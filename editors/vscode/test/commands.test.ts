@@ -27,6 +27,8 @@ let mockTypeAwareSettings: {
   require: "best-effort",
 };
 let mockTypeAwareTimeoutSeconds = 0;
+let mockProductionOverride: boolean | undefined;
+let mockChangedSince = "";
 let mockActiveTextEditor:
   | {
       readonly document: {
@@ -97,7 +99,7 @@ vi.mock("vscode", () => ({
 vi.mock("../src/config.js", () => ({
   getLspPath: () => mockLspPath,
   getAutoDownload: () => mockAutoDownload,
-  getProductionOverride: () => undefined,
+  getProductionOverride: () => mockProductionOverride,
   getTypeAwareSettings: () => mockTypeAwareSettings,
   getTypeAwareTimeoutSeconds: () => mockTypeAwareTimeoutSeconds,
   getAuditGate: () => "new-only",
@@ -117,7 +119,7 @@ vi.mock("../src/config.js", () => ({
   getComplexityBreakdownEnabled: () => mockComplexityBreakdownEnabled,
   getComplexityDecorationCap: () => 200,
   getIssueTypes: () => mockIssueTypes,
-  getChangedSince: () => "",
+  getChangedSince: () => mockChangedSince,
   getPackageBaselines: () => true,
   getAllowRemoteExtends: () => false,
   getResolvedConfigPath: (workspaceRoot?: string) => {
@@ -160,6 +162,8 @@ import {
   runFix,
   runHealthAnalysis,
   resetHealthNoWorkspaceWarning,
+  healthInputKey,
+  securityInputKey,
 } from "../src/commands.js";
 import { AnalysisFailureBackoff } from "../src/analysisBackoff.js";
 import { resetBinarySkewToast } from "../src/binary-skew.js";
@@ -180,6 +184,8 @@ beforeEach(() => {
   mockIssueTypes = {};
   mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
   mockTypeAwareTimeoutSeconds = 0;
+  mockProductionOverride = undefined;
+  mockChangedSince = "";
 });
 
 const emptyCheck = {
@@ -1666,5 +1672,44 @@ describe("runHealthAnalysis return type (envelope reachable)", () => {
       setWorkspaceRoot(null);
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("lazy view input keys", () => {
+  const pkgContext = {
+    workspaceState: {
+      get: () => "pkg-a",
+    },
+  } as unknown as vscode.ExtensionContext;
+
+  it("K1: the health key changes with the picker scope", () => {
+    expect(healthInputKey(workspaceContext)).not.toBe(healthInputKey(pkgContext));
+  });
+
+  it("K2: the health key changes with fallow.production", () => {
+    const before = healthInputKey(workspaceContext);
+    mockProductionOverride = true;
+    expect(healthInputKey(workspaceContext)).not.toBe(before);
+  });
+
+  it("K3: the health key changes with fallow.configPath", () => {
+    const before = healthInputKey(workspaceContext);
+    mockConfigPathSetting = "custom.json";
+    expect(healthInputKey(workspaceContext)).not.toBe(before);
+  });
+
+  it("K4: the health key is stable when no input changes", () => {
+    expect(healthInputKey(workspaceContext)).toBe(healthInputKey(workspaceContext));
+  });
+
+  it("K5: the security key follows the scope and changedSince, not production", () => {
+    const base = securityInputKey(workspaceContext);
+    expect(securityInputKey(pkgContext)).not.toBe(base);
+
+    mockProductionOverride = true;
+    expect(securityInputKey(workspaceContext)).toBe(base);
+
+    mockChangedSince = "main";
+    expect(securityInputKey(workspaceContext)).not.toBe(base);
   });
 });

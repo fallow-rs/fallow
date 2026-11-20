@@ -36,18 +36,17 @@ export const REANALYSIS_CONFIG_KEYS = [
   "fallow.workspace",
 ] as const;
 
-// Health settings drive the separate lazy health spawn, not the LSP, so none
-// of them restart it. `fallow.health.inlineComplexity` toggles the extension's
-// own complexity lens and is handled as a render-only refresh in extension.ts
-// (not here), so it is in neither RESTART_CONFIG_KEYS nor this list.
+// Health settings change how the extension renders health data: the context
+// key, the status bar and the complexity decorations. None of them restart the
+// LSP. This list does not decide when the health spawn starts again:
+// `healthInputKey` in commands.ts decides that. `fallow.health.inlineComplexity`
+// and `fallow.complexity.afterText` are render-only and handled in extension.ts.
 export const HEALTH_CONFIG_KEYS = [
   "fallow.health.enabled",
   "fallow.health.hotspots",
   "fallow.health.topFindings",
   "fallow.health.statusBar",
-  // The inline complexity breakdown is backed by the same health spawn:
-  // enabling it (or changing the decoration cap) changes the spawn's args, so a
-  // re-run is needed. `afterText` is render-only and handled separately.
+  // The inline complexity breakdown renders from the same health report.
   "fallow.complexity.breakdownEnabled",
   "fallow.complexity.decorationCap",
   "fallow.typeAware",

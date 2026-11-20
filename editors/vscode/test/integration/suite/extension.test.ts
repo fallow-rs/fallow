@@ -255,6 +255,34 @@ describe("Fallow VS Code extension", () => {
     assert.match(toast, /NOT verified vulnerabilities; verify each before acting/);
   });
 
+  it("starts the health run again when fallow.production changes", async () => {
+    const productionHealthRuns = (): number =>
+      readCliLog().filter(
+        (entry) => entry.command === "health" && entry.args.includes("--production"),
+      ).length;
+    const config = vscode.workspace.getConfiguration("fallow");
+    try {
+      await vscode.commands.executeCommand("fallow.health.reload");
+      assert.ok(
+        readCliLog().some((entry) => entry.command === "health"),
+        "the reload command should start a health run",
+      );
+      assert.equal(productionHealthRuns(), 0);
+
+      await config.update("production", "on", vscode.ConfigurationTarget.Workspace);
+      const deadline = Date.now() + 5000;
+      while (productionHealthRuns() === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.ok(
+        productionHealthRuns() > 0,
+        "a production change should start a health run with --production",
+      );
+    } finally {
+      await config.update("production", undefined, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+
   it("runs analysis against the configured CLI and filters disabled issue types", async () => {
     await vscode.workspace.getConfiguration("fallow").update(
       "issueTypes",

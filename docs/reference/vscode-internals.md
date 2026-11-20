@@ -61,6 +61,12 @@ Do not duplicate the full setting list in durable prose.
   missing release.
 - Keep LSP analysis, health, audit, security, and runtime coverage as separate
   lazy workflows unless a measured UX change justifies combining them.
+- The Health, Security Candidates and Runtime Coverage views load through
+  `createLazyView` in `src/lazyView.ts`. The loader applies a result only when
+  the run is the newest one, the feature is still enabled and the input key
+  did not change. `healthInputKey` and `securityInputKey` in `src/commands.ts`
+  build the key from the values that build the CLI arguments. Add a new
+  argument to the input reader, and the view reloads when it changes.
 - Configuration changes restart only the surfaces whose initialization state
   changed. Reanalysis and render-only settings must not cause unnecessary LSP
   restarts.

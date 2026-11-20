@@ -57,9 +57,17 @@ import {
 } from "./download.js";
 import { buildWorkspacesArgs, compareVersions } from "./cli-args-utils.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
-import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
+import {
+  buildHealthArgs,
+  parseUnknownHealthSubcommand,
+  type HealthArgsOptions,
+} from "./health-utils.js";
 import { registerChild, unregisterChild } from "./process-registry.js";
-import { buildSecurityArgs, parseUnknownSubcommand } from "./security-utils.js";
+import {
+  buildSecurityArgs,
+  parseUnknownSubcommand,
+  type SecurityArgsOptions,
+} from "./security-utils.js";
 import { appendTypeAwareArgs, TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
 import { fallowChildEnvironment } from "./typeAwareCompanion.js";
 import { noteTypeAwareDegradation, typeAwareDegradationWarnings } from "./typeAwareDegradation.js";
@@ -1149,6 +1157,39 @@ export const resetHealthNoWorkspaceWarning = (): void => {
   healthNoWorkspaceWarned = false;
 };
 
+/** The settings and scope that one `fallow health` run forwards to the CLI. */
+const readHealthInputs = (
+  context: vscode.ExtensionContext,
+): Omit<HealthArgsOptions, "cliVersion"> => {
+  // When the inline breakdown is on, fetch a larger top-N so files outside
+  // the tree's top-N still get decorated; the tree slices back to
+  // `getHealthTopFindings()` for display.
+  const breakdownEnabled = getComplexityBreakdownEnabled();
+  const topFindings = breakdownEnabled
+    ? Math.max(getHealthTopFindings(), getComplexityDecorationCap())
+    : getHealthTopFindings();
+
+  return {
+    hotspots: getHealthHotspots(),
+    topFindings,
+    configPath: getResolvedConfigPath(),
+    changedSince: getChangedSince(),
+    production: getProductionOverride(),
+    workspace: resolveActiveWorkspaceScope(context),
+    complexityBreakdown: breakdownEnabled,
+    allowRemoteExtends: getAllowRemoteExtends(),
+    typeAware: getTypeAwareSettings(),
+  };
+};
+
+/**
+ * One string for all inputs of a `fallow health` run. The Health view loads
+ * again when this value changes. It reads the same values as the run, so a
+ * new argument cannot be absent from the key.
+ */
+export const healthInputKey = (context: vscode.ExtensionContext): string =>
+  JSON.stringify([getWorkspaceRoot(), readHealthInputs(context)]);
+
 /**
  * Run a standalone `fallow health` analysis for the Health view. This is a
  * separate spawn from {@link runAnalysis}, fired lazily only when the Health
@@ -1184,27 +1225,7 @@ export const runHealthAnalysis = async (
 
   try {
     const { binary, version: cliVersion } = await resolveCliForRun(context, outputChannel);
-
-    // When the inline breakdown is on, fetch a larger top-N so files outside
-    // the tree's top-N still get decorated; the tree slices back to
-    // `getHealthTopFindings()` for display.
-    const breakdownEnabled = getComplexityBreakdownEnabled();
-    const topFindings = breakdownEnabled
-      ? Math.max(getHealthTopFindings(), getComplexityDecorationCap())
-      : getHealthTopFindings();
-
-    const { args, skipped } = buildHealthArgs({
-      hotspots: getHealthHotspots(),
-      topFindings,
-      configPath: getResolvedConfigPath(),
-      changedSince: getChangedSince(),
-      production: getProductionOverride(),
-      workspace: resolveActiveWorkspaceScope(context),
-      complexityBreakdown: breakdownEnabled,
-      allowRemoteExtends: getAllowRemoteExtends(),
-      typeAware: getTypeAwareSettings(),
-      cliVersion,
-    });
+    const { args, skipped } = buildHealthArgs({ ...readHealthInputs(context), cliVersion });
 
     noteSkippedCapabilities(skipped, binary, outputChannel);
     const output = await execFallowTolerant(args, root, binary, outputChannel);
@@ -1257,6 +1278,17 @@ export type SecurityScanResult =
   | { readonly ok: true; readonly data: SecurityOutput | null }
   | { readonly ok: false; readonly retryable: boolean };
 
+/** The settings and scope that one `fallow security` run forwards to the CLI. */
+const readSecurityInputs = (context: vscode.ExtensionContext): SecurityArgsOptions => ({
+  configPath: getResolvedConfigPath(),
+  changedSince: getChangedSince(),
+  workspace: resolveActiveWorkspaceScope(context),
+});
+
+/** One string for all inputs of a `fallow security` run. See {@link healthInputKey}. */
+export const securityInputKey = (context: vscode.ExtensionContext): string =>
+  JSON.stringify([getWorkspaceRoot(), readSecurityInputs(context)]);
+
 /**
  * Run `fallow security --format json` and parse its `SecurityOutput` envelope.
  * This is a SEPARATE, independent process from the combined sidebar analysis
@@ -1283,11 +1315,7 @@ export const runSecurityAnalysis = async (
 
   try {
     const { binary } = await resolveCliForRun(context, outputChannel);
-    const args = buildSecurityArgs({
-      configPath: getResolvedConfigPath(),
-      changedSince: getChangedSince(),
-      workspace: resolveActiveWorkspaceScope(context),
-    });
+    const args = buildSecurityArgs(readSecurityInputs(context));
 
     const output = await execFallow(binary, args, root);
     if (output.trim().length === 0) {

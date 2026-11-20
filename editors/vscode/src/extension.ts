@@ -13,6 +13,7 @@ import { cancelReleaseRetry } from "./download.js";
 import { enableFeature } from "./enableFeature.js";
 import { openSettingsSearch } from "./openSettings.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
+import { createLazyView, type LazyRunOutcome } from "./lazyView.js";
 import {
   getHealthEnabled,
   getSecurityEnabled,
@@ -36,11 +37,13 @@ import {
   runAnalysis,
   runAudit,
   runFix,
+  healthInputKey,
   runHealthAnalysis,
   runInspectActiveFile,
   runInspectActiveSymbol,
   runSecurityAnalysis,
   runWorkspaces,
+  securityInputKey,
 } from "./commands.js";
 import {
   DIAGNOSTIC_RENDER_CONFIG_KEYS,
@@ -99,6 +102,7 @@ import type {
   FallowDupesResult,
   HealthOutput,
   RuntimeCoverageReport,
+  SecurityOutput,
 } from "./types.js";
 
 /** Languages whose saves trigger an opt-in audit re-run (`audit.runOnSave`). */
@@ -137,16 +141,6 @@ let lastAuditResult: AuditOutput | null = null;
 // synchronous and cannot await the persist queue). A module-level handle bridges
 // that gap so the last mute toggle is not dropped mid-write on reload/shutdown.
 let activeDiagnosticFilter: DiagnosticFilter | null = null;
-
-// The security run is a separate, view-gated process with disjoint config keys
-// from the dead-code analysis: toggling security never re-runs the main
-// analysis, and dead-code config changes never trigger a security re-run (#902).
-const SECURITY_CONFIG_KEYS = [
-  "fallow.security.enabled",
-  "fallow.configPath",
-  "fallow.changedSince",
-  "fallow.workspace",
-] as const;
 
 /** Settings that the status bar item reads on each render. */
 const STATUS_BAR_CONFIG_KEYS = [
@@ -284,14 +278,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // tree view is first shown, avoiding a double analysis on activation (the LSP
   // runs its own analysis for diagnostics).
   let cliAnalysisRan = false;
-  // The health spawn has its own latch and visibility trigger, fully
-  // independent of the combined run, so opening the editor or the existing two
-  // views never triggers any health work (#902 latency isolation).
-  let healthAnalysisRan = false;
-  // The security run is decoupled from the dead-code run: it fires only on first
-  // visibility of the Security Candidates view, behind its own flag, so a user
-  // who never opens that view pays nothing even with the feature enabled (#902).
-  let securityAnalysisRan = false;
 
   // One-shot, lazy workspace-visibility probe. The status bar item offers the
   // picker by default; after the first sidebar analysis we list workspaces
@@ -443,78 +429,34 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     ),
   );
 
+  const applyHealth = (report: HealthOutput | null): void => {
+    lastHealthResult = report;
+    healthProvider.update(report);
+    updateStatusBarHealth(report);
+    complexityDecorations.setFindings(report?.findings ?? []);
+  };
+
   // Lazy, opt-out health spawn. Separate from the combined run so the
   // latency-critical sidebar is never coupled to complexity scoring or the
-  // git-churn hotspot walk.
+  // git-churn hotspot walk, and opening the editor never starts health work
+  // (#902).
   //
-  // Returns whether the run COMPLETED, not whether it produced data. A null
-  // report from a non-retryable outcome (no workspace, empty output, older CLI)
-  // still counts as completed, so the latch holds and a re-reveal does not
-  // re-spawn or repeat the no-workspace / update-CLI toast (#902). Only a
-  // genuine transient failure (rethrown by runHealthAnalysis) returns false so
-  // the caller resets the latch and a later reveal retries. Mirrors Security's
-  // unconditional-true completion contract.
-  const triggerHealthAnalysis = async (): Promise<boolean> => {
-    if (!getHealthEnabled()) {
-      lastHealthResult = null;
-      healthProvider.update(null);
-      updateStatusBarHealth(null);
-      complexityDecorations.setFindings([]);
-      return true;
-    }
-    try {
-      const report = await runHealthAnalysis(context, outputChannel);
-      lastHealthResult = report;
-      healthProvider.update(report);
-      updateStatusBarHealth(report);
-      complexityDecorations.setFindings(report?.findings ?? []);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  // Run `fallow security` and update the Security Candidates view. Findings are
-  // UNVERIFIED candidates (#903), so the toast says so explicitly and never uses
-  // "vulnerability"/"confirmed".
-  //
-  // `fallow.hasAnalyzedSecurity` (which paints the "No security candidates
-  // found" all-clear) is set ONLY after a genuinely completed scan, never after
-  // a failed or older-CLI run: a false clean bill on a security surface is the
-  // worst failure mode here, so the actionable enable/scan welcome stays in
-  // place instead. Returns whether the run COMPLETED (a non-retryable failure
-  // still counts as completed so the latch holds and a re-reveal does not
-  // re-warn); only a transient failure returns false so the caller resets the
-  // latch and a later reveal retries.
-  const triggerSecurityAnalysis = async (): Promise<boolean> => {
-    return await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Scanning for security candidates...",
-        cancellable: false,
-      },
-      async () => {
-        const result = await runSecurityAnalysis(context, outputChannel);
-        if (!result.ok) {
-          // Leave the existing view/welcome untouched on failure: do NOT flip
-          // `fallow.hasAnalyzedSecurity`, so a failed/unsupported scan never
-          // paints a false "No security candidates found" all-clear.
-          return !result.retryable;
-        }
-
-        securityProvider.update(result.data);
-        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
-
-        const count = countSecurityFindings(result.data);
-        if (count > 0) {
-          void vscode.window.showInformationMessage(
-            `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
-          );
-        }
-        return true;
-      },
-    );
-  };
+  // A null report is a completed run (no workspace, empty output, older CLI),
+  // so a later reveal does not spawn again or repeat the toast. A transient
+  // failure makes `runHealthAnalysis` throw, and a later reveal tries again.
+  const healthLoader = createLazyView<HealthOutput | null>({
+    enabled: getHealthEnabled,
+    inputKey: () => healthInputKey(context),
+    // Health data also feeds the status bar and the inline complexity
+    // decorations, so a changed input reloads while the view is hidden.
+    reloadStaleWhen: ({ revealed }) => revealed,
+    run: async () => ({
+      kind: "loaded",
+      value: await runHealthAnalysis(context, outputChannel),
+    }),
+    apply: applyHealth,
+    reset: () => applyHealth(null),
+  });
 
   const deadCodeView = vscode.window.createTreeView("fallow.deadCode", {
     treeDataProvider: deadCodeProvider,
@@ -534,23 +476,57 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   });
   context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView, coverageView);
 
-  const onHealthViewVisible = (): void => {
-    if (healthAnalysisRan) {
-      return;
-    }
-    healthAnalysisRan = true;
-    void (async (): Promise<void> => {
-      const completed = await triggerHealthAnalysis();
-      if (!completed) {
-        healthAnalysisRan = false;
+  // Run `fallow security` and update the Security Candidates view. Findings are
+  // UNVERIFIED candidates (#903), so the toast says so and never uses
+  // "vulnerability" or "confirmed". The scan starts only on a reveal of its own
+  // view or on the scan command, so a user who never opens the view pays
+  // nothing and the dead-code sidebar latency path stays untouched (#902).
+  //
+  // `fallow.hasAnalyzedSecurity` paints the "No security candidates found"
+  // all-clear. Only a completed scan sets it. A failed scan or an older CLI
+  // leaves the view and the welcome as they are: a false clean bill is the
+  // worst failure of a security surface. A non-retryable failure counts as a
+  // completed attempt, so a later reveal does not warn again.
+  const securityLoader = createLazyView<SecurityOutput | null>({
+    enabled: getSecurityEnabled,
+    inputKey: () => securityInputKey(context),
+    // The scan is opt-in and never runs for a hidden view (#902).
+    reloadStaleWhen: () => securityView.visible,
+    run: async () =>
+      await vscode.window.withProgress<LazyRunOutcome<SecurityOutput | null>>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Fallow: Scanning for security candidates...",
+          cancellable: false,
+        },
+        async () => {
+          const result = await runSecurityAnalysis(context, outputChannel);
+          if (result.ok) {
+            return { kind: "loaded", value: result.data };
+          }
+          return result.retryable ? { kind: "failed" } : { kind: "skipped" };
+        },
+      ),
+    apply: (data) => {
+      securityProvider.update(data);
+      void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
+      const count = countSecurityFindings(data);
+      if (count > 0) {
+        void vscode.window.showInformationMessage(
+          `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
+        );
       }
-    })();
-  };
+    },
+    reset: () => {
+      securityProvider.update(null);
+      void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
+    },
+  });
 
   context.subscriptions.push(
     healthView.onDidChangeVisibility((e) => {
       if (e.visible) {
-        onHealthViewVisible();
+        void healthLoader.reveal();
       } else {
         // Hiding the Health view drops the transient selection highlight.
         complexityDecorations.setSelectedFunction(undefined);
@@ -592,26 +568,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
-  // Lazily run the security scan on first visibility of its own view, behind a
-  // separate flag and gated on the opt-in setting. This is the #902 protection:
-  // the run never touches the dead-code / duplicates sidebar latency path.
-  const onSecurityViewVisible = (): void => {
-    if (securityAnalysisRan || !getSecurityEnabled()) {
-      return;
-    }
-    securityAnalysisRan = true;
-    void (async (): Promise<void> => {
-      const completed = await triggerSecurityAnalysis();
-      if (!completed) {
-        securityAnalysisRan = false;
-      }
-    })();
-  };
-
   context.subscriptions.push(
     securityView.onDidChangeVisibility((e) => {
       if (e.visible) {
-        onSecurityViewVisible();
+        void securityLoader.reveal();
       }
     }),
   );
@@ -667,9 +627,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     });
   };
 
-  const runHealthAnalysisCommand = async (): Promise<void> => {
-    healthAnalysisRan = await triggerHealthAnalysis();
-  };
+  const runHealthAnalysisCommand = (): Promise<void> => healthLoader.reload();
 
   const runSecurityAnalysisCommand = async (): Promise<void> => {
     if (!getSecurityEnabled()) {
@@ -678,7 +636,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       );
       return;
     }
-    securityAnalysisRan = await triggerSecurityAnalysis();
+    await securityLoader.reload();
   };
 
   // Runtime coverage is loaded ONLY on explicit command (or lazily on first
@@ -687,56 +645,55 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // never wired into triggerCliAnalysis, runAnalysis, the analysisComplete
   // notification, or REANALYSIS_CONFIG_KEYS. A user who never touches coverage
   // pays zero cost.
-  const loadCoverage = async (): Promise<void> => {
-    // Intentionally leaves the shared status bar (dead-code/dupes counts)
-    // untouched: runtime coverage is an independent surface (#902). The
-    // progress notification is enough feedback for the load itself.
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Loading runtime coverage...",
-        cancellable: false,
-      },
-      async () => {
-        const report = await runCoverageAnalysis(context, outputChannel);
-        // A null report means cancelled / no path / failure; only surfacing a
-        // loaded report flips the view out of its welcome state. A failed run
-        // already showed its own toast inside runCoverageAnalysis.
-        if (report) {
-          lastCoverageReport = report;
-          coverageProvider.update(report);
-          void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
+  const coverageLoader = createLazyView<RuntimeCoverageReport>({
+    enabled: () => true,
+    // A reveal loads only when the user already pointed at a capture. The
+    // welcome view starts the first load in the other case.
+    autoLoad: () => lastCoverageReport === null && getCoveragePath() !== "",
+    // Constant: the run can store `fallow.coverage.capturePath` itself, so a
+    // key that holds the path would change during the first load.
+    inputKey: () => "",
+    reloadStaleWhen: () => false,
+    // Leaves the shared status bar (dead-code/dupes counts) untouched:
+    // runtime coverage is an independent surface (#902). The progress
+    // notification is enough feedback for the load itself.
+    run: async () => {
+      const report = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Fallow: Loading runtime coverage...",
+          cancellable: false,
+        },
+        () => runCoverageAnalysis(context, outputChannel),
+      );
+      // A null report means cancelled, no path or failure. The run showed its
+      // own toast, and the view keeps its content.
+      return report ? { kind: "loaded", value: report } : { kind: "skipped" };
+    },
+    apply: (report) => {
+      lastCoverageReport = report;
+      coverageProvider.update(report);
+      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
 
-          // A grace/trial watermark means these candidates were produced under a
-          // stale or expired license: surface it once per load so "Safe to
-          // Delete" rows are not mistaken for authoritative deletions.
-          const watermark = coverageWatermarkMessage(report);
-          if (watermark) {
-            void vscode.window.showWarningMessage(`Fallow runtime coverage: ${watermark}`);
-          }
-        }
-      },
-    );
-  };
-
-  let coverageLoadAttempted = false;
-  const onCoverageViewVisible = (): void => {
-    if (coverageLoadAttempted || lastCoverageReport) {
-      return;
-    }
-    // Lazy auto-load only when the user already pointed at a capture; otherwise
-    // the welcome view's call-to-action drives the first load.
-    if (!getCoveragePath()) {
-      return;
-    }
-    coverageLoadAttempted = true;
-    void loadCoverage();
-  };
+      // A grace/trial watermark means these candidates were produced under a
+      // stale or expired license: surface it once per load so "Safe to
+      // Delete" rows are not mistaken for authoritative deletions.
+      const watermark = coverageWatermarkMessage(report);
+      if (watermark) {
+        void vscode.window.showWarningMessage(`Fallow runtime coverage: ${watermark}`);
+      }
+    },
+    reset: () => {
+      lastCoverageReport = null;
+      coverageProvider.update(null);
+      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", false);
+    },
+  });
 
   context.subscriptions.push(
     coverageView.onDidChangeVisibility((e) => {
       if (e.visible) {
-        onCoverageViewVisible();
+        void coverageLoader.reveal();
       }
     }),
   );
@@ -772,8 +729,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // dedup onto an in-flight run spawned with the OLD scope and latch its
   // results as current with no follow-up run. Mark the analysis as run so a
   // later first-open of the sidebar does not trigger a redundant second pass.
+  // The picker stores the scope in workspace state, so no configuration event
+  // tells the lazy views about the change.
   const onWorkspaceScopeChange = (): void => {
     refreshWorkspacePicker(context);
+    void healthLoader.invalidate();
+    void securityLoader.invalidate();
     void (async (): Promise<void> => {
       cliAnalysisRan = await triggerCliAnalysis({ force: true });
     })();
@@ -799,23 +760,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.loadCoverage", async () => {
-      coverageLoadAttempted = true;
-      await loadCoverage();
-    }),
+    vscode.commands.registerCommand("fallow.loadCoverage", () => coverageLoader.reload()),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.reloadCoverage", async () => {
-      coverageLoadAttempted = true;
-      await loadCoverage();
-    }),
+    vscode.commands.registerCommand("fallow.reloadCoverage", () => coverageLoader.reload()),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.clearCoverage", () => {
-      lastCoverageReport = null;
-      coverageLoadAttempted = false;
-      coverageProvider.update(null);
-      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", false);
+      coverageLoader.clear();
     }),
   );
 
@@ -1060,7 +1012,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
       const needsHealthReanalysis = affectsAnyConfiguration(e, HEALTH_CONFIG_KEYS);
       const needsDiagnosticRefresh = affectsAnyConfiguration(e, DIAGNOSTIC_RENDER_CONFIG_KEYS);
-      const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
 
       if (e.affectsConfiguration("fallow.workspace")) {
         // Keep the workspace state of the status bar item in sync with a
@@ -1100,29 +1051,15 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       }
 
       if (needsHealthReanalysis) {
-        // Health settings never restart the LSP nor re-run the combined
-        // analysis. Toggling only the status-bar visibility re-renders from the
-        // cached report (no respawn); the spawn-affecting settings (enabled,
-        // hotspots, topFindings) re-run the standalone health spawn, but only
-        // if the user already revealed the Health view (preserving the lazy
-        // trigger when they have not).
+        // Render-only work for the health settings. The loader below decides
+        // from the input key of the run whether the health spawn starts again.
         syncHealthEnabledContext();
-        const onlyStatusBarChanged =
-          e.affectsConfiguration("fallow.health.statusBar") &&
-          !e.affectsConfiguration("fallow.health.enabled") &&
-          !e.affectsConfiguration("fallow.health.hotspots") &&
-          !e.affectsConfiguration("fallow.health.topFindings");
-        if (onlyStatusBarChanged) {
+        if (e.affectsConfiguration("fallow.health.statusBar")) {
           updateStatusBarHealth(lastHealthResult);
-        } else if (healthAnalysisRan) {
-          void triggerHealthAnalysis();
-        } else {
-          // The Health view has not run yet, so there is nothing to respawn, but
-          // toggling the breakdown off should still clear any stale decorations
-          // AND lenses, so refresh() fires onDidChange to re-query code lenses.
-          complexityDecorations.refresh();
         }
+        complexityDecorations.refresh();
       }
+      void healthLoader.invalidate();
 
       // `complexity.afterText` is render-only (the inline tier on/off): re-render
       // from the cached findings without respawning health.
@@ -1136,33 +1073,22 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         complexityDecorations.refresh();
       }
 
-      if (affectsSecurity) {
-        // Keep the enabled-context (welcome split + scan-button gate) in sync
-        // when the opt-in toggles.
-        if (e.affectsConfiguration("fallow.security.enabled")) {
-          syncSecurityEnabledContext();
-        }
-        // Security keys are disjoint from REANALYSIS_CONFIG_KEYS, so this never
-        // re-runs the dead-code analysis. When the feature is enabled and the
-        // view is open, re-scan; otherwise clear the provider so a disabled view
-        // shows nothing stale.
-        if (getSecurityEnabled()) {
-          if (securityView.visible) {
-            securityAnalysisRan = await triggerSecurityAnalysis();
-          }
-        } else {
-          securityAnalysisRan = false;
-          securityProvider.update(null);
-          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
-        }
+      // Keep the enabled-context (welcome split + scan-button gate) in sync when
+      // the opt-in toggles.
+      if (e.affectsConfiguration("fallow.security.enabled")) {
+        syncSecurityEnabledContext();
       }
+      // The loader scans again when the feature switch or an input of the scan
+      // changed and the view is visible. A disabled feature empties the view.
+      // This never runs the dead-code analysis.
+      void securityLoader.invalidate();
 
       // Scoped to the coverage view only, deliberately NOT in
       // REANALYSIS_CONFIG_KEYS (#902): re-run coverage when the capture path
       // changes, but only if a capture was already loaded, so changing the
       // setting never kicks off work for a user who has not opted in.
       if (e.affectsConfiguration("fallow.coverage.capturePath") && lastCoverageReport) {
-        void loadCoverage();
+        void coverageLoader.reload();
       }
     }),
   );
