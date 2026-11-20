@@ -339,3 +339,98 @@ fn audit_ignores_fail_on_issues() {
     assert_exit(&output, 0);
     insta::assert_snapshot!("summary_mark_audit_warn", summary_lines(&output));
 }
+
+/// The hint that follows the status line of a dead-code run that passes with
+/// findings.
+const WARN_ONLY_HINT: &str =
+    "Warnings do not change the exit code. Set a rule to `error` to fail on it.";
+
+fn hint_count(output: &CommandOutput) -> usize {
+    output.stderr.matches(WARN_ONLY_HINT).count() + output.stdout.matches(WARN_ONLY_HINT).count()
+}
+
+#[test]
+fn dead_code_warn_only_states_that_warnings_do_not_fail_the_run() {
+    let dir = project(WARN_RULES);
+    for extra in [&[][..], &["--summary"], &["--group-by", "directory"]] {
+        let output = run_human(Some("dead-code"), dir.path(), extra);
+        assert_exit(&output, 0);
+        assert_eq!(
+            output.stderr.matches(WARN_ONLY_HINT).count(),
+            1,
+            "{extra:?} stderr:\n{}",
+            output.stderr
+        );
+        assert!(!output.stdout.contains(WARN_ONLY_HINT), "{extra:?}");
+    }
+}
+
+#[test]
+fn failing_and_clean_dead_code_runs_have_no_warning_hint() {
+    let dir = project(ERROR_RULES);
+    let output = run_human(Some("dead-code"), dir.path(), &[]);
+    assert_exit(&output, 1);
+    assert_eq!(hint_count(&output), 0, "stderr:\n{}", output.stderr);
+
+    let dir = project(WARN_RULES);
+    let output = run_human(Some("dead-code"), dir.path(), &["--fail-on-issues"]);
+    assert_exit(&output, 1);
+    assert_eq!(hint_count(&output), 0, "stderr:\n{}", output.stderr);
+
+    let dir =
+        project(&WARN_RULES.replace(r#""unused-exports": "warn""#, r#""unused-exports": "off""#));
+    let output = run_human(Some("dead-code"), dir.path(), &[]);
+    assert_exit(&output, 0);
+    assert_eq!(hint_count(&output), 0, "stderr:\n{}", output.stderr);
+}
+
+#[test]
+fn machine_formats_and_quiet_runs_have_no_warning_hint() {
+    let dir = project(WARN_RULES);
+    for format in [
+        "json",
+        "sarif",
+        "compact",
+        "markdown",
+        "codeclimate",
+        "pr-comment-github",
+        "review-github",
+    ] {
+        let output = run_human(Some("dead-code"), dir.path(), &["--format", format]);
+        assert_exit(&output, 0);
+        assert_eq!(
+            hint_count(&output),
+            0,
+            "{format} stderr:\n{}",
+            output.stderr
+        );
+    }
+
+    let output = run_human(Some("dead-code"), dir.path(), &["--quiet"]);
+    assert_exit(&output, 0);
+    assert_eq!(hint_count(&output), 0, "stderr:\n{}", output.stderr);
+}
+
+/// Dead-code findings at `warn` and a complexity finding at `error`: the bare
+/// run fails on health, so no line may say that the run does not fail.
+#[test]
+fn combined_run_that_fails_on_health_does_not_say_that_the_run_passes() {
+    let config = ERROR_RULES.replace(
+        r#""unused-exports": "error""#,
+        r#""unused-exports": "warn""#,
+    );
+    let dir = project(&config);
+    let output = run_human(None, dir.path(), &[]);
+    assert_exit(&output, 1);
+    assert_eq!(
+        output.stderr.matches(WARN_ONLY_HINT).count(),
+        1,
+        "stderr:\n{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("do not fail the run"),
+        "stderr:\n{}",
+        output.stderr
+    );
+}

@@ -188,6 +188,68 @@ pub(super) fn migrate_rules(
     }
 }
 
+/// The fallow rule for the knip issue type `devDependencies`.
+const DEV_DEPENDENCIES_RULE: &str = "unused-dev-dependencies";
+
+/// Whether an `include` or `exclude` list covers the issue type
+/// `devDependencies`. In knip, `dependencies` in these lists also stands for
+/// `devDependencies` and `optionalPeerDependencies`.
+fn covers_dev_dependencies(issue_types: &[String]) -> bool {
+    issue_types.iter().any(|name| name == "dependencies")
+}
+
+/// Keep the knip default severity for the issue types that the config leaves
+/// on. Knip reports each issue type as an error unless `rules` says otherwise,
+/// and some of the matching fallow rules default to `warn`. Without an
+/// explicit `error`, a finding that failed the knip run passes the fallow run.
+///
+/// Call this after `rules`, `exclude` and `include`: a rule that is absent
+/// from the migrated `rules` is then one that knip reports as an error.
+pub(super) fn keep_error_severity(config: &mut JsonMap) {
+    let defaults = default_rules();
+    let rules = config
+        .entry("rules".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let Some(rules_obj) = rules.as_object_mut() else {
+        return;
+    };
+    for (_, fallow_name) in KNIP_RULE_MAP {
+        if defaults_to_warn(&defaults, fallow_name) {
+            rules_obj
+                .entry((*fallow_name).to_string())
+                .or_insert_with(|| Value::String(DEFAULT_SEVERITY.to_string()));
+        }
+    }
+}
+
+/// Whether the fallow rule `rule` has the default severity `warn`.
+fn defaults_to_warn(defaults: &Value, rule: &str) -> bool {
+    defaults.get(rule).and_then(Value::as_str) == Some("warn")
+}
+
+/// The fallow default severities, as the `rules` object of a config file.
+fn default_rules() -> Value {
+    serde_json::to_value(fallow_config::RulesConfig::default()).unwrap_or_default()
+}
+
+/// The rules that `config` sets to `error`, that a knip issue type maps to,
+/// and that default to `warn` in fallow. The migration note names them.
+pub(super) fn error_rules_with_warn_default(config: &Value) -> Vec<&'static str> {
+    let defaults = default_rules();
+    let rules = config.get("rules");
+    KNIP_RULE_MAP
+        .iter()
+        .map(|(_, fallow_name)| *fallow_name)
+        .filter(|name| defaults_to_warn(&defaults, name))
+        .filter(|name| {
+            rules
+                .and_then(|rules| rules.get(*name))
+                .and_then(Value::as_str)
+                == Some(DEFAULT_SEVERITY)
+        })
+        .collect()
+}
+
 /// Migrate knip `exclude` — set excluded issue types to `"off"` in fallow rules.
 pub(super) fn migrate_exclude(
     excluded: &[String],
@@ -200,6 +262,13 @@ pub(super) fn migrate_exclude(
     let Some(rules_obj) = rules.as_object_mut() else {
         return;
     };
+
+    if covers_dev_dependencies(excluded) {
+        rules_obj.insert(
+            DEV_DEPENDENCIES_RULE.to_string(),
+            Value::String("off".to_string()),
+        );
+    }
 
     for knip_name in excluded {
         let mut mapped = false;
@@ -233,8 +302,11 @@ pub(super) fn migrate_include(
         return;
     };
 
+    let dev_dependencies_included = covers_dev_dependencies(included);
     for (knip_name, fallow_name) in KNIP_RULE_MAP {
-        if !included.iter().any(|i| i == knip_name) {
+        let is_included = included.iter().any(|i| i == knip_name)
+            || (dev_dependencies_included && *fallow_name == DEV_DEPENDENCIES_RULE);
+        if !is_included {
             rules_obj
                 .entry((*fallow_name).to_string())
                 .or_insert_with(|| Value::String("off".to_string()));

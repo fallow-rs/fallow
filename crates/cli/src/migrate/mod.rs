@@ -5,6 +5,8 @@ mod knip_cycles;
 mod knip_fields;
 mod knip_regex;
 mod knip_scoped;
+#[cfg(test)]
+mod knip_severity_tests;
 mod knip_tables;
 mod stylelint;
 #[cfg(all(test, unix))]
@@ -202,9 +204,19 @@ Note: knip and fallow use different glob engines; verify migrated entry /
 ignoreFindings with `fallow dead-code` before relying on CI.
 https://fallow.tools/docs/migration/from-knip/";
 
+/// The migration page of the user docs.
+const KNIP_MIGRATION_DOCS_URL: &str = "https://fallow.tools/docs/migration/from-knip/";
+
+/// The head of the note that names the rules that the migration sets to
+/// `error`. The rule names and the docs link follow.
+const KNIP_SEVERITY_NOTE: &str = "\
+Note: the migrated config sets these rules to `error`, because knip reports
+their issue types as errors. The fallow default for them is `warn`, and a
+warning does not fail a run.";
+
 /// Print the migrated-sources list, migration warnings, the knip
-/// glob-engine caveat, and the knip ignore-scope note after a successful
-/// migration.
+/// glob-engine caveat, the knip ignore-scope note, and the severity note
+/// after a successful migration.
 fn report_migration_outcome(result: &MigrationResult) {
     for source in &result.sources {
         eprintln!("Migrated from: {}", source_head(source));
@@ -221,6 +233,28 @@ fn report_migration_outcome(result: &MigrationResult) {
         eprintln!();
         eprintln!("{KNIP_IGNORE_SCOPE_NOTE}");
     }
+
+    if let Some(note) = severity_note(result) {
+        eprintln!();
+        eprintln!("{note}");
+    }
+}
+
+/// The note that names the rules that the migrated config sets to `error`
+/// although their fallow default is `warn`. `None` when knip did not
+/// contribute or when the config has no such rule.
+fn severity_note(result: &MigrationResult) -> Option<String> {
+    if !knip_contributed(result) {
+        return None;
+    }
+    let rules = knip_fields::error_rules_with_warn_default(&result.config);
+    if rules.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{KNIP_SEVERITY_NOTE}\n  {}\n{KNIP_MIGRATION_DOCS_URL}",
+        rules.join(", ")
+    ))
 }
 
 /// Print the migration warnings to stderr under a counted header.

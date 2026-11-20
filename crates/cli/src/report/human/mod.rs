@@ -78,6 +78,29 @@ pub fn findings_status_line(text: &str, run_fails: bool) -> String {
     }
 }
 
+/// The hint under the final status line of a dead-code report that has
+/// findings and does not fail on them.
+const WARN_ONLY_HINT: &str =
+    "Warnings do not change the exit code. Set a rule to `error` to fail on it.";
+
+/// Print [`WARN_ONLY_HINT`] when the dead-code gate passes. A report with
+/// findings passes that gate only when each finding has rule severity `warn`,
+/// and the status line alone does not say that a `warn` rule cannot fail a
+/// run. Another gate of the same run can still fail it, so the hint names the
+/// exit code and not the run.
+pub fn print_warn_only_hint(run_fails: bool) {
+    if !run_fails {
+        eprintln!("  {}", WARN_ONLY_HINT.dimmed());
+    }
+}
+
+/// Print the final status line of a dead-code report that has findings, and
+/// then the hint of [`print_warn_only_hint`].
+pub fn print_check_status_line(text: &str, run_fails: bool) {
+    eprintln!("{}", findings_status_line(text, run_fails));
+    print_warn_only_hint(run_fails);
+}
+
 /// Build a colored section header with bullet, title, and count.
 pub fn build_section_header(title: &str, count: usize, level: Level) -> String {
     let label = format!("{title} ({count})");
