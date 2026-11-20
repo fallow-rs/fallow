@@ -455,11 +455,32 @@ const NPM_BIN_SUBSTITUTIONS: &[&str] = &["$(npm bin)/", "`npm bin`/"];
 /// Replace each `$(npm bin)/` prefix in `segment` with the literal
 /// `node_modules/.bin/` directory that it prints. Then `$(npm bin)/tool`
 /// is a static path to the binary and not a dynamic word.
-pub(super) fn expand_npm_bin(segment: &str) -> Cow<'_, str> {
+fn expand_npm_bin(segment: &str) -> Cow<'_, str> {
     let mut expanded = Cow::Borrowed(segment);
     for substitution in NPM_BIN_SUBSTITUTIONS {
         if expanded.contains(substitution) {
             expanded = Cow::Owned(expanded.replace(substitution, "node_modules/.bin/"));
+        }
+    }
+    expanded
+}
+
+/// The text of `segment` that the command parser reads.
+///
+/// A segment that only assigns a `node_modules/.bin` path to a variable
+/// (`bundler=scripts/node_modules/.bin/esbuild`) becomes that path. The
+/// script runs the binary later through the variable, where the parser cannot
+/// see its name, so the assignment is the use of the binary.
+pub(super) fn command_text(segment: &str) -> Cow<'_, str> {
+    let expanded = expand_npm_bin(segment);
+    let word = expanded.trim();
+    if !word.contains(char::is_whitespace)
+        && super::is_env_assignment(word)
+        && let Some((_, value)) = word.split_once('=')
+    {
+        let path = value.trim_matches(['"', '\'']);
+        if super::resolve::binary_name(path) != path {
+            return Cow::Owned(path.to_string());
         }
     }
     expanded
@@ -1167,6 +1188,23 @@ mod tests {
     fn skip_wrappers_no_wrappers() {
         let tokens = vec!["webpack", "--mode", "production"];
         assert_eq!(skip_initial_wrappers(&tokens, 0), Some(0));
+    }
+
+    #[test]
+    fn a_bin_path_assignment_is_read_as_the_binary() {
+        assert_eq!(
+            command_text("bundler=scripts/node_modules/.bin/esbuild"),
+            "scripts/node_modules/.bin/esbuild"
+        );
+        assert_eq!(
+            command_text("bundler=\"node_modules/.bin/esbuild\""),
+            "node_modules/.bin/esbuild"
+        );
+        assert_eq!(command_text("NODE_ENV=production"), "NODE_ENV=production");
+        assert_eq!(
+            command_text("DIR=node_modules/.bin tool --flag"),
+            "DIR=node_modules/.bin tool --flag"
+        );
     }
 
     #[test]

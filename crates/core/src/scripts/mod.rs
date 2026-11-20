@@ -2649,7 +2649,7 @@ fn parse_command_segment(
     catalog: &ScriptCatalog,
 ) -> Vec<SegmentOutcome> {
     let mut outcomes = Vec::new();
-    let expanded = shell::expand_npm_bin(segment);
+    let expanded = shell::command_text(segment);
     let segment = expanded.as_ref();
     let words = shell::split_words(segment);
     let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
