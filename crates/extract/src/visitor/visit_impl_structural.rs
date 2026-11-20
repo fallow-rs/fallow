@@ -5,6 +5,7 @@ use oxc_ast::ast::{
 };
 use rustc_hash::FxHashMap;
 
+use super::visit_computed_keys::ComputedKeyPart;
 use super::visit_factory_returns::FactoryReturnFunctionInput;
 use super::visit_helpers::StructuralParamMemberCollector;
 use crate::function_body::BodyRef;
@@ -46,6 +47,7 @@ impl ModuleInfoExtractor {
         inferred_param_types: Option<&[Option<String>]>,
         return_type: Option<&TSTypeAnnotation<'_>>,
         implicit_receivers: Vec<(String, String)>,
+        key_members: &dyn Fn(&[ComputedKeyPart]) -> Option<Vec<String>>,
     ) -> ScopedStructuralUses {
         let mut typed_params: Vec<(usize, String, String)> = params
             .items
@@ -97,7 +99,7 @@ impl ModuleInfoExtractor {
             .cloned()
             .collect();
         let mut collector = StructuralParamMemberCollector::new(target_params);
-        collector.collect_function_body(body);
+        collector.collect_function_body(body, key_members);
 
         let mut uses = ScopedStructuralUses::default();
         for (index, param_name, type_name) in typed_params {
@@ -208,12 +210,14 @@ impl ModuleInfoExtractor {
             return;
         }
         let implicit_receivers = self.implicit_env_receivers(params, body);
+        let key_scope = self.parameter_literal_key_scope(params);
         let uses = Self::collect_structural_parameter_uses(
             params,
             body,
             None,
             return_type,
             implicit_receivers,
+            &|parts| self.computed_key_part_members(parts, Some(&key_scope)),
         );
         self.record_scoped_parameter_member_accesses(&uses);
     }
@@ -250,12 +254,14 @@ impl ModuleInfoExtractor {
             return ScopedStructuralUses::default();
         };
         let implicit_receivers = self.implicit_env_receivers(params, body);
+        let key_scope = self.parameter_literal_key_scope(params);
         let mut uses = Self::collect_structural_parameter_uses(
             params,
             body,
             inferred_param_types,
             return_type,
             implicit_receivers,
+            &|parts| self.computed_key_part_members(parts, Some(&key_scope)),
         );
         self.scoped_typed_parameter_body_spans.insert(body.span());
         if !uses.params.is_empty()

@@ -21,3 +21,9 @@ export class ShadowView {
   zoomOut(): void {}
   other(): void {}
 }
+
+export class RedeclaredKeyView {
+  zoomIn(): void {}
+  zoomOut(): void {}
+  other(): void {}
+}

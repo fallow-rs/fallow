@@ -1,4 +1,4 @@
-import { LiteralView, ShadowView, StringView, UnionView } from "./views";
+import { LiteralView, RedeclaredKeyView, ShadowView, StringView, UnionView } from "./views";
 
 export const changeUnion = (view: UnionView, action: "zoomIn" | "zoomOut"): void => {
   view[action]();
@@ -18,4 +18,11 @@ export const changeShadowed = (view: ShadowView, key: string): void => {
   };
   run({});
   view.zoomIn();
+};
+
+export const changeRedeclaredKey = (view: RedeclaredKeyView, action: "zoomIn"): void => {
+  const run = (action: string): void => {
+    view[action as keyof RedeclaredKeyView]();
+  };
+  run(action);
 };

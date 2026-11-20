@@ -263,27 +263,80 @@ impl ModuleInfoExtractor {
     /// identifier bound with a string-literal union type. `None` when the key
     /// can name any member.
     fn computed_key_members(&self, key: &Expression<'_>) -> Option<Vec<String>> {
-        match key {
-            Expression::StringLiteral(value) => Some(vec![value.value.text().into_owned()]),
-            Expression::Identifier(id) => {
-                let name = id.name.as_str();
-                for bindings in self.literal_keys.stack.iter().rev() {
-                    if let Some(keys) = bindings.get(name) {
-                        return keys.clone();
-                    }
+        self.computed_key_part_members(&computed_key_parts(key)?, None)
+    }
+
+    /// The member names of the parts of a computed key. `params` is the frame
+    /// of a function whose parameters the scope stack does not hold yet.
+    /// `None` when a part can name any member.
+    pub(in crate::visitor) fn computed_key_part_members(
+        &self,
+        parts: &[ComputedKeyPart],
+        params: Option<&FxHashMap<String, Option<Vec<String>>>>,
+    ) -> Option<Vec<String>> {
+        let mut members = Vec::new();
+        for part in parts {
+            match part {
+                ComputedKeyPart::Literal(value) => members.push(value.clone()),
+                ComputedKeyPart::Binding(name) => {
+                    members.extend(self.literal_key_binding(name, params)?);
                 }
-                self.literal_keys.module.get(name).cloned().flatten()
             }
-            Expression::ParenthesizedExpression(paren) => {
-                self.computed_key_members(&paren.expression)
-            }
-            Expression::ConditionalExpression(conditional) => {
-                let mut members = self.computed_key_members(&conditional.consequent)?;
-                members.extend(self.computed_key_members(&conditional.alternate)?);
-                Some(members)
-            }
-            _ => None,
         }
+        Some(members)
+    }
+
+    fn literal_key_binding(
+        &self,
+        name: &str,
+        params: Option<&FxHashMap<String, Option<Vec<String>>>>,
+    ) -> Option<Vec<String>> {
+        for bindings in params
+            .into_iter()
+            .chain(self.literal_keys.stack.iter().rev())
+        {
+            if let Some(keys) = bindings.get(name) {
+                return keys.clone();
+            }
+        }
+        self.literal_keys.module.get(name).cloned().flatten()
+    }
+}
+
+/// One branch of a computed key.
+#[derive(Clone)]
+pub(in crate::visitor) enum ComputedKeyPart {
+    /// A string literal key: `view["zoomIn"]`.
+    Literal(String),
+    /// An identifier key whose binding type gives the values: `view[action]`.
+    Binding(String),
+}
+
+/// The branches of a computed key: a string literal, an identifier, or a
+/// conditional or parenthesized form of these. `None` for any other key.
+pub(in crate::visitor) fn computed_key_parts(key: &Expression<'_>) -> Option<Vec<ComputedKeyPart>> {
+    let mut parts = Vec::new();
+    collect_computed_key_parts(key, &mut parts).then_some(parts)
+}
+
+fn collect_computed_key_parts(key: &Expression<'_>, parts: &mut Vec<ComputedKeyPart>) -> bool {
+    match key {
+        Expression::StringLiteral(value) => {
+            parts.push(ComputedKeyPart::Literal(value.value.text().into_owned()));
+            true
+        }
+        Expression::Identifier(id) => {
+            parts.push(ComputedKeyPart::Binding(id.name.to_string()));
+            true
+        }
+        Expression::ParenthesizedExpression(paren) => {
+            collect_computed_key_parts(&paren.expression, parts)
+        }
+        Expression::ConditionalExpression(conditional) => {
+            collect_computed_key_parts(&conditional.consequent, parts)
+                && collect_computed_key_parts(&conditional.alternate, parts)
+        }
+        _ => false,
     }
 }
 
