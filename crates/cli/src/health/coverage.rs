@@ -16,10 +16,8 @@ use fallow_v8_coverage::V8CoverageDump;
 use globset::GlobSet;
 use oxc_coverage_instrument::{FileCoverage, FnEntry, Location, Position};
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::Deserialize;
 use srcmap_sourcemap::{GeneratedLocation, GeneratedOffsetLookup, SourceMap};
 use tempfile::TempDir;
-use url::Url;
 
 use crate::error::emit_error;
 use crate::exit_codes::{
@@ -35,6 +33,10 @@ use crate::health::optimization_target::{
 use crate::health::runtime_static_signals::{StaticSignalIndex, build_static_signal_index};
 use crate::health::scoring::IstanbulCoverage;
 use fallow_engine::health::RuntimeCoverageOptions;
+use fallow_engine::health::coverage_v8::source_map_cache::{
+    SourceMapCacheEntry, file_url_to_path, parse_source_map_cache, resolve_original_source,
+    source_map_base_dir,
+};
 use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
@@ -84,15 +86,6 @@ struct PreparedCoverageSources {
     sources: Vec<CoverageSource>,
     inner_iterations: InnerIterationIndex,
     _temp_dir: Option<TempDir>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct SourceMapCacheEntry {
-    #[serde(default)]
-    url: Option<String>,
-    data: serde_json::Value,
-    #[serde(default, rename = "lineLengths")]
-    line_lengths: Vec<u32>,
 }
 
 enum GeneratedPositionLookup<'a> {
@@ -979,10 +972,11 @@ fn preprocess_v8_coverage_file(
         .map_err(|err| format!("failed to read coverage file {}: {err}", path.display()))?;
     let dump: V8CoverageDump = serde_json::from_str(&json)
         .map_err(|err| format!("failed to parse v8 coverage file {}: {err}", path.display()))?;
-    let Some(cache) = parse_source_map_cache(&dump) else {
-        record_raw_scripts(inner_iterations, &dump.result);
-        return Ok(None);
-    };
+    let cache = dump
+        .source_map_cache
+        .as_ref()
+        .map(parse_source_map_cache)
+        .unwrap_or_default();
 
     let (remapped_files, residual_scripts) =
         remap_dump_scripts(dump.result, &cache, inner_iterations);
@@ -1005,7 +999,7 @@ fn preprocess_v8_coverage_file(
 /// residual scripts that had no usable source map.
 fn remap_dump_scripts(
     scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
-    cache: &BTreeMap<String, SourceMapCacheEntry>,
+    cache: &FxHashMap<String, SourceMapCacheEntry>,
     inner_iterations: &mut InnerIterationIndex,
 ) -> (
     BTreeMap<PathBuf, BTreeMap<RemappedFnKey, AccumulatedFunction>>,
@@ -1091,11 +1085,6 @@ fn write_residual_coverage(
     Ok(Some(residual_path))
 }
 
-fn parse_source_map_cache(dump: &V8CoverageDump) -> Option<BTreeMap<String, SourceMapCacheEntry>> {
-    let raw = dump.source_map_cache.clone()?;
-    serde_json::from_value(raw).ok()
-}
-
 #[expect(
     clippy::expect_used,
     reason = "temp dir option is initialized immediately before it is read"
@@ -1131,8 +1120,9 @@ fn remap_script_with_source_map(
     let mut remapped = Vec::new();
     let mut residual_functions = Vec::new();
 
+    let base_dir = source_map_base_dir(&script.url, entry.url.as_deref());
     for function in &script.functions {
-        match remap_function(script, function, entry, &sourcemap, &positions) {
+        match remap_function(function, &sourcemap, &positions, base_dir.as_deref()) {
             Some(mapped) => remapped.push(mapped),
             None => residual_functions.push(function.clone()),
         }
@@ -1275,19 +1265,14 @@ fn utf16_source_offset_to_byte_offset(source: &str, target_offset: u32) -> Optio
 }
 
 fn remap_function(
-    script: &fallow_v8_coverage::ScriptCoverage,
     function: &fallow_v8_coverage::FunctionCoverage,
-    entry: &SourceMapCacheEntry,
     sourcemap: &SourceMap,
     positions: &GeneratedPositionLookup<'_>,
+    base_dir: Option<&Path>,
 ) -> Option<RemappedFunction> {
     let outer = function.ranges.first().copied()?;
     let start_lookup = positions.original_position_for_offset(sourcemap, outer.start_offset)?;
-    let resolved_path = resolve_original_source_path(
-        sourcemap.source(start_lookup.source),
-        &script.url,
-        entry.url.as_deref(),
-    )?;
+    let resolved_path = resolve_original_source(sourcemap.source(start_lookup.source), base_dir)?;
     let canonical_path = dunce::canonicalize(&resolved_path).unwrap_or(resolved_path);
     let end_lookup = positions
         .original_position_for_offset(sourcemap, outer.end_offset)
@@ -1334,115 +1319,6 @@ fn remap_function(
         hits: outer.count.min(u64::from(u32::MAX)) as u32,
         inner: InnerIterations::from_v8_function(function),
     })
-}
-
-fn resolve_original_source_path(
-    raw_source: &str,
-    generated_url: &str,
-    source_map_url: Option<&str>,
-) -> Option<PathBuf> {
-    if raw_source.is_empty() {
-        return None;
-    }
-    if let Some(path) = file_url_to_path(raw_source) {
-        return Some(path);
-    }
-    let source_path = PathBuf::from(raw_source);
-    if crate::path_util::is_absolute_path_any_platform(&source_path)
-        || crate::path_util::looks_like_windows_absolute_path(raw_source)
-    {
-        return Some(source_path);
-    }
-    if Url::parse(raw_source).is_ok() {
-        let base_dir = resolve_source_map_base(generated_url, source_map_url)?;
-        return resolve_virtual_source_path(raw_source, &base_dir);
-    }
-    let base_dir = resolve_source_map_base(generated_url, source_map_url)?;
-    Some(base_dir.join(source_path))
-}
-
-fn resolve_source_map_base(generated_url: &str, source_map_url: Option<&str>) -> Option<PathBuf> {
-    let generated_path = file_url_to_path(generated_url)?;
-    let generated_dir = generated_path.parent()?.to_path_buf();
-    let Some(source_map_url) = source_map_url.filter(|url| !url.is_empty()) else {
-        return Some(generated_dir);
-    };
-    if let Some(path) = file_url_to_path(source_map_url) {
-        return path.parent().map(Path::to_path_buf);
-    }
-    let candidate = PathBuf::from(source_map_url);
-    if crate::path_util::is_absolute_path_any_platform(&candidate)
-        || crate::path_util::looks_like_windows_absolute_path(source_map_url)
-    {
-        return candidate.parent().map(Path::to_path_buf);
-    }
-    if Url::parse(source_map_url).is_ok() {
-        return None;
-    }
-    generated_dir
-        .join(candidate)
-        .parent()
-        .map(Path::to_path_buf)
-}
-
-fn file_url_to_path(value: &str) -> Option<PathBuf> {
-    if let Ok(url) = Url::parse(value) {
-        return if url.scheme() == "file" {
-            url.to_file_path().ok()
-        } else {
-            None
-        };
-    }
-    let path = PathBuf::from(value);
-    (crate::path_util::is_absolute_path_any_platform(&path)
-        || crate::path_util::looks_like_windows_absolute_path(value))
-    .then_some(path)
-}
-
-fn resolve_virtual_source_path(value: &str, base_dir: &Path) -> Option<PathBuf> {
-    let url = Url::parse(value).ok()?;
-    match url.scheme() {
-        "webpack" | "vite" => {
-            let candidates = virtual_source_candidates(&url);
-            resolve_virtual_candidate(&candidates, base_dir)
-        }
-        _ => None,
-    }
-}
-
-fn virtual_source_candidates(url: &Url) -> Vec<PathBuf> {
-    let path = url.path().trim_start_matches('/');
-    let mut candidates = Vec::new();
-
-    if let Some(host) = url.host_str() {
-        let host = host.trim_matches('/');
-        if !host.is_empty() && !matches!(host, "." | "_N_E") {
-            let combined = PathBuf::from(host).join(path);
-            if !combined.as_os_str().is_empty() {
-                candidates.push(combined);
-            }
-        }
-    }
-
-    if !path.is_empty() {
-        candidates.push(PathBuf::from(path));
-    }
-
-    candidates.retain(|candidate| !candidate.as_os_str().is_empty());
-    candidates.dedup();
-    candidates
-}
-
-fn resolve_virtual_candidate(candidates: &[PathBuf], base_dir: &Path) -> Option<PathBuf> {
-    for base in base_dir.ancestors() {
-        for candidate in candidates {
-            let resolved = base.join(candidate);
-            if resolved.is_file() {
-                return Some(resolved);
-            }
-        }
-    }
-    None
 }
 
 fn merge_remapped_functions(
@@ -2161,9 +2037,8 @@ mod tests {
         RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
         build_request, build_static_signal_index, convert_response, discover_sidecar,
         looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
-        prepare_coverage_sources, resolve_original_source_path, sidecar_binary_name,
-        static_function, tracking_state_label, verify_sidecar_signature,
-        write_istanbul_coverage_file,
+        prepare_coverage_sources, sidecar_binary_name, static_function, tracking_state_label,
+        verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
@@ -2788,21 +2663,6 @@ mod tests {
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn parse_source_map_cache_rejects_missing_or_malformed_cache() {
-        let missing = fallow_v8_coverage::V8CoverageDump {
-            result: Vec::new(),
-            source_map_cache: None,
-        };
-        assert!(super::parse_source_map_cache(&missing).is_none());
-
-        let malformed = fallow_v8_coverage::V8CoverageDump {
-            result: Vec::new(),
-            source_map_cache: Some(serde_json::json!("not a cache object")),
-        };
-        assert!(super::parse_source_map_cache(&malformed).is_none());
     }
 
     #[test]
@@ -3806,6 +3666,70 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
     }
 
+    /// Remaps a bundle in `dist` whose map names `source`, with the original
+    /// file at `original` under a new root and an optional extra cache entry.
+    /// Returns whether the output has the canonical path of the original.
+    fn remaps_to_original(
+        original: &str,
+        source: &str,
+        extra: Option<(&str, serde_json::Value)>,
+    ) -> bool {
+        let root = make_temp_dir("coverage-remap-original");
+        let original = root.join(original);
+        let dist_dir = root.join("dist");
+        for dir in [original.parent().expect("original parent"), &dist_dir] {
+            std::fs::create_dir_all(dir).expect("create dir");
+        }
+        std::fs::write(&original, "export function alpha() {}\n").expect("write original");
+        let bundle = file_url(&dist_dir.join("bundle.js"));
+        let mut cache = serde_json::json!({ bundle.clone(): {
+            "url": "bundle.js.map",
+            "data": { "version": 3, "sources": [source], "names": [], "mappings": "AAAA" },
+            "lineLengths": [18]
+        }});
+        if let Some((url, entry)) = extra {
+            cache[url] = entry;
+        }
+        let v8_json = serde_json::json!({
+            "result": [{ "scriptId": "1", "url": bundle, "functions": [{
+                "functionName": "alpha",
+                "ranges": [{"startOffset": 0, "endOffset": 18, "count": 3}],
+                "isBlockCoverage": false
+            }]}],
+            "source-map-cache": cache
+        });
+        let v8_file = root.join("coverage-v8.json");
+        std::fs::write(&v8_file, v8_json.to_string()).expect("write dump");
+        let prepared = prepare_coverage_sources(&v8_file).expect("preprocess coverage");
+        let Some(CoverageSource::Istanbul { path }) = prepared.sources.first() else {
+            panic!("expected remapped istanbul coverage source");
+        };
+        let output = std::fs::read_to_string(path).expect("read remapped coverage");
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("parse output");
+        let key = dunce::canonicalize(&original).expect("canonicalize original");
+        std::fs::remove_dir_all(&root).expect("clean temp dir");
+        parsed.get(key.to_string_lossy().as_ref()).is_some()
+    }
+
+    #[test]
+    fn remaps_webpack_virtual_source_with_a_space() {
+        assert!(remaps_to_original(
+            "src dir/my file.ts",
+            "webpack://app/./src dir/my file.ts",
+            None
+        ));
+    }
+
+    #[test]
+    fn remaps_when_a_sibling_cache_entry_is_malformed() {
+        let bad = serde_json::json!({ "lineLengths": "x" });
+        assert!(remaps_to_original(
+            "src/app.ts",
+            "webpack://src/app.ts",
+            Some(("file:///other.js", bad))
+        ));
+    }
+
     #[test]
     fn remaps_vite_virtual_source_map_sources() {
         let root = make_temp_dir("coverage-remap-vite");
@@ -3870,27 +3794,6 @@ mod tests {
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn preserves_windows_absolute_source_map_sources() {
-        let resolved = resolve_original_source_path(
-            "C:/repo/src/app.ts",
-            "file:///C:/repo/dist/bundle.js",
-            Some("bundle.js.map"),
-        )
-        .unwrap_or_else(|| panic!("failed to resolve windows absolute source path"));
-
-        assert_eq!(resolved, PathBuf::from("C:/repo/src/app.ts"));
-
-        let resolved_backslashes = resolve_original_source_path(
-            r"C:\repo\src\app.ts",
-            "file:///C:/repo/dist/bundle.js",
-            Some("bundle.js.map"),
-        )
-        .unwrap_or_else(|| panic!("failed to resolve windows backslash source path"));
-
-        assert_eq!(resolved_backslashes, PathBuf::from(r"C:\repo\src\app.ts"));
     }
 
     #[test]
@@ -4319,103 +4222,6 @@ mod tests {
         fn utf16_offset_index_matches_the_char_walk_on_any_text(source in "\\PC{0,40}") {
             assert_index_matches_char_walk(&source);
         }
-    }
-
-    #[test]
-    fn file_url_to_path_accepts_file_urls_and_absolute_paths_only() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("app.js");
-        let url = file_url(&path);
-        assert_eq!(super::file_url_to_path(&url), Some(path));
-        // Non-file URLs and relative paths are rejected.
-        assert_eq!(super::file_url_to_path("https://example.com/app.js"), None);
-        assert_eq!(super::file_url_to_path("relative/app.js"), None);
-    }
-
-    #[test]
-    fn resolve_source_map_base_handles_inline_relative_and_remote_urls() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let generated = file_url(&dir.path().join("app.js"));
-        // No source-map URL: base is the generated file's directory.
-        assert_eq!(
-            super::resolve_source_map_base(&generated, None),
-            Some(dir.path().to_path_buf())
-        );
-        // Relative .map URL resolves against the generated directory.
-        assert_eq!(
-            super::resolve_source_map_base(&generated, Some("app.js.map")),
-            Some(dir.path().to_path_buf())
-        );
-        // A remote http(s) source-map URL has no local base.
-        assert_eq!(
-            super::resolve_source_map_base(&generated, Some("https://cdn.example.com/app.js.map")),
-            None
-        );
-    }
-
-    #[test]
-    fn resolve_original_source_path_handles_file_absolute_and_relative_sources() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let source = dir.path().join("src/app.ts");
-        let generated = file_url(&dir.path().join("dist/app.js"));
-
-        assert_eq!(
-            super::resolve_original_source_path("", &generated, None),
-            None
-        );
-        assert_eq!(
-            super::resolve_original_source_path(&file_url(&source), &generated, None),
-            Some(source.clone())
-        );
-        assert_eq!(
-            super::resolve_original_source_path(
-                source.to_str().expect("utf8 path"),
-                &generated,
-                None
-            ),
-            Some(source)
-        );
-        assert_eq!(
-            super::resolve_original_source_path("src/app.ts", &generated, None),
-            Some(dir.path().join("dist/src/app.ts"))
-        );
-    }
-
-    #[test]
-    fn resolve_original_source_path_resolves_virtual_sources_from_ancestors() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let source = dir.path().join("src/app.ts");
-        std::fs::create_dir_all(source.parent().expect("source parent"))
-            .expect("create source dir");
-        std::fs::write(&source, "export const app = true;").expect("write source");
-        let generated = file_url(&dir.path().join("dist/chunks/app.js"));
-
-        assert_eq!(
-            super::resolve_original_source_path("webpack://app/src/app.ts", &generated, None),
-            Some(source)
-        );
-    }
-
-    #[test]
-    fn virtual_source_candidates_strip_known_pseudo_hosts() {
-        let url = Url::parse("webpack://_N_E/./src/app.ts").expect("url");
-        let candidates = super::virtual_source_candidates(&url);
-        // The `_N_E` pseudo-host is dropped and the url crate normalizes the
-        // `/.` segment, leaving the path-only candidate.
-        assert!(
-            candidates.contains(&PathBuf::from("src/app.ts")),
-            "got: {candidates:?}"
-        );
-        assert!(!candidates.iter().any(|c| c.starts_with("_N_E")));
-    }
-
-    #[test]
-    fn resolve_virtual_source_path_ignores_non_virtual_schemes() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        assert_eq!(
-            super::resolve_virtual_source_path("https://example.com/app.ts", dir.path()),
-            None
-        );
     }
 
     #[test]

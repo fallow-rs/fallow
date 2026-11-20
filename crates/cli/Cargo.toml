@@ -91,7 +91,6 @@ oxc_coverage_instrument = { workspace = true }
 srcmap-sourcemap = "0.6.0"
 httpdate = { workspace = true }
 ureq = { workspace = true }
-url = "2"
 http = "1"
 xxhash-rust = { workspace = true }
 sha2 = { workspace = true }
@@ -146,6 +145,7 @@ syn = { version = "3", features = ["full", "visit"] }
 base64 = "0.23"
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 fallow-cov-protocol = "0.9"
+url = "2"
 
 [package.metadata.fallow.deps]
 ignored = [

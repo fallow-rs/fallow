@@ -38,6 +38,7 @@ oxc_parser = { workspace = true }
 oxc_span = { workspace = true }
 oxc_syntax = { workspace = true }
 oxc_coverage_instrument = { workspace = true }
+percent-encoding = "2"
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
 sha2 = { workspace = true }
