@@ -9,6 +9,7 @@
 //! telemetry recording, exit-code gating, and human / machine rendering.
 
 pub mod coverage;
+mod coverage_license;
 mod coverage_rows;
 pub mod mutation_report;
 pub mod optimization_target;

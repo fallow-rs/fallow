@@ -225,17 +225,45 @@ mod gated {
     }
 
     #[test]
-    fn license_expired_hard_fail_exits_3() {
+    fn license_expired_local_single_capture_succeeds() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
+        cmd.env("FALLOW_STUB_MODE", "enforce-license-gate");
         cmd.env("FALLOW_LICENSE", sign::mint_expired_runtime_coverage_jwt());
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
         let (stdout, stderr, code) = run_with(cmd);
         assert_eq!(
+            code, 0,
+            "a single local capture needs no license, so an expired license must not block it; stdout={stdout}, stderr={stderr}"
+        );
+        let json: serde_json::Value = serde_json::from_str(&stdout).expect("JSON output");
+        assert!(json.pointer("/runtime_coverage").is_some());
+        assert!(
+            stderr.contains("license expired"),
+            "the run must still tell the user that the license expired; stderr={stderr}"
+        );
+    }
+
+    #[test]
+    fn license_expired_multi_capture_exits_3() {
+        let harness = Harness::new();
+        let mut cmd = harness.fallow();
+        cmd.env("FALLOW_STUB_MODE", "enforce-license-gate");
+        cmd.env("FALLOW_LICENSE", sign::mint_expired_runtime_coverage_jwt());
+        let coverage_dir = harness.multi_capture_dir();
+        for arg in Harness::health_args_for_path_with_format(&coverage_dir, "json") {
+            cmd.arg(arg);
+        }
+        let (stdout, stderr, code) = run_with(cmd);
+        assert_eq!(
             code, 3,
-            "expired hard-fail license must exit 3; stdout={stdout}, stderr={stderr}"
+            "expired license for a multi-capture run must exit 3; stdout={stdout}, stderr={stderr}"
+        );
+        assert!(
+            format!("{stdout}{stderr}").contains("license expired"),
+            "the error must name the expired license; stdout={stdout}, stderr={stderr}"
         );
     }
 
