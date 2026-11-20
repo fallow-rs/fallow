@@ -34,6 +34,7 @@ mod predicates;
 mod production_excluded_imports;
 mod production_only_suppressions;
 mod prop_drilling;
+mod public_packages;
 mod re_export_cycles;
 mod react_intel;
 mod react_resolve;
@@ -262,21 +263,6 @@ fn is_cross_package_cycle(
         }
     }
     false
-}
-
-fn public_workspace_roots<'a>(
-    public_packages: &[String],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-) -> Vec<&'a std::path::Path> {
-    if public_packages.is_empty() || workspaces.is_empty() {
-        return Vec::new();
-    }
-
-    workspaces
-        .iter()
-        .filter(|workspace| fallow_config::workspace_is_public(&workspace.name, public_packages))
-        .map(|ws| ws.root.as_path())
-        .collect()
 }
 
 fn add_package_public_api_entry_points(
@@ -917,7 +903,12 @@ struct PostDetectionInput<'a, 'm> {
 /// reclassification, security, catalog/override, framework-convention findings,
 /// and stale-suppression accounting.
 fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
-    filter_public_workspace_results(input.config, input.workspaces, input.results);
+    public_packages::filter_public_workspace_results(
+        input.graph,
+        input.config,
+        input.workspaces,
+        input.results,
+    );
 
     // Reclassify the server-action subset of unused exports BEFORE stale
     // detection so a `// fallow-ignore-next-line unused-server-action` marker is
@@ -1894,42 +1885,6 @@ fn run_boundary_violation_detector(
         .into_iter()
         .map(BoundaryViolationFinding::with_actions)
         .collect()
-}
-
-fn filter_public_workspace_results(
-    config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    results: &mut AnalysisResults,
-) {
-    let public_roots = public_workspace_roots(&config.public_packages, workspaces);
-    if public_roots.is_empty() {
-        return;
-    }
-    results.unused_exports.retain(|e| {
-        !public_roots
-            .iter()
-            .any(|root| e.export.path.starts_with(root))
-    });
-    results.unused_types.retain(|e| {
-        !public_roots
-            .iter()
-            .any(|root| e.export.path.starts_with(root))
-    });
-    results.unused_enum_members.retain(|e| {
-        !public_roots
-            .iter()
-            .any(|root| e.member.path.starts_with(root))
-    });
-    results.unused_class_members.retain(|e| {
-        !public_roots
-            .iter()
-            .any(|root| e.member.path.starts_with(root))
-    });
-    results.unused_protected_class_members.retain(|e| {
-        !public_roots
-            .iter()
-            .any(|root| e.member.path.starts_with(root))
-    });
 }
 
 fn populate_pnpm_catalog_findings(
