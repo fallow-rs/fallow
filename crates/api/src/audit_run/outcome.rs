@@ -58,7 +58,6 @@ pub struct SharedDiff<'a> {
 }
 
 /// The change of one audit run: its files, and the inputs of its diff.
-#[derive(Clone, Copy)]
 pub struct RunChange<'a> {
     /// Head analysis root.
     pub root: &'a Path,
@@ -68,6 +67,9 @@ pub struct RunChange<'a> {
     pub shared: Option<SharedDiff<'a>>,
     /// The files that the change touched or deleted.
     pub changed_files: &'a FxHashSet<PathBuf>,
+    /// The merge-base worktree diff, read by the first phase that needs it.
+    /// The inner `None` records that git gave no diff.
+    worktree: std::cell::OnceCell<Option<fallow_output::DiffIndex>>,
 }
 
 impl<'a> RunChange<'a> {
@@ -84,18 +86,24 @@ impl<'a> RunChange<'a> {
             base_ref,
             shared,
             changed_files,
+            worktree: std::cell::OnceCell::new(),
         }
     }
 
     /// The diff of the run: the shared diff when one is active, else the
-    /// merge-base worktree diff. `None` when git gives no diff.
-    fn diff_index(&self) -> Option<std::borrow::Cow<'a, fallow_output::DiffIndex>> {
+    /// merge-base worktree diff. One run reads the worktree diff at most one
+    /// time. `None` when git gives no diff.
+    pub(super) fn diff_index(&self) -> Option<&fallow_output::DiffIndex> {
         if let Some(shared) = self.shared {
-            return Some(std::borrow::Cow::Borrowed(shared.index));
+            return Some(shared.index);
         }
-        fallow_engine::changed_files::try_get_changed_diff(self.root, self.base_ref)
-            .ok()
-            .map(|diff| std::borrow::Cow::Owned(fallow_output::DiffIndex::from_unified_diff(&diff)))
+        self.worktree
+            .get_or_init(|| {
+                fallow_engine::changed_files::try_get_changed_diff(self.root, self.base_ref)
+                    .ok()
+                    .map(|diff| fallow_output::DiffIndex::from_unified_diff(&diff))
+            })
+            .as_ref()
     }
 }
 
@@ -169,7 +177,6 @@ pub fn compare(
                     ledger.demote_unattributable_introductions(head_syntactic);
                 }
                 if let Some(base_keys) = base_keys {
-                    let diff = std::cell::OnceCell::new();
                     let moved = moved_dead_code_keys(
                         &ledger,
                         &MovedDeadCode {
@@ -177,8 +184,7 @@ pub fn compare(
                             changed: &changed_paths_of(change.changed_files, dead_code.root),
                             also_reported: dead_code.syntactic_keys.filter(|_| syntactic_fallback),
                             added_line_names: &|path, symbol| {
-                                let index = diff.get_or_init(|| change.diff_index());
-                                index.as_deref().is_some_and(|index| {
+                                change.diff_index().is_some_and(|index| {
                                     added_line_names(index, dead_code.root, path, symbol)
                                 })
                             },
@@ -305,27 +311,21 @@ pub struct DupeBase<'a> {
 pub fn demote_preexisting_dupe_introductions(
     comparison: &mut AuditComparison,
     view: &AuditAnalysesView<'_>,
-    root: &Path,
-    base_ref: &str,
-    shared: Option<SharedDiff<'_>>,
+    change: &RunChange<'_>,
     base: DupeBase<'_>,
 ) -> Option<DupeDemotionDiffSource> {
     if comparison.dupes.introduced_count() == 0 {
         return None;
     }
     let duplication = view.duplication.as_ref()?;
-    let worktree_index;
-    let (index, source) = if let Some(shared) = shared {
-        (
-            shared.index,
-            DupeDemotionDiffSource::Shared(shared.label.to_owned()),
-        )
-    } else if let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) {
-        worktree_index = fallow_output::DiffIndex::from_unified_diff(&diff);
-        (&worktree_index, DupeDemotionDiffSource::Worktree)
-    } else {
+    let Some(index) = change.diff_index() else {
         return Some(DupeDemotionDiffSource::Skipped);
     };
+    let source = change
+        .shared
+        .map_or(DupeDemotionDiffSource::Worktree, |shared| {
+            DupeDemotionDiffSource::Shared(shared.label.to_owned())
+        });
     let demote = preexisting_dupe_group_keys(
         duplication.clone_groups.iter().copied(),
         duplication.root,
@@ -362,9 +362,7 @@ pub fn realign_styling_introductions(
     comparison: &mut AuditComparison,
     view: &AuditAnalysesView<'_>,
     base: Option<&AuditKeySnapshot>,
-    root: &Path,
-    base_ref: &str,
-    shared: Option<SharedDiff<'_>>,
+    change: &RunChange<'_>,
 ) {
     let (Some(base), Some(health)) = (base, view.health.as_ref()) else {
         return;
@@ -372,13 +370,7 @@ pub fn realign_styling_introductions(
     if comparison.styling.introduced_count() == 0 {
         return;
     }
-    let worktree_index;
-    let index = if let Some(shared) = shared {
-        shared.index
-    } else if let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) {
-        worktree_index = fallow_output::DiffIndex::from_unified_diff(&diff);
-        &worktree_index
-    } else {
+    let Some(index) = change.diff_index() else {
         return;
     };
     comparison.styling = AuditDomainLedger::compare(

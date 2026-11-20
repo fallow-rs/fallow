@@ -565,9 +565,7 @@ pub fn attribute<A: AuditAnalyses>(
         let source = demote_preexisting_dupe_introductions(
             &mut comparison,
             &view,
-            root,
-            base_ref,
-            shared_diff,
+            &change,
             DupeBase {
                 // A skipped base reuses the head keys, so no group is introduced.
                 groups: base_snapshot
@@ -577,14 +575,7 @@ pub fn attribute<A: AuditAnalyses>(
                 renames,
             },
         );
-        realign_styling_introductions(
-            &mut comparison,
-            &view,
-            base_snapshot.as_ref(),
-            root,
-            base_ref,
-            shared_diff,
-        );
+        realign_styling_introductions(&mut comparison, &view, base_snapshot.as_ref(), &change);
         let result = outcome(gate, worsened, &view, &comparison, base_snapshot.is_some());
         (comparison, source, result)
     };
