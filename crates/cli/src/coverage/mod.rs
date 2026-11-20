@@ -33,6 +33,7 @@ use crate::exit_codes::{
 };
 use crate::health::coverage as runtime_coverage;
 use crate::license;
+use setup_recipe::{RecipeOutcome, run_setup_recipe_step};
 
 pub use analyze::AnalyzeArgs;
 pub use analyze::benchmark_local_json;
@@ -55,6 +56,7 @@ pub mod login;
 mod partial_capture;
 mod setup_cli;
 pub mod setup_cloud;
+mod setup_recipe;
 mod source_map_sources;
 pub mod upload_common;
 mod upload_inventory;
@@ -626,8 +628,8 @@ fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonSt
         return exit;
     }
 
-    let recipe_path = match run_setup_recipe_step(root, &context, &mut setup_state) {
-        Ok(path) => path,
+    let recipe = match run_setup_recipe_step(root, &context, &mut setup_state) {
+        Ok(recipe) => recipe,
         Err(exit) => return exit,
     };
 
@@ -637,7 +639,7 @@ fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonSt
         return exit_invalid_input();
     }
 
-    run_setup_final_step(root, &context, &recipe_path)
+    run_setup_final_step(root, &context, &recipe)
 }
 
 fn print_setup_intro(root: &Path) {
@@ -710,40 +712,10 @@ fn print_resumed_sidecar_step(setup_state: &CoverageSetupState) {
     }
 }
 
-fn run_setup_recipe_step(
-    root: &Path,
-    context: &CoverageSetupContext,
-    setup_state: &mut CoverageSetupState,
-) -> Result<PathBuf, ExitCode> {
-    let recipe = recipe_contents(context);
-    if recipe_state_is_current(setup_state, root, context, &recipe) {
-        return Ok(resumed_recipe_path(root, setup_state));
-    }
-
-    let path =
-        write_recipe(root, &recipe).map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
-    record_recipe_state(setup_state, path.clone(), context, &recipe);
-    save_setup_state(root, setup_state)
-        .map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
-    Ok(path)
-}
-
-fn resumed_recipe_path(root: &Path, setup_state: &CoverageSetupState) -> PathBuf {
-    let path = setup_state
-        .recipe
-        .as_ref()
-        .map_or_else(|| recipe_path(root), |recipe| recipe.path.clone());
-    println!(
-        "Step 3/4: Coverage recipe... ok ({}) (resumed).",
-        display_relative(root, &path)
-    );
-    path
-}
-
 fn run_setup_final_step(
     root: &Path,
     context: &CoverageSetupContext,
-    recipe_path: &Path,
+    recipe: &RecipeOutcome,
 ) -> ExitCode {
     if let Some(coverage_path) = detect_coverage_artifact(root) {
         println!(
@@ -761,11 +733,19 @@ fn run_setup_final_step(
 
     println!("Step 4/4: Collecting coverage for your app.");
     println!("  -> Detected: {}.", context.framework.label());
-    println!(
-        "  -> Wrote {} with the {} recipe.",
-        display_relative(root, recipe_path),
-        context.framework.label()
-    );
+    if recipe.kept {
+        println!(
+            "  -> Move {} away and re-run to get the {} recipe.",
+            display_relative(root, &recipe.path),
+            context.framework.label()
+        );
+    } else {
+        println!(
+            "  -> Wrote {} with the {} recipe.",
+            display_relative(root, &recipe.path),
+            context.framework.label()
+        );
+    }
     println!("  -> Run your app with the instrumentation on, then re-run this command.");
     print_upload_inventory_hint();
     ExitCode::SUCCESS

@@ -2,7 +2,7 @@ use super::{
     COVERAGE_DOCS_URL, CoverageSetupContext, FrameworkKind, PackageManager, SetupArgs,
     build_setup_json, detect_coverage_artifact, detect_framework, detect_package_manager,
     handle_license_step, load_setup_state, recipe_contents, recipe_state_is_current,
-    record_recipe_state, record_sidecar_state, render_setup_json, run_setup,
+    record_recipe_state, record_sidecar_state, render_setup_json, run_setup, run_setup_recipe_step,
     setup_context_fingerprint, setup_state_path, sidecar_state_is_current,
     upload_inventory_hint_lines, write_recipe,
 };
@@ -897,6 +897,46 @@ fn recipe_is_not_written_through_a_link_outside_the_project() {
 
 #[cfg(unix)]
 #[test]
+fn recipe_step_refuses_a_recipe_link_to_an_outside_file() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    let target = outside.path().join("rc");
+    std::fs::write(&target, "keep\n").expect("write outside file");
+    std::fs::create_dir(dir.path().join("docs")).expect("mkdir");
+    std::os::unix::fs::symlink(&target, dir.path().join("docs/collect-coverage.md"))
+        .expect("symlink");
+    let mut state = super::CoverageSetupState::default();
+
+    let result = run_setup_recipe_step(dir.path(), &vite_setup_context(), &mut state);
+
+    assert!(result.is_err());
+    assert!(state.recipe.is_none());
+    assert_eq!(std::fs::read_to_string(&target).expect("read"), "keep\n");
+}
+
+#[test]
+fn recipe_step_replaces_an_untouched_recipe_recorded_under_another_root_spelling() {
+    let dir = tempdir().expect("tempdir should be created");
+    let mut state = super::CoverageSetupState::default();
+    run_setup_recipe_step(dir.path(), &vite_setup_context(), &mut state)
+        .expect("first setup should succeed");
+    if let Some(recipe) = state.recipe.as_mut() {
+        recipe.path = PathBuf::from("/moved/project/docs/collect-coverage.md");
+    }
+    let next = next_setup_context();
+
+    let outcome =
+        run_setup_recipe_step(dir.path(), &next, &mut state).expect("second setup should succeed");
+
+    assert!(!outcome.kept);
+    assert_eq!(
+        std::fs::read_to_string(&outcome.path).expect("recipe should be readable"),
+        recipe_contents(&next)
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn recipe_is_not_written_into_a_linked_docs_dir_outside_the_project() {
     let dir = tempdir().expect("tempdir");
     let outside = tempdir().expect("outside tempdir");
@@ -949,4 +989,112 @@ fn setup_lock_is_not_created_through_a_dangling_link() {
 
     assert!(result.is_err());
     assert!(!planted.exists());
+}
+
+fn vite_setup_context() -> CoverageSetupContext {
+    CoverageSetupContext {
+        framework: FrameworkKind::ViteBrowser,
+        package_manager: Some(PackageManager::Pnpm),
+        has_build_script: true,
+        has_start_script: false,
+        has_preview_script: true,
+        node_entry_path: "src/main.ts".to_owned(),
+    }
+}
+
+fn next_setup_context() -> CoverageSetupContext {
+    CoverageSetupContext {
+        framework: FrameworkKind::NextJs,
+        package_manager: Some(PackageManager::Pnpm),
+        has_build_script: true,
+        has_start_script: true,
+        has_preview_script: false,
+        node_entry_path: "src/main.ts".to_owned(),
+    }
+}
+
+fn write_authored_recipe(root: &Path, contents: &str) -> PathBuf {
+    let path = root.join("docs").join("collect-coverage.md");
+    std::fs::create_dir_all(path.parent().expect("recipe has a parent"))
+        .expect("docs should be created");
+    std::fs::write(&path, contents).expect("authored recipe should be written");
+    path
+}
+
+#[test]
+fn recipe_step_keeps_an_authored_recipe_on_first_setup() {
+    let dir = tempdir().expect("tempdir should be created");
+    let path = write_authored_recipe(dir.path(), "# Our own coverage notes\n");
+    let mut state = super::CoverageSetupState::default();
+
+    let outcome = run_setup_recipe_step(dir.path(), &vite_setup_context(), &mut state)
+        .expect("recipe step should succeed");
+
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("recipe should be readable"),
+        "# Our own coverage notes\n"
+    );
+    assert!(outcome.kept);
+    assert!(state.recipe.is_none());
+}
+
+#[test]
+fn recipe_step_keeps_a_manual_edit_of_the_generated_recipe() {
+    let dir = tempdir().expect("tempdir should be created");
+    let context = vite_setup_context();
+    let mut state = super::CoverageSetupState::default();
+    run_setup_recipe_step(dir.path(), &context, &mut state).expect("first setup should succeed");
+    let path = write_authored_recipe(dir.path(), "# Edited by hand\n");
+
+    let outcome = run_setup_recipe_step(dir.path(), &next_setup_context(), &mut state)
+        .expect("resumed setup should succeed");
+
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("recipe should be readable"),
+        "# Edited by hand\n"
+    );
+    assert!(outcome.kept);
+}
+
+#[test]
+fn recipe_step_replaces_an_untouched_generated_recipe_when_the_framework_changes() {
+    let dir = tempdir().expect("tempdir should be created");
+    let mut state = super::CoverageSetupState::default();
+    run_setup_recipe_step(dir.path(), &vite_setup_context(), &mut state)
+        .expect("first setup should succeed");
+    let next = next_setup_context();
+
+    let outcome =
+        run_setup_recipe_step(dir.path(), &next, &mut state).expect("second setup should succeed");
+
+    assert!(!outcome.kept);
+    assert_eq!(
+        std::fs::read_to_string(&outcome.path).expect("recipe should be readable"),
+        recipe_contents(&next)
+    );
+    assert!(recipe_state_is_current(
+        &state,
+        dir.path(),
+        &next,
+        &recipe_contents(&next)
+    ));
+}
+
+#[test]
+fn recipe_step_adopts_an_existing_file_that_matches_the_recipe() {
+    let dir = tempdir().expect("tempdir should be created");
+    let context = vite_setup_context();
+    write_authored_recipe(dir.path(), &recipe_contents(&context));
+    let mut state = super::CoverageSetupState::default();
+
+    let outcome =
+        run_setup_recipe_step(dir.path(), &context, &mut state).expect("setup should succeed");
+
+    assert!(!outcome.kept);
+    assert!(recipe_state_is_current(
+        &state,
+        dir.path(),
+        &context,
+        &recipe_contents(&context)
+    ));
 }
