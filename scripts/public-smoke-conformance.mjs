@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 
 import { cargoFallowBin } from "./cargo-target.mjs";
 import { runCliMain } from "./cli-main.mjs";
+import { parseOptions } from "./lib/options.mjs";
+import { fallowIssueCounts, fallowIssueTotal } from "./lib/report-counts.mjs";
+import { parseJsonReport, runTool } from "./lib/tool-run.mjs";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_MANIFEST = "scripts/public-smoke-projects.json";
@@ -21,60 +23,19 @@ const createDefaultOptions = () => ({
   fallowBin: null,
 });
 
-const readValue = (argv, index, name) => {
-  const value = argv[index + 1];
-  if (!value) {
-    throw new Error(`${name} requires a value`);
-  }
-  return value;
-};
-
-const optionSetters = new Map([
-  ["--manifest", (options, value) => ({ ...options, manifest: value })],
-  ["--out-dir", (options, value) => ({ ...options, outDir: value })],
-  ["--cache-dir", (options, value) => ({ ...options, cacheDir: value })],
-  ["--root-dir", (options, value) => ({ ...options, rootDir: value })],
-  ["--fallow-bin", (options, value) => ({ ...options, fallowBin: value })],
-]);
-
-const setProjectPath = (options, value) => {
-  const [id, path] = splitProjectPath(value);
-  options.projectPaths.set(id, path);
-  return options;
-};
-
-const parseArg = (argv, index, options) => {
-  const arg = argv[index];
-  if (arg === "--clone") {
-    return { options: { ...options, clone: true }, nextIndex: index + 1 };
-  }
-  if (arg === "--project") {
-    return { options: setProjectPath(options, readValue(argv, index, arg)), nextIndex: index + 2 };
-  }
-  if (arg.startsWith("--project=")) {
-    return {
-      options: setProjectPath(options, arg.slice("--project=".length)),
-      nextIndex: index + 1,
-    };
-  }
-  const setter = optionSetters.get(arg);
-  if (setter) {
-    return { options: setter(options, readValue(argv, index, arg)), nextIndex: index + 2 };
-  }
-  throw new Error(`Unknown argument: ${arg}`);
+const OPTION_SPEC = {
+  "--manifest": { key: "manifest", type: "string" },
+  "--out-dir": { key: "outDir", type: "string" },
+  "--cache-dir": { key: "cacheDir", type: "string" },
+  "--root-dir": { key: "rootDir", type: "string" },
+  "--fallow-bin": { key: "fallowBin", type: "string" },
+  "--project": { key: "projects", type: "string", repeat: true },
+  "--clone": { key: "clone", type: "flag" },
 };
 
 export const parseArgs = (argv) => {
-  let options = createDefaultOptions();
-  let index = 0;
-
-  while (index < argv.length) {
-    const parsed = parseArg(argv, index, options);
-    options = parsed.options;
-    index = parsed.nextIndex;
-  }
-
-  return options;
+  const { projects = [], ...options } = parseOptions(argv, OPTION_SPEC, createDefaultOptions());
+  return { ...options, projectPaths: new Map(projects.map(splitProjectPath)) };
 };
 
 const splitProjectPath = (value) => {
@@ -124,54 +85,50 @@ const findFallowBin = (explicit) => {
   return "fallow";
 };
 
+const MAX_REASON_LENGTH = 500;
+
 const cloneProject = (project, options) => {
-  const destination = resolve(options.cacheDir, project.id);
-  if (existsSync(join(destination, ".git"))) {
-    return destination;
+  const dir = resolve(options.cacheDir, project.id);
+  if (existsSync(join(dir, ".git"))) {
+    return { ok: true, dir };
   }
   mkdirSync(options.cacheDir, { recursive: true });
-  const result = spawnSync(
-    "git",
-    [
-      "clone",
-      "--depth",
-      "1",
-      "--branch",
-      project.ref,
-      "--single-branch",
-      `https://github.com/${project.repo}.git`,
-      destination,
-    ],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  );
-  if (result.status !== 0) {
-    throw new Error(`clone failed for ${project.id}: ${result.stderr.trim()}`);
+  const result = runTool("git", [
+    "clone",
+    "--depth",
+    "1",
+    "--branch",
+    project.ref,
+    "--single-branch",
+    `https://github.com/${project.repo}.git`,
+    dir,
+  ]);
+  if (!result.ok) {
+    const detail = result.stderr.trim() || result.reason;
+    return { ok: false, dir, reason: `clone failed for ${project.id}: ${detail}` };
   }
-  return destination;
+  return { ok: true, dir };
 };
 
-const summarizeFallowOutput = (output) => {
-  const parsed = JSON.parse(output);
-  const summary = parsed.summary && typeof parsed.summary === "object" ? parsed.summary : {};
-  const resultKeys = Object.entries(parsed)
-    .filter(([, value]) => Array.isArray(value))
-    .map(([key, value]) => [key, value.length])
-    .filter(([, count]) => count > 0)
-    .toSorted(([a], [b]) => a.localeCompare(b));
-
+/**
+ * Summarizes the JSON output of one Fallow command: its kind, schema version,
+ * `total_issues` and the category counts of its `summary`. Throws when the
+ * output is not a JSON object.
+ */
+export const summarizeFallowOutput = (output) => {
+  const parsed = parseJsonReport(output);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const report = parsed.value;
   return {
-    kind: typeof parsed.kind === "string" ? parsed.kind : null,
-    schema_version: parsed.schema_version ?? null,
-    total_issues: Number.isFinite(summary.total_issues) ? summary.total_issues : null,
-    issue_counts: Object.fromEntries(resultKeys),
+    kind: typeof report.kind === "string" ? report.kind : null,
+    schema_version: report.schema_version ?? null,
+    total_issues: fallowIssueTotal(report),
+    issue_counts: fallowIssueCounts(report),
   };
 };
 
 const runFallowCommand = (command) =>
-  spawnSync(command[0], command.slice(1), {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  runTool(command[0], command.slice(1), { maxBuffer: 64 * 1024 * 1024, okStatuses: [0, 1] });
 
 const projectReportFields = (project) => ({
   id: project.id,
@@ -184,7 +141,7 @@ const projectReportFields = (project) => ({
 const failedProjectResult = (project, root, reason) => ({
   ...projectReportFields(project),
   status: "failed",
-  reason,
+  reason: reason.slice(0, MAX_REASON_LENGTH),
   command: commandForReport(project),
   project_dir: basename(root),
 });
@@ -216,12 +173,8 @@ const runProject = (project, root, fallowBin) => {
   ];
   const result = runFallowCommand(command);
 
-  if (result.status === null || result.status >= 2) {
-    return failedProjectResult(
-      project,
-      root,
-      result.stderr.trim() || `fallow exited ${result.status}`,
-    );
+  if (!result.ok) {
+    return failedProjectResult(project, root, result.stderr.trim() || result.reason);
   }
 
   try {
@@ -240,7 +193,8 @@ const commandForReport = (project) =>
 
 const resolveRunnableRoot = (project, options) => {
   const root = resolveProjectPath(project, options);
-  return root || (options.clone ? cloneProject(project, options) : null);
+  if (root) return { ok: true, dir: root };
+  return options.clone ? cloneProject(project, options) : null;
 };
 
 const skippedProjectResult = (project) => ({
@@ -252,7 +206,9 @@ const skippedProjectResult = (project) => ({
 
 const runManifestProject = (project, options, fallowBin) => {
   const root = resolveRunnableRoot(project, options);
-  return root ? runProject(project, root, fallowBin) : skippedProjectResult(project);
+  if (!root) return skippedProjectResult(project);
+  if (!root.ok) return failedProjectResult(project, root.dir, root.reason);
+  return runProject(project, root.dir, fallowBin);
 };
 
 const countStatus = (results, status) =>

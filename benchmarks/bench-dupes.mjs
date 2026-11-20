@@ -5,23 +5,27 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
+import {
+  formatMs as fmt,
+  sampleOutcome,
+  sampleSummary,
+  stats,
+  timeCells,
+  timeSample,
+} from "../scripts/lib/bench-samples.mjs";
+import { readBenchArgs } from "../scripts/lib/options.mjs";
+import { parseJsonReport } from "../scripts/lib/tool-run.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
-const hasFilter = args.includes("--synthetic") || args.includes("--real-world");
-const runSynthetic = args.includes("--synthetic") || !hasFilter;
-const runRealWorld = args.includes("--real-world") || !hasFilter;
-const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?? "5");
-const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
-const projectsArg = args.find((a) => a.startsWith("--projects="))?.split("=")[1];
-const projectFilter = projectsArg
-  ? new Set(
-      projectsArg
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    )
-  : null;
+const {
+  runSynthetic,
+  runRealWorld,
+  projectFilter,
+  runs: RUNS,
+  warmup: WARMUP,
+} = readBenchArgs(args, { runs: "5", warmup: "2" });
 const JS_WEB_FORMATS = "typescript,javascript,tsx,jsx";
 
 console.log("Building fallow (release)...");
@@ -97,56 +101,9 @@ function countSourceFiles(dir) {
   return count;
 }
 
-function timeRun(cmd, cmdArgs, cwd) {
-  const start = performance.now();
-  const result = spawnSync(cmd, cmdArgs, {
-    cwd,
-    stdio: "pipe",
-    timeout: 600000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-  });
-  return {
-    elapsed: performance.now() - start,
-    status: result.status,
-    stdout: result.stdout?.toString() ?? "",
-    stderr: result.stderr?.toString() ?? "",
-  };
-}
-
-function timeRunWithMemory(cmd, cmdArgs, cwd) {
-  const isLinux = process.platform === "linux";
-  const timeBin = "/usr/bin/time";
-  const timeArgs = isLinux ? ["-v", cmd, ...cmdArgs] : ["-l", cmd, ...cmdArgs];
-
-  const start = performance.now();
-  const result = spawnSync(timeBin, timeArgs, {
-    cwd,
-    stdio: "pipe",
-    timeout: 600000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-  });
-  const elapsed = performance.now() - start;
-  const stderr = result.stderr?.toString() ?? "";
-
-  let peakRssBytes = 0;
-  if (isLinux) {
-    const match = stderr.match(/Maximum resident set size \(kbytes\): (\d+)/);
-    if (match) peakRssBytes = parseInt(match[1]) * 1024;
-  } else {
-    const match = stderr.match(/(\d+)\s+maximum resident set size/);
-    if (match) peakRssBytes = parseInt(match[1]);
-  }
-
-  return {
-    elapsed,
-    status: result.status,
-    stdout: result.stdout?.toString() ?? "",
-    stderr,
-    peakRssBytes,
-  };
-}
+const timeRun = (cmd, cmdArgs, cwd) => timeSample(cmd, cmdArgs, { cwd, timeout: 600000 });
+const timeRunWithMemory = (cmd, cmdArgs, cwd) =>
+  timeSample(cmd, cmdArgs, { cwd, timeout: 600000, memory: true });
 
 function parseFallowCloneCount(stdout) {
   try {
@@ -177,21 +134,23 @@ function parseJscpdCloneCount(reportDir) {
   }
 }
 
-function stats(times) {
-  const sorted = [...times].toSorted((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  return {
-    min: sorted[0],
-    max: sorted.at(-1),
-    mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-    median,
-  };
-}
+const fallowReport = (stdout) => {
+  const report = parseJsonReport(stdout);
+  return report.ok && Array.isArray(report.value)
+    ? { ok: false, error: "unexpected JSON shape" }
+    : report;
+};
 
-function fmt(ms) {
-  return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`;
-}
+const jscpdReport = (reportDir) => {
+  let text;
+  try {
+    text = readFileSync(join(reportDir, "jscpd-report.json"), "utf8");
+  } catch {
+    return { ok: false, error: "no report file" };
+  }
+  return parseJsonReport(text);
+};
+
 function fmtMem(bytes) {
   if (bytes === 0) return "?";
   const mb = bytes / 1024 / 1024;
@@ -209,6 +168,26 @@ function relativeSpeed(fallowMedian, jscpdMedian) {
 function formatMultiplier(value) {
   return `${value.toFixed(1)}x`;
 }
+
+const clearReportDir = (reportDir) => {
+  if (existsSync(reportDir)) rmSync(reportDir, { recursive: true });
+};
+
+const runJscpdSample = (samples, jArgs, dir, reportDir) => {
+  clearReportDir(reportDir);
+  const run = timeRunWithMemory(jscpdBin, jArgs, dir);
+  const outcome = sampleOutcome(run, jscpdReport(reportDir));
+  if (outcome.valid) {
+    samples.times.push(run.elapsed);
+    if (samples.times.length === 1) {
+      samples.clones = parseJscpdCloneCount(reportDir);
+      samples.rss = run.peakRssBytes;
+    }
+  } else {
+    samples.firstFailure ??= outcome.reason;
+  }
+  clearReportDir(reportDir);
+};
 
 function benchmarkProject(name, dir) {
   const files = countSourceFiles(dir);
@@ -239,48 +218,44 @@ function benchmarkProject(name, dir) {
   // Warmup
   for (let i = 0; i < WARMUP; i++) {
     timeRun(fallowBin, fArgsCold, dir);
-    if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
+    clearReportDir(jscpdReportDir);
     timeRun(jscpdBin, jArgs, dir);
-    if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
+    clearReportDir(jscpdReportDir);
   }
 
   // --- Cold runs ---
-  const fTimesCold = [],
-    jTimes = [];
+  const fTimesCold = [];
   let fClones = { groups: "?", instances: "?", pct: "?" };
-  let jClones = { groups: "?", instances: "?", pct: "?" };
-  let fPeakRss = 0,
-    jPeakRss = 0;
+  let fPeakRss = 0;
+  const jscpd = {
+    times: [],
+    firstFailure: null,
+    clones: { groups: "?", instances: "?", pct: "?" },
+    rss: 0,
+  };
 
   for (let i = 0; i < RUNS; i++) {
     const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
+    const fOutcome = sampleOutcome(fr, fallowReport(fr.stdout));
+    if (!fOutcome.valid) throw new Error(`[${name}] fallow run failed: ${fOutcome.reason}`);
     fTimesCold.push(fr.elapsed);
     if (i === 0) {
       fClones = parseFallowCloneCount(fr.stdout);
       fPeakRss = fr.peakRssBytes;
     }
 
-    if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
-    const jr = timeRunWithMemory(jscpdBin, jArgs, dir);
-    jTimes.push(jr.elapsed);
-    if (i === 0) {
-      jClones = parseJscpdCloneCount(jscpdReportDir);
-      jPeakRss = jr.peakRssBytes;
-    }
-    if (existsSync(jscpdReportDir)) rmSync(jscpdReportDir, { recursive: true });
+    runJscpdSample(jscpd, jArgs, dir, jscpdReportDir);
   }
 
-  const fsCold = stats(fTimesCold),
-    js = stats(jTimes);
-  const relative = relativeSpeed(fsCold.median, js.median);
+  const fsCold = stats(fTimesCold);
+  const jSummary = sampleSummary(jscpd.times, RUNS);
+  const js = jSummary.stats;
+  const relative = jSummary.complete ? relativeSpeed(fsCold.median, js.median) : "incomplete";
 
   console.table([
     {
       Tool: "fallow dupes",
-      Min: fmt(fsCold.min),
-      Mean: fmt(fsCold.mean),
-      Median: fmt(fsCold.median),
-      Max: fmt(fsCold.max),
+      ...timeCells(fsCold),
       Relative: relative,
       Memory: fmtMem(fPeakRss),
       "Clone Groups": fClones.groups,
@@ -288,20 +263,31 @@ function benchmarkProject(name, dir) {
     },
     {
       Tool: "jscpd",
-      Min: fmt(js.min),
-      Mean: fmt(js.mean),
-      Median: fmt(js.median),
-      Max: fmt(js.max),
+      ...timeCells(js),
       Relative: relative,
-      Memory: fmtMem(jPeakRss),
-      "Clone Groups": jClones.groups,
-      "Dup %": `${jClones.pct}%`,
+      Memory: fmtMem(jscpd.rss),
+      "Clone Groups": jscpd.clones.groups,
+      "Dup %": `${jscpd.clones.pct}%`,
     },
   ]);
   console.log(`  fallow: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
-  console.log(`  jscpd:  [${jTimes.map((t) => t.toFixed(0)).join(", ")}]\n`);
+  console.log(`  jscpd:  [${jscpd.times.map((t) => t.toFixed(0)).join(", ")}]`);
+  const failure = jscpd.firstFailure ? ` (first failure: ${jscpd.firstFailure})` : "";
+  console.log(`  jscpd runs: ${jscpd.times.length}/${RUNS} ok${failure}\n`);
 
-  return { name, files, fallow: fsCold, jscpd: js, relative, fClones, jClones, fPeakRss, jPeakRss };
+  return {
+    name,
+    files,
+    fallow: fsCold,
+    jscpd: js,
+    jscpdRuns: jSummary,
+    jscpdFailure: jscpd.firstFailure,
+    relative,
+    fClones,
+    jClones: jscpd.clones,
+    fPeakRss,
+    jPeakRss: jscpd.rss,
+  };
 }
 
 const results = [];
@@ -344,7 +330,7 @@ if (results.length > 0) {
       Project: r.name,
       Files: r.files,
       "Fallow cold (median)": fmt(r.fallow.median),
-      "jscpd (median)": fmt(r.jscpd.median),
+      "jscpd (median)": timeCells(r.jscpd).Median,
       "Faster tool": r.relative,
       "Fallow RSS": fmtMem(r.fPeakRss),
       "jscpd RSS": fmtMem(r.jPeakRss),
@@ -352,4 +338,10 @@ if (results.length > 0) {
       "jscpd clones": r.jClones.groups,
     })),
   );
+  for (const r of results.filter((result) => !result.jscpdRuns.complete)) {
+    const { successful, requested } = r.jscpdRuns;
+    console.log(
+      `Incomplete: ${r.name} jscpd ${successful}/${requested} runs ok: ${r.jscpdFailure}`,
+    );
+  }
 }

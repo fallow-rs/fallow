@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { main, parseArgs, runPublicSmoke } from "./public-smoke-conformance.mjs";
+import { makeTempDir } from "./lib/temp-dir.mjs";
+import {
+  main,
+  parseArgs,
+  runPublicSmoke,
+  summarizeFallowOutput,
+} from "./public-smoke-conformance.mjs";
 
 test("parseArgs accepts explicit project paths", () => {
   const options = parseArgs([
@@ -85,4 +91,59 @@ test("main fails when no project ran", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("parseArgs accepts inline project and option values", () => {
+  const options = parseArgs(["--project=next=/repos/next", "--out-dir=target/out"]);
+
+  assert.equal(options.projectPaths.get("next"), "/repos/next");
+  assert.equal(options.outDir, "target/out");
+});
+
+test("parseArgs rejects a project without a path", () => {
+  assert.throws(
+    () => parseArgs(["--project", "next"]),
+    /--project must look like id=\/path\/to\/project/,
+  );
+});
+
+test("runPublicSmoke reports a fallow binary that does not start as a failed project", () => {
+  const dir = makeTempDir("fallow-public-smoke-");
+  const manifest = join(dir, "manifest.json");
+  writeFileSync(
+    manifest,
+    JSON.stringify({
+      projects: [{ id: "next", category: "next", repo: "vercel/next.js", ref: "v16.2.1" }],
+    }),
+  );
+
+  const report = runPublicSmoke({
+    manifest,
+    outDir: join(dir, "out"),
+    cacheDir: join(dir, "cache"),
+    clone: false,
+    projectPaths: new Map([["next", dir]]),
+    rootDir: null,
+    fallowBin: join(dir, "missing-fallow"),
+  });
+
+  assert.equal(report.summary.failed, 1);
+  assert.match(report.projects[0].reason, /failed to start/);
+});
+
+test("summarizeFallowOutput counts findings from the summary, not from root arrays", () => {
+  const output = JSON.stringify({
+    kind: "dead-code",
+    schema_version: 1,
+    total_issues: 1,
+    summary: { total_issues: 1, unused_files: 1 },
+    unused_files: [{}],
+    next_steps: [{}],
+    workspace_diagnostics: [{}],
+  });
+
+  const summary = summarizeFallowOutput(output);
+
+  assert.equal(summary.total_issues, 1);
+  assert.deepEqual(summary.issue_counts, { unused_files: 1 });
 });
