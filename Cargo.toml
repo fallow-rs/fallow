@@ -62,6 +62,7 @@ clap = { version = "4", features = ["derive"] }
 # published manifest must not pull chrono into each consumer.
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+deser-core = { version = "0.10", default-features = false }
 deser-value = "0.10"
 deser-yaml = "0.10"
 semver = "1"

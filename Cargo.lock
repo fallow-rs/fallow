@@ -1199,6 +1199,7 @@ dependencies = [
 name = "fallow-config"
 version = "3.45.0"
 dependencies = [
+ "deser-core",
  "deser-value",
  "deser-yaml",
  "dunce",

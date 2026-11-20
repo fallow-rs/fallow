@@ -643,6 +643,7 @@ checksum = "f0440157235aa4badd45ea073af8de2ba44ffead74bf8a7833b215533c36f08e"
 name = "fallow-config"
 version = "3.39.0"
 dependencies = [
+ "deser-core",
  "deser-value",
  "deser-yaml",
  "dunce",
