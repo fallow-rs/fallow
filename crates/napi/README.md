@@ -8,6 +8,20 @@ Native Node.js bindings for fallow's main analyses.
 npm install @fallow-cli/fallow-node   # or: pnpm/yarn/bun add @fallow-cli/fallow-node
 ```
 
+## Usage
+
+```js
+// ES modules
+import { detectDeadCode } from "@fallow-cli/fallow-node";
+
+// CommonJS
+const { detectDeadCode } = require("@fallow-cli/fallow-node");
+
+const report = await detectDeadCode({ root: "." });
+```
+
+The ES module entry also has a default export with all functions.
+
 ## API
 
 - `detectDeadCode(options?)`

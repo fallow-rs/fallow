@@ -437,6 +437,13 @@ test("NAPI declarations have one canonical public source", () => {
   assert.match(declarations, /export function detectDeadCode/u);
 });
 
+test("NAPI package publishes its ES module entry", () => {
+  const packageJson = readJson("crates/napi/package.json");
+
+  assert.equal(packageJson.exports["."].import, "./loader.mjs");
+  assert.ok(packageJson.files.includes("loader.mjs"));
+});
+
 test("published Node packages and Action smoke tests use Node 22", () => {
   const packagePaths = ["npm/fallow/package.json", "crates/napi/package.json"];
 
