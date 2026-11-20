@@ -483,7 +483,7 @@ fn append_missing(mut resolved: PathBuf, missing: &[Component<'_>]) -> PathBuf {
 mod tests {
     use std::path::Path;
 
-    use super::{WriteScope, create_checked, names_windows_null_device, resolve, shared_dirs_for};
+    use super::{WriteScope, create_checked, names_windows_null_device, resolve};
 
     /// macOS sets `TMPDIR` to a per-user folder, but a user who passes
     /// `/tmp/x.json` means the system temp directory. Each Unix allows it,
@@ -491,6 +491,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn scope_accepts_the_unix_system_temp_dir_when_tmpdir_names_another_folder() {
+        use super::shared_dirs_for;
+
         let project = tempfile::tempdir().expect("project dir");
         let other_temp = tempfile::tempdir().expect("temp dir");
         let scope = WriteScope::new(
