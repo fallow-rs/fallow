@@ -13,16 +13,20 @@ import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
-import { readBenchCounts } from "../scripts/lib/options.mjs";
+import { inlineOption, readBenchCounts } from "../scripts/lib/options.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
-const { runs: RUNS, samples: SAMPLE_COUNT } = readBenchCounts(args, { runs: "1", samples: "0" });
+const { runs: RUNS, samples: SAMPLE_COUNT } = readBenchCounts(
+  args,
+  { runs: "1", samples: "0" },
+  { flags: ["--skip-build"], values: ["--write-repros", "--projects"] },
+);
 const SKIP_BUILD = args.includes("--skip-build");
-const writeReprosArg = args.find((arg) => arg.startsWith("--write-repros="))?.split("=")[1];
+const writeReprosArg = inlineOption(args, "--write-repros");
 const writeReprosDir = writeReprosArg ? resolve(writeReprosArg) : null;
-const projectsArg = args.find((arg) => arg.startsWith("--projects="))?.split("=")[1];
+const projectsArg = inlineOption(args, "--projects");
 const projectFilter = projectsArg
   ? new Set(
       projectsArg

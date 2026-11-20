@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  benchArgError,
   inlineOption,
   parseNonNegativeInt,
   parseOptions,
@@ -77,4 +78,15 @@ test("readBenchCounts uses the defaults and the given counts", () => {
     runs: 1,
     samples: 0,
   });
+});
+
+test("benchArgError accepts known flags and inline values", () => {
+  const known = { flags: ["--synthetic"], values: ["--runs"] };
+  assert.equal(benchArgError(["--synthetic", "--runs=3"], known), null);
+  assert.equal(
+    benchArgError(["--runs", "3"], known),
+    "Missing value for --runs: write --runs=VALUE",
+  );
+  assert.equal(benchArgError(["--synthetic=1"], known), "Unknown argument: --synthetic=1");
+  assert.equal(benchArgError(["constructor"], known), "Unknown argument: constructor");
 });

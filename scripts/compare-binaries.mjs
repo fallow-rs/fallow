@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseOptions } from "./lib/options.mjs";
+
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const DEFAULT_OUT_DIR = join(REPO_ROOT, "target", "compare-binaries");
@@ -40,57 +42,20 @@ and SKIP_FALLOW_AGENT_GUARD=1. The exit code is 1 on any DIFF, exit-code
 mismatch or ERROR (output that is not JSON).
 `;
 
-const VALUE_OPTION_SETTERS = {
-  "--base": (opts, value) => {
-    opts.base = value;
-  },
-  "--head": (opts, value) => {
-    opts.head = value;
-  },
-  "--project": (opts, value) => {
-    opts.projects.push(value);
-  },
-  "--command": (opts, value) => {
-    opts.commands.push(value);
-  },
-  "--out-dir": (opts, value) => {
-    opts.outDir = value;
-  },
-  "--timeout-ms": (opts, value) => {
-    opts.timeoutMs = Number(value);
-  },
-};
-
-// Applies the option at `index` and returns the index of its last argument.
-const applyArg = (argv, index, opts) => {
-  const arg = argv[index];
-  if (arg === "--help" || arg === "-h") {
-    opts.help = true;
-    return index;
-  }
-  const eq = arg.indexOf("=");
-  const name = eq > 0 ? arg.slice(0, eq) : arg;
-  const setter = VALUE_OPTION_SETTERS[name];
-  if (!setter) {
-    throw new Error(`unknown option: ${arg}`);
-  }
-  if (eq > 0) {
-    setter(opts, arg.slice(eq + 1));
-    return index;
-  }
-  if (index + 1 >= argv.length) {
-    throw new Error(`${name} needs a value`);
-  }
-  setter(opts, argv[index + 1]);
-  return index + 1;
+const OPTION_SPEC = {
+  "--base": { key: "base", type: "string" },
+  "--head": { key: "head", type: "string" },
+  "--project": { key: "projects", type: "string", repeat: true },
+  "--command": { key: "commands", type: "string", repeat: true },
+  "--out-dir": { key: "outDir", type: "string" },
+  "--timeout-ms": { key: "timeoutMs", type: "positiveInt" },
+  "--help": { key: "help", type: "flag" },
+  "-h": { key: "help", type: "flag" },
 };
 
 const applyDefaults = (opts) => {
   if (!opts.base || !opts.head) {
     throw new Error("--base and --head are required");
-  }
-  if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) {
-    throw new Error("--timeout-ms must be a positive number");
   }
   opts.base = resolve(opts.base);
   opts.head = resolve(opts.head);
@@ -106,7 +71,7 @@ const applyDefaults = (opts) => {
 };
 
 export const parseArgs = (argv) => {
-  const opts = {
+  const defaults = {
     base: "",
     head: "",
     projects: [],
@@ -115,9 +80,7 @@ export const parseArgs = (argv) => {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     help: false,
   };
-  for (let index = 0; index < argv.length; index += 1) {
-    index = applyArg(argv, index, opts);
-  }
+  const opts = parseOptions(argv, OPTION_SPEC, defaults);
   return opts.help ? opts : applyDefaults(opts);
 };
 

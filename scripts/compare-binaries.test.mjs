@@ -97,7 +97,7 @@ test("compare-binaries prints help", () => {
 
 test("compare-binaries rejects missing binaries and unknown options", () => {
   assert.match(runScript(["--base", "a"]).stderr, /--base and --head are required/);
-  assert.match(runScript(["--bogus"]).stderr, /unknown option: --bogus/);
+  assert.match(runScript(["--bogus"]).stderr, /Unknown argument: --bogus/);
 });
 
 test("compare-binaries reports IDENTICAL when only volatile keys differ", () => {
@@ -166,4 +166,24 @@ test("compare-binaries fails on an exit-code mismatch with identical output", ()
   assert.equal(result.status, 1);
   assert.match(result.stdout, /^IDENTICAL\s+proj\s+security\s+exit 0\/1 EXIT-MISMATCH/m);
   assert.equal(existsSync(join(outDir, "proj", "security.diff")), false);
+});
+
+test("parseArgs rejects an inherited object key as an option", () => {
+  assert.throws(
+    () => parseArgs(["constructor", "x", "--base", "a", "--head", "b"]),
+    /Unknown argument: constructor/,
+  );
+});
+
+test("parseArgs rejects a fractional --timeout-ms", () => {
+  assert.throws(
+    () => parseArgs(["--base", "a", "--head", "b", "--timeout-ms", "1.5"]),
+    /--timeout-ms must be a positive integer/,
+  );
+});
+
+test("parseArgs reads inline values and repeated options", () => {
+  const opts = parseArgs(["--base=a", "--head=b", "--command", "dupes", "--command=health"]);
+  assert.deepEqual(opts.commands, ["dupes", "health"]);
+  assert.equal(opts.base, resolve("a"));
 });

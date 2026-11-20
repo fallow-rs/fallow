@@ -22,6 +22,7 @@ const args = process.argv.slice(2);
 const {
   runSynthetic,
   runRealWorld,
+  projectFilter,
   runs: RUNS,
   warmup: WARMUP,
 } = readBenchArgs(args, {
@@ -295,6 +296,7 @@ if (runSynthetic) {
     const order = ["tiny", "small", "medium", "large", "xlarge"];
     for (const p of readdirSync(d)
       .filter((x) => existsSync(join(d, x, "package.json")))
+      .filter((x) => !projectFilter || projectFilter.has(x))
       .toSorted((a, b) => order.indexOf(a) - order.indexOf(b)))
       results.push(benchmarkProject(p, join(d, p)));
   }
@@ -308,6 +310,7 @@ if (runRealWorld) {
     console.log("--- Real-World Projects (Circular Dependencies) ---\n");
     for (const p of readdirSync(d)
       .filter((x) => existsSync(join(d, x, "package.json")))
+      .filter((x) => !projectFilter || projectFilter.has(x))
       .toSorted())
       results.push(benchmarkProject(p, join(d, p)));
   }
