@@ -149,6 +149,12 @@ impl<'a> YamlNode<'a> {
     }
 }
 
+impl PartialEq for YamlNode<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
 /// A borrowed YAML mapping, in source order.
 #[derive(Debug, Clone, Copy)]
 pub struct YamlMapping<'a>(&'a Map);
@@ -208,6 +214,15 @@ mod tests {
 
     fn text<'s>(source: &'s str, node: YamlNode<'_>) -> &'s str {
         &source[node.byte_range().expect("node has a range")]
+    }
+
+    #[test]
+    fn nodes_compare_by_value() {
+        let first = parse("a: 1\nb: [x, y]\n").unwrap();
+        let second = parse("a: 1\nb: [x, y]\n").unwrap();
+        let other = parse("a: 2\nb: [x, y]\n").unwrap();
+        assert_eq!(first.root(), second.root());
+        assert_ne!(first.root(), other.root());
     }
 
     #[test]

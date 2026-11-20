@@ -46,6 +46,8 @@ pub mod levenshtein;
 mod package_manager;
 #[doc(hidden)]
 pub mod permutation;
+/// Edit plans for the catalogs of `pnpm-workspace.yaml`.
+pub mod pnpm_catalog_edit;
 mod production_env;
 mod rule_pack;
 mod run_inputs;
