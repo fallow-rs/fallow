@@ -12,9 +12,6 @@ use fallow_cov_protocol::{
     FunctionIdentity, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Request, Response,
     StaticFile, StaticFindings, StaticFunction, Verdict, Watermark, function_identity_id,
 };
-use fallow_license::{
-    DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
-};
 use fallow_v8_coverage::V8CoverageDump;
 use globset::GlobSet;
 use oxc_coverage_instrument::{FileCoverage, FnEntry, Location, Position};
@@ -37,7 +34,6 @@ use crate::health::optimization_target::{
 };
 use crate::health::runtime_static_signals::{StaticSignalIndex, build_static_signal_index};
 use crate::health::scoring::IstanbulCoverage;
-use crate::license::verifying_key;
 use fallow_engine::health::RuntimeCoverageOptions;
 use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
@@ -195,57 +191,15 @@ pub fn prepare_options(
     low_traffic_threshold: Option<f64>,
     output: OutputFormat,
 ) -> Result<RuntimeCoverageOptions, ExitCode> {
-    let jwt = match load_raw_jwt() {
-        Ok(Some(jwt)) => jwt,
-        Ok(None) => {
-            return Ok(RuntimeCoverageOptions {
-                path: path.to_path_buf(),
-                min_invocations_hot,
-                min_observation_volume,
-                low_traffic_threshold,
-                license_jwt: String::new(),
-                watermark: None,
-            });
-        }
-        Err(err) => {
-            return Err(emit_error(
-                &format!("license: {err}"),
-                RESOURCE_UNAVAILABLE,
-                output,
-            ));
-        }
-    };
-
-    let key = match verifying_key() {
-        Ok(key) => key,
-        Err(message) => {
-            return Err(emit_error(&message, RESOURCE_UNAVAILABLE, output));
-        }
-    };
-    let status = match load_and_verify(&key, DEFAULT_HARD_FAIL_DAYS) {
-        Ok(status) => status,
-        Err(err) => {
-            return Err(emit_error(
-                &format!("license: {err}"),
-                RESOURCE_UNAVAILABLE,
-                output,
-            ));
-        }
-    };
-
-    validate_license_status(&status, &key, output)?;
-
+    let license = super::coverage_license::resolve_runtime_license(path)
+        .map_err(|message| emit_error(&message, RESOURCE_UNAVAILABLE, output))?;
     Ok(RuntimeCoverageOptions {
         path: path.to_path_buf(),
         min_invocations_hot,
         min_observation_volume,
         low_traffic_threshold,
-        license_jwt: jwt,
-        watermark: if status.show_watermark() {
-            Some(RuntimeCoverageWatermark::LicenseExpiredGrace)
-        } else {
-            None
-        },
+        license_jwt: license.jwt,
+        watermark: license.watermark,
     })
 }
 
@@ -322,35 +276,6 @@ pub(super) fn analyze_with_transport(
     let mut inner_iterations = prepared_sources.inner_iterations;
     attach_local_optimization_targets(&mut report, input, &mut inner_iterations);
     Ok(report)
-}
-
-fn validate_license_status(
-    status: &LicenseStatus,
-    _key: &VerifyingKey,
-    output: OutputFormat,
-) -> Result<(), ExitCode> {
-    match status {
-        LicenseStatus::Missing => Err(emit_error(
-            "Continuous runtime monitoring requires a valid license or trial. Run: fallow license activate --trial --email you@company.com",
-            RESOURCE_UNAVAILABLE,
-            output,
-        )),
-        LicenseStatus::HardFail {
-            days_since_expiry, ..
-        } => Err(emit_error(
-            &format!(
-                "license expired {days_since_expiry} days ago. Refresh with: fallow license refresh"
-            ),
-            RESOURCE_UNAVAILABLE,
-            output,
-        )),
-        _ if !status.permits(&Feature::RuntimeCoverage) => Err(emit_error(
-            "License is valid but does not include continuous runtime monitoring. Upgrade at fallow.tools/upgrade.",
-            RESOURCE_UNAVAILABLE,
-            output,
-        )),
-        _ => Ok(()),
-    }
 }
 
 pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
@@ -2022,6 +1947,32 @@ fn map_runtime_finding(
     if matches!(verdict, RuntimeCoverageVerdict::Active) {
         return None;
     }
+    // `safe_to_delete` needs V8 tracking. Without it, the capture gives no
+    // runtime evidence, so only the static signal remains and a human must
+    // review the function before a delete.
+    let (verdict, actions) = if verdict == RuntimeCoverageVerdict::SafeToDelete
+        && finding.evidence.v8_tracking == "untracked"
+    {
+        (
+            RuntimeCoverageVerdict::ReviewRequired,
+            vec![RuntimeCoverageAction {
+                kind: "review-runtime".to_owned(),
+                description: "Review runtime-cold code before changing it.".to_owned(),
+                auto_fixable: false,
+            }],
+        )
+    } else {
+        let actions = finding
+            .actions
+            .into_iter()
+            .map(|action| RuntimeCoverageAction {
+                kind: action.kind,
+                description: action.description,
+                auto_fixable: action.auto_fixable,
+            })
+            .collect();
+        (verdict, actions)
+    };
     let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
         (Some(identity.stable_id), identity.source_hash)
     });
@@ -2052,15 +2003,7 @@ fn map_runtime_finding(
         invocations: finding.invocations,
         confidence: map_confidence(finding.confidence),
         evidence: map_evidence(finding.evidence),
-        actions: finding
-            .actions
-            .into_iter()
-            .map(|action| RuntimeCoverageAction {
-                kind: action.kind,
-                description: action.description,
-                auto_fixable: action.auto_fixable,
-            })
-            .collect(),
+        actions,
         discriminators: Some(discriminators),
     })
 }
@@ -2965,6 +2908,55 @@ mod tests {
             "percentile": 50,
         }))
         .expect("valid HotPath json")
+    }
+
+    #[test]
+    fn untracked_function_never_gets_safe_to_delete() {
+        let mut finding = proto_finding(None);
+        finding.verdict = Verdict::SafeToDelete;
+        finding.evidence.static_status = "unused".to_owned();
+        finding.evidence.v8_tracking = "untracked".to_owned();
+        finding.invocations = None;
+        finding.actions = vec![fallow_cov_protocol::Action {
+            kind: "delete-cold-code".to_owned(),
+            description: "Remove cold code after confirming ownership.".to_owned(),
+            auto_fixable: false,
+        }];
+        let response = Response {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            verdict: ReportVerdict::ColdCodeDetected,
+            summary: Summary {
+                functions_tracked: 0,
+                functions_hit: 0,
+                functions_unhit: 0,
+                functions_untracked: 1,
+                coverage_percent: 0.0,
+                trace_count: 0,
+                period_days: 1,
+                deployments_seen: 1,
+                capture_quality: None,
+            },
+            findings: vec![finding],
+            hot_paths: vec![],
+            blast_radius: vec![],
+            importance: vec![],
+            watermark: None,
+            errors: vec![],
+            warnings: vec![],
+        };
+        let report = convert_response(response, &FxHashMap::default(), None, 5_000, 0.001);
+        let finding = &report.findings[0];
+        assert_eq!(
+            finding.verdict,
+            fallow_output::RuntimeCoverageVerdict::ReviewRequired
+        );
+        assert_eq!(finding.evidence.v8_tracking, "untracked");
+        let kinds = finding
+            .actions
+            .iter()
+            .map(|action| action.kind.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, ["review-runtime"]);
     }
 
     #[test]
