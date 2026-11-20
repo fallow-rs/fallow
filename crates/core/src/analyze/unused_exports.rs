@@ -35,6 +35,9 @@ mod declaration_siblings;
 use declaration_siblings::{
     DeclarationSiblingCredit, declaration_sibling_credit, runtime_sibling_path,
 };
+#[path = "unused_exports_manual_mocks.rs"]
+mod manual_mocks;
+use manual_mocks::drop_manual_mocks_of_group_modules;
 #[path = "unused_exports_types.rs"]
 mod types;
 use types::drop_types_paired_with_schemas;
@@ -1343,6 +1346,7 @@ struct AlternativeFiles<'a> {
 /// Evaluate one same-name export group into an optional duplicate finding:
 /// strip re-export chain members, collapse Metro platform-extension families
 /// and the targets of each package `imports` entry (see [`AlternativeFiles`]),
+/// drop each manual mock whose own module is in the group,
 /// partition the remaining origins into importer-connected components, and
 /// collect the surviving locations.
 fn evaluate_duplicate_export_group(
@@ -1390,6 +1394,7 @@ fn evaluate_duplicate_export_group(
         independent_entries
     };
     let independent_entries = collapse.condition_families.collapse(independent_entries);
+    let independent_entries = drop_manual_mocks_of_group_modules(independent_entries);
 
     if independent_entries.len() <= 1 {
         return None;
