@@ -957,13 +957,14 @@ fn short_base_ref(base_ref: &str) -> &str {
 
 /// Format the scope context line. When the base ref was auto-detected (or set
 /// via `FALLOW_AUDIT_BASE`), append the provenance so the comparison target is
-/// checkable, e.g. `vs a1b2c3d4e5f6 (merge-base with origin/main)`.
+/// checkable, e.g. `vs a1b2c3d4e5f6 (merge-base with origin/main)`. When git
+/// resolves the base commit, append the compared range, e.g. `(a1b2c3d..HEAD)`.
 fn format_scope_line(result: &AuditResult) -> String {
     format_scope_line_parts(
         result.changed_files_count,
         &result.base_ref,
         result.base_description.as_deref(),
-        result.head_sha.as_deref(),
+        result.base_sha.as_deref(),
     )
 }
 
@@ -971,9 +972,9 @@ fn format_scope_line_parts(
     changed_files_count: usize,
     base_ref: &str,
     base_description: Option<&str>,
-    head_sha: Option<&str>,
+    base_sha: Option<&str>,
 ) -> String {
-    let sha_suffix = head_sha.map_or(String::new(), |sha| format!(" ({sha}..HEAD)"));
+    let sha_suffix = base_sha.map_or(String::new(), |sha| format!(" ({sha}..HEAD)"));
     let base_display = match base_description {
         Some(description) => format!("{} ({description})", short_base_ref(base_ref)),
         None => base_ref.to_string(),
@@ -1486,7 +1487,7 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::process::ExitCode;
     use std::time::Duration;
 
@@ -1502,7 +1503,7 @@ mod tests {
         print_audit_result, short_base_ref, styling_finding_audit_context_label,
     };
 
-    fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
+    pub fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
         AuditResult {
             verdict,
             summary: AuditSummary {
@@ -1527,6 +1528,7 @@ mod tests {
             changed_files: Vec::new(),
             base_ref: "origin/main".to_string(),
             base_description: None,
+            base_sha: None,
             head_sha: None,
             output,
             performance: false,
@@ -1569,15 +1571,19 @@ mod tests {
     }
 
     #[test]
-    fn format_scope_line_parts_uses_plural_ref_provenance_and_head_sha() {
+    fn format_scope_line_parts_uses_plural_ref_provenance_and_base_sha() {
         assert_eq!(
             format_scope_line_parts(
                 1,
                 "611d151e8250146426ff3178e94207f8a8d3cc7b",
                 Some("merge-base with origin/main"),
-                Some("HEADSHA")
+                Some("611d151")
             ),
-            "Audit scope: 1 changed file vs 611d151e8250 (merge-base with origin/main) (HEADSHA..HEAD)"
+            "Audit scope: 1 changed file vs 611d151e8250 (merge-base with origin/main) (611d151..HEAD)"
+        );
+        assert_eq!(
+            format_scope_line_parts(2, "main", None, Some("5598e4f")),
+            "Audit scope: 2 changed files vs main (5598e4f..HEAD)"
         );
         assert_eq!(
             format_scope_line_parts(3, "origin/main", None, None),
@@ -1845,6 +1851,7 @@ mod tests {
     fn build_audit_json_output_uses_typed_audit_contract() {
         let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Json);
         result.base_description = Some("merge-base with origin/main".to_string());
+        result.base_sha = Some("def456".to_string());
         result.head_sha = Some("abc123".to_string());
         result.performance = true;
         result.base_snapshot_skipped = true;
@@ -1856,6 +1863,7 @@ mod tests {
         assert_eq!(json["command"], "audit");
         assert_eq!(json["base_description"], "merge-base with origin/main");
         assert_eq!(json["head_sha"], "abc123");
+        assert!(json.get("base_sha").is_none(), "base_sha stays out of JSON");
         assert_eq!(json["base_snapshot_skipped"], true);
         assert_eq!(json["changed_files_count"], 5);
     }

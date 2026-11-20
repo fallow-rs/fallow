@@ -557,6 +557,10 @@ pub fn create_detached_base_worktree(
     Ok(())
 }
 
+#[path = "repo_refs_short_sha.rs"]
+mod short_sha;
+pub use short_sha::{short_head_sha, short_merge_base_sha};
+
 #[path = "repo_refs_linked_worktree.rs"]
 mod linked_worktree;
 use linked_worktree::make_worktree_root_private;
@@ -1422,12 +1426,6 @@ fn git_is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> Option<bool
     }
 }
 
-/// Short SHA for the current HEAD.
-#[must_use]
-pub fn short_head_sha(root: &Path) -> Option<String> {
-    run_git(root, &["rev-parse", "--short", "HEAD"])
-}
-
 /// Full SHA for the current HEAD.
 ///
 /// `Ok(None)` means git ran and HEAD does not resolve: the directory is not a
@@ -1596,7 +1594,7 @@ mod tests {
 
     use super::*;
 
-    fn git(root: &Path, args: &[&str]) -> String {
+    pub(super) fn git(root: &Path, args: &[&str]) -> String {
         let output = git_command(root)
             .args(args)
             .output()
@@ -1609,7 +1607,7 @@ mod tests {
         String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 
-    fn init_repo(root: &Path) {
+    pub(super) fn init_repo(root: &Path) {
         fs::create_dir_all(root).expect("create repo");
         git(root, &["init", "-b", "main"]);
         git(root, &["config", "user.name", "Test User"]);
@@ -1617,13 +1615,13 @@ mod tests {
         git(root, &["config", "commit.gpgsign", "false"]);
     }
 
-    fn commit_all(root: &Path, message: &str) {
+    pub(super) fn commit_all(root: &Path, message: &str) {
         git(root, &["add", "."]);
         git(root, &["commit", "-m", message]);
     }
 
     /// A repository on `main` with one seed commit and no remote.
-    fn seeded_repo(parent: &Path) -> PathBuf {
+    pub(super) fn seeded_repo(parent: &Path) -> PathBuf {
         let root = parent.join("repo");
         init_repo(&root);
         fs::write(root.join("README.md"), "seed\n").expect("write seed");
@@ -1632,7 +1630,7 @@ mod tests {
     }
 
     /// Add a tracked file, commit it, and return the new HEAD SHA.
-    fn commit_file(repo: &Path, name: &str, body: &str) -> String {
+    pub(super) fn commit_file(repo: &Path, name: &str, body: &str) -> String {
         fs::write(repo.join(name), body).expect("write file");
         commit_all(repo, name);
         git(repo, &["rev-parse", "HEAD"])
@@ -1825,26 +1823,6 @@ mod tests {
     #[test]
     fn current_user_identities_empty_when_git_config_is_unavailable() {
         assert!(current_user_identities(Path::new("/repo")).is_empty());
-    }
-
-    #[test]
-    fn short_head_sha_omits_git_line_ending() {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let repo = temp.path().join("repo");
-        init_repo(&repo);
-        fs::write(repo.join("tracked.txt"), "committed\n").expect("write tracked file");
-        commit_all(&repo, "initial");
-
-        let sha = short_head_sha(&repo).expect("HEAD sha");
-        assert_eq!(sha, sha.trim());
-        assert!(!sha.is_empty());
-    }
-
-    #[test]
-    fn short_head_sha_is_absent_outside_a_git_repo() {
-        let temp = tempfile::tempdir().expect("temp dir");
-
-        assert_eq!(short_head_sha(temp.path()), None);
     }
 
     /// Regression for issue #2699: the detected ref is handed straight back to

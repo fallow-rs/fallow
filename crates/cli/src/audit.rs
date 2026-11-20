@@ -48,6 +48,10 @@ pub struct AuditResult {
     /// the user typed is already self-describing). Not serialized; the JSON
     /// envelope carries the resolved `base_ref` directly.
     pub base_description: Option<String>,
+    /// Short SHA of the merge-base of `base_ref` and HEAD: the commit that the
+    /// changed-file diff starts from. The human scope line shows it as the
+    /// start of the compared range. Not serialized.
+    pub base_sha: Option<String>,
     pub head_sha: Option<String>,
     pub output: OutputFormat,
     pub performance: bool,
@@ -237,6 +241,8 @@ pub mod worktree_cache;
 mod base_ref;
 #[path = "audit_cache.rs"]
 mod cache;
+#[path = "audit_git_env.rs"]
+mod git_env;
 #[path = "audit_notes.rs"]
 mod notes;
 
@@ -252,27 +258,8 @@ use cache::{
     AuditBaseSnapshotCacheKey, audit_base_snapshot_cache_key, audit_workspace_patterns,
     load_cached_base_snapshot, save_cached_base_snapshot, sorted_keys,
 };
-use fallow_engine::repo_refs::short_head_sha;
-
-/// If fallow's process inherited any ambient git repo-state env vars (typical
-/// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
-/// surface the most likely culprit so a user hitting an unexpected worktree
-/// failure can short-circuit the diagnosis. Returns `None` otherwise.
-fn ambient_git_env_hint() -> Option<String> {
-    use fallow_engine::changed_files::AMBIENT_GIT_ENV_VARS;
-    for var in AMBIENT_GIT_ENV_VARS {
-        if let Ok(value) = std::env::var(var)
-            && !value.is_empty()
-        {
-            return Some(format!(
-                "{var}={value} is set in the environment; if fallow is being \
-invoked from a git hook this can interfere with worktree operations. Re-run \
-with `env -u {var} fallow audit` to confirm."
-            ));
-        }
-    }
-    None
-}
+use fallow_engine::repo_refs::{short_head_sha, short_merge_base_sha};
+use git_env::ambient_git_env_hint;
 
 /// Compute the exports-aware public-export key set from a check result's retained
 /// graph. Returns an empty set when the graph was not retained (off the brief
@@ -722,6 +709,7 @@ struct AuditResultParts {
     changed_files: FxHashSet<PathBuf>,
     base_ref: String,
     base_description: Option<String>,
+    base_sha: Option<String>,
     head_sha: Option<String>,
     output: OutputFormat,
     performance: bool,
@@ -1378,9 +1366,12 @@ fn finish_audit_result(
     crate::telemetry::note_final_result_count(
         summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
     );
-    let head_sha = match input.head_sha {
-        AuditHeadSha::Production => short_head_sha(opts.root),
-        AuditHeadSha::Preloaded(head_sha) => head_sha,
+    let (base_sha, head_sha) = match input.head_sha {
+        AuditHeadSha::Production => (
+            short_merge_base_sha(opts.root, &input.base_ref),
+            short_head_sha(opts.root),
+        ),
+        AuditHeadSha::Preloaded(head_sha) => (None, head_sha),
     };
     let HeadAnalyses {
         check,
@@ -1414,6 +1405,7 @@ fn finish_audit_result(
         changed_files,
         base_ref: input.base_ref,
         base_description: input.base_description,
+        base_sha,
         head_sha,
         output: opts.output,
         performance: opts.performance,
@@ -2335,6 +2327,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         changed_files: parts.changed_files.into_iter().collect(),
         base_ref: parts.base_ref,
         base_description: parts.base_description,
+        base_sha: parts.base_sha,
         head_sha: parts.head_sha,
         output: parts.output,
         performance: parts.performance,
@@ -2363,6 +2356,7 @@ fn empty_audit_result(
 ) -> AuditResult {
     crate::telemetry::note_final_result_count(0);
 
+    let base_sha = short_merge_base_sha(opts.root, &base_ref);
     let head_sha = short_head_sha(opts.root);
     // An empty changeset is a valid graph state: pin a hash on the brief path so
     // the walkthrough guide still carries a stable snapshot pin (no findings, so
@@ -2406,6 +2400,7 @@ fn empty_audit_result(
         changed_files: Vec::new(),
         base_ref,
         base_description,
+        base_sha,
         head_sha,
         output: opts.output,
         performance: opts.performance,
@@ -2661,7 +2656,7 @@ fn build_audit_health_options<'a>(
 #[path = "audit_impact_record.rs"]
 mod impact_record;
 #[path = "audit_output.rs"]
-mod output;
+pub mod output;
 use impact_record::record_audit_impact;
 
 pub use output::audit_json_header_input;
