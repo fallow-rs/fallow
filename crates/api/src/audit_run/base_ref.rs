@@ -49,6 +49,13 @@ pub fn parse_audit_base_override(raw: Option<String>) -> Option<String> {
     }
 }
 
+/// The `FALLOW_AUDIT_BASE` override of the process, parsed with
+/// [`parse_audit_base_override`].
+#[must_use]
+pub fn audit_base_override() -> Option<String> {
+    parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok())
+}
+
 /// Resolve the base ref of an audit rooted at `root`.
 ///
 /// The order is: the explicit ref, then the `FALLOW_AUDIT_BASE` override
@@ -63,11 +70,7 @@ pub fn resolve_audit_base(
     root: &Path,
     explicit: Option<&str>,
 ) -> Result<ResolvedAuditBase, AuditBaseError> {
-    resolve_audit_base_with_override(
-        root,
-        explicit,
-        parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok()),
-    )
+    resolve_audit_base_with_override(root, explicit, audit_base_override())
 }
 
 fn resolve_audit_base_with_override(

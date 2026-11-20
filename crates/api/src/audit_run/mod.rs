@@ -40,8 +40,8 @@ use rustc_hash::FxHashSet;
 
 pub use base_files::{BaseFileReader, BaseRead, can_reuse_current_as_base, export_names_at_base};
 pub use base_ref::{
-    AuditBaseError, AuditBaseOrigin, parse_audit_base_override, resolve_audit_base,
-    resolve_audit_base_decided,
+    AuditBaseError, AuditBaseOrigin, audit_base_override, parse_audit_base_override,
+    resolve_audit_base, resolve_audit_base_decided,
 };
 pub use outcome::{
     DupeBase, DupeDemotionDiffSource, RunChange, SharedDiff, compare,
