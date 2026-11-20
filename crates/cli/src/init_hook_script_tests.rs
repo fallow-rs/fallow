@@ -108,6 +108,18 @@ fn run_resolution_block(
     path_version: Option<&str>,
     local_version: Option<&str>,
 ) -> std::process::Output {
+    run_resolution_block_with_path(path_version, local_version, "/usr/bin:/bin")
+}
+
+/// [`run_resolution_block`] with `system_path` after `project/bin` on `PATH`.
+/// An empty `system_path` gives the hook no external command, as in a Git
+/// client with a very small `PATH`.
+#[cfg(unix)]
+fn run_resolution_block_with_path(
+    path_version: Option<&str>,
+    local_version: Option<&str>,
+    system_path: &str,
+) -> std::process::Output {
     use std::os::unix::fs::PermissionsExt;
 
     let write_stub = |path: &std::path::Path, version: &str| {
@@ -141,12 +153,13 @@ fn run_resolution_block(
     )
     .unwrap();
 
-    std::process::Command::new("sh")
+    // An absolute shell path: the reduced `PATH` may not hold `sh`.
+    std::process::Command::new("/bin/sh")
         .arg(&script)
         .current_dir(project)
         .env(
             "PATH",
-            format!("{}:/usr/bin:/bin", project.join("bin").display()),
+            format!("{}:{system_path}", project.join("bin").display()),
         )
         .output()
         .expect("spawn sh")
@@ -191,9 +204,11 @@ fn resolution_block_blocks_a_local_fallow_below_the_hook_floor() {
 #[cfg(unix)]
 #[test]
 fn resolution_block_reads_only_the_first_version_line() {
-    let output = run_resolution_block(
+    // No system directory on `PATH`: the block must use shell builtins only.
+    let output = run_resolution_block_with_path(
         None,
         Some("3.40.0\nverified: at ./node_modules/.bin/fallow"),
+        "",
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
