@@ -488,9 +488,25 @@ fn remove_catalog_entry_action(
 ) -> CodeActionOrCommand {
     let title = catalog_entry_action_title(entry);
     let mut changes = HashMap::new();
+    changes.insert(uri.clone(), catalog_text_edits(file_lines, plan));
+
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }),
+        diagnostics: Some(vec![catalog_entry_diagnostic(entry, entry_line)]),
+        ..Default::default()
+    })
+}
+
+/// The `TextEdit`s of `plan`: deletions first, then header rewrites.
+fn catalog_text_edits(file_lines: &[&str], plan: &CatalogEditPlan) -> Vec<TextEdit> {
     let deletions = plan.edits.iter().filter(|edit| edit.replacement.is_none());
     let rewrites = plan.edits.iter().filter(|edit| edit.replacement.is_some());
-    let edits: Vec<TextEdit> = deletions
+    deletions
         .chain(rewrites)
         .map(|edit| {
             let (end_line, end_character, new_text) = match &edit.replacement {
@@ -517,19 +533,7 @@ fn remove_catalog_entry_action(
             };
             TextEdit { range, new_text }
         })
-        .collect();
-    changes.insert(uri.clone(), edits);
-
-    CodeActionOrCommand::CodeAction(CodeAction {
-        title,
-        kind: Some(CodeActionKind::QUICKFIX),
-        edit: Some(WorkspaceEdit {
-            changes: Some(changes),
-            ..Default::default()
-        }),
-        diagnostics: Some(vec![catalog_entry_diagnostic(entry, entry_line)]),
-        ..Default::default()
-    })
+        .collect()
 }
 
 /// Build the `unused-catalog-entry` diagnostic linked to the removal action.
@@ -590,10 +594,10 @@ fn catalog_entry_diagnostic_message(
 /// The action plans its edit with `plan_catalog_edits` on the open buffer.
 /// It offers no action when the planner refuses the removal, for example
 /// when the group has entries in the buffer or the buffer is not valid
-/// YAML. The deletion is one line; no parent rewrite is needed (the parent
-/// `catalogs:` map keeps its other named-catalog siblings, or, if this was
-/// the only one, the user can remove the remaining `catalogs:` header by
-/// hand).
+/// YAML. The deletion covers the lines of the group key and its value; no
+/// parent rewrite is needed (the parent `catalogs:` map keeps its other
+/// named-catalog siblings, or, if this was the only one, the user can
+/// remove the remaining `catalogs:` header by hand).
 ///
 /// The default catalog (top-level `catalog:`) is intentionally never
 /// flagged by the detector, so this function never offers to delete it.
@@ -648,12 +652,14 @@ pub fn build_remove_empty_catalog_group_actions(
 
     for group in &results.empty_catalog_groups {
         let group = &group.group;
-        let Some(group_line) =
+        let Some((group_line, plan)) =
             empty_catalog_group_delete_line(group, root, uri, cursor_range, file_lines)
         else {
             continue;
         };
-        actions.push(remove_empty_catalog_group_action(group, uri, group_line));
+        actions.push(remove_empty_catalog_group_action(
+            group, uri, file_lines, group_line, &plan,
+        ));
     }
 
     actions
@@ -676,15 +682,16 @@ fn build_remove_empty_catalog_group_actions_for_test(
     ))
 }
 
-/// Validate that an empty-catalog-group finding still anchors to a matching
-/// header line within the cursor range, returning the 0-based line to delete.
+/// Validate that an empty-catalog-group finding is within the cursor range
+/// and that the open buffer still has the empty group on the line of the
+/// finding. Returns the 0-based line of the group and its edit plan.
 fn empty_catalog_group_delete_line(
     group: &fallow_api::editor_results::EmptyCatalogGroup,
     root: &Path,
     uri: &Uri,
     cursor_range: &Range,
     file_lines: &[&str],
-) -> Option<u32> {
+) -> Option<(u32, CatalogEditPlan)> {
     if !is_pnpm_catalog_source(&group.path) {
         return None;
     }
@@ -704,10 +711,10 @@ fn empty_catalog_group_delete_line(
     let removal = CatalogRemoval::Group {
         catalog: &group.catalog_name,
     };
-    plan_catalog_removal_at(file_lines, removal, group_line).map(|_| group_line)
+    plan_catalog_removal_at(file_lines, removal, group_line).map(|plan| (group_line, plan))
 }
 
-/// Build the single-line deletion code action for an empty catalog group.
+/// Build the deletion code action for an empty catalog group.
 #[expect(
     clippy::disallowed_types,
     reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
@@ -715,25 +722,14 @@ fn empty_catalog_group_delete_line(
 fn remove_empty_catalog_group_action(
     group: &fallow_api::editor_results::EmptyCatalogGroup,
     uri: &Uri,
+    file_lines: &[&str],
     group_line: u32,
+    plan: &CatalogEditPlan,
 ) -> CodeActionOrCommand {
     let title = format!("Remove empty catalog group `{}`", group.catalog_name);
 
     let mut changes = HashMap::new();
-    let edits = vec![TextEdit {
-        range: Range {
-            start: Position {
-                line: group_line,
-                character: 0,
-            },
-            end: Position {
-                line: group_line + 1,
-                character: 0,
-            },
-        },
-        new_text: String::new(),
-    }];
-    changes.insert(uri.clone(), edits);
+    changes.insert(uri.clone(), catalog_text_edits(file_lines, plan));
 
     let diagnostic_message = format!(
         "Empty catalog group: '{}' has no entries",
@@ -2111,94 +2107,98 @@ mod tests {
         assert_eq!(diag.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
     }
 
-    fn catalog_edits(actions: &[CodeActionOrCommand], uri: &Uri) -> Vec<TextEdit> {
+    /// The edits of each catalog action on `lines`, with the cursor on `line`.
+    fn catalog_action_edits(
+        results: &AnalysisResults,
+        lines: &[&str],
+        line: u32,
+    ) -> Vec<Vec<TextEdit>> {
+        let dir = tempfile::tempdir().unwrap();
+        let (uri, range) = (workspace_yaml_uri(&dir), make_range(line, line));
+        let mut actions =
+            build_remove_catalog_entry_actions_for_test(results, dir.path(), &uri, &range, lines);
+        actions.extend(build_remove_empty_catalog_group_actions_for_test(
+            results,
+            dir.path(),
+            &uri,
+            &range,
+            lines,
+        ));
+        let edits_of = |action| {
+            let edit = unwrap_code_action(action).edit.as_ref().unwrap();
+            edit.changes.as_ref().unwrap()[&uri].clone()
+        };
+        actions.iter().map(edits_of).collect()
+    }
+
+    fn entry_results(name: &str, catalog: &str, line: u32) -> AnalysisResults {
+        let mut results = AnalysisResults::default();
+        let entry = make_catalog_entry(name, catalog, line, vec![]);
+        results.unused_catalog_entries.push(entry);
+        results
+    }
+
+    fn group_results(name: &str, line: u32) -> AnalysisResults {
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group(name, line));
+        results
+    }
+
+    #[test]
+    fn empty_catalog_group_action_deletes_every_line_of_the_group() {
+        let lines = [
+            "catalogs:",
+            "  old: !!map {",
+            "    }",
+            "  ui:",
+            "    react: ^18",
+        ];
+        let actions = catalog_action_edits(&group_results("old", 2), &lines, 1);
         assert_eq!(actions.len(), 1);
-        let changes = unwrap_code_action(&actions[0]).edit.as_ref().unwrap();
-        changes.changes.as_ref().unwrap().get(uri).unwrap().clone()
+        assert_eq!(actions[0].len(), 1);
+        assert_eq!(actions[0][0].range.start.line, 1);
+        assert_eq!(actions[0][0].range.end.line, 3);
     }
 
     #[test]
     fn empty_catalog_group_action_skipped_when_live_group_has_children() {
-        let dir = tempfile::tempdir().unwrap();
-        let uri = workspace_yaml_uri(&dir);
-        let mut results = AnalysisResults::default();
-        results
-            .empty_catalog_groups
-            .push(make_empty_group("legacy", 2));
-        let lines = vec!["catalogs:", "  legacy:", "    react: ^18"];
-        let actions = build_remove_empty_catalog_group_actions_for_test(
-            &results,
-            dir.path(),
-            &uri,
-            &make_range(1, 1),
-            &lines,
-        );
+        let lines = ["catalogs:", "  legacy:", "    react: ^18"];
+        let actions = catalog_action_edits(&group_results("legacy", 2), &lines, 1);
         assert!(actions.is_empty());
     }
 
     #[test]
     fn catalog_action_skipped_when_other_catalog_owns_the_key() {
-        let dir = tempfile::tempdir().unwrap();
-        let uri = workspace_yaml_uri(&dir);
-        let mut results = AnalysisResults::default();
-        let entry = make_catalog_entry("react", "react17", 3, vec![]);
-        results.unused_catalog_entries.push(entry);
-        let lines = vec!["catalogs:", "  react18:", "    react: ^18"];
-        let actions = build_remove_catalog_entry_actions_for_test(
-            &results,
-            dir.path(),
-            &uri,
-            &make_range(2, 2),
-            &lines,
-        );
+        let lines = ["catalogs:", "  react18:", "    react: ^18"];
+        let actions = catalog_action_edits(&entry_results("react", "react17", 3), &lines, 2);
         assert!(actions.is_empty());
     }
 
     #[test]
     fn catalog_action_parent_rewrite_goes_before_inline_comment() {
-        let dir = tempfile::tempdir().unwrap();
-        let uri = workspace_yaml_uri(&dir);
-        let mut results = AnalysisResults::default();
-        let entry = make_catalog_entry("react", "ui", 3, vec![]);
-        results.unused_catalog_entries.push(entry);
-        let lines = vec!["catalogs:", "  ui: # pinned versions", "    react: ^18"];
-        let actions = build_remove_catalog_entry_actions_for_test(
-            &results,
-            dir.path(),
-            &uri,
-            &make_range(2, 2),
-            &lines,
-        );
-        let edits = catalog_edits(&actions, &uri);
-        assert_eq!(edits.len(), 2);
-        assert_eq!(edits[1].new_text, "  ui: {} # pinned versions");
+        let lines = ["catalogs:", "  ui: # pinned versions", "    react: ^18"];
+        let actions = catalog_action_edits(&entry_results("react", "ui", 3), &lines, 2);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].len(), 2);
+        assert_eq!(actions[0][1].new_text, "  ui: {} # pinned versions");
     }
 
     #[test]
     fn catalog_action_deletes_object_entry_with_blank_line() {
-        let dir = tempfile::tempdir().unwrap();
-        let uri = workspace_yaml_uri(&dir);
-        let mut results = AnalysisResults::default();
-        let entry = make_catalog_entry("react", "default", 2, vec![]);
-        results.unused_catalog_entries.push(entry);
-        let lines = vec![
+        let lines = [
             "catalog:",
             "  react:",
             "",
             "    specifier: ^18",
             "  vue: ^3",
         ];
-        let actions = build_remove_catalog_entry_actions_for_test(
-            &results,
-            dir.path(),
-            &uri,
-            &make_range(1, 1),
-            &lines,
-        );
-        let edits = catalog_edits(&actions, &uri);
-        assert_eq!(edits.len(), 1);
-        assert_eq!(edits[0].range.start.line, 1);
-        assert_eq!(edits[0].range.end.line, 4);
+        let actions = catalog_action_edits(&entry_results("react", "default", 2), &lines, 1);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].len(), 1);
+        assert_eq!(actions[0][0].range.start.line, 1);
+        assert_eq!(actions[0][0].range.end.line, 4);
     }
 
     #[test]

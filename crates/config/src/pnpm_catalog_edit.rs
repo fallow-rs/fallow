@@ -1,6 +1,6 @@
 //! Edit plans for the catalogs of `pnpm-workspace.yaml`.
 //!
-//! [`plan_catalog_edits`] finds each key by its path in the text that it
+//! [`plan_catalog_edits`](crate::pnpm_catalog_edit::plan_catalog_edits) finds each key by its path in the text that it
 //! edits. It accepts a plan only when the edited text parses to the
 //! original YAML without the requested keys.
 
@@ -306,10 +306,12 @@ fn header_rewrites(
         if key_lines.len() != catalog.entries.len() {
             continue;
         }
-        let expected = if catalog.name == "default" {
-            "catalog"
+        let default_keys = ["catalog", "default"];
+        let named_key = [catalog.name.as_str()];
+        let expected: &[&str] = if catalog.name == "default" {
+            &default_keys
         } else {
-            catalog.name.as_str()
+            &named_key
         };
         match header_rewrite(lines, first_key_idx, expected) {
             Some(edit) => edits.push(edit),
@@ -325,12 +327,15 @@ fn header_rewrites(
     edits
 }
 
-fn header_rewrite(lines: &[&str], first_key_idx: usize, expected: &str) -> Option<LineEdit> {
+/// The `{}` rewrite of the header above `first_key_idx`. The default
+/// catalog is the top-level `catalog` key or the `default` group under
+/// `catalogs`, so its header can have either key.
+fn header_rewrite(lines: &[&str], first_key_idx: usize, expected: &[&str]) -> Option<LineEdit> {
     let idx = find_parent_header(lines, first_key_idx)?;
     let (key, colon_end) = split_header(lines[idx])?;
     let rest = &lines[idx][colon_end..];
     let after = rest.trim_start();
-    if key != expected || !(after.is_empty() || after.starts_with('#')) {
+    if !expected.contains(&key) || !(after.is_empty() || after.starts_with('#')) {
         return None;
     }
     Some(LineEdit {
@@ -645,6 +650,13 @@ mod tests {
         let source = "catalogs:\n  \"日本\":\n    react: ^17.0.2\n";
         let plan = plan_catalog_edits(source, &[entry("日本", "react")], Never).unwrap();
         assert_eq!(apply(source, &plan), "catalogs:\n  \"日本\": {}\n");
+    }
+
+    #[test]
+    fn default_group_under_catalogs_rewrites_its_header() {
+        let source = "catalogs:\n  default:\n    react: ^18\n";
+        let plan = plan_catalog_edits(source, &[entry("default", "react")], Never).unwrap();
+        assert_eq!(apply(source, &plan), "catalogs:\n  default: {}\n");
     }
 
     #[test]

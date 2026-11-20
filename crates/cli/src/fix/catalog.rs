@@ -166,10 +166,7 @@ fn fix_catalog_file(file: &mut CatalogFile<'_, '_>) {
 
     let (removals, entry_slots, group_slots) = removals_of(entries, groups);
     let edit_plan = plan_catalog_edits(&content, &removals, file.policy);
-    let outcome = |slot: Slot| -> Result<&PlannedCatalogRemoval, CatalogEditRefusal> {
-        let Slot::Removal(index) = slot else {
-            unreachable!("only removal slots have an outcome")
-        };
+    let outcome = |index: usize| -> Result<&PlannedCatalogRemoval, CatalogEditRefusal> {
         match &edit_plan {
             Err(refusal) => Err(*refusal),
             Ok(plan) => match &plan.outcomes[index] {
@@ -184,7 +181,7 @@ fn fix_catalog_file(file: &mut CatalogFile<'_, '_>) {
         match slot {
             Slot::HardcodedConsumers => skip_hardcoded_catalog_consumers(entry, file),
             Slot::Duplicate => {}
-            Slot::Removal(_) => match outcome(*slot) {
+            Slot::Removal(index) => match outcome(*index) {
                 Ok(removal) => planned.entries.push((removal, entry)),
                 Err(refusal) => {
                     let (reason, description) = refusal_reason(refusal);
@@ -197,10 +194,10 @@ fn fix_catalog_file(file: &mut CatalogFile<'_, '_>) {
         }
     }
     for (group, slot) in groups.iter().zip(&group_slots) {
-        if matches!(slot, Slot::Duplicate) {
+        let Slot::Removal(index) = slot else {
             continue;
-        }
-        match outcome(*slot) {
+        };
+        match outcome(*index) {
             Ok(removal) => planned.groups.push((removal, group)),
             Err(refusal) => {
                 let (reason, description) = refusal_reason(refusal);
