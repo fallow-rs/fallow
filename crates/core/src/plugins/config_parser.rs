@@ -20,10 +20,13 @@ use merge_config::{read_each_config, read_last_config, read_last_match};
 #[path = "config_parser_multi_config.rs"]
 mod multi_config;
 use multi_config::find_default_export_array;
+#[path = "config_parser_string_values.rs"]
+mod string_values;
 pub(crate) use multi_config::{
     extract_each_config_entries, extract_each_config_path_aliases,
     extract_each_config_require_strings, extract_each_config_shallow_strings, find_config_objects,
 };
+use string_values::string_or_array_in;
 #[path = "config_parser_alias_constant.rs"]
 mod alias_constant;
 #[path = "config_parser_alias_entry.rs"]
@@ -2913,48 +2916,6 @@ fn get_nested_string_or_array(
 /// `input` prevents object-form entries from being silently dropped. See #126.
 pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
     string_or_array_in(expr, PathScope::Bare)
-}
-
-fn string_or_array_in(expr: &Expression, scope: PathScope<'_>) -> Vec<String> {
-    match expr {
-        Expression::StringLiteral(s) => vec![s.value.text().into_owned()],
-        Expression::TemplateLiteral(t) if t.expressions.is_empty() => t
-            .quasis
-            .first()
-            .map(|q| vec![q.value.raw.to_string()])
-            .unwrap_or_default(),
-        Expression::ArrayExpression(arr) => arr
-            .elements
-            .iter()
-            .filter_map(|el| el.as_expression())
-            .flat_map(|e| match e {
-                Expression::ObjectExpression(obj) => find_property(obj, "input")
-                    .map(|p| string_or_array_in(&p.value, scope))
-                    .unwrap_or_default(),
-                _ => path_string_in(e, scope).into_iter().collect(),
-            })
-            .collect(),
-        Expression::ObjectExpression(obj) => obj
-            .properties
-            .iter()
-            .flat_map(|p| {
-                if let ObjectPropertyKind::ObjectProperty(p) = p {
-                    match &p.value {
-                        Expression::ArrayExpression(_) => string_or_array_in(&p.value, scope),
-                        Expression::ObjectExpression(value_obj) => {
-                            find_property(value_obj, "import")
-                                .map(|import_prop| string_or_array_in(&import_prop.value, scope))
-                                .unwrap_or_default()
-                        }
-                        _ => path_string_in(&p.value, scope).into_iter().collect(),
-                    }
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect(),
-        _ => path_string_in(expr, scope).into_iter().collect(),
-    }
 }
 
 /// Collect `require('...')` argument strings from an expression.
