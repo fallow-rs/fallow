@@ -2705,3 +2705,31 @@ fn an_unbalanced_brace_in_script_attributes_still_finds_the_block() {
     assert_eq!(scripts.len(), 1);
     assert_eq!(scripts[0].body, "const a: number = 1;");
 }
+
+/// Vue SFCs use the same script tag scan. A `generic` attribute can hold
+/// braces and a `>`, and the scan must still find the body that follows.
+#[test]
+fn a_vue_generic_attribute_with_braces_and_gt_keeps_the_script_body() {
+    let source = "<script setup lang=\"ts\" generic=\"T extends Record<string, { a: number }>\">\n\
+                  import { helper } from './helper';\n\
+                  helper();\n\
+                  </script>\n\
+                  <template><div /></template>\n";
+    let scripts = crate::sfc::extract_sfc_scripts(source);
+    assert_eq!(scripts.len(), 1);
+    assert!(scripts[0].is_setup);
+    assert!(scripts[0].is_typescript);
+    assert!(
+        scripts[0]
+            .body
+            .contains("import { helper } from './helper';")
+    );
+
+    let info = parse_sfc(source, "Generic.vue");
+    assert_eq!(info.parse_error_count, 0);
+    assert!(
+        info.imports
+            .iter()
+            .any(|import| import.source == "./helper")
+    );
+}

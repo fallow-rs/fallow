@@ -1978,4 +1978,14 @@ mod tests {
             "nextDepth is only referenced by the <svelte:self> attribute, got: {usage:?}"
         );
     }
+
+    #[test]
+    fn markup_script_attribute_credits_binding() {
+        let usage = collect_template_usage(
+            "<script>import { handleLoad } from './x';</script>\n\
+             <script src=\"/embed.js\" onload={handleLoad}></script>",
+            &imported(&["handleLoad"]),
+        );
+        assert!(usage.used_bindings.contains("handleLoad"), "{usage:?}");
+    }
 }
