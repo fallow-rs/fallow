@@ -106,6 +106,10 @@
         "section": "development"
       },
       {
+        "path": "docs/development/output-assembly.md",
+        "section": "development"
+      },
+      {
         "path": "docs/analyzer-authoring.md",
         "section": "architecture"
       },

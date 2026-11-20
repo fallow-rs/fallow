@@ -13,6 +13,8 @@ Start with the smallest route that matches the task:
   more than one command, the MCP server or the API shares.
 - [Review routing](review-routing.md) when a change crosses output or
   integration surfaces.
+- [Output assembly](output-assembly.md) when a change touches output that a
+  crate other than `fallow-output` builds.
 - [AI tooling](ai-tooling.md) when changing agent instructions, skills, or
   adapters.
 - [Agent template](../../.agents/agents/_template.md) when adding a new repository-tracked
