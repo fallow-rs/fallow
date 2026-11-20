@@ -1089,7 +1089,7 @@ fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
 /// `MAJOR.MINOR.PATCH` as a comparable triple. Deliberately not a full semver
 /// parser: the config field mirrors the release tag format, which the release
 /// workflow already constrains to exactly three numbers.
-fn version_triple(value: &str) -> Option<(u64, u64, u64)> {
+pub(super) fn version_triple(value: &str) -> Option<(u64, u64, u64)> {
     let mut parts = value.split('.');
     let triple = (
         parts.next()?.parse().ok()?,

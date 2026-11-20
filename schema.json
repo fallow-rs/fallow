@@ -13,7 +13,7 @@
       "writeOnly": true
     },
     "minimumVersion": {
-      "description": "The lowest fallow version this config is written for, as `MAJOR.MINOR.PATCH`. An older binary stops with a message naming both versions instead of failing on the first field it does not recognize, so a config committed to a shared repository says which upgrade it needs rather than reading like a typo. Optional and unset by default; set it in the same change that adds a field introduced in a newer version. Only digits are accepted: a pre-release suffix such as `-beta.1` is a config error. A parent config of `extends` can set it too. It gates nothing on its own: an unknown key still fails on a binary at or above this version, because there the key really is a typo.",
+      "description": "The lowest fallow version this config is written for, as `MAJOR.MINOR.PATCH`. An older binary stops with a message naming both versions instead of failing on the first field it does not recognize, so a config committed to a shared repository says which upgrade it needs rather than reading like a typo. Optional and unset by default; set it in the same change that adds a field introduced in a newer version. Only digits are accepted: a pre-release suffix such as `-beta.1` is a config error. A parent config of `extends` can set it too. It gates nothing on its own: an unknown key still fails on a binary at or above this version, because there the key really is a typo. A value of `3.34.0` or higher also says that the config is written for the rule where a single `*` or `?` matches in one folder level only, so fallow prints no single-segment glob warning for the globs of the config. The globs of plugins and rule packs keep that warning.",
       "type": [
         "string",
         "null"
