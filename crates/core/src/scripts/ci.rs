@@ -39,6 +39,11 @@ pub struct CiAnalysis {
     /// The subset of `entry_files` that a built-in test runner runs as tests
     /// (`node --test scripts/*.test.mjs`). These are test entry points.
     pub test_entry_files: Vec<String>,
+    /// The project-root-relative path of the CI file that names each path of
+    /// `entry_files` (`.github/workflows/ci.yml`). When more CI files name
+    /// one path, the first file in scan order wins: `.gitlab-ci.yml`, then
+    /// the workflows by name, then the composite actions.
+    pub entry_file_sources: FxHashMap<String, String>,
 }
 
 /// Inputs shared by every CI file of one analysis.
@@ -80,26 +85,33 @@ pub fn analyze_ci_files(
         ignored,
     };
 
-    let gitlab_ci = root.join(".gitlab-ci.yml");
-    if let Ok(content) = std::fs::read_to_string(&gitlab_ci) {
-        extract_ci_signals(&content, &context, &mut analysis);
-    }
+    let mut ci_files: Vec<CiFile> = std::iter::once(".gitlab-ci.yml".to_string())
+        .chain(workflow_files(root))
+        .filter_map(|file| {
+            let content = std::fs::read_to_string(root.join(&file)).ok()?;
+            Some(CiFile {
+                file,
+                action_dir: None,
+                content,
+            })
+        })
+        .collect();
+    ci_files.extend(read_composite_actions(root));
 
-    let workflows_dir = root.join(".github/workflows");
-    if let Ok(entries) = std::fs::read_dir(&workflows_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if (name_str.ends_with(".yml") || name_str.ends_with(".yaml"))
-                && let Ok(content) = std::fs::read_to_string(entry.path())
-            {
-                extract_ci_signals(&content, &context, &mut analysis);
-            }
+    for ci_file in ci_files {
+        let first_new = analysis.entry_files.len();
+        extract_ci_signals_in(
+            &ci_file.content,
+            &context,
+            ci_file.action_dir.as_deref(),
+            &mut analysis,
+        );
+        for entry in &analysis.entry_files[first_new..] {
+            analysis
+                .entry_file_sources
+                .entry(entry.clone())
+                .or_insert_with(|| ci_file.file.clone());
         }
-    }
-
-    for (action_dir, content) in read_composite_actions(root) {
-        extract_ci_signals_in(&content, &context, Some(&action_dir), &mut analysis);
     }
 
     analysis.entry_files.sort();
@@ -109,16 +121,41 @@ pub fn analyze_ci_files(
     analysis
 }
 
+/// One CI file to scan.
+struct CiFile {
+    /// The path of the file, relative to the project root.
+    file: String,
+    /// The directory of a composite action, relative to the project root.
+    /// `None` for a workflow or a GitLab CI file.
+    action_dir: Option<String>,
+    content: String,
+}
+
 /// Extract package names AND file path references from shell commands found in
-/// a CI config file.
-///
-/// Uses line-based heuristics to find shell command lines in YAML CI configs.
-/// This intentionally avoids a full YAML parser to keep dependencies minimal.
-/// Known limitations (line-based parsing): variable interpolation
-/// (`${{ matrix.env }}/deploy.ts`), `\` line-continuations, YAML anchors
-/// (`<<: *defaults`) are silently skipped.
+/// a CI config file that is not a composite action.
+#[cfg(test)]
 fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiAnalysis) {
     extract_ci_signals_in(content, context, None, analysis);
+}
+
+/// The project-root-relative paths of the `.github/workflows/*.yml` and
+/// `*.yaml` files, sorted by name.
+fn workflow_files(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join(".github/workflows")) else {
+        return Vec::new();
+    };
+    let mut files: Vec<String> = entries
+        .flatten()
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "yml" || ext == "yaml")
+        })
+        .map(|entry| format!(".github/workflows/{}", entry.file_name().to_string_lossy()))
+        .collect();
+    files.sort();
+    files
 }
 
 /// A `-c` value with a quote or a pipe is inline code (a jq filter, a
@@ -127,8 +164,15 @@ fn is_inline_code(config_arg: &str) -> bool {
     config_arg.contains(['"', '\'', '|'])
 }
 
-/// [`extract_ci_signals`] for a file whose `${{ github.action_path }}` is
-/// `action_dir`, relative to the project root. `None` for a workflow file.
+/// Extract package names AND file path references from the shell commands of
+/// a CI config file whose `${{ github.action_path }}` is `action_dir`,
+/// relative to the project root. `None` for a workflow file.
+///
+/// Uses line-based heuristics to find shell command lines in YAML CI configs.
+/// This intentionally avoids a full YAML parser to keep dependencies minimal.
+/// Known limitations (line-based parsing): variable interpolation
+/// (`${{ matrix.env }}/deploy.ts`), `\` line-continuations, YAML anchors
+/// (`<<: *defaults`) are silently skipped.
 ///
 /// Each command runs in its `working-directory`. The commands of one
 /// directory are analyzed together, and their file arguments resolve in that
@@ -193,7 +237,7 @@ fn extract_ci_signals_in(
 /// The run steps of the composite actions in `.github/actions/<name>/` and
 /// `.github/actions/<group>/<name>/`, and of the root `action.yml`, with the
 /// directory of each action relative to the project root.
-fn read_composite_actions(root: &Path) -> Vec<(String, String)> {
+fn read_composite_actions(root: &Path) -> Vec<CiFile> {
     let mut actions = Vec::new();
     push_action_file(root, "", &mut actions);
     let Ok(entries) = std::fs::read_dir(root.join(".github/actions")) else {
@@ -227,12 +271,21 @@ fn read_composite_actions(root: &Path) -> Vec<(String, String)> {
 
 /// Read the `action.yml` (or `action.yaml`) in `dir`. Returns whether the
 /// directory holds one.
-fn push_action_file(root: &Path, dir: &str, actions: &mut Vec<(String, String)>) -> bool {
+fn push_action_file(root: &Path, dir: &str, actions: &mut Vec<CiFile>) -> bool {
     ["action.yml", "action.yaml"].iter().any(|name| {
         let Ok(content) = std::fs::read_to_string(root.join(dir).join(name)) else {
             return false;
         };
-        actions.push((dir.to_string(), content));
+        let file = if dir.is_empty() {
+            (*name).to_string()
+        } else {
+            format!("{dir}/{name}")
+        };
+        actions.push(CiFile {
+            file,
+            action_dir: Some(dir.to_string()),
+            content,
+        });
         true
     })
 }
