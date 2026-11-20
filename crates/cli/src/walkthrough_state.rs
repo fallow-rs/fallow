@@ -112,10 +112,9 @@ fn parse_viewed_state(contents: &str) -> Result<ViewedState, String> {
 ///
 /// Loads the existing ledger, upserts the marks, sets the stored hash to the
 /// current guide hash, then writes via a temp file + rename so a crash mid-write
-/// can never truncate the JSON. Returns the file count actually persisted.
-/// Returns an error and writes nothing when the ledger exists and this build
-/// cannot read or parse it. A symlink
-/// that leaves the project `root` on the way to the ledger stops the write.
+/// can never truncate the JSON. Returns an error and writes nothing when the
+/// ledger exists and this build cannot read or parse it. A symlink that leaves
+/// the project `root` on the way to the ledger stops the write.
 fn mark_viewed(
     root: &Path,
     cache_dir: &Path,
@@ -126,12 +125,20 @@ fn mark_viewed(
     let mut state = match load_existing(&path, parse_viewed_state) {
         Existing::Absent => ViewedState::default(),
         Existing::Loaded(state) => state,
-        Existing::Unreadable(err) => return Err(err),
+        Existing::Unreadable(err) => {
+            return Err(std::io::Error::new(
+                err.kind(),
+                format!(
+                    "failed to read {}: {err}; the file is unchanged",
+                    path.display()
+                ),
+            ));
+        }
         Existing::Invalid(reason) => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "{} is not a ledger that this fallow build can change ({reason}); the file is unchanged",
+                    "{} is not a ledger that this fallow build can change ({reason}); the file is unchanged, remove it to start a new ledger",
                     path.display()
                 ),
             ));
@@ -321,5 +328,28 @@ mod tests {
         let path = seed_ledger(dir.path(), b"{ not json");
         record_marks(dir.path(), dir.path(), &["src/a.ts".to_string()], "h");
         assert_eq!(std::fs::read(&path).expect("read"), b"{ not json");
+    }
+
+    #[test]
+    fn a_mark_error_names_the_ledger_and_the_remedy() {
+        let dir = temp_cache();
+        let path = seed_ledger(dir.path(), &[0xff, 0xfe, 0xfd]);
+        let unreadable = mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "h")
+            .expect_err("an unreadable ledger stops the mark")
+            .to_string();
+        assert!(
+            unreadable.contains(&path.display().to_string()),
+            "{unreadable}"
+        );
+
+        std::fs::write(&path, b"{ not json").expect("write");
+        let invalid = mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "h")
+            .expect_err("a garbled ledger stops the mark")
+            .to_string();
+        assert!(invalid.contains(&path.display().to_string()), "{invalid}");
+        assert!(
+            invalid.contains("remove it to start a new ledger"),
+            "{invalid}"
+        );
     }
 }
