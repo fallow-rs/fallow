@@ -12,7 +12,15 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  rmdirSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -214,18 +222,56 @@ const generateSkillAdapters = (repoRoot, check, tracked, onSkip) => {
   }
 
   const names = new Set(skills.map(({ name }) => name));
+  drifted.push(...retireStaleSkillAdapters(repoRoot, names, check, tracked, onSkip));
+  return drifted;
+};
+
+/**
+ * Remove the tracked files of each generated skill adapter whose canonical skill
+ * is gone. An untracked file in that folder is local work: it stays, and the
+ * caller hears about it through `onSkip`.
+ */
+const retireStaleSkillAdapters = (repoRoot, names, check, tracked, onSkip) => {
+  const drifted = [];
   for (const stalePath of staleGeneratedSkillAdapters(repoRoot, names)) {
     const staleRelative = repoPath(repoRoot, stalePath);
     if (!isTracked(tracked, staleRelative)) {
       onSkip(staleRelative);
       continue;
     }
-    drifted.push(staleRelative);
+    const staleDir = dirname(stalePath);
+    // `SKILL.md` goes last: a run that fails on a companion keeps the marker, so
+    // the next run finds the folder again. Without Git, the marker is the only
+    // ownership evidence, so companions stay.
+    for (const file of [...companionFiles(staleDir), "SKILL.md"]) {
+      const fileRelative = repoPath(repoRoot, join(staleDir, file));
+      const owned = file === "SKILL.md" || (tracked !== null && tracked.has(fileRelative));
+      if (!owned) {
+        onSkip(fileRelative);
+        continue;
+      }
+      drifted.push(fileRelative);
+      if (!check) {
+        rmSync(join(staleDir, file), { force: true });
+      }
+    }
     if (!check) {
-      rmSync(dirname(stalePath), { recursive: true, force: true });
+      pruneEmptyDirs(staleDir);
     }
   }
   return drifted;
+};
+
+/** Remove `dir` and its subfolders bottom-up, keeping any folder that still holds a file. */
+const pruneEmptyDirs = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      pruneEmptyDirs(join(dir, entry.name));
+    }
+  }
+  if (readdirSync(dir).length === 0) {
+    rmdirSync(dir);
+  }
 };
 
 /**
