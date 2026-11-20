@@ -209,6 +209,79 @@ fi
 assert_contains "$OUT" "no 'fallow' binary is on PATH" "install: FALLOW_SKIP_INSTALL explains missing binary"
 assert_not_contains "$OUT" "DRY RUN: npm install" "install: missing-binary path never reaches npm install"
 
+# A version range or `latest` must still let the MR integration download its
+# scripts: the install block records the installed exact version, and the
+# script prep pins the download to the matching release tag (issue #4841).
+RANGE_BIN="$INSTALL_TMP/range-bin"
+RANGE_WORK="$INSTALL_TMP/range-work"
+mkdir -p "$RANGE_BIN" "$RANGE_WORK"
+cat > "$RANGE_BIN/npm" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+cat > "$RANGE_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+echo "fallow ${STUB_FALLOW_VERSION:-3.44.1}"
+SH
+cat > "$RANGE_BIN/curl" <<'SH'
+#!/usr/bin/env bash
+out=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    http*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "$url" >> "${STUB_CURL_LOG:?}"
+printf '%s\n' '#!/usr/bin/env bash' > "$out"
+SH
+chmod +x "$RANGE_BIN/npm" "$RANGE_BIN/fallow" "$RANGE_BIN/curl"
+
+run_range_install_and_prep() {
+  local root="$1"
+  local version="$2"
+  rm -f /tmp/fallow-version-spec "$INSTALL_TMP/curl.log"
+  rm -rf /tmp/fallow-scripts
+  PATH="$RANGE_BIN:$PATH" FALLOW_ROOT="$root" FALLOW_VERSION="$version" FALLOW_TYPE_AWARE=false \
+    /bin/sh -c "$GITLAB_INSTALL_SCRIPT" > /dev/null 2>&1 || return 1
+  (cd "$RANGE_WORK" && PATH="$RANGE_BIN:$PATH" STUB_CURL_LOG="$INSTALL_TMP/curl.log" \
+    FALLOW_COMMENT=true FALLOW_REVIEW=false FALLOW_MUTATION=false FALLOW_VERSION="$version" FALLOW_SCRIPTS_REF="" \
+    /bin/sh -c "$GITLAB_SCRIPT_PREP_SCRIPT" 2>&1)
+}
+
+OUT=$(run_range_install_and_prep "$INSTALL_TMP/range" "")
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "script prep: package.json range with comments succeeds"
+else
+  fail "script prep: package.json range with comments succeeds" "exit=$cmd_status: $OUT"
+fi
+assert_contains "$OUT" "pinned to v3.44.1" "script prep: package.json range pins scripts to the installed version"
+assert_contains "$(cat "$INSTALL_TMP/curl.log" 2>/dev/null || true)" "fallow/v3.44.1/ci/scripts/comment.sh" \
+  "script prep: package.json range downloads scripts of the installed tag"
+
+OUT=$(run_range_install_and_prep "$INSTALL_TMP/empty" "latest")
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "script prep: FALLOW_VERSION=latest with comments succeeds"
+else
+  fail "script prep: FALLOW_VERSION=latest with comments succeeds" "exit=$cmd_status: $OUT"
+fi
+assert_contains "$OUT" "pinned to v3.44.1" "script prep: latest pins scripts to the installed version"
+
+OUT=$(STUB_FALLOW_VERSION="dev build" run_range_install_and_prep "$INSTALL_TMP/range" "")
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "script prep: unknown installed version fails with exit 2"
+else
+  fail "script prep: unknown installed version fails with exit 2" "exit=$cmd_status: $OUT"
+fi
+assert_contains "$OUT" "exact fallow version in package.json" "script prep: error names the package.json fix"
+assert_contains "$OUT" "exact FALLOW_VERSION" "script prep: error names the FALLOW_VERSION fix"
+assert_contains "$OUT" "fallow ci-template gitlab --vendor" "script prep: error names the vendored template fix"
+
 SCRIPT_PREP_TMP="$INSTALL_TMP/script-prep"
 mkdir -p "$SCRIPT_PREP_TMP/ci/scripts"
 printf '%s\n' '#!/usr/bin/env bash' 'echo comment' > "$SCRIPT_PREP_TMP/ci/scripts/comment.sh"
