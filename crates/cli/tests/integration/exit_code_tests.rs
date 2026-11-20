@@ -1381,10 +1381,43 @@ fn baseline_subcommands_keep_the_global_save_baseline_flag() {
     }
 }
 
-/// A project under `<tmp>/project` with one source file, and nothing else in
-/// `<tmp>`, so a path in `<tmp>` is outside the project root.
+/// A case directory for a write-scope test. Each Unix allows a write into
+/// `/tmp`, so the case lives outside it: on Unix in `$HOME/.cache`, which is
+/// outside every allowed directory of the child. The child gets
+/// `<case>/system-tmp` as its temp directory and `<case>/home` as its home.
+///
+/// The case base must not be inside a Git work tree: the write guard allows
+/// the work tree of the root when the working directory is inside it. A
+/// `$HOME/.git` (for example a dotfiles repository) makes every case allowed,
+/// so the helper stops with a clear message in that setup.
+fn confinement_case_dir() -> tempfile::TempDir {
+    let base = std::env::var_os("HOME")
+        .filter(|_| cfg!(unix))
+        .map(|home| std::path::PathBuf::from(home).join(".cache/fallow-write-scope-tests"));
+    match base {
+        Some(base) => {
+            if let Some(tree) = base.ancestors().find(|dir| dir.join(".git").exists()) {
+                panic!(
+                    "the write-scope tests need a case base outside a Git work tree, \
+                     but {} is inside {}",
+                    base.display(),
+                    tree.display()
+                );
+            }
+            std::fs::create_dir_all(&base).expect("create case base dir");
+            tempfile::Builder::new()
+                .prefix("case-")
+                .tempdir_in(base)
+                .expect("create case dir")
+        }
+        None => tempfile::tempdir().expect("create temp dir"),
+    }
+}
+
+/// A project under `<case>/project` with one source file, and nothing else in
+/// `<case>`, so a path in `<case>` is outside the project root.
 fn write_confinement_project() -> (tempfile::TempDir, std::path::PathBuf) {
-    let dir = tempfile::tempdir().expect("create temp dir");
+    let dir = confinement_case_dir();
     let root = dir.path().join("project");
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join("package.json"), r#"{"name": "confine"}"#).unwrap();
@@ -1401,8 +1434,17 @@ fn system_tmp(case: &std::path::Path) -> std::path::PathBuf {
     tmp
 }
 
+/// The home directory the child process sees: `<case>/home`. A run then
+/// keeps its Impact records and its user config out of the real home.
+fn case_home(case: &std::path::Path) -> std::path::PathBuf {
+    let home = case.join("home");
+    std::fs::create_dir_all(&home).expect("create case home");
+    home
+}
+
 /// Run fallow from `cwd`, so a relative path resolves the way a user types it.
-/// The child sees `<case>/system-tmp` as its temp directory and no
+/// The child sees `<case>/system-tmp` as its temp directory, `<case>/home` as
+/// its home directory, and no
 /// `RUNNER_TEMP`, `GITHUB_WORKSPACE` or `CI_PROJECT_DIR`, unless `env` sets it.
 fn run_fallow_from(
     case: &std::path::Path,
@@ -1419,10 +1461,12 @@ fn run_fallow_from_env(
     env: &[(&str, &std::path::Path)],
 ) -> crate::common::CommandOutput {
     let tmp = system_tmp(case);
+    let home = case_home(case);
     let mut cmd = std::process::Command::new(fallow_bin());
     cmd.current_dir(cwd)
         .env("RUST_LOG", "")
         .env("NO_COLOR", "1")
+        .env("HOME", &home)
         .env("TMPDIR", &tmp)
         .env("TMP", &tmp)
         .env("TEMP", &tmp)
@@ -1531,7 +1575,7 @@ fn save_paths_through_a_symlink_that_leaves_the_root_are_rejected() {
 /// `--root packages/app` keeps its repository-relative baseline path.
 #[test]
 fn save_paths_in_the_git_work_tree_of_the_root_keep_working() {
-    let dir = tempfile::tempdir().expect("create temp dir");
+    let dir = confinement_case_dir();
     let repo = dir.path().join("repo");
     let root = repo.join("packages/app");
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1601,6 +1645,37 @@ fn save_paths_in_the_system_temp_dir_keep_working() {
     }
 }
 
+/// A save into `/tmp` is allowed on each Unix, also when `TMPDIR` names
+/// another folder, as on macOS.
+#[cfg(unix)]
+#[test]
+fn save_paths_in_the_unix_tmp_dir_keep_working() {
+    let (dir, root) = write_confinement_project();
+    let probe = tempfile::Builder::new()
+        .prefix("fallow-confine-")
+        .tempdir_in("/tmp")
+        .expect("create dir in /tmp");
+    for (command, flag) in SAVE_FLAGS {
+        let target = probe
+            .path()
+            .join(format!("{}.json", flag.trim_start_matches("--")));
+        let output = run_fallow_from(
+            dir.path(),
+            &root,
+            &[
+                command,
+                flag,
+                target.to_str().unwrap(),
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_ne!(output.code, 2, "{command} {flag}: {}", output.stdout);
+        assert!(target.is_file(), "{command} {flag} writes into /tmp");
+    }
+}
+
 /// A save into `RUNNER_TEMP` is allowed, also when it is not the system temp
 /// directory, as on a self-hosted GitHub runner.
 #[test]
@@ -1633,10 +1708,8 @@ fn save_paths_in_runner_temp_keep_working() {
 #[cfg(unix)]
 #[test]
 fn save_paths_in_the_home_dir_are_rejected() {
-    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
-        return;
-    };
     let (dir, root) = write_confinement_project();
+    let home = case_home(dir.path());
     for (command, flag) in SAVE_FLAGS {
         let target = home.join(format!(
             ".fallow-confine-probe-{}-{}.json",
@@ -1774,7 +1847,7 @@ fn default_save_destinations_inside_the_project_keep_working() {
 /// repository.
 #[test]
 fn the_git_work_tree_counts_only_for_a_working_directory_inside_it() {
-    let dir = tempfile::tempdir().expect("create temp dir");
+    let dir = confinement_case_dir();
     let repo = dir.path().join("repo");
     let root = repo.join("packages/app");
     let outside_cwd = dir.path().join("elsewhere");
@@ -1808,7 +1881,7 @@ fn the_git_work_tree_counts_only_for_a_working_directory_inside_it() {
 /// work tree. The write stays allowed, because it is the file fallow reads.
 #[test]
 fn the_discovered_config_is_updated_from_outside_the_work_tree() {
-    let dir = tempfile::tempdir().expect("create temp dir");
+    let dir = confinement_case_dir();
     let repo = dir.path().join("repo");
     let root = repo.join("packages/app");
     let outside_cwd = dir.path().join("elsewhere");
@@ -1846,7 +1919,7 @@ fn the_discovered_config_is_updated_from_outside_the_work_tree() {
 #[cfg(unix)]
 #[test]
 fn a_discovered_config_symlink_outside_stays_rejected_from_outside_the_work_tree() {
-    let dir = tempfile::tempdir().expect("create temp dir");
+    let dir = confinement_case_dir();
     let repo = dir.path().join("repo");
     let root = repo.join("packages/app");
     let outside_cwd = dir.path().join("elsewhere");
@@ -2103,7 +2176,7 @@ fn output_files_may_name_a_fifo() {
 #[test]
 fn the_ci_workspace_is_an_allowed_directory() {
     for variable in ["GITHUB_WORKSPACE", "CI_PROJECT_DIR"] {
-        let dir = tempfile::tempdir().expect("create temp dir");
+        let dir = confinement_case_dir();
         let workspace = dir.path().join("workspace");
         let app = workspace.join("app");
         std::fs::create_dir_all(app.join("src")).unwrap();

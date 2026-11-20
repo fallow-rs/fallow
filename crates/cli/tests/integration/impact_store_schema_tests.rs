@@ -670,3 +670,48 @@ fn clone_removal_with_duplication_off_is_credited_when_duplication_is_on_again()
     assert_eq!(resolved_kinds(&store), ["code-duplication"], "{store:#}");
     assert_eq!(clone_groups(&store), 0, "{store:#}");
 }
+
+/// `fallow impact status` prints a short human view: the tracking state, the
+/// record count, the store file and the store key. The full report stays on bare
+/// `fallow impact`.
+#[test]
+fn impact_status_human_output_is_a_short_view() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    std::fs::write(project.path().join("package.json"), r#"{"name":"status"}"#)
+        .expect("write package.json");
+    let root = project.path().to_str().expect("utf8 root");
+
+    let off = run_isolated(home.path(), &["impact", "status", "--root", root]);
+    assert_eq!(off.code, 0, "status failed: {}", off.stderr);
+    let enable = run_isolated(
+        home.path(),
+        &["impact", "enable", "--root", root, "--quiet"],
+    );
+    assert_eq!(enable.code, 0, "enable failed: {}", enable.stderr);
+    let on = run_isolated(home.path(), &["impact", "status", "--root", root]);
+    assert_eq!(on.code, 0, "status failed: {}", on.stderr);
+
+    let store_line = |stdout: &str| {
+        stdout
+            .lines()
+            .map(|line| {
+                if line.starts_with("  Store file: ") {
+                    "  Store file: <store>".to_owned()
+                } else if line.starts_with("  Store key: ") {
+                    "  Store key: <key>".to_owned()
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    insta::assert_snapshot!("impact_status_human_off", store_line(&off.stdout));
+    insta::assert_snapshot!("impact_status_human_on", store_line(&on.stdout));
+    assert!(
+        !on.stdout.contains("CONTAINED AT COMMIT") && !on.stdout.contains("FALLOW IMPACT\n"),
+        "status must not print the full report: {}",
+        on.stdout
+    );
+}

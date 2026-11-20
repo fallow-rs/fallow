@@ -765,8 +765,8 @@ fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> Exit
 fn print_human(bundle: &InspectOutput, quiet: bool) {
     outln!("Inspect target");
     outln!();
-    outln!("  target: {}", json_display(&bundle.target));
-    outln!("  identity: {}", json_display(&bundle.identity));
+    print_fields("target", &bundle.target);
+    print_fields("identity", &bundle.identity);
     outln!();
     outln!("Evidence");
     print_evidence_summary("trace_file", &bundle.evidence.trace_file);
@@ -821,8 +821,28 @@ fn print_cloud_summary(cloud: &fallow_output::InspectCloudEvidence) {
     outln!("  cloud: {} [file]{detail}", cloud.status.as_str());
 }
 
-fn json_display(value: &impl serde::Serialize) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "<unprintable>".to_string())
+/// Print a serialized block as a `label:` heading with one `key: value` line
+/// per field. A field with no value (`null`) prints as `unknown`, because the
+/// analysis that sets it did not run.
+fn print_fields(label: &str, value: &impl serde::Serialize) {
+    outln!("  {label}:");
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::Object(fields)) => {
+            for (key, field) in &fields {
+                outln!("    {key}: {}", field_display(field));
+            }
+        }
+        Ok(other) => outln!("    {}", field_display(&other)),
+        Err(_) => outln!("    <unprintable>"),
+    }
+}
+
+fn field_display(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "unknown".to_owned(),
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
 }
 
 fn print_evidence_summary(name: &str, section: &InspectEvidenceSection) {

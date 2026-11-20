@@ -41,16 +41,11 @@ fn record_gate_is_temp_root(root: &Path) -> bool {
     }
 }
 
-/// The system temp folders: `std::env::temp_dir()`, and on Unix also `/tmp`,
-/// because macOS sets `TMPDIR` to a per-user folder that is not `/tmp`.
-/// `/var/tmp` is not in the list: Linux keeps it across reboots, and people
-/// keep long-lived clones there.
+/// The system temp folders of [`fallow_engine::write_guard::system_temp_dirs`]
+/// that are not a filesystem root or the home folder.
 #[cfg(not(test))]
 fn system_temp_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![std::env::temp_dir()];
-    if cfg!(unix) {
-        dirs.push(PathBuf::from("/tmp"));
-    }
+    let dirs = fallow_engine::write_guard::system_temp_dirs();
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from);

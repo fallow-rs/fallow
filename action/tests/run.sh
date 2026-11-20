@@ -3744,6 +3744,10 @@ run_gate "private" 1
 assert_contains "$GATE_OUT" "available=false" "gate: private repo without GHAS is unavailable"
 assert_contains "$GATE_LOG" "::warning::" "gate: private repo without GHAS warns"
 assert_contains "$GATE_LOG" "private or internal repository" "gate: warning names private or internal repos"
+# The step runs only when the sarif input is true, and analyze.sh builds SARIF
+# from that input with any format. So only sarif: false stops the warning.
+assert_contains "$GATE_LOG" "To stop this warning, set sarif: false." "gate: warning names the sarif input that stops it"
+assert_not_contains "$GATE_LOG" "format: json" "gate: warning does not advise a format change"
 
 # Case 4: internal (enterprise) repo with GHAS is available via the probe.
 # This is the row the rejected `.private == false` approach would have broken.

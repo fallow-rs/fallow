@@ -34,6 +34,6 @@ else
     echo "available=true" >> "$OUTPUT"
   else
     echo "available=false" >> "$OUTPUT"
-    echo "::warning::SARIF upload skipped. Code Scanning on a private or internal repository requires GitHub Advanced Security. The job summary and JSON output are still available. To suppress this warning, use format: json instead of sarif."
+    echo "::warning::SARIF upload skipped. Code Scanning on a private or internal repository requires GitHub Advanced Security. The job summary and JSON output are still available. To stop this warning, set sarif: false."
   fi
 fi

@@ -1,0 +1,16 @@
+---
+source: crates/cli/tests/integration/inspect_tests.rs
+expression: head(&file.stdout)
+---
+Inspect target
+
+  target:
+    type: file
+    file: src/api.ts
+  identity:
+    file: src/api.ts
+    is_reachable: true
+    is_entry_point: false
+    export_count: 1
+    import_count: 0
+    imported_by_count: 1

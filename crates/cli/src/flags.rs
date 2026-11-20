@@ -249,6 +249,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     // session captured its walk, and both are reasons a flag is missing
     // from the array this envelope reports.
     let mut workspace_diagnostics = session.current_workspace_diagnostics();
+    workspace_diagnostics.retain(|diagnostic| !is_unconfigured_detector_kind(&diagnostic.kind));
     if let Some((_, age_diagnostics)) = &retirement {
         workspace_diagnostics.extend(age_diagnostics.iter().cloned());
     }
@@ -667,6 +668,18 @@ struct FlagsRenderInput<'a> {
     files_scanned: usize,
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     retirement: Option<&'a FlagRetirementReport>,
+}
+
+/// Whether a diagnostic reports a detector that the project did not
+/// configure. The flag scan runs the dead-code pass to match flags with
+/// unused exports, and that pass records these kinds. `fallow flags` runs no
+/// boundary or policy check, so they do not describe this command.
+const fn is_unconfigured_detector_kind(kind: &fallow_config::WorkspaceDiagnosticKind) -> bool {
+    matches!(
+        kind,
+        fallow_config::WorkspaceDiagnosticKind::BoundariesNotConfigured
+            | fallow_config::WorkspaceDiagnosticKind::RulePacksNotConfigured
+    )
 }
 
 /// Print feature flag results in the requested format.

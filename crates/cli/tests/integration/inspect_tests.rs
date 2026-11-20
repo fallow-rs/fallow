@@ -216,6 +216,40 @@ fn inspect_human_output_includes_evidence_summary() {
     );
 }
 
+/// The human view renders the target and identity blocks as `key: value`
+/// lines, not as raw JSON.
+#[test]
+fn inspect_human_output_renders_target_and_identity_as_fields() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let file = run_fallow_in_root("inspect", dir.path(), &["--file", "src/api.ts"]);
+    assert_eq!(file.code, 0, "inspect should exit 0: {}", file.stderr);
+    let symbol = run_fallow_in_root(
+        "inspect",
+        dir.path(),
+        &["--symbol", "src/api.ts:fetchUser", "--quiet"],
+    );
+    assert_eq!(symbol.code, 0, "inspect should exit 0: {}", symbol.stderr);
+
+    let head = |stdout: &str| {
+        stdout
+            .lines()
+            .take_while(|line| *line != "Evidence")
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for output in [&file, &symbol] {
+        assert!(
+            !output.stdout.contains(": {\""),
+            "human output must not print raw JSON: {}",
+            output.stdout
+        );
+    }
+    insta::assert_snapshot!("inspect_human_file_target", head(&file.stdout));
+    insta::assert_snapshot!("inspect_human_symbol_target", head(&symbol.stdout));
+}
+
 #[test]
 fn inspect_file_includes_impact_closure_evidence() {
     let dir = tempdir().unwrap();
