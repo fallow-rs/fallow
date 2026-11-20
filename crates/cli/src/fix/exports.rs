@@ -867,6 +867,53 @@ mod tests {
     }
 
     #[test]
+    fn export_fixes_follow_path_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let names = ["h", "c", "f", "a", "g", "b", "e", "d"];
+        let files: Vec<PathBuf> = names
+            .iter()
+            .map(|name| {
+                let file = root.join(format!("{name}.ts"));
+                std::fs::write(&file, "export const value = 1;\n").unwrap();
+                file
+            })
+            .collect();
+        let exports: Vec<UnusedExport> = files
+            .iter()
+            .map(|file| make_export(file, "value", 1))
+            .collect();
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        for export in &exports {
+            map.insert(export.path.clone(), vec![export]);
+        }
+        let file_refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
+        apply_export_fixes(
+            root,
+            &map,
+            &capture_hashes(&file_refs),
+            &FxHashSet::default(),
+            &mut plan,
+            OutputFormat::Json,
+            true,
+            &mut fixes,
+        );
+
+        let paths: Vec<&str> = fixes
+            .iter()
+            .map(|fix| fix["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts", "g.ts", "h.ts"
+            ]
+        );
+    }
+
+    #[test]
     fn dry_run_export_fix_does_not_modify_file() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

@@ -288,7 +288,8 @@ pub struct EffectConfig {
     /// `Schema.Error`, `Schema.Opaque`), or a const whose
     /// value is a `Schema` constructor, member or pipe chain
     /// (`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand("Id"))`).
-    /// Each `pipe` argument must be a `Schema` transform.
+    /// Each `pipe` argument must be a `Schema` transform, or a call of an
+    /// `HttpApiSchema` transform such as `HttpApiSchema.status(201)`.
     /// `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.
     /// Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -472,7 +473,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub workspaces: Option<WorkspaceConfig>,
 
-    /// A list of package names or package-name globs excluded from both unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob in the `ignorePatterns` syntax matched against the package name, so `@acme/*` covers every package in the `@acme` scope. The human output names each entry that hid no dependency finding and each glob that matched no declared dependency in the run.
+    /// A list of package names or package-name globs excluded from both unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob matched against the package name. In this glob, `*` also matches `/`, so `@acme/*` and `@acme*` both cover every package in the `@acme` scope. The human output names each entry that hid no dependency finding and each glob that matched no declared dependency in the run.
     #[serde(default)]
     pub ignore_dependencies: Vec<String>,
 
@@ -626,7 +627,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 
-    /// A project-root-relative path to a CODEOWNERS file, used by fallow health --hotspots --ownership to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
+    /// A project-root-relative path to a CODEOWNERS file, used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codeowners: Option<String>,
 
@@ -646,7 +647,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub sealed: bool,
 
-    /// When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (e.g. meatdata for metadata) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.
+    /// When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (for example a misspelled `meatdata` in place of `metadata`) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.
     #[serde(default)]
     pub include_entry_exports: bool,
 

@@ -285,6 +285,37 @@ mod tests {
     }
 
     #[test]
+    fn dependency_fixes_follow_package_path_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let mut results = fallow_types::results::AnalysisResults::default();
+        for name in ["h", "c", "f", "a", "g", "b", "e", "d"] {
+            let package_dir = root.join("packages").join(name);
+            std::fs::create_dir_all(&package_dir).unwrap();
+            let path = package_dir.join("package.json");
+            std::fs::write(&path, "{\"dependencies\":{\"unused-package\":\"1\"}}").unwrap();
+            results.unused_dependencies.push(
+                fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(unused_dep(
+                    &path,
+                    "unused-package",
+                )),
+            );
+        }
+        let mut fixes = Vec::new();
+        run_fix_deps(root, &results, OutputFormat::Json, true, &mut fixes);
+
+        let paths: Vec<&str> = fixes
+            .iter()
+            .map(|fix| fix["file"].as_str().unwrap())
+            .collect();
+        let expected: Vec<String> = ["a", "b", "c", "d", "e", "f", "g", "h"]
+            .iter()
+            .map(|name| format!("packages/{name}/package.json"))
+            .collect();
+        assert_eq!(paths, expected);
+    }
+
+    #[test]
     fn dependency_fix_removes_target_from_every_duplicate_section() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
