@@ -712,9 +712,11 @@ pub(super) fn handle_regression_and_summary(
         } else {
             "dead-code"
         };
+        let failed = failed_analyses(opts, check_result, dupes_result, health_result);
         print_failure_summary(
             opts.root,
             check_section,
+            failed,
             check_result,
             dupes_result,
             health_result,
@@ -722,49 +724,129 @@ pub(super) fn handle_regression_and_summary(
     }
 }
 
+/// The analyses of a bare run with a gate that fails the run.
+///
+/// A section with findings does not always fail the run: clone groups fail it
+/// only above the duplication threshold or with `--fail-on-issues`, and a
+/// health baseline can accept every complexity finding. The `Failed:` line
+/// names only the analyses that this function marks.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+struct FailedAnalyses {
+    dead_code: bool,
+    dupes: bool,
+    health: bool,
+}
+
+fn failed_analyses(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) -> FailedAnalyses {
+    let mut gates = combined_gate_outcomes(
+        check_result,
+        dupes_result,
+        health_result,
+        CombinedGateFlags {
+            fail_on_stale_baseline: opts.fail_on_stale_baseline,
+            fail_on_issues: opts.fail_on_issues,
+        },
+    );
+    if !combined_machine_format(opts.output)
+        && let Some(gates) = gates.as_mut()
+    {
+        enforce_human_section_rules(gates);
+    }
+    gates
+        .as_ref()
+        .map_or_else(FailedAnalyses::default, failed_analyses_from_gates)
+}
+
+fn failed_analyses_from_gates(gates: &fallow_output::GateOutcomes) -> FailedAnalyses {
+    use fallow_output::GateName;
+    let fails = |names: &[GateName]| {
+        names.iter().any(|name| {
+            gates
+                .get(name)
+                .is_some_and(fallow_output::GateOutcome::fails_run)
+        })
+    };
+    FailedAnalyses {
+        dead_code: fails(&[GateName::ErrorSeverityFindings, GateName::Regression]),
+        dupes: fails(&[
+            GateName::DuplicationThreshold,
+            GateName::DuplicationFindings,
+        ]),
+        health: fails(&[GateName::HealthFindings, GateName::HealthCoverageGaps]),
+    }
+}
+
 /// Print a summary line listing which analyses had failures.
 fn print_failure_summary(
     root: &Path,
     check_section: &str,
+    failed: FailedAnalyses,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
 ) {
-    let parts = failure_summary_parts(check_section, check_result, dupes_result, health_result);
+    let parts = failure_summary_parts(
+        check_section,
+        failed,
+        check_result,
+        dupes_result,
+        health_result,
+    );
     if parts.is_empty() {
         return;
     }
 
-    let nudge = health_failure_nudge(root, health_result);
+    let nudge = if failed.health {
+        health_failure_nudge(root, health_result)
+    } else {
+        String::new()
+    };
     eprintln!("\nFailed: {}{nudge}", parts.join(", "));
     print_failure_followups(root);
 }
 
 fn failure_summary_parts(
     check_section: &str,
+    failed: FailedAnalyses,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
 ) -> Vec<String> {
     let mut parts = Vec::new();
-    if let Some(r) = check_result
+    if failed.dead_code
+        && let Some(r) = check_result
         && let Some(part) = check_failure_summary_part(r, check_section)
     {
         parts.push(part);
     }
-    if let Some(r) = dupes_result {
-        let groups = r.report.clone_groups.len();
-        if groups > 0 {
-            parts.push(dupes_failure_label(groups));
-        }
+    if failed.dupes
+        && let Some(r) = dupes_result
+    {
+        parts.push(dupes_failure_label(r.report.clone_groups.len()));
     }
-    if let Some(r) = health_result {
-        let above = r.report.summary.functions_above_threshold;
-        if above > 0 {
-            parts.push(format!("health ({above} above threshold)"));
-        }
+    if failed.health
+        && let Some(r) = health_result
+    {
+        // The findings after the baseline, the same count the gate reads.
+        let blocking = r.report.findings.iter().filter(|f| f.blocks()).count();
+        parts.push(health_failure_label(blocking));
     }
     parts
+}
+
+/// `health (<n> above threshold)` for the `Failed:` line, or `health` when
+/// only the coverage-gap gate failed.
+fn health_failure_label(blocking: usize) -> String {
+    if blocking == 0 {
+        "health".to_string()
+    } else {
+        format!("health ({blocking} above threshold)")
+    }
 }
 
 fn check_failure_summary_part(result: &CheckResult, section: &str) -> Option<String> {
@@ -1539,5 +1621,41 @@ mod tests {
         use super::dupes_failure_label;
         assert_eq!(dupes_failure_label(1), "dupes (1 clone group)");
         assert_eq!(dupes_failure_label(2), "dupes (2 clone groups)");
+    }
+
+    #[test]
+    fn health_failure_label_drops_the_count_when_only_coverage_gaps_fail() {
+        use super::health_failure_label;
+        assert_eq!(health_failure_label(3), "health (3 above threshold)");
+        assert_eq!(health_failure_label(0), "health");
+    }
+
+    /// Clone groups without a failed duplication gate, and health findings
+    /// that do not block, leave the analysis out of the `Failed:` line.
+    #[test]
+    fn failed_analyses_follow_the_failing_gates_only() {
+        use super::{FailedAnalyses, failed_analyses_from_gates};
+        use fallow_output::{GateName, GateOutcome, GateOutcomes, GateStatus};
+        let mut gates = GateOutcomes::new();
+        gates.insert(
+            GateName::ErrorSeverityFindings,
+            GateOutcome::new(GateStatus::Fail, true),
+        );
+        gates.insert(
+            GateName::DuplicationFindings,
+            GateOutcome::new(GateStatus::Fail, false),
+        );
+        gates.insert(
+            GateName::HealthFindings,
+            GateOutcome::new(GateStatus::Pass, true),
+        );
+        assert_eq!(
+            failed_analyses_from_gates(&gates),
+            FailedAnalyses {
+                dead_code: true,
+                dupes: false,
+                health: false,
+            }
+        );
     }
 }

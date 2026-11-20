@@ -6,6 +6,7 @@ pub(super) mod health;
 mod health_crap_notes;
 mod health_hotspots;
 mod health_runtime;
+mod health_status;
 mod health_targets;
 mod perf;
 pub(super) mod traces;

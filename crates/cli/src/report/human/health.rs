@@ -12,6 +12,7 @@ use super::health_crap_notes::{
 };
 use super::health_hotspots::{render_change_coupling, render_hotspots};
 use super::health_runtime::render_runtime_coverage;
+use super::health_status::print_health_final_status;
 use super::health_targets::render_refactoring_targets;
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, push_docs_footer,
@@ -85,6 +86,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
     }
 
     let has_findings = !report.findings.is_empty()
+        || !report.styling_findings.is_empty()
         || report.coverage_gaps.as_ref().is_some_and(|gaps| {
             gaps.summary.untested_files > 0 || gaps.summary.untested_exports > 0
         })
@@ -153,55 +155,6 @@ fn print_health_empty_state(report: &fallow_output::HealthReport, elapsed: Durat
         )
         .dimmed()
     );
-}
-
-/// The final status line of a health run. A run with no finding and no
-/// failing gate shows the success mark. Otherwise the mark follows the gate
-/// result, see [`super::findings_status_line`].
-fn print_health_final_status(
-    report: &fallow_output::HealthReport,
-    elapsed: Duration,
-    has_findings: bool,
-    run_fails: bool,
-) {
-    let s = &report.summary;
-    let mut parts = Vec::new();
-    parts.push(format!("{} above threshold", s.functions_above_threshold));
-    parts.push(format!("{} analyzed", s.functions_analyzed));
-    if let Some(avg) = s.average_maintainability {
-        let label = if avg >= 85.0 {
-            "good"
-        } else if avg >= 65.0 {
-            "moderate"
-        } else {
-            "low"
-        };
-        parts.push(format!("maintainability {avg:.1} ({label})"));
-    }
-    if let Some(unhit) = report
-        .runtime_coverage
-        .as_ref()
-        .and_then(|production| production.summary.functions_unhit)
-    {
-        parts.push(format!("{unhit} unhit in production"));
-    }
-    let text = format!(
-        "{} ({:.2}s)",
-        parts.join(" \u{00b7} "),
-        elapsed.as_secs_f64()
-    );
-    if has_findings || run_fails {
-        eprintln!("{}", super::findings_status_line(&text, run_fails));
-    } else {
-        eprintln!("{}", format!("\u{2713} {text}").green().bold());
-    }
-    if s.average_maintainability.is_some_and(|mi| mi < 85.0) {
-        eprintln!(
-            "{}",
-            "  Maintainability scale: good \u{2265}85, moderate \u{2265}65, low <65 (0\u{2013}100)"
-                .dimmed()
-        );
-    }
 }
 
 /// The body note for files that did not parse cleanly, empty when every file
@@ -1222,7 +1175,7 @@ pub fn render_health_score(lines: &mut Vec<String>, report: &fallow_output::Heal
     if p.duplication.is_some_and(|dp| dp >= 5.0) {
         lines.push(format!(
             "  {}",
-            "Tip: add \"dist\" or \"__generated__\" to health.ignore in your config to exclude from duplication analysis"
+            "Tip: add \"dist\" or \"__generated__\" to duplicates.ignore in your config to exclude from duplication analysis"
                 .dimmed()
         ));
     }

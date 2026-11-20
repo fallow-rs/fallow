@@ -1067,7 +1067,7 @@ fn print_audit_status_line(result: &AuditResult) {
             "files did"
         };
         let findings = match result.verdict {
-            AuditVerdict::Pass => format!("0 issues in {files_str}"),
+            AuditVerdict::Pass => format!("0 {} in {files_str}", pass_issue_noun(result)),
             AuditVerdict::Warn | AuditVerdict::Fail => format!(
                 "{} \u{00b7} {files_str}",
                 build_status_parts(&result.summary, &result.diff_risk).join(" \u{00b7} ")
@@ -1093,9 +1093,12 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
         AuditVerdict::Pass => {
             eprintln!(
                 "{}",
-                format!("\u{2713} No issues in {files_str} ({elapsed_str})")
-                    .green()
-                    .bold()
+                format!(
+                    "\u{2713} No {} in {files_str} ({elapsed_str})",
+                    pass_issue_noun(result)
+                )
+                .green()
+                .bold()
             );
         }
         AuditVerdict::Warn => {
@@ -1119,23 +1122,42 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
     }
 }
 
+/// The inherited findings that the audit gate left out. Zero under
+/// `--gate all`, because that gate judges every finding.
+fn gate_excluded_inherited(result: &AuditResult) -> usize {
+    if matches!(result.attribution.gate, AuditGate::All) {
+        return 0;
+    }
+    // The same classification gives `complexity_worsened` and
+    // `complexity_inherited`, and every worsened finding is also counted as
+    // inherited. Under `--worsened error` the worsened findings take part in
+    // the gate, so they are not excluded.
+    let gated_worsened = if result.attribution.worsened == AuditWorsened::Error {
+        result.attribution.complexity_worsened
+    } else {
+        0
+    };
+    (result.attribution.dead_code_inherited
+        + result.attribution.complexity_inherited
+        + result.attribution.duplication_inherited)
+        .saturating_sub(gated_worsened)
+}
+
+/// `issues` for the pass status line, or `introduced issues` when the gate
+/// left out inherited findings that the output lists above the line.
+fn pass_issue_noun(result: &AuditResult) -> &'static str {
+    if gate_excluded_inherited(result) > 0 {
+        "introduced issues"
+    } else {
+        "issues"
+    }
+}
+
 /// The dimmed note about inherited findings that the audit gate left out.
 fn print_audit_inherited_note(result: &AuditResult) {
     if !matches!(result.attribution.gate, AuditGate::All) {
-        // The same classification gives `complexity_worsened` and
-        // `complexity_inherited`, and every worsened finding is also counted
-        // as inherited. Under `--worsened error` the worsened findings take
-        // part in the gate, so the note does not count them as excluded.
         let worsened = result.attribution.complexity_worsened;
-        let gated_worsened = if result.attribution.worsened == AuditWorsened::Error {
-            worsened
-        } else {
-            0
-        };
-        let inherited = (result.attribution.dead_code_inherited
-            + result.attribution.complexity_inherited
-            + result.attribution.duplication_inherited)
-            .saturating_sub(gated_worsened);
+        let inherited = gate_excluded_inherited(result);
         if worsened > 0 {
             eprintln!(
                 "  {}",

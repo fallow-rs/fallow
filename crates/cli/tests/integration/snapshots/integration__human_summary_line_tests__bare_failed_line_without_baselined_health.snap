@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/human_summary_line_tests.rs
+expression: failed_line(&output).to_owned()
+---
+Failed: dead-code (1 issue)

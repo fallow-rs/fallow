@@ -3312,3 +3312,36 @@ fn react_context_none_for_non_react_finding() {
     let finding = react_finding(0, 0, 0, None);
     assert!(render_react_context(&finding).is_none());
 }
+
+/// `health.ignore` removes files from the complexity analysis only. The
+/// duplication deduction follows `duplicates.ignore`, so the tip names that key.
+#[test]
+fn duplication_tip_names_the_duplicates_ignore_key() {
+    let root = PathBuf::from("/project");
+    let mut report = empty_report();
+    report.health_score = Some(fallow_output::HealthScore {
+        formula_version: fallow_output::HEALTH_SCORE_FORMULA_VERSION,
+        score: 80.0,
+        grade: "B",
+        penalties: fallow_output::HealthScorePenalties {
+            dead_files: Some(0.0),
+            dead_exports: Some(0.0),
+            complexity: 0.0,
+            p90_complexity: 0.0,
+            maintainability: Some(0.0),
+            hotspots: Some(0.0),
+            unused_deps: Some(0.0),
+            circular_deps: Some(0.0),
+            unit_size: None,
+            coupling: None,
+            duplication: Some(6.0),
+            prop_drilling: None,
+        },
+    });
+    let text = plain(&build_health_human_lines(&report, &root));
+    assert!(
+        text.contains("to duplicates.ignore in your config to exclude from duplication analysis"),
+        "{text}"
+    );
+    assert!(!text.contains("health.ignore"), "{text}");
+}

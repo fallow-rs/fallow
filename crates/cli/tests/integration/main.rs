@@ -121,6 +121,7 @@ mod health_tests;
 mod health_v8_private_method_tests;
 mod hook_native_json_tests;
 mod hooks_install_summary_tests;
+mod human_summary_line_tests;
 mod impact_store_schema_tests;
 mod inert_plugin_warning_tests;
 mod init_tests;
