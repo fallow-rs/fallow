@@ -631,7 +631,7 @@ fn is_declaration_file(file: &str) -> bool {
     file.ends_with(".d.ts") || file.ends_with(".d.mts") || file.ends_with(".d.cts")
 }
 
-fn is_generated_source(file: &str, source: &str) -> bool {
+pub(crate) fn is_generated_source(file: &str, source: &str) -> bool {
     let lower_file = file.to_ascii_lowercase();
     let generated_path = lower_file.split('/').any(|part| {
         matches!(part, "generated" | "__generated__")

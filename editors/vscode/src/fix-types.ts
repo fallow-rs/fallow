@@ -72,9 +72,11 @@ export interface FixAction {
    *   removal is withheld because the same `export` keyword also exports a
    *   name that is in use, as in `export const { a, b } = x;`. Counted by
    *   `skipped_shared_declarations`).
+   * - `generated_source` (#4912: the file is generated code, and its
+   *   generator writes it again, so the export removal is withheld).
    *
-   * The three `low_confidence_*` reasons, `kept_re_export` and
-   * `shared_declaration_in_use` are
+   * The three `low_confidence_*` reasons, `kept_re_export`,
+   * `shared_declaration_in_use` and `generated_source` are
    * INTENTIONAL skips: they do NOT cause a non-zero exit code (unlike
    * `content_changed` / `mixed_line_endings`).
    */

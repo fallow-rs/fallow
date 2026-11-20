@@ -43,6 +43,13 @@ pub mod similar_code {
     }
 }
 
+/// Whether the file at `path` with the text `source` is generated code: a
+/// generator writes it again on its next run, so an edit of it does not last.
+#[must_use]
+pub fn is_generated_file(path: &std::path::Path, source: &str) -> bool {
+    fallow_extract::is_generated_file(path, source)
+}
+
 /// Source inventory walking for coverage and upload surfaces.
 pub mod inventory {
     use std::path::Path;

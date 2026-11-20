@@ -11,7 +11,8 @@ use fallow_engine::module_graph::NamedReExport;
 use fallow_types::output_dead_code::ReachabilityCaveat;
 
 use super::plan::{
-    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, stage_fixed_content,
+    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, skip_generated_source,
+    stage_fixed_content,
 };
 
 /// Directory names whose contents are commonly consumed through paths
@@ -298,6 +299,9 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
         else {
             continue;
         };
+        if skip_generated_source(root, path, &content, input.plan) {
+            continue;
+        }
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
         let mut lists = ExportListIndex::default();
         let declarations = SharedDeclarations::scan(path, &content, &lines);
