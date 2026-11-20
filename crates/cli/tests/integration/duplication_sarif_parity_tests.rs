@@ -178,7 +178,9 @@ fn every_surface_gives_the_dupes_shape_of_the_duplication_run() {
 /// `fallow dupes --format sarif`.
 #[test]
 fn multi_run_sarif_writers_take_the_duplication_run_from_output() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace =
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("../..");
     let owner = fs::read_to_string(workspace.join("crates/output/src/analysis_sarif.rs"))
         .expect("read the owner module");
     assert!(owner.contains("pub fn extend_sarif_runs_with_duplication"));
