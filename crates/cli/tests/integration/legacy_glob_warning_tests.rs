@@ -84,9 +84,9 @@ fn ignore_patterns_warns_with_the_globstar_rewrite() {
     assert_warning(
         &output,
         "fallow: ignorePatterns glob \"src/generated/*\" does not match 1 file in a nested folder. A single \"*\" or \"?\" matches in one folder level only. This file does \
-         not match: src/generated/nested/one.ts. To keep the one-level match and stop this \
-         warning, write the names in place of \"*\" or \"?\", for example \"{name1,name2}\". To \
-         match nested folders, use \"src/generated/**\".",
+         not match: src/generated/nested/one.ts. If this config is written for the one-level \
+         match, set \"minimumVersion\" to \"3.34.0\" or higher to stop this warning. To match \
+         nested folders, use \"src/generated/**\".",
     );
 }
 
@@ -118,8 +118,8 @@ fn health_ignore_warns() {
     );
     assert_warning(
         &output,
-        "These files do not match: src/deep/a.test.ts, src/deep/b.test.ts. To keep the \
-         one-level match and stop this warning",
+        "These files do not match: src/deep/a.test.ts, src/deep/b.test.ts. If this config is \
+         written for the one-level match, set \"minimumVersion\" to \"3.34.0\" or higher",
     );
     assert_warning(&output, "To match nested folders, use \"**/*.test.ts\".");
 }
@@ -175,6 +175,55 @@ fn no_warning_when_both_rules_match_the_same_files() {
         &[],
     );
     assert_no_legacy_warning(&output);
+}
+
+#[test]
+fn minimum_version_at_the_new_rule_stops_the_warning() {
+    for version in ["3.34.0", "3.40.2"] {
+        let output = run(
+            "dead-code",
+            &format!(r#"{{"minimumVersion":"{version}","entry":["src/*.test.ts"]}}"#),
+            &[],
+        );
+        assert_no_legacy_warning(&output);
+    }
+}
+
+#[test]
+fn minimum_version_below_the_new_rule_keeps_the_warning() {
+    let output = run(
+        "dead-code",
+        r#"{"minimumVersion":"3.33.0","entry":["src/*.test.ts"]}"#,
+        &[],
+    );
+    assert_warning(
+        &output,
+        "fallow: entry glob \"src/*.test.ts\" does not match 2 files in a nested folder.",
+    );
+    assert_warning(
+        &output,
+        "If this config is written for the one-level match, set \"minimumVersion\" to \
+         \"3.34.0\" or higher to stop this warning.",
+    );
+}
+
+#[test]
+fn minimum_version_keeps_the_warning_for_a_plugin_glob() {
+    let output = run(
+        "dead-code",
+        r#"{"minimumVersion":"3.34.0","framework":[{"name":"x","usedExports":[{"pattern":"src/*.test.ts","exports":["a"]}]}]}"#,
+        &[],
+    );
+    assert_warning(
+        &output,
+        "fallow: framework[].usedExports[].pattern glob \"src/*.test.ts\" does not match 2 \
+         files in a nested folder.",
+    );
+    assert_warning(
+        &output,
+        "To keep the one-level match and stop this warning, write the names in place of \
+         \"*\" or \"?\", for example \"{name1,name2}\".",
+    );
 }
 
 #[test]

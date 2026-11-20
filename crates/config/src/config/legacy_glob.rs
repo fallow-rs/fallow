@@ -57,6 +57,17 @@ pub struct LegacyGlobNarrowing {
 /// Config fields whose globs make entry points.
 const ENTRY_SOURCE_FIELDS: [&str; 2] = ["entry", "dynamicallyLoaded"];
 
+/// The first release where a single `*` or `?` matches in one folder level
+/// only. A config with this `minimumVersion` or higher is written for that
+/// rule, so its own globs get no warning.
+const SINGLE_SEGMENT_RULE_VERSION: &str = "3.34.0";
+
+/// Field prefixes of the globs in plugin definitions (plugin files and the
+/// inline `framework` list) and in rule packs. A plugin or a rule pack can
+/// come from another file than the config, so `minimumVersion` does not
+/// stop the warning for these globs.
+const PLUGIN_FIELD_PREFIXES: [&str; 2] = ["framework[]", "rulePacks "];
+
 /// The count of files that the warning names before "and N more".
 const NAMED_FILES: usize = 3;
 
@@ -91,15 +102,36 @@ impl LegacyGlobNarrowing {
         } else {
             named
         };
+        let keep: &str = if PLUGIN_FIELD_PREFIXES
+            .iter()
+            .any(|prefix| self.field.starts_with(prefix))
+        {
+            "To keep the one-level match and stop this warning, write the names in place of \
+             \"*\" or \"?\", for example \"{name1,name2}\"."
+        } else {
+            &format!(
+                "If this config is written for the one-level match, set \"minimumVersion\" \
+                 to \"{SINGLE_SEGMENT_RULE_VERSION}\" or higher to stop this warning."
+            )
+        };
         format!(
             "fallow: {} glob \"{}\" does not match {count} {noun} in a nested folder. A \
-             single \"*\" or \"?\" matches in one folder level only. {lost}: {files}. To \
-             keep the one-level match and stop this warning, write the names in place of \"*\" \
-             or \"?\", for example \"{{name1,name2}}\". To match nested folders, use \
-             \"{}\".",
+             single \"*\" or \"?\" matches in one folder level only. {lost}: {files}. {keep} \
+             To match nested folders, use \"{}\".",
             self.field, self.pattern, self.suggestion
         )
     }
+}
+
+/// True when the config sets a `minimumVersion` at or above the release that
+/// made a single `*` or `?` match in one folder level only.
+fn written_for_single_segment_rule(config: &FallowConfig) -> bool {
+    config
+        .minimum_version
+        .as_deref()
+        .and_then(super::parsing::version_triple)
+        .zip(super::parsing::version_triple(SINGLE_SEGMENT_RULE_VERSION))
+        .is_some_and(|(declared, rule)| declared >= rule)
 }
 
 fn normalize(pattern: &str) -> &str {
@@ -290,7 +322,13 @@ impl GroupCollector {
 ///
 /// `ignorePatterns` exceptions (`!`) are left out: a file that an exception
 /// no longer lifts is not discovered, so source discovery cannot count it.
+///
+/// A config with `minimumVersion` 3.34.0 or higher gives no groups, because
+/// it is written for the single-segment rule.
 pub(super) fn collect_config_legacy_glob_groups(config: &FallowConfig) -> Vec<LegacyGlobGroup> {
+    if written_for_single_segment_rule(config) {
+        return Vec::new();
+    }
     let mut collector = GroupCollector::default();
     collector.push_config(config);
     collector.groups
@@ -471,9 +509,9 @@ mod tests {
         assert_eq!(
             found[0].message(),
             "fallow: health.ignore glob \"*.test.ts\" does not match 2 files in a nested folder. A single \"*\" or \"?\" matches in one folder level only. These files do \
-             not match: src/b.test.ts, src/deep/c.test.ts. To keep the one-level match and \
-             stop this warning, write the names in place of \"*\" or \"?\", for example \
-             \"{name1,name2}\". To match nested folders, use \"**/*.test.ts\"."
+             not match: src/b.test.ts, src/deep/c.test.ts. If this config is written for the \
+             one-level match, set \"minimumVersion\" to \"3.34.0\" or higher to stop this \
+             warning. To match nested folders, use \"**/*.test.ts\"."
         );
     }
 
@@ -491,10 +529,46 @@ mod tests {
             found[0].message(),
             "fallow: entry glob \"src/*.ts\" does not match 5 files in a nested folder. A \
              single \"*\" or \"?\" matches in one folder level only. These files do not \
-             match: src/a/a.ts, src/b/b.ts, src/c/c.ts, and 2 more. To keep the one-level match \
-             and stop this warning, write the names in place of \"*\" or \"?\", for example \
-             \"{name1,name2}\". To match nested folders, use \"src/**/*.ts\"."
+             match: src/a/a.ts, src/b/b.ts, src/c/c.ts, and 2 more. If this config is written \
+             for the one-level match, set \"minimumVersion\" to \"3.34.0\" or higher to stop \
+             this warning. To match nested folders, use \"src/**/*.ts\"."
         );
+    }
+
+    #[test]
+    fn a_plugin_glob_message_names_the_names_rewrite() {
+        let files = paths(&["src/a/a.ts"]);
+        let found = find_legacy_glob_narrowings(
+            &[group("framework[].usedExports[].pattern", &["src/*.ts"])],
+            &files,
+        );
+        let message = found[0].message();
+        assert!(message.contains("write the names in place of"), "{message}");
+        assert!(!message.contains("minimumVersion"), "{message}");
+    }
+
+    fn config_with(minimum_version: Option<&str>) -> FallowConfig {
+        FallowConfig {
+            minimum_version: minimum_version.map(str::to_owned),
+            entry: vec!["scripts/*.ts".to_owned()],
+            ..FallowConfig::default()
+        }
+    }
+
+    #[test]
+    fn minimum_version_at_the_single_segment_rule_drops_the_config_groups() {
+        for version in ["3.34.0", "3.34.1", "3.45.0", "4.0.0"] {
+            let groups = collect_config_legacy_glob_groups(&config_with(Some(version)));
+            assert!(groups.is_empty(), "{version}: {groups:?}");
+        }
+    }
+
+    #[test]
+    fn an_older_or_missing_minimum_version_keeps_the_config_groups() {
+        for version in [None, Some("3.33.9"), Some("3.0.0"), Some("2.99.99")] {
+            let groups = collect_config_legacy_glob_groups(&config_with(version));
+            assert_eq!(groups.len(), 1, "{version:?}");
+        }
     }
 
     #[test]
@@ -509,7 +583,7 @@ mod tests {
         assert!(
             found[0]
                 .message()
-                .contains("This file does not match: src/a/a.ts. To keep")
+                .contains("This file does not match: src/a/a.ts. If this config")
         );
     }
 
