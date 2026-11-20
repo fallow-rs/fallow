@@ -1,0 +1,10 @@
+packages: [packages/*]
+
+catalogs:
+  ui: { react: "18", unused-in-flow: "1" }
+  tools:
+    is-odd: 3.0.1
+    is-even: 1.0.0
+  old: {}
+
+overrides: { is-even: "catalog:tools" }

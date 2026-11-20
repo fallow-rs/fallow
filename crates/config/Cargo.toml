@@ -20,6 +20,7 @@ dunce = { workspace = true }
 fallow-types = { workspace = true, features = ["schema"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+deser-core = { workspace = true }
 deser-value = { workspace = true }
 deser-yaml = { workspace = true }
 jsonc-parser = { workspace = true }

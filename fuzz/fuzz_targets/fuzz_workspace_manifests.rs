@@ -14,12 +14,13 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     match selector % 4 {
-        // pnpm-workspace.yaml: the YAML parser plus the hand-written line
-        // index that maps catalog and override keys back to line numbers.
+        // pnpm-workspace.yaml: the YAML parser with source positions,
+        // which gives the packages, the catalogs and the overrides.
         0 => {
             let _ = fallow_config::yaml::parse_documents(source);
             let _ = parse_pnpm_catalog_data(source);
             let _ = parse_pnpm_workspace_overrides(source);
+            let _ = fallow_config::pnpm_workspace_packages(source);
         }
         // package.json: overrides, resolutions and catalogs, each with its own
         // line index over the raw JSON text.

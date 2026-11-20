@@ -39,6 +39,7 @@ use super::pnpm_overrides::{
     ParsedOverrideKey, PnpmOverrideData, PnpmOverrideEntry, parse_override_key,
     split_pkg_and_selector,
 };
+use super::pnpm_workspace::KeyLocation;
 
 const OVERRIDES_KEY: &str = "overrides";
 const RESOLUTIONS_KEY: &str = "resolutions";
@@ -107,6 +108,7 @@ pub fn parse_bun_package_json_resolutions(source: &str) -> PnpmOverrideData {
             parsed_key: parse_resolution_key(key),
             raw_value,
             line,
+            location: KeyLocation::Unknown,
         });
     }
     PnpmOverrideData { entries }
@@ -215,6 +217,7 @@ fn flatten_overrides(
             parsed_key,
             raw_value,
             line,
+            location: KeyLocation::Unknown,
         });
     }
 }

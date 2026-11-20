@@ -68,12 +68,12 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    CompiledIgnoreCatalogReferenceRule, ManifestPatternMatcher, PackageJson, PnpmCatalogData,
-    PnpmOverrideData, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
-    is_independent_pnpm_project, nested_member_dirs_missing, parse_bun_package_json_resolutions,
-    parse_override_key, parse_package_json_catalog_data, parse_pnpm_catalog_data,
-    parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
-    record_workspace_diagnostics,
+    CompiledIgnoreCatalogReferenceRule, KeyLocation, ManifestPatternMatcher, PackageJson,
+    PnpmCatalogData, PnpmOverrideData, ResolvedConfig, WorkspaceDiagnostic,
+    WorkspaceDiagnosticKind, WorkspaceInfo, is_independent_pnpm_project,
+    nested_member_dirs_missing, parse_bun_package_json_resolutions, parse_override_key,
+    parse_package_json_catalog_data, parse_pnpm_catalog_data, parse_pnpm_package_json_overrides,
+    parse_pnpm_workspace_overrides, record_workspace_diagnostics,
 };
 use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
@@ -320,6 +320,9 @@ fn unused_catalog_entries_of(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry
     let mut findings = Vec::new();
     for catalog in &state.data.catalogs {
         for entry in &catalog.entries {
+            if !owns_reported_line(state, entry.location) {
+                continue;
+            }
             let key = ConsumerKey {
                 package_name: entry.package_name.as_str(),
                 catalog_name: catalog.name.as_str(),
@@ -358,11 +361,30 @@ pub fn find_empty_catalog_groups(states: &[PnpmCatalogState]) -> Vec<EmptyCatalo
     states.iter().flat_map(empty_catalog_groups_of).collect()
 }
 
+/// Whether a finding can name the line of this key.
+///
+/// `fallow fix` and the editor quick fix delete the reported line of a
+/// `pnpm-workspace.yaml` finding. A key in a flow mapping shares its
+/// line with other keys, so it gives no finding.
+fn owns_reported_line(state: &PnpmCatalogState, location: KeyLocation) -> bool {
+    !fallow_types::catalog_source::is_pnpm_catalog_source(&state.source_path)
+        || matches!(location, KeyLocation::Block { .. })
+}
+
 fn empty_catalog_groups_of(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
     state
         .data
         .empty_named_catalog_groups
         .iter()
+        .filter(|group| {
+            // The fix deletes only the header line of an empty group, so a
+            // group whose value spans more lines (`old: {\n}`) gives no finding.
+            let one_line = match group.location {
+                KeyLocation::Block { line, end_line } => line == end_line,
+                _ => true,
+            };
+            one_line && owns_reported_line(state, group.location)
+        })
         .map(|group| EmptyCatalogGroup {
             catalog_name: group.name.clone(),
             path: state.source_path.clone(),
@@ -972,6 +994,30 @@ fn parse_json_key(trimmed: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_group_over_several_lines_gives_no_finding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "catalogs:\n  old: {\n    }\n  tagged: !!map {\n    }\n  gone: {}\n",
+        )
+        .expect("write pnpm-workspace.yaml");
+        let config = fallow_config::FallowConfig::default().resolve(
+            dir.path().to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        let state = gather_pnpm_catalog_state(&config, &[], true).expect("valid catalog");
+        let groups: Vec<_> = find_empty_catalog_groups(&[state])
+            .into_iter()
+            .map(|group| (group.catalog_name, group.line))
+            .collect();
+        assert_eq!(groups, [("gone".to_string(), 6)]);
+    }
 
     #[test]
     fn malformed_pnpm_workspace_yaml_records_a_diagnostic_and_skips_catalog_analysis() {

@@ -119,6 +119,8 @@ mod external_plugins;
 mod extraction;
 #[path = "integration_test/false_positive_fixes.rs"]
 mod false_positive_fixes;
+#[path = "integration_test/flow_style_pnpm_workspace.rs"]
+mod flow_style_pnpm_workspace;
 #[path = "integration_test/framework_convention_coverage_astro_gatsby.rs"]
 mod framework_convention_coverage_astro_gatsby;
 #[path = "integration_test/framework_convention_coverage_common.rs"]

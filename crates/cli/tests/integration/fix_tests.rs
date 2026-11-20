@@ -643,6 +643,34 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
     );
 }
 
+#[test]
+fn fix_keeps_a_flow_style_catalog_group_with_a_consumer() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().to_path_buf();
+    let fixture = fixture_path("flow-style-pnpm-workspace");
+    copy_dir_recursive(&fixture, &root).expect("copy fixture");
+
+    let output = run_fallow_in_root("fix", &root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "fix --yes should exit 0, stderr: {}",
+        output.stderr
+    );
+
+    let after =
+        std::fs::read_to_string(root.join("pnpm-workspace.yaml")).expect("read workspace file");
+    assert!(
+        after
+            .lines()
+            .any(|line| line == "  ui: { react: \"18\", unused-in-flow: \"1\" }"),
+        "the flow-style group must stay. File:\n{after}"
+    );
+    assert!(
+        !after.contains("old: {}"),
+        "the empty group must go. File:\n{after}"
+    );
+}
+
 /// End-to-end regression for the issue #335 fix: running `fallow fix --yes`
 /// against the canonical `issue-329-pnpm-catalog` fixture must produce a
 /// `pnpm-workspace.yaml` whose emptied named catalog (`react17`, whose

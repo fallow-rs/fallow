@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::{
     DeclaredPattern, ManifestCache, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
     collect_declared_patterns, expand_patterns_to_workspaces, missing_dir_patterns,
-    parse_pnpm_workspace_yaml, register_matched_workspace,
+    pnpm_workspace_packages, register_matched_workspace,
     undeclared::{is_ignored_scan_dir, is_undeclared_scan_skip_dir},
 };
 
@@ -207,7 +207,7 @@ pub(super) fn nested_declared_patterns(project_dir: &Path) -> Vec<DeclaredPatter
     let Ok(content) = std::fs::read_to_string(&source) else {
         return Vec::new();
     };
-    parse_pnpm_workspace_yaml(&content)
+    pnpm_workspace_packages(&content)
         .into_iter()
         .map(|pattern| DeclaredPattern {
             pattern,

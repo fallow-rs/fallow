@@ -508,86 +508,9 @@ fn collect_matched_workspace_dir(path: &Path, input: &mut WorkspaceDirWalkInput<
     }
 }
 
-/// Parse pnpm-workspace.yaml to extract package patterns.
-pub(super) fn parse_pnpm_workspace_yaml(content: &str) -> Vec<String> {
-    let mut patterns = Vec::new();
-    let mut in_packages = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "packages:" {
-            in_packages = true;
-            continue;
-        }
-        if in_packages {
-            if trimmed.starts_with("- ") {
-                let value = trimmed
-                    .strip_prefix("- ")
-                    .unwrap_or(trimmed)
-                    .trim_matches('\'')
-                    .trim_matches('"');
-                patterns.push(value.to_string());
-            } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                break; // New top-level key
-            }
-        }
-    }
-
-    patterns
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_pnpm_workspace_basic() {
-        let yaml = "packages:\n  - 'packages/*'\n  - 'apps/*'\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*", "apps/*"]);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_double_quotes() {
-        let yaml = "packages:\n  - \"packages/*\"\n  - \"apps/*\"\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*", "apps/*"]);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_no_quotes() {
-        let yaml = "packages:\n  - packages/*\n  - apps/*\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*", "apps/*"]);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_empty() {
-        let yaml = "";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert!(patterns.is_empty());
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_no_packages_key() {
-        let yaml = "other:\n  - something\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert!(patterns.is_empty());
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_with_comments() {
-        let yaml = "packages:\n  # Comment\n  - 'packages/*'\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*"]);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_stops_at_next_key() {
-        let yaml = "packages:\n  - 'packages/*'\ncatalog:\n  react: ^18\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*"]);
-    }
 
     #[test]
     fn tsconfig_references_from_dir() {
@@ -897,19 +820,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_pnpm_workspace_malformed() {
-        let patterns = parse_pnpm_workspace_yaml(":::not yaml at all:::");
-        assert!(patterns.is_empty());
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_packages_key_empty_list() {
-        let yaml = "packages:\nother:\n  - something\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert!(patterns.is_empty());
-    }
-
-    #[test]
     fn expand_workspace_glob_exact_path() {
         let temp_dir = std::env::temp_dir().join("fallow-test-expand-exact");
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -1096,27 +1006,6 @@ mod tests {
         assert!(results.is_empty());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_with_empty_lines_between_entries() {
-        let yaml = "packages:\n  - 'packages/*'\n\n  - 'apps/*'\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*", "apps/*"]);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_mixed_quotes() {
-        let yaml = "packages:\n  - 'single/*'\n  - \"double/*\"\n  - bare/*\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["single/*", "double/*", "bare/*"]);
-    }
-
-    #[test]
-    fn parse_pnpm_workspace_with_negation() {
-        let yaml = "packages:\n  - 'packages/*'\n  - '!packages/test-*'\n";
-        let patterns = parse_pnpm_workspace_yaml(yaml);
-        assert_eq!(patterns, vec!["packages/*", "!packages/test-*"]);
     }
 
     #[test]

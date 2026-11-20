@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use deser_core::{Context, TrackLocations};
 use deser_value::{Kind, Map, Value};
 
 /// A YAML parse error.
@@ -46,6 +47,26 @@ pub fn parse(source: &str) -> Result<YamlDocument, YamlError> {
         .map_err(|error| YamlError(error.to_string()))
 }
 
+/// Parse `source` as a single YAML document and keep the source position
+/// of each node.
+///
+/// [`YamlNode::byte_range`] gives a range only for a document that this
+/// function made. The document holds a copy of `source`, so use this
+/// function for small files only.
+///
+/// # Errors
+///
+/// Returns an error in the same cases as [`parse`].
+pub fn parse_with_locations(source: &str) -> Result<YamlDocument, YamlError> {
+    let config = deser_yaml::DeserializerConfig::builder()
+        .context(Context::with(TrackLocations(true)))
+        .build();
+    config
+        .from_str::<Value>(source)
+        .map(YamlDocument)
+        .map_err(|error| YamlError(error.to_string()))
+}
+
 /// Parse every document of the YAML stream in `source`.
 ///
 /// An empty stream returns no documents.
@@ -75,6 +96,13 @@ impl<'a> YamlNode<'a> {
     #[must_use]
     pub fn is_null(self) -> bool {
         self.0.is_null()
+    }
+
+    /// The byte range of the node in the source. `None` when the document
+    /// does not come from [`parse_with_locations`].
+    #[must_use]
+    pub fn byte_range(self) -> Option<std::ops::Range<usize>> {
+        self.0.span().map(|span| span.range())
     }
 
     /// The value of a boolean node.
@@ -176,7 +204,11 @@ impl<'a> YamlMapping<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_documents};
+    use super::{YamlNode, parse, parse_documents, parse_with_locations};
+
+    fn text<'s>(source: &'s str, node: YamlNode<'_>) -> &'s str {
+        &source[node.byte_range().expect("node has a range")]
+    }
 
     #[test]
     fn reads_nested_mappings_and_sequences() {
@@ -243,5 +275,139 @@ mod tests {
         let source = format!("a: {}{}\n", "[".repeat(DEPTH), "]".repeat(DEPTH));
         let document = parse(&source).unwrap();
         assert!(document.root().get("a").unwrap().as_sequence().is_some());
+    }
+
+    #[test]
+    fn plain_parse_gives_no_byte_range() {
+        let document = parse("a: 1\n").unwrap();
+        assert_eq!(document.root().byte_range(), None);
+        assert_eq!(document.root().get("a").unwrap().byte_range(), None);
+    }
+
+    #[test]
+    fn block_keys_and_values_have_byte_ranges() {
+        let source = "catalog:\n  react: ^18.2.0\n  \"@scope/lib\": '1'\n";
+        let document = parse_with_locations(source).unwrap();
+        let catalog = document.root().get("catalog").unwrap();
+        let entries: Vec<_> = catalog.as_mapping().unwrap().iter().collect();
+        let keys: Vec<_> = entries.iter().map(|(key, _)| text(source, *key)).collect();
+        let values: Vec<_> = entries
+            .iter()
+            .map(|(_, value)| text(source, *value))
+            .collect();
+        assert_eq!(keys, ["react", "\"@scope/lib\""]);
+        assert_eq!(values, ["^18.2.0", "'1'"]);
+        assert!(text(source, catalog).starts_with("react:"));
+    }
+
+    #[test]
+    fn flow_mapping_range_starts_at_the_brace() {
+        let source = "catalogs:\n  ui: { react: \"18\", vue: \"3\" }\n";
+        let document = parse_with_locations(source).unwrap();
+        let ui = document.root().get("catalogs").unwrap().get("ui").unwrap();
+        assert_eq!(text(source, ui), "{ react: \"18\", vue: \"3\" }");
+        let keys: Vec<_> = ui
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .map(|key| text(source, key))
+            .collect();
+        assert_eq!(keys, ["react", "vue"]);
+    }
+
+    #[test]
+    fn flow_sequence_items_have_byte_ranges() {
+        let source = "packages: [packages/*, 'apps/*']\n";
+        let document = parse_with_locations(source).unwrap();
+        let items: Vec<_> = document
+            .root()
+            .get("packages")
+            .and_then(YamlNode::as_sequence)
+            .unwrap()
+            .map(|item| text(source, item))
+            .collect();
+        assert_eq!(items, ["packages/*", "'apps/*'"]);
+    }
+
+    #[test]
+    fn key_before_a_null_value_has_a_byte_range() {
+        let source = "catalogs:\n  a: {}\n  legacy:\n";
+        let document = parse_with_locations(source).unwrap();
+        let entries: Vec<_> = document
+            .root()
+            .get("catalogs")
+            .and_then(YamlNode::as_mapping)
+            .unwrap()
+            .iter()
+            .collect();
+        let (key, value) = entries[1];
+        assert_eq!(text(source, key), "legacy");
+        assert!(value.is_null());
+    }
+
+    #[test]
+    fn located_parse_reads_the_same_values_as_parse() {
+        let source = "a: 1.10\nb: [x, y]\nc:\n  d: ~\n";
+        for document in [
+            parse(source).unwrap(),
+            parse_with_locations(source).unwrap(),
+        ] {
+            let root = document.root();
+            assert_eq!(root.get("a").and_then(|n| n.scalar_text()), Some("1.10"));
+            let items: Vec<_> = root
+                .get("b")
+                .and_then(YamlNode::as_sequence)
+                .unwrap()
+                .filter_map(YamlNode::as_str)
+                .collect();
+            assert_eq!(items, ["x", "y"]);
+            assert!(root.get("c").and_then(|c| c.get("d")).unwrap().is_null());
+        }
+    }
+
+    #[test]
+    fn located_parse_rejects_what_parse_rejects() {
+        assert!(parse_with_locations("a: [1, 2\n").is_err());
+        assert!(parse_with_locations("a: 1\na: 2\n").is_err());
+        assert!(parse_with_locations("---\na: 1\n---\nb: 2\n").is_err());
+        assert!(parse_with_locations("").unwrap().root().is_null());
+    }
+
+    #[test]
+    fn byte_ranges_are_byte_offsets_after_non_ascii_text() {
+        let source = "a: äöü\nb: x\n";
+        let document = parse_with_locations(source).unwrap();
+        let mapping = document.root().as_mapping().unwrap();
+        let (key, value) = mapping.iter().nth(1).unwrap();
+        assert_eq!(text(source, value), "x");
+        assert_eq!(text(source, key), "b");
+    }
+
+    #[test]
+    fn located_parse_handles_deep_flow_nesting() {
+        const DEPTH: usize = 1_000_000;
+        let source = format!("a: {}{}\n", "[".repeat(DEPTH), "]".repeat(DEPTH));
+        let document = parse_with_locations(&source).unwrap();
+        assert!(document.root().get("a").unwrap().as_sequence().is_some());
+        assert!(document.root().get("a").unwrap().byte_range().is_some());
+    }
+
+    #[test]
+    fn located_parse_handles_deep_block_nesting() {
+        use std::fmt::Write as _;
+        const DEPTH: usize = 2_000;
+        let mut yaml = String::from("overrides:\n  deep:\n");
+        for level in 0..DEPTH {
+            let indent = " ".repeat(level + 4);
+            write!(yaml, "{indent}? x\n{indent}:\n").expect("writing to a String cannot fail");
+        }
+        let document = parse_with_locations(&yaml).unwrap();
+        assert!(
+            document
+                .root()
+                .get("overrides")
+                .and_then(|node| node.get("deep"))
+                .is_some()
+        );
     }
 }
