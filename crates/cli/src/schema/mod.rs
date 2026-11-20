@@ -1680,6 +1680,7 @@ mod tests {
                 "license",
                 "license_note",
                 "read_only",
+                "modifies_source",
                 "code_mode_alias",
             ] {
                 assert!(
@@ -1710,6 +1711,44 @@ mod tests {
             analyze["cli_command"],
             "fallow dead-code --format json --quiet"
         );
+    }
+
+    /// `read_only: false` also covers a tool that writes a baseline or report
+    /// file on request, so `modifies_source` tells an agent which tools edit
+    /// source files.
+    #[test]
+    fn mcp_tools_block_separates_source_edits_from_report_writes() {
+        let schema = schema();
+        let tools = schema["mcp_tools"]["tools"].as_array().unwrap();
+        let row = |name: &str| {
+            tools
+                .iter()
+                .find(|t| t["name"] == name)
+                .unwrap_or_else(|| panic!("{name} in mcp_tools"))
+        };
+        for name in ["analyze", "check_changed", "find_dupes", "check_health"] {
+            assert_eq!(row(name)["read_only"], false, "{name} read_only");
+            assert_eq!(
+                row(name)["modifies_source"],
+                false,
+                "{name} modifies_source"
+            );
+        }
+        assert_eq!(row("fix_apply")["modifies_source"], true);
+        for tool in tools {
+            assert!(
+                tool["modifies_source"].is_boolean(),
+                "mcp tool {} needs a boolean modifies_source",
+                tool["name"]
+            );
+            if tool["read_only"] == true {
+                assert_eq!(
+                    tool["modifies_source"], false,
+                    "read-only tool {} cannot modify source",
+                    tool["name"]
+                );
+            }
+        }
     }
 
     /// Agents must be able to read the Code Mode allowlist off the manifest
