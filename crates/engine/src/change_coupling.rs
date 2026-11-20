@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::churn::ChurnCommit;
+use crate::workspace_scope::WorkspaceScope;
 
 /// Default maximum number of analyzed files in one commit. A larger commit
 /// is a bulk change (a rename, a format pass, a dependency bump) and creates
@@ -397,7 +398,7 @@ pub struct PairScope<'a> {
     /// Compiled `health.ignore` globs, from [`health_ignore_set`].
     pub ignore_set: &'a globset::GlobSet,
     /// Workspace roots of `--workspace` or `--changed-workspaces`.
-    pub ws_roots: Option<&'a [PathBuf]>,
+    pub ws_roots: Option<&'a WorkspaceScope>,
     /// Changed lines of the diff, when the run is diff-scoped.
     pub diff_index: Option<&'a fallow_output::DiffIndex>,
 }
@@ -416,10 +417,7 @@ impl PairScope<'_> {
         if ignored(path_a) || ignored(path_b) {
             return false;
         }
-        let in_workspace = |path: &Path| {
-            self.ws_roots
-                .is_none_or(|roots| roots.iter().any(|root| path.starts_with(root)))
-        };
+        let in_workspace = |path: &Path| self.ws_roots.is_none_or(|scope| scope.contains(path));
         if !in_workspace(path_a) && !in_workspace(path_b) {
             return false;
         }

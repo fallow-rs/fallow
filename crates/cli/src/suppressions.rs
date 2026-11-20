@@ -153,7 +153,7 @@ fn apply_suppression_scopes(
         opts.output,
     )?;
     if let Some(ref ws_roots) = ws_scope {
-        active.retain(|s| ws_roots.iter().any(|r| s.path.starts_with(r)));
+        active.retain(|s| ws_roots.contains(&s.path));
     }
 
     apply_file_scope(active, opts);

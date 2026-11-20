@@ -32,7 +32,7 @@ pub(super) struct HealthAnalysisDataInput<'a> {
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub(super) needs_file_scores: bool,
@@ -147,7 +147,7 @@ struct RuntimeCoverageAnalysisScope<'a> {
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     test_reach: &'a SharedTestReach<'a>,
 }
 

@@ -65,7 +65,7 @@ impl UngroupedHealthSession {
     pub fn run(
         self,
         options: &HealthExecutionOptions<'_>,
-        ws_roots: Option<Vec<PathBuf>>,
+        ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     ) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
         let Self { session, config_ms } = self;
         run_ungrouped_health_on_session(options, ws_roots, &session, config_ms)
@@ -74,7 +74,7 @@ impl UngroupedHealthSession {
 
 fn run_ungrouped_health_on_session(
     options: &HealthExecutionOptions<'_>,
-    ws_roots: Option<Vec<PathBuf>>,
+    ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     session: &AnalysisSession,
     config_ms: f64,
 ) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
@@ -127,7 +127,7 @@ fn run_ungrouped_health_on_session(
 /// Returns the health command exit code for invalid inputs or analysis failures.
 pub fn run_ungrouped_health_with_session(
     options: &HealthExecutionOptions<'_>,
-    ws_roots: Option<Vec<PathBuf>>,
+    ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     session: &AnalysisSession,
     changed_files: Option<Vec<PathBuf>>,
 ) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
@@ -149,7 +149,7 @@ pub fn run_ungrouped_health_with_session(
 /// Returns the health command exit code for invalid inputs or analysis failures.
 pub fn run_ungrouped_health_with_session_artifacts(
     options: &HealthExecutionOptions<'_>,
-    ws_roots: Option<Vec<PathBuf>>,
+    ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     session: &AnalysisSession,
     changed_files: Option<Vec<PathBuf>>,
     pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
@@ -213,7 +213,7 @@ fn changed_files_analyzed(
 
 struct HealthRunPartsInput<'a, M> {
     options: &'a HealthExecutionOptions<'a>,
-    ws_roots: Option<Vec<PathBuf>>,
+    ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     config: fallow_config::ResolvedConfig,
     files: Vec<fallow_types::discover::DiscoveredFile>,
     modules: M,

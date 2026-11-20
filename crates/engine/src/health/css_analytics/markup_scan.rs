@@ -43,7 +43,7 @@ pub(super) struct MarkupCssCandidateInput<'a> {
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) css_deep: bool,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) styling_artifacts: Option<&'a StylingAnalysisArtifacts>,
     pub(super) token_candidates: &'a StylingTokenCandidateCache<'a>,
     pub(super) summary: &'a mut fallow_output::CssAnalyticsSummary,
@@ -210,7 +210,7 @@ pub(super) fn css_report_scan_target<'a>(
         return None;
     }
     if let Some(roots) = ws_roots
-        && !roots.iter().any(|root| path.starts_with(root))
+        && !roots.contains(path)
     {
         return None;
     }

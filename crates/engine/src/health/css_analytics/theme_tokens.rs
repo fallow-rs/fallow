@@ -113,7 +113,7 @@ pub(super) struct UnusedThemeTokenScanInput<'a> {
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) summary: &'a mut fallow_output::CssAnalyticsSummary,
 }
 

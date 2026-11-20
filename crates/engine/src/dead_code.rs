@@ -26,6 +26,7 @@ pub use config_patterns::config_pattern_diagnostics;
 use crate::{
     EngineResult, change_scope::ChangeScope,
     session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
+    workspace_scope::WorkspaceScope,
 };
 
 /// Run dead-code analysis from pre-parsed modules.
@@ -496,12 +497,13 @@ fn finding_id_rule_is_off(id: &str, config: &ResolvedConfig) -> bool {
 ///
 /// The full cross-workspace graph is still built before this helper runs, so
 /// cross-package imports are resolved. Only reported findings are narrowed.
-pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf]) {
-    let any_under = |path: &Path| ws_roots.iter().any(|root| path.starts_with(root));
+pub fn filter_to_workspaces(results: &mut AnalysisResults, scope: &WorkspaceScope) {
+    let any_under = |path: &Path| scope.contains(path);
     if let Some(inventory) = &mut results.shared_state {
         inventory.retain_sites(|site| any_under(&site.path));
     }
-    let pkg_jsons = ws_roots
+    let pkg_jsons = scope
+        .roots()
         .iter()
         .map(|root| root.join("package.json"))
         .collect::<Vec<_>>();
@@ -518,9 +520,8 @@ pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf])
 /// Every field is optional. A field that is `None` does not narrow the run.
 #[derive(Debug, Clone, Copy)]
 pub struct DeadCodeScope<'a> {
-    /// `--workspace`, `--changed-workspaces` and a positional path: the union
-    /// of these roots.
-    pub workspace_roots: Option<&'a [PathBuf]>,
+    /// `--workspace`, `--changed-workspaces` and a positional path.
+    pub workspace_roots: Option<&'a WorkspaceScope>,
     /// The resolved change scope: a global changed-file set or the
     /// configured package baselines.
     pub changes: Option<&'a ChangeScope>,

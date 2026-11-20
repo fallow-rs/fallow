@@ -29,7 +29,7 @@ pub(super) fn collect_findings(
     config_root: &std::path::Path,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
     max_cyclomatic: u16,
     max_cognitive: u16,
     complexity_breakdown: bool,
@@ -63,7 +63,7 @@ pub(super) struct CollectFindingsInput<'a> {
     pub(super) config_root: &'a std::path::Path,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) threshold_resolver: &'a ThresholdOverrideResolver,
     pub(super) threshold_state_tracker: &'a mut ThresholdOverrideStateTracker,
     pub(super) complexity_breakdown: bool,
@@ -155,7 +155,7 @@ fn collect_findings_module_path<'a>(
         return None;
     }
     if let Some(ws) = input.ws_roots
-        && !ws.iter().any(|root| path.starts_with(root))
+        && !ws.contains(path)
     {
         return None;
     }
@@ -280,7 +280,7 @@ pub(super) struct CrapFindingMergeInput<'a> {
     pub(super) config_root: &'a std::path::Path,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) per_function_crap:
         &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<scoring::PerFunctionCrap>>,
     pub(super) template_inherit_provenance:
@@ -567,7 +567,7 @@ fn crap_path_in_scope(path: &std::path::Path, input: &CrapFindingMergeInput<'_>)
         return false;
     }
     if let Some(ws) = input.ws_roots
-        && !ws.iter().any(|r| path.starts_with(r))
+        && !ws.contains(path)
     {
         return false;
     }

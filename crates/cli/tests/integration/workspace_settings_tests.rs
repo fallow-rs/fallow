@@ -241,3 +241,44 @@ fn an_unknown_workspaces_key_warns_and_an_unknown_settings_field_fails() {
     let output = run_fallow_in_root("dead-code", dir.path(), &["--format", "json"]);
     assert_eq!(output.code, 2, "stdout: {}", output.stdout);
 }
+
+#[test]
+fn a_nested_workspace_that_no_key_selects_keeps_its_dependency_findings() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{ "name": "mono", "private": true, "workspaces": ["packages/**"] }"#,
+    );
+    write(
+        root,
+        "packages/a/package.json",
+        r#"{ "name": "a", "main": "src/index.js", "dependencies": { "left-pad": "1.3.0" } }"#,
+    );
+    write(root, "packages/a/src/index.js", "export const a = 1;\n");
+    write(
+        root,
+        "packages/a/plugin/package.json",
+        r#"{ "name": "plugin", "main": "src/index.js", "dependencies": { "left-pad": "1.3.0" } }"#,
+    );
+    write(
+        root,
+        "packages/a/plugin/src/index.js",
+        "export const p = 1;\n",
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{ "workspaces": { "settings": { "packages/*": { "ignoreDependencies": ["left-pad"] } } } }"#,
+    );
+    let deps = names(&dead_code(root), "unused_dependencies", "package_name");
+    assert!(
+        deps.contains(&"packages/a/plugin/package.json:left-pad".to_string()),
+        "no key selects packages/a/plugin, so it keeps its finding: {deps:?}"
+    );
+    assert!(
+        !deps.contains(&"packages/a/package.json:left-pad".to_string()),
+        "the key of packages/* hides the finding of packages/a: {deps:?}"
+    );
+}

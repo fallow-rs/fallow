@@ -112,7 +112,7 @@ pub(super) fn run_duplication_report_with_session(
         &fallow_engine::duplicates::DuplicationScope {
             changes: Some(change_scope),
             diff: resolved.diff.as_ref(),
-            workspace_roots: workspace_roots.as_deref(),
+            workspace_roots: workspace_roots.as_ref(),
         },
         session.root(),
     );
