@@ -273,6 +273,54 @@ fn vitest_vi_mock_without_sibling_does_not_surface_unresolved_import() {
     );
 }
 
+/// A manual mock repeats the exports of its own module on purpose, so the
+/// pair is not a duplicate export (issue #4855). An unrelated file with the
+/// same export stays a duplicate of the module, and a mock whose own module
+/// is absent from the group stays a duplicate of the other file.
+#[test]
+fn manual_mock_and_its_module_are_not_duplicate_exports() {
+    let root = fixture_path("vitest-manual-mock-duplicate-exports");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut groups: Vec<(String, Vec<String>)> = results
+        .duplicate_exports
+        .iter()
+        .map(|dup| {
+            let mut paths: Vec<String> = dup
+                .export
+                .locations
+                .iter()
+                .map(|loc| {
+                    loc.path
+                        .strip_prefix(&root)
+                        .unwrap_or(&loc.path)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            paths.sort();
+            (dup.export.export_name.clone(), paths)
+        })
+        .collect();
+    groups.sort();
+
+    let paths = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
+    assert_eq!(
+        groups,
+        vec![
+            (
+                "formatAmount".to_string(),
+                paths(&["src/legacy/format.ts", "src/lib/parse.ts"])
+            ),
+            (
+                "now".to_string(),
+                paths(&["src/shared/__mocks__/time.ts", "src/time.ts"])
+            ),
+        ]
+    );
+}
+
 #[test]
 fn dynamic_import_pattern_makes_files_reachable() {
     let root = fixture_path("dynamic-import-patterns");
