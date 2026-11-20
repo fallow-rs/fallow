@@ -17127,9 +17127,9 @@ export interface TraceHop {
  */
 path: string
 /**
- * 1-based line number. Import-chain hops point at the import site; the
- * terminal secret-source hop points at the source module when extraction
- * does not carry a more precise member-access span.
+ * 1-based line number. Import-chain hops point at the import site. A
+ * `secret-source` hop points at the first secret read of the module, and
+ * a `client-server-leak` sink hop at its first server-only import.
  */
 line: number
 /**
@@ -17137,6 +17137,29 @@ line: number
  */
 col: number
 role: TraceHopRole
+/**
+ * Every non-public env read that makes this module a secret source, in
+ * source order. Present only on a `secret-source` hop; the hop `line` and
+ * `col` equal the first entry.
+ */
+secret_reads?: TraceSecretRead[]
+}
+/**
+ * One non-public env read on a `secret-source` trace hop.
+ */
+export interface TraceSecretRead {
+/**
+ * The read path, for example `process.env.SESSION_SECRET`.
+ */
+name: string
+/**
+ * 1-based line number of the read.
+ */
+line: number
+/**
+ * 0-based byte column offset of the read.
+ */
+col: number
 }
 /**
  * Dead-code cross-link attached to a security candidate when fallow's dead-code

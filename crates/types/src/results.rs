@@ -35,6 +35,9 @@ pub use crate::output_dead_code::{
 };
 #[path = "results_boundary.rs"]
 mod boundary;
+#[path = "results_trace_hop.rs"]
+mod trace_hop;
+pub use trace_hop::{TraceHop, TraceHopRole, TraceSecretRead};
 #[path = "results_caller_review.rs"]
 mod caller_review;
 #[path = "results_component_health.rs"]
@@ -2853,53 +2856,6 @@ pub enum SecurityFindingKind {
     /// (`security_matchers.toml`). Serializes `"tainted-sink"`; the CWE class is
     /// carried in `category` + `cwe`. ONE variant covers all catalogue categories.
     TaintedSink,
-}
-
-/// The role a hop plays in a security finding's structural import trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum TraceHopRole {
-    /// The `"use client"` boundary file the finding is anchored on.
-    ClientBoundary,
-    /// A module that reads an untrusted input source such as request data,
-    /// where the candidate's sink argument actually traces back to that read in
-    /// the same statement (arg-level, the strong intra-module association).
-    UntrustedSource,
-    /// A module that merely contains an untrusted-input source somewhere and is
-    /// import-reachable to the sink module (module-level, issue #885). This is a
-    /// reachability signal, NOT a proven value path: the specific source value
-    /// is not shown to reach the sink argument. Labeled distinctly from
-    /// `UntrustedSource` so a consumer never reads a module-level hop as a
-    /// value-flow proof.
-    ModuleSource,
-    /// An intermediate module on the transitive import path.
-    Intermediate,
-    /// The module that reads the secret.
-    SecretSource,
-    /// The syntactic sink site of a catalogue-driven `tainted-sink` candidate
-    /// (the single hop the `tainted_sink` detector emits). Distinct from
-    /// `SecretSource`, which is specific to the `client-server-leak` rule.
-    Sink,
-}
-
-/// One hop in a security finding's structural trace. Stored as an absolute path
-/// internally; JSON serialization strips the project root via
-/// `serde_path::serialize`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct TraceHop {
-    /// File on this hop of the import chain.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub path: PathBuf,
-    /// 1-based line number. Import-chain hops point at the import site; the
-    /// terminal secret-source hop points at the source module when extraction
-    /// does not carry a more precise member-access span.
-    pub line: u32,
-    /// 0-based byte column offset.
-    pub col: u32,
-    /// Role of this hop in the chain.
-    pub role: TraceHopRole,
 }
 
 /// How strongly the untrusted-source signal is associated with the sink, a

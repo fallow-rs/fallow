@@ -510,6 +510,7 @@ fn build_tainted_sink_finding(input: &TaintedSinkFindingInput<'_>) -> SecurityFi
             line,
             col,
             role: TraceHopRole::Sink,
+            secret_reads: Vec::new(),
         }],
         actions: build_actions(),
         dead_code: None,

@@ -36,7 +36,9 @@ pub use fallow_engine::diff_scope::filter_dead_code_by_diff as filter_results_by
 /// the advisory display keeps:
 /// - the `SecretSource && touches_file` FILE-level exception (advisory keeps it so
 ///   you SEE a leak when you edit the secret-reading file; in a gate it fires on
-///   an untouched sink the moment any env-config file is touched), and
+///   an untouched sink the moment any env-config file is touched). The gate
+///   keeps a `SecretSource` hop only when a secret read of the hop
+///   (`secret_reads`, or the hop line) is on an added line, and
 /// - the `Intermediate` / `ClientBoundary` pass-through hop lines (editing an
 ///   unrelated line in a transit module is not new exposure).
 ///
@@ -46,7 +48,9 @@ pub use fallow_engine::diff_scope::filter_dead_code_by_diff as filter_results_by
 /// exposure that anchor-line-only would miss; `ModuleSource` covers the
 /// module-level cross-module source node, the role the arg-vs-module split
 /// (#1093) renamed it to, so wiring a source-module import on an added line
-/// still trips the gate). Unfilterable paths (outside `root`) are RETAINED
+/// still trips the gate). A secret read on an added line is new exposure in the
+/// same way: it fails the gate also when the module already existed (issue
+/// #4881). Unfilterable paths (outside `root`) are RETAINED
 /// (`line_in_diff` returns `true` for them): a candidate the gate cannot prove is
 /// old fails conservatively, the safe direction for a security gate.
 pub fn retain_gate_new(
@@ -70,12 +74,20 @@ pub fn retain_gate_new(
             TraceHopRole::UntrustedSource | TraceHopRole::ModuleSource | TraceHopRole::Sink
         ) && line_in_diff(path, line)
     };
+    let secret_read_added = |hop: &fallow_types::results::TraceHop| -> bool {
+        hop.role == TraceHopRole::SecretSource
+            && (line_in_diff(&hop.path, hop.line)
+                || hop
+                    .secret_reads
+                    .iter()
+                    .any(|read| line_in_diff(&hop.path, read.line)))
+    };
 
     results.security_findings.retain(|f| {
         line_in_diff(&f.path, f.line)
             || f.trace
                 .iter()
-                .any(|hop| taint_hop_added(&hop.path, hop.line, hop.role))
+                .any(|hop| taint_hop_added(&hop.path, hop.line, hop.role) || secret_read_added(hop))
             || f.reachability.as_ref().is_some_and(|reachability| {
                 reachability
                     .untrusted_source_trace
@@ -173,6 +185,10 @@ fn quote_owned_patterns(patterns: &[String]) -> String {
 }
 
 #[cfg(test)]
+#[path = "filtering_gate_tests.rs"]
+mod gate_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use fallow_engine::changed_files::filter_results_by_changed_files as filter_changed_files;
@@ -188,7 +204,10 @@ mod tests {
         filter_to_workspaces(results, std::slice::from_ref(&ws_root.to_path_buf()));
     }
 
-    fn unresolved_callee_diagnostic(path: &str, line: u32) -> SecurityUnresolvedCalleeDiagnostic {
+    pub(super) fn unresolved_callee_diagnostic(
+        path: &str,
+        line: u32,
+    ) -> SecurityUnresolvedCalleeDiagnostic {
         SecurityUnresolvedCalleeDiagnostic {
             path: PathBuf::from(path),
             line,
@@ -1344,7 +1363,7 @@ mod tests {
 
     /// A low-severity security finding with empty optional fields. Tests set
     /// the fields they check and take the rest from here.
-    fn sample_security_finding() -> SecurityFinding {
+    pub(super) fn sample_security_finding() -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
             stable_finding_id: None,
@@ -1370,7 +1389,7 @@ mod tests {
         }
     }
 
-    fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
+    pub(super) fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
         crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
     }
 
@@ -1513,18 +1532,18 @@ mod tests {
             line: 2,
             col: 0,
             trace: vec![
-                TraceHop {
-                    path: PathBuf::from("/project/src/client.tsx"),
-                    line: 2,
-                    col: 0,
-                    role: TraceHopRole::ClientBoundary,
-                },
-                TraceHop {
-                    path: PathBuf::from("/project/src/server.ts"),
-                    line: 1,
-                    col: 0,
-                    role: TraceHopRole::SecretSource,
-                },
+                TraceHop::new(
+                    PathBuf::from("/project/src/client.tsx"),
+                    2,
+                    0,
+                    TraceHopRole::ClientBoundary,
+                ),
+                TraceHop::new(
+                    PathBuf::from("/project/src/server.ts"),
+                    1,
+                    0,
+                    TraceHopRole::SecretSource,
+                ),
             ],
             ..sample_security_finding()
         });
@@ -1558,18 +1577,18 @@ mod tests {
                 taint_confidence: None,
                 untrusted_source_hop_count: Some(1),
                 untrusted_source_trace: vec![
-                    TraceHop {
-                        path: PathBuf::from("/project/src/route.ts"),
-                        line: 3,
-                        col: 0,
-                        role: TraceHopRole::UntrustedSource,
-                    },
-                    TraceHop {
-                        path: PathBuf::from("/project/src/runner.ts"),
-                        line: 10,
-                        col: 0,
-                        role: TraceHopRole::Sink,
-                    },
+                    TraceHop::new(
+                        PathBuf::from("/project/src/route.ts"),
+                        3,
+                        0,
+                        TraceHopRole::UntrustedSource,
+                    ),
+                    TraceHop::new(
+                        PathBuf::from("/project/src/runner.ts"),
+                        10,
+                        0,
+                        TraceHopRole::Sink,
+                    ),
                 ],
                 blast_radius: 0,
                 crosses_boundary: false,
@@ -1580,183 +1599,6 @@ mod tests {
         filter_results_by_diff(&mut results, &diff, root);
 
         assert_eq!(results.security_findings.len(), 1);
-    }
-
-    #[test]
-    fn gate_keeps_new_sink_anchor_on_added_line() {
-        let diff = build_diff(
-            "diff --git a/src/render.ts b/src/render.ts\n\
-             --- a/src/render.ts\n\
-             +++ b/src/render.ts\n\
-             @@ -11,0 +12,1 @@\n\
-             +el.innerHTML = req.query.html;\n",
-        );
-        let root = Path::new("/project");
-        let mut results = AnalysisResults::default();
-        results.security_findings.push(SecurityFinding {
-            kind: SecurityFindingKind::TaintedSink,
-            category: Some("dangerous-html".into()),
-            cwe: Some(79),
-            path: PathBuf::from("/project/src/render.ts"),
-            line: 12,
-            col: 0,
-            ..sample_security_finding()
-        });
-
-        retain_gate_new(&mut results, &diff, root);
-
-        assert_eq!(results.security_findings.len(), 1);
-    }
-
-    #[test]
-    fn gate_new_scopes_unresolved_callee_diagnostics_to_added_lines() {
-        let diff = build_diff(
-            "diff --git a/src/a.ts b/src/a.ts\n\
-             --- a/src/a.ts\n\
-             +++ b/src/a.ts\n\
-             @@ -2,1 +2,2 @@\n\
-              ctx\n\
-             +factory()(req.body.name);\n",
-        );
-        let root = Path::new("/project");
-        let mut results = AnalysisResults::default();
-        results
-            .security_unresolved_callee_diagnostics
-            .push(unresolved_callee_diagnostic("/project/src/a.ts", 3));
-        results
-            .security_unresolved_callee_diagnostics
-            .push(unresolved_callee_diagnostic("/project/src/a.ts", 20));
-
-        retain_gate_new(&mut results, &diff, root);
-
-        assert_eq!(results.security_unresolved_callee_diagnostics.len(), 1);
-        assert_eq!(results.security_unresolved_callee_diagnostics[0].line, 3);
-    }
-
-    #[test]
-    fn gate_drops_secret_source_file_touched_when_anchor_unchanged() {
-        // The SAME shape the advisory `filter_by_diff` KEEPS (a SecretSource hop
-        // whose FILE is touched, anchor line unchanged). The gate MUST DROP it:
-        // editing a file that merely reads a secret is not a new sink, and the
-        // forbidden "a sink in a changed file fails the gate" false positive.
-        let diff = build_diff(
-            "diff --git a/src/server.ts b/src/server.ts\n\
-             --- a/src/server.ts\n\
-             +++ b/src/server.ts\n\
-             @@ -8,1 +8,2 @@\n\
-              const keep = true;\n\
-             +export const db = process.env.DATABASE_URL;\n",
-        );
-        let root = Path::new("/project");
-        let mut results = AnalysisResults::default();
-        results.security_findings.push(SecurityFinding {
-            kind: SecurityFindingKind::ClientServerLeak,
-            category: None,
-            cwe: None,
-            path: PathBuf::from("/project/src/client.tsx"),
-            line: 2,
-            col: 0,
-            trace: vec![
-                TraceHop {
-                    path: PathBuf::from("/project/src/client.tsx"),
-                    line: 2,
-                    col: 0,
-                    role: TraceHopRole::ClientBoundary,
-                },
-                TraceHop {
-                    path: PathBuf::from("/project/src/server.ts"),
-                    line: 1,
-                    col: 0,
-                    role: TraceHopRole::SecretSource,
-                },
-            ],
-            ..sample_security_finding()
-        });
-
-        // Advisory keeps it; the gate drops it.
-        let mut advisory = results.clone();
-        filter_results_by_diff(&mut advisory, &diff, root);
-        assert_eq!(advisory.security_findings.len(), 1);
-
-        retain_gate_new(&mut results, &diff, root);
-        assert_eq!(results.security_findings.len(), 0);
-    }
-
-    #[test]
-    fn gate_keeps_untrusted_source_hop_on_added_line() {
-        // A pre-existing sink whose anchor is NOT added, but the PR wires a new
-        // UntrustedSource into it on an added line: genuine new exposure, kept.
-        let diff = build_diff(
-            "diff --git a/src/route.ts b/src/route.ts\n\
-             --- a/src/route.ts\n\
-             +++ b/src/route.ts\n\
-             @@ -3,0 +3,1 @@\n\
-             +import { run } from './runner';\n",
-        );
-        let root = Path::new("/project");
-        let mut results = AnalysisResults::default();
-        results.security_findings.push(SecurityFinding {
-            kind: SecurityFindingKind::TaintedSink,
-            category: Some("command-injection".into()),
-            cwe: Some(78),
-            path: PathBuf::from("/project/src/runner.ts"),
-            line: 10,
-            col: 0,
-            reachability: Some(SecurityReachability {
-                reachable_from_entry: false,
-                reachable_from_untrusted_source: true,
-                taint_confidence: None,
-                untrusted_source_hop_count: Some(1),
-                untrusted_source_trace: vec![TraceHop {
-                    path: PathBuf::from("/project/src/route.ts"),
-                    line: 3,
-                    col: 0,
-                    role: TraceHopRole::UntrustedSource,
-                }],
-                blast_radius: 0,
-                crosses_boundary: false,
-            }),
-            ..sample_security_finding()
-        });
-
-        retain_gate_new(&mut results, &diff, root);
-
-        assert_eq!(results.security_findings.len(), 1);
-    }
-
-    #[test]
-    fn gate_drops_intermediate_hop_pass_through() {
-        // Only an Intermediate (pass-through) hop sits on an added line; the sink
-        // anchor and any UntrustedSource/Sink hop are unchanged. Editing a transit
-        // module is not new exposure, so the gate drops it.
-        let diff = build_diff(
-            "diff --git a/src/transit.ts b/src/transit.ts\n\
-             --- a/src/transit.ts\n\
-             +++ b/src/transit.ts\n\
-             @@ -4,0 +4,1 @@\n\
-             +const passthrough = next;\n",
-        );
-        let root = Path::new("/project");
-        let mut results = AnalysisResults::default();
-        results.security_findings.push(SecurityFinding {
-            kind: SecurityFindingKind::TaintedSink,
-            category: Some("dangerous-html".into()),
-            cwe: Some(79),
-            path: PathBuf::from("/project/src/sink.ts"),
-            line: 20,
-            col: 0,
-            trace: vec![TraceHop {
-                path: PathBuf::from("/project/src/transit.ts"),
-                line: 4,
-                col: 0,
-                role: TraceHopRole::Intermediate,
-            }],
-            ..sample_security_finding()
-        });
-
-        retain_gate_new(&mut results, &diff, root);
-
-        assert!(results.security_findings.is_empty());
     }
 
     #[test]

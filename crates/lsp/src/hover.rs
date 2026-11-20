@@ -267,9 +267,7 @@ fn security_hover_markdown(
 fn security_next_step(finding: &fallow_api::editor_results::SecurityFinding) -> &'static str {
     match finding.kind {
         SecurityFindingKind::ClientServerLeak => {
-            "Next: check whether the import is type-only, server-only, or behind a build-time \
-             guard; if the value never ships to the client bundle, this candidate is a false \
-             positive."
+            fallow_types::security_next_step::client_server_leak_next_step(finding)
         }
         SecurityFindingKind::TaintedSink if finding.dead_code.is_some() => {
             "Next: verify the dead-code finding and delete the code if safe; otherwise verify \

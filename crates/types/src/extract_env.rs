@@ -67,3 +67,50 @@ pub fn is_public_env_path(path: &str) -> bool {
     }
     false
 }
+
+/// The syntax that reads an env var.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum EnvReadForm {
+    /// `process.env.X` or `import.meta.env.X`.
+    Dotted,
+    /// `process.env['X']` with a static key.
+    Computed,
+    /// `const { X } = process.env`, also with a rename or a default value.
+    Destructured,
+}
+
+/// One read of a non-public env var (`process.env.X`, `import.meta.env.X`).
+///
+/// Extraction records the read where it happens, so the `client-server-leak`
+/// rule can report the line of the read and can tell whether the read is in
+/// client code of a React Router route module. A public var
+/// ([`is_public_env_var`]) is not recorded.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct EnvRead {
+    /// The full read path, for example `process.env.SESSION_SECRET`.
+    pub name: String,
+    /// The byte offset of the var name in the source: the property of a
+    /// member read, or the key of a destructured property.
+    pub span_start: u32,
+    /// The syntax of the read.
+    pub form: EnvReadForm,
+}

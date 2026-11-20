@@ -49,11 +49,11 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
-use fallow_types::extract::ModuleInfo;
+use fallow_types::extract::{EnvRead, ModuleInfo};
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
+    SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole, TraceSecretRead,
 };
 use fallow_types::security_stable_id::SecurityStableIdInput;
 use fallow_types::suppress::IssueKind;
@@ -159,16 +159,11 @@ const fn secret_word(count: usize) -> &'static str {
     if count == 1 { "secret" } else { "secrets" }
 }
 
-/// The `member_accesses` object string for a `process.env.X` read.
-const PROCESS_ENV_OBJECT: &str = "process.env";
-/// The `member_accesses` object string for an `import.meta.env.X` read.
-const IMPORT_META_ENV_OBJECT: &str = "import.meta.env";
-/// Static env source objects that feed the client/server leak candidate rule.
-const ENV_SOURCE_OBJECTS: &[&str] = &[PROCESS_ENV_OBJECT, IMPORT_META_ENV_OBJECT];
+/// For each module that reads a non-public env secret: its reads in source
+/// order.
+type SecretSources = FxHashMap<FileId, Vec<EnvRead>>;
 
-// The public-env predicate (`is_public_env_var`, `PUBLIC_ENV_PREFIXES`) is shared
-// with the extract layer in `fallow_types::extract` (issue #890), so public env
-// vars are excluded consistently here and at source-recording time.
+#[cfg(test)]
 use fallow_types::extract::is_public_env_var;
 
 /// Blind-spot accounting surfaced in-band so the user is never told "clean" when
@@ -227,12 +222,12 @@ pub(super) fn find_security_findings(
 fn apply_route_splits(
     modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
     framework_roots: &FrameworkClientRoots,
-    secret_sources: &mut FxHashMap<FileId, Vec<String>>,
+    secret_sources: &mut SecretSources,
     server_only_sources: &mut FxHashSet<FileId>,
 ) {
     for (file_id, split) in framework_roots.route_splits() {
         if let Some(reads) = secret_sources.get_mut(&file_id) {
-            reads.retain(|read| !split.dead_only_env_reads.contains(read));
+            reads.retain(|read| !split.is_dead_offset(read.span_start));
             if reads.is_empty() {
                 secret_sources.remove(&file_id);
             }
@@ -256,35 +251,88 @@ fn apply_route_splits(
 struct LeakSources<'a> {
     graph: &'a ModuleGraph,
     modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
-    secret_sources: &'a FxHashMap<FileId, Vec<String>>,
+    secret_sources: &'a SecretSources,
     server_only_sources: &'a FxHashSet<FileId>,
     framework_roots: &'a FrameworkClientRoots,
 }
 
-/// Map each module that reads a non-public env secret to the source names it
-/// reads. `process.env.X` and `import.meta.env.X` reads both surface as
-/// `MemberAccess` rows from static-member capture.
-fn compute_secret_source_set(
-    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
-) -> FxHashMap<FileId, Vec<String>> {
-    let mut sources: FxHashMap<FileId, Vec<String>> = FxHashMap::default();
+/// Map each module that reads a non-public env secret to its reads, in
+/// source order. Extraction records the reads (`ModuleInfo::env_reads`) and
+/// skips public vars.
+fn compute_secret_source_set(modules_by_id: &FxHashMap<FileId, &ModuleInfo>) -> SecretSources {
+    let mut sources = SecretSources::default();
     for (&file_id, module) in modules_by_id {
-        let mut vars: Vec<String> = module
-            .member_accesses
-            .iter()
-            .filter(|ma| {
-                ENV_SOURCE_OBJECTS.contains(&ma.object.as_str()) && !is_public_env_var(&ma.member)
-            })
-            .map(|ma| format!("{}.{}", ma.object, ma.member))
-            .collect();
-        if vars.is_empty() {
+        if module.env_reads.is_empty() {
             continue;
         }
-        vars.sort_unstable();
-        vars.dedup();
-        sources.insert(file_id, vars);
+        let mut reads = module.env_reads.clone();
+        reads.sort_by_key(|read| read.span_start);
+        sources.insert(file_id, reads);
     }
     sources
+}
+
+/// The distinct read names of a module, sorted.
+fn secret_names(reads: &[EnvRead]) -> Vec<String> {
+    let mut names: Vec<String> = reads.iter().map(|read| read.name.clone()).collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// The `secret-source` hop of a module: it points at the first read and lists
+/// every read.
+fn secret_source_hop(
+    graph: &ModuleGraph,
+    file_id: FileId,
+    reads: &[EnvRead],
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> TraceHop {
+    let secret_reads: Vec<TraceSecretRead> = reads
+        .iter()
+        .map(|read| {
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, file_id, read.span_start);
+            TraceSecretRead {
+                name: read.name.clone(),
+                line,
+                col,
+            }
+        })
+        .collect();
+    let (line, col) = secret_reads
+        .first()
+        .map_or((1, 0), |read| (read.line, read.col));
+    TraceHop {
+        path: graph.modules[file_id.0 as usize].path.clone(),
+        line,
+        col,
+        role: TraceHopRole::SecretSource,
+        secret_reads,
+    }
+}
+
+/// The offset of the first server-only import of a module that ships to the
+/// client. `None` for a module that is a sink for another reason, such as a
+/// React Router `.server` module.
+fn first_server_only_import_start(scan: &LeakScanInput<'_>, file_id: FileId) -> Option<u32> {
+    let module = scan.modules_by_id.get(&file_id)?;
+    let excluded = scan.excluded_spans.get(&file_id);
+    module
+        .imports
+        .iter()
+        .filter(|import| super::server_only::is_server_only_import(import))
+        .map(|import| import.span.start)
+        .filter(|start| excluded.is_none_or(|spans| !spans.contains(start)))
+        .min()
+}
+
+/// The `(line, col)` of the first server-only import of a module, or the
+/// module start.
+fn server_only_location(scan: &LeakScanInput<'_>, file_id: FileId) -> (u32, u32) {
+    first_server_only_import_start(scan, file_id).map_or((1, 0), |start| {
+        byte_offset_to_line_col(scan.line_offsets_by_file, file_id, start)
+    })
 }
 
 /// Set of file ids whose module is a SERVER-ONLY sink: it imports a server-only
@@ -492,7 +540,7 @@ fn find_client_server_leaks(
 struct LeakScanInput<'a> {
     graph: &'a ModuleGraph,
     modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
-    secret_sources: &'a FxHashMap<FileId, Vec<String>>,
+    secret_sources: &'a SecretSources,
     server_only_sources: &'a FxHashSet<FileId>,
     framework_roots: &'a FrameworkClientRoots,
     suppressions: &'a SuppressionContext<'a>,
@@ -548,12 +596,7 @@ fn emit_direct_client_file_leaks(
     // Direct case: the client file itself reads a non-public secret. The
     // most direct leak; no import hop needed.
     if scan.secret_sources.contains_key(&client_id) {
-        findings.push(build_direct_finding(
-            scan.graph,
-            client_id,
-            kind,
-            scan.secret_sources,
-        ));
+        findings.push(build_direct_finding(scan, client_id, kind));
         // Still count its dynamic-import blind spot below.
     }
 
@@ -563,9 +606,7 @@ fn emit_direct_client_file_leaks(
     // import hop needed. The transitive server-only emit below is gated so a
     // file that is both a direct AND a transitive sink is flagged once.
     if scan.server_only_sources.contains(&client_id) {
-        findings.push(build_direct_server_only_finding(
-            scan.graph, client_id, kind,
-        ));
+        findings.push(build_direct_server_only_finding(scan, client_id, kind));
     }
 }
 
@@ -617,17 +658,19 @@ fn emit_transitive_client_file_leaks(
 
 /// Walk the BFS parent map from `sink_id` back to `client_id`, building the
 /// shortest-path trace. Each non-terminal hop's line is the import site in that
-/// file (where it imports the NEXT hop); the terminal sink hop has no outgoing
-/// edge in the chain so it anchors at line 1 with `terminal_role`. Shared by the
-/// secret-leak (`SecretSource`) and server-only (`Sink`) findings.
+/// file (where it imports the NEXT hop). The terminal hop points at the first
+/// secret read (`SecretSource`) or the first server-only import (`Sink`), and
+/// falls back to the module start when the module has neither. Shared by the
+/// secret-leak and server-only findings.
 fn build_client_server_trace(
-    graph: &ModuleGraph,
+    scan: &LeakScanInput<'_>,
     client_id: FileId,
     sink_id: FileId,
     parent: &FxHashMap<FileId, (FileId, Option<u32>)>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
     terminal_role: TraceHopRole,
 ) -> Vec<TraceHop> {
+    let graph = scan.graph;
+    let line_offsets_by_file = scan.line_offsets_by_file;
     // Walk parent pointers from the sink back to the client, then reverse.
     let mut chain: Vec<FileId> = vec![sink_id];
     let mut cursor = sink_id;
@@ -642,40 +685,55 @@ fn build_client_server_trace(
 
     let mut trace: Vec<TraceHop> = Vec::with_capacity(chain.len());
     for (idx, &file_id) in chain.iter().enumerate() {
+        let Some(&next) = chain.get(idx + 1) else {
+            trace.push(terminal_hop(scan, sink_id, terminal_role));
+            continue;
+        };
         let role = if idx == 0 {
             TraceHopRole::ClientBoundary
-        } else if file_id == sink_id {
-            terminal_role
         } else {
             TraceHopRole::Intermediate
         };
         // The line for a non-terminal hop is where it imports the NEXT hop.
-        // Member-access / import extraction does not carry a precise span for the
-        // terminal sink hop, so it falls back to the source module start.
-        let (line, col) = if let Some(&next) = chain.get(idx + 1) {
-            parent
-                .get(&next)
-                .and_then(|&(_, span)| span)
-                .map_or((1, 0), |s| {
-                    byte_offset_to_line_col(line_offsets_by_file, file_id, s)
-                })
-        } else {
-            (1, 0)
-        };
+        let (line, col) = parent
+            .get(&next)
+            .and_then(|&(_, span)| span)
+            .map_or((1, 0), |s| {
+                byte_offset_to_line_col(line_offsets_by_file, file_id, s)
+            });
         trace.push(TraceHop {
             path: graph.modules[file_id.0 as usize].path.clone(),
             line,
             col,
             role,
+            secret_reads: Vec::new(),
         });
     }
     trace
 }
 
+/// The last hop of a transitive trace: the module that reads the secret or
+/// imports the server-only code.
+fn terminal_hop(scan: &LeakScanInput<'_>, sink_id: FileId, role: TraceHopRole) -> TraceHop {
+    if role == TraceHopRole::SecretSource
+        && let Some(reads) = scan.secret_sources.get(&sink_id)
+    {
+        return secret_source_hop(scan.graph, sink_id, reads, scan.line_offsets_by_file);
+    }
+    let (line, col) = server_only_location(scan, sink_id);
+    TraceHop {
+        path: scan.graph.modules[sink_id.0 as usize].path.clone(),
+        line,
+        col,
+        role,
+        secret_reads: Vec::new(),
+    }
+}
+
 /// Reconstruct the shortest path `client -> ... -> secret` from the BFS parent
 /// map and build the finding. Each non-terminal hop's line is the import site in
-/// that file (where it imports the next hop); the secret-source hop has no
-/// outgoing edge in the chain so it anchors at line 1.
+/// that file (where it imports the next hop); the secret-source hop points at
+/// the first secret read.
 fn build_leak_finding(
     scan: &LeakScanInput<'_>,
     client_id: FileId,
@@ -683,19 +741,19 @@ fn build_leak_finding(
     secret_id: FileId,
     parent: &FxHashMap<FileId, (FileId, Option<u32>)>,
 ) -> SecurityFinding {
-    let secret_sources = scan.secret_sources;
     let trace = build_client_server_trace(
-        scan.graph,
+        scan,
         client_id,
         secret_id,
         parent,
-        scan.line_offsets_by_file,
         TraceHopRole::SecretSource,
     );
 
     let anchor = &trace[0];
-    let empty = Vec::new();
-    let var_list = secret_sources.get(&secret_id).unwrap_or(&empty);
+    let var_list = scan
+        .secret_sources
+        .get(&secret_id)
+        .map_or_else(Vec::new, |reads| secret_names(reads));
     let vars = var_list.join(", ");
     let word = secret_word(var_list.len());
     // Do NOT embed the secret file path in the message: the SecretSource trace
@@ -720,10 +778,7 @@ fn build_leak_finding(
     );
 
     let mut finding = build_client_server_leak_finding(evidence, trace, candidate);
-    let mut secret_names = var_list.clone();
-    secret_names.sort_unstable();
-    secret_names.dedup();
-    finding.stable_id_input = Some(SecurityStableIdInput::SecretReads(secret_names));
+    finding.stable_id_input = Some(SecurityStableIdInput::SecretReads(var_list));
     finding
 }
 
@@ -741,14 +796,7 @@ fn build_server_only_finding(
     server_id: FileId,
     parent: &FxHashMap<FileId, (FileId, Option<u32>)>,
 ) -> SecurityFinding {
-    let trace = build_client_server_trace(
-        scan.graph,
-        client_id,
-        server_id,
-        parent,
-        scan.line_offsets_by_file,
-        TraceHopRole::Sink,
-    );
+    let trace = build_client_server_trace(scan, client_id, server_id, parent, TraceHopRole::Sink);
 
     let anchor = &trace[0];
     // Do NOT embed the server module path in the message: the Sink trace hop
@@ -814,16 +862,17 @@ fn client_leak_candidate(
 
 /// Build a finding for the direct case: a `"use client"` file that itself reads
 /// a non-public secret. Trace is a single hop on the client file, which is both
-/// the boundary and the secret source.
+/// the boundary and the secret source. The finding points at the first read.
 fn build_direct_finding(
-    graph: &ModuleGraph,
+    scan: &LeakScanInput<'_>,
     client_id: FileId,
     kind: ClientRootKind,
-    secret_sources: &FxHashMap<FileId, Vec<String>>,
 ) -> SecurityFinding {
-    let path = graph.modules[client_id.0 as usize].path.clone();
-    let empty = Vec::new();
-    let var_list = secret_sources.get(&client_id).unwrap_or(&empty);
+    let reads = scan
+        .secret_sources
+        .get(&client_id)
+        .map_or(&[][..], Vec::as_slice);
+    let var_list = secret_names(reads);
     let vars = var_list.join(", ");
     let word = secret_word(var_list.len());
     let subject = kind.subject();
@@ -832,15 +881,14 @@ fn build_direct_finding(
          Candidate for verification: confirm the secret value actually reaches client-bundled \
          code (it may be guarded, server-only, or build-time-stripped)."
     );
-    let candidate =
-        client_leak_candidate(path.clone(), 1, 0, Some(SECRET_LEAK_CATEGORY.to_owned()));
-    let trace = vec![TraceHop {
-        path,
-        line: 1,
-        col: 0,
-        role: TraceHopRole::SecretSource,
-    }];
-    build_client_server_leak_finding(evidence, trace, candidate)
+    let hop = secret_source_hop(scan.graph, client_id, reads, scan.line_offsets_by_file);
+    let candidate = client_leak_candidate(
+        hop.path.clone(),
+        hop.line,
+        hop.col,
+        Some(SECRET_LEAK_CATEGORY.to_owned()),
+    );
+    build_client_server_leak_finding(evidence, vec![hop], candidate)
 }
 
 /// Build a finding for the direct SERVER-ONLY case: a `"use client"` file that is
@@ -848,13 +896,15 @@ fn build_direct_finding(
 /// `next/headers` API). No import hop is needed,
 /// so the trace is a single self-hop on the client file, which is both the client
 /// boundary and the server-only sink. Mirrors [`build_direct_finding`] for the
-/// secret case; distinguished by `category: Some("server-only-import")`.
+/// secret case; distinguished by `category: Some("server-only-import")`. The
+/// finding points at the first server-only import.
 fn build_direct_server_only_finding(
-    graph: &ModuleGraph,
+    scan: &LeakScanInput<'_>,
     client_id: FileId,
     kind: ClientRootKind,
 ) -> SecurityFinding {
-    let path = graph.modules[client_id.0 as usize].path.clone();
+    let path = scan.graph.modules[client_id.0 as usize].path.clone();
+    let (line, col) = server_only_location(scan, client_id);
     let subject = kind.subject();
     let evidence = format!(
         "{subject} directly imports SERVER-ONLY code \
@@ -862,13 +912,18 @@ fn build_direct_server_only_finding(
          node:fs / node:child_process). Candidate for verification: confirm whether this \
          server-only code is meant to run on the client."
     );
-    let candidate =
-        client_leak_candidate(path.clone(), 1, 0, Some(SERVER_ONLY_CATEGORY.to_owned()));
+    let candidate = client_leak_candidate(
+        path.clone(),
+        line,
+        col,
+        Some(SERVER_ONLY_CATEGORY.to_owned()),
+    );
     let trace = vec![TraceHop {
         path,
-        line: 1,
-        col: 0,
+        line,
+        col,
         role: TraceHopRole::Sink,
+        secret_reads: Vec::new(),
     }];
     build_client_server_leak_finding(evidence, trace, candidate)
 }

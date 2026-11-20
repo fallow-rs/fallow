@@ -4190,15 +4190,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // the function-body walk (below) can push the component stack with the
         // binding name. Runs before the body is walked. No-op on non-JSX files.
         self.react_prescan_variable_declaration(decl);
-        // Export-wrapped declarations are not visible in the surrounding
-        // statement pre-scan, so seed their direct object targets here too.
-        // Ordinary declarations are idempotent because target sets deduplicate.
+        // Export-wrapped declarations miss the statement pre-scan, so seed their direct
+        // object targets here too. Ordinary declarations are idempotent: target sets dedupe.
         self.preseed_direct_object_binding_declaration(decl);
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
             self.record_literal_key_declarator(declarator);
             self.record_declarator_function_name(declarator);
             self.record_handler_object_declarator(declarator);
+            self.record_destructured_env_reads(declarator);
         }
         walk::walk_variable_declaration(self, decl);
     }
@@ -4722,6 +4722,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        self.record_dotted_env_read(expr);
         self.capture_factory_property_access(&expr.object, expr.property.name.as_str());
         self.record_projected_member_access(&expr.object, expr.property.name.as_str());
         self.record_subclass_member_access(&expr.object, expr.property.name.as_str());
@@ -4811,10 +4812,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        self.record_computed_env_read(expr);
         if let Some(member) = expr.static_property_name() {
             self.record_subclass_member_access(&expr.object, &member.text());
-        }
-        if let Some(member) = expr.static_property_name() {
             self.record_awaited_dynamic_import_member(&expr.object, &member.text());
         }
         if let Expression::StaticMemberExpression(key) = &expr.expression

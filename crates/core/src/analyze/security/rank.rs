@@ -701,18 +701,13 @@ impl UntrustedSourceIndex {
         UntrustedSourceTrace {
             hop_count,
             trace: vec![
-                TraceHop {
-                    path: finding.path.clone(),
-                    line: source_line,
-                    col: source_col,
-                    role: source_role,
-                },
-                TraceHop {
-                    path: finding.path.clone(),
-                    line: finding.line,
-                    col: finding.col,
-                    role: TraceHopRole::Sink,
-                },
+                TraceHop::new(finding.path.clone(), source_line, source_col, source_role),
+                TraceHop::new(
+                    finding.path.clone(),
+                    finding.line,
+                    finding.col,
+                    TraceHopRole::Sink,
+                ),
             ],
         }
     }
@@ -734,6 +729,7 @@ impl UntrustedSourceIndex {
                     line: finding.line,
                     col: finding.col,
                     role: TraceHopRole::Sink,
+                    secret_reads: Vec::new(),
                 });
                 continue;
             }
@@ -759,6 +755,7 @@ impl UntrustedSourceIndex {
                 } else {
                     TraceHopRole::Intermediate
                 },
+                secret_reads: Vec::new(),
             });
         }
         Some(trace)
@@ -1038,12 +1035,7 @@ mod tests {
             line: 1,
             col: 0,
             evidence: "candidate".to_string(),
-            trace: vec![TraceHop {
-                path: path.clone(),
-                line: 1,
-                col: 0,
-                role: TraceHopRole::Sink,
-            }],
+            trace: vec![TraceHop::new(path.clone(), 1, 0, TraceHopRole::Sink)],
             actions: Vec::<IssueAction>::new(),
             dead_code: None,
             reachability: None,
