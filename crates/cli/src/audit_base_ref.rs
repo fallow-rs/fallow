@@ -58,8 +58,9 @@ pub(super) fn audit_changed_files(
 /// Whether an audit with no changed file compared HEAD with itself because a
 /// shallow clone gave it no base. True when the base was auto-detected (no
 /// `--base` and no `FALLOW_AUDIT_BASE`), the repository is a shallow clone,
-/// and `base_ref` names the HEAD commit. A CI checkout with `fetch-depth: 1` has this shape:
-/// the only commit that the clone has is HEAD, so every detected base is HEAD.
+/// and `base_ref` names the HEAD commit. A CI checkout with `fetch-depth: 1`
+/// has this shape: the only commit that the clone has is HEAD, so every
+/// detected base is HEAD.
 pub(super) fn shallow_clone_base_is_head(opts: &AuditOptions<'_>, base_ref: &str) -> bool {
     if opts.changed_since.is_some()
         || parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok()).is_some()

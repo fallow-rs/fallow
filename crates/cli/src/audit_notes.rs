@@ -66,10 +66,10 @@ fn note_empty_audit_scope(result: &AuditResult) {
     }
     if result.shallow_clone_without_base {
         eprintln!(
-            "Warning: this is a shallow clone, so the audit found no base and compared HEAD \
-             ({}) with itself. Its verdict checked nothing. Fetch the full history (for \
-             example `fetch-depth: 0` on actions/checkout), or pass --base <ref> with the \
-             ref to compare with.",
+            "Warning: this is a shallow clone, and the detected base is HEAD ({}) itself. \
+             The audit compared HEAD with itself, so its verdict checked nothing. Fetch the \
+             full history (for example `fetch-depth: 0` on actions/checkout), or pass \
+             --base <ref> with the ref to compare with.",
             result.base_ref
         );
         return;
