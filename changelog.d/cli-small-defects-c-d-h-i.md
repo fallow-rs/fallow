@@ -6,7 +6,7 @@
   (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
 - **The human output of `fallow inspect` prints the target and identity as fields.** Each field is on its own `key: value` line, not in raw JSON. A field with no value prints as `unknown`.
   (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
-- **`fallow impact status` prints a short human view.** It shows the tracking state, the record count and the store file. Bare `fallow impact` still prints the full report. The JSON and Markdown output do not change.
+- **`fallow impact status` prints a short human view.** It shows the tracking state, the record count, the store file and the store key. Bare `fallow impact` still prints the full report. The JSON and Markdown output do not change.
   (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
 - **The GitHub Action names the input that stops the "SARIF upload skipped" warning.** The warning now says `To stop this warning, set sarif: false.` The old advice, `format: json`, did not stop it.
   (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
