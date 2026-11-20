@@ -12,7 +12,7 @@ impl NegatedPatterns {
             patterns
                 .into_iter()
                 .filter_map(|p| p.strip_prefix('!'))
-                .filter_map(|p| globset::Glob::new(p).ok())
+                .filter_map(|p| crate::glob_validation::compile_path_glob(p).ok())
                 .map(|g| g.compile_matcher())
                 .collect(),
         )

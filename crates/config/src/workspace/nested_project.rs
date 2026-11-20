@@ -38,16 +38,13 @@ impl ManifestPatternMatcher {
                 Some(rest) => (&mut negative, rest),
                 None => (&mut positive, declared.pattern.as_str()),
             };
-            let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+            let pattern = crate::glob_validation::normalize_path_pattern(pattern);
             let pattern = if pattern.ends_with('/') {
                 format!("{pattern}*")
             } else {
                 pattern.to_owned()
             };
-            if let Ok(glob) = globset::GlobBuilder::new(&pattern)
-                .literal_separator(true)
-                .build()
-            {
+            if let Ok(glob) = crate::glob_validation::compile_path_glob(&pattern) {
                 builder.add(glob);
             }
         }
@@ -257,5 +254,8 @@ fn prefix_member_pattern(prefix: &str, pattern: &str) -> Option<String> {
     {
         return None;
     }
-    Some(format!("{negation}{prefix}/{body}"))
+    Some(format!(
+        "{negation}{}",
+        crate::glob_validation::literal_dir_glob(prefix, body)
+    ))
 }

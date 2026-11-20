@@ -481,7 +481,7 @@ fn build_boundary_zones(
         .iter()
         .map(|zone| ZoneInfo {
             name: zone.name.clone(),
-            patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
+            patterns: zone.patterns.clone(),
             file_count: file_counts.get(zone.name.as_str()).copied().unwrap_or(0),
             public_files: zone.public_files.clone(),
         })

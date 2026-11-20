@@ -105,7 +105,6 @@ impl FindingIgnoreMatcher {
             } else {
                 (&mut hidden, &mut hidden_origins, pattern.as_str())
             };
-            let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
             builder.add(super::compile_path_glob(pattern)?);
             origins.push(index);
         }

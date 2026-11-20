@@ -660,7 +660,7 @@ fn per_root_cache_subdir(root: &Path) -> String {
 }
 
 pub(super) fn normalize_user_glob_pattern(pattern: &str) -> &str {
-    pattern.strip_prefix("./").unwrap_or(pattern)
+    super::glob_validation::normalize_path_pattern(pattern)
 }
 
 /// Built-in discovery ignore patterns, unioned into

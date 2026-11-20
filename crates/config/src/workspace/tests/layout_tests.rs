@@ -530,3 +530,91 @@ fn recursive_glob_with_leading_dot_slash_includes_its_base_folder() {
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert!(undeclared.is_empty(), "{undeclared:?}");
 }
+
+/// A negated pattern with a leading `./` excludes the same folder as the
+/// pattern without it.
+#[test]
+fn negated_pattern_with_dot_slash_excludes_the_member() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(
+        root,
+        "packages:\n  - packages/*\n  - \"!./packages/skip\"\n",
+    );
+    write_package(&root.join("packages/keep"), r#"{"name":"keep"}"#);
+    write_package(&root.join("packages/skip"), r#"{"name":"skip"}"#);
+
+    let workspaces = discover_workspaces(root);
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["packages/keep"]
+    );
+}
+
+/// A single `*` in a negated pattern stays inside one folder level, as in a
+/// positive pattern.
+#[test]
+fn negated_single_star_stays_in_one_level() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - packages/**\n  - \"!packages/*\"\n");
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+    write_package(&root.join("packages/a/b"), r#"{"name":"b"}"#);
+
+    let workspaces = discover_workspaces(root);
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["packages/a/b"]
+    );
+}
+
+/// The folder of a nested pnpm project is a literal path in its member
+/// patterns, so `tool[1]` does not also match `tool1`.
+#[test]
+fn nested_pnpm_project_with_glob_characters_in_its_name() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - packages/*\n");
+    write_package(&root.join("tool[1]"), r#"{"name":"tool-bracket"}"#);
+    write_package(&root.join("tool1"), r#"{"name":"tool-plain"}"#);
+    std::fs::write(
+        root.join("tool[1]/pnpm-workspace.yaml"),
+        "packages:\n  - apps/*\n  - '!apps/skip'\n",
+    )
+    .unwrap();
+    write_package(&root.join("tool[1]/apps/web"), r#"{"name":"web"}"#);
+    write_package(&root.join("tool[1]/apps/skip"), r#"{"name":"skip"}"#);
+    write_package(&root.join("tool1/apps/other"), r#"{"name":"other"}"#);
+
+    let (workspaces, _) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let roots = relative_workspace_roots(root, &workspaces);
+
+    assert!(roots.contains(&"tool[1]/apps/web".to_owned()), "{roots:?}");
+    assert!(
+        !roots.contains(&"tool[1]/apps/skip".to_owned()),
+        "{roots:?}"
+    );
+    assert!(!roots.contains(&"tool1/apps/other".to_owned()), "{roots:?}");
+}
+
+/// A root `packages` entry of `./` declares the root itself, not each
+/// top-level folder, so a nested pnpm project stays independent.
+#[test]
+fn dot_slash_root_entry_does_not_declare_a_nested_project() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_layout_fixture(dir.path());
+    std::fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - ./\n  - packages/*\n",
+    )
+    .unwrap();
+
+    assert!(is_independent_pnpm_project(
+        dir.path(),
+        &dir.path().join("docs")
+    ));
+}
