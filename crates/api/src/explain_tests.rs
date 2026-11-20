@@ -1061,3 +1061,16 @@ fn structure_styling_and_coverage_rules_have_their_own_guides() {
         "the runtime rules share an example"
     );
 }
+
+/// The rule reports each option key of an object-pattern parameter on its
+/// own, so the text must not say that a destructured parameter gives no
+/// finding.
+#[test]
+fn constant_parameter_text_names_option_key_findings() {
+    let full = rule_by_id("fallow/constant-parameter").unwrap().full;
+    assert!(
+        !full.contains("rest or destructured parameter gives no finding"),
+        "{full}"
+    );
+    assert!(full.contains("option key"), "{full}");
+}

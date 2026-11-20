@@ -149,7 +149,9 @@ pub struct SecurityOutput<Config, Gate> {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
-    /// Security-specific rule and field metadata, emitted with `--explain`.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the
+    /// security rule and field definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Gate verdict, present only when `--gate <mode>` was set (issue #886).
@@ -265,7 +267,9 @@ pub struct SecuritySummaryOutput<Config, Gate> {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
-    /// Security-specific rule and field metadata, emitted with `--explain`.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the
+    /// security rule and field definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Gate verdict, present only when `--gate <mode>` was set.

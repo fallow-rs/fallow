@@ -203,8 +203,9 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     /// [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
-    /// `_meta` block with metric / rule definitions, when `--explain` was
-    /// passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the metric
+    /// and rule definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Dead-code findings scoped to the audit changeset. Absent when no file
@@ -290,7 +291,9 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// does not narrow the `health` section.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub package_baselines: Vec<crate::PackageBaselineStatus>,
-    /// Per-section `_meta` blocks, when `--explain` was passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds one block
+    /// for each section.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<CombinedMeta>,
     /// Dead-code section of the combined run.

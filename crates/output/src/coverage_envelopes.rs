@@ -288,8 +288,9 @@ pub struct CoverageAnalyzeOutput {
     pub elapsed_ms: ElapsedMs,
     /// Runtime-coverage report body.
     pub runtime_coverage: RuntimeCoverageReport,
-    /// `_meta` block with docs and metric definitions, when `--explain` was
-    /// passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+    /// URL and the metric definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 }

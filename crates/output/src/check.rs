@@ -179,8 +179,9 @@ pub struct CheckOutput {
     /// baselines were selected, including runs with a global changed-since ref.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub package_baselines: Vec<crate::PackageBaselineStatus>,
-    /// `_meta` block with docs and rule definitions, when `--explain` was
-    /// passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+    /// URL and the rule definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Non-fatal diagnostics about the project itself, from all three stages
@@ -322,8 +323,9 @@ pub struct CheckGroupedOutput {
     /// Applied package Git refs, omitted outside package-baseline runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub package_baselines: Vec<crate::PackageBaselineStatus>,
-    /// `_meta` block with docs and rule definitions, when `--explain` was
-    /// passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+    /// URL and the rule definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Diagnostics collected for the full analysis before issue grouping.

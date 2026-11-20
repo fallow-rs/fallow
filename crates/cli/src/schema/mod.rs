@@ -2,6 +2,8 @@ mod cli_reference;
 mod environment;
 mod exit_code_table;
 mod issue_labels;
+#[cfg(test)]
+mod issue_registry_tests;
 
 use std::process::ExitCode;
 
@@ -317,13 +319,9 @@ fn issue_type_row(
         .map(str::to_owned);
     let opt_in = default_severity.as_deref().map(|sev| sev == "off");
     let frameworks = kind.map_or(&[][..], frameworks_for_kind);
-    let suppress_comment = meta.suppress.map(|(token, file_level)| {
-        if file_level {
-            format!("// fallow-ignore-file {token}")
-        } else {
-            format!("// fallow-ignore-next-line {token}")
-        }
-    });
+    let suppress_comment = meta
+        .suppress
+        .map(|(token, file_level)| suppress_comment(bare_id, token, file_level));
     serde_json::json!({
         "id": bare_id,
         "rule_id": rule.id,
@@ -364,6 +362,27 @@ fn issue_type_row(
         "license_note": meta.freemium.then_some(RUNTIME_COVERAGE_LICENSE_NOTE),
         "docs_url": rule_docs_url(rule),
     })
+}
+
+/// The comment marker of a suppression comment. Unused catalog entries live
+/// in `pnpm-workspace.yaml`, where a comment starts with `#`.
+fn suppress_comment_marker(bare_id: &str) -> &'static str {
+    if bare_id == "unused-catalog-entry" {
+        "#"
+    } else {
+        "//"
+    }
+}
+
+/// The paste-ready suppression comment of an issue type.
+fn suppress_comment(bare_id: &str, token: &str, file_level: bool) -> String {
+    let marker = suppress_comment_marker(bare_id);
+    let directive = if file_level {
+        "fallow-ignore-file"
+    } else {
+        "fallow-ignore-next-line"
+    };
+    format!("{marker} {directive} {token}")
 }
 
 fn issue_type_meta(bare_id: &str, command: &str) -> IssueTypeMeta {
@@ -480,21 +499,33 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 
 fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
-        "circular-dependency" | "re-export-cycle" => {}
+        "circular-dependency" | "re-export-cycle" => {
+            m.note = Some("`fallow architecture` also reports this finding.");
+        }
         "package-cycle" => {
-            m.note = Some("Requires a workspace with two or more packages");
+            m.note = Some(
+                "Requires a workspace with two or more packages. `fallow architecture` also reports this finding.",
+            );
         }
         "boundary-violation" => {
-            m.note = Some("Requires configured boundary zones (boundaries config)");
+            m.note = Some(
+                "Requires configured boundary zones (boundaries config). `fallow architecture` also reports this finding.",
+            );
         }
         "boundary-coverage" => {
-            m.note = Some("Requires boundaries.coverage.requireAllFiles");
+            m.note = Some(
+                "Requires boundaries.coverage.requireAllFiles. `fallow architecture` also reports this finding.",
+            );
         }
         "boundary-call-violation" => {
-            m.note = Some("Requires boundaries.calls.forbidden patterns");
+            m.note = Some(
+                "Requires boundaries.calls.forbidden patterns. `fallow architecture` also reports this finding.",
+            );
         }
         "policy-violation" => {
-            m.note = Some("Requires a configured rule pack (rulePacks config)");
+            m.note = Some(
+                "Requires a configured rule pack (rulePacks config). `fallow architecture` also reports this finding.",
+            );
         }
         "invalid-client-export" => {
             m.note = Some("Requires the project to declare next");
@@ -993,9 +1024,10 @@ mod tests {
                 row["id"]
             );
             if let Some(comment) = comment.as_str() {
+                let marker = suppress_comment_marker(row["id"].as_str().unwrap());
                 assert!(
-                    comment.starts_with("// fallow-ignore-next-line ")
-                        || comment.starts_with("// fallow-ignore-file "),
+                    comment.starts_with(&format!("{marker} fallow-ignore-next-line "))
+                        || comment.starts_with(&format!("{marker} fallow-ignore-file ")),
                     "unexpected suppress_comment shape: {comment}"
                 );
                 let token = comment.split_whitespace().last().unwrap();
@@ -1026,13 +1058,9 @@ mod tests {
                 "dead-code row {id} must derive filter_flag from IssueKindMeta"
             );
 
-            let expected_comment = shared.suppress_token.map(|token| {
-                if shared.suppress_file_level {
-                    format!("// fallow-ignore-file {token}")
-                } else {
-                    format!("// fallow-ignore-next-line {token}")
-                }
-            });
+            let expected_comment = shared
+                .suppress_token
+                .map(|token| suppress_comment(id, token, shared.suppress_file_level));
             assert_eq!(
                 row["suppressible"].as_bool().unwrap(),
                 expected_comment.is_some(),

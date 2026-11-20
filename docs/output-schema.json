@@ -67,7 +67,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-section `_meta` blocks, when `--explain` was passed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds one block\nfor each section."
         },
         "check": {
           "anyOf": [
@@ -122,6 +122,11 @@
             "$ref": "#/definitions/SkippedAnalysis"
           },
           "description": "Each analysis that the run skips, with the reason, in the order dead\ncode, duplication, health. The typed programmatic API fills it. The\nCLI leaves it absent. Omitted when the run skips no analysis."
+        },
+        "kind": {
+          "type": "string",
+          "const": "combined",
+          "description": "Output discriminator. The root envelope always has the value `combined`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -212,7 +217,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with metric / rule definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the metric\nand rule definitions."
         },
         "dead_code": {
           "anyOf": [
@@ -271,6 +276,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from this run's findings. See\n`CheckOutput::next_steps` for the contract."
+        },
+        "kind": {
+          "type": "string",
+          "const": "audit",
+          "description": "Output discriminator. The root envelope always has the value `audit`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -321,6 +331,11 @@
         "docs": {
           "type": "string",
           "description": "Public documentation URL for the issue type."
+        },
+        "kind": {
+          "type": "string",
+          "const": "explain",
+          "description": "Output discriminator. The root envelope always has the value `explain`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -429,6 +444,11 @@
         },
         "_meta": {
           "description": "`_meta` block with docs and field definitions, when requested."
+        },
+        "kind": {
+          "type": "string",
+          "const": "coverage-setup",
+          "description": "Output discriminator. The root envelope always has the value `coverage-setup`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -1097,7 +1117,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the docs\nURL and the rule definitions."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -1112,6 +1132,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from this run's findings, emitted\nat the JSON root so an agent acting on the output is pointed at fallow's\nadjacent verification capabilities (trace, complexity breakdown, audit,\nworkspace scoping). Each command is runnable as-is and never mutating;\nsee [`NextStep`] for both contracts. Omitted when empty or when\n`FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`."
+        },
+        "kind": {
+          "type": "string",
+          "const": "dead-code",
+          "description": "Output discriminator. The root envelope always has the value `dead-code`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -1236,7 +1261,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the docs\nURL and the rule definitions."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -1251,6 +1276,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from the full (ungrouped) findings.\nSee [`CheckOutput::next_steps`] for the contract."
+        },
+        "kind": {
+          "type": "string",
+          "const": "dead-code-grouped",
+          "description": "Output discriminator. The root envelope always has the value `dead-code-grouped`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -1780,14 +1810,14 @@
               "type": "null"
             }
           ],
-          "description": "Project-wide health score (only populated with `--score`)."
+          "description": "Project-wide health score. A plain `fallow health` run prints it. A run\nthat selects sections prints it only with `--score`, `--min-score` or\n`--trend`."
         },
         "file_scores": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
+          "description": "Per-file health scores. A plain `fallow health` run prints them. A run\nthat selects sections prints them only with `--file-scores`. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -2018,7 +2048,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with metric definitions, when `--explain` was passed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the metric\ndefinitions."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -2033,6 +2063,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from this run's findings. See\n`CheckOutput::next_steps` for the contract."
+        },
+        "kind": {
+          "type": "string",
+          "const": "health",
+          "description": "Output discriminator. The root envelope always has the value `health`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -2337,7 +2372,12 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with docs and metric definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the docs\nURL and the metric definitions."
+        },
+        "kind": {
+          "type": "string",
+          "const": "coverage-analyze",
+          "description": "Output discriminator. The root envelope always has the value `coverage-analyze`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -3098,14 +3138,14 @@
               "type": "null"
             }
           ],
-          "description": "Project-wide health score (only populated with `--score`)."
+          "description": "Project-wide health score. A plain `fallow health` run prints it. A run\nthat selects sections prints it only with `--score`, `--min-score` or\n`--trend`."
         },
         "file_scores": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
+          "description": "Per-file health scores. A plain `fallow health` run prints them. A run\nthat selects sections prints them only with `--file-scores`. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -3421,7 +3461,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with metric / rule definitions, emitted when `--explain`\nis passed (always present in MCP responses)."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain` (and in each MCP\nresponse), it also holds the metric and rule definitions."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -3436,6 +3476,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from this run's findings. See\n`CheckOutput::next_steps` for the contract."
+        },
+        "kind": {
+          "type": "string",
+          "const": "dupes",
+          "description": "Output discriminator. The root envelope always has the value `dupes`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -5778,7 +5823,7 @@
         },
         "import_specifier": {
           "type": "string",
-          "description": "The raw import specifier from the source file."
+          "description": "The project-root-relative path of the imported file, as the analysis\nresolved it (`src/services/orders.ts`). It is not the specifier text\nof the import statement (`../services/orders`)."
         },
         "line": {
           "type": "integer",
@@ -6762,6 +6807,11 @@
         },
         "meta": {
           "$ref": "#/definitions/ReviewEnvelopeMeta"
+        },
+        "kind": {
+          "type": "string",
+          "const": "review-envelope",
+          "description": "Output discriminator. The root envelope always has the value `review-envelope`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -6997,6 +7047,11 @@
             "type": "string"
           },
           "description": "Fingerprints left unprocessed after a failure aborted the apply loop."
+        },
+        "kind": {
+          "type": "string",
+          "const": "review-reconcile",
+          "description": "Output discriminator. The root envelope always has the value `review-reconcile`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -7156,7 +7211,7 @@
           "description": "Per-rule definitions for check command output."
         }
       },
-      "description": "Metric and rule definitions emitted under `_meta` when `--explain` is\npassed (always present in MCP responses). Helps AI agents and CI systems\ninterpret metric values without re-reading the docs site."
+      "description": "The `_meta` block of an envelope. A `--format json` run of the CLI always\nsets `telemetry.analysis_run_id`. With `--explain` (and in each MCP\nresponse), the block also holds the docs URL and the field, metric and\nrule definitions, so that a CI system can read the metric values without\nthe docs site."
     },
     "HealthActionsMeta": {
       "type": "object",
@@ -9704,6 +9759,11 @@
         "boundaries": {
           "description": "Boundary zones, rules, and pre-expansion logical groups.",
           "$ref": "#/definitions/BoundariesListing"
+        },
+        "kind": {
+          "type": "string",
+          "const": "list-boundaries",
+          "description": "Output discriminator. The root envelope always has the value `list-boundaries`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -10361,7 +10421,7 @@
           ]
         },
         {
-          "description": "`fallow flags --format json`. Required `findings`, `summary`, and\n`meta` for feature-flag discovery.",
+          "description": "`fallow flags --format json`. Required `schema_version`, `version`,\n`elapsed_ms`, `feature_flags`, and `total_flags`.",
           "allOf": [
             {
               "$ref": "#/definitions/FeatureFlagsOutput"
@@ -11954,7 +12014,7 @@
         },
         "import_specifier": {
           "type": "string",
-          "description": "The raw import specifier from the source file."
+          "description": "The project-root-relative path of the imported file, as the analysis\nresolved it (`src/services/orders.ts`). It is not the specifier text\nof the import statement (`../services/orders`)."
         },
         "line": {
           "type": "integer",
@@ -14874,7 +14934,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with docs and field definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the docs\nURL and the field definitions."
         },
         "first_recorded": {
           "type": [
@@ -14982,6 +15042,11 @@
         "explicit_decision": {
           "type": "boolean",
           "description": "Whether the user ever made an explicit enable/disable decision for\nImpact tracking. `enabled: false` with `explicit_decision: false` means\n\"never asked\"; with `true` it means \"asked and declined\". Agents use\nthis to offer the impact opt-in exactly once per project."
+        },
+        "kind": {
+          "type": "string",
+          "const": "impact",
+          "description": "Output discriminator. The root envelope always has the value `impact`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -15166,7 +15231,7 @@
               "type": "null"
             }
           ],
-          "description": "Security-specific rule and field metadata, emitted with `--explain`."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the\nsecurity rule and field definitions."
         },
         "gate": {
           "anyOf": [
@@ -15221,6 +15286,11 @@
             }
           ],
           "description": "Bounded diagnostics for unresolved callee blind spots."
+        },
+        "kind": {
+          "type": "string",
+          "const": "security",
+          "description": "Output discriminator. The root envelope always has the value `security`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -15801,6 +15871,11 @@
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
           "description": "Workspace discovery diagnostics produced while reading workspace\ndeclarations. Paths are project-root-relative and use forward slashes,\nlike `workspaces[].path` and like the `workspace_diagnostics[]` array on\nthe analysis envelopes. Present for compatibility with the current wire\ncontract, even when empty."
+        },
+        "kind": {
+          "type": "string",
+          "const": "list-workspaces",
+          "description": "Output discriminator. The root envelope always has the value `list-workspaces`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -16504,7 +16579,7 @@
               "type": "null"
             }
           ],
-          "description": "Security-specific rule and field metadata, emitted with `--explain`."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the\nsecurity rule and field definitions."
         },
         "gate": {
           "anyOf": [
@@ -16527,6 +16602,11 @@
         "summary": {
           "description": "Aggregate security counts after all filters, gates, and scopes.",
           "$ref": "#/definitions/SecuritySummary"
+        },
+        "kind": {
+          "type": "string",
+          "const": "security",
+          "description": "Output discriminator. The root envelope always has the value `security`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -17695,6 +17775,11 @@
             "$ref": "#/definitions/CrossRepoProjectEntry"
           },
           "description": "Per-project rows, one for each store with recorded history."
+        },
+        "kind": {
+          "type": "string",
+          "const": "impact-cross-repo",
+          "description": "Output discriminator. The root envelope always has the value `impact-cross-repo`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -20055,6 +20140,11 @@
             "$ref": "#/definitions/SecuritySurvivor"
           },
           "description": "Ambiguous candidates keyed by finding id. These are not dismissed and are\nkept explicit so queues can decide whether to include them."
+        },
+        "kind": {
+          "type": "string",
+          "const": "security-survivors",
+          "description": "Output discriminator. The root envelope always has the value `security-survivors`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -20283,6 +20373,11 @@
             "$ref": "#/definitions/SecurityBlindSpotGroup"
           },
           "description": "Grouped unresolved callee diagnostics, derived from existing samples."
+        },
+        "kind": {
+          "type": "string",
+          "const": "security-blind-spots",
+          "description": "Output discriminator. The root envelope always has the value `security-blind-spots`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -20707,6 +20802,11 @@
             }
           ],
           "description": "`_meta` block with type-aware backend info, when applicable."
+        },
+        "kind": {
+          "type": "string",
+          "const": "inspect_target",
+          "description": "Output discriminator. The root envelope always has the value `inspect_target`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -21513,6 +21613,11 @@
         "signal_count": {
           "type": "integer",
           "description": "Count of fallow-emitted signal_ids (the anti-hallucination allowlist size)."
+        },
+        "kind": {
+          "type": "string",
+          "const": "decision-surface",
+          "description": "Output discriminator. The root envelope always has the value `decision-surface`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -21863,6 +21968,11 @@
         "injection_note": {
           "type": "string",
           "description": "The injection-resistance note (digest is graph-only; PR prose untrusted)."
+        },
+        "kind": {
+          "type": "string",
+          "const": "review-walkthrough-guide",
+          "description": "Output discriminator. The root envelope always has the value `review-walkthrough-guide`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -21927,6 +22037,11 @@
         "unanchored_count": {
           "type": "integer",
           "description": "Count of accepted judgments whose `signal_id` resolved against the live\nallowlist. Zero unanchored when this equals `accepted_count` and there are\nno rejections (the clean done-condition)."
+        },
+        "kind": {
+          "type": "string",
+          "const": "review-walkthrough-validation",
+          "description": "Output discriminator. The root envelope always has the value `review-walkthrough-validation`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -22212,6 +22327,11 @@
         "reason": {
           "type": "string",
           "description": "A human-readable summary of the trace outcome."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -22752,6 +22872,11 @@
             }
           ],
           "description": "`_meta` block; see [`FeatureFlagsMeta`]."
+        },
+        "kind": {
+          "type": "string",
+          "const": "feature-flags",
+          "description": "Output discriminator. The root envelope always has the value `feature-flags`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -23390,6 +23515,11 @@
             "$ref": "#/definitions/SuppressionInventoryFile"
           },
           "description": "Per-file suppression listings, sorted by path then line."
+        },
+        "kind": {
+          "type": "string",
+          "const": "suppression-inventory",
+          "description": "Output discriminator. The root envelope always has the value `suppression-inventory`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -23752,6 +23882,11 @@
             }
           ],
           "description": "How tests reach the value exports that the diff changes. Advisory,\nnever gates. Absent when the diff changes no value export or no diff\nis known."
+        },
+        "kind": {
+          "type": "string",
+          "const": "audit-brief",
+          "description": "Output discriminator. The root envelope always has the value `audit-brief`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -24707,6 +24842,11 @@
             "type": "string"
           },
           "description": "Plain next actions for a user or automation consumer."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -24961,6 +25101,11 @@
             "type": "string"
           },
           "description": "Plain next actions."
+        },
+        "kind": {
+          "type": "string",
+          "const": "impact",
+          "description": "Output discriminator. The root envelope always has the value `impact`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25388,6 +25533,11 @@
             "null"
           ],
           "description": "How to make the companion available, when it is not."
+        },
+        "kind": {
+          "type": "string",
+          "const": "type-aware-status",
+          "description": "Output discriminator. The root envelope always has the value `type-aware-status`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25494,6 +25644,11 @@
             }
           ],
           "description": "Exact checker-backed references when type-aware tracing is enabled."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25648,6 +25803,11 @@
             }
           ],
           "description": "Exact checker-backed member references when type-aware tracing is enabled."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25720,6 +25880,11 @@
             "$ref": "#/definitions/TraceSource"
           },
           "description": "The configs that make this file an entry point through Module\nFederation `exposes`, one per config. Absent when no Federation config\nexposes the file (issue #2796)."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25869,6 +26034,11 @@
             }
           ],
           "description": "How the code uses each imported name of the dependency. Present on\n`fallow trace --dependency`, and on the MCP `trace_dependency` tool\nwhen a usage parameter is set. Absent on\n`fallow dead-code --trace-dependency`. The object has its own\n`schema_version`."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25909,6 +26079,11 @@
             "$ref": "#/definitions/TracedCloneGroup"
           },
           "description": "Clone groups matched by the trace request."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -25990,6 +26165,11 @@
             "$ref": "#/definitions/ImpactClosureGap"
           },
           "description": "Coordination gaps between the seed and consumers."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -26522,6 +26702,11 @@
             "$ref": "#/definitions/SimilarCodeDiagnostic"
           },
           "description": "Non-severity diagnostics in deterministic order."
+        },
+        "kind": {
+          "type": "string",
+          "const": "similar-code",
+          "description": "Output discriminator. The root envelope always has the value `similar-code`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -26572,6 +26757,11 @@
             "$ref": "#/definitions/SimilarCodeDiagnostic"
           },
           "description": "Non-severity diagnostics in deterministic order."
+        },
+        "kind": {
+          "type": "string",
+          "const": "similar-code-inspect",
+          "description": "Output discriminator. The root envelope always has the value `similar-code-inspect`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -26626,6 +26816,11 @@
             "$ref": "#/definitions/SimilarCodeDiagnostic"
           },
           "description": "Non-severity diagnostics in deterministic order."
+        },
+        "kind": {
+          "type": "string",
+          "const": "similar-code-review",
+          "description": "Output discriminator. The root envelope always has the value `similar-code-review`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -26716,6 +26911,11 @@
             "null"
           ],
           "description": "Whether this setup invocation downloaded new bytes."
+        },
+        "kind": {
+          "type": "string",
+          "const": "similar-code-status",
+          "description": "Output discriminator. The root envelope always has the value `similar-code-status`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -26755,6 +26955,11 @@
         "model_removed": {
           "type": "boolean",
           "description": "Whether model artifacts were removed. Version 1 always emits false."
+        },
+        "kind": {
+          "type": "string",
+          "const": "similar-code-cache-clear",
+          "description": "Output discriminator. The root envelope always has the value `similar-code-cache-clear`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -28370,6 +28575,11 @@
             "$ref": "#/definitions/DoctorCheck"
           },
           "description": "Checks in stable contract order."
+        },
+        "kind": {
+          "type": "string",
+          "const": "doctor",
+          "description": "Output discriminator. The root envelope always has the value `doctor`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -28674,6 +28884,11 @@
         "reason": {
           "type": "string",
           "description": "Human-readable summary of the outcome."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace",
+          "description": "Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -28765,6 +28980,11 @@
         "reason": {
           "type": "string",
           "description": "Human-readable summary of the outcome."
+        },
+        "kind": {
+          "type": "string",
+          "const": "trace-error",
+          "description": "Output discriminator. The root envelope always has the value `trace-error`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -31383,7 +31603,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the docs\nURL and the rule definitions."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -31398,6 +31618,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from the full (ungrouped) findings.\nSee [`CheckOutput::next_steps`] for the contract."
+        },
+        "kind": {
+          "type": "string",
+          "const": "architecture-grouped",
+          "description": "Output discriminator. The root envelope always has the value `architecture-grouped`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -31949,7 +32174,7 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
+          "description": "`_meta` block. A `--format json` run of the CLI always sets\n`telemetry.analysis_run_id`. With `--explain`, it also holds the docs\nURL and the rule definitions."
         },
         "workspace_diagnostics": {
           "type": "array",
@@ -31964,6 +32189,11 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands computed from this run's findings, emitted\nat the JSON root so an agent acting on the output is pointed at fallow's\nadjacent verification capabilities (trace, complexity breakdown, audit,\nworkspace scoping). Each command is runnable as-is and never mutating;\nsee [`NextStep`] for both contracts. Omitted when empty or when\n`FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`."
+        },
+        "kind": {
+          "type": "string",
+          "const": "architecture",
+          "description": "Output discriminator. The root envelope always has the value `architecture`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -33645,6 +33875,11 @@
             }
           ],
           "description": "The argument recording of the dry run. Present only with\n`--record-args`. It holds counts and reasons, never argument values."
+        },
+        "kind": {
+          "type": "string",
+          "const": "mutation",
+          "description": "Output discriminator. The root envelope always has the value `mutation`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -33745,6 +33980,11 @@
         "runner": {
           "description": "The selected test runner and the verdict on its installed version.",
           "$ref": "#/definitions/MutationPlanRunner"
+        },
+        "kind": {
+          "type": "string",
+          "const": "mutation-plan",
+          "description": "Output discriminator. The root envelope always has the value `mutation-plan`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -33934,6 +34174,11 @@
             }
           ],
           "description": "The replay of the mutant. Present only with `--replay`."
+        },
+        "kind": {
+          "type": "string",
+          "const": "mutation-inspect",
+          "description": "Output discriminator. The root envelope always has the value `mutation-inspect`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
@@ -36958,6 +37203,11 @@
             "$ref": "#/definitions/MutationTask"
           },
           "description": "The tasks, sorted by file, line, column and mutant id."
+        },
+        "kind": {
+          "type": "string",
+          "const": "mutation-tasks",
+          "description": "Output discriminator. The root envelope always has the value `mutation-tasks`. An envelope nested in another envelope has no `kind`."
         }
       },
       "required": [
