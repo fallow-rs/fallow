@@ -274,6 +274,21 @@ fn read_credentials_for_change(path: &Path) -> Result<CredentialsFile, String> {
     })
 }
 
+/// Refuse a change of a file that a newer fallow wrote. A typed write
+/// drops each field that this build does not know. A file with no
+/// `version` reads as 0 and is supported.
+fn refuse_newer_version(path: &Path, credentials: &CredentialsFile) -> Result<(), String> {
+    if credentials.version <= CREDENTIALS_VERSION {
+        return Ok(());
+    }
+    Err(format!(
+        "{} has version {}, but this fallow build supports up to version {CREDENTIALS_VERSION}. \
+         Fallow did not change it. Upgrade fallow, then try again",
+        path.display(),
+        credentials.version
+    ))
+}
+
 /// Take an exclusive advisory lock on the lock file next to `path`. The lock
 /// stays until the returned file is dropped. Every process that changes the
 /// credentials file takes it, so two changes cannot overlap.
@@ -294,6 +309,7 @@ fn lock_credentials(path: &Path) -> Result<std::fs::File, String> {
 fn write_to_file(path: &Path, base_url: &str, key: &str) -> Result<(), String> {
     let _lock = lock_credentials(path)?;
     let mut credentials = read_credentials_for_change(path)?;
+    refuse_newer_version(path, &credentials)?;
     credentials.version = CREDENTIALS_VERSION;
     credentials.keys.insert(base_url.to_owned(), key.to_owned());
     write_credentials(path, &credentials)
@@ -305,6 +321,7 @@ fn remove_from_file(path: &Path, base_url: &str) -> Result<bool, String> {
     }
     let _lock = lock_credentials(path)?;
     let mut credentials = read_credentials_for_change(path)?;
+    refuse_newer_version(path, &credentials)?;
     if credentials.keys.remove(base_url).is_none() {
         return Ok(false);
     }
@@ -678,6 +695,26 @@ mod tests {
         let error = remove_from_file(&path, "https://api.fallow.cloud").unwrap_err();
         assert!(error.contains(&path.display().to_string()), "{error}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn a_change_refuses_a_file_of_a_newer_version_and_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fallow").join("credentials");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let newer = r#"{"version":2,"keys":{"https://api.fallow.cloud":"fallow_read_k1_a"},"extra":{"x":1}}"#;
+        std::fs::write(&path, newer).unwrap();
+
+        let error = write_to_file(&path, "http://localhost:3000", "fallow_read_k1_b").unwrap_err();
+        assert!(error.contains(&path.display().to_string()), "{error}");
+        let error = remove_from_file(&path, "https://api.fallow.cloud").unwrap_err();
+        assert!(error.contains(&path.display().to_string()), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
+        assert!(
+            read_credentials(&path)
+                .keys
+                .contains_key("https://api.fallow.cloud")
+        );
     }
 
     #[test]
