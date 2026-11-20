@@ -1,0 +1,6 @@
+### Fixed
+
+- **`--save-regression-baseline` keeps the other settings of a JSON config.** The save edits the `regression.baseline` property through the parsed document. Before, a string value `"regression"`, for example in `ignorePatterns`, made the save replace the object after it. A config that does not parse now stops the save with an error and exit code 2.
+- **The regression baseline in `fallow.toml` holds the analysis identity and all counts.** The save writes `analysisIdentity` and the counts of boundary, policy, re-export cycle and package cycle findings. Before, a type-aware run rejected its own saved baseline, and these counts reloaded as zero. The save also keeps a commented `# [regression.baseline]` line and the tables after the section.
+- **`fallow migrate --toml` writes each migrated setting.** The TOML output now holds `includeEntryExports`, `supportEntry`, `ignoreBinaries`, `ignoreExports`, `overrides`, `workspaces.settings` and `duplicates.normalization`, the same as the JSONC output. Before, the TOML output skipped them with no warning.
+- **`fallow init --toml` escapes workspace globs.** A workspace pattern with a `"` or a `\` character now gives a valid `fallow.toml`.
