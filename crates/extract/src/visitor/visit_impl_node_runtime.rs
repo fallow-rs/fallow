@@ -15,18 +15,24 @@ use super::{
 
 #[path = "visit_impl_commands.rs"]
 mod visit_commands;
+#[path = "visit_impl_path_references.rs"]
+mod visit_path_references;
 
 /// The CommonJS globals that name a path of the current module.
 const MODULE_PATH_GLOBALS: &[&str] = &["__filename", "__dirname"];
 
 impl ModuleInfoExtractor {
     /// Record the facts of a Node runtime call: pino transports, `register`
-    /// loaders, `child_process.fork` targets and process commands.
+    /// loaders, `child_process.fork` targets, process commands and paths
+    /// below the module directory.
     pub(super) fn record_node_runtime_call(&mut self, expr: &CallExpression<'_>) {
         self.try_record_pino_transport_targets(expr);
         self.try_record_node_module_register(expr);
         self.try_record_child_process_fork(expr);
         self.try_record_command_call(expr);
+        self.try_record_require_of_module_path(expr);
+        self.try_record_module_path_reference(expr);
+        self.try_record_process_script_arguments(expr);
     }
 
     fn is_pino_factory_binding(&self, local_name: &str) -> bool {
@@ -221,6 +227,7 @@ impl ModuleInfoExtractor {
         name: &str,
         expr: &Expression<'_>,
     ) {
+        self.record_module_relative_path_binding(name, expr);
         if !self.is_module_scope() {
             return;
         }
@@ -494,6 +501,7 @@ impl ModuleInfoExtractor {
             return;
         };
         for source in self.child_process_fork_sources_from_expression(first_arg) {
+            self.drop_path_reference(&source);
             self.dynamic_imports.push(DynamicImportInfo {
                 source,
                 span: expr.span,

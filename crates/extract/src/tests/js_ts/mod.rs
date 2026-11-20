@@ -19,6 +19,7 @@ mod jsx_runtime_from_config;
 mod load_data;
 mod member_access;
 mod module_augmentation;
+mod module_dir_path_references;
 mod new_url_node_modules;
 mod react_structural;
 mod reflective_object_uses;

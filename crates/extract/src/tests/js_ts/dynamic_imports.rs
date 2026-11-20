@@ -1703,21 +1703,6 @@ fn child_process_fork_skips_shadowed_dirname_parameter() {
 }
 
 #[test]
-fn child_process_fork_skips_shadowed_path_binding() {
-    let sources = dynamic_sources(
-        "import { fork } from 'node:child_process';\n\
-         import path from 'node:path';\n\
-         import { fileURLToPath } from 'node:url';\n\
-         function run(path) { fork(path.join(__dirname, 'child.js')); }",
-    );
-
-    assert!(
-        sources.is_empty(),
-        "a local path binding is not node:path: {sources:?}"
-    );
-}
-
-#[test]
 fn child_process_fork_skips_shadowed_file_url_to_path() {
     let sources = dynamic_sources(
         "import { fork } from 'node:child_process';\n\

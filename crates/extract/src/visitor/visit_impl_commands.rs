@@ -16,7 +16,7 @@ use crate::visitor::ModuleInfoExtractor;
 
 /// The kind of process API that a local binding names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandApi {
+pub(super) enum CommandApi {
     /// The first argument names a program (`spawn`, `execFile`, `execa`).
     Program,
     /// The first argument is shell text (`exec`, `execSync`, `execaCommand`).
@@ -80,7 +80,7 @@ fn template_head(tpl: &TemplateLiteral<'_>) -> Option<String> {
 
 impl ModuleInfoExtractor {
     /// The process API that a callee or a template tag names.
-    fn command_api_of(&self, callee: &Expression<'_>) -> Option<CommandApi> {
+    pub(super) fn command_api_of(&self, callee: &Expression<'_>) -> Option<CommandApi> {
         match callee {
             Expression::Identifier(ident) => self.bound_command_api(ident.name.as_str()),
             Expression::StaticMemberExpression(member) => {
