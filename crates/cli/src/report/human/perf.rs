@@ -340,7 +340,9 @@ fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
 ///
 /// Unlike the stage rows above, these spans are disjoint parts of one clock,
 /// so they close with a real sum: the rows plus `(other)` give WALL. The
-/// stage rows are parts of the `analysis` row. Duplication is left out,
+/// config load discovers the workspaces, so the workspaces row is a part of
+/// the `config` row. The other stage rows are parts of the `analysis` row.
+/// Duplication is left out,
 /// because in combined mode it can run beside the analysis.
 fn push_process_lines(lines: &mut Vec<String>, p: &ProcessTimings) {
     push_dimmed(
@@ -356,7 +358,10 @@ fn push_process_lines(lines: &mut Vec<String>, p: &ProcessTimings) {
     );
     push_dimmed(
         lines,
-        &format!("│  config:           {:>8.1}ms", p.config_ms),
+        &format!(
+            "│  config:           {:>8.1}ms  (with the workspaces row)",
+            p.config_ms
+        ),
     );
     if p.git_ms > 0.0 {
         push_dimmed(lines, &format!("│  git:              {:>8.1}ms", p.git_ms));
@@ -364,7 +369,7 @@ fn push_process_lines(lines: &mut Vec<String>, p: &ProcessTimings) {
     push_dimmed(
         lines,
         &format!(
-            "│  analysis:         {:>8.1}ms  (the stage rows above)",
+            "│  analysis:         {:>8.1}ms  (the other stage rows above)",
             p.analysis_ms
         ),
     );
@@ -722,6 +727,14 @@ mod tests {
 
         assert!(
             text.contains("startup:               4.0ms  (thread pool 1.0ms)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("config:                2.0ms  (with the workspaces row)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("analysis:             40.0ms  (the other stage rows above)"),
             "{text}"
         );
         assert!(text.contains("(other):               5.0ms"), "{text}");

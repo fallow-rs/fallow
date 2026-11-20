@@ -986,8 +986,12 @@ fn dead_code_performance_reports_the_process_clock_and_span_tree() {
         "the process spans are disjoint parts of the wall clock: {process}"
     );
     assert!(ms(process, "thread_pool_ms") <= ms(process, "startup_ms") + 0.01);
+    // The config load discovers the workspaces, before the analysis starts.
+    assert!(
+        ms(&timings, "workspaces_ms") <= ms(process, "config_ms") + 0.05,
+        "the workspace discovery runs inside the config span: {timings}"
+    );
     let pipeline_sum: f64 = [
-        "workspaces_ms",
         "discover_files_ms",
         "parse_extract_ms",
         "cache_update_ms",
@@ -1008,6 +1012,7 @@ fn dead_code_performance_reports_the_process_clock_and_span_tree() {
         .collect();
     assert_eq!(roots.len(), 1, "one root span: {spans:#?}");
     assert_eq!(roots[0]["name"], "process");
+    assert_eq!(span(spans, "workspaces")["parent"], "config");
     assert_eq!(span(spans, "pipeline")["parent"], "analysis");
     assert_eq!(span(spans, "parse_extract")["parent"], "analysis");
     assert_eq!(span(spans, "resolve_imports")["parent"], "pipeline");

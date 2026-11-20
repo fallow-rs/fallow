@@ -24,6 +24,10 @@ impl crate::DispatchContext<'_> {
     /// validation and a failed workspace discovery exit 2 in
     /// [`Self::finish_run`]. So a command checks its flags after the config
     /// parses and before the config validates.
+    ///
+    /// The config span of the process clock covers the resolution. The
+    /// resolution loads the config and discovers the workspaces, so the
+    /// `workspaces` stage of `--performance` is a part of the config span.
     pub(crate) fn begin_run(&self) -> Result<PendingRun, ExitCode> {
         let Some(inputs) = self.run_inputs else {
             return Err(crate::error::emit_input_error(
@@ -31,7 +35,11 @@ impl crate::DispatchContext<'_> {
                 self.output,
             ));
         };
-        match fallow_engine::resolved_run::resolve_run(inputs) {
+        let resolved =
+            crate::process_clock::time(crate::process_clock::ProcessSpan::Config, || {
+                fallow_engine::resolved_run::resolve_run(inputs)
+            });
+        match resolved {
             Err(err @ (ResolveError::ConfigInvalid { .. } | ResolveError::Workspace { .. })) => {
                 Ok(PendingRun::new(Err(err)))
             }

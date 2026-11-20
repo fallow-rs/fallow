@@ -28,11 +28,13 @@ pub struct ProcessTimings {
     pub startup_ms: f64,
     /// The part of `startup_ms` that builds the worker thread pool.
     pub thread_pool_ms: f64,
-    /// Config loading and validation for the command.
+    /// Config loading and validation for the command. The config load
+    /// discovers the workspaces, so `workspaces_ms` is a part of this span.
     pub config_ms: f64,
     /// Git calls outside the pipeline, for example `--changed-since`.
     pub git_ms: f64,
-    /// The analysis call. The pipeline stage fields are parts of this span.
+    /// The analysis call. The pipeline stage fields other than
+    /// `workspaces_ms` are parts of this span.
     pub analysis_ms: f64,
     /// Work after the analysis and before the output: scope filters, rules,
     /// baselines and gates.
@@ -85,9 +87,10 @@ impl TreeBuilder {
 /// Build the span tree for one `--performance` report.
 ///
 /// Spans come in pipeline order, and a parent always comes before its
-/// children. With process spans, `process` is the only root and the pipeline
-/// stages sit under `analysis`. Without them, the pipeline stages are the
-/// roots.
+/// children. With process spans, `process` is the only root, `workspaces`
+/// sits under `config`, and the other pipeline stages sit under `analysis`.
+/// The config load discovers the workspaces before the analysis starts.
+/// Without process spans, the pipeline stages are the roots.
 #[must_use]
 pub fn pipeline_span_tree(input: SpanTreeInput<'_>) -> Vec<PipelineSpan> {
     let t = input.timings;
@@ -95,17 +98,17 @@ pub fn pipeline_span_tree(input: SpanTreeInput<'_>) -> Vec<PipelineSpan> {
         spans: Vec::with_capacity(32),
     };
 
-    let analysis_parent = input.process.map(|process| {
+    let (config_parent, analysis_parent) = input.process.map_or((None, None), |process| {
         tree.push("process", None, process.wall_ms);
         tree.push("startup", Some("process"), process.startup_ms);
         tree.push("thread_pool", Some("startup"), process.thread_pool_ms);
         tree.push("config", Some("process"), process.config_ms);
         tree.push("git", Some("process"), process.git_ms);
         tree.push("analysis", Some("process"), process.analysis_ms);
-        "analysis"
+        (Some("config"), Some("analysis"))
     });
 
-    tree.push("workspaces", analysis_parent, t.workspaces_ms);
+    tree.push("workspaces", config_parent, t.workspaces_ms);
     tree.push("discover_files", analysis_parent, t.discover_files_ms);
     tree.push("parse_extract", analysis_parent, t.parse_extract_ms);
     tree.push(
@@ -286,6 +289,8 @@ mod tests {
         assert_eq!(tree[0].name, "process");
         assert_eq!(tree.iter().filter(|span| span.parent.is_none()).count(), 1);
         assert_eq!(parent_of(&tree, "thread_pool"), Some("startup"));
+        assert_eq!(parent_of(&tree, "workspaces"), Some("config"));
+        assert_eq!(parent_of(&tree, "discover_files"), Some("analysis"));
         assert_eq!(parent_of(&tree, "parse_extract"), Some("analysis"));
         assert_eq!(parent_of(&tree, "pipeline"), Some("analysis"));
         assert_eq!(parent_of(&tree, "output"), Some("process"));
