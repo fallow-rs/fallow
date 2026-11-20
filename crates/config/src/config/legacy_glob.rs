@@ -103,7 +103,7 @@ impl LegacyGlobNarrowing {
 }
 
 fn normalize(pattern: &str) -> &str {
-    pattern.strip_prefix("./").unwrap_or(pattern)
+    super::glob_validation::normalize_path_pattern(pattern)
 }
 
 fn has_wildcard(segment: &str) -> bool {

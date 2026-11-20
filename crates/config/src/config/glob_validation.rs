@@ -256,6 +256,17 @@ pub fn escapes_project_root(pattern: &str) -> bool {
     false
 }
 
+/// The form of a path glob that the matchers see: the pattern without its
+/// leading `./` segments. Project-root-relative paths have no such segment.
+#[must_use]
+pub fn normalize_path_pattern(pattern: &str) -> &str {
+    let mut rest = pattern;
+    while let Some(stripped) = rest.strip_prefix("./") {
+        rest = stripped;
+    }
+    rest
+}
+
 /// Compile a glob that matches project-root-relative file paths.
 ///
 /// A single `*` stays within one path segment, and only `**` crosses
@@ -264,12 +275,28 @@ pub fn escapes_project_root(pattern: &str) -> bool {
 /// does not match the files in the subfolders of `src/generated` (gitignore
 /// ignores them, because it skips a matched directory). Every path glob that a user writes in the config compiles
 /// through this function, so all of these fields match a path the same way.
+/// A leading `./` is not part of the match, so `./src/**` and `src/**` match
+/// the same paths.
 ///
 /// # Errors
 ///
 /// Returns the `globset` error when the pattern is not valid glob syntax.
 pub fn compile_path_glob(pattern: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(pattern).literal_separator(true).build()
+    GlobBuilder::new(normalize_path_pattern(pattern))
+        .literal_separator(true)
+        .build()
+}
+
+/// Join a literal directory and a glob tail into one path glob. Each glob
+/// character of `dir` is escaped, so a directory such as `app/[id]`
+/// matches only itself. An empty `dir` gives `tail`.
+#[must_use]
+pub fn literal_dir_glob(dir: &str, tail: &str) -> String {
+    let dir = dir.trim_end_matches('/');
+    if dir.is_empty() {
+        return tail.to_owned();
+    }
+    format!("{}/{tail}", globset::escape(dir))
 }
 
 /// Validate that `pattern` is a relative, non-traversal, syntactically valid
@@ -706,6 +733,45 @@ mod tests {
         ] {
             assert!(!escapes_project_root(pattern), "{pattern}");
         }
+    }
+
+    #[test]
+    fn compile_path_glob_drops_the_leading_dot_slash() {
+        let main = compile_path_glob("./src/main.ts")
+            .unwrap()
+            .compile_matcher();
+        assert!(main.is_match("src/main.ts"));
+
+        let star = compile_path_glob("././src/*.ts").unwrap().compile_matcher();
+        assert!(star.is_match("src/a.ts"));
+        assert!(!star.is_match("src/nested/a.ts"));
+    }
+
+    #[test]
+    fn normalize_path_pattern_strips_only_leading_dot_slash_segments() {
+        assert_eq!(normalize_path_pattern("./a"), "a");
+        assert_eq!(normalize_path_pattern("././a"), "a");
+        assert_eq!(normalize_path_pattern("a/./b"), "a/./b");
+        assert_eq!(normalize_path_pattern(".hidden/x"), ".hidden/x");
+        assert_eq!(normalize_path_pattern("../a"), "../a");
+        assert_eq!(normalize_path_pattern("./"), "");
+    }
+
+    #[test]
+    fn literal_dir_glob_escapes_the_directory() {
+        let zone = compile_path_glob(&literal_dir_glob("app/[id]", "**"))
+            .unwrap()
+            .compile_matcher();
+        assert!(zone.is_match("app/[id]/page.tsx"));
+        assert!(!zone.is_match("app/i/page.tsx"));
+
+        assert_eq!(literal_dir_glob("", "**/*.md"), "**/*.md");
+        assert_eq!(literal_dir_glob("docs/", "*.md"), "docs/*.md");
+
+        let brace = compile_path_glob(&literal_dir_glob("src", "{a,b}.ts"))
+            .unwrap()
+            .compile_matcher();
+        assert!(brace.is_match("src/a.ts"));
     }
 
     #[test]
