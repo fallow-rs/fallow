@@ -1295,7 +1295,7 @@ impl ModuleInfoExtractor {
         // per class so it resolves against the same class's binding, then
         // stripped back to `this.` before emission (issue #1821).
         let qualified = self.qualify_this_scope(name);
-        self.push_whole_object_use(qualified);
+        self.push_walk_order_whole_object_use(qualified);
     }
 
     /// Record one name in the whole-object set, skipping a repeat.

@@ -13,6 +13,7 @@ mod shared_state;
 mod signature_value_aliases;
 mod ssr_load_module;
 mod this_scope;
+mod walk_order;
 
 use requirements::{BindingRequirements, RequirementArena};
 use std::cell::{Cell, RefCell};
@@ -734,6 +735,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// A scoped target snapshot has no module-flat binding to resolve after scope
     /// exit. Other snapshots only credit bindings that eventually become ambiguous.
     walk_order_member_accesses: Vec<(Option<String>, String, String)>,
+    /// The `(binding, class)` pair of each whole-object use of a binding,
+    /// taken at the read. It credits the class when sibling scopes make the
+    /// module-flat binding ambiguous.
+    walk_order_whole_object_uses: Vec<(String, String)>,
     interface_property_types: FxHashMap<String, FxHashMap<String, TypePropertyTarget>>,
     interface_type_links: InterfaceTypeLinks,
     worker_env_bodies: WorkerEnvBodies,
@@ -1984,41 +1989,6 @@ impl ModuleInfoExtractor {
                 proof: SubclassAccessProof::Known(proof),
                 member: member.to_string(),
             });
-    }
-
-    /// Scoped compound targets survive scope exit; module-flat targets only need
-    /// walk-order credit when sibling scopes make their final binding ambiguous.
-    fn resolve_ambiguous_walk_order_member_accesses(&mut self) {
-        for (binding, object, member) in std::mem::take(&mut self.walk_order_member_accesses) {
-            if let Some(binding) = binding {
-                if !matches!(
-                    self.binding_target_names.get(&binding),
-                    Some(BindingTarget::Ambiguous)
-                ) {
-                    continue;
-                }
-            } else {
-                match self.expand_typed_property_compound(&object, None) {
-                    TypedPropertyExpansion::Resolved(terminal, _, _) => {
-                        self.member_accesses.push(MemberAccess {
-                            object: terminal,
-                            member: member.clone(),
-                        });
-                    }
-                    TypedPropertyExpansion::CrossModule {
-                        type_name,
-                        property_path,
-                        ..
-                    } => self.record_typed_property_member_fact(
-                        type_name,
-                        property_path,
-                        member.clone(),
-                    ),
-                    TypedPropertyExpansion::Opaque => {}
-                }
-            }
-            self.member_accesses.push(MemberAccess { object, member });
-        }
     }
 
     fn record_angular_template_member_fact(&mut self, member: String) {
@@ -3306,7 +3276,7 @@ impl ModuleInfoExtractor {
         self.resolve_structural_class_calls();
         // Before `resolve_bound_member_accesses` so the re-emitted accesses reach
         // the same typed-property expansion as unambiguous ones.
-        self.resolve_ambiguous_walk_order_member_accesses();
+        self.resolve_ambiguous_walk_order_uses();
         self.resolve_bound_member_accesses();
         self.resolve_imported_call_element_accesses();
         self.complete_binding_producer_calls();
