@@ -218,30 +218,9 @@ fn detect_ui_framework(all_deps: &[String]) -> Option<String> {
 
 /// Read workspace patterns from `pnpm-workspace.yaml`.
 fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
-    let path = root.join("pnpm-workspace.yaml");
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    let mut patterns = Vec::new();
-    let mut in_packages = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "packages:" {
-            in_packages = true;
-            continue;
-        }
-        if in_packages {
-            if let Some(value) = trimmed.strip_prefix("- ") {
-                let value = value.trim().trim_matches('\'').trim_matches('"');
-                if !value.is_empty() {
-                    patterns.push(value.to_string());
-                }
-            } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                break;
-            }
-        }
-    }
-    patterns
+    std::fs::read_to_string(root.join("pnpm-workspace.yaml"))
+        .map(|content| fallow_config::pnpm_workspace_packages(&content))
+        .unwrap_or_default()
 }
 
 /// Build a JSON config string tailored to the detected project.
@@ -1397,6 +1376,20 @@ mod tests {
         assert!(!empty_generated.contains("readiness"));
         assert!(!empty_generated.contains("score"));
         assert!(!empty_generated.contains("grade"));
+    }
+
+    #[test]
+    fn detect_project_reads_flow_style_pnpm_packages() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages: [packages/*, apps/*] # members\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("package.json"), "{}").unwrap();
+        let info = detect_project(root);
+        assert_eq!(info.workspace_patterns, ["packages/*", "apps/*"]);
     }
 
     #[test]
