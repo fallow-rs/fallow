@@ -999,7 +999,7 @@ merges these sources and keeps the first entry for each canonical directory:
    entry with a `..` segment give no member. Only pnpm gets this source: the
    nested `workspaces` of npm and yarn are not read.
 
-Three more rules keep the workspace diagnostics and the catalog checks
+Four more rules keep the workspace diagnostics and the catalog checks
 consistent:
 
 - The undeclared-workspace scan skips a `package.json` with no `name` and no
@@ -1025,6 +1025,14 @@ consistent:
   catalog state for each project. The catalog findings of a nested project name its own
   `pnpm-workspace.yaml` and member manifests, and `fallow fix` edits that
   file.
+- `PnpmWorkspaceDoc` (`crates/config/src/workspace/pnpm_workspace.rs`)
+  parses `pnpm-workspace.yaml` once and gives the `packages` patterns, the
+  catalogs and the overrides. Each entry has a `KeyLocation`. A catalog entry
+  or an empty group gives an `unused-catalog-entries` or
+  `empty-catalog-groups` finding only when its key is `Block`, because the
+  fix deletes the reported lines. A flow-style entry still resolves a
+  `catalog:` reference. When the YAML parser rejects the file, a line scan
+  still reads the `packages` block list.
 
 Source 3 is for older yarn monorepos. These repositories
 have no `workspaces` field. The root lists each package as
