@@ -2457,7 +2457,7 @@ fn materialize_base_dependency_context_links_workspace_package_node_modules() {
 /// SvelteKit writes `.svelte-kit/tsconfig.json`, which holds the path
 /// aliases of the app, and git ignores it.
 #[test]
-fn materialize_base_dependency_context_symlinks_svelte_kit_generated_dir() {
+fn materialize_base_dependency_context_copies_svelte_kit_tsconfig() {
     let host = tempfile::TempDir::new().expect("host tempdir should be created");
     let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
 

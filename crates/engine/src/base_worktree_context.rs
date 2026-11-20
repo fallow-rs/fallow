@@ -5,6 +5,7 @@
 //! instead, because the relative paths of that file must resolve in the base.
 
 use std::fs;
+use std::io::Write as _;
 use std::path::Path;
 
 /// Host directories of the root and of each workspace package that detached
@@ -18,6 +19,8 @@ pub const SVELTE_KIT_DIR: &str = ".svelte-kit";
 const TSCONFIG_FILE: &str = "tsconfig.json";
 /// Marks a directory of a base view that holds files copied from the checkout.
 const GENERATED_COPY_MARKER: &str = ".fallow-base-copy";
+/// New content of a copy before the rename that puts it in place.
+const STAGING_FILE: &str = ".fallow-base-copy.tmp";
 
 const NODE_MODULES_MARKERS: &[&str] = &[".package-lock.json", ".modules.yaml", ".yarn-state.yml"];
 const NUXT_MARKERS: &[&str] = &[
@@ -72,7 +75,7 @@ pub fn copy_generated_tsconfig(source_dir: &Path, destination_dir: &Path) -> std
         Ok(_) => return Ok(()),
         Err(error) => return Err(error),
     }
-    fs::write(&marker, b"")?;
+    replace_without_following(destination_dir, &marker, b"")?;
 
     let source = source_dir.join(TSCONFIG_FILE);
     let destination = destination_dir.join(TSCONFIG_FILE);
@@ -85,7 +88,30 @@ pub fn copy_generated_tsconfig(source_dir: &Path, destination_dir: &Path) -> std
             _ => Ok(()),
         };
     }
-    fs::write(&destination, fs::read(&source)?)
+    replace_without_following(destination_dir, &destination, &fs::read(&source)?)
+}
+
+/// Write `contents` to `destination` through a new file in the same directory
+/// and a rename. The base commit controls the files in the directory, so
+/// `destination` can be a link to a file outside the base view. A rename
+/// replaces that link and never writes through it.
+fn replace_without_following(
+    directory: &Path,
+    destination: &Path,
+    contents: &[u8],
+) -> std::io::Result<()> {
+    let staging = directory.join(STAGING_FILE);
+    match fs::remove_file(&staging) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staging)?;
+    file.write_all(contents)?;
+    drop(file);
+    fs::rename(&staging, destination)
 }
 
 /// A workspace `node_modules` or `.svelte-kit` gets its context only when the
@@ -101,5 +127,42 @@ pub fn base_has_slot_parent(worktree_path: &Path, kind: &str, relative: &Path) -
                 .is_ok_and(|metadata| metadata.file_type().is_dir())
         }
         _ => true,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_replaces_a_tracked_link_and_leaves_its_target_unchanged() {
+        let root =
+            std::env::temp_dir().join(format!("fallow-base-context-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let source = root.join("checkout");
+        let destination = root.join("base");
+        let outside = root.join("outside.txt");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(source.join(TSCONFIG_FILE), b"{\"compilerOptions\":{}}").unwrap();
+        fs::write(&outside, b"keep").unwrap();
+        // A base commit can track both the marker and a link in place of the
+        // generated file.
+        fs::write(destination.join(GENERATED_COPY_MARKER), b"").unwrap();
+        std::os::unix::fs::symlink(&outside, destination.join(TSCONFIG_FILE)).unwrap();
+
+        copy_generated_tsconfig(&source, &destination).unwrap();
+
+        assert_eq!(fs::read(&outside).unwrap(), b"keep");
+        let copied = destination.join(TSCONFIG_FILE);
+        assert!(
+            !fs::symlink_metadata(&copied)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&copied).unwrap(), b"{\"compilerOptions\":{}}");
+        assert!(!destination.join(STAGING_FILE).exists());
+        fs::remove_dir_all(&root).unwrap();
     }
 }
