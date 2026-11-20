@@ -9,6 +9,7 @@ mod package_json;
 mod parsers;
 mod pnpm_catalog;
 mod pnpm_overrides;
+mod pnpm_workspace;
 mod tsconfig;
 mod undeclared;
 mod workspace_config;
@@ -43,10 +44,7 @@ use nested_project::{NestedProjectScan, collect_nested_project_workspaces};
 pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
 pub use package_json::{INLINE_TOOL_CONFIG_KEYS, NapiConfig, PackageEntryField, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
-use parsers::{
-    expand_workspace_glob_with_diagnostics, parse_pnpm_workspace_yaml,
-    parse_tsconfig_references_with_diagnostics,
-};
+use parsers::{expand_workspace_glob_with_diagnostics, parse_tsconfig_references_with_diagnostics};
 pub use pnpm_catalog::{
     PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, PnpmCatalogGroup,
     parse_package_json_catalog_data, parse_pnpm_catalog_data,
@@ -56,6 +54,7 @@ pub use pnpm_overrides::{
     is_valid_override_value, override_misconfig_reason, override_source_label, parse_override_key,
     parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
 };
+pub use pnpm_workspace::{PnpmWorkspaceDoc, pnpm_workspace_packages};
 pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution, tsconfig_linked_files};
 pub use undeclared::{find_undeclared_workspaces, find_undeclared_workspaces_with_ignores};
 pub use workspace_config::{WorkspaceConfig, WorkspaceSettings};
@@ -420,10 +419,8 @@ fn collect_declared_patterns(
     }
 
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
-    if pnpm_workspace.exists()
-        && let Ok(content) = std::fs::read_to_string(&pnpm_workspace)
-    {
-        push_all(&pnpm_workspace, parse_pnpm_workspace_yaml(&content));
+    if let Ok(content) = std::fs::read_to_string(&pnpm_workspace) {
+        push_all(&pnpm_workspace, pnpm_workspace_packages(&content));
     }
 
     if let Some((deno_path, deno_patterns)) = load_root_deno_workspace_patterns(root)
