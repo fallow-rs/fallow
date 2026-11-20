@@ -1,4 +1,8 @@
 //! Configuration for dead-code and architecture requests.
+use std::path::PathBuf;
+
+use fallow_engine::resolved_run::{ResolveError, ResolvedRun};
+
 use super::*;
 
 pub(super) fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
@@ -62,36 +66,124 @@ fn apply_type_aware_overrides(
     config: &mut ResolvedConfig,
 ) -> Result<(), ExitCode> {
     apply_type_aware_overrides_from(
+        opts.run
+            .as_ref()
+            .map(fallow_engine::resolved_run::Runnable::run),
         opts.output,
-        opts.type_aware,
-        opts.type_aware_config_override,
-        opts.type_aware_projects,
-        opts.type_aware_require,
+        &TypeAwareRequest {
+            enabled: opts.type_aware,
+            config_override: opts.type_aware_config_override,
+            projects: opts.type_aware_projects,
+            require: opts.type_aware_require,
+        },
         config,
     )
 }
 
-pub(super) fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, ExitCode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => Err(emit_input_error(
-            "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off",
-            output,
-        )),
+/// The type-aware flags of one command, and the command-scoped config key
+/// (`audit.typeAware`).
+#[derive(Clone, Copy, Default)]
+pub struct TypeAwareRequest<'a> {
+    /// `Some(true)` for `--type-aware`, `Some(false)` for `--no-type-aware`.
+    pub enabled: Option<bool>,
+    /// The command-scoped config key, below the flags and
+    /// `FALLOW_TYPE_AWARE`, above `typeAware.enabled`.
+    pub config_override: Option<bool>,
+    /// `--type-aware-project`. An empty list is not set.
+    pub projects: &'a [PathBuf],
+    /// `--type-aware-require`.
+    pub require: Option<fallow_config::TypeAwareRequire>,
+}
+
+/// The type-aware settings of one command.
+pub struct TypeAwareValues {
+    /// Whether the command runs the type-aware companion.
+    pub enabled: bool,
+    /// The TypeScript project configs.
+    pub projects: Vec<PathBuf>,
+    /// The completeness policy.
+    pub require: fallow_config::TypeAwareRequire,
+}
+
+/// The type-aware settings of a command. The order is the flags of
+/// `request`, then the environment, then the command-scoped key of
+/// `request`, then `section`. The environment is the snapshot of `run`;
+/// without a run (a benchmark hook or a unit test) it is the process
+/// environment.
+///
+/// The flags and the command-scoped key come from `request`, not from the
+/// run inputs: a command that reads no type-aware flag (such as
+/// `decision-surface`) passes none, also when the command line has one.
+///
+/// # Errors
+///
+/// Returns the input error of a `FALLOW_TYPE_AWARE` or
+/// `FALLOW_TYPE_AWARE_REQUIRE` value that the command cannot use.
+pub fn type_aware_values(
+    run: Option<&ResolvedRun>,
+    request: &TypeAwareRequest<'_>,
+    section: &fallow_config::TypeAwareConfig,
+) -> Result<TypeAwareValues, ResolveError> {
+    let inputs = fallow_config::TypeAwareInputs {
+        enabled: request.enabled.map(|on| given(on, "--type-aware")),
+        projects: (!request.projects.is_empty())
+            .then(|| given(request.projects.to_vec(), "--type-aware-project")),
+        require: request
+            .require
+            .map(|require| given(require, "--type-aware-require")),
+    };
+    // The resolver reads the command-scoped key for an audit only.
+    let command = if request.config_override.is_some() {
+        fallow_config::CommandKind::Audit
+    } else {
+        fallow_config::CommandKind::DeadCode
+    };
+    let env = run.map_or_else(fallow_config::EnvSnapshot::capture, |run| run.env().clone());
+    let settings = fallow_engine::resolved_run::decide_type_aware(
+        command,
+        &inputs,
+        &env,
+        fallow_engine::resolved_run::TypeAwareConfigInput {
+            section,
+            audit: request.config_override,
+            file: None,
+        },
+    )?;
+    Ok(TypeAwareValues {
+        enabled: *settings.enabled.value(),
+        projects: settings.projects.value().clone(),
+        require: *settings.require.value(),
+    })
+}
+
+const fn given<T>(value: T, flag: &'static str) -> fallow_types::sourced::Given<T> {
+    fallow_types::sourced::Given {
+        value,
+        origin: fallow_types::sourced::Origin::Flag(flag),
     }
 }
 
-pub(super) fn parse_type_aware_require(
-    value: &str,
+/// Write the type-aware settings of a command into `config`. An input error
+/// prints with the output format and gives exit code 2.
+///
+/// # Errors
+///
+/// Returns exit code 2 for a `FALLOW_TYPE_AWARE` or
+/// `FALLOW_TYPE_AWARE_REQUIRE` value that the command cannot use.
+pub fn apply_type_aware_overrides_from(
+    run: Option<&ResolvedRun>,
     output: OutputFormat,
-) -> Result<fallow_config::TypeAwareRequire, ExitCode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "best-effort" => Ok(fallow_config::TypeAwareRequire::BestEffort),
-        "complete" => Ok(fallow_config::TypeAwareRequire::Complete),
-        _ => Err(emit_input_error(
-            "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete",
-            output,
-        )),
-    }
+    request: &TypeAwareRequest<'_>,
+    config: &mut ResolvedConfig,
+) -> Result<(), ExitCode> {
+    let values = type_aware_values(run, request, &config.type_aware)
+        .map_err(|err| emit_input_error(&err.message(), output))?;
+    config.type_aware.enabled = values.enabled;
+    config.type_aware.projects = values
+        .projects
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    config.type_aware.require = values.require;
+    Ok(())
 }

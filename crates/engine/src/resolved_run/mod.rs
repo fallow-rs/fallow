@@ -6,6 +6,7 @@
 //! and each run setting. The result is one [`ResolvedRun`] with a resolved
 //! config per production mode.
 
+mod audit_base;
 mod env_policy;
 mod notices;
 #[cfg(any(test, feature = "testing"))]
@@ -15,12 +16,15 @@ mod resolve;
 pub mod steps;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+mod type_aware;
 mod view;
 
+pub use audit_base::{AuditBaseDecision, decide_audit_base};
 pub use resolve::{
     BaseConfig, BaseSide, EmptyCause, InputField, InputProblem, ResolveError, resolve_base_run,
     resolve_base_run_with_head_decisions, resolve_run,
 };
+pub use type_aware::{TypeAwareConfigInput, TypeAwareSettings, decide_type_aware};
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +65,9 @@ pub struct ResolvedRun {
     /// The mode entry of the analyses that run in production mode.
     on: Option<ModeEntry>,
     settings: RunSettings,
+    /// The type-aware settings, or the variable whose value the run cannot
+    /// use.
+    type_aware: type_aware::TypeAwareDecision,
     /// The settings that the surface gives and that win over the environment.
     given: GivenSettings,
     /// The environment snapshot of the run, without the variables that the
@@ -224,6 +231,31 @@ impl ResolvedRun {
         &self.settings
     }
 
+    /// The type-aware settings of the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveError::Input`] with [`InputField::Env`] when
+    /// `FALLOW_TYPE_AWARE` or `FALLOW_TYPE_AWARE_REQUIRE` has a value that the
+    /// run cannot use. The run itself resolves, so a command that reads no
+    /// type-aware setting does not fail.
+    pub fn type_aware(&self) -> Result<&TypeAwareSettings, ResolveError> {
+        self.type_aware.result()
+    }
+
+    /// The base ref candidates of an audit run. A run of another command
+    /// has none.
+    #[must_use]
+    fn audit_base(&self) -> AuditBaseDecision {
+        decide_audit_base(&self.inputs)
+    }
+
+    /// The environment snapshot of the run. It holds only the variables that
+    /// the run reads on its surface and command.
+    pub const fn env(&self) -> &EnvSnapshot {
+        &self.env
+    }
+
     /// The set variables that the run reads.
     #[cfg(test)]
     fn env_read(&self) -> &[EnvVar] {
@@ -294,6 +326,11 @@ impl<'run> Runnable<'run> {
     /// The production mode of the analysis.
     pub const fn production(&self) -> &'run Sourced<bool> {
         self.run.production(self.analysis)
+    }
+
+    /// The run of the analysis.
+    pub const fn run(&self) -> &'run ResolvedRun {
+        self.run
     }
 
     fn entry(&self) -> &'run ModeEntry {

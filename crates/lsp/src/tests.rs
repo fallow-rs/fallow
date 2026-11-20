@@ -1374,7 +1374,7 @@ fn lsp_duplication_options_override_project_config() {
         ignore_symlinks: Some(true),
     };
 
-    let merged = options.merge_with(&project);
+    let merged = project.merged(&options.inputs());
 
     assert_eq!(merged.mode, DetectionMode::Semantic);
     assert!(!merged.near);
@@ -4292,7 +4292,7 @@ fn uri_is_stale_dirty_snapshot_is_stale() {
 }
 
 // -------------------------------------------------------------------------
-// LspDuplicationOptions::merge_with edge cases
+// LspDuplicationOptions::inputs edge cases
 // -------------------------------------------------------------------------
 
 #[test]
@@ -4308,7 +4308,7 @@ fn lsp_duplication_options_min_occurrences_below_2_defers_to_config() {
         ..LspDuplicationOptions::default()
     };
 
-    let merged = options.merge_with(&project);
+    let merged = project.merged(&options.inputs());
     assert_eq!(
         merged.min_occurrences, 3,
         "min_occurrences < 2 from LSP options must defer to the project config value"
@@ -4332,7 +4332,7 @@ fn lsp_duplication_options_all_none_preserves_project_config() {
     };
     let options = LspDuplicationOptions::default(); // all None
 
-    let merged = options.merge_with(&project);
+    let merged = project.merged(&options.inputs());
     assert_eq!(merged.mode, DetectionMode::Semantic);
     assert!(merged.near);
     assert_eq!(merged.min_tokens, 99);
@@ -4356,7 +4356,7 @@ fn lsp_duplication_ignore_symlinks_false_overrides_project_config() {
         ..LspDuplicationOptions::default()
     };
 
-    assert!(!options.merge_with(&project).ignore_symlinks);
+    assert!(!project.merged(&options.inputs()).ignore_symlinks);
 }
 
 // -------------------------------------------------------------------------

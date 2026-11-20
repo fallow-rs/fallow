@@ -204,11 +204,14 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         Err(code) => return code,
     };
     if let Err(code) = crate::check::apply_type_aware_overrides_from(
+        run.as_ref().map(fallow_engine::resolved_run::Runnable::run),
         opts.output,
-        opts.type_aware,
-        None,
-        opts.type_aware_projects,
-        opts.type_aware_require,
+        &crate::check::TypeAwareRequest {
+            enabled: opts.type_aware,
+            config_override: None,
+            projects: opts.type_aware_projects,
+            require: opts.type_aware_require,
+        },
         &mut config,
     ) {
         return code;

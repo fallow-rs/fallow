@@ -1,9 +1,10 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use fallow_api::run::{EnvSnapshot, EnvVar};
 use fallow_api::{
     AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, CoverageInputs, ProgrammaticError,
     TYPE_AWARE_CONFIG_UNSUPPORTED, load_health_config, resolve_coverage_inputs,
@@ -110,9 +111,11 @@ where
 /// `AnalysisOptions::ambient_diff_file`, never `diff_file`: the variable comes
 /// from the environment the server inherited, so a bad file stands down with a
 /// `not-applied` outcome, as it does on the CLI route, instead of failing the
-/// call (issue #2799).
-fn env_diff_file() -> Option<PathBuf> {
-    env_path("FALLOW_DIFF_FILE")
+/// call (issue #2799). An empty value counts as unset.
+fn env_diff_file(env: &EnvSnapshot) -> Option<PathBuf> {
+    env.get(EnvVar::DiffFile)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` as the typed route's
@@ -135,12 +138,6 @@ fn coverage_inputs_from(lookup: impl Fn(&str) -> Option<OsString>) -> CoverageIn
         coverage: path("FALLOW_COVERAGE"),
         coverage_root: path("FALLOW_COVERAGE_ROOT"),
     }
-}
-
-fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
 }
 
 /// Resolve the typed route's Istanbul coverage inputs with the precedence the
@@ -173,23 +170,19 @@ pub(super) fn resolve_typed_coverage_inputs(
         .map_err(|err| err.into_programmatic_error(explicit_root_context))
 }
 
-/// `FALLOW_CHANGED_SINCE` over an injectable lookup, so the fallback is testable
-/// without the ambient value of the variable deciding the assertion.
-fn changed_since_from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Option<String> {
-    lookup("FALLOW_CHANGED_SINCE")
-        .and_then(|value| value.into_string().ok())
-        .filter(|value| !value.is_empty())
-}
-
-/// `FALLOW_CHANGED_SINCE` for the typed route. It goes into
+/// `FALLOW_CHANGED_SINCE` for the typed route, read from the environment
+/// snapshot of the call. An empty or non-UTF-8 value counts as unset. It goes into
 /// `AnalysisOptions::ambient_changed_since`, never `changed_since`: the
 /// variable comes from the environment the server inherited, so a ref that
 /// does not resolve stands down with a `not-applied` outcome, as a bad
 /// `--changed-since` does on the CLI, instead of failing the call. A tool's own
 /// `changed_since` or `since` argument goes into `changed_since` and keeps the
 /// hard error, and it takes precedence over this value.
-fn env_changed_since() -> Option<String> {
-    changed_since_from_lookup(|name| std::env::var_os(name))
+fn env_changed_since(env: &EnvSnapshot) -> Option<String> {
+    env.get(EnvVar::ChangedSince)
+        .and_then(OsStr::to_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 /// The settings every typed route reads from its tool params. The CLI route
@@ -228,22 +221,29 @@ pub(super) enum EnvScope {
     /// has no `request_outcomes` to state a stand-down, so a bad ref keeps the
     /// hard error of an explicit ref.
     HardRef,
+    /// `FALLOW_DIFF_FILE` only: `FALLOW_CHANGED_SINCE` is not a scope of
+    /// the tool. The audit base reads it from the environment snapshot of
+    /// the call, after the `base` parameter, `FALLOW_AUDIT_BASE` and the
+    /// detected base.
+    AuditBase,
     /// Neither variable: the tool sets its own scope from its params.
     Own,
 }
 
 /// The [`AnalysisOptions`] every typed route shares: the [`SharedParams`],
-/// the environment scope (`FALLOW_CHANGED_SINCE`, `FALLOW_DIFF_FILE`), and the
-/// cancellation token of the call. A route sets its own fields on top with
-/// struct update syntax.
+/// `FALLOW_CHANGED_SINCE` and `FALLOW_DIFF_FILE` from `env` as `scope`
+/// decides, and the cancellation token of the call. A route sets its own
+/// fields on top with struct update syntax.
 pub(super) fn shared_analysis_options(
     shared: SharedParams<'_>,
-    env: EnvScope,
+    scope: EnvScope,
+    env: &EnvSnapshot,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> AnalysisOptions {
-    let (changed_since, ambient_changed_since, ambient_diff_file) = match env {
-        EnvScope::Ambient => (None, env_changed_since(), env_diff_file()),
-        EnvScope::HardRef => (env_changed_since(), None, env_diff_file()),
+    let (changed_since, ambient_changed_since, ambient_diff_file) = match scope {
+        EnvScope::Ambient => (None, env_changed_since(env), env_diff_file(env)),
+        EnvScope::HardRef => (env_changed_since(env), None, env_diff_file(env)),
+        EnvScope::AuditBase => (None, None, env_diff_file(env)),
         EnvScope::Own => (None, None, None),
     };
     AnalysisOptions {
@@ -643,16 +643,26 @@ mod tests {
 
     #[test]
     fn env_changed_since_reads_a_non_empty_value_only() {
-        let env =
-            |name: &str| (name == "FALLOW_CHANGED_SINCE").then(|| OsString::from("origin/release"));
+        let env = |pairs: &[(&str, &str)]| EnvSnapshot::from_pairs(pairs, None);
         assert_eq!(
-            changed_since_from_lookup(env),
+            env_changed_since(&env(&[("FALLOW_CHANGED_SINCE", "origin/release")])),
             Some("origin/release".to_string())
         );
         assert_eq!(
-            changed_since_from_lookup(|_| Some(OsString::from(""))),
+            env_changed_since(&env(&[("FALLOW_CHANGED_SINCE", "")])),
             None
         );
-        assert_eq!(changed_since_from_lookup(|_| None), None);
+        assert_eq!(env_changed_since(&env(&[])), None);
+    }
+
+    #[test]
+    fn env_diff_file_reads_a_non_empty_value_only() {
+        let env = |pairs: &[(&str, &str)]| EnvSnapshot::from_pairs(pairs, None);
+        assert_eq!(
+            env_diff_file(&env(&[("FALLOW_DIFF_FILE", "pr.diff")])),
+            Some(PathBuf::from("pr.diff"))
+        );
+        assert_eq!(env_diff_file(&env(&[("FALLOW_DIFF_FILE", "")])), None);
+        assert_eq!(env_diff_file(&env(&[])), None);
     }
 }

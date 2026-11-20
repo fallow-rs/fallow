@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fallow_config::{DetectionMode, DuplicatesConfig};
+use fallow_config::{DetectionMode, DupesInputs};
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -114,28 +114,65 @@ pub struct LspDuplicationOptions {
 }
 
 impl LspDuplicationOptions {
-    pub fn merge_with(&self, config: &DuplicatesConfig) -> DuplicatesConfig {
-        DuplicatesConfig {
-            enabled: config.enabled,
-            mode: self.mode.unwrap_or(config.mode),
-            near: self.near.unwrap_or(config.near),
-            min_tokens: self.min_tokens.unwrap_or(config.min_tokens),
-            min_lines: self.min_lines.unwrap_or(config.min_lines),
-            min_occurrences: self
-                .min_occurrences
-                .filter(|min| *min >= 2)
-                .unwrap_or(config.min_occurrences),
-            threshold: self.threshold.unwrap_or(config.threshold),
-            ignore: config.ignore.clone(),
-            ignored_clones: config.ignored_clones.clone(),
-            ignore_defaults: config.ignore_defaults,
-            skip_local: self.skip_local.unwrap_or(config.skip_local),
-            ignore_symlinks: self.ignore_symlinks.unwrap_or(config.ignore_symlinks),
-            cross_language: self.cross_language.unwrap_or(config.cross_language),
-            ignore_imports: self.ignore_imports.unwrap_or(config.ignore_imports),
-            normalization: config.normalization.clone(),
-            min_corpus_size_for_shingle_filter: config.min_corpus_size_for_shingle_filter,
-            min_corpus_size_for_token_cache: config.min_corpus_size_for_token_cache,
+    /// The duplication inputs of the editor. A `minOccurrences` below 2 is
+    /// not an input, so the config value stays.
+    pub fn inputs(&self) -> DupesInputs {
+        DupesInputs {
+            mode: self.mode,
+            near: self.near,
+            min_tokens: self.min_tokens,
+            min_lines: self.min_lines,
+            min_occurrences: self.min_occurrences.filter(|min| *min >= 2),
+            threshold: self.threshold,
+            skip_local: self.skip_local,
+            cross_language: self.cross_language,
+            ignore_imports: self.ignore_imports,
+            ignore_symlinks: self.ignore_symlinks,
         }
+    }
+}
+
+/// The initialization options that the client sends but that do not parse,
+/// by name. The server then runs without them, so it names each one in a
+/// warning.
+#[must_use]
+pub fn invalid_initialization_options(opts: Option<&serde_json::Value>) -> Vec<&'static str> {
+    let Some(obj) = opts.and_then(serde_json::Value::as_object) else {
+        return Vec::new();
+    };
+    let invalid = |name: &'static str, parses: fn(serde_json::Value) -> bool| {
+        obj.get(name)
+            .filter(|value| !value.is_null() && !parses((*value).clone()))
+            .map(|_| name)
+    };
+    [
+        invalid("duplication", |value| {
+            serde_json::from_value::<LspDuplicationOptions>(value).is_ok()
+        }),
+        invalid("typeAware", |value| {
+            serde_json::from_value::<LspTypeAwareOptions>(value).is_ok()
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_option_that_does_not_parse_is_named() {
+        let opts = serde_json::json!({
+            "duplication": { "near": "yes" },
+            "typeAware": { "enabled": true, "projects": [] },
+        });
+        assert_eq!(
+            invalid_initialization_options(Some(&opts)),
+            vec!["duplication"]
+        );
+        let valid = serde_json::json!({ "duplication": { "near": false }, "typeAware": null });
+        assert!(invalid_initialization_options(Some(&valid)).is_empty());
     }
 }

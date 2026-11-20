@@ -1,0 +1,55 @@
+{
+  "name": "type-aware-env-on",
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_TYPE_AWARE": "on"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "analyze",
+      "params": {}
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dead-code"
+      ]
+    },
+    "api": {
+      "entry": "dead-code"
+    },
+    "node": {
+      "function": "detectDeadCode"
+    },
+    "lsp": {
+      "initializationOptions": {}
+    },
+    "vscode": {
+      "settings": {},
+      "compare_keys": [
+        "production"
+      ]
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "settings.type_aware": {
+      "value": true,
+      "source": "environment:FALLOW_TYPE_AWARE"
+    }
+  },
+  "deviations": {
+    "lsp": {
+      "reason": "The language server has one editor command, and it reads no FALLOW_TYPE_AWARE* variable",
+      "expected": {
+        "command": "editor",
+        "settings.type_aware": {
+          "value": false,
+          "source": "default:type-aware-off"
+        }
+      }
+    }
+  }
+}

@@ -336,11 +336,14 @@ fn collect_semantic_evidence(
     };
     let mut config = dead_code.config().clone();
     if crate::check::apply_type_aware_overrides_from(
+        Some(dead_code.run()),
         opts.output,
-        opts.type_aware,
-        None,
-        opts.type_aware_projects,
-        opts.type_aware_require,
+        &crate::check::TypeAwareRequest {
+            enabled: opts.type_aware,
+            config_override: None,
+            projects: opts.type_aware_projects,
+            require: opts.type_aware_require,
+        },
         &mut config,
     )
     .is_err()

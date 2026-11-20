@@ -147,12 +147,31 @@ fn translate_with(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
     params["root"] = Value::String(root.display().to_string());
+    if tool == TypedTool::Audit {
+        return audit_row(&params, env, change);
+    }
     let (entry, mut analysis) = match tool_call(tool, &params, env, entry_of) {
         Ok(call) => call,
         Err(message) => return RowResult::Failed(message),
     };
     change(&mut analysis);
     match resolve_programmatic_run(&analysis, &entry) {
+        Ok(run) => RowResult::Run(Box::new(run)),
+        Err(err) => RowResult::Failed(err.message),
+    }
+}
+
+/// The run of a typed `audit` call, resolved through the steps of the audit
+/// runner, so that the `base` parameter reaches the run.
+fn audit_row(params: &Value, env: EnvSnapshot, change: impl Fn(&mut AnalysisOptions)) -> RowResult {
+    let mut options = match parse(params)
+        .and_then(|params| audit::audit_options_from_params(&params, None, env))
+    {
+        Ok(options) => options,
+        Err(message) => return RowResult::Failed(message),
+    };
+    change(&mut options.analysis);
+    match fallow_api::run::resolve_audit_head_run(&options) {
         Ok(run) => RowResult::Run(Box::new(run)),
         Err(err) => RowResult::Failed(err.message),
     }
@@ -666,4 +685,170 @@ fn typed_production_matches_the_resolver() {
         }
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// The params that the options builder of `tool` needs, without the
+/// production parameters.
+fn required_params(tool: TypedTool) -> Value {
+    match tool {
+        TypedTool::CheckChanged => serde_json::json!({ "since": "HEAD" }),
+        TypedTool::TraceExport => serde_json::json!({ "file": "src/a.ts", "export_name": "a" }),
+        TypedTool::TraceFile => serde_json::json!({ "file": "src/a.ts" }),
+        TypedTool::TraceImportPath => serde_json::json!({ "from": "src/a.ts", "to": "src/b.ts" }),
+        TypedTool::TraceError => serde_json::json!({ "trace": "Error: x" }),
+        TypedTool::TraceDependency => serde_json::json!({ "package_name": "react" }),
+        _ => serde_json::json!({}),
+    }
+}
+
+/// Each production parameter of each typed tool reaches the run through the
+/// real options builder of the tool. A builder that drops a parameter, such
+/// as `production` of `trace_error` or `production_dupes` of `audit`, fails.
+#[test]
+fn every_production_param_reaches_the_run() {
+    let (_dir, root) = project(None);
+    let cwd = tempfile::tempdir().expect("cwd");
+    let mut cases = Vec::new();
+    for tool in TypedTool::ALL {
+        if tool == TypedTool::Combined || !has_production_param(tool) {
+            continue;
+        }
+        for &analysis in tool_analyses(tool) {
+            cases.push((tool, "production", analysis));
+        }
+    }
+    for (param, analysis) in [
+        ("production_dead_code", Analysis::DeadCode),
+        ("production_health", Analysis::Health),
+        ("production_dupes", Analysis::Dupes),
+    ] {
+        cases.push((TypedTool::Audit, param, analysis));
+    }
+    let mut missing = Vec::new();
+    for (tool, param, analysis) in cases {
+        let mut params = required_params(tool);
+        params["root"] = Value::String(root.display().to_string());
+        params[param] = Value::Bool(true);
+        let env = EnvSnapshot::from_pairs(&[], Some(cwd.path()));
+        let (entry, analysis_options) = tool_call(tool, &params, env, table)
+            .unwrap_or_else(|err| panic!("{}: {err}", tool.name()));
+        let run = resolve_programmatic_run(&analysis_options, &entry)
+            .unwrap_or_else(|err| panic!("{}: {}", tool.name(), err.message));
+        let decided = production_of(&run, analysis.view_key());
+        if decided != (true, format!("given:{param}")) {
+            missing.push(format!("{} {param} {analysis:?}: {decided:?}", tool.name()));
+        }
+    }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
+}
+
+/// A git repository on the branch `work` with two commits. The tag `first`
+/// names the first commit. With `with_main`, a local `main` branch also
+/// names it, so the audit detects `main` as its base. Without it, the
+/// repository has no upstream, no remote and no `main`, so the audit detects
+/// no base.
+fn base_repo(with_main: bool) -> tempfile::TempDir {
+    use super::super::base_root_fixture::git;
+    let dir = tempfile::tempdir().expect("repo");
+    let root = dir.path();
+    let commit = |message: &str| {
+        git(root, &["add", "."]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                message,
+            ],
+        );
+    };
+    std::fs::create_dir_all(root.join("src")).expect("src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"base-order","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    std::fs::write(root.join("src/index.ts"), "console.log('entry');\n").expect("entry");
+    git(root, &["init", "-q", "-b", "work"]);
+    commit("first");
+    git(root, &["tag", "first"]);
+    if with_main {
+        git(root, &["branch", "main"]);
+    }
+    std::fs::write(root.join("src/feature.ts"), "export const unused = 1;\n").expect("feature");
+    commit("second");
+    dir
+}
+
+/// The base ref of a typed `audit` call with `params` under `env`.
+fn typed_audit_base(root: &Path, params: &Value, env: &[(&str, &str)]) -> Result<String, String> {
+    let mut call = serde_json::json!({
+        "root": root.display().to_string(),
+        "no_cache": true,
+        "gate": "all",
+    });
+    for (key, value) in params.as_object().expect("params object") {
+        call[key] = value.clone();
+    }
+    let options =
+        audit::audit_options_from_params(&parse(&call)?, None, EnvSnapshot::from_pairs(env, None))?;
+    fallow_api::run_audit(&options)
+        .map(|output| output.base_ref)
+        .map_err(|err| err.message)
+}
+
+const CHANGED_SINCE_HEAD: (&str, &str) = ("FALLOW_CHANGED_SINCE", "HEAD");
+
+#[test]
+fn typed_audit_base_beats_changed_since_env() {
+    let repo = base_repo(true);
+    let base = typed_audit_base(
+        repo.path(),
+        &serde_json::json!({ "base": "first" }),
+        &[CHANGED_SINCE_HEAD],
+    );
+    assert_eq!(base.as_deref(), Ok("first"));
+}
+
+#[test]
+fn typed_audit_env_audit_base_beats_changed_since_env() {
+    let repo = base_repo(true);
+    let base = typed_audit_base(
+        repo.path(),
+        &serde_json::json!({}),
+        &[("FALLOW_AUDIT_BASE", "first"), CHANGED_SINCE_HEAD],
+    );
+    assert_eq!(base.as_deref(), Ok("first"));
+}
+
+#[test]
+fn typed_audit_detected_base_beats_changed_since_env() {
+    let repo = base_repo(true);
+    let base = typed_audit_base(repo.path(), &serde_json::json!({}), &[CHANGED_SINCE_HEAD]);
+    assert_eq!(base.as_deref(), Ok("main"));
+}
+
+/// `FALLOW_CHANGED_SINCE` gives the base only when the audit detects none.
+#[test]
+fn typed_audit_changed_since_env_is_the_last_fallback() {
+    let repo = base_repo(false);
+    let base = typed_audit_base(
+        repo.path(),
+        &serde_json::json!({}),
+        &[("FALLOW_CHANGED_SINCE", "first")],
+    );
+    assert_eq!(base.as_deref(), Ok("first"));
+    let none = typed_audit_base(repo.path(), &serde_json::json!({}), &[]);
+    assert!(
+        none.as_ref()
+            .is_err_and(|message| message.contains("could not detect base branch")),
+        "{none:?}"
+    );
 }

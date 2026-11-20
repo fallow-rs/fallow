@@ -31,6 +31,11 @@ fn base_ref_error_message(error: &AuditBaseError) -> String {
             reason,
         } => format!("FALLOW_AUDIT_BASE='{value}' is not a valid git ref: {reason}"),
         AuditBaseError::InvalidRef {
+            origin: AuditBaseOrigin::ChangedSince,
+            value,
+            reason,
+        } => format!("FALLOW_CHANGED_SINCE='{value}' is not a valid git ref: {reason}"),
+        AuditBaseError::InvalidRef {
             origin: AuditBaseOrigin::Detected,
             value,
             reason,

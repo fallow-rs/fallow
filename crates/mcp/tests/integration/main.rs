@@ -10,6 +10,7 @@ mod resources;
 // The surface differential builds `file://` URIs from Unix paths.
 #[cfg(unix)]
 mod surface_differential;
+mod typed_route_audit_base;
 mod typed_route_env_coverage;
 mod typed_route_env_production;
 mod typed_route_env_production_tools;

@@ -16,6 +16,19 @@ pub use fallow_engine::resolved_run::{
 #[cfg(feature = "testing")]
 pub use fallow_engine::resolved_run::{parity, testing};
 
+/// The head run of an audit with `options`, resolved through the steps of
+/// the audit runner. The base ref is `HEAD`, because the run does not depend
+/// on it. A parity row of a surface that calls the audit runner uses it.
+///
+/// # Errors
+///
+/// Returns the errors of the audit runner.
+#[cfg(feature = "testing")]
+pub fn resolve_audit_head_run(options: &crate::AuditOptions) -> ProgrammaticResult<ResolvedRun> {
+    let folded = crate::runtime::analysis_options_for_audit(options, "HEAD");
+    crate::runtime::resolve_audit_run(options, &folded)
+}
+
 use fallow_config::{PlannedAnalysis, RunInputs};
 use fallow_engine::resolved_run::{InputField, InputProblem};
 use fallow_types::output_format::OutputFormat;
@@ -166,10 +179,35 @@ impl ProgrammaticEntry {
 }
 
 /// Settings of one runner that are not in [`AnalysisOptions`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RouteSettings {
     /// The `include_entry_exports` option of the runner.
     pub include_entry_exports: bool,
+    /// The base ref that the caller of an audit names.
+    pub audit_base: Option<NamedAuditBase>,
+}
+
+/// The base ref that the caller of an audit names, by the option that names
+/// it.
+#[derive(Debug, Clone)]
+pub(crate) enum NamedAuditBase {
+    /// The `base` option of the audit.
+    Base(String),
+    /// The `changed_since` option of the analysis.
+    ChangedSince(String),
+}
+
+impl NamedAuditBase {
+    /// The `base` option of `options`, else its `analysis.changed_since`.
+    pub(crate) fn of(options: &crate::AuditOptions) -> Option<Self> {
+        options.base.clone().map(Self::Base).or_else(|| {
+            options
+                .analysis
+                .changed_since
+                .clone()
+                .map(Self::ChangedSince)
+        })
+    }
 }
 
 /// Resolve the run of one programmatic call.
@@ -285,6 +323,30 @@ const PRODUCTION_DUPES: OptionName = OptionName {
     node: "productionDupes",
     mcp: "production_dupes",
 };
+const AUDIT_BASE: OptionName = OptionName {
+    api: "audit.base",
+    node: "base",
+    mcp: "base",
+};
+const CHANGED_SINCE: OptionName = OptionName {
+    api: "analysis.changed_since",
+    node: "changedSince",
+    mcp: "changed_since",
+};
+const TYPE_AWARE: OptionName = OptionName {
+    api: "analysis.type_aware.enabled",
+    node: "typeAware.enabled",
+    mcp: "type_aware",
+};
+
+/// The environment snapshot of one programmatic call: the snapshot of
+/// `options.host`, else a snapshot of the process environment.
+pub(crate) fn host_env(options: &AnalysisOptions) -> EnvSnapshot {
+    options
+        .host
+        .as_ref()
+        .map_or_else(EnvSnapshot::capture, |host| host.env.clone())
+}
 
 /// The raw run inputs of one programmatic call.
 pub(crate) fn run_inputs(
@@ -325,6 +387,20 @@ pub(crate) fn run_inputs(
         .no_package_baselines
         .then(|| given(false, NO_PACKAGE_BASELINES));
     inputs.include_entry_exports = when_true(route.include_entry_exports, INCLUDE_ENTRY_EXPORTS);
+    inputs.audit_base = route.audit_base.map(|named| {
+        let (value, name) = match named {
+            NamedAuditBase::Base(value) => (value, AUDIT_BASE),
+            NamedAuditBase::ChangedSince(value) => (value, CHANGED_SINCE),
+        };
+        Given {
+            value,
+            origin: origin(name),
+        }
+    });
+    inputs.type_aware.enabled = options
+        .type_aware
+        .enabled
+        .map(|enabled| given(enabled, TYPE_AWARE));
     inputs.output = OutputFormat::Json;
     inputs.quiet = true;
     if entry.reads_production() {
@@ -407,6 +483,13 @@ pub(crate) fn programmatic_error(err: &ResolveError) -> ProgrammaticError {
                 (InputField::Root, _) => ("FALLOW_INVALID_ROOT", "analysis.root"),
                 (InputField::ConfigPath, _) => ("FALLOW_INVALID_CONFIG_PATH", CONFIG_PATH_CONTEXT),
                 (InputField::Threads, _) => ("FALLOW_INVALID_THREADS", "analysis.threads"),
+                // The typed routes refuse a type-aware layer with this code, so
+                // a caller that can run the CLI falls back on it.
+                (InputField::Env(EnvVar::TypeAware), _) => (
+                    crate::TYPE_AWARE_CONFIG_UNSUPPORTED,
+                    EnvVar::TypeAware.name(),
+                ),
+                (InputField::Env(var), _) => ("FALLOW_INVALID_ENV", var.name()),
             };
             ProgrammaticError::new(message.clone(), 2)
                 .with_code(code)

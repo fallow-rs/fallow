@@ -135,6 +135,15 @@ impl<T> EnvValue<T> {
     }
 }
 
+/// Why a run cannot use the value of a variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvProblem {
+    /// The value is not one of the values that the variable takes.
+    InvalidValue,
+    /// The value is not valid UTF-8.
+    NotUnicode,
+}
+
 /// The values of every [`EnvVar`] and the current directory of one run.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EnvSnapshot {
@@ -205,6 +214,32 @@ impl EnvSnapshot {
             .and_then(crate::cache_dir_from_env_value)
     }
 
+    /// The value of `var`, parsed with `parse`. `Ok(None)` is an unset
+    /// variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvProblem::NotUnicode`] for a value that is not valid UTF-8
+    /// and [`EnvProblem::InvalidValue`] for a value that `parse` rejects.
+    pub fn parse<T>(
+        &self,
+        var: EnvVar,
+        parse: impl FnOnce(&str) -> Option<T>,
+    ) -> Result<Option<T>, EnvProblem> {
+        let Some(raw) = self.get(var) else {
+            return Ok(None);
+        };
+        let text = raw.to_str().ok_or(EnvProblem::NotUnicode)?;
+        parse(text).map(Some).ok_or(EnvProblem::InvalidValue)
+    }
+
+    /// The paths of `var`, split with the path separator of the platform.
+    #[must_use]
+    pub fn paths(&self, var: EnvVar) -> Option<Vec<PathBuf>> {
+        self.get(var)
+            .map(|raw| std::env::split_paths(raw).collect())
+    }
+
     /// The bool value of `var`, parsed with [`bool_env_value`].
     #[must_use]
     pub fn bool(&self, var: EnvVar) -> EnvValue<bool> {
@@ -263,6 +298,33 @@ mod tests {
         assert_eq!(env.bool(EnvVar::Production), EnvValue::Set(true));
         assert_eq!(env.bool(EnvVar::ProductionHealth), EnvValue::Invalid);
         assert_eq!(env.bool(EnvVar::ProductionDupes), EnvValue::Unset);
+    }
+
+    #[test]
+    fn parse_tells_an_invalid_value_from_an_unset_variable() {
+        let env = EnvSnapshot::from_pairs(&[("FALLOW_TYPE_AWARE", " On ")], None);
+        assert_eq!(env.parse(EnvVar::TypeAware, bool_env_value), Ok(Some(true)));
+        assert_eq!(
+            env.parse(EnvVar::TypeAwareRequire, bool_env_value),
+            Ok(None)
+        );
+        let env = EnvSnapshot::from_pairs(&[("FALLOW_TYPE_AWARE", "maybe")], None);
+        assert_eq!(
+            env.parse(EnvVar::TypeAware, bool_env_value),
+            Err(EnvProblem::InvalidValue)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parse_rejects_a_value_that_is_not_utf8() {
+        use std::os::unix::ffi::OsStringExt;
+        let mut env = EnvSnapshot::none();
+        env.values[EnvVar::TypeAware.index()] = Some(OsString::from_vec(vec![0x66, 0x80]));
+        assert_eq!(
+            env.parse(EnvVar::TypeAware, bool_env_value),
+            Err(EnvProblem::NotUnicode)
+        );
     }
 
     #[test]

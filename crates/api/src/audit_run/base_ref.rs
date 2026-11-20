@@ -3,6 +3,8 @@
 use std::path::Path;
 
 use fallow_engine::repo_refs::{self, ResolvedAuditBase};
+use fallow_engine::resolved_run::AuditBaseDecision;
+use fallow_types::sourced::Source;
 
 /// Where an audit base ref came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +13,9 @@ pub enum AuditBaseOrigin {
     Explicit,
     /// The `FALLOW_AUDIT_BASE` environment variable.
     Environment,
+    /// The `FALLOW_CHANGED_SINCE` environment variable of the MCP server,
+    /// read when the audit detects no base.
+    ChangedSince,
     /// Auto-detection from the upstream or the remote default branch.
     Detected,
 }
@@ -90,6 +95,42 @@ fn resolve_audit_base_with_override(
         repo_refs::auto_detect_audit_base_ref(root).ok_or(AuditBaseError::NotDetected)?;
     validate(&detected.git_ref, AuditBaseOrigin::Detected)?;
     Ok(detected)
+}
+
+/// Resolve the base ref of an audit rooted at `root` from the candidates
+/// that the resolver decided: the named base, then auto-detection, then the
+/// fallback.
+///
+/// # Errors
+///
+/// Returns [`AuditBaseError::InvalidRef`] for a ref that is not a valid git
+/// ref, and [`AuditBaseError::NotDetected`] when no candidate gives a base.
+pub fn resolve_audit_base_decided(
+    root: &Path,
+    decision: &AuditBaseDecision,
+) -> Result<ResolvedAuditBase, AuditBaseError> {
+    if let Some(named) = &decision.named {
+        let value = named.value().clone();
+        return if matches!(named.source(), Source::Environment { .. }) {
+            resolve_audit_base_with_override(root, None, Some(value))
+        } else {
+            resolve_audit_base_with_override(root, Some(&value), None)
+        };
+    }
+    match resolve_audit_base_with_override(root, None, None) {
+        Err(AuditBaseError::NotDetected) => {
+            let Some(fallback) = &decision.fallback else {
+                return Err(AuditBaseError::NotDetected);
+            };
+            validate(fallback.value(), AuditBaseOrigin::ChangedSince)?;
+            Ok(ResolvedAuditBase {
+                description: Some(format!("FALLOW_CHANGED_SINCE={}", fallback.value())),
+                git_ref: fallback.value().clone(),
+                inherited_refs: Vec::new(),
+            })
+        }
+        other => other,
+    }
 }
 
 fn validate(value: &str, origin: AuditBaseOrigin) -> Result<(), AuditBaseError> {

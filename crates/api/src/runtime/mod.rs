@@ -15,6 +15,7 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::FxHashSet;
 
 mod audit;
+mod audit_base_ref;
 mod combined;
 mod dead_code;
 mod decision_surface;
@@ -43,7 +44,7 @@ pub use crate::runtime_output::{
     serialize_health_report_json,
 };
 pub use audit::{AUDIT_CONFIG_BASELINE_UNSUPPORTED, run_audit};
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use audit::{analysis_options_for_audit, resolve_audit_run};
 pub use combined::run_combined;
 pub use dead_code::{
@@ -256,7 +257,7 @@ impl ProgrammaticHealthRunner for EngineHealthRunner {
             };
             let run = if health_reads_config_type_aware(options) {
                 type_aware_config::resolve_run_refusing_type_aware(
-                    &options.analysis.type_aware,
+                    &options.analysis,
                     type_aware_config::TypeAwareCommand::Analysis,
                     type_aware_config::ConfigLocation::of(&resolved),
                     resolve,
@@ -517,7 +518,7 @@ fn reject_health_config_type_aware(options: &ComplexityOptions) -> ProgrammaticR
         options.analysis.config_path.as_deref(),
     )?;
     type_aware_config::reject_config_type_aware_at(
-        &options.analysis.type_aware,
+        &options.analysis,
         type_aware_config::ConfigLocation {
             root: &root,
             config_path: options.analysis.config_path.as_deref(),

@@ -977,9 +977,8 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
     }
 
     // The copy that drifted and caused #2699 lived on the CLI side, so the
-    // same rule has to hold for the CLI entry point into the detection. Both
-    // routes resolve the base through the one audit resolver in fallow-api,
-    // which asks the engine.
+    // same rule holds for the CLI entry point into the detection. Both routes
+    // resolve the base through the one audit resolver in fallow-api.
     let resolver_path = "crates/api/src/audit_run/base_ref.rs";
     let resolver = read_source_without_line_comments(resolver_path).expect("read base resolver");
     assert!(
@@ -988,8 +987,9 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
         "{resolver_path} must resolve the auto-detected base through the engine"
     );
     assert!(
-        production_source.contains("crate::audit_run::resolve_audit_base"),
-        "{source_path} must resolve the base through the shared audit resolver"
+        read_source_without_line_comments("crates/api/src/runtime/audit_base_ref.rs")
+            .is_ok_and(|typed| typed.contains("crate::audit_run::resolve_audit_base")),
+        "the typed audit must resolve the base through the shared audit resolver"
     );
     let cli_path = "crates/cli/src/audit_base_ref.rs";
     let cli_source = read_source_without_line_comments(cli_path).expect("read cli base-ref source");
@@ -1786,11 +1786,10 @@ fn mcp_api_routes_honor_ambient_changed_since_scope() {
             .unwrap_or_else(|error| panic!("read {name}.rs: {error}"))
     });
     assert!(
-        helper[0].contains("EnvScope::Ambient => (None, env_changed_since(), env_diff_file())")
-            && helper[0]
-                .contains("EnvScope::HardRef => (env_changed_since(), None, env_diff_file())")
+        helper[0].contains("Ambient => (None, env_changed_since(env), env_diff_file(env))")
+            && helper[0].contains("HardRef => (env_changed_since(env), None, env_diff_file(env))")
             && helper[1]
-                .contains("shared_analysis_options(shared, tool.env_scope(), cancellation)")
+                .contains("shared_analysis_options(shared, tool.env_scope(), &env, cancellation)")
             && helper[1].matches("EnvScope::Own").count() == 1,
         "typed_call must read FALLOW_CHANGED_SINCE through the env scope of each tool"
     );

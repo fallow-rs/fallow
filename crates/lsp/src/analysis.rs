@@ -380,7 +380,7 @@ pub fn analyze_project_root(
 
     let duplicates_config = input.duplication_options.map_or_else(
         || session.config().duplicates.clone(),
-        |options| options.merge_with(&session.config().duplicates),
+        |options| session.config().duplicates.merged(&options.inputs()),
     );
     let before = session.parse_counts();
     let result = run_typed_project_analysis(input, &session, &duplicates_config);

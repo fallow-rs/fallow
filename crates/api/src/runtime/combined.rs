@@ -84,7 +84,7 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
         // check runs here.
         let run = if options.dead_code || options.health {
             super::type_aware_config::resolve_run_refusing_type_aware(
-                &options.analysis.type_aware,
+                &options.analysis,
                 super::type_aware_config::TypeAwareCommand::Analysis,
                 super::type_aware_config::ConfigLocation::of(&resolved),
                 resolve,
@@ -149,6 +149,7 @@ fn resolve_combined_run(
         },
         RouteSettings {
             include_entry_exports: options.include_entry_exports,
+            audit_base: None,
         },
     )
     .map_err(|err| match err {

@@ -33,6 +33,7 @@ impl ResolvedRun {
     /// environment block names the variables and never holds a value.
     pub fn view(&self) -> ResolvedRunView {
         let settings = &self.settings;
+        let audit_base = self.audit_base();
         ResolvedRunView {
             schema_version: RESOLVED_RUN_VIEW_SCHEMA_VERSION,
             kind: ResolvedRunKind::ResolvedRun,
@@ -54,6 +55,12 @@ impl ResolvedRun {
                 cache_max_size_mb: cloned(&settings.cache_max_size_mb),
                 package_baselines: cloned(&settings.package_baselines),
                 include_entry_exports: cloned(&settings.include_entry_exports),
+                type_aware: self
+                    .type_aware()
+                    .ok()
+                    .map(|type_aware| type_aware.enabled.clone()),
+                audit_base: audit_base.named,
+                audit_base_fallback: audit_base.fallback,
             },
             env: self.env_view(),
             fell_back: self.fallback.is_some(),

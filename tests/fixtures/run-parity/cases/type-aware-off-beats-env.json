@@ -1,0 +1,81 @@
+{
+  "name": "type-aware-off-beats-env",
+  "files": {
+    ".fallowrc.json": "{\"typeAware\":{\"enabled\":true}}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_TYPE_AWARE": "on"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "analyze",
+      "params": {
+        "type_aware": false
+      }
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dead-code",
+        "--no-type-aware"
+      ]
+    },
+    "api": {
+      "entry": "dead-code",
+      "options": {
+        "type_aware": false
+      }
+    },
+    "node": {
+      "function": "detectDeadCode",
+      "options": {
+        "typeAware": {
+          "enabled": false
+        }
+      }
+    },
+    "lsp": {
+      "not_expressible": "The language server reads its typeAware option for each analysis, not as an input of the run"
+    },
+    "vscode": {
+      "not_expressible": "The language server reads its typeAware option for each analysis, not as an input of the run"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "settings.type_aware": {
+      "value": false,
+      "source": "given:type_aware"
+    }
+  },
+  "deviations": {
+    "cli": {
+      "reason": "The CLI names the flag --no-type-aware",
+      "expected": {
+        "settings.type_aware": {
+          "value": false,
+          "source": "given:--no-type-aware"
+        }
+      }
+    },
+    "api": {
+      "reason": "The Rust API names its option analysis.type_aware.enabled",
+      "expected": {
+        "settings.type_aware": {
+          "value": false,
+          "source": "given:analysis.type_aware.enabled"
+        }
+      }
+    },
+    "node": {
+      "reason": "The Node bindings name the option typeAware.enabled",
+      "expected": {
+        "settings.type_aware": {
+          "value": false,
+          "source": "given:typeAware.enabled"
+        }
+      }
+    }
+  }
+}

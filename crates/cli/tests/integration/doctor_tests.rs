@@ -321,6 +321,40 @@ fn type_aware_environment_requirement_controls_readiness() {
     assert_eq!(json["checks"][4]["remediation"]["mutating"], true);
 }
 
+/// The doctor reports a type-aware variable that it cannot parse as a failed
+/// readiness check, with its own text for each variable and problem.
+#[test]
+fn doctor_reports_an_unknown_type_aware_value_as_a_check() {
+    let root = tempfile::tempdir().expect("temp root");
+    let root_text = root.path().to_string_lossy();
+    let args = [
+        "doctor",
+        "--root",
+        root_text.as_ref(),
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    for (name, value, message) in [
+        (
+            "FALLOW_TYPE_AWARE",
+            "maybe",
+            "FALLOW_TYPE_AWARE must contain a supported boolean value.",
+        ),
+        (
+            "FALLOW_TYPE_AWARE_REQUIRE",
+            "sometimes",
+            "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete.",
+        ),
+    ] {
+        let output = run_fallow_raw_with_env(&args, &[(name, value)]);
+        let json = parse_json(&output);
+        assert_eq!(json["checks"][4]["id"], "type-aware", "{name}");
+        assert_eq!(json["checks"][4]["status"], "fail", "{name}");
+        assert_eq!(json["checks"][4]["message"], message, "{name}");
+    }
+}
+
 #[test]
 fn doctor_rejects_fail_on_stale_baseline() {
     let output = run_fallow_raw(&["doctor", "--fail-on-stale-baseline"]);

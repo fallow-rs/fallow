@@ -39,6 +39,13 @@ fn analysis_of(
             threads,
             production: input.bool("production"),
             no_package_baselines: input.bool("noPackageBaselines"),
+            type_aware: input
+                .options
+                .get("typeAware")
+                .map(|type_aware| TypeAwareOptions {
+                    enabled: type_aware.get("enabled").and_then(Value::as_bool),
+                    ..TypeAwareOptions::default()
+                }),
             ..DeadCodeOptions::default()
         }
         .to_api(env)

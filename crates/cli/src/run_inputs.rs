@@ -8,7 +8,7 @@
 
 use fallow_config::{
     CommandKind, EnvSnapshot, HostInputs, OutputFormat, PlannedAnalysis, RunInputs, SelectionInput,
-    Surface,
+    Surface, TypeAwareInputs,
 };
 use fallow_types::sourced::{Given, Origin};
 
@@ -338,9 +338,35 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
             Origin::Flag("--dupes-baseline"),
         ));
     }
+    inputs.type_aware = type_aware_inputs(cli);
+    // `--changed-since` and its alias `--base` name the base ref of an audit.
+    if route.command == CommandKind::Audit {
+        inputs.audit_base = cli.changed_since.clone().map(|base| given(base, "--base"));
+    }
     inputs.output = OutputFormat::from(cli.format);
     inputs.quiet = cli.quiet;
     Some(inputs)
+}
+
+/// The type-aware flags of a command line.
+fn type_aware_inputs(cli: &Cli) -> TypeAwareInputs {
+    TypeAwareInputs {
+        enabled: cli.type_aware_override().map(|on| {
+            given(
+                on,
+                if on {
+                    "--type-aware"
+                } else {
+                    "--no-type-aware"
+                },
+            )
+        }),
+        projects: (!cli.type_aware_project.is_empty())
+            .then(|| given(cli.type_aware_project.clone(), "--type-aware-project")),
+        require: cli
+            .type_aware_require
+            .map(|require| given(require.into(), "--type-aware-require")),
+    }
 }
 
 /// The host of a command that runs through `fallow-api` (`mutation` and

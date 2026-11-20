@@ -20,6 +20,17 @@ pub enum DupesMode {
     Semantic,
 }
 
+impl From<DupesMode> for fallow_config::DetectionMode {
+    fn from(mode: DupesMode) -> Self {
+        match mode {
+            DupesMode::Strict => Self::Strict,
+            DupesMode::Mild => Self::Mild,
+            DupesMode::Weak => Self::Weak,
+            DupesMode::Semantic => Self::Semantic,
+        }
+    }
+}
+
 impl From<fallow_config::DetectionMode> for DupesMode {
     fn from(mode: fallow_config::DetectionMode) -> Self {
         match mode {
@@ -99,6 +110,24 @@ impl DupesOverrides {
     /// Whether no override is set, so the run uses the config as it is.
     pub fn is_empty(&self) -> bool {
         self.first_global_flag().is_none()
+    }
+
+    /// The overrides as duplication inputs. A switch without a negative flag
+    /// (`--dupes-near`, `--dupes-skip-local`, `--dupes-cross-language`) is an
+    /// input only when it is set.
+    pub fn inputs(&self) -> fallow_config::DupesInputs {
+        fallow_config::DupesInputs {
+            mode: self.mode.map(fallow_config::DetectionMode::from),
+            near: self.near.then_some(true),
+            min_tokens: self.min_tokens,
+            min_lines: self.min_lines,
+            min_occurrences: self.min_occurrences,
+            threshold: self.threshold,
+            skip_local: self.skip_local.then_some(true),
+            cross_language: self.cross_language.then_some(true),
+            ignore_imports: self.ignore_imports,
+            ignore_symlinks: self.ignore_symlinks,
+        }
     }
 }
 
@@ -218,52 +247,15 @@ fn run_clone_trace(
     ExitCode::SUCCESS
 }
 
-/// Build a `DuplicatesConfig` from CLI options, merging with values from the config file.
-///
-/// CLI scalar fields (`mode`, `min_tokens`, `min_lines`, `threshold`) are
-/// `Option<T>` so an absent flag falls through to the value declared in
-/// `toml_dupes`. This is what lets users set e.g. `duplicates.minLines = 8`
-/// in `.fallowrc.jsonc` and have `fallow dupes` honor it. The opt-in toggles
-/// (`skip_local`, `cross_language`) use OR-merge, so any `true` (CLI or config)
-/// wins. `ignore_imports` and `ignore_symlinks` have a CLI opt-out, so they
-/// use precedence instead: an explicit CLI `Some(true|false)` wins over
-/// config, `None` defers to the config value.
+/// The `DuplicatesConfig` of a `fallow dupes` run: the CLI overrides over
+/// the config file, through [`fallow_config::DuplicatesConfig::merged`]. An
+/// absent flag keeps the value of the config, so `duplicates.minLines = 8` in
+/// the config holds without `--dupes-min-lines`.
 fn build_dupes_config(
     opts: &DupesOptions<'_>,
     toml_dupes: &fallow_config::DuplicatesConfig,
 ) -> fallow_config::DuplicatesConfig {
-    let overrides = &opts.overrides;
-    let mode = overrides.mode.map_or(toml_dupes.mode, |m| match m {
-        DupesMode::Strict => fallow_config::DetectionMode::Strict,
-        DupesMode::Mild => fallow_config::DetectionMode::Mild,
-        DupesMode::Weak => fallow_config::DetectionMode::Weak,
-        DupesMode::Semantic => fallow_config::DetectionMode::Semantic,
-    });
-    fallow_config::DuplicatesConfig {
-        enabled: true,
-        mode,
-        near: overrides.near || toml_dupes.near,
-        min_tokens: overrides.min_tokens.unwrap_or(toml_dupes.min_tokens),
-        min_lines: overrides.min_lines.unwrap_or(toml_dupes.min_lines),
-        min_occurrences: overrides
-            .min_occurrences
-            .unwrap_or(toml_dupes.min_occurrences),
-        threshold: overrides.threshold.unwrap_or(toml_dupes.threshold),
-        ignore: toml_dupes.ignore.clone(),
-        ignored_clones: toml_dupes.ignored_clones.clone(),
-        ignore_defaults: toml_dupes.ignore_defaults,
-        skip_local: overrides.skip_local || toml_dupes.skip_local,
-        ignore_symlinks: overrides
-            .ignore_symlinks
-            .unwrap_or(toml_dupes.ignore_symlinks),
-        cross_language: overrides.cross_language || toml_dupes.cross_language,
-        ignore_imports: overrides
-            .ignore_imports
-            .unwrap_or(toml_dupes.ignore_imports),
-        normalization: toml_dupes.normalization.clone(),
-        min_corpus_size_for_shingle_filter: toml_dupes.min_corpus_size_for_shingle_filter,
-        min_corpus_size_for_token_cache: toml_dupes.min_corpus_size_for_token_cache,
-    }
+    toml_dupes.merged_for_selected_run(&opts.overrides.inputs())
 }
 
 /// Check whether duplication percentage exceeds the configured threshold.

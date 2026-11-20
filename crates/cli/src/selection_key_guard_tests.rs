@@ -35,10 +35,13 @@ struct SelectionKeyOwner {
     fact: &'static str,
 }
 
-const SELECTION_KEY_OWNERS: &[SelectionKeyOwner] = &[SelectionKeyOwner {
+const SELECTION_KEY_OWNERS: &[SelectionKeyOwner] = &[];
+
+/// The owner entries of the self-tests of the guard.
+const TEST_OWNERS: &[SelectionKeyOwner] = &[SelectionKeyOwner {
     path: "crates/lsp/src/initialization.rs",
     reads: &["config.enabled"],
-    fact: "the copy of duplicates.enabled into the duplication config of the editor",
+    fact: "a read for the self-tests of the guard",
 }];
 
 #[test]
@@ -778,13 +781,13 @@ fn guard_does_not_bind_a_closure_parameter_of_another_value() {
 
 #[test]
 fn guard_flags_a_read_in_an_owner_file_that_the_owner_does_not_name() {
-    let owner = &SELECTION_KEY_OWNERS[0];
+    let owner = &TEST_OWNERS[0];
     let found = vec![
         "148: config.enabled".to_owned(),
         "200: cfg.dupes".to_owned(),
     ];
     assert_eq!(
-        unowned_reads(owner.path, found, SELECTION_KEY_OWNERS),
+        unowned_reads(owner.path, found, TEST_OWNERS),
         [format!("{}:200: cfg.dupes", owner.path)]
     );
     let twice = vec![
@@ -792,14 +795,14 @@ fn guard_flags_a_read_in_an_owner_file_that_the_owner_does_not_name() {
         "300: config.enabled".to_owned(),
     ];
     assert_eq!(
-        unowned_reads(owner.path, twice, SELECTION_KEY_OWNERS),
+        unowned_reads(owner.path, twice, TEST_OWNERS),
         [format!("{}:300: config.enabled", owner.path)]
     );
     assert!(
         unowned_reads(
             owner.path,
             vec!["9: config.enabled".to_owned()],
-            SELECTION_KEY_OWNERS
+            TEST_OWNERS
         )
         .is_empty()
     );
@@ -807,7 +810,7 @@ fn guard_flags_a_read_in_an_owner_file_that_the_owner_does_not_name() {
 
 #[test]
 fn guard_reports_an_owned_read_that_the_file_no_longer_has() {
-    let owner = &SELECTION_KEY_OWNERS[0];
+    let owner = &TEST_OWNERS[0];
     assert_eq!(
         missing_owned_reads(owner, &["148: other.enabled".to_owned()]),
         ["config.enabled"]

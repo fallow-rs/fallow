@@ -357,8 +357,6 @@ pub(super) fn audit_options_from_params(
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             type_aware: typed_type_aware(params.type_aware),
-            // The base ref of this tool, not a narrowing request: the
-            // runtime reads it from `changed_since`, so it stays there.
             ..call.analysis
         },
         base: non_empty_string(params.base.as_deref()),

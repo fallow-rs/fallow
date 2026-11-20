@@ -113,6 +113,17 @@ pub struct RunSettingsView {
     pub package_baselines: Sourced<bool>,
     /// Whether the run reports unused exports of entry files.
     pub include_entry_exports: Sourced<bool>,
+    /// Whether the run refines its findings with the type-aware companion.
+    /// `null` when `FALLOW_TYPE_AWARE` or `FALLOW_TYPE_AWARE_REQUIRE` has a
+    /// value that the run cannot use.
+    pub type_aware: Option<Sourced<bool>>,
+    /// The base ref of an audit that the caller or `FALLOW_AUDIT_BASE`
+    /// names. `null` when the audit detects the base, and for another
+    /// command.
+    pub audit_base: Option<Sourced<String>>,
+    /// The base ref of an audit that detects no base: `FALLOW_CHANGED_SINCE`
+    /// on the MCP server. `null` when there is none.
+    pub audit_base_fallback: Option<Sourced<String>>,
 }
 
 /// The environment variables of one run, by name.

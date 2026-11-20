@@ -40,7 +40,7 @@ pub fn run_trace_export(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         let run = super::type_aware_config::resolve_trace_run(
-            &options.analysis.type_aware,
+            &options.analysis,
             super::type_aware_config::ConfigLocation::of(&resolved),
             || resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceChain),
         )?;

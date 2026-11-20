@@ -192,6 +192,7 @@ mod type_aware_constant_parameter_tests;
 mod type_aware_coupling_tests;
 mod type_aware_default_export_tests;
 mod type_aware_degradation_tests;
+mod type_aware_env_tests;
 mod type_aware_scope_tests;
 mod typeorm_datasource_tests;
 mod unresolved_gitignored_target_tests;
