@@ -1,6 +1,6 @@
-//! The config load behaviour of the four project config entry points:
-//! `config_for_project`, `config_for_project_with_load_options`,
-//! `config_for_project_analysis` and `config_for_project_readiness`.
+//! The config load behaviour of the three direct project config loads:
+//! `config_for_project`, `config_for_project_with_load_options` and
+//! `config_for_project_analysis`.
 //!
 //! Each test pins the error text, the validation level, the production
 //! flatten or the trust policy of remote `extends` that a host sees.
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::project_config::{
     ProjectConfig, ProjectConfigOptions, config_for_project, config_for_project_analysis,
-    config_for_project_readiness, config_for_project_with_load_options,
+    config_for_project_with_load_options,
 };
 use fallow_config::{ConfigLoadOptions, FallowConfig, ProductionAnalysis};
 use fallow_types::output_format::OutputFormat;
@@ -45,21 +45,18 @@ enum Wrapper {
     Project,
     WithLoadOptions,
     Analysis(ProductionAnalysis, Option<bool>),
-    Readiness(ProductionAnalysis, Option<bool>),
 }
 
-const ALL_WRAPPERS: [Wrapper; 4] = [
+const ALL_WRAPPERS: [Wrapper; 3] = [
     Wrapper::Project,
     Wrapper::WithLoadOptions,
     Wrapper::Analysis(ProductionAnalysis::DeadCode, None),
-    Wrapper::Readiness(ProductionAnalysis::DeadCode, None),
 ];
 
-/// The three entry points that take the remote `extends` opt-in.
-const OPT_IN_WRAPPERS: [Wrapper; 3] = [
+/// The two entry points that take the remote `extends` opt-in.
+const OPT_IN_WRAPPERS: [Wrapper; 2] = [
     Wrapper::WithLoadOptions,
     Wrapper::Analysis(ProductionAnalysis::DeadCode, None),
-    Wrapper::Readiness(ProductionAnalysis::DeadCode, None),
 ];
 
 fn options(
@@ -104,12 +101,6 @@ fn load_with_trust(
             config_path,
             options(analysis, production, allow_remote_extends),
         ),
-        Wrapper::Readiness(analysis, production) => config_for_project_readiness(
-            root,
-            config_path,
-            options(analysis, production, allow_remote_extends),
-        )
-        .map(|readiness| readiness.project),
     };
     result.map_err(|err| err.to_string())
 }
@@ -237,17 +228,17 @@ fn only_the_analysis_entry_points_validate_external_plugins() {
             load(Wrapper::WithLoadOptions, &root, None).is_ok(),
             "{config:?}"
         );
-        for wrapper in [
+        let err = load(
             Wrapper::Analysis(ProductionAnalysis::DeadCode, None),
-            Wrapper::Readiness(ProductionAnalysis::DeadCode, None),
-        ] {
-            let err = load(wrapper, &root, None).expect_err("plugin rejected");
-            assert!(
-                err.starts_with("invalid external plugin definition:\n  - "),
-                "{wrapper:?} with {config:?}: {err}"
-            );
-            assert!(err.contains("../outside/**"), "{err}");
-        }
+            &root,
+            None,
+        )
+        .expect_err("plugin rejected");
+        assert!(
+            err.starts_with("invalid external plugin definition:\n  - "),
+            "{config:?}: {err}"
+        );
+        assert!(err.contains("../outside/**"), "{err}");
     }
 }
 
@@ -302,9 +293,8 @@ fn per_analysis_production_flattens_for_the_requested_analysis() {
             Wrapper::Analysis(ProductionAnalysis::DeadCode, Some(false)),
             false,
         ),
-        (Wrapper::Readiness(ProductionAnalysis::Health, None), false),
         (
-            Wrapper::Readiness(ProductionAnalysis::Health, Some(true)),
+            Wrapper::Analysis(ProductionAnalysis::Health, Some(true)),
             true,
         ),
     ];
@@ -331,7 +321,7 @@ fn production_override_without_a_config_file_reaches_only_the_analysis_entry_poi
             true,
         ),
         (
-            Wrapper::Readiness(ProductionAnalysis::Dupes, Some(true)),
+            Wrapper::Analysis(ProductionAnalysis::Dupes, Some(true)),
             true,
         ),
     ];

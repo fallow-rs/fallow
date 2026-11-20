@@ -17,14 +17,15 @@ mod loader;
 
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use direct_load::default_project_config;
+#[cfg(test)]
+pub(crate) use direct_load::{
+    ProjectConfigOptions, config_for_project_analysis, config_for_project_analysis_with_env,
+    config_for_project_with_env,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use direct_load::{
-    ProjectConfigOptions, ProjectConfigReadiness, config_for_project, config_for_project_analysis,
-    config_for_project_readiness, config_for_project_with_load_options,
-    config_for_project_with_production,
+    config_for_project, config_for_project_with_load_options, config_for_project_with_production,
 };
-#[cfg(test)]
-pub(crate) use direct_load::{config_for_project_analysis_with_env, config_for_project_with_env};
 
 #[cfg(any(test, feature = "testing"))]
 pub use loader::load_count;

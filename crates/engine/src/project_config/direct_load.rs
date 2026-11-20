@@ -65,6 +65,7 @@ impl DuplicationScope {
 }
 
 /// Scalar config-loading knobs for one analysis family.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 pub struct ProjectConfigOptions {
     /// Output format the resolved config carries into rendering.
@@ -82,16 +83,6 @@ pub struct ProjectConfigOptions {
     pub analysis: ProductionAnalysis,
     /// Permit `extends` config inheritance from remote URLs.
     pub allow_remote_extends: bool,
-}
-
-/// Resolved project configuration plus doctor-specific plugin diagnostics.
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct ProjectConfigReadiness {
-    /// The same resolved configuration returned by [`config_for_project_analysis`].
-    pub project: ProjectConfig,
-    /// Unresolved resources named explicitly by the `plugins` config field.
-    pub configured_plugin_diagnostics: Vec<fallow_config::ConfiguredPluginDiagnostic>,
 }
 
 /// Resolve the analysis config for a project.
@@ -214,13 +205,13 @@ pub fn default_project_config(root: &Path) -> ProjectConfig {
 /// # Errors
 ///
 /// Returns an engine error when config loading or validation fails.
+#[cfg(test)]
 pub fn config_for_project_analysis(
     root: &Path,
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfig> {
     resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())
-        .map(|(project, _)| project)
 }
 
 /// [`config_for_project_analysis`] with the environment variables of `env`
@@ -232,36 +223,16 @@ pub fn config_for_project_analysis_with_env(
     options: ProjectConfigOptions,
     env: &EnvSnapshot,
 ) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options, env).map(|(project, _)| project)
+    resolve_project_config_analysis(root, config_path, options, env)
 }
 
-/// Resolve project configuration and collect typed readiness diagnostics for
-/// plugin resources named explicitly by the user configuration.
-///
-/// # Errors
-///
-/// Returns an engine error when config loading or validation fails.
-pub fn config_for_project_readiness(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ProjectConfigOptions,
-) -> EngineResult<ProjectConfigReadiness> {
-    let (project, configured_plugin_paths) =
-        resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())?;
-    let configured_plugin_diagnostics =
-        fallow_config::diagnose_configured_external_plugins(root, &configured_plugin_paths);
-    Ok(ProjectConfigReadiness {
-        project,
-        configured_plugin_diagnostics,
-    })
-}
-
+#[cfg(test)]
 fn resolve_project_config_analysis(
     root: &Path,
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
     env: &EnvSnapshot,
-) -> EngineResult<(ProjectConfig, Vec<String>)> {
+) -> EngineResult<ProjectConfig> {
     let file = load_config_file(
         root,
         config_path,
@@ -276,7 +247,6 @@ fn resolve_project_config_analysis(
     );
     file.validate(root)?;
     let ConfigFile { config, path, .. } = file;
-    let configured_plugin_paths = config.plugins.clone();
     let options = ResolveOptions {
         output: options.output,
         threads: options.threads,
@@ -287,8 +257,7 @@ fn resolve_project_config_analysis(
     // The caller names one analysis and owns the production mode of each
     // other analysis, so a session of this config runs duplication only when
     // the caller found that the modes match.
-    let project = entry.into_project_config(path, DuplicationScope::SameAsSession);
-    Ok((project, configured_plugin_paths))
+    Ok(entry.into_project_config(path, DuplicationScope::SameAsSession))
 }
 
 #[cfg(test)]
