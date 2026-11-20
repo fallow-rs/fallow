@@ -1,39 +1,33 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import {
-  closeSync,
-  existsSync,
-  mkdtempSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
-import { parseNonNegativeInt, parsePositiveInt } from "../scripts/lib/options.mjs";
+import {
+  formatMs as fmt,
+  sampleOutcome,
+  sampleSummary,
+  stats,
+  timeCells,
+  timeSample,
+} from "../scripts/lib/bench-samples.mjs";
+import { readBenchArgs } from "../scripts/lib/options.mjs";
+import { parseJsonReport } from "../scripts/lib/tool-run.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
-const hasFilter = args.includes("--synthetic") || args.includes("--real-world");
-const runSynthetic = args.includes("--synthetic") || !hasFilter;
-const runRealWorld = args.includes("--real-world") || !hasFilter;
-const inlineOption = (name) =>
-  args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-const readCount = (parse, name, fallback) => {
-  try {
-    return parse(name, inlineOption(name) ?? fallback);
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-};
-const RUNS = readCount(parsePositiveInt, "--runs", "5");
-const WARMUP = readCount(parseNonNegativeInt, "--warmup", "2");
+const {
+  runSynthetic,
+  runRealWorld,
+  runs: RUNS,
+  warmup: WARMUP,
+} = readBenchArgs(args, {
+  runs: "5",
+  warmup: "2",
+});
 
 console.log("Building fallow (release)...");
 // No timeout: a cold release build can take many minutes. Cargo writes its
@@ -116,86 +110,84 @@ function countSourceFiles(dir) {
 const stdoutDir = mkdtempSync(join(os.tmpdir(), "fallow-bench-circular-"));
 process.on("exit", () => rmSync(stdoutDir, { recursive: true, force: true }));
 
-function timeRunWithMemory(cmd, cmdArgs, cwd) {
-  const isLinux = process.platform === "linux";
-  const timeBin = "/usr/bin/time";
-  const timeArgs = isLinux ? ["-v", cmd, ...cmdArgs] : ["-l", cmd, ...cmdArgs];
+const timeRunWithMemory = (cmd, cmdArgs, cwd) =>
+  timeSample(cmd, cmdArgs, {
+    cwd,
+    timeout: 600000,
+    memory: true,
+    stdoutFile: join(stdoutDir, "stdout"),
+  });
 
-  // Send stdout to a regular file, not a pipe. madge calls process.exit before
-  // a pipe drains, so piped output stops at 64 KiB and the JSON is incomplete.
-  const stdoutPath = join(stdoutDir, "stdout");
-  const stdoutFd = openSync(stdoutPath, "w");
-  const start = performance.now();
-  let result;
+const UNEXPECTED_SHAPE = { ok: false, error: "unexpected JSON shape" };
+
+const objectReport = (stdout) => {
+  const report = parseJsonReport(stdout);
+  return report.ok && Array.isArray(report.value) ? UNEXPECTED_SHAPE : report;
+};
+
+const arrayReport = (stdout) => {
+  const report = parseJsonReport(stdout);
+  return report.ok && !Array.isArray(report.value) ? UNEXPECTED_SHAPE : report;
+};
+
+const dpdmReport = (outputFile) => {
+  let text;
   try {
-    result = spawnSync(timeBin, timeArgs, {
-      cwd,
-      stdio: ["pipe", stdoutFd, "pipe"],
-      timeout: 600000,
-      maxBuffer: 50 * 1024 * 1024,
-      env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-    });
-  } finally {
-    closeSync(stdoutFd);
-  }
-  const elapsed = performance.now() - start;
-  const stderr = result.stderr?.toString() ?? "";
-  const stdout = readFileSync(stdoutPath, "utf8");
-
-  let peakRssBytes = 0;
-  if (isLinux) {
-    const match = stderr.match(/Maximum resident set size \(kbytes\): (\d+)/);
-    if (match) peakRssBytes = parseInt(match[1]) * 1024;
-  } else {
-    const match = stderr.match(/(\d+)\s+maximum resident set size/);
-    if (match) peakRssBytes = parseInt(match[1]);
-  }
-
-  return { elapsed, status: result.status, stdout, stderr, peakRssBytes };
-}
-
-function parseFallowCycles(stdout) {
-  try {
-    const data = JSON.parse(stdout);
-    return data.circular_dependencies?.length ?? 0;
+    text = readFileSync(outputFile, "utf8");
   } catch {
-    return "?";
+    return { ok: false, error: "no report file" };
   }
-}
+  const report = parseJsonReport(text);
+  return report.ok && !Array.isArray(report.value.circulars) ? UNEXPECTED_SHAPE : report;
+};
 
-function parseMadgeCycles(stdout) {
-  try {
-    const data = JSON.parse(stdout);
-    return Array.isArray(data) ? data.length : "?";
-  } catch {
-    return "?";
+const toolSamples = (tool) => ({ tool, times: [], firstFailure: null, cycles: "?", rss: 0 });
+
+const recordSample = (samples, run, outcome, countCycles) => {
+  samples.firstFailure ??= outcome.reason;
+  if (!outcome.valid) return;
+  samples.times.push(run.elapsed);
+  if (samples.times.length > 1) return;
+  samples.cycles = countCycles();
+  samples.rss = run.peakRssBytes;
+};
+
+const addComparison = (result, rows, samples) => {
+  const { tool } = samples;
+  const summary = sampleSummary(samples.times, RUNS);
+  const speedup = summary.complete ? summary.stats.median / result.fallow.median : null;
+  rows.push({
+    Tool: tool,
+    ...timeCells(summary.stats),
+    Speedup: speedup === null ? "incomplete" : `1/${speedup.toFixed(1)}x`,
+    Memory: fmtMem(samples.rss),
+    Cycles: samples.cycles,
+  });
+  result[tool] = summary.stats;
+  result[`${tool}Cycles`] = samples.cycles;
+  result[`${tool}Rss`] = samples.rss;
+  result[`${tool}Speedup`] = speedup;
+  if (speedup === null) result.incomplete.push({ tool, summary, reason: samples.firstFailure });
+};
+
+const printSamples = (samples) => {
+  const label = `${samples.tool}:`.padEnd(7);
+  if (samples.times.length > 0) {
+    console.log(`  ${label} [${samples.times.map((t) => t.toFixed(0)).join(", ")}]`);
   }
-}
+  const failure = samples.firstFailure ? ` (first failure: ${samples.firstFailure})` : "";
+  console.log(`  ${samples.tool} runs: ${samples.times.length}/${RUNS} ok${failure}`);
+};
 
-function parseDpdmCycles(stdout) {
-  try {
-    const data = JSON.parse(stdout);
-    return data.circulars?.length ?? "?";
-  } catch {
-    return "?";
-  }
-}
-
-function stats(times) {
-  const sorted = [...times].toSorted((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+const summaryCells = (result, tool) => {
+  if (result[tool] === undefined) return {};
+  const speedup = result[`${tool}Speedup`];
   return {
-    min: sorted[0],
-    max: sorted.at(-1),
-    mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-    median,
+    [`${tool} (median)`]: result[tool] ? fmt(result[tool].median) : "--",
+    [`vs ${tool}`]: speedup === null ? "incomplete" : `${speedup.toFixed(1)}x`,
   };
-}
+};
 
-function fmt(ms) {
-  return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`;
-}
 function fmtMem(bytes) {
   if (bytes === 0) return "?";
   const mb = bytes / 1024 / 1024;
@@ -238,48 +230,35 @@ function benchmarkProject(name, dir) {
   }
 
   // --- Measured runs ---
-  const fallowTimes = [],
-    madgeTimes = [],
-    dpdmTimes = [];
+  const fallowTimes = [];
   let fallowCycles = "?",
-    madgeCycles = "?",
-    dpdmCycles = "?";
-  let fallowRss = 0,
-    madgeRss = 0,
-    dpdmRss = 0;
+    fallowRss = 0;
+  const madge = toolSamples("madge");
+  const dpdm = toolSamples("dpdm");
 
   for (let i = 0; i < RUNS; i++) {
-    // fallow
     const fr = timeRunWithMemory(fallowBin, fallowArgs, dir);
+    const fallowReport = objectReport(fr.stdout);
+    const fallowOutcome = sampleOutcome(fr, fallowReport);
+    if (!fallowOutcome.valid)
+      throw new Error(`[${name}] fallow run failed: ${fallowOutcome.reason}`);
     fallowTimes.push(fr.elapsed);
     if (i === 0) {
-      fallowCycles = parseFallowCycles(fr.stdout);
+      fallowCycles = fallowReport.value.circular_dependencies?.length ?? 0;
       fallowRss = fr.peakRssBytes;
     }
 
-    // madge
     if (hasMadge) {
       const mr = timeRunWithMemory(madgeBin, madgeArgs, dir);
-      madgeTimes.push(mr.elapsed);
-      if (i === 0) {
-        madgeCycles = parseMadgeCycles(mr.stdout);
-        madgeRss = mr.peakRssBytes;
-      }
+      const report = arrayReport(mr.stdout);
+      recordSample(madge, mr, sampleOutcome(mr, report), () => report.value.length);
     }
 
-    // dpdm
     if (hasDpdm) {
       const dr = timeRunWithMemory(dpdmBin, dpdmArgs, dir);
-      dpdmTimes.push(dr.elapsed);
-      if (i === 0) {
-        try {
-          dpdmCycles = parseDpdmCycles(readFileSync(dpdmOutputFile, "utf8"));
-        } catch {
-          dpdmCycles = "?";
-        }
-        dpdmRss = dr.peakRssBytes;
-      }
+      const report = dpdmReport(dpdmOutputFile);
       if (existsSync(dpdmOutputFile)) rmSync(dpdmOutputFile);
+      recordSample(dpdm, dr, sampleOutcome(dr, report), () => report.value.circulars.length);
     }
   }
 
@@ -287,62 +266,19 @@ function benchmarkProject(name, dir) {
   const rows = [
     {
       Tool: "fallow",
-      Min: fmt(fs.min),
-      Mean: fmt(fs.mean),
-      Median: fmt(fs.median),
-      Max: fmt(fs.max),
+      ...timeCells(fs),
       Speedup: "--",
       Memory: fmtMem(fallowRss),
       Cycles: fallowCycles,
     },
   ];
-
-  const result = { name, files, fallow: fs, fallowCycles, fallowRss };
-
-  if (hasMadge && madgeTimes.length > 0) {
-    const ms = stats(madgeTimes);
-    const speedup = ms.median / fs.median;
-    rows.push({
-      Tool: "madge",
-      Min: fmt(ms.min),
-      Mean: fmt(ms.mean),
-      Median: fmt(ms.median),
-      Max: fmt(ms.max),
-      Speedup: `1/${speedup.toFixed(1)}x`,
-      Memory: fmtMem(madgeRss),
-      Cycles: madgeCycles,
-    });
-    result.madge = ms;
-    result.madgeSpeedup = speedup;
-    result.madgeCycles = madgeCycles;
-    result.madgeRss = madgeRss;
-  }
-
-  if (hasDpdm && dpdmTimes.length > 0) {
-    const ds = stats(dpdmTimes);
-    const speedup = ds.median / fs.median;
-    rows.push({
-      Tool: "dpdm",
-      Min: fmt(ds.min),
-      Mean: fmt(ds.mean),
-      Median: fmt(ds.median),
-      Max: fmt(ds.max),
-      Speedup: `1/${speedup.toFixed(1)}x`,
-      Memory: fmtMem(dpdmRss),
-      Cycles: dpdmCycles,
-    });
-    result.dpdm = ds;
-    result.dpdmSpeedup = speedup;
-    result.dpdmCycles = dpdmCycles;
-    result.dpdmRss = dpdmRss;
-  }
+  const result = { name, files, fallow: fs, fallowCycles, fallowRss, incomplete: [] };
+  const compared = [hasMadge && madge, hasDpdm && dpdm].filter(Boolean);
+  for (const samples of compared) addComparison(result, rows, samples);
 
   console.table(rows);
   console.log(`  fallow: [${fallowTimes.map((t) => t.toFixed(0)).join(", ")}]`);
-  if (hasMadge && madgeTimes.length > 0)
-    console.log(`  madge:  [${madgeTimes.map((t) => t.toFixed(0)).join(", ")}]`);
-  if (hasDpdm && dpdmTimes.length > 0)
-    console.log(`  dpdm:   [${dpdmTimes.map((t) => t.toFixed(0)).join(", ")}]`);
+  for (const samples of compared) printSamples(samples);
   console.log("");
 
   return result;
@@ -383,25 +319,24 @@ if (results.length === 0) {
 }
 if (results.length > 0) {
   console.log("\n=== Summary ===\n");
-  const summaryRows = results.map((r) => {
-    const row = {
-      Project: r.name,
-      Files: r.files,
-      "Fallow (median)": fmt(r.fallow.median),
-      "Fallow cycles": r.fallowCycles,
-      "Fallow RSS": fmtMem(r.fallowRss),
-    };
-    if (r.madge) {
-      row["madge (median)"] = fmt(r.madge.median);
-      row["vs madge"] = `${r.madgeSpeedup.toFixed(1)}x`;
-    }
-    if (r.dpdm) {
-      row["dpdm (median)"] = fmt(r.dpdm.median);
-      row["vs dpdm"] = `${r.dpdmSpeedup.toFixed(1)}x`;
-    }
-    return row;
-  });
+  const summaryRows = results.map((r) => ({
+    Project: r.name,
+    Files: r.files,
+    "Fallow (median)": fmt(r.fallow.median),
+    "Fallow cycles": r.fallowCycles,
+    "Fallow RSS": fmtMem(r.fallowRss),
+    ...summaryCells(r, "madge"),
+    ...summaryCells(r, "dpdm"),
+  }));
   console.table(summaryRows);
+  for (const r of results) {
+    for (const { tool, summary, reason } of r.incomplete) {
+      const detail = reason ? `: ${reason}` : "";
+      console.log(
+        `Incomplete: ${r.name} ${tool} ${summary.successful}/${summary.requested} runs ok${detail}`,
+      );
+    }
+  }
 
   if (results.some((r) => r.madgeSpeedup)) {
     const avgMadge =

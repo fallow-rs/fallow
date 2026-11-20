@@ -5,35 +5,28 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
-import { parseNonNegativeInt, parsePositiveInt } from "../scripts/lib/options.mjs";
+import {
+  formatMs as fmt,
+  sampleOutcome,
+  sampleSummary,
+  stats,
+  timeCells,
+  timeSample,
+} from "../scripts/lib/bench-samples.mjs";
+import { readBenchArgs } from "../scripts/lib/options.mjs";
+import { fallowIssueTotal, knipIssueTotal } from "../scripts/lib/report-counts.mjs";
+import { parseJsonReport } from "../scripts/lib/tool-run.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
-const hasFilter = args.includes("--synthetic") || args.includes("--real-world");
-const runSynthetic = args.includes("--synthetic") || !hasFilter;
-const runRealWorld = args.includes("--real-world") || !hasFilter;
-const inlineOption = (name) =>
-  args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-const readCount = (parse, name, fallback) => {
-  try {
-    return parse(name, inlineOption(name) ?? fallback);
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-};
-const RUNS = readCount(parsePositiveInt, "--runs", "5");
-const WARMUP = readCount(parseNonNegativeInt, "--warmup", "2");
-const projectsArg = args.find((a) => a.startsWith("--projects="))?.split("=")[1];
-const projectFilter = projectsArg
-  ? new Set(
-      projectsArg
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    )
-  : null;
+const {
+  runSynthetic,
+  runRealWorld,
+  projectFilter,
+  runs: RUNS,
+  warmup: WARMUP,
+} = readBenchArgs(args, { runs: "5", warmup: "2" });
 
 console.log("Building fallow (release)...");
 // No timeout: a cold release build can take many minutes. Cargo writes its
@@ -100,55 +93,9 @@ function countSourceFiles(dir) {
   return count;
 }
 
-function timeRun(cmd, cmdArgs, cwd) {
-  const start = performance.now();
-  const result = spawnSync(cmd, cmdArgs, {
-    cwd,
-    stdio: "pipe",
-    timeout: 300000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-  });
-  return {
-    elapsed: performance.now() - start,
-    status: result.status,
-    signal: result.signal,
-    stdout: result.stdout?.toString() ?? "",
-    stderr: result.stderr?.toString() ?? "",
-  };
-}
-
-function timeRunWithMemory(cmd, cmdArgs, cwd) {
-  const isLinux = process.platform === "linux";
-  const timeBin = "/usr/bin/time";
-  const timeArgs = isLinux ? ["-v", cmd, ...cmdArgs] : ["-l", cmd, ...cmdArgs];
-
-  const start = performance.now();
-  const result = spawnSync(timeBin, timeArgs, {
-    cwd,
-    stdio: "pipe",
-    timeout: 300000,
-    maxBuffer: 50 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-  });
-  const elapsed = performance.now() - start;
-  const stderr = result.stderr?.toString() ?? "";
-
-  let peakRssBytes = 0;
-  if (isLinux) {
-    const match = stderr.match(/Maximum resident set size \(kbytes\): (\d+)/);
-    if (match) peakRssBytes = parseInt(match[1]) * 1024;
-  } else {
-    // macOS: reports in bytes
-    const match = stderr.match(/(\d+)\s+maximum resident set size/);
-    if (match) peakRssBytes = parseInt(match[1]);
-  }
-
-  // stdout for fallow comes from the time wrapper child process.
-  const stdout = result.stdout?.toString() ?? "";
-
-  return { elapsed, status: result.status, signal: result.signal, stdout, stderr, peakRssBytes };
-}
+const timeRun = (cmd, cmdArgs, cwd) => timeSample(cmd, cmdArgs, { cwd, timeout: 300000 });
+const timeRunWithMemory = (cmd, cmdArgs, cwd) =>
+  timeSample(cmd, cmdArgs, { cwd, timeout: 300000, memory: true });
 
 function firstDiagnosticLine(text) {
   const lines = text
@@ -162,63 +109,22 @@ function firstDiagnosticLine(text) {
   );
 }
 
-function parseJsonReport(stdout) {
-  const trimmed = stdout.replace(/^\uFEFF/, "").trim();
-  if (!trimmed) return { ok: false, reason: "no JSON output" };
-  try {
-    const data = JSON.parse(trimmed);
-    if (data === null || (typeof data !== "object" && !Array.isArray(data))) {
-      return { ok: false, reason: "unexpected JSON shape" };
-    }
-    return { ok: true, data };
-  } catch (error) {
-    return { ok: false, reason: `invalid JSON output (${String(error.message).split("\n")[0]})` };
-  }
-}
+const fallowIssueCount = (report) => fallowIssueTotal(report) ?? "?";
 
-function countIssues(data) {
-  if (Array.isArray(data)) return data.length;
-  let count = 0;
-  for (const value of Object.values(data)) {
-    if (Array.isArray(value)) count += value.length;
-  }
-  return count;
-}
-
-function summarizeBenchmarkRun(result) {
-  const parsed = parseJsonReport(result.stdout);
-  if (!parsed.ok) {
+function summarizeBenchmarkRun(result, countIssues) {
+  const report = parseJsonReport(result.stdout);
+  const outcome = sampleOutcome(result, report);
+  if (!outcome.valid) {
     const detail = firstDiagnosticLine(result.stderr) ?? firstDiagnosticLine(result.stdout);
     return {
       valid: false,
       issues: "error",
-      error: detail ? `${parsed.reason}; ${detail}` : parsed.reason,
+      error: detail ? `${outcome.reason}; ${detail}` : outcome.reason,
     };
   }
-  if (result.status !== 0 && result.status !== 1) {
-    const detail = result.signal
-      ? `terminated by ${result.signal}`
-      : `exit ${result.status ?? "unknown"}`;
-    return { valid: false, issues: "error", error: detail };
-  }
-  return { valid: true, issues: countIssues(parsed.data), error: null };
+  return { valid: true, issues: countIssues(report.value), error: null };
 }
 
-function stats(times) {
-  const sorted = [...times].toSorted((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  return {
-    min: sorted[0],
-    max: sorted.at(-1),
-    mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-    median,
-  };
-}
-
-function fmt(ms) {
-  return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`;
-}
 function fmtMem(bytes) {
   if (bytes === 0) return "?";
   const mb = bytes / 1024 / 1024;
@@ -264,7 +170,7 @@ function benchmarkProject(name, dir) {
 
   for (let i = 0; i < RUNS; i++) {
     const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
-    const fSummary = summarizeBenchmarkRun(fr);
+    const fSummary = summarizeBenchmarkRun(fr, fallowIssueCount);
     if (!fSummary.valid) throw new Error(`[${name}] fallow cold run failed: ${fSummary.error}`);
     fTimesCold.push(fr.elapsed);
     if (i === 0) {
@@ -272,7 +178,7 @@ function benchmarkProject(name, dir) {
       fPeakRss = fr.peakRssBytes;
     }
     const kr = timeRunWithMemory(knipBin, kArgs, dir);
-    const kSummary = summarizeBenchmarkRun(kr);
+    const kSummary = summarizeBenchmarkRun(kr, knipIssueTotal);
     if (kSummary.valid) {
       kTimes.push(kr.elapsed);
       if (kIssues === "error") {
@@ -289,7 +195,7 @@ function benchmarkProject(name, dir) {
   clearFallowCache(dir);
   const fArgsWarm = ["dead-code", "--quiet", "--format", "json"];
   const populate = timeRun(fallowBin, fArgsWarm, dir);
-  const populateSummary = summarizeBenchmarkRun(populate);
+  const populateSummary = summarizeBenchmarkRun(populate, fallowIssueCount);
   if (!populateSummary.valid)
     throw new Error(`[${name}] fallow cache warm-up failed: ${populateSummary.error}`);
   // Warmup runs (same shape as cold path) to settle OS / Spotlight noise
@@ -298,67 +204,52 @@ function benchmarkProject(name, dir) {
   }
   // Benchmark warm runs
   const fTimesWarm = [];
+  let fWarmIssues = "?";
   for (let i = 0; i < RUNS; i++) {
     const fr = timeRun(fallowBin, fArgsWarm, dir);
-    const fSummary = summarizeBenchmarkRun(fr);
+    const fSummary = summarizeBenchmarkRun(fr, fallowIssueCount);
     if (!fSummary.valid) throw new Error(`[${name}] fallow warm run failed: ${fSummary.error}`);
     fTimesWarm.push(fr.elapsed);
+    if (i === 0) fWarmIssues = fSummary.issues;
   }
   clearFallowCache(dir);
 
   const fsCold = stats(fTimesCold),
     fsWarm = stats(fTimesWarm);
-  const ks = kTimes.length > 0 ? stats(kTimes) : null;
-  const relative = ks ? relativeSpeed(fsCold.median, ks.median, "knip") : "--";
-  const speedupCold = ks ? ks.median / fsCold.median : null;
-  const speedupWarm = ks ? ks.median / fsWarm.median : null;
+  const kRuns = sampleSummary(kTimes, RUNS);
+  const ks = kRuns.stats;
+  const knipRelative = (fallowMedian) => {
+    if (kRuns.complete) return relativeSpeed(fallowMedian, ks.median, "knip");
+    return ks ? "incomplete" : "--";
+  };
+  const relative = knipRelative(fsCold.median);
+  const speedupCold = kRuns.complete ? ks.median / fsCold.median : null;
+  const speedupWarm = kRuns.complete ? ks.median / fsWarm.median : null;
   const cacheSpeedup = fsCold.median / fsWarm.median;
 
   const rows = [
     {
       Tool: "fallow (cold)",
-      Min: fmt(fsCold.min),
-      Mean: fmt(fsCold.mean),
-      Median: fmt(fsCold.median),
-      Max: fmt(fsCold.max),
+      ...timeCells(fsCold),
       Relative: relative,
       Memory: fmtMem(fPeakRss),
       Issues: fIssues,
     },
     {
       Tool: "fallow (warm)",
-      Min: fmt(fsWarm.min),
-      Mean: fmt(fsWarm.mean),
-      Median: fmt(fsWarm.median),
-      Max: fmt(fsWarm.max),
-      Relative: ks ? relativeSpeed(fsWarm.median, ks.median, "knip") : "--",
+      ...timeCells(fsWarm),
+      Relative: knipRelative(fsWarm.median),
       Memory: "-",
-      Issues: fIssues,
+      Issues: fWarmIssues,
     },
   ];
-  if (ks) {
-    rows.push({
-      Tool: "knip",
-      Min: fmt(ks.min),
-      Mean: fmt(ks.mean),
-      Median: fmt(ks.median),
-      Max: fmt(ks.max),
-      Relative: relative,
-      Memory: fmtMem(kPeakRss),
-      Issues: kIssues,
-    });
-  } else {
-    rows.push({
-      Tool: "knip",
-      Min: "--",
-      Mean: "--",
-      Median: "--",
-      Max: "--",
-      Relative: "--",
-      Memory: "--",
-      Issues: kIssues,
-    });
-  }
+  rows.push({
+    Tool: "knip",
+    ...timeCells(ks),
+    Relative: relative,
+    Memory: ks ? fmtMem(kPeakRss) : "--",
+    Issues: kIssues,
+  });
   console.table(rows);
   console.log(`  Cache speedup: ${cacheSpeedup.toFixed(2)}x (warm vs cold)`);
   console.log(`  fallow cold: [${fTimesCold.map((t) => t.toFixed(0)).join(", ")}]`);
@@ -366,6 +257,8 @@ function benchmarkProject(name, dir) {
   console.log(
     `  knip:        ${kTimes.length > 0 ? `[${kTimes.map((t) => t.toFixed(0)).join(", ")}]` : `[error: ${kErrorReason ?? kIssues}]`}`,
   );
+  const kFailure = kErrorReason ? ` (first failure: ${kErrorReason})` : "";
+  console.log(`  knip runs: ${kRuns.successful}/${kRuns.requested} ok${kFailure}`);
   console.log("");
 
   return {
@@ -384,6 +277,7 @@ function benchmarkProject(name, dir) {
     kPeakRss,
     kError: !ks,
     kErrorReason,
+    kRuns,
   };
 }
 
@@ -445,10 +339,13 @@ if (results.length > 0) {
       `Average speedup vs knip (warm): ${(valid.reduce((s, r) => s + r.speedupWarm, 0) / valid.length).toFixed(1)}x`,
     );
   }
-  const errorProjects = results.filter((r) => r.kError);
-  if (errorProjects.length > 0) {
-    console.log(`\nknip errors:`);
-    for (const project of errorProjects) console.log(`  ${project.name}: ${project.kErrorReason}`);
+  const incompleteProjects = results.filter((r) => !r.kRuns.complete);
+  if (incompleteProjects.length > 0) {
+    console.log(`\nIncomplete knip runs:`);
+    for (const project of incompleteProjects) {
+      const { successful, requested } = project.kRuns;
+      console.log(`  ${project.name}: ${successful}/${requested} ok: ${project.kErrorReason}`);
+    }
   }
   console.log(
     `Average cache effect:              ${(results.reduce((s, r) => s + r.cacheSpeedup, 0) / results.length).toFixed(2)}x\n`,

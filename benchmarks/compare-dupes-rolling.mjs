@@ -13,24 +13,13 @@ import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
-import { parseNonNegativeInt, parsePositiveInt } from "../scripts/lib/options.mjs";
+import { readBenchCounts } from "../scripts/lib/options.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
-const inlineOption = (name) =>
-  args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-const readCount = (parse, name, fallback) => {
-  try {
-    return parse(name, inlineOption(name) ?? fallback);
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
-};
-const RUNS = readCount(parsePositiveInt, "--runs", "1");
+const { runs: RUNS, samples: SAMPLE_COUNT } = readBenchCounts(args, { runs: "1", samples: "0" });
 const SKIP_BUILD = args.includes("--skip-build");
-const SAMPLE_COUNT = readCount(parseNonNegativeInt, "--samples", "0");
 const writeReprosArg = args.find((arg) => arg.startsWith("--write-repros="))?.split("=")[1];
 const writeReprosDir = writeReprosArg ? resolve(writeReprosArg) : null;
 const projectsArg = args.find((arg) => arg.startsWith("--projects="))?.split("=")[1];

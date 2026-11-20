@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseNonNegativeInt, parseOptions, parsePositiveInt } from "./lib/options.mjs";
+import {
+  inlineOption,
+  parseNonNegativeInt,
+  parseOptions,
+  parsePositiveInt,
+  readBenchCounts,
+} from "./lib/options.mjs";
 
 const spec = {
   "--list": { key: "list", type: "flag" },
@@ -55,4 +61,20 @@ test("parseOptions leaves the defaults unchanged and checks numeric values", () 
   parseOptions(["--project", "b"], spec, defaults);
   assert.deepEqual(defaults.projects, ["a"]);
   assert.throws(() => parseOptions(["--max", "1.5"], spec), /--max must be a positive integer/);
+});
+
+test("inlineOption reads the first name=value argument", () => {
+  assert.equal(inlineOption(["--a=1", "--runs=3", "--runs=4"], "--runs"), "3");
+  assert.equal(inlineOption(["--runs"], "--runs"), undefined);
+});
+
+test("readBenchCounts uses the defaults and the given counts", () => {
+  assert.deepEqual(readBenchCounts(["--runs=3"], { runs: "5", warmup: "2" }), {
+    runs: 3,
+    warmup: 2,
+  });
+  assert.deepEqual(readBenchCounts(["--samples=0"], { runs: "1", samples: "4" }), {
+    runs: 1,
+    samples: 0,
+  });
 });

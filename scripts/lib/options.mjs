@@ -33,6 +33,37 @@ const CONVERTERS = {
   nonNegativeInt: parseNonNegativeInt,
 };
 
+/** The value of the first `<name>=<value>` argument in `argv`, else undefined. */
+export const inlineOption = (argv, name) =>
+  argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
+
+const BENCH_COUNT_PARSERS = {
+  runs: parsePositiveInt,
+  warmup: parseNonNegativeInt,
+  samples: parseNonNegativeInt,
+};
+
+/**
+ * Reads the repetition counts of a benchmark script from `--<key>=N`
+ * arguments. `defaults` maps each key (`runs`, `warmup` or `samples`) to its
+ * default. `runs` must be 1 or more; the other counts can be 0. On invalid
+ * input the function prints the error and exits the process with status 1,
+ * before the script starts a build.
+ */
+export const readBenchCounts = (argv, defaults) => {
+  try {
+    return Object.fromEntries(
+      Object.entries(defaults).map(([key, fallback]) => {
+        const name = `--${key}`;
+        return [key, BENCH_COUNT_PARSERS[key](name, inlineOption(argv, name) ?? fallback)];
+      }),
+    );
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+};
+
 const optionOf = (spec, name) => (Object.hasOwn(spec, name) ? spec[name] : null);
 
 const inlineValue = (spec, arg) => {
@@ -78,4 +109,29 @@ export const parseOptions = (argv, spec, defaults = {}) => {
     index += 1;
   }
   return values;
+};
+
+const projectSet = (raw) =>
+  raw
+    ? new Set(
+        raw
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean),
+      )
+    : null;
+
+/**
+ * Reads the shared arguments of the `bench*` scripts: `--synthetic` and
+ * `--real-world` (both run when neither is given), `--projects=a,b` (null
+ * when absent), and the counts of `readBenchCounts` for `counts`.
+ */
+export const readBenchArgs = (argv, counts) => {
+  const hasFilter = argv.includes("--synthetic") || argv.includes("--real-world");
+  return {
+    runSynthetic: argv.includes("--synthetic") || !hasFilter,
+    runRealWorld: argv.includes("--real-world") || !hasFilter,
+    projectFilter: projectSet(inlineOption(argv, "--projects")),
+    ...readBenchCounts(argv, counts),
+  };
 };
