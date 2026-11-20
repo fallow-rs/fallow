@@ -235,3 +235,60 @@ export const handle = ((input: Input): void => {}) satisfies Handler;
         ]
     );
 }
+
+fn signature_types_of(source: &str, export_name: &str) -> Vec<String> {
+    let mut types: Vec<String> = parse_ts(source)
+        .public_signature_type_references
+        .into_iter()
+        .filter(|reference| reference.export_name == export_name)
+        .map(|reference| reference.type_name)
+        .collect();
+    types.sort_unstable();
+    types.dedup();
+    types
+}
+
+#[test]
+fn inferred_type_flow_follows_returns_fields_calls_default_and_member_reads() {
+    let source = r"
+interface Box { value: string }
+interface Other { flag: boolean }
+const box: Box = { value: 'a' };
+const other: Other = { flag: true };
+const holder = { inner: { box }, other };
+function makeBox(): Box { return box; }
+export const arrow = () => box;
+export function returned() { return { latency: box }; }
+export class Field { readonly latency = box; }
+export const called = { latency: makeBox() };
+export const member = holder.inner.box;
+export default [box];
+";
+    for export_name in ["arrow", "returned", "Field", "called", "member", "default"] {
+        assert_eq!(
+            signature_types_of(source, export_name),
+            vec!["Box".to_string()],
+            "{export_name}"
+        );
+    }
+}
+
+#[test]
+fn inferred_type_flow_skips_a_shadowed_name_and_a_call_argument() {
+    let source = r"
+interface Box { value: string }
+interface Other { flag: boolean }
+const box: Box = { value: 'a' };
+const other: Other = { flag: true };
+const holder = { box, other };
+declare function wrap<T>(value: T): { value: T };
+export const param = (box: number) => box;
+export function local() { const box = 1; return box; }
+export const generic = wrap(box);
+export const read = holder.box;
+";
+    assert!(signature_types_of(source, "param").is_empty());
+    assert!(signature_types_of(source, "local").is_empty());
+    assert!(signature_types_of(source, "generic").is_empty());
+    assert_eq!(signature_types_of(source, "read"), vec!["Box".to_string()]);
+}

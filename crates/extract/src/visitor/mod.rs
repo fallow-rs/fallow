@@ -879,8 +879,8 @@ pub(crate) struct ModuleInfoExtractor {
     local_type_declarations: Vec<LocalTypeDeclaration>,
     public_signature_type_references: Vec<PublicSignatureTypeReference>,
     local_signature_type_references: Vec<LocalSignatureTypeReference>,
-    /// `(owner, held)`: the module binding `owner` has no type annotation, and
-    /// its initializer holds the module binding `held` as a value.
+    /// `(owner, held)`: the inferred type of `owner` holds `held` as a value.
+    /// Both are a binding, a path (`a.b`), a call result (`f()`) or `default`.
     local_value_aliases: Vec<(String, String)>,
     local_class_exports: FxHashMap<String, LocalClassExportInfo>,
     subclass_declarations: FxHashMap<String, SubclassDeclaration>,

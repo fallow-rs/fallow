@@ -5,6 +5,8 @@ use super::*;
 use crate::js_text::JsText;
 use crate::{SemanticFact, TypeAliasSurfaceTargetFact};
 
+use super::type_flow::TypeFlow;
+
 /// A local in a class method that holds the result of a `this.<name>()` call,
 /// such as `table` in `const table = this.find()`. The extractor keeps the
 /// locals of one name in declaration order, the outer local first.
@@ -198,21 +200,6 @@ impl ModuleInfoExtractor {
         self.member_accesses.extend(picked_members);
     }
 
-    fn remove_type_parameter_refs(
-        refs: &mut Vec<(String, Span)>,
-        type_parameters: Option<&TSTypeParameterDeclaration<'_>>,
-    ) {
-        let Some(type_parameters) = type_parameters else {
-            return;
-        };
-        refs.retain(|(name, _)| {
-            !type_parameters
-                .params
-                .iter()
-                .any(|parameter| parameter.name.name == name.as_str())
-        });
-    }
-
     pub(super) fn record_local_type_declaration(&mut self, name: &str, span: Span) {
         self.local_type_declarations.push(LocalTypeDeclaration {
             name: name.to_string(),
@@ -291,172 +278,76 @@ impl ModuleInfoExtractor {
         collector.refs
     }
 
-    pub(super) fn collect_function_signature_refs(function: &Function<'_>) -> Vec<(String, Span)> {
-        let mut collector = SignatureTypeCollector::default();
-        if let Some(type_parameters) = function.type_parameters.as_deref() {
-            collector.visit_ts_type_parameter_declaration(type_parameters);
-        }
-        if let Some(this_param) = function.this_param.as_deref() {
-            collector.visit_ts_this_parameter(this_param);
-        }
-        for param in &function.params.items {
-            if let Some(annotation) = param.type_annotation.as_deref() {
-                collector.visit_ts_type_annotation(annotation);
-            }
-        }
-        if let Some(rest) = function.params.rest.as_deref()
-            && let Some(annotation) = rest.type_annotation.as_deref()
-        {
-            collector.visit_ts_type_annotation(annotation);
-        }
-        if let Some(return_type) = function.return_type.as_deref() {
-            collector.visit_ts_type_annotation(return_type);
-        } else if let Some(body) = function.body.as_deref() {
-            collect_inferred_return_refs(body, &mut collector.refs);
-        }
-        Self::remove_type_parameter_refs(&mut collector.refs, function.type_parameters.as_deref());
-        collector.refs
-    }
-
-    fn collect_arrow_signature_refs(arrow: &ArrowFunctionExpression<'_>) -> Vec<(String, Span)> {
-        let mut collector = SignatureTypeCollector::default();
-        if let Some(type_parameters) = arrow.type_parameters.as_deref() {
-            collector.visit_ts_type_parameter_declaration(type_parameters);
-        }
-        for param in &arrow.params.items {
-            if let Some(annotation) = param.type_annotation.as_deref() {
-                collector.visit_ts_type_annotation(annotation);
-            }
-        }
-        if let Some(rest) = arrow.params.rest.as_deref()
-            && let Some(annotation) = rest.type_annotation.as_deref()
-        {
-            collector.visit_ts_type_annotation(annotation);
-        }
-        if let Some(return_type) = arrow.return_type.as_deref() {
-            collector.visit_ts_type_annotation(return_type);
-        } else if let Some(expression) = arrow.get_expression() {
-            collect_returned_expression_refs(
-                expression,
-                &FxHashMap::default(),
-                &mut collector.refs,
-            );
-        } else if let Some(body) = arrow.get_function_body() {
-            collect_inferred_return_refs(body, &mut collector.refs);
-        }
-        Self::remove_type_parameter_refs(&mut collector.refs, arrow.type_parameters.as_deref());
-        collector.refs
-    }
-
-    /// Record the signature type references of a module-level variable, and
-    /// the module bindings that its initializer holds when it has no type
-    /// annotation (see `signature_value_aliases`).
+    /// Record the type flow of a module-level variable. A variable without a
+    /// type annotation gets the whole type flow of its initializer, with its
+    /// held names and the flow of each static property path. A function
+    /// initializer also gives the flow of its return type under `name()`.
     pub(super) fn record_module_variable_signature_refs(
         &mut self,
         declarator: &VariableDeclarator<'_>,
     ) {
-        let refs = Self::collect_variable_signature_refs(declarator);
         let satisfies_refs = Self::collect_variable_satisfies_refs(declarator);
+        if let (BindingPattern::BindingIdentifier(id), None, Some(init)) = (
+            &declarator.id,
+            declarator.type_annotation.as_deref(),
+            &declarator.init,
+        ) {
+            let parts = match Self::strip_satisfies_clauses(init).without_parentheses() {
+                Expression::ArrowFunctionExpression(arrow) => Some(TypeFlow::of_arrow_parts(arrow)),
+                Expression::FunctionExpression(function) => {
+                    Some(TypeFlow::of_function_parts(function))
+                }
+                _ => None,
+            };
+            if let Some((whole, returned)) = parts {
+                self.record_type_flow(&id.name, whole);
+                self.record_type_flow(
+                    &format!("{}{}", id.name, super::type_flow::CALL_RESULT_SUFFIX),
+                    returned,
+                );
+            } else {
+                self.record_type_flow(&id.name, TypeFlow::of_initializer(init));
+            }
+            self.record_local_satisfies_refs(&id.name, satisfies_refs);
+            return;
+        }
+        let refs = Self::collect_annotated_variable_signature_refs(declarator);
         for id in declarator.id.get_binding_identifiers() {
             self.record_local_signature_refs(&id.name, refs.clone());
             self.record_local_satisfies_refs(&id.name, satisfies_refs.clone());
         }
-        if let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && declarator.type_annotation.is_none()
-            && let Some(init) = &declarator.init
-        {
-            let mut held = Vec::new();
-            crate::visitor::signature_value_aliases::collect_initializer_value_aliases(
-                init, &mut held,
-            );
-            self.local_value_aliases
-                .extend(held.into_iter().map(|held| (id.name.to_string(), held)));
-        }
     }
 
-    fn collect_variable_signature_refs(declarator: &VariableDeclarator<'_>) -> Vec<(String, Span)> {
+    /// The signature type references of a variable with a type annotation or
+    /// a destructuring pattern. The annotation sets the type. A function, a
+    /// call, `new` or a type assertion as the initializer adds the types of
+    /// its own signature, for example `memo(function C(p: Props) {})`.
+    fn collect_annotated_variable_signature_refs(
+        declarator: &VariableDeclarator<'_>,
+    ) -> Vec<(String, Span)> {
         let mut refs = Vec::new();
         if let Some(annotation) = declarator.type_annotation.as_deref() {
             refs.extend(Self::collect_type_refs_from_annotation(annotation));
         }
         if let Some(init) = &declarator.init {
-            Self::collect_initializer_signature_refs(
-                Self::strip_satisfies_clauses(init),
-                &mut refs,
-            );
+            let init = Self::strip_satisfies_clauses(init);
+            let mut inner = init.without_parentheses();
+            while let Expression::TSNonNullExpression(non_null) = inner {
+                inner = non_null.expression.without_parentheses();
+            }
+            if matches!(
+                inner,
+                Expression::ArrowFunctionExpression(_)
+                    | Expression::FunctionExpression(_)
+                    | Expression::CallExpression(_)
+                    | Expression::NewExpression(_)
+                    | Expression::TSAsExpression(_)
+                    | Expression::TSTypeAssertion(_)
+            ) {
+                refs.extend(TypeFlow::of_module_expression(inner).refs);
+            }
         }
         refs
-    }
-
-    /// Collect the types that shape the inferred type of a variable
-    /// initializer. A type assertion sets the type directly. A call or `new`
-    /// wrapper takes its type from its type arguments and from the signature
-    /// of a function argument, for example `memo(function C(p: Props) {})`.
-    fn collect_initializer_signature_refs(init: &Expression<'_>, refs: &mut Vec<(String, Span)>) {
-        match init {
-            Expression::ParenthesizedExpression(parenthesized) => {
-                Self::collect_initializer_signature_refs(&parenthesized.expression, refs);
-            }
-            Expression::TSNonNullExpression(non_null) => {
-                Self::collect_initializer_signature_refs(&non_null.expression, refs);
-            }
-            Expression::TSAsExpression(assertion) => {
-                Self::collect_asserted_type_refs(&assertion.type_annotation, refs);
-            }
-            Expression::TSTypeAssertion(assertion) => {
-                Self::collect_asserted_type_refs(&assertion.type_annotation, refs);
-            }
-            Expression::ArrowFunctionExpression(arrow) => {
-                refs.extend(Self::collect_arrow_signature_refs(arrow));
-            }
-            Expression::FunctionExpression(function) => {
-                refs.extend(Self::collect_function_signature_refs(function));
-            }
-            Expression::CallExpression(call) => {
-                Self::collect_wrapper_call_signature_refs(
-                    call.type_arguments.as_deref(),
-                    &call.arguments,
-                    refs,
-                );
-            }
-            Expression::NewExpression(new_expression) => {
-                Self::collect_wrapper_call_signature_refs(
-                    new_expression.type_arguments.as_deref(),
-                    &new_expression.arguments,
-                    refs,
-                );
-            }
-            _ => {}
-        }
-    }
-
-    fn collect_asserted_type_refs(ty: &TSType<'_>, refs: &mut Vec<(String, Span)>) {
-        let mut collector = SignatureTypeCollector::default();
-        collector.visit_ts_type(ty);
-        refs.extend(collector.refs);
-    }
-
-    fn collect_wrapper_call_signature_refs(
-        type_arguments: Option<&TSTypeParameterInstantiation<'_>>,
-        arguments: &[Argument<'_>],
-        refs: &mut Vec<(String, Span)>,
-    ) {
-        if let Some(type_arguments) = type_arguments {
-            let mut collector = SignatureTypeCollector::default();
-            collector.visit_ts_type_parameter_instantiation(type_arguments);
-            refs.extend(collector.refs);
-        }
-        for argument in arguments {
-            match argument {
-                Argument::ArrowFunctionExpression(arrow) => {
-                    refs.extend(Self::collect_arrow_signature_refs(arrow));
-                }
-                Argument::FunctionExpression(function) => {
-                    refs.extend(Self::collect_function_signature_refs(function));
-                }
-                _ => {}
-            }
-        }
     }
 
     /// Return the value under any `satisfies` clauses and parentheses. A
@@ -518,8 +409,12 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn collect_class_signature_refs(class: &Class<'_>) -> Vec<(String, Span)> {
+    /// The type flow of a class: its heritage, the signatures of its public
+    /// methods, and the type of each public property. A property without a
+    /// type annotation gets the type flow of its initializer.
+    pub(super) fn collect_class_type_flow(class: &Class<'_>) -> TypeFlow {
         let mut collector = SignatureTypeCollector::default();
+        let mut flow = TypeFlow::default();
         Self::collect_class_heritage_signature_refs(class, &mut collector);
         for element in &class.body.body {
             match element {
@@ -529,9 +424,9 @@ impl ModuleInfoExtractor {
                     {
                         continue;
                     }
-                    collector
-                        .refs
-                        .extend(Self::collect_function_signature_refs(&method.value));
+                    let method_flow = TypeFlow::of_function(&method.value);
+                    collector.refs.extend(method_flow.refs);
+                    flow.held.extend(method_flow.held);
                 }
                 ClassElement::PropertyDefinition(prop) => {
                     if matches!(prop.accessibility, Some(TSAccessibility::Private))
@@ -541,6 +436,10 @@ impl ModuleInfoExtractor {
                     }
                     if let Some(annotation) = prop.type_annotation.as_deref() {
                         collector.visit_ts_type_annotation(annotation);
+                    } else if let Some(value) = &prop.value {
+                        let value_flow = TypeFlow::of_module_expression(value);
+                        collector.refs.extend(value_flow.refs);
+                        flow.held.extend(value_flow.held);
                     }
                 }
                 ClassElement::AccessorProperty(prop) => {
@@ -559,8 +458,12 @@ impl ModuleInfoExtractor {
                 ClassElement::StaticBlock(_) => {}
             }
         }
-        Self::remove_type_parameter_refs(&mut collector.refs, class.type_parameters.as_deref());
-        collector.refs
+        super::type_flow::remove_type_parameter_refs(
+            &mut collector.refs,
+            class.type_parameters.as_deref(),
+        );
+        flow.refs = collector.refs;
+        flow
     }
 
     pub(super) fn collect_interface_signature_refs(
@@ -579,7 +482,10 @@ impl ModuleInfoExtractor {
             }
         }
         collector.visit_ts_interface_body(&iface.body);
-        Self::remove_type_parameter_refs(&mut collector.refs, iface.type_parameters.as_deref());
+        super::type_flow::remove_type_parameter_refs(
+            &mut collector.refs,
+            iface.type_parameters.as_deref(),
+        );
         collector.refs
     }
 
@@ -591,7 +497,10 @@ impl ModuleInfoExtractor {
             collector.visit_ts_type_parameter_declaration(type_parameters);
         }
         collector.visit_ts_type(&alias.type_annotation);
-        Self::remove_type_parameter_refs(&mut collector.refs, alias.type_parameters.as_deref());
+        super::type_flow::remove_type_parameter_refs(
+            &mut collector.refs,
+            alias.type_parameters.as_deref(),
+        );
         collector.refs
     }
 
@@ -1021,147 +930,6 @@ impl ModuleInfoExtractor {
             }
         }
     }
-}
-
-/// A function-valued binding declared directly in a function body.
-#[derive(Clone, Copy)]
-enum LocalCallable<'b, 'a> {
-    Function(&'b Function<'a>),
-    Arrow(&'b ArrowFunctionExpression<'a>),
-}
-
-/// Collect type references that reach the inferred return type of a function
-/// without a return annotation. Only the returned values count: inline
-/// functions, `as` assertions, and local functions that a return statement
-/// names. Type annotations on other body values stay private, so a type that
-/// only annotates a local value keeps its unused finding.
-fn collect_inferred_return_refs(body: &FunctionBody<'_>, refs: &mut Vec<(String, Span)>) {
-    let locals = collect_local_callables(body);
-    let mut collector = ReturnedValueCollector {
-        locals: &locals,
-        refs,
-    };
-    collector.visit_function_body(body);
-}
-
-fn collect_local_callables<'b, 'a>(
-    body: &'b FunctionBody<'a>,
-) -> FxHashMap<&'b str, LocalCallable<'b, 'a>> {
-    let mut locals = FxHashMap::default();
-    for statement in &body.statements {
-        match statement {
-            Statement::FunctionDeclaration(function) => {
-                if let Some(id) = function.id.as_ref() {
-                    locals.insert(id.name.as_str(), LocalCallable::Function(function));
-                }
-            }
-            Statement::VariableDeclaration(declaration) => {
-                for declarator in &declaration.declarations {
-                    let (BindingPattern::BindingIdentifier(id), Some(init)) =
-                        (&declarator.id, &declarator.init)
-                    else {
-                        continue;
-                    };
-                    let callable = match init.without_parentheses() {
-                        Expression::ArrowFunctionExpression(arrow) => LocalCallable::Arrow(arrow),
-                        Expression::FunctionExpression(function) => {
-                            LocalCallable::Function(function)
-                        }
-                        _ => continue,
-                    };
-                    locals.insert(id.name.as_str(), callable);
-                }
-            }
-            _ => {}
-        }
-    }
-    locals
-}
-
-fn collect_returned_expression_refs(
-    expression: &Expression<'_>,
-    locals: &FxHashMap<&str, LocalCallable<'_, '_>>,
-    refs: &mut Vec<(String, Span)>,
-) {
-    match expression {
-        Expression::ParenthesizedExpression(inner) => {
-            collect_returned_expression_refs(&inner.expression, locals, refs);
-        }
-        Expression::TSSatisfiesExpression(inner) => {
-            collect_returned_expression_refs(&inner.expression, locals, refs);
-        }
-        Expression::TSNonNullExpression(inner) => {
-            collect_returned_expression_refs(&inner.expression, locals, refs);
-        }
-        Expression::TSAsExpression(assertion) => {
-            let mut collector = SignatureTypeCollector::default();
-            collector.visit_ts_type(&assertion.type_annotation);
-            refs.extend(collector.refs);
-        }
-        Expression::ArrowFunctionExpression(arrow) => {
-            refs.extend(ModuleInfoExtractor::collect_arrow_signature_refs(arrow));
-        }
-        Expression::FunctionExpression(function) => {
-            refs.extend(ModuleInfoExtractor::collect_function_signature_refs(
-                function,
-            ));
-        }
-        Expression::Identifier(identifier) => match locals.get(identifier.name.as_str()) {
-            Some(LocalCallable::Function(function)) => {
-                refs.extend(ModuleInfoExtractor::collect_function_signature_refs(
-                    function,
-                ));
-            }
-            Some(LocalCallable::Arrow(arrow)) => {
-                refs.extend(ModuleInfoExtractor::collect_arrow_signature_refs(arrow));
-            }
-            None => {}
-        },
-        Expression::ObjectExpression(object) => {
-            for property in &object.properties {
-                if let ObjectPropertyKind::ObjectProperty(property) = property {
-                    collect_returned_expression_refs(&property.value, locals, refs);
-                }
-            }
-        }
-        Expression::ArrayExpression(array) => {
-            for element in &array.elements {
-                if let Some(element) = element.as_expression() {
-                    collect_returned_expression_refs(element, locals, refs);
-                }
-            }
-        }
-        Expression::ConditionalExpression(conditional) => {
-            collect_returned_expression_refs(&conditional.consequent, locals, refs);
-            collect_returned_expression_refs(&conditional.alternate, locals, refs);
-        }
-        Expression::LogicalExpression(logical) => {
-            collect_returned_expression_refs(&logical.left, locals, refs);
-            collect_returned_expression_refs(&logical.right, locals, refs);
-        }
-        _ => {}
-    }
-}
-
-/// Visit the return statements of one function body. Nested functions and
-/// classes own their return statements, so the walk does not enter them.
-struct ReturnedValueCollector<'r, 'b, 'a> {
-    locals: &'r FxHashMap<&'b str, LocalCallable<'b, 'a>>,
-    refs: &'r mut Vec<(String, Span)>,
-}
-
-impl<'a> Visit<'a> for ReturnedValueCollector<'_, '_, '_> {
-    fn visit_return_statement(&mut self, statement: &ReturnStatement<'a>) {
-        if let Some(argument) = &statement.argument {
-            collect_returned_expression_refs(argument, self.locals, self.refs);
-        }
-    }
-
-    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
-
-    fn visit_arrow_function_expression(&mut self, _arrow: &ArrowFunctionExpression<'a>) {}
-
-    fn visit_class(&mut self, _class: &Class<'a>) {}
 }
 
 /// The method name of a call on `this`: `current` for `this.current()`,
