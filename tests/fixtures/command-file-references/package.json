@@ -1,0 +1,10 @@
+{
+  "name": "command-file-references",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "devDependencies": {
+    "bundler-tool": "1.0.0",
+    "unused-tool": "1.0.0"
+  }
+}

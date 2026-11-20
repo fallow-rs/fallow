@@ -1,0 +1,10 @@
+{
+  // The image and the lifecycle commands of the development container.
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24",
+  "onCreateCommand": "bash .devcontainer/on-create.sh",
+  "postCreateCommand": ["node", "scripts/post-create.mjs"],
+  "postStartCommand": {
+    "warm": "node scripts/post-start.mjs",
+    "list": ["node", "scripts/post-start-list.mjs"],
+  },
+}

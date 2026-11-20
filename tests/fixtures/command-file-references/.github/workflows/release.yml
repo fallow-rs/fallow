@@ -1,0 +1,11 @@
+name: Release
+on: workflow_dispatch
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bundle the verification script
+        run: |
+          bundler=node_modules/.bin/bundler-tool
+          "$bundler" --bundle --outfile=verify/verify.mjs

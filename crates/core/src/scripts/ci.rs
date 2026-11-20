@@ -10,6 +10,8 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+#[path = "ci_command_files.rs"]
+mod command_files;
 #[path = "ci_references.rs"]
 mod references;
 #[path = "ci_run_scalar.rs"]
@@ -65,6 +67,8 @@ struct CiContext<'a> {
 ///
 /// CI files always live at `.gitlab-ci.yml` or `.github/workflows/*.yml`
 /// relative to the project root, so no workspace-prefix transformation applies.
+/// The lifecycle commands of a development container and the scripts of a
+/// `t3.json` project file run at the project root too, and count the same way.
 /// The catalog spans the whole project, so a CI step that resolves to a script
 /// declared only by a workspace package credits that body's dependencies but
 /// contributes none of its file arguments, which are relative to that package.
@@ -111,6 +115,17 @@ pub fn analyze_ci_files(
                 .entry_file_sources
                 .entry(entry.clone())
                 .or_insert_with(|| ci_file.file.clone());
+        }
+    }
+
+    for (file, commands) in command_files::read_command_files(root) {
+        let first_new = analysis.entry_files.len();
+        analyze_command_group(&[], &commands, &context, &mut analysis);
+        for entry in &analysis.entry_files[first_new..] {
+            analysis
+                .entry_file_sources
+                .entry(entry.clone())
+                .or_insert_with(|| file.clone());
         }
     }
 
@@ -198,40 +213,51 @@ fn extract_ci_signals_in(
     }
 
     for (dir, commands) in groups {
-        let catalog = working_directory_catalog(context.scripts, &dir);
-        let parsed = analyze_commands_with_context(
-            &commands,
-            context.root,
-            context.bin_map,
-            context.declared_packages,
-            &catalog,
-            context.ignored,
-        );
-        let resolve = |entry: String| {
-            if dir.is_empty() {
-                Some(entry)
-            } else {
-                resolve_in_working_dir(&dir, &entry)
-            }
-        };
-        analysis.used_packages.extend(parsed.used_packages);
-        analysis.entry_files.extend(
-            parsed
-                .config_files
-                .into_iter()
-                .filter(|s| could_be_file_path(s) && !is_inline_code(s))
-                .filter_map(resolve),
-        );
-        analysis
-            .entry_files
-            .extend(parsed.entry_files.into_iter().filter_map(resolve));
-        analysis
-            .test_entry_files
-            .extend(parsed.test_entry_files.into_iter().filter_map(resolve));
+        analyze_command_group(&dir, &commands, context, analysis);
     }
     analysis
         .entry_files
         .extend(github_script_files(content, action_dir));
+}
+
+/// Analyze the commands that run in the working directory `dir`, and add
+/// their packages and their file arguments to `analysis`.
+fn analyze_command_group(
+    dir: &[Segment],
+    commands: &[String],
+    context: &CiContext<'_>,
+    analysis: &mut CiAnalysis,
+) {
+    let catalog = working_directory_catalog(context.scripts, dir);
+    let parsed = analyze_commands_with_context(
+        commands,
+        context.root,
+        context.bin_map,
+        context.declared_packages,
+        &catalog,
+        context.ignored,
+    );
+    let resolve = |entry: String| {
+        if dir.is_empty() {
+            Some(entry)
+        } else {
+            resolve_in_working_dir(dir, &entry)
+        }
+    };
+    analysis.used_packages.extend(parsed.used_packages);
+    analysis.entry_files.extend(
+        parsed
+            .config_files
+            .into_iter()
+            .filter(|s| could_be_file_path(s) && !is_inline_code(s))
+            .filter_map(resolve),
+    );
+    analysis
+        .entry_files
+        .extend(parsed.entry_files.into_iter().filter_map(resolve));
+    analysis
+        .test_entry_files
+        .extend(parsed.test_entry_files.into_iter().filter_map(resolve));
 }
 
 /// The run steps of the composite actions in `.github/actions/<name>/` and
