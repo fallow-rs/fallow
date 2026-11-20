@@ -100,6 +100,7 @@ mod type_aware_envelopes;
 #[cfg(test)]
 mod unicode_span_oracle;
 mod unified_diff;
+mod verdict_facts;
 mod walkthrough_render;
 
 pub use analysis_sarif::{
@@ -483,6 +484,10 @@ pub use type_aware_envelopes::{
     serialize_type_aware_status_json_output,
 };
 pub use unified_diff::{DiffEvent, DiffFileHeader, UnifiedDiffEvents, unified_diff_events};
+pub use verdict_facts::{
+    EmptyScope, GateVerdict, GateVerdictFile, RequestVerdict, gate_number_text, read_gate_verdicts,
+    read_request_verdicts,
+};
 pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_member_list, cap_names, clean_decision_fact,
     decisions_outside_units, visible_stage_units,

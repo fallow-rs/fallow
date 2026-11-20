@@ -89,6 +89,18 @@ pub enum RequestName {
 }
 
 impl RequestName {
+    /// The kebab-case wire name of the request.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ChangedSince => "changed-since",
+            Self::DiffFilter => "diff-filter",
+            Self::PackageBaselines => "package-baselines",
+            Self::SarifFile => "sarif-file",
+            Self::GroupFilter => "group-filter",
+        }
+    }
+
     /// What an unapplied request of this name means for the report.
     #[must_use]
     pub const fn affects(self) -> RequestEffect {

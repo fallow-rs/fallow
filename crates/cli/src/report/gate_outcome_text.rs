@@ -20,55 +20,29 @@
 //! integration that knows which gates the repository armed keeps ownership of
 //! the failing exit.
 
+use fallow_output::GateVerdict as GateLine;
 use serde_json::Value;
-
-/// One gate's verdict, read off a saved or live envelope.
-pub struct GateLine {
-    pub name: String,
-    pub status: String,
-    pub enforced: bool,
-    pub observed: Option<f64>,
-    pub threshold: Option<f64>,
-    pub threshold_label: Option<String>,
-    /// The files a file-judging gate named, each as `path: reason`.
-    pub files: Vec<String>,
-}
 
 /// How many files a gate line names before it says "and N more", so a run with
 /// many broken files keeps a one-line summary.
 const MAX_NAMED_FILES: usize = 5;
 
-impl GateLine {
-    /// The observed number as text. The mutation score is a percent of a
-    /// division, so it shows one decimal, rounded down like the mutation
-    /// section: a score just below the minimum never shows as equal to it.
-    fn observed_num(&self, observed: f64) -> String {
-        if self.name == "mutation-min-score" {
-            trim_num(observed.mul_add(10.0, 1e-9).floor() / 10.0)
-        } else {
-            trim_num(observed)
-        }
-    }
+/// The CLI text of one gate verdict. The facts and the number rule come from
+/// [`fallow_output::GateVerdict`], so the MCP result shows the same numbers.
+trait GateText {
+    fn measured_clause(&self) -> String;
+    fn described(&self) -> String;
+    fn files_clause(&self) -> String;
+    fn row_observed(&self) -> String;
+    fn row_threshold(&self) -> Option<String>;
+}
 
+impl GateText for GateLine {
     /// The trailing `(85 against 90)` clause, when the gate compared something.
     fn measured_clause(&self) -> String {
-        match (
-            self.observed,
-            self.threshold,
-            self.threshold_label.as_deref(),
-        ) {
-            (Some(observed), Some(threshold), _) => {
-                format!(
-                    " ({} against {})",
-                    self.observed_num(observed),
-                    trim_num(threshold)
-                )
-            }
-            (Some(observed), None, Some(label)) => {
-                format!(" ({} at or above {label})", self.observed_num(observed))
-            }
-            (Some(observed), None, None) => format!(" ({})", self.observed_num(observed)),
-            _ => String::new(),
+        match self.observed_text() {
+            Some(_) => format!(" ({})", self.row_observed()),
+            None => String::new(),
         }
     }
 
@@ -82,16 +56,20 @@ impl GateLine {
 
     /// `src/a.ts: 1 parser error, the parser recovered; and 2 more`.
     fn files_clause(&self) -> String {
-        let mut named: Vec<&str> = self
+        let mut named: Vec<String> = self
             .files
             .iter()
             .take(MAX_NAMED_FILES)
-            .map(String::as_str)
+            .map(|file| match &file.parse {
+                Some(parse) => {
+                    format!("{}: {}", file.path, crate::gates::parse_error_reason(parse))
+                }
+                None => file.path.clone(),
+            })
             .collect();
         let rest = self.files.len().saturating_sub(MAX_NAMED_FILES);
-        let more = format!("and {rest} more");
         if rest > 0 {
-            named.push(&more);
+            named.push(format!("and {rest} more"));
         }
         named.join("; ")
     }
@@ -102,43 +80,25 @@ impl GateLine {
     /// A row with an empty `observed` renders as a bare label in the check run
     /// and as `Fallow / <id>: ` in a split commit status, so a gate that
     /// measured nothing says what it concluded instead.
-    fn observed_text(&self) -> String {
+    fn row_observed(&self) -> String {
+        let Some(observed) = self.observed_text() else {
+            return self.status.clone();
+        };
         match (
-            self.observed,
-            self.threshold,
+            self.threshold_number_text(),
             self.threshold_label.as_deref(),
         ) {
-            (Some(observed), Some(threshold), _) => {
-                format!(
-                    "{} against {}",
-                    self.observed_num(observed),
-                    trim_num(threshold)
-                )
-            }
-            (Some(observed), None, Some(label)) => {
-                format!("{} at or above {label}", self.observed_num(observed))
-            }
-            (Some(observed), None, None) => self.observed_num(observed),
-            _ => self.status.clone(),
+            (Some(threshold), _) => format!("{observed} against {threshold}"),
+            (None, Some(label)) => format!("{observed} at or above {label}"),
+            (None, None) => observed,
         }
     }
 
     /// The `threshold` display text, `None` when the gate has no threshold to
     /// show.
-    fn threshold_text(&self) -> Option<String> {
-        self.threshold
-            .map(trim_num)
+    fn row_threshold(&self) -> Option<String> {
+        self.threshold_number_text()
             .or_else(|| self.threshold_label.clone())
-    }
-}
-
-/// Render a whole number without a trailing `.0`, so a count of three reads as
-/// `3` in prose while the wire keeps it a JSON number.
-fn trim_num(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value}")
     }
 }
 
@@ -146,60 +106,8 @@ fn trim_num(value: f64) -> String {
 ///
 /// Returns an empty vector when the run armed no gate, which is every run
 /// produced before this object existed and every run that asked for nothing.
-pub fn read_gate_outcomes(envelope: &Value) -> Vec<GateLine> {
-    let Some(map) = envelope.get("gate_outcomes").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    map.iter()
-        .filter_map(|(name, entry)| {
-            Some(GateLine {
-                name: name.clone(),
-                status: entry.get("status")?.as_str()?.to_owned(),
-                enforced: entry.get("enforced").and_then(Value::as_bool)?,
-                observed: entry.get("observed").and_then(Value::as_f64),
-                threshold: entry.get("threshold").and_then(Value::as_f64),
-                threshold_label: entry
-                    .get("threshold_label")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                files: read_gate_files(entry),
-            })
-        })
-        .collect()
-}
-
-/// Read the `files` of one gate entry as `path: reason` lines. An item without
-/// a `path` is skipped, and an item without the parser facts names only the
-/// path, so a newer file-judging gate still reads.
-fn read_gate_files(entry: &Value) -> Vec<String> {
-    let Some(items) = entry.get("files").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter_map(|item| {
-            let path = item.get("path")?.as_str()?;
-            let error_count = item
-                .get("error_count")
-                .and_then(Value::as_u64)
-                .and_then(|count| u32::try_from(count).ok());
-            let panicked = item.get("panicked").and_then(Value::as_bool);
-            let reason = (item.get("reason").and_then(Value::as_str) == Some("nesting-too-deep"))
-                .then_some(fallow_output::GateFileReason::NestingTooDeep);
-            Some(match (error_count, panicked) {
-                (Some(error_count), Some(panicked)) => format!(
-                    "{path}: {}",
-                    crate::gates::parse_error_reason(&fallow_output::GateFile {
-                        path: path.to_owned(),
-                        error_count,
-                        panicked,
-                        reason,
-                    })
-                ),
-                _ => path.to_owned(),
-            })
-        })
-        .collect()
+fn read_gate_outcomes(envelope: &Value) -> Vec<GateLine> {
+    fallow_output::read_gate_verdicts(envelope.get("gate_outcomes"))
 }
 
 /// The four outcomes, kept apart.
@@ -467,8 +375,8 @@ pub fn gate_rows(envelope: &Value) -> Vec<fallow_output::PrDecisionGate> {
             id: gate.name.clone(),
             label: gate_label(&gate.name),
             status: row_status(gate),
-            observed: gate.observed_text(),
-            threshold: gate.threshold_text(),
+            observed: gate.row_observed(),
+            threshold: gate.row_threshold(),
             // The existing command row says "new code". A gate verdict is not
             // scoped to the change: the baseline rule compares what the whole
             // run matched, and a health floor reads the whole score.
@@ -881,6 +789,40 @@ mod tests {
             Some("2.5 against 1")
         );
         assert_eq!(gate_rows(&near)[0].observed, "79.9 against 80");
+    }
+
+    /// A measured percentage arrives at full `f64` precision. The line shows
+    /// two decimals, the same text that the MCP result shows.
+    #[test]
+    fn a_measured_percentage_shows_two_decimals() {
+        let value = envelope(&serde_json::json!({
+            "duplication-threshold": {
+                "status": "fail", "enforced": true,
+                "observed": 97.826_086_956_521_72, "threshold": 0.1
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a gate ran"),
+            "Gates: failed duplication-threshold (97.83 against 0.1)."
+        );
+        assert_eq!(gate_rows(&value)[0].observed, "97.83 against 0.1");
+    }
+
+    /// `enforced` is a required member, but an entry from another producer can
+    /// lack it. The entry still reports, as not enforced, the same as in the MCP
+    /// result.
+    #[test]
+    fn a_gate_entry_without_enforced_still_reports_as_not_enforced() {
+        let value = envelope(&serde_json::json!({
+            "health-min-score": { "status": "fail", "observed": 85.0, "threshold": 90.0 }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a gate ran"),
+            "Gates: failed health-min-score (85 against 90)."
+        );
+        let rows = gate_rows(&value);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, fallow_output::PrDecisionConclusion::Neutral);
     }
 
     /// The name set is OPEN, so a gate from a newer build must still reach the
