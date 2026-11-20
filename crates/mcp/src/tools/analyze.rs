@@ -323,6 +323,33 @@ mod tests {
         assert!(!args.iter().any(|arg| arg == "--unused-component-props"));
     }
 
+    /// MCP `issue_types` maps each architecture issue type to the `dead-code`
+    /// option, because the `analyze` tool runs `fallow dead-code`, which does
+    /// not accept the `fallow architecture` flags.
+    #[test]
+    fn architecture_issue_types_map_to_dead_code_options() {
+        for (issue_type, flag) in [
+            ("circular-deps", "--circular-deps"),
+            ("re-export-cycles", "--re-export-cycles"),
+            ("package-cycles", "--package-cycles"),
+            ("boundary-violations", "--boundary-violations"),
+            ("policy-violations", "--policy-violations"),
+        ] {
+            let params = AnalyzeParams {
+                issue_types: Some(vec![issue_type.to_string()]),
+                ..AnalyzeParams::default()
+            };
+            let args = build_analyze_args(&params).expect("args");
+            assert!(args.iter().any(|arg| arg == flag), "{issue_type}: {args:?}");
+            for current in ["--cycles", "--boundaries", "--policy"] {
+                assert!(
+                    !args.iter().any(|arg| arg == current),
+                    "{issue_type}: {args:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn finding_ids_reach_both_paths_and_force_the_full_family() {
         let id = "dc1:unused-export:0123456789abcdef";

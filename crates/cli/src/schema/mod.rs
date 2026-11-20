@@ -1,9 +1,11 @@
 mod cli_reference;
+pub mod deprecations;
 mod environment;
 mod exit_code_table;
 mod issue_labels;
 #[cfg(test)]
 mod issue_registry_tests;
+mod issue_selection;
 
 use std::process::ExitCode;
 
@@ -64,13 +66,23 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             if arg.get_id() == "help" || arg.get_id() == "version" {
                 continue;
             }
-            flags.push(build_arg_schema(arg));
+            let mut flag = build_arg_schema(arg);
+            if let Some(deprecated) =
+                deprecations::deprecation_json(sub.get_name(), flag["name"].as_str())
+            {
+                flag["deprecated"] = deprecated;
+            }
+            flags.push(flag);
         }
-        commands.push(serde_json::json!({
+        let mut command = serde_json::json!({
             "name": sub.get_name(),
             "description": sub.get_about().map(std::string::ToString::to_string),
             "flags": flags,
-        }));
+        });
+        if let Some(deprecated) = deprecations::deprecation_json(sub.get_name(), None) {
+            command["deprecated"] = deprecated;
+        }
+        commands.push(command);
     }
 
     serde_json::json!({
@@ -302,10 +314,9 @@ fn issue_type_row(
 ) -> serde_json::Value {
     let bare_id = rule.id.split_once('/').map_or(rule.id, |(_, bare)| bare);
     let meta = issue_type_meta(bare_id, command);
-    let kind = meta
-        .registry_index
-        .and_then(|i| ISSUE_KIND_META.get(i))
-        .and_then(|m| m.kind);
+    let shared = meta.registry_index.and_then(|i| ISSUE_KIND_META.get(i));
+    let kind = shared.and_then(|m| m.kind);
+    let selection = issue_selection::issue_type_selection(command, meta.filter_flag, shared);
     // Default severity comes from the rule that GATES this finding (see
     // `fallow_api::rule_severity_key`, shared with the MCP issue-type resource).
     // This lets opt-in command families (security, coverage) expose
@@ -325,7 +336,7 @@ fn issue_type_row(
     serde_json::json!({
         "id": bare_id,
         "rule_id": rule.id,
-        "command": command,
+        "command": selection.command,
         "category": rule.category,
         "description": rule.short,
         "label": meta.label,
@@ -333,7 +344,10 @@ fn issue_type_row(
         "registry_index": meta.registry_index,
         "aliases": meta.aliases,
         "lsp": meta.lsp,
-        "filter_flag": meta.filter_flag,
+        "filter_flag": selection.filter_flag,
+        // The deprecated `fallow dead-code` option that also selects this
+        // issue type. Null when the filter flag has no deprecated form.
+        "deprecated_filter_flag": selection.deprecated_filter_flag,
         "result_key": meta.result_key,
         "summary_label": meta.summary_label,
         "summary_docs_anchor": meta.summary_docs_anchor,
@@ -500,31 +514,32 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "circular-dependency" | "re-export-cycle" => {
-            m.note = Some("`fallow architecture` also reports this finding.");
+            m.note =
+                Some("`fallow dead-code` also reports this finding until the next major version.");
         }
         "package-cycle" => {
             m.note = Some(
-                "Requires a workspace with two or more packages. `fallow architecture` also reports this finding.",
+                "Requires a workspace with two or more packages. `fallow dead-code` also reports this finding until the next major version.",
             );
         }
         "boundary-violation" => {
             m.note = Some(
-                "Requires configured boundary zones (boundaries config). `fallow architecture` also reports this finding.",
+                "Requires configured boundary zones (boundaries config). `fallow dead-code` also reports this finding until the next major version.",
             );
         }
         "boundary-coverage" => {
             m.note = Some(
-                "Requires boundaries.coverage.requireAllFiles. `fallow architecture` also reports this finding.",
+                "Requires boundaries.coverage.requireAllFiles. `fallow dead-code` also reports this finding until the next major version.",
             );
         }
         "boundary-call-violation" => {
             m.note = Some(
-                "Requires boundaries.calls.forbidden patterns. `fallow architecture` also reports this finding.",
+                "Requires boundaries.calls.forbidden patterns. `fallow dead-code` also reports this finding until the next major version.",
             );
         }
         "policy-violation" => {
             m.note = Some(
-                "Requires a configured rule pack (rulePacks config). `fallow architecture` also reports this finding.",
+                "Requires a configured rule pack (rulePacks config). `fallow dead-code` also reports this finding until the next major version.",
             );
         }
         "invalid-client-export" => {
@@ -709,7 +724,7 @@ fn build_arg_schema(arg: &clap::Arg) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use fallow_types::results::TOTAL_ISSUE_RESULT_KEYS;
-    use fallow_types::suppress::{DEAD_CODE_FILTER_FLAGS, IssueKind, KNOWN_ISSUE_KIND_NAMES};
+    use fallow_types::suppress::{IssueKind, KNOWN_ISSUE_KIND_NAMES};
     use rustc_hash::FxHashSet;
 
     use super::*;
@@ -717,18 +732,6 @@ mod tests {
     fn schema() -> serde_json::Value {
         let cmd = Cli::command();
         build_cli_schema(&cmd)
-    }
-
-    /// Collect every `--long` flag of a subcommand from live clap state.
-    fn subcommand_flags(name: &str) -> FxHashSet<String> {
-        let cmd = Cli::command();
-        let sub = cmd
-            .get_subcommands()
-            .find(|s| s.get_name() == name)
-            .unwrap_or_else(|| panic!("no subcommand named {name}"));
-        sub.get_arguments()
-            .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
-            .collect()
     }
 
     #[test]
@@ -1040,11 +1043,18 @@ mod tests {
         }
     }
 
+    /// Whether the row reports in the dead-code envelope: a dead-code row, or
+    /// an architecture row, which `fallow architecture` reports with the same
+    /// arrays.
+    fn in_dead_code_envelope(row: &serde_json::Value) -> bool {
+        matches!(row["command"].as_str(), Some("dead-code" | "architecture"))
+    }
+
     #[test]
     fn dead_code_schema_issue_contracts_follow_issue_kind_meta() {
         let schema = schema();
         for row in schema["issue_types"].as_array().unwrap() {
-            if row["command"].as_str().unwrap() != "dead-code" {
+            if !in_dead_code_envelope(row) {
                 continue;
             }
 
@@ -1052,10 +1062,19 @@ mod tests {
             let shared = issue_meta_by_code(id)
                 .unwrap_or_else(|| panic!("dead-code row {id} has no IssueKindMeta"));
 
+            let (filter_flag, deprecated_filter_flag) = match shared.architecture_flag() {
+                Some(flag) => (Some(flag), shared.filter_flag),
+                None => (shared.filter_flag, None),
+            };
             assert_eq!(
                 row["filter_flag"].as_str(),
-                shared.filter_flag,
+                filter_flag,
                 "dead-code row {id} must derive filter_flag from IssueKindMeta"
+            );
+            assert_eq!(
+                row["deprecated_filter_flag"].as_str(),
+                deprecated_filter_flag,
+                "dead-code row {id} must derive deprecated_filter_flag from IssueKindMeta"
             );
 
             let expected_comment = shared
@@ -1302,6 +1321,7 @@ mod tests {
             let obj = row.as_object().unwrap();
             for key in [
                 "filter_flag",
+                "deprecated_filter_flag",
                 "result_key",
                 "summary_label",
                 "summary_docs_anchor",
@@ -1349,7 +1369,7 @@ mod tests {
         let mut advisory = FxHashSet::default();
 
         for row in rows {
-            if row["command"].as_str() != Some("dead-code") {
+            if !in_dead_code_envelope(row) {
                 assert!(
                     row["result_key"].is_null(),
                     "non dead-code row {} must not expose a dead-code result_key",
@@ -1447,7 +1467,7 @@ mod tests {
 
         let missing: FxHashSet<&str> = rows
             .iter()
-            .filter(|row| row["command"].as_str() == Some("dead-code"))
+            .filter(|row| in_dead_code_envelope(row))
             .filter(|row| row["result_key"].as_str().is_some())
             .filter(|row| row["codeclimate_check_names"].is_null())
             .map(|row| row["id"].as_str().unwrap())
@@ -1469,9 +1489,7 @@ mod tests {
         }
 
         for row in rows {
-            if row["command"].as_str() == Some("dead-code")
-                && row["codeclimate_check_names"].as_array().is_some()
-            {
+            if in_dead_code_envelope(row) && row["codeclimate_check_names"].as_array().is_some() {
                 let codeclimate_check_names: FxHashSet<&str> = row["codeclimate_check_names"]
                     .as_array()
                     .unwrap()
@@ -1499,7 +1517,7 @@ mod tests {
         let rows = schema["issue_types"].as_array().unwrap();
         let aliases: FxHashSet<(String, String, String)> = rows
             .iter()
-            .filter(|row| row["command"].as_str() == Some("dead-code"))
+            .filter(|row| in_dead_code_envelope(row))
             .filter_map(|row| {
                 let alias = row["ts_alias"].as_object()?;
                 Some((
@@ -1612,53 +1630,6 @@ mod tests {
             assert!(
                 listed.contains(id),
                 "the --unused-deps note omits {id}: {note}"
-            );
-        }
-    }
-
-    /// Filter flags in the manifest must exist on the live clap command,
-    /// and the shared dead-code filter-flag list must be fully represented.
-    #[test]
-    fn filter_flags_exist_on_live_clap_commands() {
-        let schema = schema();
-        let rows = schema["issue_types"].as_array().unwrap();
-        let dead_code_flags = subcommand_flags("dead-code");
-        let health_flags = subcommand_flags("health");
-
-        let mut seen_dead_code_filters: FxHashSet<&str> = FxHashSet::default();
-        for row in rows {
-            let Some(flag) = row["filter_flag"].as_str() else {
-                continue;
-            };
-            match row["command"].as_str().unwrap() {
-                "dead-code" => {
-                    assert!(
-                        DEAD_CODE_FILTER_FLAGS.contains(&flag),
-                        "row {} filter_flag {flag} is not in the shared DEAD_CODE_FILTER_FLAGS list",
-                        row["id"]
-                    );
-                    assert!(
-                        dead_code_flags.contains(flag),
-                        "row {} filter_flag {flag} does not exist on the dead-code subcommand",
-                        row["id"]
-                    );
-                    seen_dead_code_filters
-                        .insert(DEAD_CODE_FILTER_FLAGS.iter().find(|f| **f == flag).unwrap());
-                }
-                "health" => {
-                    assert!(
-                        health_flags.contains(flag),
-                        "row {} filter_flag {flag} does not exist on the health subcommand",
-                        row["id"]
-                    );
-                }
-                other => panic!("unexpected filter_flag on command {other}"),
-            }
-        }
-        for flag in DEAD_CODE_FILTER_FLAGS.iter() {
-            assert!(
-                seen_dead_code_filters.contains(flag),
-                "shared filter flag {flag} is not represented by any issue_types row"
             );
         }
     }

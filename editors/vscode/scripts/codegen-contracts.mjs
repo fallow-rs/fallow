@@ -460,10 +460,13 @@ async function loadCapabilitySchema() {
   return JSON.parse(raw);
 }
 
+const DEAD_CODE_ENVELOPE_COMMANDS = new Set(["dead-code", "architecture"]);
+
 function deadCodeAliasesFromCapabilitySchema(schema) {
   const groups = new Map();
   for (const issue of schema.issue_types ?? []) {
-    if (issue.command !== "dead-code" || !issue.ts_alias) {
+    // `fallow architecture` reports its issue types in the dead-code arrays.
+    if (!DEAD_CODE_ENVELOPE_COMMANDS.has(issue.command) || !issue.ts_alias) {
       continue;
     }
     const { name, parent } = issue.ts_alias;

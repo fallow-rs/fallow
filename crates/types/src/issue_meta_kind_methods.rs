@@ -2,6 +2,16 @@
 
 use super::*;
 
+/// Each deprecated `fallow dead-code` filter flag of an architecture issue
+/// type with the `fallow architecture` flag that replaces it.
+const ARCHITECTURE_FLAGS: &[(&str, &str)] = &[
+    ("--circular-deps", "--cycles"),
+    ("--re-export-cycles", "--cycles"),
+    ("--package-cycles", "--cycles"),
+    ("--boundary-violations", "--boundaries"),
+    ("--policy-violations", "--policy"),
+];
+
 impl IssueKindMeta {
     /// Return the filter flag as an MCP selector pair.
     #[must_use]
@@ -10,6 +20,17 @@ impl IssueKindMeta {
             (Some(issue_type), Some(flag)) => Some((issue_type, flag)),
             _ => None,
         }
+    }
+
+    /// The `fallow architecture` selection flag of an architecture issue
+    /// type, from the deprecated `fallow dead-code` filter flag of the row.
+    #[must_use]
+    pub fn architecture_flag(self) -> Option<&'static str> {
+        let flag = self.filter_flag?;
+        ARCHITECTURE_FLAGS
+            .iter()
+            .find(|(dead_code, _)| *dead_code == flag)
+            .map(|(_, architecture)| *architecture)
     }
 
     /// Whether this row owns a serialized dead-code result contract.

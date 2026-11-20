@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
-use clap::Parser;
 use fallow_engine::validate;
 use fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET;
 use tracing_subscriber::filter::{LevelFilter, Targets};
@@ -396,13 +395,37 @@ fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool)
     }
 }
 
+/// Parse argv like `Cli::try_parse`, and also return the deprecated options
+/// that the command line sets.
+fn parse_cli_with_deprecations()
+-> Result<(Cli, Vec<&'static crate::schema::deprecations::Deprecation>), clap::Error> {
+    use clap::{CommandFactory, FromArgMatches};
+    let root = Cli::command();
+    let mut matches = root.clone().try_get_matches()?;
+    let deprecated = crate::schema::deprecations::options_on_command_line(&root, &matches);
+    let cli =
+        Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(&mut root.clone()))?;
+    Ok((cli, deprecated))
+}
+
+fn warn_deprecated_options(entries: &[&crate::schema::deprecations::Deprecation], quiet: bool) {
+    if quiet {
+        return;
+    }
+    for entry in entries {
+        eprintln!("{}", crate::schema::deprecations::option_warning(entry));
+    }
+}
+
 /// Parse argv into a `Cli`, apply the legacy-alias warning and process-wide
 /// overrides (max-file-size, workspace PR marker), and resolve the output
 /// format. Returns the parse error's exit code on failure.
 pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
     let used_legacy_check_alias = raw_args_use_legacy_check_alias();
-    let mut cli = Cli::try_parse().map_err(|err| handle_cli_parse_error(&err))?;
+    let (mut cli, deprecated_options) =
+        parse_cli_with_deprecations().map_err(|err| handle_cli_parse_error(&err))?;
     warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
+    warn_deprecated_options(&deprecated_options, cli.quiet);
     apply_review_alias(
         &mut cli,
         std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()),

@@ -456,7 +456,7 @@
       "section": "commands",
       "row": "setup-hooks",
       "column": "Purpose",
-      "seed": "Deprecated: install or remove a Claude Code PreToolUse hook that gates `git commit` / `git push` on `fallow audit`, so the agent cleans findings before the command runs"
+      "seed": "Deprecated: use `fallow agent install`"
     },
     {
       "section": "commands",
@@ -850,18 +850,6 @@
     },
     {
       "section": "flags:dead-code-filters",
-      "row": "--boundary-violations",
-      "column": "Issue Type",
-      "seed": "Import crosses a configured architecture boundary; Source file matches no configured architecture boundary zone; Zoned file calls a callee its zone forbids"
-    },
-    {
-      "section": "flags:dead-code-filters",
-      "row": "--circular-deps",
-      "column": "Issue Type",
-      "seed": "Circular dependency chain detected"
-    },
-    {
-      "section": "flags:dead-code-filters",
       "row": "--constant-parameters",
       "column": "Issue Type",
       "seed": "Each visible call passes a function parameter in the same way"
@@ -898,27 +886,9 @@
     },
     {
       "section": "flags:dead-code-filters",
-      "row": "--package-cycles",
-      "column": "Issue Type",
-      "seed": "Two or more workspace packages import each other in a loop"
-    },
-    {
-      "section": "flags:dead-code-filters",
-      "row": "--policy-violations",
-      "column": "Issue Type",
-      "seed": "Usage violates a configured rule-pack policy"
-    },
-    {
-      "section": "flags:dead-code-filters",
       "row": "--private-type-leaks",
       "column": "Issue Type",
       "seed": "Exported signature references a private type"
-    },
-    {
-      "section": "flags:dead-code-filters",
-      "row": "--re-export-cycles",
-      "column": "Issue Type",
-      "seed": "Two or more barrel files re-export from each other in a loop"
     },
     {
       "section": "flags:dead-code-filters",
@@ -2220,25 +2190,25 @@
       "section": "issue-types",
       "row": "boundary-call-violation",
       "column": "Description",
-      "seed": "Zoned file calls a callee its zone forbids; Requires boundaries.calls.forbidden patterns. `fallow architecture` also reports this finding."
+      "seed": "Zoned file calls a callee its zone forbids; Requires boundaries.calls.forbidden patterns. `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",
       "row": "boundary-coverage",
       "column": "Description",
-      "seed": "Source file matches no configured architecture boundary zone; Requires boundaries.coverage.requireAllFiles. `fallow architecture` also reports this finding."
+      "seed": "Source file matches no configured architecture boundary zone; Requires boundaries.coverage.requireAllFiles. `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",
       "row": "boundary-violation",
       "column": "Description",
-      "seed": "Import crosses a configured architecture boundary; Requires configured boundary zones (boundaries config). `fallow architecture` also reports this finding."
+      "seed": "Import crosses a configured architecture boundary; Requires configured boundary zones (boundaries config). `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",
       "row": "circular-dependency",
       "column": "Description",
-      "seed": "Circular dependency chain detected; `fallow architecture` also reports this finding."
+      "seed": "Circular dependency chain detected; `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",
@@ -2424,13 +2394,13 @@
       "section": "issue-types",
       "row": "package-cycle",
       "column": "Description",
-      "seed": "Two or more workspace packages import each other in a loop; Requires a workspace with two or more packages. `fallow architecture` also reports this finding."
+      "seed": "Two or more workspace packages import each other in a loop; Requires a workspace with two or more packages. `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",
       "row": "policy-violation",
       "column": "Description",
-      "seed": "Usage violates a configured rule-pack policy; Requires a configured rule pack (rulePacks config). `fallow architecture` also reports this finding."
+      "seed": "Usage violates a configured rule-pack policy; Requires a configured rule pack (rulePacks config). `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",
@@ -2448,7 +2418,7 @@
       "section": "issue-types",
       "row": "re-export-cycle",
       "column": "Description",
-      "seed": "Two or more barrel files re-export from each other in a loop; `fallow architecture` also reports this finding."
+      "seed": "Two or more barrel files re-export from each other in a loop; `fallow dead-code` also reports this finding until the next major version."
     },
     {
       "section": "issue-types",

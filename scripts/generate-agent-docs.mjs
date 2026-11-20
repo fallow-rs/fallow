@@ -341,6 +341,21 @@ const curatedCell = (existing, key, header, seed) => {
   return cell !== undefined && cell !== "" ? cell : escaped;
 };
 
+/** The flags that the manifest does not mark as deprecated. The tables list
+ * only the current form; the manifest `deprecated` field names the
+ * replacement of each deprecated flag. */
+const currentFlags = (flags) => flags.filter((flag) => !flag.deprecated);
+
+/** The Purpose seed of a command: the first sentence of its description, or
+ * the replacement when the manifest marks the command as deprecated. */
+const commandPurposeSeed = (command) => {
+  const replacement = command.deprecated?.replacement;
+  if (command.deprecated) {
+    return replacement ? `Deprecated: use ${code(replacement)}` : "Deprecated";
+  }
+  return firstSentence(command.description ?? "");
+};
+
 const renderCommandsSection = (schema, existing) => {
   const headers = ["Command", "Purpose", "Key Flags"];
   const commandNames = new Set(schema.commands.map((c) => c.name));
@@ -371,11 +386,11 @@ const renderCommandsSection = (schema, existing) => {
   // Bare `fallow` (combined mode) is not in schema.commands[]; synthesize it.
   pushCommand("fallow", firstSentence(schema.default_behavior), "");
   for (const command of schema.commands) {
-    const flagSeed = command.flags
+    const flagSeed = currentFlags(command.flags)
       .slice(0, MAX_SEEDED_KEY_FLAGS)
       .map((f) => code(f.name))
       .join(", ");
-    pushCommand(command.name, firstSentence(command.description ?? ""), flagSeed);
+    pushCommand(command.name, commandPurposeSeed(command), flagSeed);
   }
 
   return [
@@ -567,7 +582,7 @@ const renderCommandFlags = (schema, existing, sectionId) => {
   const command = commandByName(schema, config.command);
   const issueFilters = issueFilterSet(schema, config);
   const excludedFlags = new Set(config.excludedFlags ?? []);
-  const flags = nonArgumentFlags(command.flags ?? []).filter(
+  const flags = currentFlags(nonArgumentFlags(command.flags ?? [])).filter(
     (flag) => !issueFilters.has(flag.name) && !excludedFlags.has(flag.name),
   );
   const table = renderTable(["Flag", "Type", "Default", "Description"], flagRows(flags, existing));
