@@ -128,3 +128,12 @@ test("summarizeAudit accepts an audit report with a failed verdict", () => {
   assert.equal(audit.verdict, "fail");
   assert.equal(audit.styling_findings, 0);
 });
+
+test("summarizeAudit keeps the message of a fallow error report", () => {
+  const stdout = '{"error":true,"message":"could not determine changed files","exit_code":2}';
+  const run = classifyRun({ status: 2, signal: null, stdout, stderr: "" }, AUDIT_STATUSES);
+  const audit = summarizeAudit(run);
+
+  assert.equal(audit.usable, false);
+  assert.equal(audit.reason, "could not determine changed files");
+});

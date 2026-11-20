@@ -75,3 +75,13 @@ test("compare.mjs reports a tool that does not start and fails", () => {
   assert.match(result.stdout, /failed to start/);
   assert.match(result.stderr, /no project gave a usable report/);
 });
+
+test("compare.mjs looks up a bare --fallow-bin name on PATH", () => {
+  const dir = makeTempDir("fallow-bench-compare-");
+  mkdirSync(join(dir, "demo"));
+  writeFileSync(join(dir, "demo", "package.json"), "{}");
+  const result = runBench("compare.mjs", [`--fixtures=${dir}`, "--fallow-bin=no-such-fallow"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /spawnSync no-such-fallow ENOENT/);
+});

@@ -70,3 +70,11 @@ test("resolveFallowBin returns the first candidate that runs", () => {
   assert.throws(() => resolveFallowBin([join(dir, "missing")]), /fallow binary not found/);
   assert.equal(resolveFallowBin(["", process.execPath]), process.execPath);
 });
+
+test("runTool names output that exceeds maxBuffer", () => {
+  const run = runTool(process.execPath, ["-e", "process.stdout.write('x'.repeat(4096))"], {
+    maxBuffer: 16,
+  });
+  assert.equal(run.ok, false);
+  assert.match(run.reason, /^output exceeded maxBuffer/);
+});

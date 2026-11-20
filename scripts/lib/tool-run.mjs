@@ -2,13 +2,15 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 const TIMEOUT_CODE = "ETIMEDOUT";
+const OVERFLOW_CODE = "ENOBUFS";
 const BYTE_ORDER_MARK = String.fromCodePoint(0xfeff);
 const PATH_SEPARATOR = /[\\/]/;
 
 const text = (value) => (value === undefined || value === null ? "" : value.toString());
 
-const failureReason = ({ timedOut, spawnError, signal, status }) => {
+const failureReason = ({ timedOut, overflow, spawnError, signal, status }) => {
   if (timedOut) return "timed out";
+  if (overflow) return `output exceeded maxBuffer: ${spawnError}`;
   if (spawnError) return `failed to start: ${spawnError}`;
   if (signal) return `stopped by ${signal}`;
   return `exited with status ${status}`;
@@ -34,7 +36,15 @@ export const classifyRun = (proc, { okStatuses = [0] } = {}) => {
     spawnError,
     stdout: text(proc.stdout),
     stderr: text(proc.stderr),
-    reason: ok ? null : failureReason({ timedOut, spawnError, signal, status }),
+    reason: ok
+      ? null
+      : failureReason({
+          timedOut,
+          overflow: proc.error?.code === OVERFLOW_CODE,
+          spawnError,
+          signal,
+          status,
+        }),
   };
 };
 

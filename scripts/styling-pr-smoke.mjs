@@ -324,9 +324,9 @@ const groupFindings = (findings) => {
 };
 
 const auditReason = (proc, parsed) => {
+  if (parsed.ok && parsed.value.error && parsed.value.message) return parsed.value.message;
   if (!proc.ok) return proc.reason;
   if (!parsed.ok) return parsed.error;
-  if (parsed.value.error && parsed.value.message) return parsed.value.message;
   if (parsed.value.kind !== "audit") return "no audit report in the output";
   return null;
 };

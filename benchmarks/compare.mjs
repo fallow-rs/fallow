@@ -16,9 +16,10 @@ const args = process.argv.slice(2);
 const fixturesDir = resolve(
   inlineOption(args, "--fixtures") ?? join(__dirname, "fixtures", "real-world"),
 );
-const fallowBin = resolve(
-  inlineOption(args, "--fallow-bin") ?? join(rootDir, "target", "release", "fallow"),
-);
+const fallowBinOption =
+  inlineOption(args, "--fallow-bin") ?? join(rootDir, "target", "release", "fallow");
+// A bare name stays a name, so the run looks it up on PATH.
+const fallowBin = /[\\/]/.test(fallowBinOption) ? resolve(fallowBinOption) : fallowBinOption;
 const knipBin = join(__dirname, "node_modules", ".bin", "knip");
 
 function normalizeProjectPath(projectDir, value) {
