@@ -118,7 +118,8 @@ protocol and package parity.
   tests) through `runtime_support::load_config_for_analysis`, and its session
   through `AnalysisSession::from_resolved_config`. So
   `from_resolved_config`, `ProductionFlags` and
-  `ConfigFile::{for_analysis, validate, resolve}` stay public.
+  `ConfigFile::{for_analysis, validate, resolve}` stay public. Issue
+  [#4875](https://github.com/fallow-rs/fallow/issues/4875) tracks the move.
   `crates/cli/src/config_load_guard_tests.rs` counts each such call.
 - The resolver reads each run variable of `fallow_config::EnvVar` from the
   `EnvSnapshot` of the run. `crates/cli/src/env_read_guard_tests.rs` fails

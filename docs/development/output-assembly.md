@@ -58,6 +58,7 @@ location. Only the category differs (`SARIF_CATEGORY_DUPES` against
 gives a location for each clone instance. One builder in `fallow-output`
 removes the three copies. The open decision is whether the bare run and the
 audit then give locations too, which changes their SARIF.
+Issue [#4873](https://github.com/fallow-rs/fallow/issues/4873) tracks this move.
 
 ## Saved-envelope renderers of `fallow report --from`
 
@@ -82,6 +83,7 @@ analysis result, and only the CLI has that input.
 The CLI and the MCP server each read the same envelope members and write
 their own sentences. `fallow-mcp` cannot depend on `fallow-cli`, so the two
 readers do not share code. A sentence fix in one does not reach the other.
+Issue [#4874](https://github.com/fallow-rs/fallow/issues/4874) tracks this move.
 
 ## Surface-owned members and text
 
