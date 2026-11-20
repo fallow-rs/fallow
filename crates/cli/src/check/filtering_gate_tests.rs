@@ -41,7 +41,7 @@ fn gate_new_scopes_unresolved_callee_diagnostics_to_added_lines() {
          --- a/src/a.ts\n\
          +++ b/src/a.ts\n\
          @@ -2,1 +2,2 @@\n\
-          ctx\n\
+          \x20ctx\n\
          +factory()(req.body.name);\n",
     );
     let root = Path::new("/project");
@@ -102,7 +102,7 @@ fn gate_keeps_secret_read_added_to_existing_module() {
          --- a/src/shared.ts\n\
          +++ b/src/shared.ts\n\
          @@ -1,1 +1,2 @@\n\
-          export const name = 'app';\n\
+          \x20export const name = 'app';\n\
          +export const key = process.env.API_SECRET_KEY;\n",
     );
     let root = Path::new("/project");

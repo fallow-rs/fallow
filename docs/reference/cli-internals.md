@@ -685,6 +685,13 @@ line states exit code 0.
   as inherited and are also reported through
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
+- Unified diffs: `fallow_output::unified_diff_events` is the one reader of
+  unified diff text (`crates/output/src/unified_diff.rs`). It reads a file
+  header only outside a hunk, decodes a quoted path of git, and removes the
+  tab that git writes after a path with a space. `DiffIndex::from_unified_diff`
+  and the change anchors of the walkthrough consume its events. One audit run
+  reads its merge-base worktree diff at most one time (`RunChange::diff_index`
+  in `crates/api/src/audit_run/outcome.rs`).
 - Clone groups inside a base clone group: after the demotion, the same
   function marks an introduced clone group as inherited when each instance
   lies inside a different instance of one base clone group

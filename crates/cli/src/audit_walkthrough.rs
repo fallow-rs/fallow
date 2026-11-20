@@ -36,13 +36,12 @@ pub use fallow_output::{
     AcceptedJudgment, AgentJudgment, AgentWalkthrough, ChangeAnchor, DirectionUnit, INJECTION_NOTE,
     RejectedJudgment, ReviewDirection, TestAdjacency, WalkthroughValidation, agent_schema,
 };
-use fallow_output::{FocusMap, RoutingFacts};
+use fallow_output::{DiffEvent, FocusMap, RoutingFacts};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::audit_brief::{ReviewBriefOutput, ReviewBriefSchemaVersion, build_brief_output};
 use crate::audit_decision_surface::DecisionSurface;
-use crate::report::ci::diff_filter::parse_new_hunk_start;
 
 /// The standing reason a judgment is rejected for citing a `signal_id` fallow
 /// never emitted (the anti-hallucination gate).
@@ -98,10 +97,8 @@ struct AnchorParser {
     seen: FxHashMap<(String, String), u32>,
     current_file: Option<String>,
     rename_from: Option<String>,
-    pending_rename_from: Option<String>,
     start_line: u64,
     hunk_lines: Vec<String>,
-    in_hunk: bool,
 }
 
 impl AnchorParser {
@@ -136,53 +133,23 @@ impl AnchorParser {
         self.hunk_lines.clear();
     }
 
-    /// Consume one diff line, flushing any pending hunk on a structural boundary
-    /// (`diff --git`, `+++ b/`, `+++ /dev/null`, `@@`) and accumulating `+` lines
-    /// inside a hunk.
-    fn consume(&mut self, line: &str) {
-        if line.starts_with("diff --git ") {
-            self.flush();
-            self.in_hunk = false;
-            self.current_file = None;
-            self.rename_from = None;
-            self.pending_rename_from = None;
-            return;
-        }
-        if let Some(rest) = line.strip_prefix("rename from ") {
-            self.pending_rename_from = Some(rest.to_owned());
-            return;
-        }
-        if let Some(rest) = line.strip_prefix("rename to ") {
-            if let Some(from) = self.pending_rename_from.take() {
-                self.current_file = Some(rest.to_owned());
-                self.rename_from = Some(from);
+    /// Consume one diff event. A `File` or `Hunk` event flushes the pending
+    /// hunk. An `Added` event of a file adds its text to the hunk.
+    fn consume(&mut self, event: DiffEvent<'_>) {
+        match event {
+            DiffEvent::File(header) => {
+                self.flush();
+                self.current_file = header.new_path.map(std::borrow::Cow::into_owned);
+                self.rename_from = header.renamed_from.map(std::borrow::Cow::into_owned);
             }
-            return;
-        }
-        if let Some(path) = line.strip_prefix("+++ b/") {
-            self.flush();
-            self.in_hunk = false;
-            self.current_file = Some(path.to_owned());
-            return;
-        }
-        if line.starts_with("+++ /dev/null") {
-            self.flush();
-            self.in_hunk = false;
-            self.current_file = None;
-            return;
-        }
-        if let Some(header) = line.strip_prefix("@@ ") {
-            self.flush();
-            self.start_line = parse_new_hunk_start(header).unwrap_or(0);
-            self.in_hunk = true;
-            return;
-        }
-        if self.in_hunk
-            && self.current_file.is_some()
-            && line.starts_with('+')
-            && !line.starts_with("+++")
-        {
-            self.hunk_lines.push(line[1..].to_owned());
+            DiffEvent::Hunk { new_start, .. } => {
+                self.flush();
+                self.start_line = new_start;
+            }
+            DiffEvent::Added(text) if self.current_file.is_some() => {
+                self.hunk_lines.push(text.to_owned());
+            }
+            _ => {}
         }
     }
 }
@@ -194,8 +161,8 @@ impl AnchorParser {
 #[must_use]
 pub fn parse_change_anchors(diff: &str) -> Vec<ChangeAnchor> {
     let mut parser = AnchorParser::default();
-    for line in diff.lines() {
-        parser.consume(line);
+    for event in fallow_output::unified_diff_events(diff) {
+        parser.consume(event);
     }
     parser.flush();
     parser.anchors
@@ -1032,6 +999,27 @@ mod tests {
         );
         assert_eq!(a[0].start_line, 11);
         assert_eq!(b[0].start_line, 41, "start_line tracks the new position");
+    }
+
+    #[test]
+    fn parse_change_anchors_keeps_an_added_plus_plus_line() {
+        let diff = "diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1,0 +2,2 @@ let count = 0;\n+++count;\n+--count;\n";
+        let anchors = parse_change_anchors(diff);
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].file, "src/a.js");
+        assert_eq!(anchors[0].start_line, 2);
+        assert_eq!(
+            anchors[0].line_count, 2,
+            "the `++count;` line is an added line"
+        );
+    }
+
+    #[test]
+    fn parse_change_anchors_reads_quoted_and_tab_suffixed_paths() {
+        let diff = "diff --git \"a/src/caf\\303\\251.ts\" \"b/src/caf\\303\\251.ts\"\n--- \"a/src/caf\\303\\251.ts\"\n+++ \"b/src/caf\\303\\251.ts\"\n@@ -1,0 +2 @@ x\n+x2\ndiff --git a/src/my file.ts b/src/my file.ts\n--- a/src/my file.ts\t\n+++ b/src/my file.ts\t\n@@ -1,0 +2 @@ y\n+y2\n\\ No newline at end of file\n";
+        let anchors = parse_change_anchors(diff);
+        let files: Vec<&str> = anchors.iter().map(|anchor| anchor.file.as_str()).collect();
+        assert_eq!(files, vec!["src/café.ts", "src/my file.ts"]);
     }
 
     // change_anchor: a judgment citing an emitted change_anchor is ACCEPTED with

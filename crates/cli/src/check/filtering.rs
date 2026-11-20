@@ -1400,7 +1400,7 @@ mod tests {
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
              @@ -10,1 +10,2 @@\n\
-              ctx\n\
+              \x20ctx\n\
              +touched\n",
         );
         let root = Path::new("/project");
@@ -1447,7 +1447,7 @@ mod tests {
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
              @@ -10,1 +10,2 @@\n\
-              ctx\n\
+              \x20ctx\n\
              +client[method](req.body.name);\n",
         );
         let root = Path::new("/project");

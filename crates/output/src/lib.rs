@@ -99,6 +99,7 @@ mod trace_envelopes;
 mod type_aware_envelopes;
 #[cfg(test)]
 mod unicode_span_oracle;
+mod unified_diff;
 mod walkthrough_render;
 
 pub use analysis_sarif::{
@@ -192,9 +193,7 @@ pub use coverage_envelopes::{
     serialize_coverage_analyze_json_output, serialize_coverage_setup_json_output,
 };
 pub use dead_code_sarif::build_dead_code_sarif;
-pub use diff::{
-    DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
-};
+pub use diff::{DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, relative_to_diff_path};
 pub use doctor::{
     DOCTOR_SCHEMA_VERSION, DoctorCheck, DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus,
     DoctorOutput, DoctorRemediation, DoctorStatus, DoctorSummary, serialize_doctor_json_output,
@@ -483,6 +482,7 @@ pub use type_aware_envelopes::{
     TYPE_AWARE_STATUS_SCHEMA_VERSION, TypeAwareStatusOutput,
     serialize_type_aware_status_json_output,
 };
+pub use unified_diff::{DiffEvent, DiffFileHeader, UnifiedDiffEvents, unified_diff_events};
 pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_member_list, cap_names, clean_decision_fact,
     decisions_outside_units, visible_stage_units,

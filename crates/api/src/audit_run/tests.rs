@@ -684,6 +684,52 @@ fn a_docs_only_change_reuses_the_head_run_as_the_base() {
     );
 }
 
+#[test]
+fn the_worktree_diff_of_a_run_is_read_one_time() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = seeded_repo(tmp.path());
+    fs::write(repo.join("README.md"), "seed\nfirst\n").expect("edit file");
+    let changed = FxHashSet::default();
+    let change = RunChange::new(&repo, "HEAD", None, &changed);
+
+    let first = change
+        .diff_index()
+        .expect("git gives a diff")
+        .added_line_count();
+    assert_eq!(first, 1);
+
+    fs::write(repo.join("README.md"), "seed\nfirst\nsecond\n").expect("edit file again");
+    assert_eq!(
+        change
+            .diff_index()
+            .map(fallow_output::DiffIndex::added_line_count),
+        Some(1),
+        "every phase of the run reads the diff of the first read"
+    );
+}
+
+#[test]
+fn a_run_with_a_shared_diff_reads_no_worktree_diff() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = seeded_repo(tmp.path());
+    fs::write(repo.join("README.md"), "seed\nfirst\n").expect("edit file");
+    let changed = FxHashSet::default();
+    let index = fallow_output::DiffIndex::default();
+    let shared = SharedDiff {
+        index: &index,
+        label: "--diff-file x",
+    };
+    let change = RunChange::new(&repo, "HEAD", Some(shared), &changed);
+
+    assert_eq!(
+        change
+            .diff_index()
+            .map(fallow_output::DiffIndex::added_line_count),
+        Some(0),
+        "the shared diff decides, not the worktree"
+    );
+}
+
 fn branching_totals(
     branch_points: u32,
     functions: u32,

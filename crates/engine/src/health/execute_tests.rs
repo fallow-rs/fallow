@@ -902,7 +902,7 @@ fn filter_complexity_findings_by_diff_handles_zero_line_count() {
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
              @@ -4,1 +4,2 @@\n\
-              ctx\n\
+              \x20ctx\n\
              +touched\n",
     );
     filter_complexity_findings_by_diff(&mut findings, &diff, Path::new("/project"));

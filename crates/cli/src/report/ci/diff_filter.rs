@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES, parse_new_hunk_start};
+pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES};
 
 use fallow_output::CiIssue;
 
@@ -891,7 +891,7 @@ mod tests {
              --- a/package.json\n\
              +++ b/package.json\n\
              @@ -11,1 +11,2 @@\n\
-              \"dependencies\": {\n\
+              \x20\"dependencies\": {\n\
              +  \"lodash\": \"^4.17.21\"\n",
         )
         .expect("write");
