@@ -7,13 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.44.1] - 2026-11-19
+## [3.45.0] - 2026-11-20
+
+### Added
+
+- **`fallow config --resolved` shows the settings of a run and where each one comes from.** For each analysis it shows whether it runs and its production mode, with the cause: a flag, an environment variable, a config key with its file, or a default. It also shows the thread count, the cache directory and the other run settings. Use `--for audit`, `--for dead-code`, `--for dupes` or `--for health` to see the rules of another command, and `--only`, `--skip` and `--production-dead-code`, `--production-health`, `--production-dupes` to see the effect of those flags. Environment variables show by name only; a variable with a value that fallow cannot read is under `env.ignored`, and the human format prints its note on stderr. `--only` and `--skip` apply to `--for combined` and `--for audit` only, and exit 2 with another `--for` command. The JSON goes to stdout for each output format; a config that does not resolve exits 2 with a structured error. `docs/output-schema.json` describes the JSON as the `ResolvedRunView` definition. `fallow config` without `--resolved` does not change.
+
+- **Run notices are part of the JSON output.** When a flag has no effect, when the config does not load in the editor, when two config files exist in one directory, when `security.categories` names an unknown category, or when a `FALLOW_PRODUCTION*` variable has a value that fallow cannot read, the JSON output now has a `workspace_diagnostics` entry for it. The new kinds are `inert-flag`, `config-load-fell-back`, `config-file-shadowed`, `unknown-security-category` and `env-value-ignored`. An entry names an environment variable and never holds its value. `fallow audit --format json` has a root `workspace_diagnostics` array when such a notice exists. MCP tools show these notices in `warnings`, and the degraded-run warning now counts the diagnostics of every section of an audit. The language server writes them to its log. The human output prints a flag without effect and an ignored variable as one `Note:` line, and `--quiet` hides it.
+
+- **`fallow config --resolved` shows the base ref of an audit.** For `--for audit`, `settings.audit_base` gives the base that `--base` or `FALLOW_AUDIT_BASE` names, with its source, and is `null` when the audit detects the base.
+
+- **`fallow config --resolved` shows the type-aware setting.** The new `settings.type_aware` member gives the on or off value and its source: a flag or an option, `FALLOW_TYPE_AWARE`, `audit.typeAware`, or `typeAware.enabled`. It is `null` when `FALLOW_TYPE_AWARE` or `FALLOW_TYPE_AWARE_REQUIRE` has a value that the run cannot use.
+
+- **`fallow schema --cli-reference` prints a full CLI reference as one JSON document.**
+  The document lists every command and subcommand at each depth, in the
+  order and the groups of `fallow --help`, with its usage line, its full help
+  and its options. Each option has its value name, aliases, possible values,
+  default, help heading, conflicts and the `--x`/`--no-x` pair. Hidden
+  commands and options stay in the document with `hidden: true`. The document
+  also has the exit codes with a name for each code, the exit codes whose
+  meaning a command defines itself, the environment variables with a group
+  and a default, the output formats, the MCP tools and resources, and each
+  issue type with a sentence-case `display_label` and the text of
+  `fallow explain <id> --format json`. A documentation generator can write
+  the command pages, the option tables and the issue type pages from this
+  one file. The repository commits the output as `docs/cli-reference.json`.
+  In the default `fallow schema` output, the row of the `schema` command
+  gains the `--cli-reference` flag.
+- **`fallow dupes --help` groups its options under Detection, Output and Gates.**
+  The flags of the `dupes` row in the default `fallow schema` output follow
+  the same order, so `--threshold` now comes after `--trace`.
 
 ### Changed
 
 - **The Node bindings and the Rust API read the config once for each call.** A combined or audit call used to load the config for each analysis, so a config edit during a call could give two analyses different settings. The feature flags, mutation and similar-code calls now also check external plugin files, as the other calls do. A config that does not load gives the same error text on each call. The combined result lists each skipped analysis with its reason in the new `skipped` member. The `ProgrammaticHealthRunner` trait has a new `refuses_config_type_aware` method. A custom runner returns `true` when it does the type-aware config check itself, and `run_health_with_runner` then does not read the config for that check.
 
 - **`fallow` checks the config once before the first analysis.** The bare run, `dead-code`, `dupes`, `health` and `audit` load, validate and resolve the config one time for each run. A config that fails validation stops the run with exit code 2 before it prints the `loaded config` line. On the bare run, this error also comes before a flag usage error, such as `--baseline-base` without `--fail-on-baseline-growth`. An `audit` that selects no sub-analysis prints only its error, with no `loaded config` line before it. The workspace discovery notice prints one time for each run. When the host cannot report its parallelism, fallow now starts one worker thread, not four.
+
+- **`fallow coverage analyze` reads `production` from the config.** Without `--production`, the command analyzed in non-production mode. It now uses the `production` setting of the config, as `fallow dead-code` does.
+- **`fallow security` reads the base config from the base commit.** When `fallow security --gate newly-reachable` compares with a base ref, the base side now uses the config file of that commit, as the second base pass of `fallow audit` does. A config change in the pull request then shows as a change in the findings. When the base version of the config does not load or does not validate, the base side reads the config file of the head run.
+- **`fallow mutation` and `fallow plugin-check` print a config error with the same text as the analysis commands.** An invalid rule pack or boundary now gives `invalid rule pack:` or `invalid boundary configuration:` without the `failed to load config:` prefix. A `--config` file that does not load gives `failed to load config '<path>': <cause>`, with the path as given. The `message` field of the JSON error of `fallow mutation --format json` changes the same way. The exit code stays 2.
+- **The programmatic audit reads the base version of an explicit config file on the base side.** When `AnalysisOptions.config_path` names a file under the root and the change edits that file, the second base pass of `run_audit` now reads the base version of that file, as `fallow audit --config` does. Before, that pass read the config file that discovery found in the base checkout. When the base version does not load or does not validate, the audit skips that pass.
+
+- **The `--dupes-baseline` note follows `--quiet` and the output format.** When `duplicates.enabled: false` turns the duplication analysis off, the note now prints only in the human output and without `--quiet`. `--production` on `fallow trace --path`, a re-export chain trace and `fallow trace-error` now prints a note, because these commands read the production mode from the config only.
+
+- **The `source` of a package.json entry point names the field that declares it.**
+  `fallow list --entry-points`, its JSON `entry_points[].source` value and the
+  entry weight listing used the label `package.json main` for each field of the
+  root package and of a workspace package, and `package.json exports` for each
+  field of a nested package. A wildcard target such as `"main": "./src/*.ts"`
+  used `package.json exports` in each package. The label now names the real
+  field: `package.json main`, `package.json module`, `package.json types`,
+  `package.json typings`, `package.json source`, `package.json browser`,
+  `package.json bin` or `package.json exports`. The four labels `types`,
+  `typings`, `source` and `browser` are new values. A script that matches
+  `"source": "package.json main"` to find every package.json entry point must
+  match the `package.json ` prefix instead.
+  (Closes [#4831](https://github.com/fallow-rs/fallow/issues/4831))
+
+- **The language server warns about a `duplication` or `typeAware` initialization option that does not parse.** Before, the server ran without the option and said nothing. It now writes a warning that names the option to the log of the editor, for example when `duplication.near` is a string.
+
+- **`fallow <command> --help` groups the options under headings.**
+  Each global option has a heading: Project, Output, Scope, Baselines,
+  Gates, Duplication, Type-aware or Performance. Each command with more than
+  six options of its own groups them under two to five headings, for example
+  Issue types, Tracing, Scope and Output for `dead-code`, and Scope,
+  Baselines, Coverage, Gates and Review for `audit`. A command heading and a
+  global heading with the same name print as one section. The `help_heading`
+  field of `fallow schema --cli-reference` carries each heading. In the
+  default `fallow schema` output, `--top` of `dead-code`, `health` and
+  `flags`, `--sort` of `health`, and the global `--no-cache`, `--threads`
+  and `--performance` flags move, so that each list follows the order of
+  `--help`. The root `fallow --help` keeps one options block.
+
+- **Help and schema texts use plain case.** Option help, config schema
+  descriptions and output schema descriptions no longer use all-caps words
+  for emphasis. The `includeEntryExports` description now says that fallow
+  checks the other exports of an entry file when a plugin `usedExports` rule
+  matches the file, also without the setting. The unused class member
+  heading now says that a use through `this` counts as a use. The
+  environment registry of `fallow schema` gives the default `2.85.0` for
+  `FALLOW_GATE_MIN_VERSION`.
+- **`fallow explain` says what goes wrong when a finding stays.** The "Why it
+  matters" section of dead-code, dependency, component, suppression, styling,
+  test reachability, duplication, runtime coverage and flag rules no longer
+  repeats the definition of the rule. Each tainted-sink security category has
+  its own reason and its own example line with a sink of that category. The
+  three complexity rules, `untested-file` and `untested-export` have one
+  example each, and `feature-flag` and `flag-retirement-candidate` have an
+  example and a fix. The SARIF `fullDescription` of each rule does not change.
 
 ### Fixed
 
@@ -59,6 +141,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A computed member access credits the class members that its key can name.** With a class field `view: View` and `action: "zoomIn" | "zoomOut"`, `this.view[action]()` gave no credit, so fallow reported every member of `View` as unused. With `const view = new View()`, `view[action]()` counted as a use of the whole object, so fallow reported no member of `View`, also a member that no code reads. A key that is a string literal, a conditional of string literals, or a parameter or variable typed as a union of string literals now credits those members. A key of another type keeps the whole-object use. Thanks [@neumaennl](https://github.com/neumaennl) for the report. (Closes [#4799](https://github.com/fallow-rs/fallow/issues/4799))
 
 - **Type-aware analysis resolves the members of a default-exported class.** A member of `export default class Foo {}`, `export default class {}`, or a class that `export default Foo;` or `export { Foo as default };` exports, stayed unresolved, so fallow kept the unused-member finding when code used the member. The type-aware companion now finds these members. Thanks [@DiefBell](https://github.com/DiefBell) for the report. (Closes [#4792](https://github.com/fallow-rs/fallow/issues/4792))
+
+- **`fallow inspect` now applies `--allow-remote-extends` to each part of the bundle.** The child processes that collect the evidence did not get the flag, so a config with an `https://` entry in `extends` failed there. The type-aware evidence of a symbol now also reads the flag and the `FALLOW_PRODUCTION*` variables, as the child processes do.
+- **The VS Code extension passes the `allowRemoteExtends` setting in each run.** The Health view, the workspace picker, the audit run and the fix run now pass the setting to the CLI, as the combined analysis run does.
+
+- **`fallow dead-code --show-cascade` lists the hidden findings in the human report.**
+  The JSON report listed the unused exports and unused types of unused files
+  with the flag, but the human report still left them out and printed only a
+  count line. The human report and its summary line now list and count them,
+  as the help text says. The same applies when the config sets
+  `showCascade: true`. Without the flag or the config key, the report hides
+  them as before.
+  (Closes [#4832](https://github.com/fallow-rs/fallow/issues/4832))
+- **CLI texts match the behavior.** The help and the input error of `fallow dupes --trace` name
+  both accepted forms, `FILE:LINE` and `dup:<fingerprint>`. The
+  `code-duplication` explanation describes each `duplicates.mode` value
+  correctly: `weak` ignores only string values, and only `semantic` ignores
+  identifiers. The combined report prints no em dash in its target hint and
+  in the warning for a project without entry points.
+  (Closes [#4830](https://github.com/fallow-rs/fallow/issues/4830))
+
+- **The MCP `audit` tool picks the same base on both routes.** With `FALLOW_CHANGED_SINCE` set, the typed `audit` and `decision_surface` tools compared with that ref before `FALLOW_AUDIT_BASE` and before the detected base. They now use the `base` parameter first, then `FALLOW_AUDIT_BASE`, then the automatic base, as the tool description says and as the CLI route does. `FALLOW_CHANGED_SINCE` gives the base only when the audit detects none.
+
+- **`fallow health` rejects a `FALLOW_TYPE_AWARE` value that is not valid UTF-8.** `fallow dead-code` already stopped with exit code 2 for such a value, but `fallow health` ignored the variable. Both commands now give the same error. A `FALLOW_TYPE_AWARE_REQUIRE` value that is not valid UTF-8 now also stops each command that reads type-aware settings with exit code 2. Before, the commands ignored it.
+
+- **Named ES module imports of `@fallow-cli/fallow-node` now work.** `import { detectDeadCode } from "@fallow-cli/fallow-node"` failed with `SyntaxError: Named export 'detectDeadCode' not found`. The package now has an ES module entry that exports each binding function by name. The default export and the CommonJS `require` entry do not change.
+  (Closes [#4840](https://github.com/fallow-rs/fallow/issues/4840))
+
+- **`fallow fix` removes the import of a name that it removes from a local export list.** In `import { a } from './a'; export { a, used };`, the fix removed `a` from the list but kept the import. The next fix run did not count that import as a use, so it removed the `export` of `a` in `./a`, and the type check then failed with TS2306 or TS2459. The fix now also removes an import binding when the removed list specifiers are all of its references in the file, and the full import declaration when no binding is left. An import without bindings, such as `import './polyfill';`, does not change. The dry run lists each import removal. An import declaration that shares a line with other code, or a file that does not parse, keeps its imports.
+  Thanks [@MikeSpock](https://github.com/MikeSpock) for the report.
+  (Closes [#4833](https://github.com/fallow-rs/fallow/issues/4833))
+
+- **The commit gate block message no longer includes the `verified:` line of the npm launcher.** The npm launcher prints a second `verified:` line for `fallow --version`. The gate script of `fallow setup-hooks` now reads only the first line of that output. The block message and the version floor check use only that version.
+  (Closes [#4842](https://github.com/fallow-rs/fallow/issues/4842))
+
+- **`fallow schema` lists the environment variables that it did not list.**
+  The `environment_variables` map now has `FALLOW_CLOCK_EPOCH`,
+  `FALLOW_MCP_MAX_OUTPUT_BYTES` and the four `FALLOW_GATE_*` variables of the
+  agent gate script.
+- **`fallow schema` names the rules key of the complexity and file-length findings.**
+  The `high-cyclomatic-complexity`, `high-cognitive-complexity`,
+  `high-crap-score` and `long-file` rows had a null `config_key`,
+  `default_severity` and `opt_in`, although `rules.complexity-cyclomatic`,
+  `rules.complexity-cognitive`, `rules.complexity-crap` and
+  `rules.complexity-file-lines` decide if these findings fail a run. The rows
+  now name these keys, their default `error` and `opt_in: false`. The
+  `fallow://issue-types` MCP resource and `npm/fallow/issue-registry.json`
+  give the same values.
+
+- **The human duplication report uses the singular for one clone group.**
+  The header reads `Duplicates (1 clone group)`. The overflow and corpus
+  total lines also use the singular for one group or one family.
+- **The audit scope line starts the range at the base commit.** `fallow
+  audit` printed the head commit as the start of the range, so the line read
+  as an empty range. The line now prints the merge base of the base ref and
+  `HEAD`, the commit that the changed-file diff starts from.
+  (Closes [#4838](https://github.com/fallow-rs/fallow/issues/4838))
+
+- **`fallow explain` states the facts of each rule correctly.** The
+  `unused-class-member` text says that private members are not checked. The
+  `unused-file` fix names `entry`, `supportEntry` and `dynamicallyLoaded`.
+  `unused-dependency` names `ignoreDependencies`. `mixed-client-server-barrel`
+  and `misplaced-directive` list every React Server Components bundler that
+  turns them on. `prop-drilling` reports a prop that passes unchanged through
+  2 or more components. `unrendered-component` names Vue, Svelte, Astro,
+  Angular and Lit.
+- **Every structure, styling and coverage rule has an example and a fix.**
+  `route-collision`, `dynamic-segment-name-conflict`, `invalid-client-export`,
+  `mixed-client-server-barrel`, `misplaced-directive`, `re-export-cycle`,
+  `package-cycle`, the five `css-*` rules and the four
+  `coverage-intelligence-*` rules had none. The five `runtime-*` rules now
+  have one example and one fix each.
+- **Help texts name the add-ons as users know them.** The help of the
+  runtime coverage options, `coverage setup`, `ci post-check-run --decision`,
+  the `type-aware` subcommands, `similar-code status` and the mutation
+  options names the runtime coverage add-on, the type-aware companion, the
+  similar-code companion and the mutation runner. Help texts lose internal
+  labels, all-caps emphasis, contractions, `<https://...>` markup and the
+  names of other tools in `--version`. `--fail-on-issues` lists every format
+  that exits 0 without it, and the `dupes` defaults name the config file.
+- **The config schema describes each key for its users.** `production`
+  names the commands that each per-analysis key affects.
+  `circularDependencies` names `allow`. `ignoreDependencyOverrides` covers
+  npm and bun overrides and bun `resolutions`. `extends` states the remote
+  opt-in, the 5 second timeout, the 1 MB limit and the depth limit of 10.
+  `ignoreFindings`, `ignoreDependencies`, `ignoreUnresolvedImports`,
+  `ignoreExports`, `ignoreCatalogReferences`, `minimumVersion`,
+  `includeEntryExports` and `sharedStateAllowlist` gain the facts that a
+  user needs, and the override rule keys say what they do. The schema gives
+  the defaults of `cache.maxSizeMb`, `effect.schemaExportsAsTypes` and the
+  list keys that had none.
+- **Messages and descriptions drop internal and history wording.** The error
+  for a missing runtime coverage add-on names the add-on. `telemetry status`
+  links to the telemetry document instead of a repository path. The glob
+  warning no longer compares with an older fallow version. The descriptions
+  of the environment variables name the add-ons, the cache trim at 80 and 60
+  percent, the 32-snapshot limit of the audit cache and the lookup order of
+  `FALLOW_BIN`. Each exit code description ends with a period, and code 2
+  describes its JSON error in words.
+- **The help of `fallow list [PATH]` says what the path limits.** The path
+  limits the listed files, entry points and entry weights. The help said
+  that it scoped reported findings, but `list` reports no findings.
+- **Runtime coverage messages name the runtime coverage add-on.** The
+  signature, protocol, spawn and response errors of the add-on, the
+  `FALLOW_COV_BIN` and `FALLOW_COV_BINARY_PATH` errors, the runtime coverage
+  fields of the JSON output schema and the `coverage setup` JSON contract
+  no longer say "sidecar". `fallow audit-cache prune` reports "lock file"
+  and "orphaned marker files" instead of "lock sidecar" and "orphaned
+  sidecars". The JSON `reason` value `orphaned-sidecars` stays the same.
+- **More descriptions lose all-caps emphasis and internal labels.** The
+  `audit` help, the gate descriptions of the JSON output schema, the
+  `mixed-client-server-barrel` texts and the opt-in parameters of the
+  `inspect_target` MCP tool use plain words. The mutation config keys name
+  the mutation runner and the type-aware companion.
+- **`fallow schema --cli-reference` shows each value name and an optional value.**
+  Options get `value_names`, for example `FROM` and `TO` for `trace --path`,
+  and `value_optional`, which is true for `--save-snapshot`.
 
 ## [3.44.0] - 2026-11-18
 
@@ -17708,8 +17906,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.44.1...HEAD
-[3.44.1]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.44.1
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.45.0...HEAD
+[3.45.0]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.45.0
 [3.44.0]: https://github.com/fallow-rs/fallow/compare/v3.43.2...v3.44.0
 [3.43.2]: https://github.com/fallow-rs/fallow/compare/v3.43.1...v3.43.2
 [3.43.1]: https://github.com/fallow-rs/fallow/compare/v3.43.0...v3.43.1
