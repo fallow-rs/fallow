@@ -86,7 +86,7 @@ variables:
   GIT_DEPTH: "0"
 
   # Core
-  FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
+  FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest. A range or latest resolves to the installed exact version for the FALLOW_COMMENT, FALLOW_REVIEW and FALLOW_MUTATION scripts
   FALLOW_SKIP_INSTALL: ""        # "true" skips `npm install -g fallow` and uses the fallow already on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`). Fails fast if no fallow is found. Type-aware analysis then needs `fallow-type-aware` at the same version in that install.
   FALLOW_COMMAND: ""            # dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)
   FALLOW_ROOT: "."
@@ -117,8 +117,8 @@ variables:
   FALLOW_TYPE_AWARE_PROJECTS: ""         # Comma-separated tsconfig paths; empty uses automatic project discovery
   FALLOW_TYPE_AWARE_REQUIRE: ""           # best-effort or complete; empty defers to repository typeAware.require
   FALLOW_ARGS: ""               # Extra CLI arguments (space-separated)
-  FALLOW_COMMENT: "false"       # Post results as MR summary comment
-  FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
+  FALLOW_COMMENT: "false"       # Post results as MR summary comment. Uses vendored ci/scripts, or downloads the scripts of the installed fallow release
+  FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions. Uses vendored ci/scripts, or downloads the scripts of the installed fallow release
   FALLOW_REVIEW_GUIDANCE: "false" # Add collapsed "What to do" guidance to inline review discussions
   FALLOW_REVIEW_ID: ""       # Stable scope for parallel review jobs targeting the same MR
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
@@ -216,14 +216,15 @@ variables:
   # install the dependencies first (see the example above). A merge request
   # from a fork that runs in the target project is refused. Exit code 2 of
   # fallow mutation fails the job.
-  FALLOW_MUTATION: "false"            # Run fallow mutation before the analysis and add a section to the MR comment
+  FALLOW_MUTATION: "false"            # Run fallow mutation before the analysis and add a section to the MR comment. Uses vendored ci/scripts, or downloads the scripts of the installed fallow release
   FALLOW_MUTATION_SCOPE: "changed"    # changed (the lines that the MR adds), all, or files and directories relative to FALLOW_ROOT, separated by spaces or commas
   FALLOW_MUTATION_TIME_BUDGET: "10m"  # Time budget, for example 90s, 10m or 1h; a stopped run is partial and the next run continues from the result cache; empty means no budget
   FALLOW_MUTATION_MAX_MUTANTS: ""     # Maximum number of covered mutants that the run executes
   FALLOW_MUTATION_MIN_SCORE: ""       # Minimum mutation score in percent; a lower score fails the job
 
   # Advanced: pin remote MR-integration scripts to a specific tag or commit.
-  # Leave empty to prefer vendored local ci/ + action/ scripts when present.
+  # Leave empty to use vendored local ci/scripts when present, else the
+  # release tag of the installed fallow version (also for a range or latest).
   FALLOW_SCRIPTS_REF: ""
 
 # ---------------------------------------------------------------------------
@@ -382,9 +383,16 @@ variables:
 
       installed_version="$(fallow --version || echo 'unknown version')"
       echo "Installed fallow ${installed_version}"
+      installed_semver="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
+
+      # A range or `latest` resolves to one exact version at install time.
+      # The script-prep block pins the remote MR-integration scripts to the
+      # release tag of that version, so record it in place of the range.
+      if [ -n "$installed_semver" ]; then
+        printf '%s\n' "$installed_semver" > /tmp/fallow-version-spec
+      fi
 
       if [ -z "$requested_version" ] && [ -n "$project_spec" ] && is_exact_version "$project_spec"; then
-        installed_semver="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
         if [ -n "$installed_semver" ] && [ "$installed_semver" != "$project_spec" ]; then
           echo "WARNING: Installed fallow ${installed_semver}, but ${root}/package.json pins ${project_spec}. Set FALLOW_VERSION or align package.json to keep local and CI results comparable."
         fi
@@ -394,10 +402,9 @@ variables:
       # installs the exact-version companion next to the global `fallow`,
       # where the launcher finds it. FALLOW_TYPE_AWARE=false skips it.
       if [ "$(trim "${FALLOW_TYPE_AWARE:-}")" != "false" ]; then
-        companion_version="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
-        if [ -n "$companion_version" ]; then
-          npm install -g --ignore-scripts "fallow-type-aware@${companion_version}" \
-            || echo "WARNING: Failed to install fallow-type-aware@${companion_version}; type-aware analysis is unavailable in this job."
+        if [ -n "$installed_semver" ]; then
+          npm install -g --ignore-scripts "fallow-type-aware@${installed_semver}" \
+            || echo "WARNING: Failed to install fallow-type-aware@${installed_semver}; type-aware analysis is unavailable in this job."
         fi
       fi
       FALLOW_INSTALL_EOF
@@ -429,7 +436,11 @@ variables:
           fi
 
           if [ -z "$FALLOW_SCRIPTS_REF" ]; then
-            echo "ERROR: FALLOW_COMMENT/FALLOW_REVIEW/FALLOW_MUTATION require vendored ci/ + action/ scripts or a pinned FALLOW_SCRIPTS_REF when fallow is installed from latest or a semver range."
+            echo "ERROR: FALLOW_COMMENT, FALLOW_REVIEW and FALLOW_MUTATION download scripts of the installed fallow release, but the template cannot find the exact version of the installed fallow ('${FALLOW_RESOLVED_VERSION}')."
+            echo "Use one of these fixes:"
+            echo "  - Put an exact fallow version in package.json (no ^, ~ or other range)."
+            echo "  - Set an exact FALLOW_VERSION (no range and no latest)."
+            echo "  - Vendor the template and its scripts with 'fallow ci-template gitlab --vendor', or set FALLOW_SCRIPTS_REF to a release tag."
             exit 2
           fi
 
