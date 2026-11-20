@@ -57,11 +57,17 @@ pub struct McpToolInfo {
     pub license: McpToolLicense,
     /// Free/paid nuance; populated exactly when `license` is `Freemium`.
     pub license_note: Option<&'static str>,
-    /// Whether the tool leaves the project untouched. `fix_apply` changes
-    /// source files. `analyze`, `check_changed`, `find_dupes` and
-    /// `check_health` write a baseline, regression baseline or snapshot file
-    /// when the caller asks for one.
+    /// Whether the tool leaves the project untouched. `false` means that the
+    /// tool can write a file: `fix_apply` changes source files, and
+    /// `analyze`, `check_changed`, `find_dupes` and `check_health` write a
+    /// report or baseline file (a baseline, regression baseline or snapshot)
+    /// when the caller asks for one. Use `modifies_source` to tell the two
+    /// cases apart.
     pub read_only: bool,
+    /// Whether the tool edits source files of the project. `fix_apply` is
+    /// `true`. A tool that writes only a report or baseline file on request
+    /// is `false`, and so is every read-only tool.
+    pub modifies_source: bool,
     /// camelCase host-API alias when the tool is reachable from Code Mode
     /// (`code_execute`), `None` when it is not. This field is the single
     /// source of truth for the Code Mode allowlist: `crates/mcp` builds its
@@ -84,6 +90,7 @@ impl McpToolInfo {
             "license": self.license.as_str(),
             "license_note": self.license_note,
             "read_only": self.read_only,
+            "modifies_source": self.modifies_source,
             "code_mode_alias": self.code_mode_alias,
         })
     }
@@ -133,6 +140,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -151,6 +159,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: false,
+        modifies_source: false,
         code_mode_alias: Some("analyze"),
     },
     McpToolInfo {
@@ -162,6 +171,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: false,
+        modifies_source: false,
         code_mode_alias: Some("checkChanged"),
     },
     McpToolInfo {
@@ -180,6 +190,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("checkArchitecture"),
     },
     McpToolInfo {
@@ -191,6 +202,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("securityCandidates"),
     },
     McpToolInfo {
@@ -202,6 +214,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -215,6 +228,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -234,6 +248,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -247,6 +262,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -258,6 +274,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -269,6 +286,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -280,6 +298,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -298,6 +317,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: false,
+        modifies_source: false,
         code_mode_alias: Some("findDupes"),
     },
     McpToolInfo {
@@ -319,6 +339,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: false,
+        modifies_source: false,
         code_mode_alias: Some("checkHealth"),
     },
     McpToolInfo {
@@ -336,6 +357,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("checkRuntimeCoverage"),
     },
     McpToolInfo {
@@ -347,6 +369,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("getHotPaths"),
     },
     McpToolInfo {
@@ -358,6 +381,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("getBlastRadius"),
     },
     McpToolInfo {
@@ -369,6 +393,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("getImportance"),
     },
     McpToolInfo {
@@ -380,6 +405,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("getCleanupCandidates"),
     },
     McpToolInfo {
@@ -393,6 +419,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -406,6 +433,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -419,6 +447,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Freemium,
         license_note: Some(CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -430,6 +459,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -449,6 +479,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("audit"),
     },
     McpToolInfo {
@@ -460,6 +491,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -471,6 +503,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("explain"),
     },
     McpToolInfo {
@@ -482,6 +515,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -493,6 +527,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: false,
+        modifies_source: true,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -504,6 +539,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("projectInfo"),
     },
     McpToolInfo {
@@ -515,6 +551,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -526,6 +563,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("listBoundaries"),
     },
     McpToolInfo {
@@ -540,6 +578,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("featureFlags"),
     },
     McpToolInfo {
@@ -551,6 +590,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -562,6 +602,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("impact"),
     },
     McpToolInfo {
@@ -573,6 +614,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -584,6 +626,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("traceExport"),
     },
     McpToolInfo {
@@ -602,6 +645,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -622,6 +666,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -633,6 +678,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("traceFile"),
     },
     McpToolInfo {
@@ -644,6 +690,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -655,6 +702,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: None,
     },
     McpToolInfo {
@@ -666,6 +714,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("impactClosure"),
     },
     McpToolInfo {
@@ -677,6 +726,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("traceDependency"),
     },
     McpToolInfo {
@@ -688,6 +738,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
+        modifies_source: false,
         code_mode_alias: Some("traceClone"),
     },
 ];

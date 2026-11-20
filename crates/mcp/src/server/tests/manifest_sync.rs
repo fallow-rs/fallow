@@ -111,6 +111,33 @@ fn manifest_read_only_matches_live_annotations() {
     }
 }
 
+/// The manifest's `modifies_source` flag must match the live rmcp
+/// `destructive_hint` annotation: only a tool that edits source files is
+/// destructive, with the MCP defaults for a missing hint.
+#[test]
+fn manifest_modifies_source_matches_live_destructive_hint() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    for entry in MCP_TOOLS {
+        let tool = tools
+            .iter()
+            .find(|t| t.name.as_ref() == entry.name)
+            .unwrap_or_else(|| panic!("manifest tool {} is not registered", entry.name));
+        // MCP defaults `readOnlyHint` to false and `destructiveHint` to true,
+        // and a read-only tool is never destructive. A tool that leaves the
+        // hint out is therefore destructive to an MCP host.
+        let annotations = tool.annotations.as_ref();
+        let read_only = annotations.and_then(|a| a.read_only_hint).unwrap_or(false);
+        let live_destructive =
+            !read_only && annotations.and_then(|a| a.destructive_hint).unwrap_or(true);
+        assert_eq!(
+            entry.modifies_source, live_destructive,
+            "manifest modifies_source for {} diverges from the live destructive_hint annotation",
+            entry.name
+        );
+    }
+}
+
 /// The shared resource manifest must match the live catalogue in both
 /// directions (names and URIs), and the MIME type each row advertises must be
 /// the one the live reader returns; `fallow schema`'s `mcp_resources` block

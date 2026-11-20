@@ -221,6 +221,11 @@ Contract rules:
   `code_execute` stays read-only, so it refuses `save_baseline`,
   `save_regression_baseline` and `save_snapshot` before dispatch and names
   the standalone tool that declares the write.
+- The manifest row of each tool (`crates/types/src/mcp_manifest.rs`) carries
+  `read_only` and `modifies_source`. `read_only` follows `read_only_hint`, and
+  `modifies_source` follows `destructive_hint`. Thus `modifies_source` is
+  `true` only for `fix_apply`. `crates/mcp/src/server/tests/manifest_sync.rs`
+  checks both pairs against the live annotations.
 - `tools/list` is budgeted on both of its channels, because every byte of it is
   resident in every agent session that connects whether or not the tool is ever
   called. `crates/mcp/src/server/tests/tool_descriptions.rs` ratchets the total
