@@ -210,3 +210,41 @@ fn toml_rejects_invalid_document() {
     let err = set_toml("[rules\n").unwrap_err();
     assert!(matches!(err, ConfigWriteError::TomlParse(_)), "{err}");
 }
+
+#[test]
+fn render_writes_each_header_line_as_comment() {
+    let out = render_toml_config(&json!({"entry": ["x"]}), Some("a\nb")).unwrap();
+    assert!(out.starts_with("# a\n# b\n\n"), "{out}");
+}
+
+#[test]
+fn render_puts_root_scalar_before_tables() {
+    let config = json!({"rules": {"unused-files": "error"}, "includeEntryExports": true});
+    let out = render_toml_config(&config, None).unwrap();
+    assert_eq!(
+        toml::from_str::<serde_json::Value>(&out).unwrap(),
+        config,
+        "{out}"
+    );
+}
+
+#[test]
+fn render_writes_array_of_objects_as_array_of_tables() {
+    let config = json!({"overrides": [{"files": ["a.ts"], "rules": {"unused-files": "off"}}]});
+    let out = render_toml_config(&config, None).unwrap();
+    assert!(out.contains("[[overrides]]"), "{out}");
+    assert_eq!(toml::from_str::<serde_json::Value>(&out).unwrap(), config);
+}
+
+#[test]
+fn render_escapes_strings() {
+    let config = json!({"entry": ["a\"b", "c\\d"]});
+    let out = render_toml_config(&config, None).unwrap();
+    assert_eq!(toml::from_str::<serde_json::Value>(&out).unwrap(), config);
+}
+
+#[test]
+fn render_rejects_non_object_root() {
+    let err = render_toml_config(&json!([1]), None).unwrap_err();
+    assert!(matches!(err, ConfigWriteError::InvalidShape(_)), "{err}");
+}

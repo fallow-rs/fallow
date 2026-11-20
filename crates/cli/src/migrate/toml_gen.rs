@@ -1,215 +1,23 @@
-use std::fmt::Write as _;
-
 use super::{MigrationResult, source_head};
 
 #[expect(
     clippy::expect_used,
-    reason = "migrated config is always stored as a JSON object"
+    reason = "the migrated config is a JSON object with no null value"
 )]
 pub(super) fn generate_toml(result: &MigrationResult) -> String {
-    let mut output = String::new();
-    let source_comment = result
-        .sources
-        .iter()
-        .map(|s| source_head(s))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let _ = writeln!(output, "# Migrated from {source_comment}\n");
-
-    let obj = result
-        .config
-        .as_object()
-        .expect("config is always an Object");
-
-    write_string_array_fields(&mut output, obj);
-    write_ignore_exports_used_in_file(&mut output, obj);
-    write_boolean_section(&mut output, obj, "audit");
-    write_string_section(&mut output, obj, "rules");
-    write_scalar_section(&mut output, obj, "duplicates");
-    write_scalar_section(&mut output, obj, "production");
-    write_circular_dependencies_section(&mut output, obj);
-
-    output
-}
-
-fn write_boolean_section(
-    output: &mut String,
-    obj: &serde_json::Map<String, serde_json::Value>,
-    section: &str,
-) {
-    let Some(section_obj) = obj.get(section).and_then(serde_json::Value::as_object) else {
-        return;
-    };
-    if section_obj.is_empty() {
-        return;
-    }
-
-    let _ = writeln!(output, "\n[{section}]");
-    for (key, value) in section_obj {
-        if let Some(enabled) = value.as_bool() {
-            let _ = writeln!(output, "{key} = {enabled}");
-        }
-    }
-}
-
-fn write_string_array_fields(
-    output: &mut String,
-    obj: &serde_json::Map<String, serde_json::Value>,
-) {
-    for key in &[
-        "entry",
-        "ignorePatterns",
-        "ignoreFindings",
-        "ignoreDependencies",
-    ] {
-        if let Some(value) = obj.get(*key)
-            && let Some(arr) = value.as_array()
-        {
-            let _ = writeln!(output, "{key} = [{}]", quoted_items(arr).join(", "));
-        }
-    }
-}
-
-fn write_ignore_exports_used_in_file(
-    output: &mut String,
-    obj: &serde_json::Map<String, serde_json::Value>,
-) {
-    let Some(value) = obj.get("ignoreExportsUsedInFile") else {
-        return;
-    };
-
-    match value {
-        serde_json::Value::Bool(enabled) => {
-            let _ = writeln!(output, "ignoreExportsUsedInFile = {enabled}");
-        }
-        serde_json::Value::Object(kinds) => {
-            write_ignore_exports_used_in_file_kinds(output, kinds);
-        }
-        _ => {}
-    }
-}
-
-fn write_ignore_exports_used_in_file_kinds(
-    output: &mut String,
-    kinds: &serde_json::Map<String, serde_json::Value>,
-) {
-    let entries: Vec<String> = ["type", "interface"]
-        .into_iter()
-        .filter_map(|key| {
-            kinds
-                .get(key)
-                .and_then(serde_json::Value::as_bool)
-                .map(|enabled| format!("{key} = {enabled}"))
-        })
-        .collect();
-
-    if !entries.is_empty() {
-        let _ = writeln!(
-            output,
-            "ignoreExportsUsedInFile = {{ {} }}",
-            entries.join(", ")
-        );
-    }
-}
-
-fn write_string_section(
-    output: &mut String,
-    obj: &serde_json::Map<String, serde_json::Value>,
-    section: &str,
-) {
-    let Some(section_obj) = obj.get(section).and_then(serde_json::Value::as_object) else {
-        return;
-    };
-    if section_obj.is_empty() {
-        return;
-    }
-
-    let _ = writeln!(output, "\n[{section}]");
-    for (key, value) in section_obj {
-        if let Some(s) = value.as_str() {
-            let _ = writeln!(output, "{key} = {}", toml_string(s));
-        }
-    }
-}
-
-/// Write a section whose values are numbers, booleans, strings or string
-/// arrays.
-fn write_scalar_section(
-    output: &mut String,
-    obj: &serde_json::Map<String, serde_json::Value>,
-    section: &str,
-) {
-    let Some(section_obj) = obj.get(section).and_then(serde_json::Value::as_object) else {
-        return;
-    };
-    if section_obj.is_empty() {
-        return;
-    }
-
-    let _ = writeln!(output, "\n[{section}]");
-    for (key, value) in section_obj {
-        write_scalar_value(output, key, value);
-    }
-}
-
-fn write_scalar_value(output: &mut String, key: &str, value: &serde_json::Value) {
-    match value {
-        serde_json::Value::Number(n) => {
-            let _ = writeln!(output, "{key} = {n}");
-        }
-        serde_json::Value::Bool(b) => {
-            let _ = writeln!(output, "{key} = {b}");
-        }
-        serde_json::Value::String(s) => {
-            let _ = writeln!(output, "{key} = {}", toml_string(s));
-        }
-        serde_json::Value::Array(arr) => {
-            let _ = writeln!(output, "{key} = [{}]", quoted_items(arr).join(", "));
-        }
-        _ => {}
-    }
-}
-
-/// Write the `circularDependencies.allow` file lists as an array of arrays.
-fn write_circular_dependencies_section(
-    output: &mut String,
-    obj: &serde_json::Map<String, serde_json::Value>,
-) {
-    let Some(allow) = obj
-        .get("circularDependencies")
-        .and_then(|section| section.get("allow"))
-        .and_then(serde_json::Value::as_array)
-    else {
-        return;
-    };
-    let entries: Vec<String> = allow
-        .iter()
-        .filter_map(serde_json::Value::as_array)
-        .map(|files| format!("[{}]", quoted_items(files).join(", ")))
-        .collect();
-    if entries.is_empty() {
-        return;
-    }
-    let _ = writeln!(
-        output,
-        "\n[circularDependencies]\nallow = [{}]",
-        entries.join(", ")
+    let header = format!(
+        "Migrated from {}",
+        result
+            .sources
+            .iter()
+            .map(|s| source_head(s))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
-}
-
-fn quoted_items(arr: &[serde_json::Value]) -> Vec<String> {
-    arr.iter()
-        .filter_map(|v| v.as_str().map(toml_string))
-        .collect()
-}
-
-/// Render `value` as a TOML string literal.
-///
-/// Migrated values come verbatim from a knip config, so a glob can carry a
-/// backslash (Windows-style separators, an escaped brace) or a quote. Splicing
-/// those into `"{value}"` emits a `fallow.toml` that fails to parse, or worse
-/// parses into a different glob, while `migrate` still reports success.
-/// Serializing through `toml` applies the escaping rules the parser expects.
-fn toml_string(value: &str) -> String {
-    toml::Value::String(value.to_string()).to_string()
+    let mut config = result.config.clone();
+    if let Some(map) = config.as_object_mut() {
+        map.retain(|_, value| !value.as_object().is_some_and(serde_json::Map::is_empty));
+    }
+    fallow_config::render_toml_config(&config, Some(&header))
+        .expect("migrated config holds only TOML-compatible values")
 }

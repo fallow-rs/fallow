@@ -1,7 +1,7 @@
-//! Sets one value in a fallow config document.
+//! Sets one value in a fallow config document and renders a new TOML config.
 
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
-use toml_edit::{Array, ArrayOfTables, InlineTable, Item, Table, Value};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
 use crate::config_writer::{
     BOM, ConfigWriteError, ConfigWriteResult, parse_toml_document, preserve_line_endings,
@@ -51,6 +51,42 @@ pub fn set_config_value_in_string(
     } else {
         with_endings
     })
+}
+
+/// Render a JSON object as a new TOML document.
+///
+/// Each line of `header_comment` becomes a `#` comment line before the first
+/// key. An object becomes a table, and an array of objects becomes an array of
+/// tables.
+///
+/// # Errors
+///
+/// Returns [`ConfigWriteError::InvalidShape`] when `config` is not an object
+/// or when TOML cannot hold a value in it.
+pub fn render_toml_config(
+    config: &serde_json::Value,
+    header_comment: Option<&str>,
+) -> ConfigWriteResult<String> {
+    let serde_json::Value::Object(map) = config else {
+        return Err(ConfigWriteError::InvalidShape(
+            "config must be an object".into(),
+        ));
+    };
+    let mut doc = DocumentMut::new();
+    for (key, member) in map {
+        doc.as_table_mut().insert(key, json_to_toml_item(member)?);
+    }
+    let mut out = String::new();
+    if let Some(header) = header_comment {
+        for line in header.lines() {
+            out.push_str("# ");
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.push_str(&doc.to_string());
+    Ok(out)
 }
 
 fn set_json_value(
