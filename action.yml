@@ -27,7 +27,7 @@ inputs:
     required: false
     default: 'false'
   production:
-    description: 'Production mode: exclude test/dev files, only analyze start/build scripts'
+    description: 'Production mode: exclude test/dev files, only analyze start/build scripts. `true` passes `--production`. `false` keeps the config value `production`, which is off by default.'
     required: false
     default: 'false'
   production-dead-code:
@@ -158,15 +158,15 @@ inputs:
     description: 'Fail if duplication exceeds this percentage (dupes command, 0 = no limit)'
     required: false
   skip-local:
-    description: 'Only report cross-directory duplicates (dupes command)'
+    description: 'Only report cross-directory duplicates (dupes command). `true` passes `--skip-local`. `false` keeps the config value `duplicates.skipLocal`, which is off by default.'
     required: false
     default: 'false'
   cross-language:
-    description: 'Strip TypeScript type annotations for TS<->JS clone matching (dupes command)'
+    description: 'Strip TypeScript type annotations for TS<->JS clone matching (dupes command). `true` passes `--cross-language`. `false` keeps the config value `duplicates.crossLanguage`, which is off by default.'
     required: false
     default: 'false'
   ignore-imports:
-    description: 'Exclude import declarations from clone detection (dupes command)'
+    description: 'Exclude import declarations from clone detection (dupes command). `true` passes `--ignore-imports`. `false` keeps the config value `duplicates.ignoreImports`, which excludes imports by default.'
     required: false
     default: 'false'
   # Workspace

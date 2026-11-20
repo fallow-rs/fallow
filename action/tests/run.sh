@@ -219,6 +219,23 @@ else
   fail "repo fallow configs have no duplicate JSON keys" "$DUPLICATE_CONFIG_KEYS"
 fi
 
+# --- Action input descriptions ---
+
+echo ""
+echo "=== Action input descriptions ==="
+
+# analyze.sh passes these flags only for `true`, so `false` keeps the value of
+# the fallow config. The description must say so, because a config can turn
+# the option on (and ignoreImports is on by default).
+for input in production skip-local cross-language ignore-imports; do
+  input_description=$(awk -v name="  ${input}:" '
+    $0 == name { found = 1; next }
+    found && /^    description:/ { sub(/^    description: /, ""); print; exit }
+  ' "$DIR/../../action.yml")
+  assert_contains "$input_description" "\`false\` keeps the config value" \
+    "action input ${input} says that false keeps the config value"
+done
+
 # --- Install script tests ---
 
 echo ""

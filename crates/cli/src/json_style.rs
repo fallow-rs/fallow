@@ -44,11 +44,11 @@ pub struct JsonPresentationArgs {
     #[arg(hide_short_help = true, long, global = true, help_heading = "Output")]
     pub pretty: bool,
 
-    /// Trim JSON for agent context: leave out empty arrays and zero dead-code summary counts,
-    /// group workspace diagnostics, cap health tables, and move repeated action text to
-    /// `_meta.actions`. Requires JSON output. Applies to dead-code, health and the combined
-    /// report; other commands reject it. Run without `--lean` for the full diagnostic list
-    /// and the complete tables.
+    /// Trim the JSON of dead-code, health and the combined report for agent context: leave out
+    /// empty arrays and zero dead-code summary counts, group workspace diagnostics, cap health
+    /// tables, and move repeated action text to `_meta.actions`. Other commands and other
+    /// output formats exit with code 2. Run without `--lean` for the full diagnostic list and
+    /// the complete tables.
     #[arg(hide_short_help = true, long, global = true, help_heading = "Output")]
     pub lean: bool,
 

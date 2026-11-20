@@ -152,7 +152,12 @@ pub struct DuplicatesConfig {
     )))]
     pub ignored_clones: Vec<String>,
 
-    /// Merge built-in generated-framework ignore patterns with `ignore`.
+    /// Merge the built-in ignore patterns with `ignore`. The patterns cover
+    /// generated framework and tool output (`**/.next/**`, `**/.nuxt/**`,
+    /// `**/.svelte-kit/**`, `**/.turbo/**`, `**/.parcel-cache/**`,
+    /// `**/.vite/**`, `**/.cache/**`, `**/out/**`, `**/storybook-static/**`)
+    /// and test and mock files (`**/*.test.*`, `**/*.spec.*`,
+    /// `**/__tests__/**`, `**/__mocks__/**`).
     ///
     /// Set to `false` to use only the user-provided `ignore` list.
     #[serde(default = "default_true")]

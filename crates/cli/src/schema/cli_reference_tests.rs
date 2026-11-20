@@ -740,3 +740,31 @@ fn options_report_an_optional_value_and_each_value_name() {
     assert_eq!(flag["value_names"], serde_json::json!([]));
     assert_eq!(flag["value_optional"], false);
 }
+
+/// The first sentence of a help text, the part that short listings keep.
+fn first_sentence(text: &str) -> &str {
+    text.find(". ").map_or(text, |end| &text[..=end])
+}
+
+#[test]
+fn lean_help_names_its_commands_in_the_first_sentence() {
+    let doc = reference();
+    let lean = doc["global_options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|option| option["long"] == "--lean")
+        .unwrap();
+    let first = first_sentence(lean["help"].as_str().unwrap());
+    for command in ["dead-code", "health", "combined report"] {
+        assert!(first.contains(command), "{command} is missing in: {first}");
+    }
+}
+
+#[test]
+fn setup_hooks_about_says_that_the_command_is_deprecated() {
+    let doc = reference();
+    let commands = commands_by_path(&doc);
+    let about = commands["setup-hooks"]["about"].as_str().unwrap();
+    assert!(about.starts_with("Deprecated"), "{about}");
+}
