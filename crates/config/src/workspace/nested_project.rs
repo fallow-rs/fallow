@@ -38,6 +38,7 @@ impl ManifestPatternMatcher {
                 Some(rest) => (&mut negative, rest),
                 None => (&mut positive, declared.pattern.as_str()),
             };
+            let pattern = crate::glob_validation::normalize_path_pattern(pattern);
             let pattern = if pattern.ends_with('/') {
                 format!("{pattern}*")
             } else {

@@ -600,3 +600,21 @@ fn nested_pnpm_project_with_glob_characters_in_its_name() {
     );
     assert!(!roots.contains(&"tool1/apps/other".to_owned()), "{roots:?}");
 }
+
+/// A root `packages` entry of `./` declares the root itself, not each
+/// top-level folder, so a nested pnpm project stays independent.
+#[test]
+fn dot_slash_root_entry_does_not_declare_a_nested_project() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_layout_fixture(dir.path());
+    std::fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - ./\n  - packages/*\n",
+    )
+    .unwrap();
+
+    assert!(is_independent_pnpm_project(
+        dir.path(),
+        &dir.path().join("docs")
+    ));
+}
