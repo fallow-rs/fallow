@@ -71,7 +71,7 @@ const NAME_OWNERS: &[NameOwner] = &[
     },
     NameOwner {
         path: "crates/cli/src/schema/environment.rs",
-        names: 15,
+        names: 17,
         why: "the schema of the environment variables names each one",
     },
     NameOwner {
