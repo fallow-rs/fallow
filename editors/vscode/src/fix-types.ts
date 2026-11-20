@@ -100,7 +100,8 @@ export interface FallowFixResult {
   readonly total_fixed: number;
   /**
    * Count of fixer-logic skips (catalog `hardcoded_consumers`,
-   * `multi_document_yaml`, `line_out_of_range`, `monorepo_subpackage`,
+   * `multi_document_yaml`, `not_found`, `not_empty`,
+   * `unsupported_yaml_style`, `unsafe_edit`, `monorepo_subpackage`,
    * `no_create_config`). Semantics unchanged since pre-#454; disjoint
    * from `skipped_content_changed`.
    */
