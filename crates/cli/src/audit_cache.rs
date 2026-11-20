@@ -598,9 +598,10 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
 /// A config that does not load gives no patterns. The head analysis loads the
 /// same config and reports the error, so this function stays silent.
 pub(super) fn audit_workspace_patterns(opts: &AuditOptions<'_>) -> Vec<String> {
-    let options = ConfigFileOptions {
-        allow_remote_extends: opts.allow_remote_extends,
-    };
+    let options = ConfigFileOptions::new(
+        opts.allow_remote_extends,
+        &fallow_config::EnvSnapshot::capture(),
+    );
     loaded_config(opts.root, opts.config_path.as_deref(), options)
         .and_then(|config| config.workspaces)
         .map(|workspaces| workspaces.patterns)

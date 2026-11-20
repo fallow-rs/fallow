@@ -376,3 +376,15 @@ mod selection_key_guard_tests;
 #[cfg(test)]
 #[path = "config_load_guard_tests.rs"]
 mod config_load_guard_tests;
+
+#[cfg(test)]
+#[path = "env_read_guard_tests.rs"]
+mod env_read_guard_tests;
+
+#[cfg(test)]
+#[path = "testing_feature_tests.rs"]
+mod testing_feature_tests;
+
+#[cfg(test)]
+#[path = "runs_by_default_owner_tests.rs"]
+mod runs_by_default_owner_tests;

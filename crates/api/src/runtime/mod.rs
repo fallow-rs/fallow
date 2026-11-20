@@ -114,9 +114,7 @@ fn load_config_file(
     let file = project_config::load_config_file(
         root,
         config_path,
-        ConfigFileOptions {
-            allow_remote_extends,
-        },
+        ConfigFileOptions::new(allow_remote_extends, &fallow_config::EnvSnapshot::capture()),
     )
     .map_err(|err| config_load_error(&err))?;
     Ok(file.path.map(|_| file.config))

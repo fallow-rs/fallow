@@ -63,9 +63,10 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
     let result = fallow_engine::project_config::load_config_file(
         input.root,
         input.explicit_config,
-        fallow_engine::project_config::ConfigFileOptions {
-            allow_remote_extends: input.load_options.allow_remote_extends,
-        },
+        fallow_engine::project_config::ConfigFileOptions::new(
+            input.load_options.allow_remote_extends,
+            &fallow_config::EnvSnapshot::capture(),
+        ),
     )
     .map(|file| file.path.map(|path| (file.config, path)))
     .map_err(|err| crate::runtime_support::config_load_error_message(&err));
@@ -146,9 +147,7 @@ pub fn run_config_command(
         output: dispatch.output,
         quiet: dispatch.quiet,
         json_style: dispatch.json_style,
-        load_options: fallow_config::ConfigLoadOptions {
-            allow_remote_extends: dispatch.cli.allow_remote_extends,
-        },
+        load_options: fallow_config::ConfigLoadOptions::new(dispatch.cli.allow_remote_extends),
     })
 }
 

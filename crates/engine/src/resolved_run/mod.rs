@@ -404,7 +404,7 @@ impl<'run> Runnable<'run> {
             self.run.config_file.value().clone(),
             self.duplication_scope(),
         );
-        AnalysisSession::from_config(project)
+        AnalysisSession::from_project_config(project)
     }
 
     /// The duplication files of a session of this analysis: the session files

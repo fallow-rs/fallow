@@ -17,6 +17,8 @@ for contributors and maintainers of the open-source codebase.
 - [AI tooling](development/ai-tooling.md): canonical skills and generated
   adapters for Codex and Claude.
 - [Task context map](development/task-context-map.md): ordered reads by task.
+- [Output assembly](development/output-assembly.md): the sites that build
+  output outside `crates/output`, with a verdict for each.
 - [Repository map](development/repo-map.md): crates, pipeline, and subsystem
   hotspots.
 - [Quality gates](development/quality-gates.md): local verification and hook

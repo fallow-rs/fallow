@@ -553,9 +553,10 @@ fn load_audit_config(
     config_path: Option<&PathBuf>,
     allow_remote_extends: bool,
 ) -> Option<fallow_config::AuditConfig> {
-    let options = fallow_engine::project_config::ConfigFileOptions {
+    let options = fallow_engine::project_config::ConfigFileOptions::new(
         allow_remote_extends,
-    };
+        &fallow_config::EnvSnapshot::capture(),
+    );
     crate::runtime_support::loaded_config(root, config_path.map(PathBuf::as_path), options)
         .map(|config| config.audit)
 }

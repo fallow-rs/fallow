@@ -478,9 +478,7 @@ pub fn load_config_file(
     fallow_engine::project_config::load_config_file(
         root,
         config_path,
-        ConfigFileOptions {
-            allow_remote_extends,
-        },
+        ConfigFileOptions::new(allow_remote_extends, &fallow_config::EnvSnapshot::capture()),
     )
     .map_err(|err| crate::error::emit_input_error(&config_load_error_message(&err), output))
 }
@@ -513,10 +511,11 @@ pub struct ConfigFlags<'a> {
 impl ConfigFlags<'_> {
     /// The load options of these flags.
     #[must_use]
-    pub const fn file_options(self) -> ConfigFileOptions {
-        ConfigFileOptions {
-            allow_remote_extends: self.allow_remote_extends,
-        }
+    pub fn file_options(self) -> ConfigFileOptions {
+        ConfigFileOptions::new(
+            self.allow_remote_extends,
+            &fallow_config::EnvSnapshot::capture(),
+        )
     }
 
     /// The `--config` file, when it loads.

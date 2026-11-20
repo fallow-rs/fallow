@@ -214,6 +214,16 @@ impl EnvSnapshot {
             .and_then(crate::cache_dir_from_env_value)
     }
 
+    /// The time limit of the fetch of a remote `extends` entry, parsed from
+    /// `FALLOW_EXTENDS_TIMEOUT_SECS` with
+    /// [`crate::extends_timeout_from_env_value`].
+    #[must_use]
+    pub fn extends_timeout(&self) -> std::time::Duration {
+        crate::extends_timeout_from_env_value(
+            self.get(EnvVar::ExtendsTimeoutSecs).and_then(OsStr::to_str),
+        )
+    }
+
     /// The value of `var`, parsed with `parse`. `Ok(None)` is an unset
     /// variable.
     ///
@@ -324,6 +334,25 @@ mod tests {
         assert_eq!(
             env.parse(EnvVar::TypeAware, bool_env_value),
             Err(EnvProblem::NotUnicode)
+        );
+    }
+
+    #[test]
+    fn extends_timeout_reads_the_snapshot_and_keeps_the_default_for_a_bad_value() {
+        let secs = |pairs: &[(&str, &str)]| {
+            EnvSnapshot::from_pairs(pairs, None)
+                .extends_timeout()
+                .as_secs()
+        };
+        assert_eq!(secs(&[("FALLOW_EXTENDS_TIMEOUT_SECS", "12")]), 12);
+        assert_eq!(secs(&[("FALLOW_EXTENDS_TIMEOUT_SECS", "0")]), 5);
+        assert_eq!(secs(&[("FALLOW_EXTENDS_TIMEOUT_SECS", "soon")]), 5);
+        assert_eq!(secs(&[]), 5);
+        assert_eq!(
+            crate::ConfigLoadOptions::new(true)
+                .extends_timeout
+                .as_secs(),
+            5
         );
     }
 

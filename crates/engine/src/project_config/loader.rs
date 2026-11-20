@@ -3,16 +3,45 @@
 //! trust policy and the error detail are the same on each surface.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use fallow_config::{ConfigLoadOptions, FallowConfig};
+use fallow_config::{ConfigLoadOptions, EnvSnapshot, FallowConfig};
 
 use crate::EngineError;
 
 /// The options of [`load_config_file`].
-#[derive(Debug, Clone, Copy, Default)]
+///
+/// The default refuses remote `extends` entries and gives each fetch the
+/// default time limit.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct ConfigFileOptions {
     /// Permit `https://` entries in the `extends` chain of the config.
     pub allow_remote_extends: bool,
+    /// The time limit of the fetch of one remote `extends` entry.
+    pub extends_timeout: Duration,
+}
+
+impl ConfigFileOptions {
+    /// The options with the trust policy `allow_remote_extends` and the
+    /// time limit of `FALLOW_EXTENDS_TIMEOUT_SECS` in `env`.
+    #[must_use]
+    pub fn new(allow_remote_extends: bool, env: &EnvSnapshot) -> Self {
+        Self {
+            allow_remote_extends,
+            extends_timeout: env.extends_timeout(),
+        }
+    }
+}
+
+impl Default for ConfigFileOptions {
+    fn default() -> Self {
+        let load = ConfigLoadOptions::default();
+        Self {
+            allow_remote_extends: load.allow_remote_extends,
+            extends_timeout: load.extends_timeout,
+        }
+    }
 }
 
 /// The config file of a project, before resolution.
@@ -141,9 +170,8 @@ pub fn load_config_file(
 ) -> Result<ConfigFile, ConfigLoadError> {
     #[cfg(any(test, feature = "testing"))]
     load_count::record(root);
-    let load_options = ConfigLoadOptions {
-        allow_remote_extends: options.allow_remote_extends,
-    };
+    let load_options = ConfigLoadOptions::new(options.allow_remote_extends)
+        .with_extends_timeout(options.extends_timeout);
     if let Some(path) = config_path {
         let before = ConfigChainSnapshot::read(Some(path));
         return FallowConfig::load_with_options(path, load_options)
@@ -294,11 +322,22 @@ mod tests {
     }
 
     #[test]
+    fn file_options_take_the_extends_timeout_of_the_snapshot() {
+        let env = EnvSnapshot::from_pairs(&[("FALLOW_EXTENDS_TIMEOUT_SECS", "9")], None);
+        assert_eq!(
+            ConfigFileOptions::new(true, &env).extends_timeout,
+            Duration::from_secs(9)
+        );
+        assert_eq!(
+            ConfigFileOptions::default().extends_timeout,
+            Duration::from_secs(5)
+        );
+    }
+
+    #[test]
     fn remote_extends_is_fetched_with_the_opt_in() {
         let (_dir, root) = project(UNREACHABLE_REMOTE_EXTENDS);
-        let options = ConfigFileOptions {
-            allow_remote_extends: true,
-        };
+        let options = ConfigFileOptions::new(true, &EnvSnapshot::none());
         for config_path in [None, Some(root.join(".fallowrc.json"))] {
             let err =
                 load_config_file(&root, config_path.as_deref(), options).expect_err("fetch fails");

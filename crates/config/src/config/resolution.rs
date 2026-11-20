@@ -524,16 +524,6 @@ fn hash_str(hasher: &mut xxhash_rust::xxh3::Xxh3, value: &str) {
 /// Environment variable that moves the persistent analysis cache.
 pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
 
-/// Read the non-empty `FALLOW_CACHE_DIR` value from the process environment.
-///
-/// Every host that loads a project config (CLI, LSP, MCP, Node bindings)
-/// applies this value with [`ResolvedConfig::override_cache_dir`], so the
-/// variable has one meaning on every surface. It wins over `cache.dir`.
-#[must_use]
-pub fn cache_dir_env_override() -> Option<PathBuf> {
-    std::env::var_os(CACHE_DIR_ENV).and_then(cache_dir_from_env_value)
-}
-
 /// Parse a raw `FALLOW_CACHE_DIR` value. An empty value is no override.
 #[must_use]
 pub fn cache_dir_from_env_value(raw: OsString) -> Option<PathBuf> {
@@ -546,7 +536,8 @@ pub fn cache_dir_from_env_value(raw: OsString) -> Option<PathBuf> {
 pub const CACHE_MAX_SIZE_ENV: &str = "FALLOW_CACHE_MAX_SIZE";
 
 /// Read `FALLOW_CACHE_MAX_SIZE` from the process environment. It wins over
-/// `cache.maxSizeMb` on every host, like [`cache_dir_env_override`].
+/// `cache.maxSizeMb` on every host, like `FALLOW_CACHE_DIR` wins over
+/// `cache.dir`.
 #[must_use]
 pub fn cache_max_size_env_override() -> Option<u32> {
     std::env::var_os(CACHE_MAX_SIZE_ENV)
@@ -1145,6 +1136,9 @@ fn sorted_by_name(plugins: &[ExternalPluginDef]) -> Vec<&ExternalPluginDef> {
     sorted
 }
 
+/// The mutators that change a decided field after resolution are
+/// `#[doc(hidden)]`: the resolver of the engine applies them to each mode
+/// entry of a run, and a host reads the result from the run.
 impl ResolvedConfig {
     /// Lower every `error` rule of [`super::SEMANTIC_REFINABLE_KINDS`] to
     /// `warn`, in the base rules and in each override, for a run whose
@@ -1170,6 +1164,7 @@ impl ResolvedConfig {
     /// Turn `includeEntryExports` on in every workspace for this run, the
     /// way the `--include-entry-exports` flag does. It wins over a
     /// `workspaces.settings` value of `false`.
+    #[doc(hidden)]
     pub const fn force_include_entry_exports(&mut self) {
         self.include_entry_exports = true;
         self.workspace_settings.force_include_entry_exports();
@@ -1197,6 +1192,7 @@ impl ResolvedConfig {
 
     /// Apply a `FALLOW_PACKAGE_BASELINES` value: a false value empties
     /// `workspaces.changedSince`, so no run of the process reads the map.
+    #[doc(hidden)]
     pub fn apply_package_baselines_env(&mut self, raw: Option<&OsStr>) {
         if raw.is_some_and(package_baselines_disabled_by_env_value) {
             self.workspace_changed_since.clear();
@@ -1206,6 +1202,7 @@ impl ResolvedConfig {
     /// Replace the resolved cache directory with a host override, such as
     /// `FALLOW_CACHE_DIR`. A relative path resolves from the project root,
     /// the same base as `cache.dir`.
+    #[doc(hidden)]
     pub fn override_cache_dir(&mut self, dir: PathBuf) {
         self.cache_dir = resolve_cache_dir(&self.root, Some(dir));
     }
@@ -1226,6 +1223,7 @@ impl ResolvedConfig {
     /// so a shared CI cache stays valid when the checkout path changes. A
     /// cache directory inside the root already belongs to that root and
     /// stays unchanged.
+    #[doc(hidden)]
     pub fn scope_shared_cache_dir_to_root(&mut self) {
         if cache_dir_is_inside_root(&self.root, &self.cache_dir) {
             return;

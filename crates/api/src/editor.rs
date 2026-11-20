@@ -419,6 +419,7 @@ impl EditorAnalysisSession {
     /// # Errors
     ///
     /// Returns an engine error when project config loading fails.
+    #[cfg(any(test, feature = "testing"))]
     pub fn load(root: &Path, config_path: Option<&Path>) -> fallow_engine::EngineResult<Self> {
         fallow_engine::session::AnalysisSession::load(root, config_path).map(Self::from_engine)
     }
@@ -428,6 +429,7 @@ impl EditorAnalysisSession {
     /// # Errors
     ///
     /// Returns an engine error when project config loading fails.
+    #[cfg(any(test, feature = "testing"))]
     pub fn load_with_config(
         root: &Path,
         config_path: Option<&Path>,
@@ -443,6 +445,7 @@ impl EditorAnalysisSession {
     /// # Errors
     ///
     /// Returns an engine error when project config loading fails.
+    #[cfg(any(test, feature = "testing"))]
     pub fn load_with_config_options(
         root: &Path,
         config_path: Option<&Path>,
@@ -467,6 +470,7 @@ impl EditorAnalysisSession {
     /// # Errors
     ///
     /// Returns an engine error when project config loading fails.
+    #[cfg(any(test, feature = "testing"))]
     pub fn load_with_production(
         root: &Path,
         config_path: Option<&Path>,
@@ -492,6 +496,7 @@ impl EditorAnalysisSession {
     }
 
     /// Build a session from built-in defaults, ignoring project config files.
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn load_default(root: &Path) -> Self {
         Self::from_engine(fallow_engine::session::AnalysisSession::load_default(root))
@@ -499,6 +504,7 @@ impl EditorAnalysisSession {
 
     /// Build a session from built-in defaults, apply one editor-specific
     /// adjustment, then discover files.
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn load_default_with_config(
         root: &Path,
@@ -522,7 +528,10 @@ impl EditorAnalysisSession {
         self,
         cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
-        Self::from_engine(self.inner.with_cancellation(cancellation))
+        Self {
+            inner: self.inner.with_cancellation(cancellation),
+            runs_duplication: self.runs_duplication,
+        }
     }
 
     /// Replace the cancellation token of a session that serves several runs.
@@ -776,9 +785,10 @@ impl EditorAnalysisSession {
         output
     }
 
-    /// A session of an editor constructor. No editor action names the
-    /// duplication analysis, so `duplicates.enabled: false` leaves the
-    /// editor without clone groups, as it leaves the bare `fallow` run.
+    /// A session of a constructor without a resolved run. No editor action
+    /// names the duplication analysis, so `duplicates.enabled: false` leaves
+    /// the editor without clone groups, as it leaves the bare `fallow` run.
+    #[cfg(any(test, feature = "testing"))]
     fn from_engine(inner: fallow_engine::session::AnalysisSession) -> Self {
         Self {
             runs_duplication: inner.config().duplicates.runs_by_default(),

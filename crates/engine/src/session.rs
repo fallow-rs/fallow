@@ -21,7 +21,7 @@ use crate::session_reuse::{
 };
 use crate::{
     EngineResult, core_backend,
-    project_config::{DuplicationScope, ProjectConfig, config_for_project, default_project_config},
+    project_config::{DuplicationScope, ProjectConfig},
     results::{
         DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
         SharedDeadCodeAnalysisArtifacts,
@@ -139,87 +139,9 @@ pub struct AnalysisSessionArtifacts {
 }
 
 impl AnalysisSession {
-    /// Load config and discover files for a project root.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when config loading fails.
-    pub fn load(root: &Path, config_path: Option<&Path>) -> EngineResult<Self> {
-        let project_config = config_for_project(root, config_path)?;
-        Ok(Self::from_config(project_config))
-    }
-
-    /// Load config, apply one caller-supplied config adjustment, then discover
-    /// files for a project root.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when config loading fails.
-    pub fn load_with_config(
-        root: &Path,
-        config_path: Option<&Path>,
-        configure: impl FnOnce(&mut ResolvedConfig),
-    ) -> EngineResult<Self> {
-        Self::load_with_config_options(
-            root,
-            config_path,
-            fallow_config::ConfigLoadOptions::default(),
-            configure,
-        )
-    }
-
-    /// Load config with an explicit inheritance trust policy, apply one
-    /// caller-supplied adjustment, then discover project files.
-    ///
-    /// When duplication has another production mode than dead code, the
-    /// session walks the files of duplication from the loaded config. The
-    /// adjustment does not reach that walk, so it must not change the root,
-    /// the ignore patterns or the production mode.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when config loading fails.
-    pub fn load_with_config_options(
-        root: &Path,
-        config_path: Option<&Path>,
-        load_options: fallow_config::ConfigLoadOptions,
-        configure: impl FnOnce(&mut ResolvedConfig),
-    ) -> EngineResult<Self> {
-        let mut project_config = crate::project_config::config_for_project_with_load_options(
-            root,
-            config_path,
-            load_options,
-        )?;
-        configure(&mut project_config.config);
-        Ok(Self::from_config(
-            project_config.without_workspace_metadata(),
-        ))
-    }
-
-    /// Build a session from built-in defaults, ignoring project config files.
-    ///
-    /// This is intended for editor fallback paths that have already reported a
-    /// config-load warning but should still surface best-effort diagnostics.
+    /// Build a session from the project config of a mode entry.
     #[must_use]
-    pub fn load_default(root: &Path) -> Self {
-        Self::load_default_with_config(root, |_| {})
-    }
-
-    /// Build a session from built-in defaults, apply one caller-supplied
-    /// adjustment, then discover project files.
-    #[must_use]
-    pub fn load_default_with_config(
-        root: &Path,
-        configure: impl FnOnce(&mut ResolvedConfig),
-    ) -> Self {
-        let mut project_config = default_project_config(root);
-        configure(&mut project_config.config);
-        Self::from_config(project_config)
-    }
-
-    /// Build a session from a previously resolved config.
-    #[must_use]
-    pub fn from_config(project_config: ProjectConfig) -> Self {
+    pub(crate) fn from_project_config(project_config: ProjectConfig) -> Self {
         let uses_preloaded_workspaces = project_config.workspace_discovery_ms.is_some();
         let discovery = if let Some(workspace_discovery_ms) = project_config.workspace_discovery_ms
         {
@@ -479,7 +401,7 @@ impl AnalysisSession {
     pub fn from_resolved_config(config: ResolvedConfig) -> EngineResult<Self> {
         let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
             crate::project_config::collect_workspace_metadata(&config)?;
-        Ok(Self::from_config(ProjectConfig {
+        Ok(Self::from_project_config(ProjectConfig {
             inputs: fallow_config::ConfigInputs::default(),
             inputs_before_resolve: fallow_config::ConfigInputsSnapshot::default(),
             config,
@@ -2914,9 +2836,17 @@ wrapper();
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+#[path = "session_direct_load.rs"]
+mod direct_load;
+
 #[cfg(all(test, unix, not(miri)))]
 #[path = "session_shared_state_tests.rs"]
 mod shared_state_tests;
+
+#[cfg(test)]
+#[path = "session_shared_state_load_tests.rs"]
+mod shared_state_load_tests;
 
 #[cfg(all(test, unix, not(miri)))]
 #[path = "session_call_facts_tests.rs"]
