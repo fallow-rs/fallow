@@ -640,6 +640,28 @@ fn source_head(s: &str) -> &str {
     s
 }
 
+/// The source of a `MigrationResult.sources` entry for a one-line comment.
+/// A path can hold a line break, which ends the comment, or a control
+/// character, which a TOML comment does not allow. Each of them except a tab
+/// is written as an escape.
+fn source_label(s: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut label = String::new();
+    for ch in source_head(s).chars() {
+        match ch {
+            '\r' => label.push_str("\\r"),
+            '\n' => label.push_str("\\n"),
+            '\t' => label.push(ch),
+            _ if ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}') => {
+                let _ = write!(label, "\\u{{{:04X}}}", u32::from(ch));
+            }
+            _ => label.push(ch),
+        }
+    }
+    label
+}
+
 /// Whether a knip config contributed to the migration result.
 fn knip_contributed(result: &MigrationResult) -> bool {
     result.sources.iter().any(|s| s.contains("knip"))

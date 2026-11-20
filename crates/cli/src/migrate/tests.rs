@@ -1520,3 +1520,117 @@ fn toml_output_clamps_jscpd_count_above_i64_max() {
         "{output}"
     );
 }
+
+fn migrate_knip_value(
+    knip: &serde_json::Value,
+) -> (
+    serde_json::Map<String, serde_json::Value>,
+    Vec<MigrationWarning>,
+) {
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_knip(knip, &mut config_map, &mut warnings);
+    (config_map, warnings)
+}
+
+#[test]
+fn knip_rule_severity_is_written_in_canonical_form() {
+    let (config_map, warnings) = migrate_knip_value(&serde_json::json!({
+        "rules": {"files": "Warning", "exports": "OFF", "duplicates": "warn"}
+    }));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let rules = &config_map["rules"];
+    assert_eq!(rules["unused-files"], "warn");
+    assert_eq!(rules["unused-exports"], "off");
+    assert_eq!(rules["duplicate-exports"], "warn");
+    assert_eq!(rules["duplicate-export-aliases"], "warn");
+    let result = MigrationResult {
+        config: serde_json::Value::Object(config_map),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let config: fallow_config::FallowConfig = toml::from_str(&generate_toml(&result)).unwrap();
+    assert_eq!(config.rules.unused_files, fallow_config::Severity::Warn);
+}
+
+#[test]
+fn knip_rule_with_an_invalid_severity_warns_once_and_is_skipped() {
+    let (config_map, warnings) = migrate_knip_value(&serde_json::json!({
+        "rules": {"files": 123, "exports": "loud", "duplicates": "maybe", "types": "error"}
+    }));
+    let rules = config_map["rules"].as_object().unwrap();
+    assert_eq!(rules["unused-types"], "error");
+    for (rule, severity) in rules {
+        let text = severity.as_str().unwrap_or_default();
+        assert!(
+            text.parse::<fallow_config::Severity>().is_ok(),
+            "{rule} = {severity}"
+        );
+    }
+    let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
+    assert_eq!(fields, ["rules.files", "rules.exports", "rules.duplicates"]);
+    assert_eq!(
+        warnings[1].message,
+        r#"severity "loud" is not "error", "warn" or "off", so the rule was not migrated"#
+    );
+}
+
+#[test]
+fn knip_namespace_rule_matches_its_base_rule_in_any_spelling() {
+    for rules in [
+        serde_json::json!({"exports": "warn", "nsExports": "Warning"}),
+        serde_json::json!({"exports": "Warn", "nsExports": "warn"}),
+        serde_json::json!({"nsExports": "ERROR"}),
+    ] {
+        let (_, warnings) = migrate_knip_value(&serde_json::json!({ "rules": rules }));
+        assert!(warnings.is_empty(), "{rules}: {warnings:?}");
+    }
+}
+
+#[test]
+fn source_path_control_characters_stay_inside_the_comment() {
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["/tmp/a\u{1}b\u{7f}c\u{2028}d\te/knip.json".to_string()],
+    };
+    let toml_out = generate_toml(&result);
+    assert!(
+        toml_out.starts_with("# Migrated from /tmp/a\\u{0001}b\\u{007F}c\\u{2028}d\te/knip.json\n"),
+        "{toml_out}"
+    );
+    let toml_config: fallow_config::FallowConfig = toml::from_str(&toml_out).unwrap();
+    assert_eq!(toml_config.entry, vec!["src/index.ts"]);
+    let jsonc_config: fallow_config::FallowConfig = jsonc_parser::parse_to_serde_value(
+        &generate_jsonc(&result, false),
+        &jsonc_parser::ParseOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(jsonc_config.entry, vec!["src/index.ts"]);
+}
+
+#[test]
+fn source_path_line_breaks_stay_inside_the_comment() {
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["/tmp/a\nentry = 5\r/knip.json (knip config)".to_string()],
+    };
+    let toml_out = generate_toml(&result);
+    let toml_config: fallow_config::FallowConfig = toml::from_str(&toml_out).unwrap();
+    assert_eq!(toml_config.entry, vec!["src/index.ts"], "{toml_out}");
+    assert!(
+        toml_out.starts_with("# Migrated from /tmp/a\\nentry = 5\\r/knip.json\n"),
+        "{toml_out}"
+    );
+
+    let jsonc_out = generate_jsonc(&result, false);
+    assert!(
+        jsonc_out.contains("// Migrated from /tmp/a\\nentry = 5\\r/knip.json\n"),
+        "{jsonc_out}"
+    );
+    let jsonc_config: fallow_config::FallowConfig =
+        jsonc_parser::parse_to_serde_value(&jsonc_out, &jsonc_parser::ParseOptions::default())
+            .unwrap();
+    assert_eq!(jsonc_config.entry, vec!["src/index.ts"]);
+}

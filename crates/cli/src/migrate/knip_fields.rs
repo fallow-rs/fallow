@@ -47,7 +47,12 @@ pub(super) fn warn_unmapped_rule_key(
 }
 
 /// The severity of a knip issue type that `rules` does not set.
-const DEFAULT_SEVERITY: &str = "error";
+const DEFAULT_SEVERITY: fallow_config::Severity = fallow_config::Severity::Error;
+
+/// Read a rule severity in any spelling that fallow accepts.
+fn parse_severity(value: &Value) -> Option<fallow_config::Severity> {
+    value.as_str()?.parse().ok()
+}
 
 /// Migrate a knip namespace issue type (`nsExports`, `nsTypes`). Returns
 /// `false` when `key` is not one.
@@ -158,14 +163,30 @@ pub(super) fn migrate_rules(
     };
 
     let mut fallow_rules = Map::new();
+    let mut invalid_rules: Vec<&str> = Vec::new();
     for (knip_name, fallow_name) in KNIP_RULE_MAP {
-        if let Some(severity_val) = rules_obj.get(*knip_name)
-            && let Some(severity_str) = severity_val.as_str()
-        {
-            fallow_rules.insert(
-                (*fallow_name).to_string(),
-                Value::String(severity_str.to_string()),
-            );
+        let Some(severity_val) = rules_obj.get(*knip_name) else {
+            continue;
+        };
+        match parse_severity(severity_val) {
+            Some(severity) => {
+                fallow_rules.insert(
+                    (*fallow_name).to_string(),
+                    Value::String(severity.to_string()),
+                );
+            }
+            None if !invalid_rules.contains(knip_name) => {
+                invalid_rules.push(knip_name);
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: format!("rules.{knip_name}"),
+                    message: format!(
+                        "severity {severity_val} is not \"error\", \"warn\" or \"off\", so the rule was not migrated"
+                    ),
+                    suggestion: None,
+                });
+            }
+            None => {}
         }
     }
 
@@ -173,10 +194,10 @@ pub(super) fn migrate_rules(
         if KNIP_RULE_MAP.iter().any(|(k, _)| k == key) {
             continue;
         }
-        // An unset base rule has the default severity `"error"`.
+        let own = parse_severity(severity);
         let has_peer = |base: &str| match rules_obj.get(base) {
-            Some(peer) => peer == severity,
-            None => severity.as_str() == Some(DEFAULT_SEVERITY),
+            Some(peer) => peer == severity || (own.is_some() && parse_severity(peer) == own),
+            None => own == Some(DEFAULT_SEVERITY),
         };
         if !migrate_namespace_issue_type("rules", key, has_peer, warnings) {
             warn_unmapped_rule_key("rules", key, warnings);
@@ -244,7 +265,7 @@ pub(super) fn error_rules_with_warn_default(config: &Value) -> Vec<&'static str>
         .filter(|name| {
             rules
                 .and_then(|rules| rules.get(*name))
-                .and_then(Value::as_str)
+                .and_then(parse_severity)
                 == Some(DEFAULT_SEVERITY)
         })
         .collect()

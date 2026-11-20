@@ -1,4 +1,4 @@
-use super::{MigrationResult, source_head};
+use super::{MigrationResult, source_label};
 
 #[expect(
     clippy::expect_used,
@@ -10,7 +10,7 @@ pub(super) fn generate_toml(result: &MigrationResult) -> String {
         result
             .sources
             .iter()
-            .map(|s| source_head(s))
+            .map(|s| source_label(s))
             .collect::<Vec<_>>()
             .join(", ")
     );
