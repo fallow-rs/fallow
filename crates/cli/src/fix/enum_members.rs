@@ -461,6 +461,51 @@ mod tests {
         fixes
     }
 
+    #[test]
+    fn enum_member_fixes_follow_path_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let files: Vec<PathBuf> = ["h", "c", "f", "a", "g", "b", "e", "d"]
+            .iter()
+            .map(|name| {
+                let file = root.join(format!("{name}.ts"));
+                std::fs::write(&file, "enum Status {\n  Active,\n  Unused,\n}\n").unwrap();
+                file
+            })
+            .collect();
+        let members: Vec<UnusedMember> = files
+            .iter()
+            .map(|file| make_enum_member(file, "Status", "Unused", 3))
+            .collect();
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedMember>> = FxHashMap::default();
+        for member in &members {
+            map.insert(member.path.clone(), vec![member]);
+        }
+        let file_refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
+        apply_enum_member_fixes(EnumMemberFixInput {
+            root,
+            members_by_file: &map,
+            hashes: &capture_hashes(&file_refs),
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: true,
+            fixes: &mut fixes,
+        });
+
+        let paths: Vec<&str> = fixes
+            .iter()
+            .map(|fix| fix["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts", "g.ts", "h.ts"
+            ]
+        );
+    }
+
     /// Helper mirrored from `exports.rs`. The fix tests need the
     /// captured-hashes map to be populated for every file the test
     /// considers freshly analyzed.

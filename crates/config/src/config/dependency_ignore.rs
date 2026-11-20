@@ -20,8 +20,8 @@ pub fn is_dependency_glob(entry: &str) -> bool {
 /// Compiled `ignoreDependencies` entries.
 ///
 /// Entries without glob metacharacters match a package name exactly. Entries
-/// with glob metacharacters (`@acme/*`, `@types/*`) use the same glob syntax as
-/// `ignorePatterns`, matched against the package name.
+/// with glob metacharacters (`@acme/*`, `@types/*`) are globs matched against
+/// the package name. In these globs, `*` also matches `/`.
 #[derive(Debug, Clone, Default)]
 pub struct IgnoreDependencyMatcher {
     /// Exact package name to the config indices of the entries that name it.

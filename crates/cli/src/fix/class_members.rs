@@ -431,6 +431,45 @@ mod tests {
     }
 
     #[test]
+    fn class_member_fixes_follow_path_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = "class Worker {\n  execute(): void {}\n\n  keep(): void {}\n}\n";
+        let mut hashes = CapturedHashes::default();
+        let findings: Vec<UnusedClassMemberFinding> = ["h", "c", "f", "a", "g", "b", "e", "d"]
+            .iter()
+            .map(|name| {
+                let path = directory.path().join(format!("{name}.ts"));
+                std::fs::write(&path, source).unwrap();
+                hashes.insert(path.clone(), xxhash_rust::xxh3::xxh3_64(source.as_bytes()));
+                eligible_finding(path, source)
+            })
+            .collect();
+        let mut plan = FixPlan::for_root(directory.path()).unwrap();
+        let mut fixes = Vec::new();
+
+        apply_class_member_fixes(ClassMemberFixInput {
+            root: directory.path(),
+            findings: &findings,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: true,
+            fixes: &mut fixes,
+        });
+
+        let paths: Vec<&str> = fixes
+            .iter()
+            .map(|fix| fix["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts", "g.ts", "h.ts"
+            ]
+        );
+    }
+
+    #[test]
     fn refuses_an_eligible_guarded_class_property() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("src/worker.ts");
