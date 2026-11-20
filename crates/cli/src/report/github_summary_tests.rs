@@ -343,7 +343,7 @@ fn health_summary_with_no_new_function_does_not_ask_for_a_rerun() {
 }
 
 /// Every counted dead-code kind needs a summary row with the registry
-/// label and docs anchor, and every summary row needs a registry kind.
+/// label and issue code, and every summary row needs a registry kind.
 #[test]
 fn dead_code_categories_match_counted_result_metadata() {
     let native: BTreeSet<(&str, &str, &str)> = DEAD_CODE_CATEGORIES.iter().copied().collect();
@@ -353,14 +353,14 @@ fn dead_code_categories_match_counted_result_metadata() {
         "DEAD_CODE_CATEGORIES has a duplicate row"
     );
     let registry: BTreeSet<(&str, &str, &str)> = counted_result_issue_metas()
-        .map(|meta| (meta.summary_label, meta.result_key, meta.docs_anchor))
+        .map(|meta| (meta.summary_label, meta.result_key, meta.code))
         .collect();
     let missing: Vec<_> = registry.difference(&native).collect();
     let extra: Vec<_> = native.difference(&registry).collect();
     assert!(
         missing.is_empty() && extra.is_empty(),
         "DEAD_CODE_CATEGORIES must match the counted result metadata \
-             (label, result key, docs anchor).\nMissing rows: {missing:?}\nRows not in the registry: {extra:?}"
+             (label, result key, issue code).\nMissing rows: {missing:?}\nRows not in the registry: {extra:?}"
     );
 }
 

@@ -40,7 +40,7 @@ pub(super) fn emit_config_quality_signal(results: &AnalysisResults, root: &Path)
             }
             eprintln!(
                 "  {}",
-                "https://fallow.tools/docs/explanations/dead-code/#unused-files".yellow()
+                "https://fallow.tools/docs/rules/unused-file/".yellow()
             );
         }
     }

@@ -221,9 +221,9 @@ fn glob_that_stays_in_entry_keeps_the_runtime_role() {
 fn human_section_links_to_the_docs_for_the_finding() {
     let output = run(&project(ENTRY_GLOB), &["dead-code"], &[]);
     assert!(
-        output.stdout.contains(
-            "https://fallow.tools/docs/explanations/dead-code/#dev-dependencies-in-production"
-        ),
+        output
+            .stdout
+            .contains("https://fallow.tools/docs/rules/dev-dependency-in-production/"),
         "stdout:\n{}",
         output.stdout
     );

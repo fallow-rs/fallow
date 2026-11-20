@@ -470,7 +470,7 @@ fn build_audit_diff_risk_sarif_run(report: &fallow_output::DiffRiskReport) -> se
             serde_json::json!({
                 "id": rule.sarif_rule_id(),
                 "shortDescription": { "text": rule.description() },
-                "helpUri": fallow_output::rule_docs_url("cli/audit#diff-risk-rules"),
+                "helpUri": fallow_output::rule_docs_url(&format!("rules/{}", rule.code())),
             })
         })
         .collect();

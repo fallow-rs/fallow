@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
 
 use ls_types::{
-    CodeDescription, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag,
-    Location, NumberOrString, Position, Range, Uri,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag, Location,
+    NumberOrString, Position, Range, Uri,
 };
 
 use fallow_api::editor_results::{
@@ -236,10 +236,7 @@ fn push_duplication_instance_diagnostic(
         severity: Some(DiagnosticSeverity::INFORMATION),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String("code-duplication".to_string())),
-        code_description: "https://fallow.tools/docs/explanations/duplication/"
-            .parse::<Uri>()
-            .ok()
-            .map(|href| CodeDescription { href }),
+        code_description: super::doc_link_for_rule("fallow/code-duplication"),
         message: format!(
             "Duplicated code block ({} lines, {} instances)",
             group.line_count,

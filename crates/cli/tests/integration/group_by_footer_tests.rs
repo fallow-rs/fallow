@@ -16,8 +16,9 @@ use std::path::Path;
 use crate::common::run_fallow_in_root;
 use tempfile::TempDir;
 
-const DEPS_URL: &str = "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies";
-const FILES_URL: &str = "https://fallow.tools/docs/explanations/dead-code/#unused-files";
+const DEPS_URL: &str = "https://fallow.tools/docs/rules/unused-dependency/";
+const DEV_DEPS_URL: &str = "https://fallow.tools/docs/rules/unused-dev-dependency/";
+const FILES_URL: &str = "https://fallow.tools/docs/rules/unused-file/";
 const FILES_DESCRIPTION: &str = "Files not reachable from any entry point";
 
 /// A project with an unused dependency, an unused devDependency, and an unused
@@ -83,17 +84,20 @@ fn lines_after(stdout: &str, needle: &str) -> Vec<String> {
 }
 
 #[test]
-fn grouped_footers_that_share_a_url_keep_their_link() {
+fn grouped_dependency_footers_keep_their_link() {
     let dir = project();
     let stdout = grouped_output(dir.path());
 
-    for description in [
-        "Listed in dependencies but never imported",
-        "Listed in devDependencies but never imported or referenced",
+    for (description, url) in [
+        ("Listed in dependencies but never imported", DEPS_URL),
+        (
+            "Listed in devDependencies but never imported or referenced",
+            DEV_DEPS_URL,
+        ),
     ] {
         assert_eq!(
             lines_after(&stdout, description),
-            vec![DEPS_URL.to_string()],
+            vec![url.to_string()],
             "footer {description:?} must print once and keep its link\n{stdout}",
         );
     }

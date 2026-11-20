@@ -179,9 +179,10 @@ fn result_meta_codes_have_meta_names() {
 #[test]
 fn result_meta_codes_have_meta_docs_paths() {
     for meta in ISSUE_RESULT_META {
-        assert!(
-            meta.meta_docs_path.starts_with("explanations/dead-code#"),
-            "result metadata code {} has invalid meta docs path",
+        assert_eq!(
+            meta.meta_docs_path,
+            format!("rules/{}", meta.code),
+            "result metadata code {} must link to its rule page",
             meta.code
         );
     }

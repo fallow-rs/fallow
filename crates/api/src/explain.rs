@@ -24,7 +24,8 @@ pub struct RuleDef {
     pub short: &'static str,
     /// Paragraph-length description used as the SARIF `fullDescription`.
     pub full: &'static str,
-    /// Path under the docs site base URL for the rule's `helpUri`.
+    /// Path under the docs site base URL for the rule's `helpUri`: the rule
+    /// page `rules/<id>`, where `<id>` is the id without its prefix.
     pub docs_path: &'static str,
 }
 
@@ -36,7 +37,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Files",
         short: "File is not reachable from any entry point",
         full: "Source files that are not imported by any other module and are not entry points (scripts, tests, configs). These files can safely be deleted. Detection uses graph reachability from configured entry points.",
-        docs_path: "explanations/dead-code#unused-files",
+        docs_path: "rules/unused-file",
     },
     RuleDef {
         id: "fallow/unused-export",
@@ -44,7 +45,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Exports",
         short: "Export is never imported",
         full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file.",
-        docs_path: "explanations/dead-code#unused-exports",
+        docs_path: "rules/unused-export",
     },
     RuleDef {
         id: "fallow/unused-type",
@@ -52,7 +53,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Type Exports",
         short: "Type export is never imported",
         full: "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden.",
-        docs_path: "explanations/dead-code#unused-types",
+        docs_path: "rules/unused-type",
     },
     RuleDef {
         id: "fallow/private-type-leak",
@@ -60,7 +61,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Private Type Leaks",
         short: "Exported signature references a private type",
         full: "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported. Consumers cannot name that private type directly, so the backing type should be exported or removed from the public signature.",
-        docs_path: "explanations/dead-code#private-type-leaks",
+        docs_path: "rules/private-type-leak",
     },
     RuleDef {
         id: "fallow/deprecated-export-in-use",
@@ -68,7 +69,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Deprecated Exports in Use",
         short: "Export marked @deprecated is still referenced",
         full: "Exports whose leading JSDoc carries @deprecated and that still have at least one consumer in a reachable file. Each finding lists the exact consumer count, a sample of up to 10 consumers sorted by path and line, and the deprecation message. A deprecated export with no consumer is reported as an unused export instead, marked deprecated. A consumer in an unreachable file does not count, because that file is dead code itself. `public_api` is true when the export lives in an entry point or a re-export chain reaches one: external consumers are not visible, so the finding makes no removal claim. The rule is opt-in and defaults to off. A per-path override resolves on the file that declares the export, not on the consumer.",
-        docs_path: "explanations/dead-code#deprecated-exports-in-use",
+        docs_path: "rules/deprecated-export-in-use",
     },
     RuleDef {
         id: "fallow/unused-dependency",
@@ -76,7 +77,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Dependencies",
         short: "Dependency listed but never imported",
         full: "Packages listed in dependencies that are never imported or required by any source file. A package that only a framework or a CLI tool loads can be reported when no plugin of fallow knows that use. To keep such a package, add it to `ignoreDependencies`.",
-        docs_path: "explanations/dead-code#unused-dependencies",
+        docs_path: "rules/unused-dependency",
     },
     RuleDef {
         id: "fallow/unused-dev-dependency",
@@ -84,7 +85,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Dev Dependencies",
         short: "Dev dependency listed but never imported",
         full: "Packages listed in devDependencies that are never imported by test files, config files, or scripts. A build tool or a Jest preset that only a config file names is reported when no plugin of fallow reads that config file. To keep such a package, add it to `ignoreDependencies`.",
-        docs_path: "explanations/dead-code#unused-devdependencies",
+        docs_path: "rules/unused-dev-dependency",
     },
     RuleDef {
         id: "fallow/unused-optional-dependency",
@@ -92,7 +93,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Optional Dependencies",
         short: "Optional dependency listed but never imported",
         full: "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific; verify they are not needed on any supported platform before removing.",
-        docs_path: "explanations/dead-code#unused-optionaldependencies",
+        docs_path: "rules/unused-optional-dependency",
     },
     RuleDef {
         id: "fallow/type-only-dependency",
@@ -100,7 +101,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Type-only Dependencies",
         short: "Production dependency only used via type-only imports",
         full: "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation.",
-        docs_path: "explanations/dead-code#type-only-dependencies",
+        docs_path: "rules/type-only-dependency",
     },
     RuleDef {
         id: "fallow/test-only-dependency",
@@ -108,7 +109,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Test-only Dependencies",
         short: "Production dependency only imported by test files",
         full: "Production dependencies that are only imported from test files. These can usually move to devDependencies because production entry points do not require them at runtime.",
-        docs_path: "explanations/dead-code#test-only-dependencies",
+        docs_path: "rules/test-only-dependency",
     },
     RuleDef {
         id: "fallow/dev-dependency-in-production",
@@ -116,7 +117,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Dev Dependencies Used in Production",
         short: "devDependency imported by production code with a runtime import",
         full: "A package in `devDependencies` that is imported by production (non-test, non-config) source code via a runtime/value import. Whether it should be promoted to `dependencies` depends on the deployment: a production-only install (`pnpm install --prod`) omits devDependencies, so an import resolved at runtime breaks, while a build that inlines the package into its output resolves nothing at runtime and promoting it can instead make the deployment require an install it did not need. This is the promote-side mirror of `test-only-dependency` and `type-only-dependency`. A dev dependency imported from production code only via `import type` is not flagged (types are erased at build time), and a package also listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is left alone because another manifest section provides it at runtime.",
-        docs_path: "explanations/dead-code#dev-dependencies-in-production",
+        docs_path: "rules/dev-dependency-in-production",
     },
     RuleDef {
         id: "fallow/unused-enum-member",
@@ -124,7 +125,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Enum Members",
         short: "Enum member is never referenced",
         full: "Enum members that are never referenced in the codebase. Uses scope-aware binding analysis to track all references including computed access patterns.",
-        docs_path: "explanations/dead-code#unused-enum-members",
+        docs_path: "rules/unused-enum-member",
     },
     RuleDef {
         id: "fallow/unused-class-member",
@@ -132,7 +133,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Class Members",
         short: "Class member is never referenced",
         full: "Public class methods and properties that are never referenced, checked project-wide. Members marked `private` and `#private` members are not checked. Protected members have their own rule, `unused-protected-class-member`.",
-        docs_path: "explanations/dead-code#unused-class-members",
+        docs_path: "rules/unused-class-member",
     },
     RuleDef {
         id: "fallow/unused-store-member",
@@ -140,7 +141,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Store Members",
         short: "Store member is never accessed by any consumer",
         full: "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency.",
-        docs_path: "explanations/dead-code#unused-store-members",
+        docs_path: "rules/unused-store-member",
     },
     RuleDef {
         id: "fallow/unused-protected-class-member",
@@ -148,7 +149,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Protected Class Members",
         short: "Protected class member is never referenced",
         full: "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked.",
-        docs_path: "explanations/dead-code#unused-protected-class-members",
+        docs_path: "rules/unused-protected-class-member",
     },
     RuleDef {
         id: "fallow/unused-namespace-member",
@@ -156,7 +157,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Namespace Members",
         short: "Namespace member is never referenced",
         full: "Exported members of an exported TypeScript namespace that no code reads. A nested namespace member has a dotted name (`Inner.x`). A whole use of the namespace (an argument, an alias, a spread) counts every member as used. Declaration files, `declare global`, module augmentations and the public API of an entry point are not checked. Defaults to warn.",
-        docs_path: "explanations/dead-code#unused-namespace-members",
+        docs_path: "rules/unused-namespace-member",
     },
     RuleDef {
         id: "fallow/unresolved-import",
@@ -164,7 +165,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unresolved Imports",
         short: "Import could not be resolved",
         full: "Import specifiers that could not be resolved to a file on disk. Common causes: deleted files, typos in paths, missing path aliases in tsconfig, or uninstalled packages.",
-        docs_path: "explanations/dead-code#unresolved-imports",
+        docs_path: "rules/unresolved-import",
     },
     RuleDef {
         id: "fallow/unlisted-dependency",
@@ -172,7 +173,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unlisted Dependencies",
         short: "Dependency used but not in package.json",
         full: "Packages imported without an applicable dependency declaration in package.json. This includes workspace packages imported from the repository root: npm workspace links make a package resolvable, but do not declare a dependency. Package self-references are allowed. Private packages and tooling may use ancestor declarations; publishable runtime code must declare its own dependencies.",
-        docs_path: "explanations/dead-code#unlisted-dependencies",
+        docs_path: "rules/unlisted-dependency",
     },
     RuleDef {
         id: "fallow/unlisted-binary",
@@ -180,7 +181,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unlisted Binaries",
         short: "Binary used but provided by no installed package",
         full: "Binaries that package.json scripts or process calls in source (`spawn`, `execSync`, `execa`, the `$` template of zx or execa, `Bun.spawn`) run with a literal command, when no installed or listed package provides them. A binary counts as provided when a `node_modules/.bin` link exists, a declared dependency or a workspace package declares it in `bin`, or it maps to a declared dependency. Shell builtins, commands that `npx` or `pnpm dlx` download, and a fixed list of common operating-system tools are skipped. The check needs installed dependencies and reports nothing without a root `node_modules`. Defaults to warn.",
-        docs_path: "explanations/dead-code#unlisted-binaries",
+        docs_path: "rules/unlisted-binary",
     },
     RuleDef {
         id: "fallow/duplicate-export",
@@ -188,7 +189,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Duplicate Exports",
         short: "Export name appears in multiple modules",
         full: "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating.",
-        docs_path: "explanations/dead-code#duplicate-exports",
+        docs_path: "rules/duplicate-export",
     },
     RuleDef {
         id: "fallow/duplicate-export-alias",
@@ -196,7 +197,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Duplicate Export Aliases",
         short: "One module exports one binding under two or more names",
         full: "One module exports the same binding under two or more names, for example `export const layer = make(); export default layer;` or `export { a, a as b }`. Consumers can import one value under several names, so the export surface is larger than it needs to be. Fallow groups the exports of a file by binding: a local binding name, or the source and imported name of a named re-export. Value and type-only exports are separate groups, and a plain specifier of a name that the file declares only as a type joins the type group. Two bindings with the same initializer are two bindings and are not reported. `export *`, files with CommonJS exports (`export =`, `module.exports`), component files and unreachable files are skipped. `ignoreExports` exempts a file with `*`, or a binding when one of its names is listed. Default warn. The rule differs from `duplicate-export`, which reports one export name in several files.",
-        docs_path: "explanations/dead-code#duplicate-export-aliases",
+        docs_path: "rules/duplicate-export-alias",
     },
     RuleDef {
         id: "fallow/circular-dependency",
@@ -204,7 +205,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Circular Dependencies",
         short: "Circular dependency chain detected",
         full: "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code.",
-        docs_path: "explanations/dead-code#circular-dependencies",
+        docs_path: "rules/circular-dependency",
     },
     RuleDef {
         id: "fallow/re-export-cycle",
@@ -212,7 +213,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Re-Export Cycles",
         short: "Two or more barrel files re-export from each other in a loop",
         full: "A barrel file re-exports from another barrel that ultimately re-exports back. When this happens, imports from any file in the loop may silently come up empty, because the re-export chain has no terminating module to resolve names against. To fix this: open any one file in the loop and remove the `export * from` (or `export { ... } from`) statement that points back into the cycle. Any single removal will break the cycle and restore working re-exports. A self-loop (a single barrel re-exporting from itself, often a rename leftover) is reported under the same rule with kind `self-loop`.",
-        docs_path: "explanations/dead-code#re-export-cycles",
+        docs_path: "rules/re-export-cycle",
     },
     RuleDef {
         id: "fallow/package-cycle",
@@ -220,7 +221,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Package Cycles",
         short: "Two or more workspace packages import each other in a loop",
         full: "Workspace packages whose resolved imports form a cycle. Each workspace package is a node and each resolved import from one package to another is an edge, so a package cycle can exist when no file-level cycle exists. Imports from test, spec, story, fixture and tooling config files are not edges, because those files are not part of the package build. Packages in a cycle cannot be built in dependency order. Each hop shows one example import and a `type_only` flag; a type-only hop still matters for declaration builds. To fix this, remove the imports on one hop, for example by moving the shared code to a package that both packages import.",
-        docs_path: "explanations/dead-code#package-cycles",
+        docs_path: "rules/package-cycle",
     },
     RuleDef {
         id: "fallow/boundary-violation",
@@ -228,7 +229,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Boundary Violations",
         short: "Import crosses a configured architecture boundary",
         full: "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable.",
-        docs_path: "explanations/dead-code#boundary-violations",
+        docs_path: "rules/boundary-violation",
     },
     RuleDef {
         id: "fallow/boundary-coverage",
@@ -236,7 +237,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Boundary Coverage",
         short: "Source file matches no configured architecture boundary zone",
         full: "A reachable source file is not assigned to any configured boundary zone while boundaries.coverage.requireAllFiles is enabled. Add the file to a zone pattern, move it under an existing zone, or allow-list generated and intentionally unzoned paths with boundaries.coverage.allowUnmatched.",
-        docs_path: "explanations/dead-code#boundary-violations",
+        docs_path: "rules/boundary-coverage",
     },
     RuleDef {
         id: "fallow/boundary-call-violation",
@@ -244,7 +245,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Boundary Call Violation",
         short: "Zoned file calls a callee its zone forbids",
         full: "A file classified into a boundary zone calls or constructs a callee matching one of the zone's boundaries.calls.forbidden patterns. The check is syntactic: it matches the written callee path and the import-resolved canonical path of calls and new expressions, and it only applies to files classified into a zone. Move the call behind an allowed abstraction, or adjust the zone's forbidden patterns if the rule was wrong.",
-        docs_path: "explanations/dead-code#boundary-violations",
+        docs_path: "rules/boundary-call-violation",
     },
     RuleDef {
         id: "fallow/policy-violation",
@@ -252,7 +253,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Policy Violation",
         short: "Usage violates a configured rule-pack policy",
         full: "A call, import, export, catalogue-derived effect, or graph-resolved GDP proof producer violates a configured rule pack (the rulePacks config key). Packs are pure declarative data. Call rules match calls and new expressions, on written plus import-resolved canonical callees. Effect rules match calls only. Import rules match the raw specifier. GDP rules trace @gdp-ts/core proof producers through unambiguous re-exports and restrict which files may create proof factories, optionally by exact static proof kind. This is syntactic ownership analysis, not a runtime authorization guarantee. Follow the rule's message, move a producer into an allowed file, scope the rule with files/exclude globs, or adjust its severity.",
-        docs_path: "explanations/dead-code#policy-violations",
+        docs_path: "rules/policy-violation",
     },
     RuleDef {
         id: "fallow/stale-suppression",
@@ -260,7 +261,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Stale Suppressions",
         short: "Suppression comment or tag no longer matches any issue",
         full: "A fallow-ignore-next-line, fallow-ignore-file, or @expected-unused suppression that no longer matches any active issue. The underlying problem was fixed but the suppression was left behind. Remove it to keep the codebase clean.",
-        docs_path: "explanations/dead-code#stale-suppressions",
+        docs_path: "rules/stale-suppression",
     },
     RuleDef {
         id: "fallow/missing-suppression-reason",
@@ -268,7 +269,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Missing Suppression Reason",
         short: "Suppression comment omits a required reason",
         full: "A fallow-ignore-next-line or fallow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional.",
-        docs_path: "explanations/dead-code#stale-suppressions",
+        docs_path: "rules/missing-suppression-reason",
     },
     RuleDef {
         id: "fallow/unused-catalog-entry",
@@ -276,7 +277,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused catalog entry",
         short: "Catalog entry not referenced by any workspace package",
         full: "An entry in a package manager catalog (`pnpm-workspace.yaml` `catalog:` / `catalogs:` or Bun root `package.json` `workspaces.catalog` / `workspaces.catalogs`) that no workspace package.json dependency and no pnpm override (`pnpm-workspace.yaml` `overrides`, skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`; root `package.json` `pnpm.overrides`, skipped when `packageManager` names pnpm 11 or later; root `package.json` `resolutions`, read only when `packageManager` names pnpm 10 or earlier) references via the `catalog:` protocol. Catalog entries are leftover dependency metadata once a package is removed from every consumer; delete the entry to keep the catalog truthful. See also: fallow/unresolved-catalog-reference (the inverse: consumer references a catalog that does not declare the package).",
-        docs_path: "explanations/dead-code#unused-catalog-entries",
+        docs_path: "rules/unused-catalog-entry",
     },
     RuleDef {
         id: "fallow/empty-catalog-group",
@@ -284,7 +285,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Empty catalog group",
         short: "Named catalog group has no entries",
         full: "A named group under `catalogs:` in `pnpm-workspace.yaml` or Bun root `package.json` has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The default `catalog` map is intentionally ignored because some projects keep it as a stable hook.",
-        docs_path: "explanations/dead-code#empty-catalog-groups",
+        docs_path: "rules/empty-catalog-group",
     },
     RuleDef {
         id: "fallow/unresolved-catalog-reference",
@@ -292,7 +293,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unresolved catalog reference",
         short: "package.json references a catalog that does not declare the package",
         full: "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. The package manager install will fail until the catalog is fixed. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`, plus the pnpm override values in `pnpm-workspace.yaml` `overrides` (skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`), root `package.json` `pnpm.overrides` (skipped when `packageManager` names pnpm 11 or later, because pnpm 11 does not read it), and root `package.json` `resolutions` (read only when `packageManager` names pnpm 10 or earlier), using `pnpm-workspace.yaml` catalogs when present and Bun root `package.json` catalogs otherwise. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
-        docs_path: "explanations/dead-code#unresolved-catalog-references",
+        docs_path: "rules/unresolved-catalog-reference",
     },
     RuleDef {
         id: "fallow/unused-dependency-override",
@@ -300,7 +301,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused dependency override",
         short: "Package-manager override target is not declared or resolved",
         full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section (skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`), `package.json#pnpm.overrides` (skipped when `packageManager` names pnpm 11 or later, which does not read it), npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose target package is not declared by any workspace package and is not present in the active readable lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, or `bun.lock`). Override entries linger after their target package leaves the resolved dependency tree. pnpm and npm projects without a readable lockfile fall back to workspace package manifests and keep a `hint` so transitive CVE pins can be reviewed before removal. Bun projects with only binary `bun.lockb` fail closed: fallow reports a workspace diagnostic and emits no unused-override finding until a readable `bun.lock` exists. To fix: delete the entry, refresh the active lockfile if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override.",
-        docs_path: "explanations/dead-code#unused-dependency-overrides",
+        docs_path: "rules/unused-dependency-override",
     },
     RuleDef {
         id: "fallow/misconfigured-dependency-override",
@@ -308,7 +309,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Misconfigured dependency override",
         short: "Package-manager override has an unparsable key or value",
         full: "An entry in `pnpm-workspace.yaml#overrides` (skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`), `package.json#pnpm.overrides` (skipped when `packageManager` names pnpm 11 or later, which does not read it), npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose key or value cannot be interpreted in that source's override grammar. Common shapes include an empty key, an empty value, a malformed version selector (`@types/react@<<18`), or an unbalanced parent matcher (`react>`). The active package manager may reject or ignore the entry. To fix: correct the key or value according to that package manager's grammar, or remove the entry. See also: fallow/unused-dependency-override.",
-        docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
+        docs_path: "rules/misconfigured-dependency-override",
     },
     RuleDef {
         id: "fallow/invalid-client-export",
@@ -316,7 +317,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Invalid client export",
         short: "\"use client\" file exports a server-only / route-config name",
         full: "A file carrying the `\"use client\"` directive also exports a Next.js server-only or route-segment config name (such as `metadata`, `generateMetadata`, `revalidate`, `generateStaticParams`, or a route HTTP method like `GET`/`POST`). Next.js rejects this combination at build time. Move the server-only export to a non-client module (a server component, a `route.ts`, or a separate config file), or remove the `\"use client\"` directive if the module does not need to be a client boundary. The check runs only when the project declares `next`.",
-        docs_path: "explanations/dead-code#invalid-client-exports",
+        docs_path: "rules/invalid-client-export",
     },
     RuleDef {
         id: "fallow/mixed-client-server-barrel",
@@ -324,7 +325,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Mixed client/server barrel",
         short: "Barrel re-exports both a \"use client\" module and a server-only module",
         full: "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, a known Next.js App Router problem. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility is not reported. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares a React Server Components bundler: `next`, `waku`, `@lazarv/react-server`, `react-server-dom-webpack`, `react-server-dom-vite`, `react-server-dom-parcel` or `@vitejs/plugin-rsc`.",
-        docs_path: "explanations/dead-code#mixed-client-server-barrels",
+        docs_path: "rules/mixed-client-server-barrel",
     },
     RuleDef {
         id: "fallow/misplaced-directive",
@@ -332,7 +333,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Misplaced directive",
         short: "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
         full: "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and silently ignored. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares a React Server Components bundler: `next`, `waku`, `@lazarv/react-server`, `react-server-dom-webpack`, `react-server-dom-vite`, `react-server-dom-parcel` or `@vitejs/plugin-rsc`.",
-        docs_path: "explanations/dead-code#misplaced-directives",
+        docs_path: "rules/misplaced-directive",
     },
     RuleDef {
         id: "fallow/unprovided-inject",
@@ -340,7 +341,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unprovided injects",
         short: "inject() / getContext() reads a key that no provide() / setContext() supplies",
         full: "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained.",
-        docs_path: "explanations/dead-code#unprovided-injects",
+        docs_path: "rules/unprovided-inject",
     },
     RuleDef {
         id: "fallow/unrendered-component",
@@ -348,7 +349,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unrendered components",
         short: "A component is reachable through a barrel but rendered nowhere",
         full: "A component is reachable in the module graph (a barrel re-exports it) but rendered nowhere in the project. The rule covers Vue, Svelte and Astro single-file components (the default export of a `.vue`, `.svelte` or `.astro` file), Angular components with an element selector, and Lit elements. For a single-file component: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained.",
-        docs_path: "explanations/dead-code#unrendered-components",
+        docs_path: "rules/unrendered-component",
     },
     RuleDef {
         id: "fallow/absent-component-prop",
@@ -356,7 +357,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Absent optional component props",
         short: "Known reachable callers omit an optional prop consumed inside its component",
         full: "A used optional component input is supplied by none of its inspected reachable callers. The finding includes the declaration, framework, default presence and caller locations. Enable absent-component-props explicitly; it defaults to off. Supported contracts cover React, Preact, Solid, Qwik, Vue, Svelte, Astro, Angular, Lit and Ember. Unknown spreads, dynamic or escaped component references, ambiguous bindings, incomplete contracts and externally exposed APIs abstain. Review defaults and API intent manually; static analysis does not prove runtime unreachability.",
-        docs_path: "explanations/dead-code#absent-component-props",
+        docs_path: "rules/absent-component-prop",
     },
     RuleDef {
         id: "fallow/constant-parameter",
@@ -364,7 +365,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Constant parameters",
         short: "Each visible call passes a function parameter in the same way",
         full: "A parameter of a module-scope function gets the same literal at each visible call (reason identical-argument), or an optional parameter is passed by no call (reason never-passed). The finding lists the value, the call count, the calls, and the count of conditions that test the parameter; a condition that tests a constant points at a branch that cannot run. Enable constant-parameters explicitly; it defaults to off. The rule fires only when each caller is visible. It abstains for public API and entry-point exports, exports that a plugin marks as used, dynamic imports, CommonJS, escaped namespaces, a function used as a value or through call/apply/bind, template hosts that can import the function, direct eval, classic scripts, framework auto-imports, open contracts (arguments, overloads, a reassigned binding, decorators, generators), a module with a parse error that can import the function, and fewer than 2 calls. A self-call that passes an optional parameter on blocks never-passed. For an object-pattern parameter, the rule reports each option key on its own: a key that no call sets (never-passed), or a key that each call sets to the same literal (identical-argument). A written or rest parameter, an array pattern, and an object pattern with a default other than {} give no finding. In the default mode a test file is a caller; with --production only production callers count. Review the parameter manually; static analysis does not prove that no caller outside the project exists.",
-        docs_path: "explanations/dead-code#constant-parameters",
+        docs_path: "rules/constant-parameter",
     },
     RuleDef {
         id: "fallow/unused-component-prop",
@@ -372,7 +373,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused component props",
         short: "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
         full: "A declared component prop referenced nowhere inside its own component, in these framework shapes: a Vue `<script setup>` defineProps prop, a Svelte 5 `$props()` prop, or a React/Preact prop destructured from a component's first parameter and read nowhere in its body. Framework type checkers check caller-side prop correctness, not this in-component dead-input direction. Conservative: Vue abstains on `$attrs` fallthrough, whole-object props use, defineExpose, defineModel, and imported prop-type aliases; Svelte abstains on rest, computed, nested, and whole-object `$props()` shapes; React abstains on rest spread (`{...rest}`), props forwarded by spread, props passed wholesale to a hook, `forwardRef` / imported-interface props, and exported public-API component props. Default warn; suppress or remove the prop.",
-        docs_path: "explanations/dead-code#unused-component-props",
+        docs_path: "rules/unused-component-prop",
     },
     RuleDef {
         id: "fallow/unused-component-emit",
@@ -380,7 +381,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused component emits",
         short: "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
         full: "A Vue `<script setup>` defineEmits declared event that is emitted nowhere in its own component (no `emit('<name>')` call). vue-tsc / Volar check caller-side emit correctness, not this in-component dead-output direction. Conservative: abstains on `$attrs` fallthrough, whole-object emit use, defineExpose, defineModel, and imported emit-type aliases. Default warn; suppress or remove the emit.",
-        docs_path: "explanations/dead-code#unused-component-emits",
+        docs_path: "rules/unused-component-emit",
     },
     RuleDef {
         id: "fallow/unused-component-input",
@@ -388,7 +389,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused component inputs",
         short: "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
         full: "An Angular `@Input()` / signal `input()` / `model()` declared input that is read nowhere in its own component (neither the inline / external template nor the class body). The Angular compiler never flags a declared-but-unread `@Input`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a template sentinel ref, any class-body member access by that name, or a bare identifier read counts as used), and the whole component abstains on an unresolved `extends` heritage clause (a base class in another file may read the input). A `model()` is recorded as an input only. Default warn; suppress or remove the input. The check runs only when the project declares `@angular/core`.",
-        docs_path: "explanations/dead-code#unused-component-inputs",
+        docs_path: "rules/unused-component-input",
     },
     RuleDef {
         id: "fallow/unused-component-output",
@@ -396,7 +397,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused component outputs",
         short: "An Angular @Output() / signal output() output is emitted nowhere in its own component",
         full: "An Angular `@Output()` / signal `output()` declared output that is emitted nowhere in its own component (no `this.<output>.emit(...)`). The Angular compiler never flags a declared-but-unemitted `@Output`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a `this.<output>.emit` call site, or any value read of `this.<output>` that might forward it, counts as used), and the whole component abstains on an unresolved `extends` heritage clause. A `model()`-derived implicit output is never flagged. Default warn; suppress or remove the output. The check runs only when the project declares `@angular/core`.",
-        docs_path: "explanations/dead-code#unused-component-outputs",
+        docs_path: "rules/unused-component-output",
     },
     RuleDef {
         id: "fallow/unused-svelte-event",
@@ -404,7 +405,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Svelte events",
         short: "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
         full: "A Svelte component that dispatches a custom event via `createEventDispatcher` (`const dispatch = createEventDispatcher(); dispatch('save')`) whose event name is listened to nowhere in the analyzed project. This is the cross-file dead-output direction: the component fires an event nothing handles. No native tool covers the listener side: eslint-plugin-svelte and svelte-check are single-file / type-only. fallow builds a project-wide listened-event set from every component-tag `on:<name>` binding (event forwarding, an `on:<name>` with no handler, counts as a listen), then flags a dispatched event whose name is in no listened set. Conservative (zero false positives): the whole component abstains on a dynamic `dispatch(<nonLiteral>)` (the event name is unknowable) or a `dispatch` reference forwarded as a value; a DOM `on:click` on a lowercase element is not a custom event and is ignored; and any listener on any component anywhere credits the name (the liberal over-credit, false-negative-safe direction). Default warn; remove the dispatched event or wire a listener. The check runs only when the project declares `svelte`.",
-        docs_path: "explanations/dead-code#unused-svelte-events",
+        docs_path: "rules/unused-svelte-event",
     },
     RuleDef {
         id: "fallow/unused-effect-layer",
@@ -412,7 +413,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Effect layers",
         short: "An Effect layer is composed only into layers that nothing uses",
         full: "An Effect `Layer` definition (a module-scope const or a class static property such as `static layer = Layer.effect(this, make)`) whose every reference sits inside other layer definitions that are themselves unused. The layer never reaches `Effect.provide`, `ManagedRuntime.make`, `Layer.launch` or any other runtime use. fallow builds a layer graph from `Layer.*` initializers and `.pipe(Layer.*)` chains. Any value reference outside a layer definition is a root, including references in functions and tests. A layer with zero references is not reported here: `unused-export` or `unused-class-member` reports it, so the rule reports the tail of a dead composition and names the unused consumers. Default warn. The check runs only when the project declares `effect`.",
-        docs_path: "explanations/dead-code#unused-effect-layers",
+        docs_path: "rules/unused-effect-layer",
     },
     RuleDef {
         id: "fallow/unused-tagged-error",
@@ -420,7 +421,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused tagged errors",
         short: "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it",
         full: "A class that extends `Data.TaggedError(\"X\")` or `Schema.TaggedError<Self>()(\"X\", ...)` that type positions or `catchTag(\"X\")` handlers reference, but that no code reads as a value. Any value reference counts as a producer: `new X()`, `X.make`, `Schema.Union(X)`, an API or RPC error declaration that decodes the error at a boundary, or passing the class to a function. Only type positions and catch-tag strings do not count. A class with zero references is left to `unused-export`. The finding lists the `catchTag` handlers of the tag. Default warn. The check runs only when the project declares `effect`.",
-        docs_path: "explanations/dead-code#unused-tagged-errors",
+        docs_path: "rules/unused-tagged-error",
     },
     RuleDef {
         id: "fallow/unproduced-catch-tag",
@@ -428,7 +429,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unproduced catch tags",
         short: "A catchTag handler names a project error tag that no code produces",
         full: "A `catchTag(\"X\", ...)` or `catchTags({ X: ... })` handler where every project class with tag `X` is never constructed or failed with, and no object literal `_tag: \"X\"` or tagged constructor produces the tag. A tag that no project class declares can come from a package, so the rule abstains. Effect built-in tags such as `TimeoutException` are never reported. The rule reports a handler only when no `unused-tagged-error` finding covers its classes: the error rule is off, or its finding is suppressed. Default warn. The check runs only when the project declares `effect`.",
-        docs_path: "explanations/dead-code#unproduced-catch-tags",
+        docs_path: "rules/unproduced-catch-tag",
     },
     RuleDef {
         id: "fallow/unused-server-action",
@@ -436,7 +437,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused server actions",
         short: "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
         full: "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does not mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`.",
-        docs_path: "explanations/dead-code#unused-server-actions",
+        docs_path: "rules/unused-server-action",
     },
     RuleDef {
         id: "fallow/unused-load-data-key",
@@ -444,7 +445,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused load data keys",
         short: "A SvelteKit load() return-object key is read by no consumer",
         full: "A SvelteKit route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) returns an object whose keys become the route's `data` prop. A returned key that NO consumer reads is dead: it runs a real server-side fetch / DB cost on every request for data nothing renders. fallow checks two channels: the sibling `+page.svelte`'s `data.<key>` reads (route-pinned), and project-wide `page.data.<key>` (Svelte 5 `$app/state`) / `$page.data.<key>` (Svelte 4 `$app/stores`) reads in any component. `svelte-check` types `data` via generated `$types` but never flags an unread returned key. The detector abstains (never false-flags) on a spread / non-literal / multi-return / computed-key / wrapped `load`, on a sibling that passes the whole `data` object opaquely, on a `+page.server.ts` whose universal `+page.ts` sibling forwards its `data`, and project-wide when any whole-object use of `page.data` / `$page.data` is seen. Default warn; delete the key or wire a consumer. A load fetch can have side effects, so there is no safe auto-fix. The check runs only when the project declares `@sveltejs/kit`.",
-        docs_path: "explanations/dead-code#unused-load-data-keys",
+        docs_path: "rules/unused-load-data-key",
     },
     RuleDef {
         id: "fallow/prop-drilling",
@@ -452,7 +453,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Prop drilling",
         short: "A React/Preact prop is forwarded unchanged through 2 or more components to a distant consumer",
         full: "A React/Preact prop is received by a component and forwarded unchanged to a child, which forwards it unchanged again, until a component uses it. One intermediate \"pass-through\" component is enough: the prop then passes unchanged through two components before the consumer. The high-confidence signal is that the received identifier appears only as the root of forwarded child-JSX attribute values (so `<Child userName={user.name}/>` counts: the prop `user` is projected forward), not the attribute name matching. fallow emits located per-chain records (the source, each pass-through hop, and the consumer with file + line + component name) so CI and an agent can act: colocate the consumer with the data, lift the value to a React context/provider at a mid-chain hop, or compose the component so the intermediates no longer thread the prop. This is a graph-derived health signal, not a correctness error. The rule defaults to off (opt-in), like private-type-leak and the security rules: enable it with `prop-drilling: \"warn\"` in `rules`. Set `prop-drilling: \"error\"` to enforce remaining chains in CI. Warnings remain advisory even with strict flags. File overrides resolve at the source hop and can activate the rule when the base setting is off. Suppressed or baselined chains do not gate. Zero false positives by construction: any `{...props}` spread, `cloneElement`, element-as-prop / render-prop / children-as-function, or context `*.Provider` anywhere in the chain abstains the whole chain, as does an ambiguous or unresolvable hop. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
-        docs_path: "explanations/dead-code#prop-drilling",
+        docs_path: "rules/prop-drilling",
     },
     RuleDef {
         id: "fallow/thin-wrapper",
@@ -460,7 +461,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Thin wrapper",
         short: "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
         full: "A React/Preact component whose entire body is structural indirection: it returns exactly one capitalized component element that forwards the component's own props via a bare spread (`return <Child {...props}/>`), with no host-element wrapper, no extra children, no named attributes alongside the spread, no hooks, no branching, and no other statements. Such a component adds nothing of its own: it is a candidate for inlining at its call sites or deleting, not a correctness error. fallow emits a located per-wrapper record (file + line + the wrapper and child component names) so CI and an agent can act. The rule defaults to off (opt-in), like prop-drilling and the security rules: enable it with `thin-wrapper: \"warn\"` in `rules`. Zero false positives by construction: a `forwardRef` / `memo` wrapper (the sanctioned way to make a child ref-able or set a perf boundary), an exported component (a public-API re-brand / encapsulation), a context `*.Provider` wrapper, a `cloneElement` / render-prop forward, a wrapper that passes any named attribute alongside the spread (a fixed configuration), a self-render, or an unresolvable / member-expression child all abstain. A TypeScript-only type-narrowing wrapper (`const StrictButton = (p: StrictProps) => <Button {...p}/>`) is a known limitation, because fallow reads syntax and does not resolve types; suppress it with the inline comment. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
-        docs_path: "explanations/dead-code#thin-wrapper",
+        docs_path: "rules/thin-wrapper",
     },
     RuleDef {
         id: "fallow/duplicate-prop-shape",
@@ -468,7 +469,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Duplicate prop shape",
         short: "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
         full: "Three or more distinct React/Preact components, living in two or more files, whose statically-harvested prop name set is byte-for-byte identical after (a) excluding a fixed denylist of ubiquitous DOM / render-passthrough prop names (className, style, id, children, key, ref, the common event handlers, plus data-* / aria-* by prefix) and (b) requiring the remaining significant set to have four or more members. Identity is over names only, never types (fallow does not resolve types). This is a structural-refactor health signal: the recurring shape is a missing shared abstraction, so extract one shared `Props` type (or a base component) that every member reuses. It is never a correctness error and never an auto-fix. fallow emits one located record per participating component, each naming the shared `shape`, the `group_size`, and the other members in `sharing_components`. The rule defaults to off (opt-in), like thin-wrapper and the security rules: enable it with `duplicate-prop-shape: \"warn\"` in `rules`. Anti-noise gates (defended as rule-of-three plus a denylist-survivor floor, not tuned magic): the four-significant-prop floor turns `{label, onClick}` buttons into non-findings; the three-component floor is the rule-of-three abstraction trigger; the two-file floor keeps a local same-shaped variant pair (a render-prop pair, a Foo/FooImpl split) unflagged. A component whose props are not fully harvestable (a rest/spread signature, a forwardRef/memo over an imported interface) abstains, because a partial prop set can never be proven identical. Exact full-set identity only: a superset / subset relationship does not group, so a four-prop group and a five-prop superset form two findings (the price of zero invalid groups: the finding always fits one extracted shared type). The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
-        docs_path: "explanations/dead-code#duplicate-prop-shape",
+        docs_path: "rules/duplicate-prop-shape",
     },
     RuleDef {
         id: "fallow/route-collision",
@@ -476,7 +477,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Route collision",
         short: "Two or more Next.js App Router route files resolve to the same URL",
         full: "Two or more App Router route files (a `page` or a `route` handler) resolve to the same URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. fallow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`.",
-        docs_path: "explanations/dead-code#route-collisions",
+        docs_path: "rules/route-collision",
     },
     RuleDef {
         id: "fallow/dynamic-segment-name-conflict",
@@ -484,7 +485,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Dynamic segment name conflict",
         short: "Sibling Next.js dynamic route segments use different slug names at the same position",
         full: "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does not catch this (the build succeeds), so CI passes while the route crashes on its first request; fallow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`.",
-        docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
+        docs_path: "rules/dynamic-segment-name-conflict",
     },
 ];
 
@@ -1259,7 +1260,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "High Cyclomatic Complexity",
         short: "Function has high cyclomatic complexity",
         full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings across every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup), counting each dialect's control-flow blocks (Angular `@if`/`@else if`/`@for`/`@case`/`@defer (when ...)` and legacy `*ngIf`/`*ngFor`; Vue `v-if`/`v-else-if`/`v-for`; Svelte `{#if}`/`{:else if}`/`{#each}`/`{#await}`/`{#key}`; the Astro equivalents) plus ternary and logical operators inside bound attributes and interpolations; on each top-level Svelte `{#snippet name(...)}` block, emitted as its own `<snippet:NAME>` unit; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
-        docs_path: "explanations/health#cyclomatic-complexity",
+        docs_path: "rules/high-cyclomatic-complexity",
     },
     RuleDef {
         id: "fallow/high-cognitive-complexity",
@@ -1267,7 +1268,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "High Cognitive Complexity",
         short: "Function has high cognitive complexity",
         full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings across every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup), where nesting penalties accumulate on stacked control-flow blocks: Angular `@if`/`@for`/`@switch`, Vue `v-if`/`v-for`, Svelte `{#if}`/`{#each}`/`{#await}`; on each top-level Svelte `{#snippet name(...)}` block, emitted as its own `<snippet:NAME>` unit with nesting rebased to zero so in-file snippet extraction lowers the parent template's score; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
-        docs_path: "explanations/health#cognitive-complexity",
+        docs_path: "rules/high-cognitive-complexity",
     },
     RuleDef {
         id: "fallow/high-complexity",
@@ -1275,7 +1276,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "High Complexity (Both)",
         short: "Function exceeds both complexity thresholds",
         full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths and is hard to understand. The same rule fires on synthetic `<template>` findings in every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup) when both metrics exceed their thresholds, and on synthetic `<component>` rollup findings whose totals are the worst class method's score plus the template's. Ranking and `--targets` use the rollup totals; JSON exposes the per-half breakdown under `component_rollup`.",
-        docs_path: "explanations/health#complexity-metrics",
+        docs_path: "rules/high-complexity",
     },
     RuleDef {
         id: "fallow/high-crap-score",
@@ -1283,7 +1284,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "High CRAP Score",
         short: "Function has a high CRAP score (complexity combined with low coverage)",
         full: "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex and poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph. This rule fires on functions only: synthetic template-family units (`<template>`, Svelte `<snippet:NAME>`) are excluded from the CRAP dimension, because a template is exercised only through its component and carries no coverage the formula could measure. Templates gate on the cyclomatic and cognitive dimensions instead.",
-        docs_path: "explanations/health#crap-score",
+        docs_path: "rules/high-crap-score",
     },
     RuleDef {
         id: "fallow/long-file",
@@ -1291,7 +1292,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Long File",
         short: "File has more lines than the file-length threshold",
         full: "The file has more physical lines than `health.maxFileLines` (or `--max-file-lines`, or a `thresholdOverrides[].maxFileLines` entry for the file). Every line counts, also blank lines and comment lines; a final newline does not add a line. The threshold is off (`0`) by default. The finding is a complexity finding with `exceeded: \"file_lines\"`, the name `<file>`, the line count in `line_count`, and the ceiling in `max_file_lines`. The `complexity-file-lines` rule sets its gate severity. In `fallow audit`, a long file that did not grow by at least 5 lines stays inherited, and one that grew is worsened.",
-        docs_path: "explanations/health#file-length",
+        docs_path: "rules/long-file",
     },
     RuleDef {
         id: "fallow/refactoring-target",
@@ -1299,7 +1300,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Refactoring Target",
         short: "File identified as a high-priority refactoring candidate",
         full: "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling.",
-        docs_path: "explanations/health#refactoring-targets",
+        docs_path: "rules/refactoring-target",
     },
     RuleDef {
         id: "fallow/css-token-drift",
@@ -1307,7 +1308,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "CSS Token Drift",
         short: "CSS or CSS-in-JS hardcoded styling value bypasses the design token system",
         full: "A styling value appears to bypass the project's design token system, for example a Tailwind arbitrary value in markup. The finding is advisory by default and does not affect the audit verdict unless rules.css-token-drift is set to error. Verify the value and replace it with an existing scale token when appropriate.",
-        docs_path: "explanations/health#css-token-drift",
+        docs_path: "rules/css-token-drift",
     },
     RuleDef {
         id: "fallow/css-duplicate-block",
@@ -1315,7 +1316,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "CSS Duplicate Block",
         short: "CSS or CSS-in-JS declaration block is duplicated across rules",
         full: "A style rule declaration block is repeated across selectors, suggesting copy-pasted styling that can often be consolidated. The finding is advisory by default and does not affect the audit verdict unless rules.css-duplicate-block is set to error.",
-        docs_path: "explanations/health#css-duplicate-block",
+        docs_path: "rules/css-duplicate-block",
     },
     RuleDef {
         id: "fallow/css-selector-complexity",
@@ -1323,7 +1324,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "CSS Selector Complexity",
         short: "CSS selector, nesting, or important usage is structurally complex",
         full: "A CSS or CSS-in-JS rule crosses the structural floor for selector specificity, selector complexity, nesting depth, or important usage. The finding is advisory by default and does not affect the audit verdict unless rules.css-selector-complexity is set to error.",
-        docs_path: "explanations/health#css-selector-complexity",
+        docs_path: "rules/css-selector-complexity",
     },
     RuleDef {
         id: "fallow/css-dead-surface",
@@ -1331,7 +1332,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "CSS Dead Surface",
         short: "CSS or CSS-in-JS surface appears unused",
         full: "A styling surface appears unused in the analyzed project, such as a scoped SFC class with no component-local use. The finding is advisory by default and does not affect the audit verdict unless rules.css-dead-surface is set to error. Verify dynamic consumers before deleting.",
-        docs_path: "explanations/health#css-dead-surface",
+        docs_path: "rules/css-dead-surface",
     },
     RuleDef {
         id: "fallow/css-broken-reference",
@@ -1339,7 +1340,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "CSS Broken Reference",
         short: "CSS or CSS-in-JS reference resolves to no stylesheet definition",
         full: "A styling reference appears unresolved, such as a class token or keyframes name that has no stylesheet definition in the analyzed project. The finding is advisory by default and does not affect the audit verdict unless rules.css-broken-reference is set to error. Verify external or CSS-in-JS definitions before fixing.",
-        docs_path: "explanations/health#css-broken-reference",
+        docs_path: "rules/css-broken-reference",
     },
     RuleDef {
         id: "fallow/untested-file",
@@ -1347,7 +1348,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Untested File",
         short: "Runtime-reachable file has no test dependency path",
         full: "A file is reachable from runtime entry points but not from any discovered test entry point. This indicates production code that no test imports, directly or transitively, according to the static module graph.",
-        docs_path: "explanations/health#coverage-gaps",
+        docs_path: "rules/untested-file",
     },
     RuleDef {
         id: "fallow/untested-export",
@@ -1355,7 +1356,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Untested Export",
         short: "Runtime-reachable export has no test dependency path",
         full: "A value export is reachable from runtime entry points but no test-reachable module references it. This is a static test dependency gap rather than line coverage, and highlights exports exercised only through production entry paths.",
-        docs_path: "explanations/health#coverage-gaps",
+        docs_path: "rules/untested-export",
     },
     RuleDef {
         id: "fallow/runtime-safe-to-delete",
@@ -1363,7 +1364,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Production Safe To Delete",
         short: "Statically unused and never invoked in production",
         full: "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits.",
-        docs_path: "explanations/health#runtime-coverage",
+        docs_path: "rules/runtime-safe-to-delete",
     },
     RuleDef {
         id: "fallow/runtime-review-required",
@@ -1371,7 +1372,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Production Review Required",
         short: "Statically used but never invoked in production",
         full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused.",
-        docs_path: "explanations/health#runtime-coverage",
+        docs_path: "rules/runtime-review-required",
     },
     RuleDef {
         id: "fallow/runtime-low-traffic",
@@ -1379,7 +1380,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Production Low Traffic",
         short: "Function was invoked below the low-traffic threshold",
         full: "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period.",
-        docs_path: "explanations/health#runtime-coverage",
+        docs_path: "rules/runtime-low-traffic",
     },
     RuleDef {
         id: "fallow/runtime-coverage-unavailable",
@@ -1387,7 +1388,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Runtime Coverage Unavailable",
         short: "Runtime coverage could not be resolved for this function",
         full: "The function could not be matched to a V8-tracked coverage entry. Common causes: the function lives in a worker thread (separate V8 isolate), it is lazy-parsed and never reached the JIT tier, or its source map did not resolve to the expected source path. This is advisory, not a dead-code signal.",
-        docs_path: "explanations/health#runtime-coverage",
+        docs_path: "rules/runtime-coverage-unavailable",
     },
     RuleDef {
         id: "fallow/runtime-coverage",
@@ -1395,7 +1396,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Runtime Coverage",
         short: "Runtime coverage gave no verdict for this function",
         full: "A runtime coverage finding whose verdict no other `runtime-*` rule covers. This is the `unknown` verdict: the runtime data did not lead to a verdict for the function, for example when a newer version of the runtime coverage add-on gives a verdict that this fallow version does not know. Functions with the `active` verdict are not reported.",
-        docs_path: "explanations/health#runtime-coverage",
+        docs_path: "rules/runtime-coverage",
     },
     RuleDef {
         id: "fallow/coverage-intelligence-risky-change",
@@ -1403,7 +1404,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Coverage Intelligence Risky Change",
         short: "Changed hot path combines high CRAP and low test coverage",
         full: "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging.",
-        docs_path: "explanations/health#coverage-intelligence",
+        docs_path: "rules/coverage-intelligence-risky-change",
     },
     RuleDef {
         id: "fallow/coverage-intelligence-delete",
@@ -1411,7 +1412,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Coverage Intelligence Delete",
         short: "Static and runtime evidence indicate code can be deleted",
         full: "Coverage intelligence combined static unused status, runtime cold evidence, and lack of test reachability into a high-confidence delete recommendation.",
-        docs_path: "explanations/health#coverage-intelligence",
+        docs_path: "rules/coverage-intelligence-delete",
     },
     RuleDef {
         id: "fallow/coverage-intelligence-review",
@@ -1419,7 +1420,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Coverage Intelligence Review",
         short: "Cold reachable uncovered code needs owner review",
         full: "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it.",
-        docs_path: "explanations/health#coverage-intelligence",
+        docs_path: "rules/coverage-intelligence-review",
     },
     RuleDef {
         id: "fallow/coverage-intelligence-refactor",
@@ -1427,7 +1428,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "Coverage Intelligence Refactor",
         short: "Hot covered code has high CRAP and should be refactored carefully",
         full: "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior.",
-        docs_path: "explanations/health#coverage-intelligence",
+        docs_path: "rules/coverage-intelligence-refactor",
     },
 ];
 
@@ -1438,7 +1439,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     name: "Code Duplication",
     short: "Duplicated code block",
     full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection compares normalized token sequences. The `duplicates.mode` setting selects the normalization: `strict` and `mild` keep identifiers and literal values, `weak` ignores string values, and `semantic` ignores identifiers, string values and numeric values. The `duplicates.normalization` settings override each of these mode defaults. Duplicated line counts and percentages include every instance, including the first. Overlapping line ranges in the same file count once. Redundant token counts exclude one retained copy per clone group. In `fallow audit`, the `introduced-clone-group` rule sets how a clone group takes part in the verdict: `warn` (the default) gives `warn`, `error` fails the audit, and `off` removes the group from the verdict. Under `--gate new-only`, only a group that the change introduced counts. Under `--gate all`, every clone group in the changed files counts. With `overrides`, the most severe result over the instance files applies. The `duplicates.threshold` gate is independent of the rule.",
-    docs_path: "explanations/duplication#clone-groups",
+    docs_path: "rules/code-duplication",
 }];
 
 /// Rule definitions for the diff-risk rules of `fallow audit`.
@@ -1449,7 +1450,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         name: "Weakened Tests",
         short: "The change weakens tests or a coverage threshold",
         full: "`fallow audit` compares the base and head text of each changed file. The `kind` field tells how the change weakened the tests: `skip-only` (a new `.skip`, `.only`, `xit` or `fit` marker), `removed-tests` (fewer test cases in a file, while the total of all changed test files also dropped), `assertion-drop` (fewer `expect`, `assert` or `should` calls in a test file with no test case removed), `coverage-threshold` (a coverage or quality threshold that is less strict), `rule-severity` (a rule severity in the Fallow config that is less strict, such as `error` to `off`, a removed rule whose default is weaker, or a new `overrides` entry that turns a rule off for some paths), or `ignore-pattern` (a new or broader entry in a config key that removes files or findings from the analysis or makes code count as used, or a removed `!` exception of `ignorePatterns` or `ignoreFindings`). The keys are `ignorePatterns`, `ignoreFindings`, `production.ignore`, `health.ignore`, `duplicates.ignore`, `duplicates.ignoredClones`, `entry`, `supportEntry`, `dynamicallyLoaded`, `publicPackages`, `usedClassMembers`, `ignoreDependencies`, `ignoreBinaries`, `ignoreUnresolvedImports`, `ignoreExports`, `ignoreCatalogReferences`, `ignoreDependencyOverrides` and `boundaries.coverage.allowUnmatched`. The evidence names the key. A new entry that a base entry or a built-in default already covers does not report. The config check follows each relative `extends` file, so a change in an extended file or in the `extends` list reports too. A value that an `npm:` package or an `https://` URL can set does not compare, because the audit cannot read it at the base. A `rule-severity` or `ignore-pattern` finding takes the stricter of the base and head `weakened-tests` severity, so a change that turns off `weakened-tests` still reports. A suppression comment in the head config does not hide it, and it has no suppression action. A drop does not report when the lost test lines name code that the change removed, such as a deleted function or a deleted fixture directory: the tests went with that code. A name of a deleted file that a changed file still holds, a name that a deleted file only imports, a directory that still exists, and a reserved word such as `import` do not count. An assertion drop reports only when assertions are at least half of the code lines that the file lost, so a test rewrite that moves setup checks into a helper does not report. The finding is a fact about the change, not a proof that coverage dropped. Defaults to `warn`.",
-        docs_path: "cli/audit#diff-risk-rules",
+        docs_path: "rules/weakened-tests",
     },
     RuleDef {
         id: "fallow/added-suppression",
@@ -1457,7 +1458,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         name: "Added Suppressions",
         short: "The change adds a suppression comment",
         full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Files below a fixture or generated directory (`fixture`, `fixtures`, `__fixtures__`, `__snapshots__`, `generated`, `__generated__`) do not report, because a tool writes them or a test reads them as data. Defaults to `warn`.",
-        docs_path: "cli/audit#diff-risk-rules",
+        docs_path: "rules/added-suppression",
     },
     RuleDef {
         id: "fallow/test-only-branch",
@@ -1465,7 +1466,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         name: "Test-Only Branches",
         short: "The change adds a test-environment branch to source code",
         full: "`fallow audit` reports a line that the change adds to a non-test source file and that checks the test environment: `process.env.NODE_ENV` compared with `'test'`, `process.env.VITEST` or `process.env.JEST_WORKER_ID`. Such a branch lets the tests take a path that production does not take. A Vitest in-source test block (`if (import.meta.vitest)`) is test code and is not reported. Tool config files are skipped. A check that only keeps `console` output quiet in tests (`if (process.env.NODE_ENV !== 'test') console.warn(...)`), and a check that picks an env file (`'.env.test'`), do not report. Defaults to `warn`.",
-        docs_path: "cli/audit#diff-risk-rules",
+        docs_path: "rules/test-only-branch",
     },
     RuleDef {
         id: "fallow/diverged-clone-sibling",
@@ -1473,7 +1474,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         name: "Diverged Clone Siblings",
         short: "The change edits one copy of duplicated code but not its siblings",
         full: "`fallow audit` reports a base clone group where the change edited exactly one copy, the edit broke the clone, and every other copy kept its text. The siblings can need the same change. A cosmetic edit that keeps the clone, a removed copy, a change that edits every copy, and an edit to a test or story copy do not report. Needs the base snapshot of `--gate new-only`. Opt-in: defaults to `off`, because copies often differ on purpose, for example an input and an output type, or a legacy copy. Set it to `warn` or `error` to review every diverged copy.",
-        docs_path: "cli/audit#diff-risk-rules",
+        docs_path: "rules/diverged-clone-sibling",
     },
     RuleDef {
         id: "fallow/added-dependency",
@@ -1481,7 +1482,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         name: "Added Dependencies",
         short: "The change adds a dependency",
         full: "`fallow audit` reports a dependency that the change adds to a `package.json`. A new dependency is often correct, so the rule defaults to `off`. Set it to `warn` or `error` to review every new package. An invented package name already fails as an unresolved import or an unlisted dependency.",
-        docs_path: "cli/audit#diff-risk-rules",
+        docs_path: "rules/added-dependency",
     },
 ];
 
@@ -1493,7 +1494,7 @@ pub const FLAGS_RULES: &[RuleDef] = &[
         name: "Feature Flags",
         short: "Detected feature flag pattern",
         full: "A feature flag pattern detected by `fallow flags`: environment-variable checks, flag SDK calls (LaunchDarkly, Unleash, and similar), or config-object lookups. Long-lived flags accumulate dead branches; review old flags for retirement and pair with dead-code analysis to find branches that can no longer execute.",
-        docs_path: "cli/flags",
+        docs_path: "rules/feature-flag",
     },
     RuleDef {
         id: "fallow/flag-retirement-candidate",
@@ -1501,7 +1502,7 @@ pub const FLAGS_RULES: &[RuleDef] = &[
         name: "Flag Retirement Candidate",
         short: "Feature flag is a retirement candidate",
         full: "A feature flag that `fallow flags --retirement` lists with at least one retirement reason: one read site, reads only in tests, a literal constant, identical or empty guard branches, guarded dead code, a definition that no code reads, or a vendor state from `--flag-state` (rolled out, archived, missing in the vendor export, or in the export only). The report is advisory. A person decides to remove the flag; Fallow does not remove code.",
-        docs_path: "cli/flags#retirement-report",
+        docs_path: "rules/flag-retirement-candidate",
     },
 ];
 
@@ -1512,7 +1513,7 @@ pub const MUTATION_RULES: &[RuleDef] = &[RuleDef {
     name: "Survived Mutants",
     short: "A small code change made no test fail",
     full: "`fallow mutation` makes one small change to the code, such as `>=` to `>`, and runs the tests that reach the changed line. A survived mutant is a change that made no test fail, so the tests do not check that behavior. The CI integrations report a survived mutant on a changed line as a warning finding (CodeClimate severity `minor`). The finding names the operator, the function and the mutant id, and never the source text. A mutant that no test reaches (`no_coverage`) is not a finding. No `rules.*` key gates the finding: the mutation score gate (`--min-score` or `mutation.minScore`) decides the exit code.",
-    docs_path: "cli/mutation",
+    docs_path: "rules/mutation-survived",
 }];
 
 macro_rules! security_catalogue_rule {
@@ -1530,7 +1531,7 @@ macro_rules! security_catalogue_rule {
                 $id,
                 "` findings, then inspect the trace, source, sink, sanitization, and application context before treating it as exploitable."
             ),
-            docs_path: "cli/security",
+            docs_path: concat!("rules/", $id),
         }
     };
 }
@@ -1544,7 +1545,7 @@ pub const SECURITY_RULES: &[RuleDef] = &[
         name: "Tainted Sink Candidates",
         short: "Syntactic security sink candidates require verification",
         full: "The `tainted-sink` family covers data-driven `fallow security` catalogue categories. These findings are unverified candidates, not confirmed vulnerabilities. fallow can connect known source signals to captured sink shapes and add CWE metadata, but it does not prove attacker control, missing sanitization, exploitability, or business impact.",
-        docs_path: "cli/security",
+        docs_path: "rules/tainted-sink",
     },
     RuleDef {
         id: "security/client-server-leak",
@@ -1552,7 +1553,7 @@ pub const SECURITY_RULES: &[RuleDef] = &[
         name: "Client-server Secret Leak Candidates",
         short: "Client-bound code reaches a non-public env read",
         full: "`client-server-leak` reports a candidate when a `use client` module can transitively reach a static non-public `process.env` or `import.meta.env` read. Public-by-convention env prefixes are treated as public. The finding is advisory and still needs bundle, framework, and runtime verification before treating it as a real exposure.",
-        docs_path: "cli/security",
+        docs_path: "rules/client-server-leak",
     },
     RuleDef {
         id: "security/hardcoded-secret",
@@ -1560,7 +1561,7 @@ pub const SECURITY_RULES: &[RuleDef] = &[
         name: "Hardcoded Secret Candidates",
         short: "Provider-prefixed or contextual secret literals require verification",
         full: "`hardcoded-secret` reports opt-in candidates for provider-prefixed or contextual secret-shaped literals. The category is include-required and only runs when listed in `security.categories.include`. It avoids raw entropy alone, but every result still requires review, secret rotation decisions, and context before acting.",
-        docs_path: "cli/security",
+        docs_path: "rules/hardcoded-secret",
     },
     security_catalogue_rule!("dangerous-html", "Dangerous HTML sink", "79"),
     security_catalogue_rule!(

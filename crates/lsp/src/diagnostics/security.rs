@@ -22,11 +22,6 @@ use fallow_api::editor_results::{SecurityFinding, SecurityFindingKind};
 
 use crate::position::PositionMapper;
 
-/// Documentation page for the security candidate surface. The dead-code
-/// `DOCS_BASE` in `super` points at the dead-code explanation; security has its
-/// own CLI page, so this block uses a dedicated link.
-const SECURITY_DOCS_URL: &str = "https://fallow.tools/docs/cli/security/";
-
 /// The `// fallow-ignore-file` / `// fallow-ignore-next-line` suppression token
 /// for a security finding's kind. One token per kind covers all catalogue
 /// categories (mirrors `IssueKind::SecuritySink` / `SecurityClientServerLeak`).
@@ -58,12 +53,18 @@ pub fn security_label(finding: &SecurityFinding) -> String {
     }
 }
 
-/// Build a `CodeDescription` linking to the security candidate docs page.
-fn security_doc_link() -> Option<CodeDescription> {
-    SECURITY_DOCS_URL
-        .parse::<Uri>()
-        .ok()
-        .map(|href| CodeDescription { href })
+/// Build a `CodeDescription` with the rule page of a security candidate:
+/// the page of its catalogue category, else the page of its rule family.
+fn security_doc_link(finding: &SecurityFinding) -> Option<CodeDescription> {
+    let family = match finding.kind {
+        SecurityFindingKind::TaintedSink => "security/tainted-sink",
+        SecurityFindingKind::ClientServerLeak => "security/client-server-leak",
+    };
+    finding
+        .category
+        .as_deref()
+        .and_then(|category| super::doc_link_for_rule(&format!("security/{category}")))
+        .or_else(|| super::doc_link_for_rule(family))
 }
 
 /// Structured `Diagnostic.data` payload so agents reading `getDiagnostics()` can
@@ -119,7 +120,7 @@ pub fn security_diagnostic(finding: &SecurityFinding, mapper: &mut PositionMappe
         code: Some(NumberOrString::String(
             security_token(finding.kind).to_string(),
         )),
-        code_description: security_doc_link(),
+        code_description: security_doc_link(finding),
         message: format!("Security candidate ({label}): {}", finding.evidence),
         data: super::with_finding_id(
             Some(security_data(finding)),

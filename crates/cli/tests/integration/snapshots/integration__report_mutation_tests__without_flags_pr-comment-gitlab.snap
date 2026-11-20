@@ -14,7 +14,7 @@ Fallow codebase report, 1 finding: 1 error.
 
 | Severity | Rule | Location | Description |
 | --- | --- | --- | --- |
-| error | [`fallow/unused-export`](https://fallow.tools/docs/explanations/dead-code/#unused-exports) | `src/age.ts:5` | Export `isSenior` is never imported by other modules |
+| error | [`fallow/unused-export`](https://fallow.tools/docs/rules/unused-export/) | `src/age.ts:5` | Export `isSenior` is never imported by other modules |
 
 </details>
 
