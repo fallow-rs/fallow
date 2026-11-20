@@ -665,9 +665,12 @@ pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
     )
 }
 
-/// Reject `--sarif-file` on `dupes` and `health`, and on a bare run that
-/// leaves out the dead-code analysis. They write no SARIF file, so the flag
-/// had no effect and the run wrote nothing.
+/// Reject `--sarif-file` on every command that writes no SARIF file.
+///
+/// Only a bare run with the dead-code analysis, `dead-code`, `architecture`
+/// and `security` write the file (see `writes_sarif` in `write_scope.rs`).
+/// The `security` subcommands reject the flag with their own error. Each other
+/// command would accept the flag, exit 0 and write nothing.
 fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
     cli.sarif_file.as_ref()?;
     let command = match cli.command.as_ref() {
@@ -677,12 +680,16 @@ fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
                 "This run does not include the dead-code analysis, which writes the SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or include dead-code in the run.".to_string()
             });
         }
-        Some(Command::Dupes { .. }) => "dupes",
-        Some(Command::Health { .. }) => "health",
-        Some(_) => return None,
+        Some(Command::Check { .. } | Command::Architecture { .. } | Command::Security { .. }) => {
+            return None;
+        }
+        Some(Command::Dupes { .. }) => "`fallow dupes`",
+        Some(Command::Health { .. }) => "`fallow health`",
+        Some(Command::Audit { .. }) => "`fallow audit`",
+        Some(_) => "This command",
     };
     Some(format!(
-        "`fallow {command}` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
+        "{command} does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
     ))
 }
 
