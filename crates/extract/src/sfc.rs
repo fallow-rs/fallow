@@ -29,10 +29,10 @@ use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute
 use oxc_span::Span;
 
 /// Regex to extract `<script>` block content from Vue/Svelte SFCs.
-/// The attrs pattern handles `>` inside quoted attribute values (e.g., `generic="T extends Foo<Bar>"`).
+/// The attrs pattern skips `>` in quoted values and in brace expressions up to 3 levels deep (#4828).
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(
-        r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
+        r#"(?is)<script\b(?P<attrs>(?:[^>"'{]|"[^"]*"|'[^']*'|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{[^{}]*\})*\})*\}|\{)*)>(?P<body>[\s\S]*?)</script>"#,
     )
 });
 

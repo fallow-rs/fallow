@@ -26,7 +26,7 @@ use super::{build_template_complexity, build_unit_complexity};
 
 static MASK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(
-        r#"(?is)<script\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?</script\s*>|<style\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?</style\s*>|<!--[\s\S]*?-->"#,
+        r#"(?is)<script\b(?:[^>"'{]|"[^"]*"|'[^']*'|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{[^{}]*\})*\})*\}|\{)*>[\s\S]*?</script\s*>|<style\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?</style\s*>|<!--[\s\S]*?-->"#,
     )
 });
 

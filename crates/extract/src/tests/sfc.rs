@@ -2661,3 +2661,75 @@ fn an_empty_template_in_a_class_component_decorator_parses() {
     );
     assert_eq!(info.parse_error_count, 0);
 }
+
+/// Svelte markup can hold a `<script>` element with brace attribute
+/// expressions. A `>` inside such an expression must not end the opening tag,
+/// or the rest of the expression becomes the script body and fails to parse.
+/// See issue #4828.
+#[test]
+fn a_gt_in_a_brace_attribute_of_a_svelte_markup_script_does_not_end_the_tag() {
+    for markup in [
+        r#"<script src="/embed.js" onload={() => {}}></script>"#,
+        r#"<script src="/embed.js" data-big={2 > 1}></script>"#,
+        r#"<script src="/embed.js" onerror={() => (failed = "}>")}></script>"#,
+    ] {
+        let source = format!(
+            "<script>\nimport {{ used }} from './used';\nlet failed = false;\n</script>\n\n\
+             {{#if used}}\n    {markup}\n{{/if}}\n"
+        );
+        let info = parse_sfc(&source, "A.svelte");
+        assert_eq!(info.parse_error_count, 0, "{markup}");
+        assert!(!info.parse_panicked, "{markup}");
+        assert!(
+            info.imports.iter().any(|import| import.source == "./used"),
+            "{markup}"
+        );
+    }
+}
+
+#[test]
+fn the_script_tag_scan_skips_brace_attribute_expressions() {
+    let source = "<script>const a = 1;</script>\n\
+                  <script src=\"/x.js\" onload={() => { if (a > 1) {} }}></script>\n\
+                  <script src=\"/y.js\" data-x={`>${'}'}`}></script>";
+    let scripts = crate::sfc::extract_sfc_scripts(source);
+    let bodies: Vec<&str> = scripts.iter().map(|script| script.body.as_str()).collect();
+    assert_eq!(bodies, ["const a = 1;", "", ""]);
+}
+
+#[test]
+fn an_unbalanced_brace_in_script_attributes_still_finds_the_block() {
+    let scripts = crate::sfc::extract_sfc_scripts(
+        "<script data-x={ lang=\"ts\">const a: number = 1;</script>",
+    );
+    assert_eq!(scripts.len(), 1);
+    assert_eq!(scripts[0].body, "const a: number = 1;");
+}
+
+/// Vue SFCs use the same script tag scan. A `generic` attribute can hold
+/// braces and a `>`, and the scan must still find the body that follows.
+#[test]
+fn a_vue_generic_attribute_with_braces_and_gt_keeps_the_script_body() {
+    let source = "<script setup lang=\"ts\" generic=\"T extends Record<string, { a: number }>\">\n\
+                  import { helper } from './helper';\n\
+                  helper();\n\
+                  </script>\n\
+                  <template><div /></template>\n";
+    let scripts = crate::sfc::extract_sfc_scripts(source);
+    assert_eq!(scripts.len(), 1);
+    assert!(scripts[0].is_setup);
+    assert!(scripts[0].is_typescript);
+    assert!(
+        scripts[0]
+            .body
+            .contains("import { helper } from './helper';")
+    );
+
+    let info = parse_sfc(source, "Generic.vue");
+    assert_eq!(info.parse_error_count, 0);
+    assert!(
+        info.imports
+            .iter()
+            .any(|import| import.source == "./helper")
+    );
+}
