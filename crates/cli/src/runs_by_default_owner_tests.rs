@@ -38,11 +38,6 @@ const CALLERS: &[Caller] = &[
         calls: 1,
         why: "a bare run whose config turns duplication off counts as a whole-project run",
     },
-    Caller {
-        path: "crates/api/src/editor.rs",
-        calls: 1,
-        why: "an editor session that is not opened from a resolved run",
-    },
 ];
 
 const METHOD: &str = "runs_by_default";

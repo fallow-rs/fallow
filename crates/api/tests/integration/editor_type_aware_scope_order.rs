@@ -10,11 +10,13 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_api::run::{CommandKind, EnvSnapshot, SelectionInput, Surface};
 use fallow_api::{
     DeadCodeFilters, EditorAnalysisSession, TypeAwareOptions, TypeAwareRequire, TypeAwareSession,
 };
 use fallow_config::DuplicatesConfig;
 use fallow_types::semantic::SemanticCandidateDecisionKind;
+use fallow_types::sourced::{Given, Origin};
 use rustc_hash::FxHashSet;
 
 use crate::common::{rerun_with_type_aware_sidecar, write};
@@ -58,6 +60,28 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
+/// The run inputs of an editor session of `root`, as the language server
+/// gives them: dead code and duplication, no health.
+fn editor_run_inputs(root: &Path) -> fallow_config::RunInputs {
+    let origin = Origin::ApiOption("test");
+    let mut inputs = fallow_config::RunInputs::new(
+        Surface::Api,
+        EnvSnapshot::capture().with_cwd(root.to_path_buf()),
+        CommandKind::Editor,
+        SelectionInput::Booleans {
+            dead_code: true,
+            duplication: true,
+            health: false,
+            origin,
+        },
+    );
+    inputs.root = Some(Given {
+        value: root.to_path_buf(),
+        origin,
+    });
+    inputs
+}
+
 #[test]
 fn changed_files_scope_after_type_aware_pass_keeps_real_finding() {
     if std::env::var_os("FALLOW_TYPE_AWARE_BIN").is_none() {
@@ -67,7 +91,8 @@ fn changed_files_scope_after_type_aware_pass_keeps_real_finding() {
     let (_dir, root) = fixture();
     let changed: FxHashSet<PathBuf> = std::iter::once(root.join("src/lonely.ts")).collect();
 
-    let session = EditorAnalysisSession::load(&root, None).expect("load editor session");
+    let run = fallow_api::run::resolve_run(&editor_run_inputs(&root)).expect("resolve the run");
+    let session = EditorAnalysisSession::open(&run).expect("open the editor session");
     let mut output = session
         .analyze_project_with_changed_files(&DuplicatesConfig::default(), false, Some(&changed))
         .expect("analyze project");

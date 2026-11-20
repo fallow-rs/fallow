@@ -3,7 +3,7 @@
     reason = "tests use unwrap to keep fixture setup concise"
 )]
 
-use fallow_engine::session::AnalysisSession;
+use crate::session::AnalysisSession;
 
 #[test]
 fn shared_state_is_opt_in_and_survives_cache_modes() {

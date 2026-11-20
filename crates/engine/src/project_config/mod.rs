@@ -2,22 +2,29 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{
-    ConfigLoadOptions, EnvSnapshot, FallowConfig, ProductionAnalysis, ResolvedConfig,
-    WorkspaceDiagnostic, WorkspaceInfo,
-};
+use fallow_config::{EnvSnapshot, FallowConfig, ProductionAnalysis, ResolvedConfig};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::sourced::{Given, Origin};
 
 use crate::EngineResult;
-use crate::resolved_run::steps::{
-    GivenSettings, ModeEntry, flatten_production, mode_entry, mode_entry_lossy,
-    validate_boundaries_and_rule_packs, validate_config,
-};
+use crate::resolved_run::steps::{GivenSettings, ModeEntry, flatten_production, validate_config};
 pub(crate) use crate::resolved_run::steps::{collect_workspace_metadata, resolve_with_env_from};
 use crate::resolved_run::{PerAnalysis, ProductionInputs, decide_production};
 
+#[cfg(any(test, feature = "testing"))]
+mod direct_load;
 mod loader;
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use direct_load::default_project_config;
+#[cfg(any(test, feature = "testing"))]
+pub use direct_load::{
+    ProjectConfigOptions, ProjectConfigReadiness, config_for_project, config_for_project_analysis,
+    config_for_project_readiness, config_for_project_with_load_options,
+    config_for_project_with_production,
+};
+#[cfg(test)]
+pub(crate) use direct_load::{config_for_project_analysis_with_env, config_for_project_with_env};
 
 #[cfg(any(test, feature = "testing"))]
 pub use loader::load_count;
@@ -26,14 +33,15 @@ pub use loader::{
     load_config_file,
 };
 
-/// The production flags of one run: the global `--production` override and one
-/// override per analysis (`--production-dead-code`, `--production-health`,
-/// `--production-dupes`).
+/// The production flags of a config load without a resolved run: the global
+/// `--production` override and one override per analysis
+/// (`--production-dead-code`, `--production-health`, `--production-dupes`).
 ///
-/// Every command and surface that runs more than one analysis reads the
-/// production mode of each analysis from here, so the precedence has one
-/// implementation: the flag of the analysis, then the global override, then
-/// the config.
+/// The precedence is the precedence of the resolver without environment
+/// variables: the flag of the analysis, then the global override, then the
+/// config. A run of a surface decides the production mode in
+/// [`crate::resolved_run`]; these flags serve the loads of
+/// [`ConfigFile::for_analysis`] that have no run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProductionFlags {
     /// The global override. The CLI sets `Some(true)` for `--production` and
@@ -236,27 +244,43 @@ impl ProductionModes {
     }
 }
 
-/// Resolved project config plus the config file path when one was loaded.
-#[derive(Debug)]
-pub struct ProjectConfig {
-    /// Fully resolved config for the project.
-    pub config: ResolvedConfig,
-    /// Path of the loaded config file; `None` when defaults were used.
-    pub path: Option<PathBuf>,
-    /// Workspace metadata discovered under the project root.
-    pub workspaces: Vec<WorkspaceInfo>,
-    /// Diagnostics from workspace discovery (undeclared or invalid members).
-    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
-    /// Workspace discovery wall time in milliseconds, when measured.
-    pub(crate) workspace_discovery_ms: Option<f64>,
-    /// The plugin files, rule packs and `autoDiscover` directories that
-    /// config resolution read.
-    pub inputs: fallow_config::ConfigInputs,
-    /// The content of [`Self::inputs`] just before resolution read them.
-    pub(crate) inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
-    /// The files that duplication analyzes.
-    pub(crate) duplication: DuplicationScope,
+/// The resolved config of one mode entry, with the config file path and the
+/// workspace metadata of the load. A session holds it. Outside this crate
+/// only tests and benchmarks (feature `testing`) see the type.
+mod project {
+    use std::path::PathBuf;
+
+    use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo};
+
+    use super::DuplicationScope;
+
+    /// Resolved project config plus the config file path when one was loaded.
+    #[derive(Debug)]
+    pub struct ProjectConfig {
+        /// Fully resolved config for the project.
+        pub config: ResolvedConfig,
+        /// Path of the loaded config file; `None` when defaults were used.
+        pub path: Option<PathBuf>,
+        /// Workspace metadata discovered under the project root.
+        pub workspaces: Vec<WorkspaceInfo>,
+        /// Diagnostics from workspace discovery (undeclared or invalid members).
+        pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+        /// Workspace discovery wall time in milliseconds, when measured.
+        pub(crate) workspace_discovery_ms: Option<f64>,
+        /// The plugin files, rule packs and `autoDiscover` directories that
+        /// config resolution read.
+        pub inputs: fallow_config::ConfigInputs,
+        /// The content of [`Self::inputs`] just before resolution read them.
+        pub(crate) inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
+        /// The files that duplication analyzes.
+        pub(crate) duplication: DuplicationScope,
+    }
 }
+
+#[cfg(any(test, feature = "testing"))]
+pub use project::ProjectConfig;
+#[cfg(not(any(test, feature = "testing")))]
+pub(crate) use project::ProjectConfig;
 
 /// The files that duplication analyzes.
 #[derive(Debug, Clone)]
@@ -278,41 +302,6 @@ pub(crate) enum DuplicationScope {
     },
 }
 
-impl DuplicationScope {
-    /// The scope of a session config that is flattened for dead code. When
-    /// the flags and the config give duplication another production mode,
-    /// duplication gets a copy of the config flattened for its own mode.
-    fn for_dead_code_session(
-        file: &ConfigFile,
-        flags: ProductionFlags,
-        options: ResolveOptions,
-        env: &EnvSnapshot,
-    ) -> Self {
-        let mode = |analysis| {
-            if file.path.is_some() {
-                flags.effective(analysis, &file.config.production)
-            } else {
-                flags.mode(analysis)
-            }
-        };
-        if mode(ProductionAnalysis::Dupes) == mode(ProductionAnalysis::DeadCode) {
-            return Self::SameAsSession;
-        }
-        let dupes = ConfigFile {
-            config: file.config.clone(),
-            path: file.path.clone(),
-            chain: file.chain.clone(),
-        }
-        .for_analysis(ProductionAnalysis::Dupes, flags);
-        Self::Own {
-            config: Box::new(dupes.config),
-            options,
-            env: Box::new(env.clone()),
-            given: Box::default(),
-        }
-    }
-}
-
 /// The run settings that resolution records on the config.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolveOptions {
@@ -324,18 +313,6 @@ pub struct ResolveOptions {
     pub no_cache: bool,
     /// Suppress progress notes on stderr.
     pub quiet: bool,
-}
-
-impl ResolveOptions {
-    /// The settings of a host that resolves a config without a CLI run.
-    fn host_default() -> Self {
-        Self {
-            output: OutputFormat::Human,
-            threads: std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
-            no_cache: false,
-            quiet: true,
-        }
-    }
 }
 
 impl ConfigFile {
@@ -397,136 +374,6 @@ impl ModeEntry {
     }
 }
 
-/// Scalar config-loading knobs for one analysis family.
-#[derive(Debug, Clone, Copy)]
-pub struct ProjectConfigOptions {
-    /// Output format the resolved config carries into rendering.
-    pub output: OutputFormat,
-    /// Bypass the parse cache for this run.
-    pub no_cache: bool,
-    /// Worker thread count recorded on the resolved config.
-    pub threads: usize,
-    /// Tri-state production override: `Some` forces production-only analysis
-    /// on or off regardless of config, `None` defers to the config value.
-    pub production_override: Option<bool>,
-    /// Suppress progress notes on stderr.
-    pub quiet: bool,
-    /// Which analysis family's per-analysis production config to flatten.
-    pub analysis: ProductionAnalysis,
-    /// Permit `extends` config inheritance from remote URLs.
-    pub allow_remote_extends: bool,
-}
-
-/// Resolved project configuration plus doctor-specific plugin diagnostics.
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct ProjectConfigReadiness {
-    /// The same resolved configuration returned by [`config_for_project_analysis`].
-    pub project: ProjectConfig,
-    /// Unresolved resources named explicitly by the `plugins` config field.
-    pub configured_plugin_diagnostics: Vec<fallow_config::ConfiguredPluginDiagnostic>,
-}
-
-/// Resolve the analysis config for a project.
-///
-/// # Errors
-///
-/// Returns an error when an explicit config cannot be loaded or automatic
-/// config discovery finds an invalid config.
-pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
-    config_for_project_with_load_options(root, config_path, ConfigLoadOptions::default())
-}
-
-/// Resolve project config with an explicit inheritance trust policy.
-///
-/// # Errors
-///
-/// Returns an error when config loading or validation fails.
-pub fn config_for_project_with_load_options(
-    root: &Path,
-    config_path: Option<&Path>,
-    load_options: ConfigLoadOptions,
-) -> EngineResult<ProjectConfig> {
-    config_for_project_with_production(root, config_path, load_options, ProductionFlags::default())
-}
-
-/// Resolve project config with an explicit inheritance trust policy and the
-/// production flags of the run. The flags decide the production mode before
-/// resolution, so the rules that production mode turns off are off, as with
-/// the CLI `--production` flag. The config holds the production mode of dead
-/// code. Duplication in a session of this config uses its own production mode,
-/// as `fallow dupes` does.
-///
-/// # Errors
-///
-/// Returns an error when config loading or validation fails.
-pub fn config_for_project_with_production(
-    root: &Path,
-    config_path: Option<&Path>,
-    load_options: ConfigLoadOptions,
-    production: ProductionFlags,
-) -> EngineResult<ProjectConfig> {
-    load_project_config(
-        root,
-        config_path,
-        load_options,
-        production,
-        &EnvSnapshot::capture(),
-    )
-}
-
-/// Load a project config as [`config_for_project_with_production`] does, with
-/// the environment variables of `env` in place of the process environment.
-#[cfg(test)]
-pub(crate) fn config_for_project_with_env(
-    root: &Path,
-    config_path: Option<&Path>,
-    env: &EnvSnapshot,
-) -> EngineResult<ProjectConfig> {
-    load_project_config(
-        root,
-        config_path,
-        ConfigLoadOptions::default(),
-        ProductionFlags::default(),
-        env,
-    )
-}
-
-fn load_project_config(
-    root: &Path,
-    config_path: Option<&Path>,
-    load_options: ConfigLoadOptions,
-    production: ProductionFlags,
-    env: &EnvSnapshot,
-) -> EngineResult<ProjectConfig> {
-    let file = load_config_file(
-        root,
-        config_path,
-        ConfigFileOptions::new(load_options.allow_remote_extends, env),
-    )?;
-    let options = ResolveOptions::host_default();
-    let duplication = DuplicationScope::for_dead_code_session(&file, production, options, env);
-    let ConfigFile { config, path, .. } =
-        file.for_analysis(ProductionAnalysis::DeadCode, production);
-    if path.is_some() {
-        validate_boundaries_and_rule_packs(root, &config)?;
-    }
-    Ok(mode_entry(root, config, options, env)?.into_project_config(path, duplication))
-}
-
-impl ProjectConfig {
-    /// Drop the workspace metadata of the load, so that a session built from
-    /// this config discovers the workspaces again. A caller that changes the
-    /// resolved config after the load uses this.
-    #[must_use]
-    pub fn without_workspace_metadata(mut self) -> Self {
-        self.workspaces.clear();
-        self.workspace_diagnostics.clear();
-        self.workspace_discovery_ms = None;
-        self
-    }
-}
-
 /// Resolve the parse-cache size limit for a resolved config.
 #[must_use]
 pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
@@ -535,103 +382,6 @@ pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
         .map_or(fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
             (mb as usize).saturating_mul(1024 * 1024)
         })
-}
-
-pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
-    mode_entry_lossy(
-        root,
-        FallowConfig::default(),
-        ResolveOptions::host_default(),
-        &EnvSnapshot::capture(),
-    )
-    .into_project_config(None, DuplicationScope::SameAsSession)
-}
-
-/// Resolve config for a specific analysis without depending on the CLI crate.
-///
-/// This mirrors the CLI's core config semantics: explicit production overrides
-/// are applied before resolution, per-analysis production config is flattened
-/// for the requested analysis, and boundary / external plugin / rule-pack
-/// validation happens before the resolved config reaches the engine.
-///
-/// # Errors
-///
-/// Returns an engine error when config loading or validation fails.
-pub fn config_for_project_analysis(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ProjectConfigOptions,
-) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())
-        .map(|(project, _)| project)
-}
-
-/// [`config_for_project_analysis`] with the environment variables of `env`
-/// in place of the process environment.
-#[cfg(test)]
-pub(crate) fn config_for_project_analysis_with_env(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ProjectConfigOptions,
-    env: &EnvSnapshot,
-) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options, env).map(|(project, _)| project)
-}
-
-/// Resolve project configuration and collect typed readiness diagnostics for
-/// plugin resources named explicitly by the user configuration.
-///
-/// # Errors
-///
-/// Returns an engine error when config loading or validation fails.
-pub fn config_for_project_readiness(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ProjectConfigOptions,
-) -> EngineResult<ProjectConfigReadiness> {
-    let (project, configured_plugin_paths) =
-        resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())?;
-    let configured_plugin_diagnostics =
-        fallow_config::diagnose_configured_external_plugins(root, &configured_plugin_paths);
-    Ok(ProjectConfigReadiness {
-        project,
-        configured_plugin_diagnostics,
-    })
-}
-
-fn resolve_project_config_analysis(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ProjectConfigOptions,
-    env: &EnvSnapshot,
-) -> EngineResult<(ProjectConfig, Vec<String>)> {
-    let file = load_config_file(
-        root,
-        config_path,
-        ConfigFileOptions::new(options.allow_remote_extends, env),
-    )?
-    .for_analysis(
-        options.analysis,
-        ProductionFlags {
-            global: options.production_override,
-            ..ProductionFlags::default()
-        },
-    );
-    file.validate(root)?;
-    let ConfigFile { config, path, .. } = file;
-    let configured_plugin_paths = config.plugins.clone();
-    let options = ResolveOptions {
-        output: options.output,
-        threads: options.threads,
-        no_cache: options.no_cache,
-        quiet: options.quiet,
-    };
-    let entry = mode_entry(root, config, options, env)?;
-    // The caller names one analysis and owns the production mode of each
-    // other analysis, so a session of this config runs duplication only when
-    // the caller found that the modes match.
-    let project = entry.into_project_config(path, DuplicationScope::SameAsSession);
-    Ok((project, configured_plugin_paths))
 }
 
 #[cfg(test)]

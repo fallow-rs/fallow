@@ -13,11 +13,11 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ConfigLoadOptions, FallowConfig, ProductionAnalysis};
-use fallow_engine::project_config::{
+use crate::project_config::{
     ProjectConfig, ProjectConfigOptions, config_for_project, config_for_project_analysis,
     config_for_project_readiness, config_for_project_with_load_options,
 };
+use fallow_config::{ConfigLoadOptions, FallowConfig, ProductionAnalysis};
 use fallow_types::output_format::OutputFormat;
 
 const CONFIG_NAME: &str = ".fallowrc.json";
