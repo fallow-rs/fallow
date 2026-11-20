@@ -1520,3 +1520,77 @@ fn toml_output_clamps_jscpd_count_above_i64_max() {
         "{output}"
     );
 }
+
+fn migrate_knip_value(
+    knip: &serde_json::Value,
+) -> (
+    serde_json::Map<String, serde_json::Value>,
+    Vec<MigrationWarning>,
+) {
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_knip(knip, &mut config_map, &mut warnings);
+    (config_map, warnings)
+}
+
+#[test]
+fn knip_rule_severity_is_written_in_canonical_form() {
+    let (config_map, warnings) = migrate_knip_value(&serde_json::json!({
+        "rules": {"files": "Warning", "exports": "OFF", "duplicates": "warn"}
+    }));
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        config_map["rules"],
+        serde_json::json!({
+            "unused-files": "warn",
+            "unused-exports": "off",
+            "duplicate-exports": "warn",
+            "duplicate-export-aliases": "warn"
+        })
+    );
+    let result = MigrationResult {
+        config: serde_json::Value::Object(config_map),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let config: fallow_config::FallowConfig = toml::from_str(&generate_toml(&result)).unwrap();
+    assert_eq!(config.rules.unused_files, fallow_config::Severity::Warn);
+}
+
+#[test]
+fn knip_rule_with_an_invalid_severity_warns_once_and_is_skipped() {
+    let (config_map, warnings) = migrate_knip_value(&serde_json::json!({
+        "rules": {"files": 123, "exports": "loud", "duplicates": "maybe", "types": "error"}
+    }));
+    let rules = config_map["rules"].as_object().unwrap();
+    assert_eq!(rules.len(), 1, "{rules:?}");
+    assert_eq!(rules["unused-types"], "error");
+    let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
+    assert_eq!(fields, ["rules.files", "rules.exports", "rules.duplicates"]);
+}
+
+#[test]
+fn source_path_line_breaks_stay_inside_the_comment() {
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["/tmp/a\nentry = 5\r/knip.json (knip config)".to_string()],
+    };
+    let toml_out = generate_toml(&result);
+    let toml_config: fallow_config::FallowConfig = toml::from_str(&toml_out).unwrap();
+    assert_eq!(toml_config.entry, vec!["src/index.ts"], "{toml_out}");
+    assert!(
+        toml_out.starts_with("# Migrated from /tmp/a\\nentry = 5\\r/knip.json\n"),
+        "{toml_out}"
+    );
+
+    let jsonc_out = generate_jsonc(&result, false);
+    assert!(
+        jsonc_out.contains("// Migrated from /tmp/a\\nentry = 5\\r/knip.json\n"),
+        "{jsonc_out}"
+    );
+    let jsonc_config: fallow_config::FallowConfig =
+        jsonc_parser::parse_to_serde_value(&jsonc_out, &jsonc_parser::ParseOptions::default())
+            .unwrap();
+    assert_eq!(jsonc_config.entry, vec!["src/index.ts"]);
+}

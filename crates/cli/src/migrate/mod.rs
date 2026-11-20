@@ -640,6 +640,13 @@ fn source_head(s: &str) -> &str {
     s
 }
 
+/// The source of a `MigrationResult.sources` entry for a one-line comment.
+/// A path can hold a line break, which would end the comment, so `\r` and
+/// `\n` are written as escapes.
+fn source_label(s: &str) -> String {
+    source_head(s).replace('\r', "\\r").replace('\n', "\\n")
+}
+
 /// Whether a knip config contributed to the migration result.
 fn knip_contributed(result: &MigrationResult) -> bool {
     result.sources.iter().any(|s| s.contains("knip"))

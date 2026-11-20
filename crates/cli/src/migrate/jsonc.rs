@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::{MigrationResult, source_head};
+use super::{MigrationResult, source_label};
 
 #[expect(
     clippy::expect_used,
@@ -23,7 +23,7 @@ pub(super) fn generate_jsonc(result: &MigrationResult, has_local_schema: bool) -
     let source_comment = result
         .sources
         .iter()
-        .map(|s| source_head(s))
+        .map(|s| source_label(s))
         .collect::<Vec<_>>()
         .join(", ");
     let _ = writeln!(output, "  // Migrated from {source_comment}");

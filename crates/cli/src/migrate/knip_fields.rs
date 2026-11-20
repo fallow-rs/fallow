@@ -158,14 +158,33 @@ pub(super) fn migrate_rules(
     };
 
     let mut fallow_rules = Map::new();
+    let mut invalid_rules: Vec<&str> = Vec::new();
     for (knip_name, fallow_name) in KNIP_RULE_MAP {
-        if let Some(severity_val) = rules_obj.get(*knip_name)
-            && let Some(severity_str) = severity_val.as_str()
+        let Some(severity_val) = rules_obj.get(*knip_name) else {
+            continue;
+        };
+        match severity_val
+            .as_str()
+            .and_then(|text| text.parse::<fallow_config::Severity>().ok())
         {
-            fallow_rules.insert(
-                (*fallow_name).to_string(),
-                Value::String(severity_str.to_string()),
-            );
+            Some(severity) => {
+                fallow_rules.insert(
+                    (*fallow_name).to_string(),
+                    Value::String(severity.to_string()),
+                );
+            }
+            None if !invalid_rules.contains(knip_name) => {
+                invalid_rules.push(knip_name);
+                warnings.push(MigrationWarning {
+                    source: "knip",
+                    field: format!("rules.{knip_name}"),
+                    message: format!(
+                        "severity {severity_val} is not \"error\", \"warn\" or \"off\", so the rule was not migrated"
+                    ),
+                    suggestion: None,
+                });
+            }
+            None => {}
         }
     }
 
