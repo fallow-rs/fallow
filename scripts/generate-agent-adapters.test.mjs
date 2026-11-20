@@ -157,6 +157,63 @@ test("reports and removes a tracked adapter whose canonical source is gone", () 
   assert.equal(existsSync(join(repoRoot, ".claude", "agents", "rust-reviewer.md")), false);
 });
 
+test("retiring a tracked adapter keeps an untracked file in its folder", () => {
+  const repoRoot = createTrackedRepo();
+  generateAgentAdapters({ repoRoot });
+  git(repoRoot, ["add", "-f", "--", ".claude"]);
+  const note = join(repoRoot, ".claude", "skills", "review", "notes", "local.md");
+  mkdirSync(dirname(note), { recursive: true });
+  writeFileSync(note, "local note\n");
+  removeCanonicalSources(repoRoot);
+
+  const skipped = [];
+  assert.deepEqual(
+    generateAgentAdapters({ check: true, onSkip: (path) => skipped.push(path), repoRoot }),
+    [".claude/agents/rust-reviewer.md", ".claude/skills/review/SKILL.md"],
+  );
+  assert.deepEqual(skipped, [".claude/skills/review/notes/local.md"]);
+
+  generateAgentAdapters({ repoRoot });
+  assert.equal(readFileSync(note, "utf8"), "local note\n");
+  assert.equal(existsSync(join(repoRoot, ".claude", "skills", "review", "SKILL.md")), false);
+});
+
+test("retiring a tracked adapter removes its tracked companions and empty folders", () => {
+  const repoRoot = createTrackedRepo();
+  const reference = join(repoRoot, ".agents", "skills", "review", "references", "guide.md");
+  mkdirSync(dirname(reference), { recursive: true });
+  writeFileSync(reference, "guide\n");
+  generateAgentAdapters({ repoRoot });
+  git(repoRoot, ["add", "-f", "--", ".claude"]);
+  removeCanonicalSources(repoRoot);
+
+  assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), [
+    ".claude/agents/rust-reviewer.md",
+    ".claude/skills/review/SKILL.md",
+    ".claude/skills/review/references/guide.md",
+  ]);
+  generateAgentAdapters({ repoRoot });
+  assert.equal(existsSync(join(repoRoot, ".claude", "skills", "review")), false);
+});
+
+test("without Git, retiring an adapter keeps every file but its marked SKILL.md", () => {
+  const repoRoot = createRepo();
+  generateAgentAdapters({ repoRoot });
+  const note = join(repoRoot, ".claude", "skills", "review", "note.md");
+  writeFileSync(note, "local note\n");
+  removeCanonicalSources(repoRoot);
+
+  const skipped = [];
+  assert.deepEqual(
+    generateAgentAdapters({ check: true, onSkip: (path) => skipped.push(path), repoRoot }),
+    [".claude/agents/rust-reviewer.md", ".claude/skills/review/SKILL.md"],
+  );
+  assert.deepEqual(skipped, [".claude/skills/review/note.md"]);
+  generateAgentAdapters({ repoRoot });
+  assert.equal(readFileSync(note, "utf8"), "local note\n");
+  assert.equal(existsSync(join(repoRoot, ".claude", "skills", "review", "SKILL.md")), false);
+});
+
 test("a checkout nested in another repository judges ownership by its own paths", () => {
   // Git reports paths relative to the top of the repository it answers for, which
   // here is the outer one. Ownership is looked up by a path relative to the
