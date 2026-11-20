@@ -1158,8 +1158,8 @@ mod tests {
             .href
             .as_str();
         assert!(
-            href.ends_with("#re-export-cycles"),
-            "expected docs anchor in helpUri, got {href}"
+            href.ends_with("/rules/re-export-cycle/"),
+            "expected the rule page in codeDescription, got {href}"
         );
 
         let related = d.related_information.as_ref().unwrap();

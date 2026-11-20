@@ -59,6 +59,7 @@ mod catalog_sections;
 use catalog_sections::check_sections_catalog;
 
 const DEAD_CODE_DOCS: &str = "https://fallow.tools/docs/explanations/dead-code/";
+const RULES_DOCS: &str = "https://fallow.tools/docs/rules/";
 const HEALTH_DOCS: &str = "https://fallow.tools/docs/explanations/health/";
 const DUPES_DOCS: &str = "https://fallow.tools/docs/explanations/duplication/";
 const SUPPRESSION_DOCS: &str = "https://fallow.tools/docs/configuration/suppression/";
@@ -276,7 +277,7 @@ fn backtick_join(item: &Value, key: &str) -> String {
 
 // ---------------------------------------------------------------------------
 // Dead-code category table (shared by the check summary and the combined
-// code-issues breakdown). Labels, result keys, and docs anchors come from the
+// code-issues breakdown). Labels, result keys, and issue codes come from the
 // issue registry; a unit test below holds the two equal.
 // ---------------------------------------------------------------------------
 
@@ -288,264 +289,253 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "duplicate_prop_shapes",
         "duplicate-prop-shape",
     ),
-    ("Unused files", "unused_files", "unused-files"),
-    ("Unused exports", "unused_exports", "unused-exports"),
-    ("Unused types", "unused_types", "unused-types"),
+    ("Unused files", "unused_files", "unused-file"),
+    ("Unused exports", "unused_exports", "unused-export"),
+    ("Unused types", "unused_types", "unused-type"),
     (
         "Private type leaks",
         "private_type_leaks",
-        "private-type-leaks",
+        "private-type-leak",
     ),
     (
         "Deprecated exports in use",
         "deprecated_exports_in_use",
-        "deprecated-exports-in-use",
+        "deprecated-export-in-use",
     ),
     (
         "Unused dependencies",
         "unused_dependencies",
-        "unused-dependencies",
+        "unused-dependency",
     ),
     (
         "Unused devDependencies",
         "unused_dev_dependencies",
-        "unused-dependencies",
+        "unused-dev-dependency",
     ),
     (
         "Unused optionalDependencies",
         "unused_optional_dependencies",
-        "unused-dependencies",
+        "unused-optional-dependency",
     ),
     (
         "Unused enum members",
         "unused_enum_members",
-        "unused-enum-members",
+        "unused-enum-member",
     ),
     (
         "Unused class members",
         "unused_class_members",
-        "unused-class-members",
+        "unused-class-member",
     ),
     (
         "Unused store members",
         "unused_store_members",
-        "unused-store-members",
+        "unused-store-member",
     ),
     (
         "Unused namespace members",
         "unused_namespace_members",
-        "unused-namespace-members",
+        "unused-namespace-member",
     ),
     (
         "Unused protected class members",
         "unused_protected_class_members",
-        "unused-protected-class-members",
+        "unused-protected-class-member",
     ),
     (
         "Unresolved imports",
         "unresolved_imports",
-        "unresolved-imports",
+        "unresolved-import",
     ),
     (
         "Unlisted dependencies",
         "unlisted_dependencies",
-        "unlisted-dependencies",
+        "unlisted-dependency",
     ),
-    (
-        "Unlisted binaries",
-        "unlisted_binaries",
-        "unlisted-binaries",
-    ),
-    (
-        "Duplicate exports",
-        "duplicate_exports",
-        "duplicate-exports",
-    ),
+    ("Unlisted binaries", "unlisted_binaries", "unlisted-binary"),
+    ("Duplicate exports", "duplicate_exports", "duplicate-export"),
     (
         "Duplicate export aliases",
         "duplicate_export_aliases",
-        "duplicate-export-aliases",
+        "duplicate-export-alias",
     ),
     (
         "Circular dependencies",
         "circular_dependencies",
-        "circular-dependencies",
+        "circular-dependency",
     ),
-    ("Re-export cycles", "re_export_cycles", "re-export-cycles"),
-    ("Package cycles", "package_cycles", "package-cycles"),
+    ("Re-export cycles", "re_export_cycles", "re-export-cycle"),
+    ("Package cycles", "package_cycles", "package-cycle"),
     (
         "Boundary violations",
         "boundary_violations",
-        "boundary-violations",
+        "boundary-violation",
     ),
     (
         "Boundary coverage",
         "boundary_coverage_violations",
-        "boundary-violations",
+        "boundary-coverage",
     ),
     (
         "Boundary calls",
         "boundary_call_violations",
-        "boundary-violations",
+        "boundary-call-violation",
     ),
-    (
-        "Policy violations",
-        "policy_violations",
-        "policy-violations",
-    ),
+    ("Policy violations", "policy_violations", "policy-violation"),
     (
         "Invalid client exports",
         "invalid_client_exports",
-        "invalid-client-exports",
+        "invalid-client-export",
     ),
     (
         "Mixed client/server barrels",
         "mixed_client_server_barrels",
-        "mixed-client-server-barrels",
+        "mixed-client-server-barrel",
     ),
     (
         "Misplaced directives",
         "misplaced_directives",
-        "misplaced-directives",
+        "misplaced-directive",
     ),
     (
         "Unused server actions",
         "unused_server_actions",
-        "unused-server-actions",
+        "unused-server-action",
     ),
-    ("Route collisions", "route_collisions", "route-collisions"),
+    ("Route collisions", "route_collisions", "route-collision"),
     (
         "Dynamic segment conflicts",
         "dynamic_segment_name_conflicts",
-        "dynamic-segment-name-conflicts",
+        "dynamic-segment-name-conflict",
     ),
     (
         "Unrendered components",
         "unrendered_components",
-        "unrendered-components",
+        "unrendered-component",
     ),
     (
         "Unused component props",
         "unused_component_props",
-        "unused-component-props",
+        "unused-component-prop",
     ),
     (
         "Absent optional component props",
         "absent_component_props",
-        "absent-component-props",
+        "absent-component-prop",
     ),
     (
         "Constant parameters",
         "constant_parameters",
-        "constant-parameters",
+        "constant-parameter",
     ),
     (
         "Unused component emits",
         "unused_component_emits",
-        "unused-component-emits",
+        "unused-component-emit",
     ),
     (
         "Unused component inputs",
         "unused_component_inputs",
-        "unused-component-inputs",
+        "unused-component-input",
     ),
     (
         "Unused component outputs",
         "unused_component_outputs",
-        "unused-component-outputs",
+        "unused-component-output",
     ),
     (
         "Unused Svelte events",
         "unused_svelte_events",
-        "unused-svelte-events",
+        "unused-svelte-event",
     ),
     (
         "Unused Effect layers",
         "unused_effect_layers",
-        "unused-effect-layers",
+        "unused-effect-layer",
     ),
     (
         "Unused tagged errors",
         "unused_tagged_errors",
-        "unused-tagged-errors",
+        "unused-tagged-error",
     ),
     (
         "Unproduced catch tags",
         "unproduced_catch_tags",
-        "unproduced-catch-tags",
+        "unproduced-catch-tag",
     ),
     (
         "Unprovided injects",
         "unprovided_injects",
-        "unprovided-injects",
+        "unprovided-inject",
     ),
     (
         "Unused load data keys",
         "unused_load_data_keys",
-        "unused-load-data-keys",
+        "unused-load-data-key",
     ),
     (
         "Type-only dependencies",
         "type_only_dependencies",
-        "type-only-dependencies",
+        "type-only-dependency",
     ),
     (
         "Test-only dependencies",
         "test_only_dependencies",
-        "test-only-dependencies",
+        "test-only-dependency",
     ),
     (
         "Dev dependencies used in production",
         "dev_dependencies_in_production",
-        "dev-dependencies-in-production",
+        "dev-dependency-in-production",
     ),
     (
         "Stale suppressions",
         "stale_suppressions",
-        "stale-suppressions",
+        "stale-suppression",
     ),
     (
         "Unused catalog entries",
         "unused_catalog_entries",
-        "unused-catalog-entries",
+        "unused-catalog-entry",
     ),
     (
         "Empty catalog groups",
         "empty_catalog_groups",
-        "empty-catalog-groups",
+        "empty-catalog-group",
     ),
     (
         "Unresolved catalog references",
         "unresolved_catalog_references",
-        "unresolved-catalog-references",
+        "unresolved-catalog-reference",
     ),
     (
         "Unused dependency overrides",
         "unused_dependency_overrides",
-        "unused-dependency-overrides",
+        "unused-dependency-override",
     ),
     (
         "Misconfigured dependency overrides",
         "misconfigured_dependency_overrides",
-        "misconfigured-dependency-overrides",
+        "misconfigured-dependency-override",
     ),
 ];
 
-fn dead_code_docs(anchor: &str) -> String {
-    format!("{DEAD_CODE_DOCS}#{anchor}")
+/// Rule page of an issue code.
+fn rule_page(code: &str) -> String {
+    format!("{RULES_DOCS}{code}/")
 }
 
 fn dead_code_category_table(env: &Value) -> String {
     DEAD_CODE_CATEGORIES
         .iter()
-        .filter_map(|(name, key, anchor)| {
+        .filter_map(|(name, key, code)| {
             let n = arr(env, key)
                 .filter(|item| {
                     !fallow_types::results::ERROR_ONLY_RESULT_KEYS.contains(key)
                         || s(item, "effective_severity") == "error"
                 })
                 .count();
-            (n > 0).then(|| format!("| [{name}]({}) | {n} |", dead_code_docs(anchor)))
+            (n > 0).then(|| format!("| [{name}]({}) | {n} |", rule_page(code)))
         })
         .collect::<Vec<_>>()
         .join("\n")

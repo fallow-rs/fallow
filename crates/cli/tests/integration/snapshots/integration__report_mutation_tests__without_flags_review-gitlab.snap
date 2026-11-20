@@ -11,7 +11,7 @@ expression: body
   },
   "comments": [
     {
-      "body": "**error** [`fallow/unused-export`](https://fallow.tools/docs/explanations/dead-code/#unused-exports): Export `isSenior` is never imported by other modules\n\n**Fix:** Remove the export, or keep it when it is public API.\n\n```suggestion:-0+0\nfunction isSenior(age: number): boolean {\n```\n\n<!-- fallow-fingerprint:v3: 61a33f11cb50d50e -->",
+      "body": "**error** [`fallow/unused-export`](https://fallow.tools/docs/rules/unused-export/): Export `isSenior` is never imported by other modules\n\n**Fix:** Remove the export, or keep it when it is public API.\n\n```suggestion:-0+0\nfunction isSenior(age: number): boolean {\n```\n\n<!-- fallow-fingerprint:v3: 61a33f11cb50d50e -->",
       "position": {
         "position_type": "text",
         "old_path": "src/age.ts",

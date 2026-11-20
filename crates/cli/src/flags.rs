@@ -1165,7 +1165,7 @@ fn print_flags_sarif(
     let mut rules = vec![serde_json::json!({
         "id": "fallow/feature-flag",
         "shortDescription": { "text": "Feature flag pattern detected" },
-        "helpUri": "https://fallow.tools/docs/cli/flags/",
+        "helpUri": crate::explain::rule_by_id("fallow/feature-flag").map(crate::explain::rule_docs_url),
         "defaultConfiguration": { "level": "note" },
     })];
 

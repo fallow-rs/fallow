@@ -929,6 +929,34 @@ mod tests {
         }
     }
 
+    /// The docs site builds one rule page for each `issue_types` row, at
+    /// `rules/<id>/`. Each docs link of a row must name that page, so each
+    /// link resolves to a rule id of this contract.
+    #[test]
+    fn issue_type_docs_urls_name_a_rule_page_of_the_contract() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+        let ids: FxHashSet<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        for row in rows {
+            let id = row["id"].as_str().unwrap();
+            let expected = format!("https://fallow.tools/docs/rules/{id}/");
+            assert_eq!(row["docs_url"], expected.as_str(), "docs_url of {id}");
+            if !row["explanation"].is_null() {
+                assert_eq!(
+                    row["explanation"]["docs"],
+                    expected.as_str(),
+                    "explanation.docs of {id}"
+                );
+            }
+            let linked = row["docs_url"]
+                .as_str()
+                .and_then(|url| url.strip_prefix("https://fallow.tools/docs/rules/"))
+                .and_then(|rest| rest.strip_suffix('/'))
+                .unwrap();
+            assert!(ids.contains(linked), "{id} links to unknown rule {linked}");
+        }
+    }
+
     /// Row-source completeness: every rule in every explain slice gets
     /// exactly one issue_types row, so the manifest cannot drift behind
     /// the rule registry again.

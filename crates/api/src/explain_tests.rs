@@ -150,8 +150,7 @@ fn rule_by_id_returns_none_for_unknown() {
 fn rule_docs_url_format() {
     let rule = rule_by_id("fallow/unused-export").unwrap();
     let url = rule_docs_url(rule);
-    assert!(url.starts_with("https://fallow.tools/docs/"));
-    assert!(url.contains("unused-exports"));
+    assert_eq!(url, "https://fallow.tools/docs/rules/unused-export/");
 }
 
 #[test]
@@ -544,12 +543,40 @@ fn security_rules_all_have_security_prefix() {
     }
 }
 
+/// The docs site has one rule page for each issue type, at `rules/<id>/`.
+#[test]
+fn every_rule_links_to_its_rule_page() {
+    for rule in all_rules() {
+        assert_eq!(
+            rule_docs_url(rule),
+            format!("https://fallow.tools/docs/rules/{}/", bare_rule_id(rule)),
+            "rule {} must link to its rule page",
+            rule.id
+        );
+    }
+}
+
+#[test]
+fn security_meta_links_each_rule_to_its_rule_page() {
+    let meta = meta_value(security_meta());
+    let rules = meta["rules"].as_object().unwrap();
+    assert_eq!(rules.len(), SECURITY_RULES.len());
+    for (id, rule) in rules {
+        let bare = id.strip_prefix("security/").unwrap();
+        assert_eq!(
+            rule["docs"],
+            format!("https://fallow.tools/docs/rules/{bare}/"),
+            "security rule {id} must link to its rule page"
+        );
+    }
+}
+
 #[test]
 fn security_rules_all_have_docs_path() {
     for rule in SECURITY_RULES {
-        assert_eq!(
-            rule.docs_path, "cli/security",
-            "security rule {} should point at security docs",
+        assert!(
+            rule.docs_path.starts_with("rules/"),
+            "security rule {} should point at its rule page",
             rule.id
         );
     }
@@ -597,23 +624,24 @@ fn check_rules_all_have_non_empty_fields() {
 fn rule_docs_url_health_rule() {
     let rule = rule_by_id("fallow/high-cyclomatic-complexity").unwrap();
     let url = rule_docs_url(rule);
-    assert!(url.starts_with("https://fallow.tools/docs/"));
-    assert!(url.contains("health"));
+    assert_eq!(
+        url,
+        "https://fallow.tools/docs/rules/high-cyclomatic-complexity/"
+    );
 }
 
 #[test]
 fn rule_docs_url_dupes_rule() {
     let rule = rule_by_id("fallow/code-duplication").unwrap();
     let url = rule_docs_url(rule);
-    assert!(url.starts_with("https://fallow.tools/docs/"));
-    assert!(url.contains("duplication"));
+    assert_eq!(url, "https://fallow.tools/docs/rules/code-duplication/");
 }
 
 #[test]
 fn rule_docs_url_security_rule() {
     let rule = rule_by_id("security/sql-injection").unwrap();
     let url = rule_docs_url(rule);
-    assert_eq!(url, "https://fallow.tools/docs/cli/security/");
+    assert_eq!(url, "https://fallow.tools/docs/rules/sql-injection/");
 }
 
 #[test]
@@ -951,7 +979,7 @@ fn the_mutation_survived_rule_reports_under_mutation_in_the_tests_category() {
     assert!(all_rules().any(|found| found.id == rule.id));
     assert_eq!(
         rule_docs_url(rule),
-        "https://fallow.tools/docs/cli/mutation/"
+        "https://fallow.tools/docs/rules/mutation-survived/"
     );
 }
 

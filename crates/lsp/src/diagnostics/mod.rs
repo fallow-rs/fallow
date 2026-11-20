@@ -18,13 +18,16 @@ use fallow_types::issue_meta::issue_meta_by_code;
 
 use crate::position::PositionMapper;
 
-/// Base URL for diagnostic documentation links.
-const DOCS_BASE: &str = "https://fallow.tools/docs/explanations/dead-code/#";
-
-/// Build a `CodeDescription` with a documentation URL for the given issue code.
+/// Build a `CodeDescription` with the rule page URL of the given issue code.
 fn doc_link_for_code(code: &str) -> Option<CodeDescription> {
-    let anchor = issue_meta_by_code(code)?.docs_anchor()?;
-    let url = format!("{DOCS_BASE}{anchor}");
+    let code = issue_meta_by_code(code)?.code;
+    doc_link_for_rule(&format!("fallow/{code}"))
+}
+
+/// Build a `CodeDescription` with the rule page URL of a registry rule id,
+/// such as `fallow/code-duplication` or `security/sql-injection`.
+fn doc_link_for_rule(rule_id: &str) -> Option<CodeDescription> {
+    let url = fallow_api::rule_docs_url(fallow_api::rule_by_id(rule_id)?);
     url.parse::<Uri>().ok().map(|href| CodeDescription { href })
 }
 
@@ -402,22 +405,22 @@ mod tests {
         let desc = link.unwrap();
         assert_eq!(
             desc.href.as_str(),
-            "https://fallow.tools/docs/explanations/dead-code/#unused-exports"
+            "https://fallow.tools/docs/rules/unused-export/"
         );
     }
 
     #[test]
-    fn lsp_doc_links_follow_issue_metadata_anchors() {
+    fn lsp_doc_links_name_the_rule_page() {
         for meta in fallow_types::issue_meta::diagnostic_issue_metas() {
-            let Some(anchor) = meta.docs_anchor() else {
+            if meta.docs_anchor().is_none() {
                 continue;
-            };
+            }
             let link = doc_link_for_code(meta.code)
                 .unwrap_or_else(|| panic!("missing LSP doc link for {}", meta.code));
             assert_eq!(
                 link.href.as_str(),
-                format!("https://fallow.tools/docs/explanations/dead-code/#{anchor}"),
-                "LSP doc link for {} must use IssueKindMeta docs anchor",
+                format!("https://fallow.tools/docs/rules/{}/", meta.code),
+                "LSP doc link for {} must name its rule page",
                 meta.code
             );
         }

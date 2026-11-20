@@ -9,8 +9,8 @@ expression: body
 
 | Category | Count |
 |----------|------:|
-| [Unused files](https://fallow.tools/docs/explanations/dead-code/#unused-files) | 1 |
-| [Unused exports](https://fallow.tools/docs/explanations/dead-code/#unused-exports) | 1 |
+| [Unused files](https://fallow.tools/docs/rules/unused-file/) | 1 |
+| [Unused exports](https://fallow.tools/docs/rules/unused-export/) | 1 |
 
 ---
 

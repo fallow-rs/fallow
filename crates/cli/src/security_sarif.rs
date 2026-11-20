@@ -11,6 +11,17 @@ fn sarif_rule_id(finding: &SecurityFinding) -> String {
     canonical_security_rule_id(finding)
 }
 
+/// The rule page of a SARIF ruleId, else the rule page of its rule family
+/// (`security/server-only-import` has no page of its own).
+fn security_help_uri(rule_id: &str, family: &str) -> String {
+    crate::explain::rule_by_id(rule_id)
+        .or_else(|| crate::explain::rule_by_id(family))
+        .map_or_else(
+            || "https://github.com/fallow-rs/fallow".to_owned(),
+            crate::explain::rule_docs_url,
+        )
+}
+
 fn security_help_text(title: &str) -> String {
     format!(
         "Verify this unverified {title} candidate before acting. Review the source, sink, \
@@ -123,7 +134,7 @@ fn sarif_rule_def_server_only_leak(rule_id: &str) -> serde_json::Value {
             "text": security_help_text(title),
             "markdown": security_help_markdown(title)
         },
-        "helpUri": "https://github.com/fallow-rs/fallow",
+        "helpUri": security_help_uri(rule_id, "security/client-server-leak"),
         "defaultConfiguration": { "level": "note" }
     })
 }
@@ -143,7 +154,7 @@ fn sarif_rule_def_secret_leak(rule_id: &str) -> serde_json::Value {
             "text": security_help_text(title),
             "markdown": security_help_markdown(title)
         },
-        "helpUri": "https://github.com/fallow-rs/fallow",
+        "helpUri": security_help_uri(rule_id, "security/client-server-leak"),
         "defaultConfiguration": { "level": "note" }
     })
 }
@@ -174,7 +185,7 @@ fn sarif_rule_def_tainted_sink(
             "text": security_help_text(title),
             "markdown": security_help_markdown(title)
         },
-        "helpUri": "https://github.com/fallow-rs/fallow",
+        "helpUri": security_help_uri(rule_id, "security/tainted-sink"),
         "defaultConfiguration": { "level": "note" }
     });
     if let Some(cwe) = finding.cwe {
@@ -411,4 +422,23 @@ pub(super) fn sarif_location(
             "region": { "startLine": line.max(1), "startColumn": column }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::security_help_uri;
+
+    /// The SARIF `helpUri` is a public contract. A rule with its own page
+    /// links to that page; a rule without one links to the page of its family.
+    #[test]
+    fn help_uri_links_a_rule_page_or_the_page_of_its_family() {
+        assert_eq!(
+            security_help_uri("security/command-injection", "security/tainted-sink"),
+            "https://fallow.tools/docs/rules/command-injection/"
+        );
+        assert_eq!(
+            security_help_uri("security/server-only-import", "security/client-server-leak"),
+            "https://fallow.tools/docs/rules/client-server-leak/"
+        );
+    }
 }

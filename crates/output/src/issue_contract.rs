@@ -93,7 +93,7 @@ pub fn check_meta() -> Meta {
         MetaRule {
             name: Some("Missing Suppression Reason".to_string()),
             description: Some("A fallow-ignore-next-line or fallow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional.".to_string()),
-            docs: Some(rule_docs_url("explanations/dead-code#stale-suppressions")),
+            docs: Some(rule_docs_url("rules/missing-suppression-reason")),
         },
     );
 
@@ -365,8 +365,26 @@ mod tests {
         assert!(meta.rules.contains_key("missing-suppression-reason"));
         assert_eq!(
             meta.rules["unused-dev-dependency"].docs.as_deref(),
-            Some("https://fallow.tools/docs/explanations/dead-code/#unused-devdependencies")
+            Some("https://fallow.tools/docs/rules/unused-dev-dependency/")
         );
+    }
+
+    /// Each `_meta.rules` key is an issue type, and the docs site has one
+    /// rule page for each issue type at `rules/<id>/`.
+    #[test]
+    fn check_meta_links_each_rule_to_its_rule_page() {
+        for (code, rule) in check_meta().rules {
+            assert!(
+                code == MISSING_SUPPRESSION_REASON_CODE
+                    || issue_output_contract_by_code(&code).is_some(),
+                "_meta.rules key {code} is not an issue type"
+            );
+            assert_eq!(
+                rule.docs,
+                Some(format!("https://fallow.tools/docs/rules/{code}/")),
+                "_meta.rules.{code} must link to its rule page"
+            );
+        }
     }
 
     #[test]

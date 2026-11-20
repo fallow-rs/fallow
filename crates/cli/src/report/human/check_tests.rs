@@ -1939,7 +1939,7 @@ fn section_footer_contains_docs_link() {
     let rules = RulesConfig::default();
     let lines = build_human_lines(&results, &root, &rules, None);
     let text = plain(&lines);
-    assert!(text.contains("fallow.tools/docs/explanations/dead-code/"));
+    assert!(text.contains("https://fallow.tools/docs/rules/unused-file/"));
     assert!(text.contains("Files not reachable from any entry point"));
 }
 

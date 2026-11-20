@@ -16508,7 +16508,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-files",
+      "docs_url": "https://fallow.tools/docs/rules/unused-file/",
       "explanation": {
         "id": "fallow/unused-file",
         "name": "Unused Files",
@@ -16516,7 +16516,7 @@
         "rationale": "No code runs the file, but people still read it, search it and update it in refactors. A bug fix in the file has no effect on the running program.",
         "example": "src/old-widget.ts is not imported by any entry point, route, script, or config file.",
         "how_to_fix": "Delete the file if it is genuinely dead. If a framework or a tool loads it implicitly, add the file to `entry`, to `supportEntry` for a file that only tests or tooling load, or to `dynamicallyLoaded` for a file that the code loads at runtime by a computed path.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-files"
+        "docs": "https://fallow.tools/docs/rules/unused-file/"
       },
       "display_label": "Unused files"
     },
@@ -16556,7 +16556,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-exports",
+      "docs_url": "https://fallow.tools/docs/rules/unused-export/",
       "explanation": {
         "id": "fallow/unused-export",
         "name": "Unused Exports",
@@ -16564,7 +16564,7 @@
         "rationale": "An export that nothing imports looks like an API that other code depends on, so nobody dares to change or remove it. Code that only this export uses stays in the project with it.",
         "example": "export const formatPrice = ... exists in src/money.ts, but no module imports formatPrice.",
         "how_to_fix": "Remove the export or make it file-local. If it is public API, import it from an entry point or add an intentional suppression with context. To treat exported Effect schemas as type contracts, set effect.schemaExportsAsTypes: fallow then reports them as unused types.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-exports"
+        "docs": "https://fallow.tools/docs/rules/unused-export/"
       },
       "display_label": "Unused exports"
     },
@@ -16601,7 +16601,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-types",
+      "docs_url": "https://fallow.tools/docs/rules/unused-type/",
       "explanation": {
         "id": "fallow/unused-type",
         "name": "Unused Type Exports",
@@ -16609,7 +16609,7 @@
         "rationale": "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden.",
         "example": "export interface LegacyProps is exported, but no module imports the type.",
         "how_to_fix": "Remove the type export, inline it, or keep it behind an explicit API entry point when consumers rely on it. With effect.schemaExportsAsTypes, this rule also reports unused Effect schema exports.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-types"
+        "docs": "https://fallow.tools/docs/rules/unused-type/"
       },
       "display_label": "Unused types"
     },
@@ -16649,7 +16649,7 @@
       "note": "Opt-in API hygiene check; the rule defaults to off",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#private-type-leaks",
+      "docs_url": "https://fallow.tools/docs/rules/private-type-leak/",
       "explanation": {
         "id": "fallow/private-type-leak",
         "name": "Private Type Leaks",
@@ -16657,7 +16657,7 @@
         "rationale": "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported. Consumers cannot name that private type directly, so the backing type should be exported or removed from the public signature.",
         "example": "export function makeUser(): InternalUser exposes InternalUser even though InternalUser is not exported.",
         "how_to_fix": "Export the referenced type, change the public signature to an exported type, or keep the helper private.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#private-type-leaks"
+        "docs": "https://fallow.tools/docs/rules/private-type-leak/"
       },
       "display_label": "Private type leaks"
     },
@@ -16697,7 +16697,7 @@
       "note": "Opt-in migration sweep; the rule defaults to off",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#deprecated-exports-in-use",
+      "docs_url": "https://fallow.tools/docs/rules/deprecated-export-in-use/",
       "explanation": {
         "id": "fallow/deprecated-export-in-use",
         "name": "Deprecated Exports in Use",
@@ -16705,7 +16705,7 @@
         "rationale": "Exports whose leading JSDoc carries @deprecated and that still have at least one consumer in a reachable file. Each finding lists the exact consumer count, a sample of up to 10 consumers sorted by path and line, and the deprecation message. A deprecated export with no consumer is reported as an unused export instead, marked deprecated. A consumer in an unreachable file does not count, because that file is dead code itself. `public_api` is true when the export lives in an entry point or a re-export chain reaches one: external consumers are not visible, so the finding makes no removal claim. The rule is opt-in and defaults to off. A per-path override resolves on the file that declares the export, not on the consumer.",
         "example": "/** @deprecated Use formatMoney. */ export function formatPrice() is still imported by src/cart.ts and src/checkout.ts.",
         "how_to_fix": "Move each consumer to the replacement the message names, then remove the export. For the full consumer list, run `fallow dead-code --trace <file>:<export>`. Enable the rule with `deprecated-exports-in-use: \"warn\"` in `rules`, or pass `--deprecated-exports-in-use` for one run.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#deprecated-exports-in-use"
+        "docs": "https://fallow.tools/docs/rules/deprecated-export-in-use/"
       },
       "display_label": "Deprecated exports in use"
     },
@@ -16745,7 +16745,7 @@
       "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies",
+      "docs_url": "https://fallow.tools/docs/rules/unused-dependency/",
       "explanation": {
         "id": "fallow/unused-dependency",
         "name": "Unused Dependencies",
@@ -16753,7 +16753,7 @@
         "rationale": "Packages listed in dependencies that are never imported or required by any source file. A package that only a framework or a CLI tool loads can be reported when no plugin of fallow knows that use. To keep such a package, add it to `ignoreDependencies`.",
         "example": "package.json lists left-pad, but no source, script, config, or plugin-recognized file imports it.",
         "how_to_fix": "Remove the dependency after checking runtime/plugin usage. If another workspace uses it, move the dependency to that workspace.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-dependencies"
+        "docs": "https://fallow.tools/docs/rules/unused-dependency/"
       },
       "display_label": "Unused dependencies"
     },
@@ -16796,7 +16796,7 @@
       "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-devdependencies",
+      "docs_url": "https://fallow.tools/docs/rules/unused-dev-dependency/",
       "explanation": {
         "id": "fallow/unused-dev-dependency",
         "name": "Unused Dev Dependencies",
@@ -16804,7 +16804,7 @@
         "rationale": "Every install on every developer machine and in every CI run downloads the package. Its security advisories and version updates still need a review, for a package that no code uses.",
         "example": "package.json lists left-pad, but no source, script, config, or plugin-recognized file imports it.",
         "how_to_fix": "Remove the dependency after checking runtime/plugin usage. If another workspace uses it, move the dependency to that workspace.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-devdependencies"
+        "docs": "https://fallow.tools/docs/rules/unused-dev-dependency/"
       },
       "display_label": "Unused devDependencies"
     },
@@ -16847,7 +16847,7 @@
       "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-optionaldependencies",
+      "docs_url": "https://fallow.tools/docs/rules/unused-optional-dependency/",
       "explanation": {
         "id": "fallow/unused-optional-dependency",
         "name": "Unused Optional Dependencies",
@@ -16855,7 +16855,7 @@
         "rationale": "The package manager still tries to install the package on each install. Its advisories and version updates still need a review, and readers assume that some platform needs it.",
         "example": "package.json lists left-pad, but no source, script, config, or plugin-recognized file imports it.",
         "how_to_fix": "Remove the dependency after checking runtime/plugin usage. If another workspace uses it, move the dependency to that workspace.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-optionaldependencies"
+        "docs": "https://fallow.tools/docs/rules/unused-optional-dependency/"
       },
       "display_label": "Unused optionalDependencies"
     },
@@ -16895,7 +16895,7 @@
       "note": "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#type-only-dependencies",
+      "docs_url": "https://fallow.tools/docs/rules/type-only-dependency/",
       "explanation": {
         "id": "fallow/type-only-dependency",
         "name": "Type-only Dependencies",
@@ -16903,7 +16903,7 @@
         "rationale": "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation.",
         "example": "zod is in dependencies but only appears in import type declarations.",
         "how_to_fix": "Move the package to devDependencies unless runtime code imports it as a value.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#type-only-dependencies"
+        "docs": "https://fallow.tools/docs/rules/type-only-dependency/"
       },
       "display_label": "Type-only dependencies"
     },
@@ -16943,7 +16943,7 @@
       "note": "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#test-only-dependencies",
+      "docs_url": "https://fallow.tools/docs/rules/test-only-dependency/",
       "explanation": {
         "id": "fallow/test-only-dependency",
         "name": "Test-only Dependencies",
@@ -16951,7 +16951,7 @@
         "rationale": "Production dependencies that are only imported from test files. These can usually move to devDependencies because production entry points do not require them at runtime.",
         "example": "vitest is listed in dependencies, but only test files import it.",
         "how_to_fix": "Move the package to devDependencies unless production code imports it at runtime.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#test-only-dependencies"
+        "docs": "https://fallow.tools/docs/rules/test-only-dependency/"
       },
       "display_label": "Test-only dependencies"
     },
@@ -16991,7 +16991,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#dev-dependencies-in-production",
+      "docs_url": "https://fallow.tools/docs/rules/dev-dependency-in-production/",
       "explanation": {
         "id": "fallow/dev-dependency-in-production",
         "name": "Dev Dependencies Used in Production",
@@ -16999,7 +16999,7 @@
         "rationale": "A package in `devDependencies` that is imported by production (non-test, non-config) source code via a runtime/value import. Whether it should be promoted to `dependencies` depends on the deployment: a production-only install (`pnpm install --prod`) omits devDependencies, so an import resolved at runtime breaks, while a build that inlines the package into its output resolves nothing at runtime and promoting it can instead make the deployment require an install it did not need. This is the promote-side mirror of `test-only-dependency` and `type-only-dependency`. A dev dependency imported from production code only via `import type` is not flagged (types are erased at build time), and a package also listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is left alone because another manifest section provides it at runtime.",
         "example": "yaml is in devDependencies, but src/config.ts imports { parse } from 'yaml' and runs it at runtime.",
         "how_to_fix": "Move the package to dependencies when the deployment installs them, so a production-only install keeps it. Leave it in devDependencies if the build inlines it into the output, if the only production imports are `import type`, or if another manifest section (dependencies / peer / optional) already provides it.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#dev-dependencies-in-production"
+        "docs": "https://fallow.tools/docs/rules/dev-dependency-in-production/"
       },
       "display_label": "Dev dependencies used in production"
     },
@@ -17039,7 +17039,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-enum-members",
+      "docs_url": "https://fallow.tools/docs/rules/unused-enum-member/",
       "explanation": {
         "id": "fallow/unused-enum-member",
         "name": "Unused Enum Members",
@@ -17047,7 +17047,7 @@
         "rationale": "Readers treat each enum member as a state that can occur, so switch statements, mappings and tests keep a branch for a value that no code uses.",
         "example": "Status.Legacy remains in an exported enum, but no code reads that member.",
         "how_to_fix": "Remove the member after checking serialized/API compatibility, or suppress it with a reason when external data still uses it.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-enum-members"
+        "docs": "https://fallow.tools/docs/rules/unused-enum-member/"
       },
       "display_label": "Unused enum members"
     },
@@ -17087,7 +17087,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-class-members",
+      "docs_url": "https://fallow.tools/docs/rules/unused-class-member/",
       "explanation": {
         "id": "fallow/unused-class-member",
         "name": "Unused Class Members",
@@ -17095,7 +17095,7 @@
         "rationale": "No code calls the member, but it stays in the public shape of the class. People keep it in step during refactors, and readers assume that some caller depends on it.",
         "example": "class Parser has a public parseLegacy method that is never called in the project.",
         "how_to_fix": "Remove or privatize the member. For reflection/framework lifecycle hooks, configure or suppress the intentional entry point.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-class-members"
+        "docs": "https://fallow.tools/docs/rules/unused-class-member/"
       },
       "display_label": "Unused class members"
     },
@@ -17137,7 +17137,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-store-members",
+      "docs_url": "https://fallow.tools/docs/rules/unused-store-member/",
       "explanation": {
         "id": "fallow/unused-store-member",
         "name": "Unused Store Members",
@@ -17145,7 +17145,7 @@
         "rationale": "Pinia store members (a `state` / `getters` / `actions` key, or a setup-store returned key) declared but never accessed by any consumer project-wide. The store binding is imported (so the module is reachable) yet a specific member is dead. Defaults to warn, not error: a store has an open declaration surface (plugins, dynamic dispatch) so confidence is lower. Activates only when pinia or @pinia/nuxt is a declared dependency.",
         "example": "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
         "how_to_fix": "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-store-members"
+        "docs": "https://fallow.tools/docs/rules/unused-store-member/"
       },
       "display_label": "Unused store members"
     },
@@ -17187,7 +17187,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-protected-class-members",
+      "docs_url": "https://fallow.tools/docs/rules/unused-protected-class-member/",
       "explanation": {
         "id": "fallow/unused-protected-class-member",
         "name": "Unused Protected Class Members",
@@ -17195,7 +17195,7 @@
         "rationale": "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked.",
         "example": "class Shape declares protected unusedHelper(), and neither Shape nor a subclass calls this.unusedHelper() or super.unusedHelper().",
         "how_to_fix": "Remove the member, or make it private when only the class reads it. If a subclass outside the project reads it, suppress the line with // fallow-ignore-next-line unused-protected-class-member.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-protected-class-members"
+        "docs": "https://fallow.tools/docs/rules/unused-protected-class-member/"
       },
       "display_label": "Unused protected class members"
     },
@@ -17237,7 +17237,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-namespace-members",
+      "docs_url": "https://fallow.tools/docs/rules/unused-namespace-member/",
       "explanation": {
         "id": "fallow/unused-namespace-member",
         "name": "Unused Namespace Members",
@@ -17245,7 +17245,7 @@
         "rationale": "No code reads the member, but its export makes it look like an API that other code depends on. People keep it in step during refactors and do not dare to remove it.",
         "example": "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",
         "how_to_fix": "Remove the unused member, or remove its export keyword when only the namespace body uses it. For generated code, turn the rule off for those files in overrides. Suppress an intentional member with // fallow-ignore-next-line unused-namespace-member.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-namespace-members"
+        "docs": "https://fallow.tools/docs/rules/unused-namespace-member/"
       },
       "display_label": "Unused namespace members"
     },
@@ -17285,7 +17285,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unresolved-imports",
+      "docs_url": "https://fallow.tools/docs/rules/unresolved-import/",
       "explanation": {
         "id": "fallow/unresolved-import",
         "name": "Unresolved Imports",
@@ -17293,7 +17293,7 @@
         "rationale": "When the runtime or the bundler cannot resolve the path either, the build fails or the module throws when it loads. fallow also loses the edge, so the files behind it can show up as unused.",
         "example": "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
         "how_to_fix": "Fix the specifier, restore the missing file, install the package, or align tsconfig path aliases with the runtime resolver.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unresolved-imports"
+        "docs": "https://fallow.tools/docs/rules/unresolved-import/"
       },
       "display_label": "Unresolved imports"
     },
@@ -17333,7 +17333,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies",
+      "docs_url": "https://fallow.tools/docs/rules/unlisted-dependency/",
       "explanation": {
         "id": "fallow/unlisted-dependency",
         "name": "Unlisted Dependencies",
@@ -17341,7 +17341,7 @@
         "rationale": "Packages imported without an applicable dependency declaration in package.json. This includes workspace packages imported from the repository root: npm workspace links make a package resolvable, but do not declare a dependency. Package self-references are allowed. Private packages and tooling may use ancestor declarations; publishable runtime code must declare its own dependencies.",
         "example": "Root src/app.ts imports @acme/shared, an npm workspace package. The root package.json lists workspaces but does not list @acme/shared as a dependency, so the import is unlisted even when npm links it into node_modules.",
         "how_to_fix": "Declare the imported package in the owning package.json, including the root manifest for root code. Use dependencies for runtime needs or devDependencies for tooling/tests, with a version accepted by your package manager. Self-references need no declaration. For deliberately ambient packages, use ignoreDependencies as an explicit opt-out.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies"
+        "docs": "https://fallow.tools/docs/rules/unlisted-dependency/"
       },
       "display_label": "Unlisted dependencies"
     },
@@ -17381,7 +17381,7 @@
       "note": "Needs installed dependencies; a project without a root node_modules reports none",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unlisted-binaries",
+      "docs_url": "https://fallow.tools/docs/rules/unlisted-binary/",
       "explanation": {
         "id": "fallow/unlisted-binary",
         "name": "Unlisted Binaries",
@@ -17389,7 +17389,7 @@
         "rationale": "Binaries that package.json scripts or process calls in source (`spawn`, `execSync`, `execa`, the `$` template of zx or execa, `Bun.spawn`) run with a literal command, when no installed or listed package provides them. A binary counts as provided when a `node_modules/.bin` link exists, a declared dependency or a workspace package declares it in `bin`, or it maps to a declared dependency. Shell builtins, commands that `npx` or `pnpm dlx` download, and a fixed list of common operating-system tools are skipped. The check needs installed dependencies and reports nothing without a root `node_modules`. Defaults to warn.",
         "example": "The package.json script `pack` runs `gnome-extensions pack ext`, and src/capture.ts calls `spawnSync(\"hyprctl\", [\"version\"])`. No installed package provides either binary.",
         "how_to_fix": "Add the package that provides the binary to devDependencies. When the operating system or the CI image provides it, add the name to ignoreBinaries.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unlisted-binaries"
+        "docs": "https://fallow.tools/docs/rules/unlisted-binary/"
       },
       "display_label": "Unlisted binaries"
     },
@@ -17429,7 +17429,7 @@
       "note": "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#duplicate-exports",
+      "docs_url": "https://fallow.tools/docs/rules/duplicate-export/",
       "explanation": {
         "id": "fallow/duplicate-export",
         "name": "Duplicate Exports",
@@ -17437,7 +17437,7 @@
         "rationale": "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating.",
         "example": "Button is exported from both src/ui/button.ts and src/components/button.ts.",
         "how_to_fix": "Rename or consolidate the exports so consumers have one intentional import target.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#duplicate-exports"
+        "docs": "https://fallow.tools/docs/rules/duplicate-export/"
       },
       "display_label": "Duplicate exports"
     },
@@ -17479,7 +17479,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#duplicate-export-aliases",
+      "docs_url": "https://fallow.tools/docs/rules/duplicate-export-alias/",
       "explanation": {
         "id": "fallow/duplicate-export-alias",
         "name": "Duplicate Export Aliases",
@@ -17487,7 +17487,7 @@
         "rationale": "One module exports the same binding under two or more names, for example `export const layer = make(); export default layer;` or `export { a, a as b }`. Consumers can import one value under several names, so the export surface is larger than it needs to be. Fallow groups the exports of a file by binding: a local binding name, or the source and imported name of a named re-export. Value and type-only exports are separate groups, and a plain specifier of a name that the file declares only as a type joins the type group. Two bindings with the same initializer are two bindings and are not reported. `export *`, files with CommonJS exports (`export =`, `module.exports`), component files and unreachable files are skipped. `ignoreExports` exempts a file with `*`, or a binding when one of its names is listed. Default warn. The rule differs from `duplicate-export`, which reports one export name in several files.",
         "example": "src/worker.ts has export const handler = createHandler() and export default handler, so one binding has the names handler and default.",
         "how_to_fix": "Keep one export name and update the importers of the other names. If the names are an intentional public API, add them to ignoreExports, or suppress the line with // fallow-ignore-next-line duplicate-export-alias.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#duplicate-export-aliases"
+        "docs": "https://fallow.tools/docs/rules/duplicate-export-alias/"
       },
       "display_label": "Duplicate export aliases"
     },
@@ -17529,7 +17529,7 @@
       "note": "`fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#circular-dependencies",
+      "docs_url": "https://fallow.tools/docs/rules/circular-dependency/",
       "explanation": {
         "id": "fallow/circular-dependency",
         "name": "Circular Dependencies",
@@ -17537,7 +17537,7 @@
         "rationale": "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code.",
         "example": "src/a.ts imports src/b.ts, and src/b.ts imports src/a.ts.",
         "how_to_fix": "Extract shared code to a third module, invert the dependency, or split initialization-time side effects from type-only contracts.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#circular-dependencies"
+        "docs": "https://fallow.tools/docs/rules/circular-dependency/"
       },
       "display_label": "Circular dependencies"
     },
@@ -17581,7 +17581,7 @@
       "note": "`fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#re-export-cycles",
+      "docs_url": "https://fallow.tools/docs/rules/re-export-cycle/",
       "explanation": {
         "id": "fallow/re-export-cycle",
         "name": "Re-Export Cycles",
@@ -17589,7 +17589,7 @@
         "rationale": "A barrel file re-exports from another barrel that ultimately re-exports back. When this happens, imports from any file in the loop may silently come up empty, because the re-export chain has no terminating module to resolve names against. To fix this: open any one file in the loop and remove the `export * from` (or `export { ... } from`) statement that points back into the cycle. Any single removal will break the cycle and restore working re-exports. A self-loop (a single barrel re-exporting from itself, often a rename leftover) is reported under the same rule with kind `self-loop`.",
         "example": "src/ui/index.ts has `export * from './forms'`, and src/ui/forms/index.ts has `export * from '..'`, so the two barrels re-export from each other.",
         "how_to_fix": "Remove one `export ... from` statement in the loop that points back into the cycle. For a self-loop, remove the statement with which the file re-exports itself.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#re-export-cycles"
+        "docs": "https://fallow.tools/docs/rules/re-export-cycle/"
       },
       "display_label": "Re-export cycles"
     },
@@ -17631,7 +17631,7 @@
       "note": "Requires a workspace with two or more packages. `fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#package-cycles",
+      "docs_url": "https://fallow.tools/docs/rules/package-cycle/",
       "explanation": {
         "id": "fallow/package-cycle",
         "name": "Package Cycles",
@@ -17639,7 +17639,7 @@
         "rationale": "Workspace packages whose resolved imports form a cycle. Each workspace package is a node and each resolved import from one package to another is an edge, so a package cycle can exist when no file-level cycle exists. Imports from test, spec, story, fixture and tooling config files are not edges, because those files are not part of the package build. Packages in a cycle cannot be built in dependency order. Each hop shows one example import and a `type_only` flag; a type-only hop still matters for declaration builds. To fix this, remove the imports on one hop, for example by moving the shared code to a package that both packages import.",
         "example": "packages/api imports `@acme/db`, and packages/db imports a type from `@acme/api`.",
         "how_to_fix": "Remove the imports on one hop. Move the code that both packages need into a third package that both packages import.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#package-cycles"
+        "docs": "https://fallow.tools/docs/rules/package-cycle/"
       },
       "display_label": "Package cycles"
     },
@@ -17679,7 +17679,7 @@
       "note": "Requires configured boundary zones (boundaries config). `fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations",
+      "docs_url": "https://fallow.tools/docs/rules/boundary-violation/",
       "explanation": {
         "id": "fallow/boundary-violation",
         "name": "Boundary Violations",
@@ -17687,7 +17687,7 @@
         "rationale": "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable.",
         "example": "features/billing imports app/admin even though the configured boundary only allows imports from shared and entities.",
         "how_to_fix": "Move the shared contract to an allowed zone, invert the dependency, or update the boundary config only if the architecture rule was wrong.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
+        "docs": "https://fallow.tools/docs/rules/boundary-violation/"
       },
       "display_label": "Boundary violations"
     },
@@ -17726,7 +17726,7 @@
       "note": "Requires boundaries.coverage.requireAllFiles. `fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations",
+      "docs_url": "https://fallow.tools/docs/rules/boundary-coverage/",
       "explanation": {
         "id": "fallow/boundary-coverage",
         "name": "Boundary Coverage",
@@ -17734,7 +17734,7 @@
         "rationale": "A file outside every zone is outside every boundary rule, so it can import from any layer. New code in that file can break the architecture, and no check reports it.",
         "example": "src/generated/client.ts is reachable but does not match any boundaries.zones[].patterns entry.",
         "how_to_fix": "Add the file to the intended zone pattern, move it under a zoned directory, or add a generated-file glob to boundaries.coverage.allowUnmatched.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
+        "docs": "https://fallow.tools/docs/rules/boundary-coverage/"
       },
       "display_label": "Boundary coverage"
     },
@@ -17774,7 +17774,7 @@
       "note": "Requires boundaries.calls.forbidden patterns. `fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations",
+      "docs_url": "https://fallow.tools/docs/rules/boundary-call-violation/",
       "explanation": {
         "id": "fallow/boundary-call-violation",
         "name": "Boundary Call Violation",
@@ -17782,7 +17782,7 @@
         "rationale": "The zone now performs an effect that the architecture keeps out of it, such as a shell command in domain code. Its tests then need that effect, and reviewers of the zone do not expect it.",
         "example": "src/domain/policy.ts calls execSync from node:child_process while boundaries.calls.forbidden bans child_process.* from the domain zone.",
         "how_to_fix": "Move the call into a zone that may perform the effect, route it through an allowed abstraction, or narrow the forbidden pattern if the rule was wrong. To suppress, use the boundary family token: `// fallow-ignore-next-line boundary-violation` governs import, coverage, and call findings alike (the rule-id-shaped `boundary-call-violation` is accepted as an alias).",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
+        "docs": "https://fallow.tools/docs/rules/boundary-call-violation/"
       },
       "display_label": "Boundary calls"
     },
@@ -17821,7 +17821,7 @@
       "note": "Requires a configured rule pack (rulePacks config). `fallow dead-code` also reports this finding until the next major version.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#policy-violations",
+      "docs_url": "https://fallow.tools/docs/rules/policy-violation/",
       "explanation": {
         "id": "fallow/policy-violation",
         "name": "Policy Violation",
@@ -17829,7 +17829,7 @@
         "rationale": "A call, import, export, catalogue-derived effect, or graph-resolved GDP proof producer violates a configured rule pack (the rulePacks config key). Packs are pure declarative data. Call rules match calls and new expressions, on written plus import-resolved canonical callees. Effect rules match calls only. Import rules match the raw specifier. GDP rules trace @gdp-ts/core proof producers through unambiguous re-exports and restrict which files may create proof factories, optionally by exact static proof kind. This is syntactic ownership analysis, not a runtime authorization guarantee. Follow the rule's message, move a producer into an allowed file, scope the rule with files/exclude globs, or adjust its severity.",
         "example": "src/app.ts imports moment while a rule pack bans the moment specifier with the message 'Use date-fns.'",
         "how_to_fix": "Follow the rule's message to replace banned usage or remove a banned export. For a GDP proof producer, move proof factory creation into an allowed file, or correct the rule's allowedFiles and optional proofKinds if the ownership policy was wrong. For a banned-import rule with allowNames, import a listed name by name. To waive one rule, use `// fallow-ignore-next-line policy-violation:<pack>/<rule-id>` or the file-level form. Use bare `policy-violation` only when you intend to suppress every rule-pack finding at that scope.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#policy-violations"
+        "docs": "https://fallow.tools/docs/rules/policy-violation/"
       },
       "display_label": "Policy violations"
     },
@@ -17868,7 +17868,7 @@
       "note": "Fix by removing the stale suppression marker itself",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions",
+      "docs_url": "https://fallow.tools/docs/rules/stale-suppression/",
       "explanation": {
         "id": "fallow/stale-suppression",
         "name": "Stale Suppressions",
@@ -17876,7 +17876,7 @@
         "rationale": "The comment tells readers that a problem exists where none does. When a new issue of the same kind appears on that line, the old comment hides it from review.",
         "example": "`// fallow-ignore-next-line unused-export` stays above an export that another module imports, so no unused-export finding remains for the comment to suppress.",
         "how_to_fix": "Remove the suppression. If a different issue is still intentional, replace it with a current, specific suppression.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions"
+        "docs": "https://fallow.tools/docs/rules/stale-suppression/"
       },
       "display_label": "Stale suppressions"
     },
@@ -17911,7 +17911,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions",
+      "docs_url": "https://fallow.tools/docs/rules/missing-suppression-reason/",
       "explanation": {
         "id": "fallow/missing-suppression-reason",
         "name": "Missing Suppression Reason",
@@ -17919,7 +17919,7 @@
         "rationale": "Without a reason, a reviewer cannot tell if the suppression is a decision or a shortcut. Later, nobody can check if the reason still holds, so the suppression stays forever.",
         "example": "`// fallow-ignore-next-line unused-export` appears without a reason after the token, while `requireSuppressionReason` is on.",
         "how_to_fix": "Add a concise reason after the suppression token, or remove the suppression if the issue is no longer intentional.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#stale-suppressions"
+        "docs": "https://fallow.tools/docs/rules/missing-suppression-reason/"
       },
       "display_label": "Missing suppression reasons"
     },
@@ -17962,7 +17962,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-catalog-entries",
+      "docs_url": "https://fallow.tools/docs/rules/unused-catalog-entry/",
       "explanation": {
         "id": "fallow/unused-catalog-entry",
         "name": "Unused catalog entry",
@@ -17970,7 +17970,7 @@
         "rationale": "No package uses the pinned version, but the entry still gets version updates and reviews. Readers assume that some workspace depends on it.",
         "example": "The catalog source declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
         "how_to_fix": "Delete the entry from the catalog source file. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-catalog-entries"
+        "docs": "https://fallow.tools/docs/rules/unused-catalog-entry/"
       },
       "display_label": "Unused catalog entries"
     },
@@ -18013,7 +18013,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#empty-catalog-groups",
+      "docs_url": "https://fallow.tools/docs/rules/empty-catalog-group/",
       "explanation": {
         "id": "fallow/empty-catalog-group",
         "name": "Empty catalog group",
@@ -18021,7 +18021,7 @@
         "rationale": "A named group under `catalogs:` in `pnpm-workspace.yaml` or Bun root `package.json` has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The default `catalog` map is intentionally ignored because some projects keep it as a stable hook.",
         "example": "The catalog source declares `catalogs: { react17: {} }` after the last react17 entry was removed.",
         "how_to_fix": "Delete the empty named group from the catalog source file. Comments between the deleted header and the next sibling can stay in place for manual review.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#empty-catalog-groups"
+        "docs": "https://fallow.tools/docs/rules/empty-catalog-group/"
       },
       "display_label": "Empty catalog groups"
     },
@@ -18064,7 +18064,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unresolved-catalog-references",
+      "docs_url": "https://fallow.tools/docs/rules/unresolved-catalog-reference/",
       "explanation": {
         "id": "fallow/unresolved-catalog-reference",
         "name": "Unresolved catalog reference",
@@ -18072,7 +18072,7 @@
         "rationale": "A workspace package.json declares a dependency with the `catalog:` or `catalog:<name>` protocol, but the catalog has no entry for that package. The package manager install will fail until the catalog is fixed. To fix: add the package to the named catalog, switch the reference to a different catalog that does declare it, or remove the reference and pin a hardcoded version. Scope: the detector scans `dependencies`, `devDependencies`, `peerDependencies`, and `optionalDependencies` in every workspace `package.json`, plus the pnpm override values in `pnpm-workspace.yaml` `overrides` (skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`), root `package.json` `pnpm.overrides` (skipped when `packageManager` names pnpm 11 or later, because pnpm 11 does not read it), and root `package.json` `resolutions` (read only when `packageManager` names pnpm 10 or earlier), using `pnpm-workspace.yaml` catalogs when present and Bun root `package.json` catalogs otherwise. See also: fallow/unused-catalog-entry (the inverse: catalog entries no consumer references).",
         "example": "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in the catalog source does not declare `old-react`. The package manager install will fail.",
         "how_to_fix": "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in the catalog source, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unresolved-catalog-references"
+        "docs": "https://fallow.tools/docs/rules/unresolved-catalog-reference/"
       },
       "display_label": "Unresolved catalog references"
     },
@@ -18116,7 +18116,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-dependency-overrides",
+      "docs_url": "https://fallow.tools/docs/rules/unused-dependency-override/",
       "explanation": {
         "id": "fallow/unused-dependency-override",
         "name": "Unused dependency override",
@@ -18124,7 +18124,7 @@
         "rationale": "An entry in `pnpm-workspace.yaml`'s `overrides:` section (skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`), `package.json#pnpm.overrides` (skipped when `packageManager` names pnpm 11 or later, which does not read it), npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose target package is not declared by any workspace package and is not present in the active readable lockfile (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, or `bun.lock`). Override entries linger after their target package leaves the resolved dependency tree. pnpm and npm projects without a readable lockfile fall back to workspace package manifests and keep a `hint` so transitive CVE pins can be reviewed before removal. Bun projects with only binary `bun.lockb` fail closed: fallow reports a workspace diagnostic and emits no unused-override finding until a readable `bun.lock` exists. To fix: delete the entry, refresh the active lockfile if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override.",
         "example": "The root package.json declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json declares `axios` and the active lockfile does not resolve it.",
         "how_to_fix": "Delete the entry from its reported declaration source. If the finding is caused by a stale or missing readable lockfile, refresh the active lockfile and rerun fallow. If the override is intentionally retained, add it to `ignoreDependencyOverrides` in your fallow config.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-dependency-overrides"
+        "docs": "https://fallow.tools/docs/rules/unused-dependency-override/"
       },
       "display_label": "Unused dependency overrides"
     },
@@ -18168,7 +18168,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#misconfigured-dependency-overrides",
+      "docs_url": "https://fallow.tools/docs/rules/misconfigured-dependency-override/",
       "explanation": {
         "id": "fallow/misconfigured-dependency-override",
         "name": "Misconfigured dependency override",
@@ -18176,7 +18176,7 @@
         "rationale": "An entry in `pnpm-workspace.yaml#overrides` (skipped when `packageManager` names a pnpm version that ignores it: pnpm before 10.5.1, or pnpm 10 or earlier when the root `package.json` declares non-empty `pnpm.overrides` or `resolutions`), `package.json#pnpm.overrides` (skipped when `packageManager` names pnpm 11 or later, which does not read it), npm or Bun's top-level `package.json#overrides`, or Bun's `package.json#resolutions` whose key or value cannot be interpreted in that source's override grammar. Common shapes include an empty key, an empty value, a malformed version selector (`@types/react@<<18`), or an unbalanced parent matcher (`react>`). The active package manager may reject or ignore the entry. To fix: correct the key or value according to that package manager's grammar, or remove the entry. See also: fallow/unused-dependency-override.",
         "example": "The root package.json declares `overrides: { \"axios\": \"\" }`. An empty override value is invalid and the active package manager will reject or ignore it.",
         "how_to_fix": "Fix the key or value to match the active package manager's grammar. For pnpm this includes bare or scoped package names, version selectors, parent matchers, and the supported `-`, `$ref`, and `npm:alias` values. For npm or Bun, preserve the supported nested object shape. Remove experimental entries that should not remain.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#misconfigured-dependency-overrides"
+        "docs": "https://fallow.tools/docs/rules/misconfigured-dependency-override/"
       },
       "display_label": "Misconfigured dependency overrides"
     },
@@ -18217,7 +18217,7 @@
       "note": "Requires the project to declare next",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#invalid-client-exports",
+      "docs_url": "https://fallow.tools/docs/rules/invalid-client-export/",
       "explanation": {
         "id": "fallow/invalid-client-export",
         "name": "Invalid client export",
@@ -18225,7 +18225,7 @@
         "rationale": "Next.js rejects the file when it compiles the route, so the page fails to build. The check reports the export before anyone opens the page or runs the build.",
         "example": "app/page.tsx starts with `\"use client\"` and exports `metadata`.",
         "how_to_fix": "Move the server-only export to a module without `\"use client\"`, such as a server component or `layout.tsx`. Or remove the directive when the module does not need to be a client boundary.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#invalid-client-exports"
+        "docs": "https://fallow.tools/docs/rules/invalid-client-export/"
       },
       "display_label": "Invalid client exports"
     },
@@ -18264,7 +18264,7 @@
       "note": "Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#mixed-client-server-barrels",
+      "docs_url": "https://fallow.tools/docs/rules/mixed-client-server-barrel/",
       "explanation": {
         "id": "fallow/mixed-client-server-barrel",
         "name": "Mixed client/server barrel",
@@ -18272,7 +18272,7 @@
         "rationale": "A barrel file (a module whose exports are `export ... from` re-exports) forwards a name from a `\"use client\"` module alongside a name from a server-only module (one carrying `\"use server\"`, importing the `server-only` package, or importing a server-only Next.js API such as `next/headers`). Importing one name from such a barrel drags the other's directive context across the React Server Components boundary, a known Next.js App Router problem. Type-only re-exports are ignored (erased at build), and a barrel re-exporting a client module alongside an ordinary undirected utility is not reported. To fix: split the barrel so client and server-only modules are re-exported from separate entry points. The check runs only when the project declares a React Server Components bundler: `next`, `waku`, `@lazarv/react-server`, `react-server-dom-webpack`, `react-server-dom-vite`, `react-server-dom-parcel` or `@vitejs/plugin-rsc`.",
         "example": "components/index.ts re-exports `Button` from a `\"use client\"` module and `getUser` from a module that imports `server-only`.",
         "how_to_fix": "Split the barrel: re-export the client modules from one file and the server-only modules from another file.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#mixed-client-server-barrels"
+        "docs": "https://fallow.tools/docs/rules/mixed-client-server-barrel/"
       },
       "display_label": "Mixed client/server barrels"
     },
@@ -18311,7 +18311,7 @@
       "note": "Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#misplaced-directives",
+      "docs_url": "https://fallow.tools/docs/rules/misplaced-directive/",
       "explanation": {
         "id": "fallow/misplaced-directive",
         "name": "Misplaced directive",
@@ -18319,7 +18319,7 @@
         "rationale": "A `\"use client\"` or `\"use server\"` directive string appears as an expression statement after a non-directive statement (an `import`, a `const`). React Server Components bundlers only honor a directive in the leading prologue, before any other statement; once any statement precedes it the string is parsed as an ordinary expression and silently ignored. The intended client/server boundary never takes effect, so the file is treated as a server module. To fix: move the directive to the very top of the file, above every import. The check runs only when the project declares a React Server Components bundler: `next`, `waku`, `@lazarv/react-server`, `react-server-dom-webpack`, `react-server-dom-vite`, `react-server-dom-parcel` or `@vitejs/plugin-rsc`.",
         "example": "A file has `import { useState } from 'react';` on line 1 and `\"use client\";` on line 2.",
         "how_to_fix": "Move the directive to the first line of the file, above every import.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#misplaced-directives"
+        "docs": "https://fallow.tools/docs/rules/misplaced-directive/"
       },
       "display_label": "Misplaced directives"
     },
@@ -18358,7 +18358,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unprovided-injects",
+      "docs_url": "https://fallow.tools/docs/rules/unprovided-inject/",
       "explanation": {
         "id": "fallow/unprovided-inject",
         "name": "Unprovided injects",
@@ -18366,7 +18366,7 @@
         "rationale": "A Vue `inject(KEY)` or Svelte `getContext(KEY)` reads a dependency-injection key (an imported or module-local symbol) that no matching `provide(KEY)` / `setContext(KEY)` supplies anywhere in the project. The read resolves to undefined at runtime, surfaced only at render. To fix: add a matching provider for the key, or remove the dead inject. Defaults to warn, not error: a provider may live outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host application). String-literal keys and keys imported from a package are abstained.",
         "example": "A component calls inject(ThemeKey) (Vue) or getContext(ThemeKey) (Svelte) with an imported symbol key, but no provide(ThemeKey) / setContext(ThemeKey) exists anywhere in the project.",
         "how_to_fix": "Add a matching provide() / setContext() for the key, or remove the dead inject() / getContext(). If a provider lives outside the analyzed graph (an app-level provide registered elsewhere, a plugin, a host app), suppress the line with // fallow-ignore-next-line unprovided-inject.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unprovided-injects"
+        "docs": "https://fallow.tools/docs/rules/unprovided-inject/"
       },
       "display_label": "Unprovided injects"
     },
@@ -18405,7 +18405,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unrendered-components",
+      "docs_url": "https://fallow.tools/docs/rules/unrendered-component/",
       "explanation": {
         "id": "fallow/unrendered-component",
         "name": "Unrendered components",
@@ -18413,7 +18413,7 @@
         "rationale": "A component is reachable in the module graph (a barrel re-exports it) but rendered nowhere in the project. The rule covers Vue, Svelte and Astro single-file components (the default export of a `.vue`, `.svelte` or `.astro` file), Angular components with an element selector, and Lit elements. For a single-file component: no `<Tag>`, no `:is` / `this=` binding, no `components` / `app.component` registration, no `h()` / auto-import use, and no script value-read. It survives unused-file (the barrel keeps it reachable) and unused-export (the re-export counts as a use), yet no file actually renders it. To fix: render the component somewhere, or delete it and drop the dead re-export. Defaults to warn, not error: a component can be rendered reflectively (a dynamic `<component :is>` resolved from a non-literal value), so analyzer confidence is lower. Components that are themselves entry points (route pages, layouts, `App.vue`) and components re-exported from a non-private package entry point are abstained.",
         "example": "components/Orphan.vue is re-exported from a barrel (export { default as Orphan } from './Orphan.vue') but no template, registration, h() call, or dynamic import ever renders it.",
         "how_to_fix": "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // fallow-ignore-next-line unrendered-component.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unrendered-components"
+        "docs": "https://fallow.tools/docs/rules/unrendered-component/"
       },
       "display_label": "Unrendered components"
     },
@@ -18452,7 +18452,7 @@
       "note": "Opt-in manual review candidate; defaults to off. Inspect caller evidence and defaults before changing the component. No automatic fix.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#absent-component-props",
+      "docs_url": "https://fallow.tools/docs/rules/absent-component-prop/",
       "explanation": {
         "id": "fallow/absent-component-prop",
         "name": "Absent optional component props",
@@ -18460,7 +18460,7 @@
         "rationale": "No caller passes the prop, so the code that reads it always runs with the default value. The other branch has no caller to test it, and the component looks more configurable than it is.",
         "example": "Card declares highlight?: boolean with a false default, reads highlight in its render body, and every inspected reachable caller renders <Card /> without highlight.",
         "how_to_fix": "Review inspected callers, defaults and API intent. Keep intentional stable props, update the component manually, or add a declaration-line fallow-ignore-next-line absent-component-prop comment. This candidate has no automatic fix.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#absent-component-props"
+        "docs": "https://fallow.tools/docs/rules/absent-component-prop/"
       },
       "display_label": "Absent optional component props"
     },
@@ -18499,7 +18499,7 @@
       "note": "Opt-in manual review candidate; defaults to off. Inspect the calls and the intent of the parameter before changing the function. No automatic fix.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#constant-parameters",
+      "docs_url": "https://fallow.tools/docs/rules/constant-parameter/",
       "explanation": {
         "id": "fallow/constant-parameter",
         "name": "Constant parameters",
@@ -18507,7 +18507,7 @@
         "rationale": "A parameter of a module-scope function gets the same literal at each visible call (reason identical-argument), or an optional parameter is passed by no call (reason never-passed). The finding lists the value, the call count, the calls, and the count of conditions that test the parameter; a condition that tests a constant points at a branch that cannot run. Enable constant-parameters explicitly; it defaults to off. The rule fires only when each caller is visible. It abstains for public API and entry-point exports, exports that a plugin marks as used, dynamic imports, CommonJS, escaped namespaces, a function used as a value or through call/apply/bind, template hosts that can import the function, direct eval, classic scripts, framework auto-imports, open contracts (arguments, overloads, a reassigned binding, decorators, generators), a module with a parse error that can import the function, and fewer than 2 calls. A self-call that passes an optional parameter on blocks never-passed. For an object-pattern parameter, the rule reports each option key on its own: a key that no call sets (never-passed), or a key that each call sets to the same literal (identical-argument). A written or rest parameter, an array pattern, and an object pattern with a default other than {} give no finding. In the default mode a test file is a caller; with --production only production callers count. Review the parameter manually; static analysis does not prove that no caller outside the project exists.",
         "example": "format(value, compact, locale?) is called 14 times in the project, each time as format(n, true). compact is always true, so the branch for false cannot run, and no call passes locale.",
         "how_to_fix": "Review the calls and the intent of the parameter. Remove the parameter and move the value into the function, or keep it when the flexibility is deliberate. Add a fallow-ignore-next-line constant-parameter comment above the parameter or the function to keep it. This candidate has no automatic fix.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#constant-parameters"
+        "docs": "https://fallow.tools/docs/rules/constant-parameter/"
       },
       "display_label": "Constant parameters"
     },
@@ -18546,7 +18546,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-props",
+      "docs_url": "https://fallow.tools/docs/rules/unused-component-prop/",
       "explanation": {
         "id": "fallow/unused-component-prop",
         "name": "Unused component props",
@@ -18554,7 +18554,7 @@
         "rationale": "Callers pass a value that the component ignores, so a caller can think that the prop changes the output. The prop also stays in the component type and in every call site.",
         "example": "Widget.vue declares defineProps<{ size: string }>(), or a React Widget({ size }) destructures `size`, but `size` is referenced nowhere in the component (Vue: its script or template; React: its function body or JSX).",
         "how_to_fix": "Remove the unused prop, or reference it in the component (Vue: the script / template; React: the function body or JSX). If the prop is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-prop.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-component-props"
+        "docs": "https://fallow.tools/docs/rules/unused-component-prop/"
       },
       "display_label": "Unused component props"
     },
@@ -18593,7 +18593,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-emits",
+      "docs_url": "https://fallow.tools/docs/rules/unused-component-emit/",
       "explanation": {
         "id": "fallow/unused-component-emit",
         "name": "Unused component emits",
@@ -18601,7 +18601,7 @@
         "rationale": "A parent can listen for an event that the component never emits. The handler of the parent never runs, and no error tells anyone.",
         "example": "Widget.vue declares defineEmits<{ close: [] }>() but `emit('close')` is called nowhere in the component's script.",
         "how_to_fix": "Remove the unused emit, or emit it in the script. If the emit is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-emit.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-component-emits"
+        "docs": "https://fallow.tools/docs/rules/unused-component-emit/"
       },
       "display_label": "Unused component emits"
     },
@@ -18640,7 +18640,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-inputs",
+      "docs_url": "https://fallow.tools/docs/rules/unused-component-input/",
       "explanation": {
         "id": "fallow/unused-component-input",
         "name": "Unused component inputs",
@@ -18648,7 +18648,7 @@
         "rationale": "An Angular `@Input()` / signal `input()` / `model()` declared input that is read nowhere in its own component (neither the inline / external template nor the class body). The Angular compiler never flags a declared-but-unread `@Input`, and there is no `@angular-eslint` rule for it. Conservative: usage detection over-credits by design (a template sentinel ref, any class-body member access by that name, or a bare identifier read counts as used), and the whole component abstains on an unresolved `extends` heritage clause (a base class in another file may read the input). A `model()` is recorded as an input only. Default warn; suppress or remove the input. The check runs only when the project declares `@angular/core`.",
         "example": "user-card.component.ts declares @Input() size: string (or size = input<string>()) but `size` is read nowhere in the template or the class body.",
         "how_to_fix": "Remove the unused input, or read it in the template or class body. If the input is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-input.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-component-inputs"
+        "docs": "https://fallow.tools/docs/rules/unused-component-input/"
       },
       "display_label": "Unused component inputs"
     },
@@ -18687,7 +18687,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-component-outputs",
+      "docs_url": "https://fallow.tools/docs/rules/unused-component-output/",
       "explanation": {
         "id": "fallow/unused-component-output",
         "name": "Unused component outputs",
@@ -18695,7 +18695,7 @@
         "rationale": "A parent can bind to an output that the component never emits. The handler of the parent never runs, and no error tells anyone.",
         "example": "user-card.component.ts declares @Output() close = new EventEmitter<void>() (or close = output<void>()) but `this.close.emit(...)` is called nowhere in the class.",
         "how_to_fix": "Remove the unused output, or emit it from the class. If the output is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-component-output.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-component-outputs"
+        "docs": "https://fallow.tools/docs/rules/unused-component-output/"
       },
       "display_label": "Unused component outputs"
     },
@@ -18734,7 +18734,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-svelte-events",
+      "docs_url": "https://fallow.tools/docs/rules/unused-svelte-event/",
       "explanation": {
         "id": "fallow/unused-svelte-event",
         "name": "Unused Svelte events",
@@ -18742,7 +18742,7 @@
         "rationale": "The component dispatches an event that no parent handles, so the action that the event reports has no effect. Readers assume that some parent reacts to it.",
         "example": "Child.svelte calls const dispatch = createEventDispatcher(); dispatch('dead'), but no parent listens for it (no <Child on:dead> anywhere in the project).",
         "how_to_fix": "Remove the dispatched event, or listen for it on the component (<Child on:dead={...}> or forward it via <Child on:dead>). If the event is dispatched reflectively (a dynamic name) or is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-svelte-event.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-svelte-events"
+        "docs": "https://fallow.tools/docs/rules/unused-svelte-event/"
       },
       "display_label": "Unused Svelte events"
     },
@@ -18781,7 +18781,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-effect-layers",
+      "docs_url": "https://fallow.tools/docs/rules/unused-effect-layer/",
       "explanation": {
         "id": "fallow/unused-effect-layer",
         "name": "Unused Effect layers",
@@ -18789,7 +18789,7 @@
         "rationale": "An Effect `Layer` definition (a module-scope const or a class static property such as `static layer = Layer.effect(this, make)`) whose every reference sits inside other layer definitions that are themselves unused. The layer never reaches `Effect.provide`, `ManagedRuntime.make`, `Layer.launch` or any other runtime use. fallow builds a layer graph from `Layer.*` initializers and `.pipe(Layer.*)` chains. Any value reference outside a layer definition is a root, including references in functions and tests. A layer with zero references is not reported here: `unused-export` or `unused-class-member` reports it, so the rule reports the tail of a dead composition and names the unused consumers. Default warn. The check runs only when the project declares `effect`.",
         "example": "services.ts defines const CacheLive = Cache.layer.pipe(Layer.provide(Db.layer)) and export const OrphanLive = Layer.mergeAll(CacheLive), but nothing provides OrphanLive.",
         "how_to_fix": "Remove the unused consumer layers first, then this layer, or compose the layer into a layer that reaches a runtime. If code outside the analyzed project composes it, suppress the line with // fallow-ignore-next-line unused-effect-layer.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-effect-layers"
+        "docs": "https://fallow.tools/docs/rules/unused-effect-layer/"
       },
       "display_label": "Unused Effect layers"
     },
@@ -18828,7 +18828,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-tagged-errors",
+      "docs_url": "https://fallow.tools/docs/rules/unused-tagged-error/",
       "explanation": {
         "id": "fallow/unused-tagged-error",
         "name": "Unused tagged errors",
@@ -18836,7 +18836,7 @@
         "rationale": "Types and `catchTag` handlers plan for a failure that no code produces. The handlers are dead code, and readers think that the failure can occur.",
         "example": "errors.ts declares class Expired extends Data.TaggedError(\"Expired\"), signatures list it in the error channel and a handler calls catchTag(\"Expired\"), but no code constructs Expired or fails with it.",
         "how_to_fix": "Fail with the error where the condition occurs, or remove the class, its type references and its catchTag handlers. If consumers outside the project construct or decode it, suppress the line with // fallow-ignore-next-line unused-tagged-error.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-tagged-errors"
+        "docs": "https://fallow.tools/docs/rules/unused-tagged-error/"
       },
       "display_label": "Unused tagged errors"
     },
@@ -18875,7 +18875,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unproduced-catch-tags",
+      "docs_url": "https://fallow.tools/docs/rules/unproduced-catch-tag/",
       "explanation": {
         "id": "fallow/unproduced-catch-tag",
         "name": "Unproduced catch tags",
@@ -18883,7 +18883,7 @@
         "rationale": "A `catchTag(\"X\", ...)` or `catchTags({ X: ... })` handler where every project class with tag `X` is never constructed or failed with, and no object literal `_tag: \"X\"` or tagged constructor produces the tag. A tag that no project class declares can come from a package, so the rule abstains. Effect built-in tags such as `TimeoutException` are never reported. The rule reports a handler only when no `unused-tagged-error` finding covers its classes: the error rule is off, or its finding is suppressed. Default warn. The check runs only when the project declares `effect`.",
         "example": "main.ts calls Effect.catchTag(\"Expired\", ...), the only class with tag Expired is never constructed, and the unused-tagged-error finding for it is suppressed.",
         "how_to_fix": "Remove the handler, or fail with the error where the condition occurs. If a package or code outside the project produces the tag, suppress the line with // fallow-ignore-next-line unproduced-catch-tag.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unproduced-catch-tags"
+        "docs": "https://fallow.tools/docs/rules/unproduced-catch-tag/"
       },
       "display_label": "Unproduced catch tags"
     },
@@ -18922,7 +18922,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-server-actions",
+      "docs_url": "https://fallow.tools/docs/rules/unused-server-action/",
       "explanation": {
         "id": "fallow/unused-server-action",
         "name": "Unused server actions",
@@ -18930,7 +18930,7 @@
         "rationale": "A Next.js Server Action (an export of a `\"use server\"` file) that no code in the project references: no import-and-call, no `action={fn}` JSX binding, no `<form action={fn}>`. This is the cross-graph \"declared but zero consumers\" direction, reclassified out of `unused-export` for `\"use server\"` files so the finding carries the action-specific signal. eslint-plugin-next is single-file and cannot see cross-file usage. It does not mean the endpoint is unreachable: Next.js still registers a generated action id, so it stays POST-able; it means no project code references it (likely forgotten or dead, and a candidate for removal to shrink surface area). Default warn; wire the action to a consumer or remove it. The check runs only when the project declares `next`.",
         "example": "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
         "how_to_fix": "Wire the action to a consumer (an import-and-call, an action={fn} binding, or a <form action={fn}>), or remove it. If it is invoked reflectively (an action registry dispatching by id, or a non-JS caller), suppress the line with // fallow-ignore-next-line unused-server-action.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-server-actions"
+        "docs": "https://fallow.tools/docs/rules/unused-server-action/"
       },
       "display_label": "Unused server actions"
     },
@@ -18969,7 +18969,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-load-data-keys",
+      "docs_url": "https://fallow.tools/docs/rules/unused-load-data-key/",
       "explanation": {
         "id": "fallow/unused-load-data-key",
         "name": "Unused load data keys",
@@ -18977,7 +18977,7 @@
         "rationale": "A SvelteKit route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) returns an object whose keys become the route's `data` prop. A returned key that NO consumer reads is dead: it runs a real server-side fetch / DB cost on every request for data nothing renders. fallow checks two channels: the sibling `+page.svelte`'s `data.<key>` reads (route-pinned), and project-wide `page.data.<key>` (Svelte 5 `$app/state`) / `$page.data.<key>` (Svelte 4 `$app/stores`) reads in any component. `svelte-check` types `data` via generated `$types` but never flags an unread returned key. The detector abstains (never false-flags) on a spread / non-literal / multi-return / computed-key / wrapped `load`, on a sibling that passes the whole `data` object opaquely, on a `+page.server.ts` whose universal `+page.ts` sibling forwards its `data`, and project-wide when any whole-object use of `page.data` / `$page.data` is seen. Default warn; delete the key or wire a consumer. A load fetch can have side effects, so there is no safe auto-fix. The check runs only when the project declares `@sveltejs/kit`.",
         "example": "src/routes/blog/+page.ts returns { posts, draftCount } but +page.svelte only reads data.posts and no component reads page.data.draftCount.",
         "how_to_fix": "Delete the unused key from the load() return (and skip its fetch), or wire a consumer (read data.<key> in +page.svelte, or page.data.<key> in a shared component). If the load fetch has a side effect you must keep, suppress the line with // fallow-ignore-next-line unused-load-data-key.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#unused-load-data-keys"
+        "docs": "https://fallow.tools/docs/rules/unused-load-data-key/"
       },
       "display_label": "Unused load data keys"
     },
@@ -19014,7 +19014,7 @@
       "note": "Opt-in: error gates CI; warn remains advisory even with --fail-on-issues. Defaults to off. Source-hop overrides decide severity.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#prop-drilling",
+      "docs_url": "https://fallow.tools/docs/rules/prop-drilling/",
       "explanation": {
         "id": "fallow/prop-drilling",
         "name": "Prop drilling",
@@ -19022,7 +19022,7 @@
         "rationale": "A React/Preact prop is received by a component and forwarded unchanged to a child, which forwards it unchanged again, until a component uses it. One intermediate \"pass-through\" component is enough: the prop then passes unchanged through two components before the consumer. The high-confidence signal is that the received identifier appears only as the root of forwarded child-JSX attribute values (so `<Child userName={user.name}/>` counts: the prop `user` is projected forward), not the attribute name matching. fallow emits located per-chain records (the source, each pass-through hop, and the consumer with file + line + component name) so CI and an agent can act: colocate the consumer with the data, lift the value to a React context/provider at a mid-chain hop, or compose the component so the intermediates no longer thread the prop. This is a graph-derived health signal, not a correctness error. The rule defaults to off (opt-in), like private-type-leak and the security rules: enable it with `prop-drilling: \"warn\"` in `rules`. Set `prop-drilling: \"error\"` to enforce remaining chains in CI. Warnings remain advisory even with strict flags. File overrides resolve at the source hop and can activate the rule when the base setting is off. Suppressed or baselined chains do not gate. Zero false positives by construction: any `{...props}` spread, `cloneElement`, element-as-prop / render-prop / children-as-function, or context `*.Provider` anywhere in the chain abstains the whole chain, as does an ambiguous or unresolvable hop. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
         "example": "Page receives `user` and renders <Layout user={user}/>; Layout only re-passes it to <Sidebar user={user}/>; Sidebar only re-passes it to <Profile user={user}/>, which finally reads user.name. The prop is drilled through Layout and Sidebar untouched.",
         "how_to_fix": "Collapse the chain: colocate the consumer with the data, lift the value into a React context/provider at a mid-chain hop and consume it there, or compose the component (pass the rendered child as children) so the intermediates no longer thread the prop. Enable the rule with rules.prop-drilling = \"warn\" (it defaults to off). To accept one chain, suppress the source prop with // fallow-ignore-next-line prop-drilling.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#prop-drilling"
+        "docs": "https://fallow.tools/docs/rules/prop-drilling/"
       },
       "display_label": "Prop drilling"
     },
@@ -19061,7 +19061,7 @@
       "note": "Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#thin-wrapper",
+      "docs_url": "https://fallow.tools/docs/rules/thin-wrapper/",
       "explanation": {
         "id": "fallow/thin-wrapper",
         "name": "Thin wrapper",
@@ -19069,7 +19069,7 @@
         "rationale": "A React/Preact component whose entire body is structural indirection: it returns exactly one capitalized component element that forwards the component's own props via a bare spread (`return <Child {...props}/>`), with no host-element wrapper, no extra children, no named attributes alongside the spread, no hooks, no branching, and no other statements. Such a component adds nothing of its own: it is a candidate for inlining at its call sites or deleting, not a correctness error. fallow emits a located per-wrapper record (file + line + the wrapper and child component names) so CI and an agent can act. The rule defaults to off (opt-in), like prop-drilling and the security rules: enable it with `thin-wrapper: \"warn\"` in `rules`. Zero false positives by construction: a `forwardRef` / `memo` wrapper (the sanctioned way to make a child ref-able or set a perf boundary), an exported component (a public-API re-brand / encapsulation), a context `*.Provider` wrapper, a `cloneElement` / render-prop forward, a wrapper that passes any named attribute alongside the spread (a fixed configuration), a self-render, or an unresolvable / member-expression child all abstain. A TypeScript-only type-narrowing wrapper (`const StrictButton = (p: StrictProps) => <Button {...p}/>`) is a known limitation, because fallow reads syntax and does not resolve types; suppress it with the inline comment. The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
         "example": "const ButtonWrapper = (props) => <Button {...props}/>; the wrapper has no own markup, hooks, or logic, so it only re-points at Button.",
         "how_to_fix": "Inline the wrapper at its call sites (use <Button .../> directly) or delete it. Keep it only if it is a deliberate seam (a planned divergence point, a public-API re-brand): an exported wrapper already abstains. Enable the rule with rules.thin-wrapper = \"warn\" (it defaults to off). To accept one wrapper, suppress it with // fallow-ignore-next-line thin-wrapper above the component definition.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#thin-wrapper"
+        "docs": "https://fallow.tools/docs/rules/thin-wrapper/"
       },
       "display_label": "Thin wrappers"
     },
@@ -19108,7 +19108,7 @@
       "note": "Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off.",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#duplicate-prop-shape",
+      "docs_url": "https://fallow.tools/docs/rules/duplicate-prop-shape/",
       "explanation": {
         "id": "fallow/duplicate-prop-shape",
         "name": "Duplicate prop shape",
@@ -19116,7 +19116,7 @@
         "rationale": "Three or more distinct React/Preact components, living in two or more files, whose statically-harvested prop name set is byte-for-byte identical after (a) excluding a fixed denylist of ubiquitous DOM / render-passthrough prop names (className, style, id, children, key, ref, the common event handlers, plus data-* / aria-* by prefix) and (b) requiring the remaining significant set to have four or more members. Identity is over names only, never types (fallow does not resolve types). This is a structural-refactor health signal: the recurring shape is a missing shared abstraction, so extract one shared `Props` type (or a base component) that every member reuses. It is never a correctness error and never an auto-fix. fallow emits one located record per participating component, each naming the shared `shape`, the `group_size`, and the other members in `sharing_components`. The rule defaults to off (opt-in), like thin-wrapper and the security rules: enable it with `duplicate-prop-shape: \"warn\"` in `rules`. Anti-noise gates (defended as rule-of-three plus a denylist-survivor floor, not tuned magic): the four-significant-prop floor turns `{label, onClick}` buttons into non-findings; the three-component floor is the rule-of-three abstraction trigger; the two-file floor keeps a local same-shaped variant pair (a render-prop pair, a Foo/FooImpl split) unflagged. A component whose props are not fully harvestable (a rest/spread signature, a forwardRef/memo over an imported interface) abstains, because a partial prop set can never be proven identical. Exact full-set identity only: a superset / subset relationship does not group, so a four-prop group and a five-prop superset form two findings (the price of zero invalid groups: the finding always fits one extracted shared type). The check runs only when the project declares `react` / `react-dom` / `next` / `preact`.",
         "example": "FieldText, FieldNumber, and FieldSelect (across three files) each declare exactly { name, label, value, onChange, error }. The five significant prop names are identical, so they form one duplicate-prop-shape group.",
         "how_to_fix": "Extract one shared Props type (e.g. type FieldProps = { name; label; value; onChange; error }) that every member reuses, or a base component the variants compose. Keep them separate only if a per-variant prop divergence is planned. Enable the rule with rules.duplicate-prop-shape = \"warn\" (it defaults to off). To accept one member, suppress it with // fallow-ignore-next-line duplicate-prop-shape above the component definition; the suppressed member still appears in its siblings' sharing_components because the group is real regardless of suppression.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#duplicate-prop-shape"
+        "docs": "https://fallow.tools/docs/rules/duplicate-prop-shape/"
       },
       "display_label": "Duplicate prop shapes"
     },
@@ -19157,7 +19157,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#route-collisions",
+      "docs_url": "https://fallow.tools/docs/rules/route-collision/",
       "explanation": {
         "id": "fallow/route-collision",
         "name": "Route collision",
@@ -19165,7 +19165,7 @@
         "rationale": "Two or more App Router route files (a `page` or a `route` handler) resolve to the same URL within one app-root. Route groups `(name)` and parallel slots `@name` do not change the URL, so `app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both own `/about`. Next.js fails the build (\"You cannot have two parallel pages that resolve to the same path\") because a URL can have at most one owner, whether a Page or a Route Handler. fallow surfaces every colliding file at once; the build error names only one. Buckets are scoped per app-root (per workspace package), so a monorepo with several independent Next apps sharing a path is not flagged. Files under a private `_folder` or an intercepting marker `(.)`/`(..)`/`(...)` are excluded. There is no safe auto-fix: move or merge one of the files so each URL has a single owner. The check runs only when the project declares `next`.",
         "example": "`app/(marketing)/about/page.tsx` and `app/(shop)/about/page.tsx` both resolve to the URL `/about`.",
         "how_to_fix": "Move or merge one of the files, so that each URL has one page or one route handler.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#route-collisions"
+        "docs": "https://fallow.tools/docs/rules/route-collision/"
       },
       "display_label": "Route collisions"
     },
@@ -19206,7 +19206,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#dynamic-segment-name-conflicts",
+      "docs_url": "https://fallow.tools/docs/rules/dynamic-segment-name-conflict/",
       "explanation": {
         "id": "fallow/dynamic-segment-name-conflict",
         "name": "Dynamic segment name conflict",
@@ -19214,7 +19214,7 @@
         "rationale": "Two or more sibling dynamic route segments at the same App Router tree position use different param spellings (`[id]` vs `[slug]`, or a catch-all `[...x]` vs an optional catch-all `[[...x]]`). Next.js throws \"You cannot use different slug names for the same dynamic path\" at dev and production runtime when the position is hit, because one position must resolve to a single param name. `next build` does not catch this (the build succeeds), so CI passes while the route crashes on its first request; fallow's static catch closes that gap. Route groups are transparent to the position and parallel slots fork it, so only genuinely-sibling segments conflict. To fix: rename the dynamic segments at the position to one consistent slug name. The check runs only when the project declares `next`.",
         "example": "`app/blog/[id]/page.tsx` and `app/blog/[slug]/edit/page.tsx` use two names for the dynamic segment at the same position.",
         "how_to_fix": "Rename the dynamic segments at that position to one name, for example `[slug]` in both paths.",
-        "docs": "https://fallow.tools/docs/explanations/dead-code/#dynamic-segment-name-conflicts"
+        "docs": "https://fallow.tools/docs/rules/dynamic-segment-name-conflict/"
       },
       "display_label": "Dynamic segment conflicts"
     },
@@ -19247,7 +19247,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#cyclomatic-complexity",
+      "docs_url": "https://fallow.tools/docs/rules/high-cyclomatic-complexity/",
       "explanation": {
         "id": "fallow/high-cyclomatic-complexity",
         "name": "High Cyclomatic Complexity",
@@ -19255,7 +19255,7 @@
         "rationale": "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings across every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup), counting each dialect's control-flow blocks (Angular `@if`/`@else if`/`@for`/`@case`/`@defer (when ...)` and legacy `*ngIf`/`*ngFor`; Vue `v-if`/`v-else-if`/`v-for`; Svelte `{#if}`/`{:else if}`/`{#each}`/`{#await}`/`{#key}`; the Astro equivalents) plus ternary and logical operators inside bound attributes and interpolations; on each top-level Svelte `{#snippet name(...)}` block, emitted as its own `<snippet:NAME>` unit; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
         "example": "`function route(req)` has a `switch` with 14 `case` labels and two `if` checks. Its cyclomatic complexity is 17, while `health.maxCyclomatic` is 15.",
         "how_to_fix": "For function findings, extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring. For `<template>` findings, flatten nested control flow and move branch selection out of the markup: Angular `@if`/`@for`/`@switch`/`@defer` and legacy `*ngIf`/`*ngFor` into computed signals on the component class, Vue `v-if`/`v-else-if`/`v-for` into computed properties, Svelte `{#if}`/`{:else if}`/`{#each}`/`{#await}`/`{#key}` into derived state, Astro control flow into props resolved in the frontmatter. In Svelte, moving a repeated or deeply nested block into a top-level `{#snippet}` gives it its own `<snippet:NAME>` unit with nesting rebased to zero, so the in-file extraction moves the score; splitting a large template into child components lowers the score in every dialect. For `<component>` rollup findings, attack the larger half first; the per-half breakdown lives in `component_rollup`. To report these findings without a failed run, set the `complexity-cyclomatic` or `complexity-cognitive` rule to `warn`.",
-        "docs": "https://fallow.tools/docs/explanations/health/#cyclomatic-complexity"
+        "docs": "https://fallow.tools/docs/rules/high-cyclomatic-complexity/"
       },
       "display_label": "High cyclomatic complexity"
     },
@@ -19288,7 +19288,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#cognitive-complexity",
+      "docs_url": "https://fallow.tools/docs/rules/high-cognitive-complexity/",
       "explanation": {
         "id": "fallow/high-cognitive-complexity",
         "name": "High Cognitive Complexity",
@@ -19296,7 +19296,7 @@
         "rationale": "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings across every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup), where nesting penalties accumulate on stacked control-flow blocks: Angular `@if`/`@for`/`@switch`, Vue `v-if`/`v-for`, Svelte `{#if}`/`{#each}`/`{#await}`; on each top-level Svelte `{#snippet name(...)}` block, emitted as its own `<snippet:NAME>` unit with nesting rebased to zero so in-file snippet extraction lowers the parent template's score; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`.",
         "example": "`applyDiscount` puts an `if` inside a `for` inside another `if`, with a `continue` and a `&&` chain in the inner block. Each nesting level adds to the score, which reaches 21 while `health.maxCognitive` is 15.",
         "how_to_fix": "For function findings, extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring. For `<template>` findings, flatten nested control flow and move branch selection out of the markup: Angular `@if`/`@for`/`@switch`/`@defer` and legacy `*ngIf`/`*ngFor` into computed signals on the component class, Vue `v-if`/`v-else-if`/`v-for` into computed properties, Svelte `{#if}`/`{:else if}`/`{#each}`/`{#await}`/`{#key}` into derived state, Astro control flow into props resolved in the frontmatter. In Svelte, moving a repeated or deeply nested block into a top-level `{#snippet}` gives it its own `<snippet:NAME>` unit with nesting rebased to zero, so the in-file extraction moves the score; splitting a large template into child components lowers the score in every dialect. For `<component>` rollup findings, attack the larger half first; the per-half breakdown lives in `component_rollup`. To report these findings without a failed run, set the `complexity-cyclomatic` or `complexity-cognitive` rule to `warn`.",
-        "docs": "https://fallow.tools/docs/explanations/health/#cognitive-complexity"
+        "docs": "https://fallow.tools/docs/rules/high-cognitive-complexity/"
       },
       "display_label": "High cognitive complexity"
     },
@@ -19329,7 +19329,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#complexity-metrics",
+      "docs_url": "https://fallow.tools/docs/rules/high-complexity/",
       "explanation": {
         "id": "fallow/high-complexity",
         "name": "High Complexity (Both)",
@@ -19337,7 +19337,7 @@
         "rationale": "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths and is hard to understand. The same rule fires on synthetic `<template>` findings in every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup) when both metrics exceed their thresholds, and on synthetic `<component>` rollup findings whose totals are the worst class method's score plus the template's. Ranking and `--targets` use the rollup totals; JSON exposes the per-half breakdown under `component_rollup`.",
         "example": "`parseRow` has a cyclomatic complexity of 24 and a cognitive complexity of 31, so the function exceeds both thresholds: it has many paths, and the paths are deeply nested.",
         "how_to_fix": "For function findings, extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring. For `<template>` findings, flatten nested control flow and move branch selection out of the markup: Angular `@if`/`@for`/`@switch`/`@defer` and legacy `*ngIf`/`*ngFor` into computed signals on the component class, Vue `v-if`/`v-else-if`/`v-for` into computed properties, Svelte `{#if}`/`{:else if}`/`{#each}`/`{#await}`/`{#key}` into derived state, Astro control flow into props resolved in the frontmatter. In Svelte, moving a repeated or deeply nested block into a top-level `{#snippet}` gives it its own `<snippet:NAME>` unit with nesting rebased to zero, so the in-file extraction moves the score; splitting a large template into child components lowers the score in every dialect. For `<component>` rollup findings, attack the larger half first; the per-half breakdown lives in `component_rollup`. To report these findings without a failed run, set the `complexity-cyclomatic` or `complexity-cognitive` rule to `warn`.",
-        "docs": "https://fallow.tools/docs/explanations/health/#complexity-metrics"
+        "docs": "https://fallow.tools/docs/rules/high-complexity/"
       },
       "display_label": "High complexity (both)"
     },
@@ -19370,7 +19370,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#crap-score",
+      "docs_url": "https://fallow.tools/docs/rules/high-crap-score/",
       "explanation": {
         "id": "fallow/high-crap-score",
         "name": "High CRAP Score",
@@ -19378,7 +19378,7 @@
         "rationale": "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex and poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph. This rule fires on functions only: synthetic template-family units (`<template>`, Svelte `<snippet:NAME>`) are excluded from the CRAP dimension, because a template is exercised only through its component and carries no coverage the formula could measure. Templates gate on the cyclomatic and cognitive dimensions instead.",
         "example": "A complex function has little or no matching Istanbul coverage, so its CRAP score crosses the configured gate. Synthetic template-family units (the `<template>` units on Angular, Vue, Svelte and Astro markup, and Svelte `<snippet:NAME>` units) are not scored on this dimension: a template carries no direct coverage of its own, so fallow gates templates on the cyclomatic and cognitive dimensions instead.",
         "how_to_fix": "Add focused tests for the risky branches first, then simplify the function if the score remains high. Template findings never carry this rule, so a `maxCrap` override scoped to a template unit buys nothing and can be removed. To report these findings without a failed run, set the `complexity-crap` rule to `warn`.",
-        "docs": "https://fallow.tools/docs/explanations/health/#crap-score"
+        "docs": "https://fallow.tools/docs/rules/high-crap-score/"
       },
       "display_label": "High CRAP score"
     },
@@ -19411,7 +19411,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#file-length",
+      "docs_url": "https://fallow.tools/docs/rules/long-file/",
       "explanation": {
         "id": "fallow/long-file",
         "name": "Long File",
@@ -19419,7 +19419,7 @@
         "rationale": "A long file is slow to review and to search. More changes touch the same file, so merge conflicts happen more often.",
         "example": "A module grew to 900 physical lines while `health.maxFileLines` is 500. Blank lines and comment lines count; a final newline does not add a line.",
         "how_to_fix": "Move cohesive groups of exports into their own modules, and remove unused code. In `fallow audit`, a long file that did not grow stays inherited, so you can enable the threshold on an existing project and stop further growth. To report these findings without a failed run, set the `complexity-file-lines` rule to `warn`. To raise the ceiling for generated files, use `thresholdOverrides[].maxFileLines`.",
-        "docs": "https://fallow.tools/docs/explanations/health/#file-length"
+        "docs": "https://fallow.tools/docs/rules/long-file/"
       },
       "display_label": "Long file"
     },
@@ -19452,7 +19452,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#refactoring-targets",
+      "docs_url": "https://fallow.tools/docs/rules/refactoring-target/",
       "explanation": {
         "id": "fallow/refactoring-target",
         "name": "Refactoring Target",
@@ -19460,7 +19460,7 @@
         "rationale": "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling.",
         "example": "A file combines high complexity density, churn, fan-in, and dead-code signals.",
         "how_to_fix": "Start with the listed evidence: remove dead exports, extract complex functions, then reduce fan-out or cycles in small steps.",
-        "docs": "https://fallow.tools/docs/explanations/health/#refactoring-targets"
+        "docs": "https://fallow.tools/docs/rules/refactoring-target/"
       },
       "display_label": "Refactoring target"
     },
@@ -19493,7 +19493,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#css-token-drift",
+      "docs_url": "https://fallow.tools/docs/rules/css-token-drift/",
       "explanation": {
         "id": "fallow/css-token-drift",
         "name": "CSS Token Drift",
@@ -19501,7 +19501,7 @@
         "rationale": "A hardcoded value does not follow a change of the design token. A theme or brand update misses this place, and the interface becomes inconsistent.",
         "example": "Markup uses `class=\"w-[13px] bg-[#1a2b3c]\"`, Tailwind arbitrary values, or a stylesheet sets `color: #1a2b3c` where the project has color tokens.",
         "how_to_fix": "Replace the value with the nearest token of the scale. Keep the value when the one-off value is deliberate.",
-        "docs": "https://fallow.tools/docs/explanations/health/#css-token-drift"
+        "docs": "https://fallow.tools/docs/rules/css-token-drift/"
       },
       "display_label": "CSS token drift"
     },
@@ -19534,7 +19534,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#css-duplicate-block",
+      "docs_url": "https://fallow.tools/docs/rules/css-duplicate-block/",
       "explanation": {
         "id": "fallow/css-duplicate-block",
         "name": "CSS Duplicate Block",
@@ -19542,7 +19542,7 @@
         "rationale": "A style rule declaration block is repeated across selectors, suggesting copy-pasted styling that can often be consolidated. The finding is advisory by default and does not affect the audit verdict unless rules.css-duplicate-block is set to error.",
         "example": "`.card` in src/card.css and `.panel` in src/panel.css declare the same four or more declarations.",
         "how_to_fix": "Move the shared declarations to one class or a shared mixin, and use it from both places.",
-        "docs": "https://fallow.tools/docs/explanations/health/#css-duplicate-block"
+        "docs": "https://fallow.tools/docs/rules/css-duplicate-block/"
       },
       "display_label": "CSS duplicate block"
     },
@@ -19575,7 +19575,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#css-selector-complexity",
+      "docs_url": "https://fallow.tools/docs/rules/css-selector-complexity/",
       "explanation": {
         "id": "fallow/css-selector-complexity",
         "name": "CSS Selector Complexity",
@@ -19583,7 +19583,7 @@
         "rationale": "A selector with high specificity or `!important` wins over later rules, so the next style change needs a stronger selector. A long descendant chain also breaks when the markup changes.",
         "example": "`.sidebar nav ul li a.active` sits four levels deep in nested SCSS, and its block uses `!important` on most declarations.",
         "how_to_fix": "Flatten the nesting, put a class on the element instead of a long descendant chain, and remove `!important` where the order of the rules can do the work.",
-        "docs": "https://fallow.tools/docs/explanations/health/#css-selector-complexity"
+        "docs": "https://fallow.tools/docs/rules/css-selector-complexity/"
       },
       "display_label": "CSS selector complexity"
     },
@@ -19616,7 +19616,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#css-dead-surface",
+      "docs_url": "https://fallow.tools/docs/rules/css-dead-surface/",
       "explanation": {
         "id": "fallow/css-dead-surface",
         "name": "CSS Dead Surface",
@@ -19624,7 +19624,7 @@
         "rationale": "The unused style still ships to users and still gets updated in redesigns. A dead scoped class often means that the markup changed and the style stayed behind.",
         "example": "Card.vue defines `.card__badge` in `<style scoped>`, but no part of the component uses that class.",
         "how_to_fix": "Delete the unused class after you check that no code adds it at runtime, for example through a class name built from a variable.",
-        "docs": "https://fallow.tools/docs/explanations/health/#css-dead-surface"
+        "docs": "https://fallow.tools/docs/rules/css-dead-surface/"
       },
       "display_label": "CSS dead surface"
     },
@@ -19657,7 +19657,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#css-broken-reference",
+      "docs_url": "https://fallow.tools/docs/rules/css-broken-reference/",
       "explanation": {
         "id": "fallow/css-broken-reference",
         "name": "CSS Broken Reference",
@@ -19665,7 +19665,7 @@
         "rationale": "The class or animation name has no definition, so the element gets no style or no animation. The browser reports no error, so the defect shows only on screen.",
         "example": "src/app.css sets `animation: fade-in 1s`, but no stylesheet defines `@keyframes fade-in`. Or markup uses `class=\"nav-item\"` where only `.nav-items` exists.",
         "how_to_fix": "Correct the name or add the missing definition. Keep the reference when a CSS-in-JS library or an external stylesheet defines the name.",
-        "docs": "https://fallow.tools/docs/explanations/health/#css-broken-reference"
+        "docs": "https://fallow.tools/docs/rules/css-broken-reference/"
       },
       "display_label": "CSS broken reference"
     },
@@ -19698,7 +19698,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-gaps",
+      "docs_url": "https://fallow.tools/docs/rules/untested-file/",
       "explanation": {
         "id": "fallow/untested-file",
         "name": "Untested File",
@@ -19706,7 +19706,7 @@
         "rationale": "No test imports the file, directly or through other modules. A change to the file can break production, and no test fails.",
         "example": "`src/routes/checkout.ts` imports `src/billing/invoice.ts`, but no test file imports either module, directly or through other modules.",
         "how_to_fix": "Add or wire a test that imports the runtime path, or update entry-point/test discovery if the existing test is invisible to fallow.",
-        "docs": "https://fallow.tools/docs/explanations/health/#coverage-gaps"
+        "docs": "https://fallow.tools/docs/rules/untested-file/"
       },
       "display_label": "Untested file"
     },
@@ -19739,7 +19739,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-gaps",
+      "docs_url": "https://fallow.tools/docs/rules/untested-export/",
       "explanation": {
         "id": "fallow/untested-export",
         "name": "Untested Export",
@@ -19747,7 +19747,7 @@
         "rationale": "No test reaches the export. A change to its behavior can break the production code that uses it, and no test fails.",
         "example": "`src/cart.ts` calls `roundCents` from `src/money.ts`. `test/money.test.ts` imports only `formatPrice` from that file, so no test reaches `roundCents`.",
         "how_to_fix": "Add or wire a test that imports the runtime path, or update entry-point/test discovery if the existing test is invisible to fallow.",
-        "docs": "https://fallow.tools/docs/explanations/health/#coverage-gaps"
+        "docs": "https://fallow.tools/docs/rules/untested-export/"
       },
       "display_label": "Untested export"
     },
@@ -19780,7 +19780,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+      "docs_url": "https://fallow.tools/docs/rules/runtime-safe-to-delete/",
       "explanation": {
         "id": "fallow/runtime-safe-to-delete",
         "name": "Production Safe To Delete",
@@ -19788,7 +19788,7 @@
         "rationale": "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits.",
         "example": "No module references `formatLegacyInvoice` in src/billing/legacy.ts, and the production capture shows no call to it.",
         "how_to_fix": "Check that the capture window covers rare paths, such as a monthly job, then delete the function.",
-        "docs": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
+        "docs": "https://fallow.tools/docs/rules/runtime-safe-to-delete/"
       },
       "display_label": "Production safe to delete"
     },
@@ -19821,7 +19821,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+      "docs_url": "https://fallow.tools/docs/rules/runtime-review-required/",
       "explanation": {
         "id": "fallow/runtime-review-required",
         "name": "Production Review Required",
@@ -19829,7 +19829,7 @@
         "rationale": "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused.",
         "example": "src/reports/page.tsx imports `exportCsv`, but the production capture shows no call to it.",
         "how_to_fix": "Ask the owner whether the path is seasonal, an error path or dead. Remove the call sites and the function when nobody needs them.",
-        "docs": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
+        "docs": "https://fallow.tools/docs/rules/runtime-review-required/"
       },
       "display_label": "Production review required"
     },
@@ -19862,7 +19862,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+      "docs_url": "https://fallow.tools/docs/rules/runtime-low-traffic/",
       "explanation": {
         "id": "fallow/runtime-low-traffic",
         "name": "Production Low Traffic",
@@ -19870,7 +19870,7 @@
         "rationale": "Production almost never runs the function, but the team still maintains and tests it. Each change to it carries risk for a path that few requests need.",
         "example": "`legacyLogin` ran 3 times in a capture of 2 million calls, below the `--low-traffic-threshold` fraction.",
         "how_to_fix": "Find the remaining callers, move them to the current path, then remove the function. Keep it when the rare callers matter.",
-        "docs": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
+        "docs": "https://fallow.tools/docs/rules/runtime-low-traffic/"
       },
       "display_label": "Production low traffic"
     },
@@ -19903,7 +19903,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+      "docs_url": "https://fallow.tools/docs/rules/runtime-coverage-unavailable/",
       "explanation": {
         "id": "fallow/runtime-coverage-unavailable",
         "name": "Runtime Coverage Unavailable",
@@ -19911,7 +19911,7 @@
         "rationale": "fallow has no runtime data for the function, so it cannot tell if production runs it. A decision to delete or keep the function has no runtime evidence.",
         "example": "`renderChart` runs in a worker thread, so the capture of the main process has no coverage entry for it.",
         "how_to_fix": "Capture coverage in the worker too, or check that the source maps map the bundle to the source file. Do not delete code because of this finding.",
-        "docs": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
+        "docs": "https://fallow.tools/docs/rules/runtime-coverage-unavailable/"
       },
       "display_label": "Runtime coverage unavailable"
     },
@@ -19944,7 +19944,7 @@
       "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+      "docs_url": "https://fallow.tools/docs/rules/runtime-coverage/",
       "explanation": {
         "id": "fallow/runtime-coverage",
         "name": "Runtime Coverage",
@@ -19952,7 +19952,7 @@
         "rationale": "The runtime data gave no known verdict for the function. A decision to delete or keep the function has no runtime evidence until fallow can read the verdict.",
         "example": "The runtime coverage add-on gives `syncInventory` a verdict that this fallow version does not know, so the finding has the `unknown` verdict.",
         "how_to_fix": "Update fallow, then run the analysis again. Until then, treat the finding as no evidence for or against the function.",
-        "docs": "https://fallow.tools/docs/explanations/health/#runtime-coverage"
+        "docs": "https://fallow.tools/docs/rules/runtime-coverage/"
       },
       "display_label": "Runtime coverage"
     },
@@ -19985,7 +19985,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+      "docs_url": "https://fallow.tools/docs/rules/coverage-intelligence-risky-change/",
       "explanation": {
         "id": "fallow/coverage-intelligence-risky-change",
         "name": "Coverage Intelligence Risky Change",
@@ -19993,7 +19993,7 @@
         "rationale": "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging.",
         "example": "The change touches `applyDiscount`, a hot path in production, which has less than 70% test coverage and a CRAP score above the limit.",
         "how_to_fix": "Add tests for the changed function before you merge, or split the change so that the hot path changes less.",
-        "docs": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
+        "docs": "https://fallow.tools/docs/rules/coverage-intelligence-risky-change/"
       },
       "display_label": "Coverage intelligence risky change"
     },
@@ -20026,7 +20026,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+      "docs_url": "https://fallow.tools/docs/rules/coverage-intelligence-delete/",
       "explanation": {
         "id": "fallow/coverage-intelligence-delete",
         "name": "Coverage Intelligence Delete",
@@ -20034,7 +20034,7 @@
         "rationale": "No code imports the code, production does not run it and no test reaches it. It costs reading and upkeep in each refactor, and nothing depends on it.",
         "example": "No module references `oldExport`, the production capture shows no call to it, and no test reaches it.",
         "how_to_fix": "Confirm with the owner of the file, then delete the code.",
-        "docs": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
+        "docs": "https://fallow.tools/docs/rules/coverage-intelligence-delete/"
       },
       "display_label": "Coverage intelligence delete"
     },
@@ -20067,7 +20067,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+      "docs_url": "https://fallow.tools/docs/rules/coverage-intelligence-review/",
       "explanation": {
         "id": "fallow/coverage-intelligence-review",
         "name": "Coverage Intelligence Review",
@@ -20075,7 +20075,7 @@
         "rationale": "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it.",
         "example": "`syncLegacy` is reachable but never ran in production, no test covers it, and its file has no owner or an inactive owner.",
         "how_to_fix": "Give the code an owner, and let that owner decide whether to change or delete it.",
-        "docs": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
+        "docs": "https://fallow.tools/docs/rules/coverage-intelligence-review/"
       },
       "display_label": "Coverage intelligence review"
     },
@@ -20108,7 +20108,7 @@
       "note": "Produced by fallow coverage analyze",
       "license": "freemium",
       "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
-      "docs_url": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+      "docs_url": "https://fallow.tools/docs/rules/coverage-intelligence-refactor/",
       "explanation": {
         "id": "fallow/coverage-intelligence-refactor",
         "name": "Coverage Intelligence Refactor",
@@ -20116,7 +20116,7 @@
         "rationale": "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior.",
         "example": "`calculateTax` runs often in production and has 70% or more test coverage, but its CRAP score is above the limit.",
         "how_to_fix": "Refactor the function in small steps, and run the tests after each step.",
-        "docs": "https://fallow.tools/docs/explanations/health/#coverage-intelligence"
+        "docs": "https://fallow.tools/docs/rules/coverage-intelligence-refactor/"
       },
       "display_label": "Coverage intelligence refactor"
     },
@@ -20149,7 +20149,7 @@
       "note": "Reported by fallow dupes (and bare fallow / fallow audit)",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/explanations/duplication/#clone-groups",
+      "docs_url": "https://fallow.tools/docs/rules/code-duplication/",
       "explanation": {
         "id": "fallow/code-duplication",
         "name": "Code Duplication",
@@ -20157,7 +20157,7 @@
         "rationale": "A bug fix in one copy does not reach the other copies. The copies drift apart, and each copy needs its own review and tests.",
         "example": "Two files contain the same normalized token sequence across a multi-line block.",
         "how_to_fix": "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge. To keep one intended copy out of the report, suppress it with `// fallow-ignore-next-line code-duplication`. To make a new copy fail `fallow audit`, set the `introduced-clone-group` rule to `error`.",
-        "docs": "https://fallow.tools/docs/explanations/duplication/#clone-groups"
+        "docs": "https://fallow.tools/docs/rules/code-duplication/"
       },
       "display_label": "Code duplication"
     },
@@ -20190,7 +20190,7 @@
       "note": "Reported by fallow flags",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/flags/",
+      "docs_url": "https://fallow.tools/docs/rules/feature-flag/",
       "explanation": {
         "id": "fallow/feature-flag",
         "name": "Feature Flags",
@@ -20198,7 +20198,7 @@
         "rationale": "A feature flag pattern detected by `fallow flags`: environment-variable checks, flag SDK calls (LaunchDarkly, Unleash, and similar), or config-object lookups. Long-lived flags accumulate dead branches; review old flags for retirement and pair with dead-code analysis to find branches that can no longer execute.",
         "example": "`src/checkout.ts` checks `process.env.FEATURE_NEW_CHECKOUT === 'true'`, or calls `client.variation('new-checkout', user, false)` of a flag SDK.",
         "how_to_fix": "Check if the flag still switches behavior. Run `fallow flags --retirement` to list the flags that are ready to go, then remove the flag check and the branch that production no longer runs.",
-        "docs": "https://fallow.tools/docs/cli/flags/"
+        "docs": "https://fallow.tools/docs/rules/feature-flag/"
       },
       "display_label": "Feature flags"
     },
@@ -20231,7 +20231,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/flags/#retirement-report",
+      "docs_url": "https://fallow.tools/docs/rules/flag-retirement-candidate/",
       "explanation": {
         "id": "fallow/flag-retirement-candidate",
         "name": "Flag Retirement Candidate",
@@ -20239,7 +20239,7 @@
         "rationale": "The flag no longer switches real behavior, but its branches stay in the code. Readers and tests keep both paths alive, and a dead path can come back on with a wrong flag value.",
         "example": "`FEATURE_NEW_CHECKOUT` has one read site, and `--flag-state` shows that the vendor rolled the flag out to all users.",
         "how_to_fix": "Confirm with the owner of the flag that the rollout is done. Remove the flag check, keep the branch that production runs, delete the other branch, then remove the flag from the vendor.",
-        "docs": "https://fallow.tools/docs/cli/flags/#retirement-report"
+        "docs": "https://fallow.tools/docs/rules/flag-retirement-candidate/"
       },
       "display_label": "Flag retirement candidate"
     },
@@ -20272,7 +20272,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/tainted-sink/",
       "explanation": {
         "id": "security/tainted-sink",
         "name": "Tainted Sink Candidates",
@@ -20280,7 +20280,7 @@
         "rationale": "The `tainted-sink` family covers data-driven `fallow security` catalogue categories. These findings are unverified candidates, not confirmed vulnerabilities. fallow can connect known source signals to captured sink shapes and add CWE metadata, but it does not prove attacker control, missing sanitization, exploitability, or business impact.",
         "example": "A non-literal request field reaches a catalogue sink such as security/sql-injection or security/dangerous-html. The finding is a candidate, not proof of exploitability.",
         "how_to_fix": "Trace the source, sink, sanitization, and runtime context. Fix confirmed issues with parameterization, escaping, validation, or safer APIs, and suppress only reviewed false positives with context.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/tainted-sink/"
       },
       "display_label": "Tainted sink candidates"
     },
@@ -20313,7 +20313,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/client-server-leak/",
       "explanation": {
         "id": "security/client-server-leak",
         "name": "Client-server Secret Leak Candidates",
@@ -20321,7 +20321,7 @@
         "rationale": "`client-server-leak` reports a candidate when a `use client` module can transitively reach a static non-public `process.env` or `import.meta.env` read. Public-by-convention env prefixes are treated as public. The finding is advisory and still needs bundle, framework, and runtime verification before treating it as a real exposure.",
         "example": "A module marked `use client` imports code that reads a non-public `process.env` or `import.meta.env` value through a static path.",
         "how_to_fix": "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/client-server-leak/"
       },
       "display_label": "Client-server secret leak candidates"
     },
@@ -20354,7 +20354,7 @@
       "note": "Include-required category: enable via security.categories.include",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/hardcoded-secret/",
       "explanation": {
         "id": "security/hardcoded-secret",
         "name": "Hardcoded Secret Candidates",
@@ -20362,7 +20362,7 @@
         "rationale": "`hardcoded-secret` reports opt-in candidates for provider-prefixed or contextual secret-shaped literals. The category is include-required and only runs when listed in `security.categories.include`. It avoids raw entropy alone, but every result still requires review, secret rotation decisions, and context before acting.",
         "example": "A provider-prefixed token-shaped literal is assigned to a secret-shaped variable, and the hardcoded-secret category is explicitly included.",
         "how_to_fix": "Rotate real credentials, move them to a secret manager or environment variable, and keep test-only literals clearly fake so they do not resemble provider tokens.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/hardcoded-secret/"
       },
       "display_label": "Hardcoded secret candidates"
     },
@@ -20395,7 +20395,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/dangerous-html/",
       "explanation": {
         "id": "security/dangerous-html",
         "name": "Dangerous HTML sink",
@@ -20403,7 +20403,7 @@
         "rationale": "If an attacker controls the value, the browser runs their script in the page (cross-site scripting). fallow does not prove that attacker input reaches the sink, so check the trace first.",
         "example": "`element.innerHTML = comment.body;`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/dangerous-html/"
       },
       "display_label": "Dangerous HTML sink"
     },
@@ -20436,7 +20436,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/template-escape-bypass/",
       "explanation": {
         "id": "security/template-escape-bypass",
         "name": "Template escape bypass sink",
@@ -20444,7 +20444,7 @@
         "rationale": "The template engine skips HTML escaping for the wrapped value. If an attacker controls it, their markup and script reach the page. Check the trace before you fix.",
         "example": "`return new Handlebars.SafeString(user.bio);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/template-escape-bypass/"
       },
       "display_label": "Template escape bypass sink"
     },
@@ -20477,7 +20477,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/command-injection/",
       "explanation": {
         "id": "security/command-injection",
         "name": "OS command injection sink",
@@ -20485,7 +20485,7 @@
         "rationale": "The shell parses the string, so an attacker who controls part of it can run other commands on the server. Check the trace before you fix.",
         "example": "`child_process.exec('convert ' + req.query.file + ' out.png');`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/command-injection/"
       },
       "display_label": "OS command injection sink"
     },
@@ -20518,7 +20518,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/code-injection/",
       "explanation": {
         "id": "security/code-injection",
         "name": "Code injection sink",
@@ -20526,7 +20526,7 @@
         "rationale": "The runtime executes the string as code. If an attacker controls it, they run code with the rights of the process. Check the trace before you fix.",
         "example": "`eval(req.body.expression);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/code-injection/"
       },
       "display_label": "Code injection sink"
     },
@@ -20559,7 +20559,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/dynamic-regex/",
       "explanation": {
         "id": "security/dynamic-regex",
         "name": "Dynamic regular expression sink",
@@ -20567,7 +20567,7 @@
         "rationale": "An attacker who controls the pattern can make the regular expression run for a long time and block the event loop. Check the trace before you fix.",
         "example": "`new RegExp(req.query.filter);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/dynamic-regex/"
       },
       "display_label": "Dynamic regular expression sink"
     },
@@ -20600,7 +20600,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/redos-regex/",
       "explanation": {
         "id": "security/redos-regex",
         "name": "ReDoS regex sink",
@@ -20608,7 +20608,7 @@
         "rationale": "The pattern can backtrack for a very long time on a crafted input string. An attacker can then block the event loop with one request.",
         "example": "`/^(a+)+$/.test(req.query.name);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/redos-regex/"
       },
       "display_label": "ReDoS regex sink"
     },
@@ -20641,7 +20641,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/resource-amplification/",
       "explanation": {
         "id": "security/resource-amplification",
         "name": "Resource amplification sink",
@@ -20649,7 +20649,7 @@
         "rationale": "A size that comes from the request controls how much memory the code allocates. One request with a large value can exhaust the memory of the process.",
         "example": "`new Array(Number(req.query.count));`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/resource-amplification/"
       },
       "display_label": "Resource amplification sink"
     },
@@ -20682,7 +20682,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/dynamic-module-load/",
       "explanation": {
         "id": "security/dynamic-module-load",
         "name": "Dynamic module load sink",
@@ -20690,7 +20690,7 @@
         "rationale": "If an attacker controls the module path, they choose which code the process loads and runs. Check the trace before you fix.",
         "example": "`require('./plugins/' + req.params.name);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/dynamic-module-load/"
       },
       "display_label": "Dynamic module load sink"
     },
@@ -20723,7 +20723,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/sql-injection/",
       "explanation": {
         "id": "security/sql-injection",
         "name": "SQL injection sink",
@@ -20731,7 +20731,7 @@
         "rationale": "The database parses the string as SQL. An attacker who controls part of it can read or change data that the query must not touch. Check the trace before you fix.",
         "example": "`db.query('SELECT * FROM users WHERE id = ' + req.params.id);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/sql-injection/"
       },
       "display_label": "SQL injection sink"
     },
@@ -20764,7 +20764,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/ssrf/",
       "explanation": {
         "id": "security/ssrf",
         "name": "Server-side request forgery sink",
@@ -20772,7 +20772,7 @@
         "rationale": "The server sends a request to a URL that the input chooses. An attacker can reach internal services or cloud metadata endpoints through it. Check the trace before you fix.",
         "example": "`fetch(req.query.url);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/ssrf/"
       },
       "display_label": "Server-side request forgery sink"
     },
@@ -20805,7 +20805,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/secret-to-network/",
       "explanation": {
         "id": "security/secret-to-network",
         "name": "Secret reaches a network request",
@@ -20813,7 +20813,7 @@
         "rationale": "A secret from the environment leaves the process in a network request. If the destination or the payload is not the intended one, the secret leaks.",
         "example": "`fetch(endpoint, { body: process.env.API_KEY });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/secret-to-network/"
       },
       "display_label": "Secret reaches a network request"
     },
@@ -20846,7 +20846,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/path-traversal/",
       "explanation": {
         "id": "security/path-traversal",
         "name": "Path traversal sink",
@@ -20854,7 +20854,7 @@
         "rationale": "A path segment that contains `../` can point outside the intended directory. An attacker can then read or write other files on the server. Check the trace before you fix.",
         "example": "`fs.readFile(path.join(uploadDir, req.params.name));`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/path-traversal/"
       },
       "display_label": "Path traversal sink"
     },
@@ -20887,7 +20887,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/header-injection/",
       "explanation": {
         "id": "security/header-injection",
         "name": "HTTP response header injection sink",
@@ -20895,7 +20895,7 @@
         "rationale": "A value with line breaks can add headers or split the response. An attacker can then set cookies or change the response that the client gets.",
         "example": "`res.setHeader('Location', req.query.next);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/header-injection/"
       },
       "display_label": "HTTP response header injection sink"
     },
@@ -20928,7 +20928,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/open-redirect/",
       "explanation": {
         "id": "security/open-redirect",
         "name": "Open redirect sink",
@@ -20936,7 +20936,7 @@
         "rationale": "The application sends users to a URL that the input chooses. An attacker can use a trusted link of your domain to send users to a phishing page.",
         "example": "`res.redirect(req.query.returnTo);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/open-redirect/"
       },
       "display_label": "Open redirect sink"
     },
@@ -20969,7 +20969,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/postmessage-wildcard-origin/",
       "explanation": {
         "id": "security/postmessage-wildcard-origin",
         "name": "Wildcard postMessage target origin",
@@ -20977,7 +20977,7 @@
         "rationale": "With `*` as the target origin, any page that holds the window reference receives the message, including a page of an attacker.",
         "example": "`window.parent.postMessage({ token }, '*');`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/postmessage-wildcard-origin/"
       },
       "display_label": "Wildcard postMessage target origin"
     },
@@ -21010,7 +21010,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/tls-validation-disabled/",
       "explanation": {
         "id": "security/tls-validation-disabled",
         "name": "TLS validation disabled",
@@ -21018,7 +21018,7 @@
         "rationale": "The client accepts any certificate, so an attacker on the network can read and change the traffic without a warning.",
         "example": "`https.request(url, { rejectUnauthorized: false });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/tls-validation-disabled/"
       },
       "display_label": "TLS validation disabled"
     },
@@ -21051,7 +21051,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/cleartext-transport/",
       "explanation": {
         "id": "security/cleartext-transport",
         "name": "Cleartext transport URL",
@@ -21059,7 +21059,7 @@
         "rationale": "The connection is not encrypted. Anyone on the network path can read and change the data that it carries.",
         "example": "`fetch('http://api.example.com/orders');`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/cleartext-transport/"
       },
       "display_label": "Cleartext transport URL"
     },
@@ -21092,7 +21092,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/electron-unsafe-webpreferences/",
       "explanation": {
         "id": "security/electron-unsafe-webpreferences",
         "name": "Unsafe Electron BrowserWindow preferences",
@@ -21100,7 +21100,7 @@
         "rationale": "Web content in the window gets Node.js access or skips the same-origin policy. A script injected into the page can then read files and run programs on the user's machine.",
         "example": "`new BrowserWindow({ webPreferences: { nodeIntegration: true } });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/electron-unsafe-webpreferences/"
       },
       "display_label": "Unsafe Electron BrowserWindow preferences"
     },
@@ -21133,7 +21133,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/world-writable-permission/",
       "explanation": {
         "id": "security/world-writable-permission",
         "name": "World-writable chmod mode",
@@ -21141,7 +21141,7 @@
         "rationale": "Mode `0o777` lets every user on the machine change the file. Another process can replace its content, for example a script that the application runs later.",
         "example": "`fs.chmodSync(scriptPath, 0o777);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/world-writable-permission/"
       },
       "display_label": "World-writable chmod mode"
     },
@@ -21174,7 +21174,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/insecure-temp-file/",
       "explanation": {
         "id": "security/insecure-temp-file",
         "name": "Predictable temporary file path",
@@ -21182,7 +21182,7 @@
         "rationale": "Other users can predict a fixed path in a shared temporary folder. They can create the file first or link it to another file, so the application reads or overwrites the wrong data.",
         "example": "`fs.writeFileSync('/tmp/report.json', data);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/insecure-temp-file/"
       },
       "display_label": "Predictable temporary file path"
     },
@@ -21215,7 +21215,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/mysql-multiple-statements/",
       "explanation": {
         "id": "security/mysql-multiple-statements",
         "name": "MySQL multiple statements enabled",
@@ -21223,7 +21223,7 @@
         "rationale": "The connection runs more than one statement per query. A small SQL injection anywhere in the application can then append statements that drop or change tables.",
         "example": "`mysql.createConnection({ host, user, multipleStatements: true });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/mysql-multiple-statements/"
       },
       "display_label": "MySQL multiple statements enabled"
     },
@@ -21256,7 +21256,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/permissive-cors/",
       "explanation": {
         "id": "security/permissive-cors",
         "name": "Permissive CORS policy",
@@ -21264,7 +21264,7 @@
         "rationale": "The policy allows every origin to send credentialed requests. Any website that a signed-in user visits can then call the API as that user.",
         "example": "`app.use(cors({ origin: '*', credentials: true }));`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/permissive-cors/"
       },
       "display_label": "Permissive CORS policy"
     },
@@ -21297,7 +21297,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/insecure-cookie/",
       "explanation": {
         "id": "security/insecure-cookie",
         "name": "Insecure cookie options",
@@ -21305,7 +21305,7 @@
         "rationale": "Without `httpOnly`, a script in the page can read the cookie. Without `secure`, the browser also sends it over plain HTTP, where others on the network can read it.",
         "example": "`res.cookie('session', id, { httpOnly: false });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/insecure-cookie/"
       },
       "display_label": "Insecure cookie options"
     },
@@ -21338,7 +21338,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/mass-assignment/",
       "explanation": {
         "id": "security/mass-assignment",
         "name": "Mass assignment sink",
@@ -21346,7 +21346,7 @@
         "rationale": "All properties of the request object go into the target. An attacker can set fields that the form never shows, such as a role or an owner ID. Check the trace before you fix.",
         "example": "`Object.assign(user, req.body);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/mass-assignment/"
       },
       "display_label": "Mass assignment sink"
     },
@@ -21379,7 +21379,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/weak-crypto/",
       "explanation": {
         "id": "security/weak-crypto",
         "name": "Runtime-selectable crypto algorithm",
@@ -21387,7 +21387,7 @@
         "rationale": "The algorithm comes from a value at run time, or it is MD5, SHA-1, DES or RC4. With a weak algorithm, an attacker can forge hashes or decrypt the data.",
         "example": "`crypto.createHash(options.algorithm);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/weak-crypto/"
       },
       "display_label": "Runtime-selectable crypto algorithm"
     },
@@ -21420,7 +21420,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/insecure-randomness/",
       "explanation": {
         "id": "security/insecure-randomness",
         "name": "Insecure randomness sink",
@@ -21428,7 +21428,7 @@
         "rationale": "`Math.random()` and `pseudoRandomBytes` are predictable. A token, session ID or salt made with them can be guessed.",
         "example": "`const resetToken = Math.random().toString(36);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/insecure-randomness/"
       },
       "display_label": "Insecure randomness sink"
     },
@@ -21461,7 +21461,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/jwt-alg-none/",
       "explanation": {
         "id": "security/jwt-alg-none",
         "name": "JWT alg none",
@@ -21469,7 +21469,7 @@
         "rationale": "A token signed with `none` has no signature. Anyone can change its claims, and a verifier that accepts `none` treats the token as valid.",
         "example": "`jwt.sign(payload, '', { algorithm: 'none' });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/jwt-alg-none/"
       },
       "display_label": "JWT alg none"
     },
@@ -21502,7 +21502,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/jwt-verify-missing-algorithms/",
       "explanation": {
         "id": "security/jwt-verify-missing-algorithms",
         "name": "JWT verify missing algorithms allowlist",
@@ -21510,7 +21510,7 @@
         "rationale": "Without an `algorithms` allowlist, the token header chooses the algorithm. An attacker can then pick an algorithm that lets them forge a valid token.",
         "example": "`jwt.verify(token, publicKey, { audience: 'api' });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/jwt-verify-missing-algorithms/"
       },
       "display_label": "JWT verify missing algorithms allowlist"
     },
@@ -21543,7 +21543,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/deprecated-cipher/",
       "explanation": {
         "id": "security/deprecated-cipher",
         "name": "Deprecated cipher constructor",
@@ -21551,7 +21551,7 @@
         "rationale": "`createCipher` derives the key without a salt and uses no random IV, so equal input gives equal output and the key is easy to brute-force. Node.js removed the function.",
         "example": "`crypto.createCipher('aes-256-cbc', password);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/deprecated-cipher/"
       },
       "display_label": "Deprecated cipher constructor"
     },
@@ -21584,7 +21584,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/unsafe-buffer-alloc/",
       "explanation": {
         "id": "security/unsafe-buffer-alloc",
         "name": "Unsafe Buffer allocation sink",
@@ -21592,7 +21592,7 @@
         "rationale": "The buffer holds old memory of the process until the code overwrites it. If the code sends the buffer before it fills it, earlier data such as secrets can leak.",
         "example": "`Buffer.allocUnsafe(Number(req.query.size));`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/unsafe-buffer-alloc/"
       },
       "display_label": "Unsafe Buffer allocation sink"
     },
@@ -21625,7 +21625,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/unsafe-deserialization/",
       "explanation": {
         "id": "security/unsafe-deserialization",
         "name": "Unsafe deserialization sink",
@@ -21633,7 +21633,7 @@
         "rationale": "The parser can create objects or run code from the input. An attacker who controls the input can then run code in the process. Check the trace before you fix.",
         "example": "`yaml.load(req.body.config);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/unsafe-deserialization/"
       },
       "display_label": "Unsafe deserialization sink"
     },
@@ -21666,7 +21666,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/angular-trusted-html/",
       "explanation": {
         "id": "security/angular-trusted-html",
         "name": "Angular bypassSecurityTrust sink",
@@ -21674,7 +21674,7 @@
         "rationale": "The call turns off Angular's sanitizer for the value. If an attacker controls the value, their script runs in the page. Check the trace before you fix.",
         "example": "`this.sanitizer.bypassSecurityTrustHtml(comment.body);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/angular-trusted-html/"
       },
       "display_label": "Angular bypassSecurityTrust sink"
     },
@@ -21707,7 +21707,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/nextjs-open-redirect/",
       "explanation": {
         "id": "security/nextjs-open-redirect",
         "name": "Next.js open redirect sink",
@@ -21715,7 +21715,7 @@
         "rationale": "The route sends users to a URL that the input chooses. An attacker can use a trusted link of your domain to send users to a phishing page.",
         "example": "`redirect(searchParams.get('next'));`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/nextjs-open-redirect/"
       },
       "display_label": "Next.js open redirect sink"
     },
@@ -21748,7 +21748,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/dom-document-write/",
       "explanation": {
         "id": "security/dom-document-write",
         "name": "DOM document.write sink",
@@ -21756,7 +21756,7 @@
         "rationale": "The browser parses the written string as HTML. If an attacker controls it, their script runs in the page. Check the trace before you fix.",
         "example": "`document.write(location.hash.slice(1));`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/dom-document-write/"
       },
       "display_label": "DOM document.write sink"
     },
@@ -21789,7 +21789,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/jquery-html/",
       "explanation": {
         "id": "security/jquery-html",
         "name": "jQuery .html() sink",
@@ -21797,7 +21797,7 @@
         "rationale": "jQuery parses the string as HTML and runs its scripts. If an attacker controls it, their script runs in the page. Check the trace before you fix.",
         "example": "`$('#preview').html(comment.body);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/jquery-html/"
       },
       "display_label": "jQuery .html() sink"
     },
@@ -21830,7 +21830,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/route-send-file/",
       "explanation": {
         "id": "security/route-send-file",
         "name": "Route file-send path traversal sink",
@@ -21838,7 +21838,7 @@
         "rationale": "The route sends a file from a path that the input chooses. With `../` in the path, an attacker can download other files from the server.",
         "example": "`res.sendFile(req.params.file, { root: 'public' });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/route-send-file/"
       },
       "display_label": "Route file-send path traversal sink"
     },
@@ -21871,7 +21871,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/webview-injection/",
       "explanation": {
         "id": "security/webview-injection",
         "name": "WebView injected-script sink",
@@ -21879,7 +21879,7 @@
         "rationale": "The WebView runs the string as a script in the loaded page. If an attacker controls it, their code runs with the page's access to the app bridge.",
         "example": "`webViewRef.current.injectJavaScript(message.script);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/webview-injection/"
       },
       "display_label": "WebView injected-script sink"
     },
@@ -21912,7 +21912,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/prototype-pollution/",
       "explanation": {
         "id": "security/prototype-pollution",
         "name": "Prototype pollution sink",
@@ -21920,7 +21920,7 @@
         "rationale": "A key such as `__proto__` in the input changes the prototype of all objects. Checks elsewhere in the process can then read values that an attacker set.",
         "example": "`_.merge(settings, req.body);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/prototype-pollution/"
       },
       "display_label": "Prototype pollution sink"
     },
@@ -21953,7 +21953,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/zip-slip/",
       "explanation": {
         "id": "security/zip-slip",
         "name": "Archive path-traversal (zip-slip) sink",
@@ -21961,7 +21961,7 @@
         "rationale": "An archive entry with `../` in its name can write outside the target folder. A crafted archive can then overwrite application files.",
         "example": "`zip.extractAllTo(targetDir, true);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/zip-slip/"
       },
       "display_label": "Archive path-traversal (zip-slip) sink"
     },
@@ -21994,7 +21994,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/nosql-injection/",
       "explanation": {
         "id": "security/nosql-injection",
         "name": "NoSQL injection sink",
@@ -22002,7 +22002,7 @@
         "rationale": "The query filter comes from the input as a whole object. An attacker can send an operator such as `$ne` and match records that they must not see, for example to skip a password check.",
         "example": "`users.findOne(req.body);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/nosql-injection/"
       },
       "display_label": "NoSQL injection sink"
     },
@@ -22035,7 +22035,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/ssti/",
       "explanation": {
         "id": "security/ssti",
         "name": "Server-side template injection sink",
@@ -22043,7 +22043,7 @@
         "rationale": "The template engine compiles a template that the input builds. An attacker can then run template code on the server.",
         "example": "`ejs.render('<h1>' + req.query.title + '</h1>');`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/ssti/"
       },
       "display_label": "Server-side template injection sink"
     },
@@ -22076,7 +22076,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/xxe/",
       "explanation": {
         "id": "security/xxe",
         "name": "XML external entity (XXE) sink",
@@ -22084,7 +22084,7 @@
         "rationale": "An XML parser that resolves external entities can read local files or send requests for the attacker. A crafted XML document is enough.",
         "example": "`libxmljs.parseXml(req.body, { noent: true });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/xxe/"
       },
       "display_label": "XML external entity (XXE) sink"
     },
@@ -22117,7 +22117,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/secret-pii-log/",
       "explanation": {
         "id": "security/secret-pii-log",
         "name": "Secret or PII logged",
@@ -22125,7 +22125,7 @@
         "rationale": "Logs go to more places and people than the data itself, and they stay for a long time. A secret or personal data in a log leaks to everyone who can read the logs.",
         "example": "`console.log('login', req.body.password);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/secret-pii-log/"
       },
       "display_label": "Secret or PII logged"
     },
@@ -22158,7 +22158,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/xpath-injection/",
       "explanation": {
         "id": "security/xpath-injection",
         "name": "XPath injection sink",
@@ -22166,7 +22166,7 @@
         "rationale": "The XPath engine parses the string as a query. An attacker who controls part of it can select other nodes, for example to skip a login check.",
         "example": "`xpath.select(\"//user[name='\" + req.query.name + \"']\", doc);`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/xpath-injection/"
       },
       "display_label": "XPath injection sink"
     },
@@ -22199,7 +22199,7 @@
       "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/security/",
+      "docs_url": "https://fallow.tools/docs/rules/llm-call-injection/",
       "explanation": {
         "id": "security/llm-call-injection",
         "name": "Untrusted input reaches an LLM call",
@@ -22207,7 +22207,7 @@
         "rationale": "Input from the request goes into the prompt. An attacker can write instructions that change what the model does, for example to leak the system prompt or call tools.",
         "example": "`openai.chat.completions.create({ messages: [{ role: 'user', content: req.body.q }] });`",
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
-        "docs": "https://fallow.tools/docs/cli/security/"
+        "docs": "https://fallow.tools/docs/rules/llm-call-injection/"
       },
       "display_label": "Untrusted input reaches an LLM call"
     },
@@ -22240,7 +22240,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/audit/#diff-risk-rules",
+      "docs_url": "https://fallow.tools/docs/rules/weakened-tests/",
       "explanation": {
         "id": "fallow/weakened-tests",
         "name": "Weakened Tests",
@@ -22248,7 +22248,7 @@
         "rationale": "`fallow audit` compares the base and head text of each changed file. The `kind` field tells how the change weakened the tests: `skip-only` (a new `.skip`, `.only`, `xit` or `fit` marker), `removed-tests` (fewer test cases in a file, while the total of all changed test files also dropped), `assertion-drop` (fewer `expect`, `assert` or `should` calls in a test file with no test case removed), `coverage-threshold` (a coverage or quality threshold that is less strict), `rule-severity` (a rule severity in the Fallow config that is less strict, such as `error` to `off`, a removed rule whose default is weaker, or a new `overrides` entry that turns a rule off for some paths), or `ignore-pattern` (a new or broader entry in a config key that removes files or findings from the analysis or makes code count as used, or a removed `!` exception of `ignorePatterns` or `ignoreFindings`). The keys are `ignorePatterns`, `ignoreFindings`, `production.ignore`, `health.ignore`, `duplicates.ignore`, `duplicates.ignoredClones`, `entry`, `supportEntry`, `dynamicallyLoaded`, `publicPackages`, `usedClassMembers`, `ignoreDependencies`, `ignoreBinaries`, `ignoreUnresolvedImports`, `ignoreExports`, `ignoreCatalogReferences`, `ignoreDependencyOverrides` and `boundaries.coverage.allowUnmatched`. The evidence names the key. A new entry that a base entry or a built-in default already covers does not report. The config check follows each relative `extends` file, so a change in an extended file or in the `extends` list reports too. A value that an `npm:` package or an `https://` URL can set does not compare, because the audit cannot read it at the base. A `rule-severity` or `ignore-pattern` finding takes the stricter of the base and head `weakened-tests` severity, so a change that turns off `weakened-tests` still reports. A suppression comment in the head config does not hide it, and it has no suppression action. A drop does not report when the lost test lines name code that the change removed, such as a deleted function or a deleted fixture directory: the tests went with that code. A name of a deleted file that a changed file still holds, a name that a deleted file only imports, a directory that still exists, and a reserved word such as `import` do not count. An assertion drop reports only when assertions are at least half of the code lines that the file lost, so a test rewrite that moves setup checks into a helper does not report. The finding is a fact about the change, not a proof that coverage dropped. Defaults to `warn`.",
         "example": "A change turns `it('charges tax', ...)` into `it.skip('charges tax', ...)`, or lowers `coverage.thresholds.lines` from 90 to 70.",
         "how_to_fix": "Decide if the weaker test or threshold is intended. If it is, suppress the finding with `// fallow-ignore-next-line weakened-tests` (or `fallow-ignore-file` for a file-level kind), or set the rule to `off` for the path in `overrides`.",
-        "docs": "https://fallow.tools/docs/cli/audit/#diff-risk-rules"
+        "docs": "https://fallow.tools/docs/rules/weakened-tests/"
       },
       "display_label": "Weakened tests"
     },
@@ -22281,7 +22281,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/audit/#diff-risk-rules",
+      "docs_url": "https://fallow.tools/docs/rules/added-suppression/",
       "explanation": {
         "id": "fallow/added-suppression",
         "name": "Added Suppressions",
@@ -22289,7 +22289,7 @@
         "rationale": "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Files below a fixture or generated directory (`fixture`, `fixtures`, `__fixtures__`, `__snapshots__`, `generated`, `__generated__`) do not report, because a tool writes them or a test reads them as data. Defaults to `warn`.",
         "example": "A change adds `// @ts-expect-error` above a call instead of a correct type.",
         "how_to_fix": "Decide if the suppression is necessary. If it is, keep it and suppress the finding with `// fallow-ignore-next-line added-suppression`, or turn the rule off for the path.",
-        "docs": "https://fallow.tools/docs/cli/audit/#diff-risk-rules"
+        "docs": "https://fallow.tools/docs/rules/added-suppression/"
       },
       "display_label": "Added suppressions"
     },
@@ -22322,7 +22322,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/audit/#diff-risk-rules",
+      "docs_url": "https://fallow.tools/docs/rules/test-only-branch/",
       "explanation": {
         "id": "fallow/test-only-branch",
         "name": "Test-Only Branches",
@@ -22330,7 +22330,7 @@
         "rationale": "The tests run a path that production never runs. A passing test then does not prove that the production path works.",
         "example": "A change adds `if (process.env.NODE_ENV === 'test') return cached;` to `src/pricing.ts`.",
         "how_to_fix": "Prefer a seam that tests can inject, such as a parameter or a module mock. If the branch is intended, suppress it with `// fallow-ignore-next-line test-only-branch`.",
-        "docs": "https://fallow.tools/docs/cli/audit/#diff-risk-rules"
+        "docs": "https://fallow.tools/docs/rules/test-only-branch/"
       },
       "display_label": "Test-only branches"
     },
@@ -22363,7 +22363,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/audit/#diff-risk-rules",
+      "docs_url": "https://fallow.tools/docs/rules/diverged-clone-sibling/",
       "explanation": {
         "id": "fallow/diverged-clone-sibling",
         "name": "Diverged Clone Siblings",
@@ -22371,7 +22371,7 @@
         "rationale": "`fallow audit` reports a base clone group where the change edited exactly one copy, the edit broke the clone, and every other copy kept its text. The siblings can need the same change. A cosmetic edit that keeps the clone, a removed copy, a change that edits every copy, and an edit to a test or story copy do not report. Needs the base snapshot of `--gate new-only`. Opt-in: defaults to `off`, because copies often differ on purpose, for example an input and an output type, or a legacy copy. Set it to `warn` or `error` to review every diverged copy.",
         "example": "`src/a/total.ts` and `src/b/total.ts` held the same function. The change fixes a bug in the first copy only.",
         "how_to_fix": "Check the unchanged copies in `related`. Apply the same change there, or extract a shared function. If the copies must differ, suppress with `// fallow-ignore-next-line diverged-clone-sibling`.",
-        "docs": "https://fallow.tools/docs/cli/audit/#diff-risk-rules"
+        "docs": "https://fallow.tools/docs/rules/diverged-clone-sibling/"
       },
       "display_label": "Diverged clone siblings"
     },
@@ -22404,7 +22404,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/audit/#diff-risk-rules",
+      "docs_url": "https://fallow.tools/docs/rules/added-dependency/",
       "explanation": {
         "id": "fallow/added-dependency",
         "name": "Added Dependencies",
@@ -22412,7 +22412,7 @@
         "rationale": "`fallow audit` reports a dependency that the change adds to a `package.json`. A new dependency is often correct, so the rule defaults to `off`. Set it to `warn` or `error` to review every new package. An invented package name already fails as an unresolved import or an unlisted dependency.",
         "example": "A change adds `\"left-pad\": \"^1.3.0\"` to `dependencies`.",
         "how_to_fix": "Check that the package exists, is maintained, and is not already covered by a dependency of the project. Suppress through `overrides` because `package.json` cannot hold a comment.",
-        "docs": "https://fallow.tools/docs/cli/audit/#diff-risk-rules"
+        "docs": "https://fallow.tools/docs/rules/added-dependency/"
       },
       "display_label": "Added dependencies"
     },
@@ -22445,7 +22445,7 @@
       "note": null,
       "license": "free",
       "license_note": null,
-      "docs_url": "https://fallow.tools/docs/cli/mutation/",
+      "docs_url": "https://fallow.tools/docs/rules/mutation-survived/",
       "explanation": {
         "id": "fallow/mutation-survived",
         "name": "Survived Mutants",
@@ -22453,7 +22453,7 @@
         "rationale": "`fallow mutation` makes one small change to the code, such as `>=` to `>`, and runs the tests that reach the changed line. A survived mutant is a change that made no test fail, so the tests do not check that behavior. The CI integrations report a survived mutant on a changed line as a warning finding (CodeClimate severity `minor`). The finding names the operator, the function and the mutant id, and never the source text. A mutant that no test reaches (`no_coverage`) is not a finding. No `rules.*` key gates the finding: the mutation score gate (`--min-score` or `mutation.minScore`) decides the exit code.",
         "example": "The tests call `isAdult(30)` and `isAdult(10)` only. Changing `>=` to `>` in `isAdult` makes no test fail, because no test checks the age `18`.",
         "how_to_fix": "Add or change a test so that it fails on this change. To see the code, run `fallow mutation inspect` with the mutant ID that the finding names.",
-        "docs": "https://fallow.tools/docs/cli/mutation/"
+        "docs": "https://fallow.tools/docs/rules/mutation-survived/"
       },
       "display_label": "Survived mutants"
     }

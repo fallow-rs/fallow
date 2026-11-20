@@ -21,7 +21,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively. fallow also emits this rule on synthetic `<template>` findings across every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup), counting each dialect's control-flow blocks (Angular `@if`/`@else if`/`@for`/`@case`/`@defer (when ...)` and legacy `*ngIf`/`*ngFor`; Vue `v-if`/`v-else-if`/`v-for`; Svelte `{#if}`/`{:else if}`/`{#each}`/`{#await}`/`{#key}`; the Astro equivalents) plus ternary and logical operators inside bound attributes and interpolations; on each top-level Svelte `{#snippet name(...)}` block, emitted as its own `<snippet:NAME>` unit; and on synthetic `<component>` rollup findings whose `cyclomatic` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#cyclomatic-complexity",
+              "helpUri": "https://fallow.tools/docs/rules/high-cyclomatic-complexity/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -34,7 +34,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially. fallow also emits this rule on synthetic `<template>` findings across every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup), where nesting penalties accumulate on stacked control-flow blocks: Angular `@if`/`@for`/`@switch`, Vue `v-if`/`v-for`, Svelte `{#if}`/`{#each}`/`{#await}`; on each top-level Svelte `{#snippet name(...)}` block, emitted as its own `<snippet:NAME>` unit with nesting rebased to zero so in-file snippet extraction lowers the parent template's score; and on synthetic `<component>` rollup findings whose `cognitive` is the worst class method's score plus the template's. Ranking and `--targets` use the rollup total; JSON exposes the per-half breakdown under `component_rollup`."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#cognitive-complexity",
+              "helpUri": "https://fallow.tools/docs/rules/high-cognitive-complexity/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -47,7 +47,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths and is hard to understand. The same rule fires on synthetic `<template>` findings in every supported template dialect (Angular .html templates and inline `@Component({ template: ... })` literals, Vue SFC `<template>` blocks, Svelte markup, Astro markup) when both metrics exceed their thresholds, and on synthetic `<component>` rollup findings whose totals are the worst class method's score plus the template's. Ranking and `--targets` use the rollup totals; JSON exposes the per-half breakdown under `component_rollup`."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#complexity-metrics",
+              "helpUri": "https://fallow.tools/docs/rules/high-complexity/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -60,7 +60,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex and poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph. This rule fires on functions only: synthetic template-family units (`<template>`, Svelte `<snippet:NAME>`) are excluded from the CRAP dimension, because a template is exercised only through its component and carries no coverage the formula could measure. Templates gate on the cyclomatic and cognitive dimensions instead."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#crap-score",
+              "helpUri": "https://fallow.tools/docs/rules/high-crap-score/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -73,7 +73,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "The file has more physical lines than `health.maxFileLines` (or `--max-file-lines`, or a `thresholdOverrides[].maxFileLines` entry for the file). Every line counts, also blank lines and comment lines; a final newline does not add a line. The threshold is off (`0`) by default. The finding is a complexity finding with `exceeded: \"file_lines\"`, the name `<file>`, the line count in `line_count`, and the ceiling in `max_file_lines`. The `complexity-file-lines` rule sets its gate severity. In `fallow audit`, a long file that did not grow by at least 5 lines stays inherited, and one that grew is worsened."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#file-length",
+              "helpUri": "https://fallow.tools/docs/rules/long-file/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -86,7 +86,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#refactoring-targets",
+              "helpUri": "https://fallow.tools/docs/rules/refactoring-target/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -99,7 +99,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A file is reachable from runtime entry points but not from any discovered test entry point. This indicates production code that no test imports, directly or transitively, according to the static module graph."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#coverage-gaps",
+              "helpUri": "https://fallow.tools/docs/rules/untested-file/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -112,7 +112,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A value export is reachable from runtime entry points but no test-reachable module references it. This is a static test dependency gap rather than line coverage, and highlights exports exercised only through production entry paths."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#coverage-gaps",
+              "helpUri": "https://fallow.tools/docs/rules/untested-export/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -125,7 +125,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+              "helpUri": "https://fallow.tools/docs/rules/runtime-safe-to-delete/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -138,7 +138,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+              "helpUri": "https://fallow.tools/docs/rules/runtime-review-required/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -151,7 +151,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+              "helpUri": "https://fallow.tools/docs/rules/runtime-low-traffic/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -164,7 +164,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "The function could not be matched to a V8-tracked coverage entry. Common causes: the function lives in a worker thread (separate V8 isolate), it is lazy-parsed and never reached the JIT tier, or its source map did not resolve to the expected source path. This is advisory, not a dead-code signal."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+              "helpUri": "https://fallow.tools/docs/rules/runtime-coverage-unavailable/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -177,7 +177,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A runtime coverage finding whose verdict no other `runtime-*` rule covers. This is the `unknown` verdict: the runtime data did not lead to a verdict for the function, for example when a newer version of the runtime coverage add-on gives a verdict that this fallow version does not know. Functions with the `active` verdict are not reported."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#runtime-coverage",
+              "helpUri": "https://fallow.tools/docs/rules/runtime-coverage/",
               "defaultConfiguration": {
                 "level": "note"
               }
@@ -190,7 +190,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "Coverage intelligence combined change scope, runtime hot-path evidence, low test coverage, and high CRAP into a risky-change finding. Add focused tests or split the change before merging."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+              "helpUri": "https://fallow.tools/docs/rules/coverage-intelligence-risky-change/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -203,7 +203,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "Coverage intelligence combined static unused status, runtime cold evidence, and lack of test reachability into a high-confidence delete recommendation."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+              "helpUri": "https://fallow.tools/docs/rules/coverage-intelligence-delete/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -216,7 +216,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "Coverage intelligence found code that is statically reachable but cold in runtime evidence, uncovered by tests, and ownership-risky. Route it to an owner before changing or deleting it."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+              "helpUri": "https://fallow.tools/docs/rules/coverage-intelligence-review/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -229,7 +229,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#coverage-intelligence",
+              "helpUri": "https://fallow.tools/docs/rules/coverage-intelligence-refactor/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -242,7 +242,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A styling value appears to bypass the project's design token system, for example a Tailwind arbitrary value in markup. The finding is advisory by default and does not affect the audit verdict unless rules.css-token-drift is set to error. Verify the value and replace it with an existing scale token when appropriate."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#css-token-drift",
+              "helpUri": "https://fallow.tools/docs/rules/css-token-drift/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -255,7 +255,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A style rule declaration block is repeated across selectors, suggesting copy-pasted styling that can often be consolidated. The finding is advisory by default and does not affect the audit verdict unless rules.css-duplicate-block is set to error."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#css-duplicate-block",
+              "helpUri": "https://fallow.tools/docs/rules/css-duplicate-block/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -268,7 +268,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A CSS or CSS-in-JS rule crosses the structural floor for selector specificity, selector complexity, nesting depth, or important usage. The finding is advisory by default and does not affect the audit verdict unless rules.css-selector-complexity is set to error."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#css-selector-complexity",
+              "helpUri": "https://fallow.tools/docs/rules/css-selector-complexity/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -281,7 +281,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A styling surface appears unused in the analyzed project, such as a scoped SFC class with no component-local use. The finding is advisory by default and does not affect the audit verdict unless rules.css-dead-surface is set to error. Verify dynamic consumers before deleting."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#css-dead-surface",
+              "helpUri": "https://fallow.tools/docs/rules/css-dead-surface/",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -294,7 +294,7 @@ expression: redact_health_sarif_version(&json_str)
               "fullDescription": {
                 "text": "A styling reference appears unresolved, such as a class token or keyframes name that has no stylesheet definition in the analyzed project. The finding is advisory by default and does not affect the audit verdict unless rules.css-broken-reference is set to error. Verify external or CSS-in-JS definitions before fixing."
               },
-              "helpUri": "https://fallow.tools/docs/explanations/health/#css-broken-reference",
+              "helpUri": "https://fallow.tools/docs/rules/css-broken-reference/",
               "defaultConfiguration": {
                 "level": "warning"
               }

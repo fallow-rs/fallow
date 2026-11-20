@@ -61,7 +61,7 @@ fn explain_compact_is_single_line() {
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     assert_eq!(
         output.stdout.trim(),
-        "explain:fallow/unused-export:Export is never imported:https://fallow.tools/docs/explanations/dead-code/#unused-exports"
+        "explain:fallow/unused-export:Export is never imported:https://fallow.tools/docs/rules/unused-export/"
     );
 }
 
@@ -80,7 +80,7 @@ fn explain_markdown_is_markdown() {
     assert!(
         output
             .stdout
-            .contains("[Docs](https://fallow.tools/docs/explanations/dead-code/#unused-exports)")
+            .contains("[Docs](https://fallow.tools/docs/rules/unused-export/)")
     );
 }
 
