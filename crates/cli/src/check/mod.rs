@@ -120,13 +120,11 @@ impl ArchitectureSelection {
             Self::All => {}
             Self::Only => {
                 let mut only = IssueFilters::default();
-                for flag in [
-                    "--circular-deps",
-                    "--re-export-cycles",
-                    "--package-cycles",
-                    "--boundary-violations",
-                    "--policy-violations",
-                ] {
+                for flag in fallow_types::issue_meta::ISSUE_KIND_META
+                    .iter()
+                    .filter(|meta| meta.architecture_flag().is_some())
+                    .filter_map(|meta| meta.filter_flag)
+                {
                     only.enable_cli_filter_flag(flag);
                 }
                 only.apply(results);

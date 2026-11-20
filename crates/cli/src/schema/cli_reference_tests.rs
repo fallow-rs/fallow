@@ -769,3 +769,73 @@ fn setup_hooks_about_says_that_the_command_is_deprecated() {
     let about = commands["setup-hooks"]["about"].as_str().unwrap();
     assert!(about.starts_with("Deprecated"), "{about}");
 }
+
+/// The architecture issue types name `fallow architecture` and its current
+/// selection flag. The deprecated `fallow dead-code` option stays in
+/// `deprecated_filter_flag` (issue #4883).
+#[test]
+fn architecture_issue_types_name_the_architecture_command() {
+    let doc = reference();
+    let rows: FxHashMap<&str, &Value> = doc["issue_types"]
+        .as_array()
+        .expect("issue_types is an array")
+        .iter()
+        .map(|row| (row["id"].as_str().expect("id"), row))
+        .collect();
+    for (id, flag, deprecated) in [
+        ("circular-dependency", "--cycles", "--circular-deps"),
+        ("re-export-cycle", "--cycles", "--re-export-cycles"),
+        ("package-cycle", "--cycles", "--package-cycles"),
+        (
+            "boundary-violation",
+            "--boundaries",
+            "--boundary-violations",
+        ),
+        ("boundary-coverage", "--boundaries", "--boundary-violations"),
+        (
+            "boundary-call-violation",
+            "--boundaries",
+            "--boundary-violations",
+        ),
+        ("policy-violation", "--policy", "--policy-violations"),
+    ] {
+        let row = rows[id];
+        assert_eq!(row["command"], "architecture", "{id}");
+        assert_eq!(row["filter_flag"], flag, "{id}");
+        assert_eq!(row["deprecated_filter_flag"], deprecated, "{id}");
+    }
+    assert_eq!(rows["unused-file"]["command"], "dead-code");
+    assert!(rows["unused-file"]["deprecated_filter_flag"].is_null());
+}
+
+/// Each deprecated option and command carries a `deprecated` field with the
+/// replacement, and a current option carries no such field.
+#[test]
+fn deprecated_options_and_commands_name_their_replacement() {
+    let doc = reference();
+    let commands = commands_by_path(&doc);
+    let dead_code = &commands["dead-code"];
+    let option = |long: &str| -> Value {
+        dead_code["options"]
+            .as_array()
+            .expect("options")
+            .iter()
+            .find(|option| option["long"] == long)
+            .cloned()
+            .unwrap_or_else(|| panic!("{long} is an option of dead-code"))
+    };
+    assert_eq!(
+        option("--circular-deps")["deprecated"]["replacement"],
+        "fallow architecture --cycles"
+    );
+    assert_eq!(
+        option("--policy-violations")["deprecated"]["replacement"],
+        "fallow architecture --policy"
+    );
+    assert!(option("--unused-files").get("deprecated").is_none());
+    assert_eq!(
+        commands["setup-hooks"]["deprecated"]["replacement"],
+        "fallow agent install"
+    );
+    assert!(commands["architecture"].get("deprecated").is_none());
+}

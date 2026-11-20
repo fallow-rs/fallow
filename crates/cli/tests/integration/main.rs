@@ -85,6 +85,7 @@ mod coverage_setup_cloud_tests;
 mod coverage_upload_binding_tests;
 mod deep_nesting_tests;
 mod deprecated_export_tests;
+mod deprecated_option_tests;
 mod doctor_tests;
 mod dupes_range_suppression_tests;
 mod dupes_tests;

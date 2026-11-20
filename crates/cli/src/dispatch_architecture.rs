@@ -102,14 +102,18 @@ fn architecture_inventory_filters(
         shared_state,
         ..IssueFilters::default()
     };
-    for (flag, active) in [
-        ("--circular-deps", cycles || all),
-        ("--re-export-cycles", cycles || all),
-        ("--package-cycles", cycles || all),
-        ("--boundary-violations", boundaries || all),
-        ("--policy-violations", policy || all),
-    ] {
-        enable_check_filter(&mut filters, flag, active);
+    for meta in fallow_types::issue_meta::ISSUE_KIND_META {
+        let (Some(architecture_flag), Some(flag)) = (meta.architecture_flag(), meta.filter_flag)
+        else {
+            continue;
+        };
+        let selected = match architecture_flag {
+            "--cycles" => cycles,
+            "--boundaries" => boundaries,
+            "--policy" => policy,
+            other => unreachable!("unknown architecture selection flag {other}"),
+        };
+        enable_check_filter(&mut filters, flag, selected || all);
     }
     filters
 }

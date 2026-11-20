@@ -223,6 +223,20 @@ fn negation_pair(cmd: &Command, arg: &Arg) -> (Value, Value) {
     (negates, negated_by)
 }
 
+/// The options of `cmd` with the `deprecated` field of each deprecated option.
+/// The field is absent when the option is not deprecated.
+fn options_with_deprecations(path: &str, mut options: Vec<Value>) -> Vec<Value> {
+    for option in &mut options {
+        let Some(long) = option["long"].as_str() else {
+            continue;
+        };
+        if let Some(deprecated) = super::deprecations::deprecation_json(path, Some(long)) {
+            option["deprecated"] = deprecated;
+        }
+    }
+    options
+}
+
 fn option_json(cmd: &Command, arg: &Arg) -> Value {
     let (negates, negated_by) = negation_pair(cmd, arg);
     let conflicts: Vec<String> = cmd
@@ -317,7 +331,7 @@ fn command_json(cmd: &Command, path: &str, help_group: Option<&str>) -> Value {
         .get_all_aliases()
         .map(|alias| json!({ "name": alias, "visible": visible_aliases.contains(&alias) }))
         .collect();
-    json!({
+    let mut command = json!({
         "name": cmd.get_name(),
         "path": path,
         "aliases": aliases,
@@ -329,9 +343,13 @@ fn command_json(cmd: &Command, path: &str, help_group: Option<&str>) -> Value {
         "always_json": always_json(path),
         "exit_codes": command_exit_codes(path),
         "positionals": positionals(cmd),
-        "options": own_options(cmd),
+        "options": options_with_deprecations(path, own_options(cmd)),
         "subcommands": subcommands,
-    })
+    });
+    if let Some(deprecated) = super::deprecations::deprecation_json(path, None) {
+        command["deprecated"] = deprecated;
+    }
+    command
 }
 
 /// Top-level commands in the order and the groups of the root `--help`, then

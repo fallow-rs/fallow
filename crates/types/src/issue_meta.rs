@@ -30,7 +30,10 @@ pub struct IssueKindMeta {
     pub label: &'static str,
     /// Canonical `[rules]` key when the issue is configurable.
     pub config_key: Option<&'static str>,
-    /// Dead-code CLI filter flag, when one exists.
+    /// Dead-code CLI filter flag, when one exists. For an architecture issue
+    /// type this is the deprecated `fallow dead-code` alias that MCP
+    /// `issue_types` and the dead-code filters still accept; see
+    /// [`IssueKindMeta::architecture_flag`] for the current form.
     pub filter_flag: Option<&'static str>,
     /// MCP `issue_types` selector, when this issue can be selected there.
     pub mcp_issue_type: Option<&'static str>,
