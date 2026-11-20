@@ -15221,6 +15221,12 @@ name: string
  */
 patterns: string[]
 /**
+ * Project-relative folder that `patterns` are relative to (`root` in the
+ * boundary config), without a trailing slash. Omitted when the zone has
+ * no root and the patterns are relative to the project root.
+ */
+root?: (string | null)
+/**
  * Number of analyzable files the zone matched.
  */
 file_count: number

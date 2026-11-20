@@ -1981,3 +1981,99 @@ fn list_workspaces_reports_nested_projects_and_missing_pattern_dirs() {
         ]
     );
 }
+
+#[test]
+fn list_files_omits_the_default_viz_map_after_viz() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).expect("create src dir");
+    fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("write index");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "viz-map", "main": "src/index.ts"}"#,
+    )
+    .expect("write package json");
+
+    let viz = run_fallow_combined_in_root(root, &["viz", "--no-open", "--quiet"]);
+    assert_eq!(viz.code, 0, "viz should succeed: {}", viz.stderr);
+    assert!(
+        root.join("fallow-viz.html").is_file(),
+        "viz should write the map to the project root"
+    );
+
+    let list = run_fallow_combined_in_root(root, &["list", "--files", "--format", "json"]);
+    assert_eq!(list.code, 0, "list should succeed: {}", list.stderr);
+    let json = parse_json(&list);
+    let files: Vec<&str> = json["files"]
+        .as_array()
+        .expect("files array")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        files.contains(&"src/index.ts"),
+        "list should still name the source file: {files:?}"
+    );
+    assert!(
+        !files.iter().any(|file| file.ends_with("fallow-viz.html")),
+        "list should not name the viz map: {files:?}"
+    );
+}
+
+fn write_project_with_rooted_zone(root: &std::path::Path) {
+    fs::create_dir_all(root.join("packages/app/src")).expect("create app dir");
+    fs::write(root.join("packages/app/src/a.ts"), "export const a = 1;\n").expect("write a");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "rooted-zone", "main": "packages/app/src/a.ts"}"#,
+    )
+    .expect("write package json");
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"boundaries": {"zones": [{"name": "app", "root": "packages/app", "patterns": ["src/**"]}], "rules": []}}"#,
+    )
+    .expect("write config");
+}
+
+#[test]
+fn list_boundaries_human_line_names_the_zone_root() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project_with_rooted_zone(dir.path());
+
+    let output = run_fallow_combined_in_root(dir.path(), &["list", "--boundaries"]);
+    assert_eq!(output.code, 0, "list should succeed: {}", output.stderr);
+    let zone_line = output
+        .stderr
+        .lines()
+        .find(|line| line.trim_start().starts_with("app "))
+        .unwrap_or_else(|| panic!("no zone line in stderr: {}", output.stderr));
+    assert!(
+        zone_line.contains("src/**") && zone_line.contains("root packages/app"),
+        "the zone line should name the patterns and the root: {zone_line}"
+    );
+}
+
+#[test]
+fn list_boundaries_json_names_the_zone_root_only_when_set() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project_with_rooted_zone(dir.path());
+
+    let output =
+        run_fallow_combined_in_root(dir.path(), &["list", "--boundaries", "--format", "json"]);
+    assert_eq!(output.code, 0, "list should succeed: {}", output.stderr);
+    let json = parse_json(&output);
+    let zone = &json["boundaries"]["zones"][0];
+    assert_eq!(zone["name"].as_str(), Some("app"));
+    assert_eq!(zone["root"].as_str(), Some("packages/app"));
+    assert_eq!(zone["file_count"].as_u64(), Some(1));
+
+    let unrooted = run_list("boundary-violations", &["--boundaries", "--format", "json"]);
+    let unrooted_json = parse_json(&unrooted);
+    let zones = unrooted_json["boundaries"]["zones"]
+        .as_array()
+        .expect("zones array");
+    assert!(
+        zones.iter().all(|zone| zone.get("root").is_none()),
+        "a zone without a root should omit the field: {zones:?}"
+    );
+}

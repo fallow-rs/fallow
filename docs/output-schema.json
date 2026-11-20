@@ -9682,6 +9682,13 @@
           },
           "description": "Glob patterns that classify files into the zone."
         },
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Project-relative folder that `patterns` are relative to (`root` in the\nboundary config), without a trailing slash. Omitted when the zone has\nno root and the patterns are relative to the project root."
+        },
         "file_count": {
           "type": "integer",
           "description": "Number of analyzable files the zone matched."
