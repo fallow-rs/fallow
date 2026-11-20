@@ -8,6 +8,10 @@ use std::path::Path;
 use ls_types::*;
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
+use fallow_config::CatalogPrecedingCommentPolicy;
+use fallow_config::pnpm_catalog_edit::{
+    CatalogEditPlan, CatalogRemoval, CatalogRemovalOutcome, plan_catalog_edits,
+};
 use fallow_types::catalog_source::is_pnpm_catalog_source;
 use fallow_types::output_dead_code::MutationEvidence;
 
@@ -407,13 +411,13 @@ pub fn build_remove_catalog_entry_actions(
 
     for entry in &results.unused_catalog_entries {
         let entry = &entry.entry;
-        let Some((entry_line, start_idx, end_idx)) =
+        let Some((entry_line, plan)) =
             catalog_entry_delete_span(entry, root, uri, cursor_range, file_lines)
         else {
             continue;
         };
         actions.push(remove_catalog_entry_action(
-            entry, uri, file_lines, entry_line, start_idx, end_idx,
+            entry, uri, file_lines, entry_line, &plan,
         ));
     }
 
@@ -443,7 +447,7 @@ fn catalog_entry_delete_span(
     uri: &Uri,
     cursor_range: &Range,
     file_lines: &[&str],
-) -> Option<(u32, usize, usize)> {
+) -> Option<(u32, CatalogEditPlan)> {
     if !entry.hardcoded_consumers.is_empty() {
         return None;
     }
@@ -461,19 +465,14 @@ fn catalog_entry_delete_span(
         return None;
     }
 
-    let start_idx = entry_line as usize;
-    if start_idx >= file_lines.len() {
+    if entry_line as usize >= file_lines.len() {
         return None;
     }
-    if !line_matches_catalog_key(file_lines[start_idx], &entry.entry_name) {
-        return None;
-    }
-
-    Some((
-        entry_line,
-        start_idx,
-        compute_catalog_deletion_end(file_lines, start_idx),
-    ))
+    let removal = CatalogRemoval::Entry {
+        catalog: &entry.catalog_name,
+        entry: &entry.entry_name,
+    };
+    plan_catalog_removal_at(file_lines, removal, entry_line).map(|plan| (entry_line, plan))
 }
 
 #[expect(
@@ -485,34 +484,40 @@ fn remove_catalog_entry_action(
     uri: &Uri,
     file_lines: &[&str],
     entry_line: u32,
-    start_idx: usize,
-    end_idx: usize,
+    plan: &CatalogEditPlan,
 ) -> CodeActionOrCommand {
     let title = catalog_entry_action_title(entry);
     let mut changes = HashMap::new();
-    let mut edits = vec![TextEdit {
-        range: Range {
-            start: Position {
-                line: start_idx as u32,
-                character: 0,
-            },
-            end: Position {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "line index is bounded by source size"
-                )]
-                line: end_idx as u32,
-                character: 0,
-            },
-        },
-        new_text: String::new(),
-    }];
-
-    if let Some(parent_edit) =
-        build_parent_rewrite_edit(file_lines, start_idx, end_idx, &entry.catalog_name)
-    {
-        edits.push(parent_edit);
-    }
+    let deletions = plan.edits.iter().filter(|edit| edit.replacement.is_none());
+    let rewrites = plan.edits.iter().filter(|edit| edit.replacement.is_some());
+    let edits: Vec<TextEdit> = deletions
+        .chain(rewrites)
+        .map(|edit| {
+            let (end_line, end_character, new_text) = match &edit.replacement {
+                None => (edit.lines.end, 0, String::new()),
+                Some(text) => (
+                    edit.lines.start,
+                    file_lines[edit.lines.start].encode_utf16().count(),
+                    text.clone(),
+                ),
+            };
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "line index is bounded by source size"
+            )]
+            let range = Range {
+                start: Position {
+                    line: edit.lines.start as u32,
+                    character: 0,
+                },
+                end: Position {
+                    line: end_line as u32,
+                    character: end_character as u32,
+                },
+            };
+            TextEdit { range, new_text }
+        })
+        .collect();
     changes.insert(uri.clone(), edits);
 
     CodeActionOrCommand::CodeAction(CodeAction {
@@ -582,13 +587,13 @@ fn catalog_entry_diagnostic_message(
 /// Build quick-fix code actions for empty pnpm catalog groups (delete the
 /// named `catalogs.<name>:` header line).
 ///
-/// Mirrors `build_remove_catalog_entry_actions` but covers the case where
-/// the catalog group itself has no entries to delete: a single bare header
-/// line under `catalogs:`. The deletion is one line; no parent rewrite is
-/// needed (the parent `catalogs:` map keeps its other named-catalog
-/// siblings, or, if this was the only one, the user can remove the
-/// remaining `catalogs:` header by hand). Same conservative policy as the
-/// CLI `fallow fix` path in `crates/cli/src/fix/catalog.rs`.
+/// The action plans its edit with `plan_catalog_edits` on the open buffer.
+/// It offers no action when the planner refuses the removal, for example
+/// when the group has entries in the buffer or the buffer is not valid
+/// YAML. The deletion is one line; no parent rewrite is needed (the parent
+/// `catalogs:` map keeps its other named-catalog siblings, or, if this was
+/// the only one, the user can remove the remaining `catalogs:` header by
+/// hand).
 ///
 /// The default catalog (top-level `catalog:`) is intentionally never
 /// flagged by the detector, so this function never offers to delete it.
@@ -693,15 +698,13 @@ fn empty_catalog_group_delete_line(
         return None;
     }
 
-    let start_idx = group_line as usize;
-    if start_idx >= file_lines.len() {
+    if group_line as usize >= file_lines.len() {
         return None;
     }
-    if !line_matches_catalog_key(file_lines[start_idx], &group.catalog_name) {
-        return None;
-    }
-
-    Some(group_line)
+    let removal = CatalogRemoval::Group {
+        catalog: &group.catalog_name,
+    };
+    plan_catalog_removal_at(file_lines, removal, group_line).map(|_| group_line)
 }
 
 /// Build the single-line deletion code action for an empty catalog group.
@@ -766,158 +769,25 @@ fn remove_empty_catalog_group_action(
     })
 }
 
-/// Anchored match for a catalog key on its declared line. Handles
-/// unquoted (`react:`), double-quoted (`"@scope/foo":`), and single-quoted
-/// (`'react':`) key forms; rejects substring matches in values or in
-/// sibling entries whose names share a prefix (`react` vs `react-native`).
-fn line_matches_catalog_key(line: &str, entry_name: &str) -> bool {
-    let trimmed = line.trim_start();
-    if let Some(rest) = trimmed.strip_prefix(entry_name)
-        && rest.trim_start().starts_with(':')
-    {
-        return true;
-    }
-    if let Some(rest) = trimmed
-        .strip_prefix('"')
-        .and_then(|s| s.strip_prefix(entry_name))
-        && (rest.starts_with("\":") || rest.starts_with("\" :"))
-    {
-        return true;
-    }
-    if let Some(rest) = trimmed
-        .strip_prefix('\'')
-        .and_then(|s| s.strip_prefix(entry_name))
-        && (rest.starts_with("':") || rest.starts_with("' :"))
-    {
-        return true;
-    }
-    false
-}
-
-/// Compute the end line index (exclusive) for a catalog entry whose key
-/// sits on `start_idx`. This mirrors the CLI's forward object-form entry
-/// scan, but intentionally does not delete leading comments; LSP quick fixes
-/// stay conservative even when `fallow fix` uses the default
-/// `fix.catalog.deletePrecedingComments = "auto"` policy.
-fn compute_catalog_deletion_end(lines: &[&str], start_idx: usize) -> usize {
-    let entry_indent = lines[start_idx].bytes().take_while(|&b| b == b' ').count();
-    let mut end_idx = start_idx + 1;
-    while end_idx < lines.len() {
-        let line = lines[end_idx];
-        if line.trim().is_empty() {
-            break;
+/// Plans `removal` on the open buffer with `plan_catalog_edits`. Returns
+/// the plan only when the key is on `expected_line` (0-based), the line of
+/// the diagnostic. The quick fix never deletes a comment block, even when
+/// `fallow fix` uses the default `fix.catalog.deletePrecedingComments =
+/// "auto"` policy.
+fn plan_catalog_removal_at(
+    file_lines: &[&str],
+    removal: CatalogRemoval<'_>,
+    expected_line: u32,
+) -> Option<CatalogEditPlan> {
+    let source = file_lines.join("\n");
+    let plan =
+        plan_catalog_edits(&source, &[removal], CatalogPrecedingCommentPolicy::Never).ok()?;
+    match plan.outcomes.first()? {
+        CatalogRemovalOutcome::Planned(planned) if planned.key_line == expected_line as usize => {
+            Some(plan)
         }
-        let indent = line.bytes().take_while(|&b| b == b' ').count();
-        if indent <= entry_indent {
-            break;
-        }
-        end_idx += 1;
+        _ => None,
     }
-    end_idx
-}
-
-/// Build a TextEdit that rewrites the parent catalog header to `key: {}`
-/// when removing the line range `[start_idx, end_idx)` would leave it
-/// with no children. Returns `None` if siblings remain or no parent is
-/// found. Mirrors the CLI fix module's `rewrite_empty_catalog_parents`.
-fn build_parent_rewrite_edit(
-    lines: &[&str],
-    start_idx: usize,
-    end_idx: usize,
-    catalog_name: &str,
-) -> Option<TextEdit> {
-    let parent_idx = find_parent_header_idx(lines, start_idx, catalog_name)?;
-    if parent_has_other_children(lines, parent_idx, start_idx, end_idx) {
-        return None;
-    }
-    let header = lines[parent_idx];
-    let trimmed_end = header.trim_end();
-    let new_text = format!("{trimmed_end} {{}}");
-    Some(TextEdit {
-        range: Range {
-            start: Position {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "line index is bounded by source size"
-                )]
-                line: parent_idx as u32,
-                character: 0,
-            },
-            end: Position {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "line index is bounded by source size"
-                )]
-                line: parent_idx as u32,
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "header length is bounded by source size"
-                )]
-                character: header.encode_utf16().count() as u32,
-            },
-        },
-        new_text,
-    })
-}
-
-/// Walk backwards from a catalog entry line to find its parent header
-/// line index. For default-catalog entries the parent is the line
-/// starting with `catalog:`; for named-catalog entries the parent is
-/// the indented `<name>:` line under `catalogs:`.
-fn find_parent_header_idx(lines: &[&str], entry_idx: usize, catalog_name: &str) -> Option<usize> {
-    if entry_idx >= lines.len() {
-        return None;
-    }
-    let entry_indent = lines[entry_idx].bytes().take_while(|&b| b == b' ').count();
-    for idx in (0..entry_idx).rev() {
-        let line = lines[idx];
-        let stripped = line.trim_end();
-        let content = stripped.trim_start();
-        if content.is_empty() || content.starts_with('#') {
-            continue;
-        }
-        let indent = stripped.bytes().take_while(|&b| b == b' ').count();
-        if indent >= entry_indent {
-            continue;
-        }
-        if catalog_name == "default" {
-            return content.starts_with("catalog:").then_some(idx);
-        }
-        let key = content
-            .trim_start_matches(['"', '\''])
-            .split([':', '"', '\''])
-            .next()
-            .unwrap_or("");
-        return (key == catalog_name).then_some(idx);
-    }
-    None
-}
-
-/// Return true if the parent at `parent_idx` has at least one child
-/// line that is NOT inside the deletion range `[del_start, del_end)`.
-/// Comments and blank lines are not counted as children.
-fn parent_has_other_children(
-    lines: &[&str],
-    parent_idx: usize,
-    del_start: usize,
-    del_end: usize,
-) -> bool {
-    let parent_indent = lines[parent_idx].bytes().take_while(|&b| b == b' ').count();
-    for (idx, line) in lines.iter().enumerate().skip(parent_idx + 1) {
-        let stripped = line.trim_end();
-        let content = stripped.trim_start();
-        if content.is_empty() || content.starts_with('#') {
-            continue;
-        }
-        let indent = stripped.bytes().take_while(|&b| b == b' ').count();
-        if indent <= parent_indent {
-            return false;
-        }
-        if idx < del_start || idx >= del_end {
-            return true;
-        }
-    }
-    false
 }
 
 /// Typed input for unused file delete quick-fix code actions.
@@ -2182,21 +2052,6 @@ mod tests {
         assert_eq!(edits[1].new_text, "catalog: {}");
     }
 
-    #[test]
-    fn compute_catalog_deletion_end_scalar() {
-        let lines: Vec<&str> = "catalog:\n  is-even: ^1.0.0\n  is-odd: ^1.0.0\n"
-            .split('\n')
-            .collect();
-        assert_eq!(compute_catalog_deletion_end(&lines, 1), 2);
-    }
-
-    #[test]
-    fn compute_catalog_deletion_end_object_form() {
-        let content = "catalog:\n  react:\n    specifier: ^18.2.0\n    publishConfig: {}\n  is-even: ^1.0.0\n";
-        let lines: Vec<&str> = content.split('\n').collect();
-        assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
-    }
-
     use fallow_api::editor_results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
     fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
@@ -2254,6 +2109,96 @@ mod tests {
         );
         assert_eq!(diag.message, "Empty catalog group: 'legacy' has no entries");
         assert_eq!(diag.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+    }
+
+    fn catalog_edits(actions: &[CodeActionOrCommand], uri: &Uri) -> Vec<TextEdit> {
+        assert_eq!(actions.len(), 1);
+        let changes = unwrap_code_action(&actions[0]).edit.as_ref().unwrap();
+        changes.changes.as_ref().unwrap().get(uri).unwrap().clone()
+    }
+
+    #[test]
+    fn empty_catalog_group_action_skipped_when_live_group_has_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("legacy", 2));
+        let lines = vec!["catalogs:", "  legacy:", "    react: ^18"];
+        let actions = build_remove_empty_catalog_group_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_skipped_when_other_catalog_owns_the_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+        let mut results = AnalysisResults::default();
+        let entry = make_catalog_entry("react", "react17", 3, vec![]);
+        results.unused_catalog_entries.push(entry);
+        let lines = vec!["catalogs:", "  react18:", "    react: ^18"];
+        let actions = build_remove_catalog_entry_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn catalog_action_parent_rewrite_goes_before_inline_comment() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+        let mut results = AnalysisResults::default();
+        let entry = make_catalog_entry("react", "ui", 3, vec![]);
+        results.unused_catalog_entries.push(entry);
+        let lines = vec!["catalogs:", "  ui: # pinned versions", "    react: ^18"];
+        let actions = build_remove_catalog_entry_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+        let edits = catalog_edits(&actions, &uri);
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[1].new_text, "  ui: {} # pinned versions");
+    }
+
+    #[test]
+    fn catalog_action_deletes_object_entry_with_blank_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+        let mut results = AnalysisResults::default();
+        let entry = make_catalog_entry("react", "default", 2, vec![]);
+        results.unused_catalog_entries.push(entry);
+        let lines = vec![
+            "catalog:",
+            "  react:",
+            "",
+            "    specifier: ^18",
+            "  vue: ^3",
+        ];
+        let actions = build_remove_catalog_entry_actions_for_test(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        let edits = catalog_edits(&actions, &uri);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].range.start.line, 1);
+        assert_eq!(edits[0].range.end.line, 4);
     }
 
     #[test]
