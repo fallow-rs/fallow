@@ -50,6 +50,8 @@ pub struct AuditResult {
     /// Abbreviated merge base of `base_ref` and `HEAD`, where the compared range
     /// starts. Not serialized; only the scope line prints it.
     pub base_sha: Option<String>,
+    /// See [`base_ref::shallow_clone_base_is_head`].
+    pub shallow_clone_without_base: bool,
     pub head_sha: Option<String>,
     pub output: OutputFormat,
     pub performance: bool,
@@ -243,8 +245,11 @@ mod cache;
 mod notes;
 #[path = "audit_snapshot_hash.rs"]
 mod snapshot_hash;
+#[cfg(test)]
+#[path = "audit_test_fixture.rs"]
+pub mod test_fixture;
 
-use base_ref::resolve_base_ref;
+use base_ref::{audit_changed_files, resolve_base_ref};
 pub use cache::sweep_base_snapshot_cache;
 #[cfg(test)]
 use cache::{
@@ -1227,34 +1232,6 @@ fn compute_brief_focus_facts(
         .and_then(|out| out.graph.as_ref())?;
 
     fallow_engine::module_graph::focus_facts_for_changed_paths(graph, root, changed_files)
-}
-
-/// The files an audit compares, or the exit-2 document naming why git could
-/// not say.
-///
-/// Resolved without the shared `--changed-since` warning on purpose. That
-/// sentence says the report covers the whole project instead of the changed
-/// files, which is what every command that WIDENS does; audit widens nothing,
-/// it stops here. It also names `--changed-since`, and audit's flag is
-/// `--base`. The cause travels into the error document instead, folded onto one
-/// line so a CI log keeps one fact per record.
-fn audit_changed_files(
-    opts: &AuditOptions<'_>,
-    base_ref: &str,
-) -> Result<FxHashSet<PathBuf>, ExitCode> {
-    crate::check::try_get_changed_files(opts.root, base_ref).map_err(|err| {
-        let cause = err
-            .describe()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        emit_input_error(
-            &format!(
-                "could not determine changed files for base ref '{base_ref}': {cause}. Verify the ref exists in this git repository"
-            ),
-            opts.output,
-        )
-    })
 }
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
@@ -2288,6 +2265,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         base_ref: parts.base_ref,
         base_description: parts.base_description,
         base_sha: parts.base_sha,
+        shallow_clone_without_base: false,
         head_sha: parts.head_sha,
         output: parts.output,
         performance: parts.performance,
@@ -2358,6 +2336,7 @@ fn empty_audit_result(
         base_snapshot_skipped: false,
         changed_files_count: 0,
         changed_files: Vec::new(),
+        shallow_clone_without_base: base_ref::shallow_clone_base_is_head(opts, &base_ref),
         base_ref,
         base_description,
         base_sha,

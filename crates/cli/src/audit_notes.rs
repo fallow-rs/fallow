@@ -57,9 +57,21 @@ fn note_type_aware_require_inert(opts: &AuditOptions<'_>, type_aware: AuditTypeA
 /// evidence. A CI job on a push to the default branch causes this: the
 /// auto-detected base is the branch itself, which is HEAD. The note goes to
 /// stderr also under `--quiet`, because a job that reads only the JSON verdict
-/// otherwise sees a pass.
+/// otherwise sees a pass. A shallow clone without a base gets a warning that
+/// names the missing history instead, because a pull request run has the same
+/// empty scope there and the generic advice does not fix it.
 fn note_empty_audit_scope(result: &AuditResult) {
     if result.changed_files_count != 0 {
+        return;
+    }
+    if result.shallow_clone_without_base {
+        eprintln!(
+            "Warning: this is a shallow clone, so the audit found no base and compared HEAD \
+             ({}) with itself. Its verdict checked nothing. Fetch the full history (for \
+             example `fetch-depth: 0` on actions/checkout), or pass --base <ref> with the \
+             ref to compare with.",
+            result.base_ref
+        );
         return;
     }
     eprintln!(
