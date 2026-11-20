@@ -29598,7 +29598,7 @@
         {
           "type": "string",
           "const": "audit-verdict",
-          "description": "`fallow audit`'s rule-severity verdict, the only three-valued gate."
+          "description": "`fallow audit`'s rule-severity verdict, the only three-valued gate.\n`skipped` when the audit runs in a shallow clone and its\nauto-detected base is HEAD, so it compared no file."
         },
         {
           "type": "string",
@@ -29621,7 +29621,7 @@
           "description": "`fallow mutation --min-score` or `mutation.minScore`. `observed` is the\nscore in percent, and `threshold` is the minimum. `skipped` when no\nmutant was counted. Absent on a recheck, because the score of a\nrecheck covers only the rechecked mutants."
         }
       ],
-      "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set: a name\nthat a consumer does not recognize means \"some gate\", not an error.\n\nThe default exit rule of a command is always in `gate_outcomes`, also when\nno flag armed a gate: `error-severity-findings` on `dead-code`, `check` and\nthe combined run (with `health-findings` when the combined run analyzed\nhealth), `health-findings` on `health`, `security-advisory` on `security`\nand `audit-verdict` on `audit`. `dupes` has no default exit rule, so a\n`dupes` run that armed no gate carries no object and always exits 0. The\ntyped programmatic API runs no CLI gate and leaves the object absent.\n\nA gate reports `skipped` when it stands down: a change-scoped baseline\ncomparison, `health --report-only`, or a security advisory that a\nconfigured `--gate` shadows. `type-aware-fallback` is always `skipped`.\nOnly `audit-verdict` reports `warn`."
+      "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set: a name\nthat a consumer does not recognize means \"some gate\", not an error.\n\nThe default exit rule of a command is always in `gate_outcomes`, also when\nno flag armed a gate: `error-severity-findings` on `dead-code`, `check` and\nthe combined run (with `health-findings` when the combined run analyzed\nhealth), `health-findings` on `health`, `security-advisory` on `security`\nand `audit-verdict` on `audit`. `dupes` has no default exit rule, so a\n`dupes` run that armed no gate carries no object and always exits 0. The\ntyped programmatic API runs no CLI gate and leaves the object absent.\n\nA gate reports `skipped` when it stands down: a change-scoped baseline\ncomparison, `health --report-only`, a security advisory that a\nconfigured `--gate` shadows, or an `audit-verdict` in a shallow clone\nwhose auto-detected base is HEAD itself. That audit compared no file and\nstill exits 0. `type-aware-fallback` is always `skipped`.\nOnly `audit-verdict` reports `warn`."
     },
     "GateOutcomes": {
       "type": "object",

@@ -56,8 +56,10 @@ pub use fallow_report_protocol::{GateFile, GateFileReason, GateOutcome, GateStat
 /// typed programmatic API runs no CLI gate and leaves the object absent.
 ///
 /// A gate reports `skipped` when it stands down: a change-scoped baseline
-/// comparison, `health --report-only`, or a security advisory that a
-/// configured `--gate` shadows. `type-aware-fallback` is always `skipped`.
+/// comparison, `health --report-only`, a security advisory that a
+/// configured `--gate` shadows, or an `audit-verdict` in a shallow clone
+/// whose auto-detected base is HEAD itself. That audit compared no file and
+/// still exits 0. `type-aware-fallback` is always `skipped`.
 /// Only `audit-verdict` reports `warn`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -116,6 +118,8 @@ pub enum GateName {
     /// it, so this reports `skipped` on any run that set one.
     SecurityAdvisory,
     /// `fallow audit`'s rule-severity verdict, the only three-valued gate.
+    /// `skipped` when the audit runs in a shallow clone and its
+    /// auto-detected base is HEAD, so it compared no file.
     AuditVerdict,
     /// `--type-aware-require complete`: semantic analysis was partial or
     /// unavailable.

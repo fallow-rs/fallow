@@ -1984,13 +1984,11 @@ fn walkthrough_view_key(path: &std::path::Path, root: &std::path::Path) -> Strin
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use fallow_config::{AuditGate, OutputFormat};
+    use fallow_config::OutputFormat;
     use fallow_output::REVIEW_BRIEF_SCHEMA_VERSION;
     use rustc_hash::FxHashSet;
 
-    use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
+    use crate::audit::AuditVerdict;
 
     #[test]
     fn dependency_names_preserve_scopes_and_manifest_labels() {
@@ -2062,51 +2060,7 @@ mod tests {
     }
 
     use super::*;
-
-    fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
-        AuditResult {
-            verdict,
-            summary: AuditSummary {
-                dead_code_issues: 0,
-                dead_code_has_errors: false,
-                dead_code_skipped: false,
-                complexity_skipped: false,
-                duplication_skipped: false,
-                complexity_findings: 0,
-                max_cyclomatic: None,
-                duplication_clone_groups: 0,
-            },
-            attribution: AuditAttribution {
-                gate: AuditGate::NewOnly,
-                ..AuditAttribution::default()
-            },
-            dupe_demotion_diff_source: None,
-            base_snapshot: None,
-            comparison: None,
-            base_snapshot_skipped: false,
-            changed_files_count: 0,
-            changed_files: Vec::new(),
-            base_ref: "origin/main".to_string(),
-            base_description: None,
-            base_sha: None,
-            head_sha: None,
-            output,
-            performance: false,
-            check: None,
-            dupes: None,
-            health: None,
-            elapsed: Duration::ZERO,
-            review_deltas: None,
-            weakening_signals: Vec::new(),
-            diff_risk: fallow_output::DiffRiskReport::default(),
-            routing: None,
-            ownership: None,
-            decision_surface: None,
-            graph_snapshot_hash: None,
-            change_anchors: Vec::new(),
-            diff_index: None,
-        }
-    }
+    use crate::audit::test_fixture::audit_result;
 
     #[test]
     fn brief_mode_always_returns_success_even_when_verdict_is_fail() {

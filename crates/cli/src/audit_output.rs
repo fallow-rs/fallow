@@ -112,8 +112,16 @@ const fn audit_verdict_status(verdict: AuditVerdict) -> fallow_output::GateStatu
 
 /// The audit run's rule-severity verdict, for the envelope's `gate_outcomes`.
 fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcomes> {
+    // A shallow clone without a base compares HEAD with itself, so the
+    // verdict judged nothing. The run still exits 0, but the gate stands
+    // down, so a CI reader does not take the pass as a check.
+    let verdict = if result.shallow_clone_without_base {
+        fallow_output::GateStatus::Skipped
+    } else {
+        audit_verdict_status(result.verdict)
+    };
     crate::gates::audit_gate_outcomes(
-        audit_verdict_status(result.verdict),
+        verdict,
         audit_loaded_any_baseline(result),
         result
             .check
@@ -1488,11 +1496,11 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use std::process::ExitCode;
-    use std::time::Duration;
 
     use fallow_config::{AuditGate, OutputFormat};
     use fallow_output::PrDecisionConclusion;
 
+    use crate::audit::test_fixture::audit_result;
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
     use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 
@@ -1501,51 +1509,6 @@ mod tests {
         build_status_parts, build_vital_sign_parts, diff_risk_lines, format_scope_line_parts,
         print_audit_result, short_base_ref, styling_finding_audit_context_label,
     };
-
-    fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
-        AuditResult {
-            verdict,
-            summary: AuditSummary {
-                dead_code_issues: 0,
-                dead_code_has_errors: false,
-                dead_code_skipped: false,
-                complexity_skipped: false,
-                duplication_skipped: false,
-                complexity_findings: 0,
-                max_cyclomatic: None,
-                duplication_clone_groups: 0,
-            },
-            attribution: AuditAttribution {
-                gate: AuditGate::NewOnly,
-                ..AuditAttribution::default()
-            },
-            dupe_demotion_diff_source: None,
-            base_snapshot: None,
-            comparison: None,
-            base_snapshot_skipped: false,
-            changed_files_count: 0,
-            changed_files: Vec::new(),
-            base_ref: "origin/main".to_string(),
-            base_description: None,
-            base_sha: None,
-            head_sha: None,
-            output,
-            performance: false,
-            check: None,
-            dupes: None,
-            health: None,
-            elapsed: Duration::ZERO,
-            review_deltas: None,
-            weakening_signals: Vec::new(),
-            diff_risk: fallow_output::DiffRiskReport::default(),
-            routing: None,
-            ownership: None,
-            decision_surface: None,
-            graph_snapshot_hash: None,
-            change_anchors: Vec::new(),
-            diff_index: None,
-        }
-    }
 
     #[test]
     fn short_base_ref_abbreviates_full_sha() {
