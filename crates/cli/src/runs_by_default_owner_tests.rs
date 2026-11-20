@@ -3,13 +3,14 @@
 //! outside `fallow-config` can decide the duplication analysis by another
 //! rule. This test counts each call of it in the production code of every
 //! crate outside `fallow-config`, outside `#[cfg(test)]` items and test
-//! files.
+//! files. Calls in macro bodies count too.
 //!
 //! The owner is `crates/engine/src/health/derived_sections.rs`: the health
 //! score measures duplication when the config enables it, whatever analyses
 //! one run selects. [`CALLERS`] also lists the CLI sites that still read the
 //! config in place of the plan of the run, each with the exact count.
 
+use proc_macro2::{TokenStream, TokenTree};
 use rustc_hash::FxHashMap;
 use syn::visit::{self, Visit};
 
@@ -87,6 +88,36 @@ impl<'ast> Visit<'ast> for CallVisitor {
         }
         visit::visit_expr_path(self, path);
     }
+
+    /// `syn` keeps a macro body as tokens, so a call in `assert!` or
+    /// `matches!` is not an expression node.
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        self.count_tokens(mac.tokens.clone());
+        visit::visit_macro(self, mac);
+    }
+}
+
+impl CallVisitor {
+    /// Count each `runs_by_default` token after a `.` or a `::`.
+    fn count_tokens(&mut self, tokens: TokenStream) {
+        let mut after_separator = false;
+        for token in tokens {
+            after_separator = match token {
+                TokenTree::Group(group) => {
+                    self.count_tokens(group.stream());
+                    false
+                }
+                TokenTree::Ident(ident) => {
+                    if after_separator && ident == METHOD {
+                        self.calls += 1;
+                    }
+                    false
+                }
+                TokenTree::Punct(punct) => matches!(punct.as_char(), '.' | ':'),
+                TokenTree::Literal(_) => false,
+            };
+        }
+    }
 }
 
 fn calls_in(source_path: &str) -> usize {
@@ -96,11 +127,34 @@ fn calls_in(source_path: &str) -> usize {
     .join("../..");
     let source = std::fs::read_to_string(root.join(source_path))
         .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-    let file =
-        syn::parse_file(&source).unwrap_or_else(|error| panic!("parse {source_path}: {error}"));
+    calls_in_source(&source).unwrap_or_else(|error| panic!("parse {source_path}: {error}"))
+}
+
+/// The number of `runs_by_default` calls in the production code of `source`.
+fn calls_in_source(source: &str) -> syn::Result<usize> {
+    let file = syn::parse_file(source)?;
     let mut visitor = CallVisitor::default();
     visitor.visit_file(&file);
-    visitor.calls
+    Ok(visitor.calls)
+}
+
+#[test]
+fn the_visitor_counts_calls_in_code_and_macros_but_not_in_tests() {
+    let source = r#"
+        fn decide(config: &DuplicatesConfig) -> bool {
+            assert!(config.runs_by_default(), "duplication runs");
+            let _ = matches!(config.runs_by_default(), true);
+            let _ = format!("{}", DuplicatesConfig::runs_by_default(config));
+            let _ = vec![config.runs_by_default(); 2];
+            let _ = matches!(config.runs_by_default(), on if on);
+            config.runs_by_default()
+        }
+        #[cfg(test)]
+        fn in_test(config: &DuplicatesConfig) -> bool {
+            config.runs_by_default()
+        }
+    "#;
+    assert_eq!(calls_in_source(source).expect("parse"), 6);
 }
 
 #[test]
