@@ -99,6 +99,8 @@ mod effect_dead_code;
 mod effect_schema_exports_as_types;
 #[path = "integration_test/egg_framework_plugin.rs"]
 mod egg_framework_plugin;
+#[path = "integration_test/entry_dot_slash_prefix.rs"]
+mod entry_dot_slash_prefix;
 #[path = "integration_test/entry_load_closure.rs"]
 mod entry_load_closure;
 #[path = "integration_test/entry_output_mapping.rs"]
