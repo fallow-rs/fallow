@@ -37,6 +37,7 @@ import {
   runAnalysis,
   runAudit,
   runFix,
+  healthInputKey,
   runHealthAnalysis,
   runInspectActiveFile,
   runInspectActiveSymbol,
@@ -285,10 +286,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // tree view is first shown, avoiding a double analysis on activation (the LSP
   // runs its own analysis for diagnostics).
   let cliAnalysisRan = false;
-  // The health spawn has its own latch and visibility trigger, fully
-  // independent of the combined run, so opening the editor or the existing two
-  // views never triggers any health work (#902 latency isolation).
-  let healthAnalysisRan = false;
   // The security run is decoupled from the dead-code run: it fires only on first
   // visibility of the Security Candidates view, behind its own flag, so a user
   // who never opens that view pays nothing even with the feature enabled (#902).
@@ -444,36 +441,34 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     ),
   );
 
+  const applyHealth = (report: HealthOutput | null): void => {
+    lastHealthResult = report;
+    healthProvider.update(report);
+    updateStatusBarHealth(report);
+    complexityDecorations.setFindings(report?.findings ?? []);
+  };
+
   // Lazy, opt-out health spawn. Separate from the combined run so the
   // latency-critical sidebar is never coupled to complexity scoring or the
-  // git-churn hotspot walk.
+  // git-churn hotspot walk, and opening the editor never starts health work
+  // (#902).
   //
-  // Returns whether the run COMPLETED, not whether it produced data. A null
-  // report from a non-retryable outcome (no workspace, empty output, older CLI)
-  // still counts as completed, so the latch holds and a re-reveal does not
-  // re-spawn or repeat the no-workspace / update-CLI toast (#902). Only a
-  // genuine transient failure (rethrown by runHealthAnalysis) returns false so
-  // the caller resets the latch and a later reveal retries. Mirrors Security's
-  // unconditional-true completion contract.
-  const triggerHealthAnalysis = async (): Promise<boolean> => {
-    if (!getHealthEnabled()) {
-      lastHealthResult = null;
-      healthProvider.update(null);
-      updateStatusBarHealth(null);
-      complexityDecorations.setFindings([]);
-      return true;
-    }
-    try {
-      const report = await runHealthAnalysis(context, outputChannel);
-      lastHealthResult = report;
-      healthProvider.update(report);
-      updateStatusBarHealth(report);
-      complexityDecorations.setFindings(report?.findings ?? []);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  // A null report is a completed run (no workspace, empty output, older CLI),
+  // so a later reveal does not spawn again or repeat the toast. A transient
+  // failure makes `runHealthAnalysis` throw, and a later reveal tries again.
+  const healthLoader = createLazyView<HealthOutput | null>({
+    enabled: getHealthEnabled,
+    inputKey: () => healthInputKey(context),
+    // Health data also feeds the status bar and the inline complexity
+    // decorations, so a changed input reloads while the view is hidden.
+    reloadStaleWhen: ({ revealed }) => revealed,
+    run: async () => ({
+      kind: "loaded",
+      value: await runHealthAnalysis(context, outputChannel),
+    }),
+    apply: applyHealth,
+    reset: () => applyHealth(null),
+  });
 
   // Run `fallow security` and update the Security Candidates view. Findings are
   // UNVERIFIED candidates (#903), so the toast says so explicitly and never uses
@@ -535,23 +530,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   });
   context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView, coverageView);
 
-  const onHealthViewVisible = (): void => {
-    if (healthAnalysisRan) {
-      return;
-    }
-    healthAnalysisRan = true;
-    void (async (): Promise<void> => {
-      const completed = await triggerHealthAnalysis();
-      if (!completed) {
-        healthAnalysisRan = false;
-      }
-    })();
-  };
-
   context.subscriptions.push(
     healthView.onDidChangeVisibility((e) => {
       if (e.visible) {
-        onHealthViewVisible();
+        void healthLoader.reveal();
       } else {
         // Hiding the Health view drops the transient selection highlight.
         complexityDecorations.setSelectedFunction(undefined);
@@ -668,9 +650,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     });
   };
 
-  const runHealthAnalysisCommand = async (): Promise<void> => {
-    healthAnalysisRan = await triggerHealthAnalysis();
-  };
+  const runHealthAnalysisCommand = (): Promise<void> => healthLoader.reload();
 
   const runSecurityAnalysisCommand = async (): Promise<void> => {
     if (!getSecurityEnabled()) {
@@ -772,8 +752,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // dedup onto an in-flight run spawned with the OLD scope and latch its
   // results as current with no follow-up run. Mark the analysis as run so a
   // later first-open of the sidebar does not trigger a redundant second pass.
+  // The picker stores the scope in workspace state, so no configuration event
+  // tells the lazy views about the change.
   const onWorkspaceScopeChange = (): void => {
     refreshWorkspacePicker(context);
+    void healthLoader.invalidate();
     void (async (): Promise<void> => {
       cliAnalysisRan = await triggerCliAnalysis({ force: true });
     })();
@@ -1091,29 +1074,15 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       }
 
       if (needsHealthReanalysis) {
-        // Health settings never restart the LSP nor re-run the combined
-        // analysis. Toggling only the status-bar visibility re-renders from the
-        // cached report (no respawn); the spawn-affecting settings (enabled,
-        // hotspots, topFindings) re-run the standalone health spawn, but only
-        // if the user already revealed the Health view (preserving the lazy
-        // trigger when they have not).
+        // Render-only work for the health settings. The loader below decides
+        // from the input key of the run whether the health spawn starts again.
         syncHealthEnabledContext();
-        const onlyStatusBarChanged =
-          e.affectsConfiguration("fallow.health.statusBar") &&
-          !e.affectsConfiguration("fallow.health.enabled") &&
-          !e.affectsConfiguration("fallow.health.hotspots") &&
-          !e.affectsConfiguration("fallow.health.topFindings");
-        if (onlyStatusBarChanged) {
+        if (e.affectsConfiguration("fallow.health.statusBar")) {
           updateStatusBarHealth(lastHealthResult);
-        } else if (healthAnalysisRan) {
-          void triggerHealthAnalysis();
-        } else {
-          // The Health view has not run yet, so there is nothing to respawn, but
-          // toggling the breakdown off should still clear any stale decorations
-          // AND lenses, so refresh() fires onDidChange to re-query code lenses.
-          complexityDecorations.refresh();
         }
+        complexityDecorations.refresh();
       }
+      void healthLoader.invalidate();
 
       // `complexity.afterText` is render-only (the inline tier on/off): re-render
       // from the cached findings without respawning health.
