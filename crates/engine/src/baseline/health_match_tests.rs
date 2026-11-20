@@ -110,3 +110,116 @@ fn compare_gives_the_filter_and_the_overlap_of_one_match() {
     assert_eq!(compared.new_findings[0].name, "render");
     assert_eq!(compared.overlap.matched_entries, 1);
 }
+
+mod invariants {
+    use proptest::prelude::*;
+
+    use super::super::*;
+
+    const CATEGORY_KEYS: [&str; 9] = [
+        "complexity_moderate",
+        "complexity_high",
+        "complexity_critical",
+        "crap_moderate",
+        "crap_high",
+        "crap_critical",
+        "file_lines_moderate",
+        "file_lines_high",
+        "file_lines_critical",
+    ];
+    const FILE_BUCKETS: [&str; 3] = ["src/a.ts", "src/b.ts", "src/c.ts"];
+    /// One file, so no bucket follows a move.
+    const FUNCTION_BUCKETS: [&str; 5] = [
+        "src/a.ts\0<anonymous>",
+        "src/a.ts\0<arrow>",
+        "src/a.ts\0f",
+        "src/a.ts\0g",
+        "src/a.ts\0h",
+    ];
+
+    fn count_map(buckets: &'static [&'static str]) -> impl Strategy<Value = HealthFindingCountMap> {
+        proptest::collection::btree_map(
+            proptest::sample::select(buckets),
+            proptest::collection::btree_map(
+                proptest::sample::select(&CATEGORY_KEYS[..]),
+                1usize..=3,
+                0..=4,
+            ),
+            0..=4,
+        )
+        .prop_map(|buckets| {
+            buckets
+                .into_iter()
+                .map(|(bucket, counts)| {
+                    let counts = counts
+                        .into_iter()
+                        .map(|(category, count)| {
+                            (category.to_owned(), HealthBaselineCount { count })
+                        })
+                        .collect();
+                    (bucket.to_owned(), counts)
+                })
+                .collect()
+        })
+    }
+
+    fn total(counts: &HealthFindingCountMap) -> usize {
+        counts.values().map(slot_total).sum()
+    }
+
+    fn check(
+        saved: &HealthFindingCountMap,
+        current: &HealthFindingCountMap,
+        mode: HealthBaselineMode,
+    ) -> Result<(), TestCaseError> {
+        let root = Path::new("/nonexistent-fallow-health-match");
+        let matched = match_health_baseline(saved, current, mode, root);
+        let mut kept = HealthFindingCountMap::new();
+        for (bucket, counts) in saved {
+            for (category, entry) in counts {
+                let used = matched.used_slots(bucket, category);
+                prop_assert!(used <= entry.count, "a slot is used at most one time");
+                if used > 0 {
+                    add_slots(&mut kept, bucket, category, used);
+                }
+            }
+        }
+        let matched_entries = matched.overlap().matched_entries;
+        prop_assert!(
+            matched_entries <= total(current),
+            "no more matches than findings"
+        );
+        prop_assert_eq!(matched_entries, total(&kept));
+
+        let pruned = match_health_baseline(&kept, current, mode, root);
+        prop_assert_eq!(pruned.overlap().matched_entries, total(&kept));
+        for bucket in current.keys() {
+            for category in CATEGORY_KEYS {
+                prop_assert_eq!(
+                    matched.overflows(bucket, category),
+                    pruned.overflows(bucket, category),
+                    "the prune changes no overflow"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    proptest! {
+        #[test]
+        fn count_match_is_stable_under_prune(
+            saved in count_map(&FILE_BUCKETS),
+            current in count_map(&FILE_BUCKETS),
+        ) {
+            check(&saved, &current, HealthBaselineMode::Count)?;
+        }
+
+        #[test]
+        fn identity_match_is_stable_under_prune(
+            saved in count_map(&FUNCTION_BUCKETS),
+            current in count_map(&FUNCTION_BUCKETS),
+        ) {
+            check(&saved, &current, HealthBaselineMode::Identity)?;
+        }
+    }
+}
