@@ -25,7 +25,7 @@
 //!   (transpiled or stale), and the script is not read as that file.
 //!
 //! A transpiled script (`tsx`, a bundle) reaches its original files through
-//! the source map that Node records in the dump; see [`mapped`].
+//! the source map that Node records in the dump; see the `mapped` module.
 
 mod mapped;
 pub mod source_map_cache;

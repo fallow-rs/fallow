@@ -64,7 +64,6 @@ fallow-security = { workspace = true }
 fallow-types = { workspace = true }
 fallow-v8-coverage = { version = "3.45.0", path = "../v8-coverage" }
 fallow-cov-protocol = "0.9"
-url = "2"
 fallow-license = { version = "3.45.0", path = "../license" }
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 clap = { workspace = true }
@@ -146,6 +145,7 @@ syn = { version = "3", features = ["full", "visit"] }
 base64 = "0.23"
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 fallow-cov-protocol = "0.9"
+url = "2"
 
 [package.metadata.fallow.deps]
 ignored = [
