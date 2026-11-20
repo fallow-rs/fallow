@@ -803,6 +803,8 @@ mod issue_4731_base_url_missing_file;
 mod issue_4734_ts_import_declaration_file;
 #[path = "integration_test/issue_4799_computed_literal_key.rs"]
 mod issue_4799_computed_literal_key;
+#[path = "integration_test/issue_4812_computed_key_param_member.rs"]
+mod issue_4812_computed_key_param_member;
 #[path = "integration_test/issue_4824_whole_object_same_name_local.rs"]
 mod issue_4824_whole_object_same_name_local;
 #[path = "integration_test/issue_4828_svelte_markup_script_attr_gt.rs"]

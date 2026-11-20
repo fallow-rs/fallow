@@ -44,6 +44,7 @@ impl ReceiverAlias {
 }
 
 /// A receiver that resolves to a property path of a tracked parameter.
+#[derive(Clone)]
 pub(super) struct ResolvedReceiver {
     pub(super) param: String,
     pub(super) path: String,

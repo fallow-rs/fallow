@@ -11,6 +11,7 @@ use crate::js_text::JsText;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
+use super::visit_computed_keys::{ComputedKeyPart, computed_key_parts};
 use super::{
     ITERABLE_ELEMENT_CALLBACK_METHODS, assignment_target_identifier_name,
     static_member_object_name, unwrap_parens, unwrap_static_expr,
@@ -90,7 +91,7 @@ mod durable_objects;
 #[path = "visit_impl_receiver_paths.rs"]
 mod receiver_paths;
 
-use durable_objects::{DurableObjectCalls, ReceiverAlias};
+use durable_objects::{DurableObjectCalls, ReceiverAlias, ResolvedReceiver};
 
 pub(super) struct StructuralParamMemberCollector {
     target_params: FxHashSet<String>,
@@ -102,6 +103,12 @@ pub(super) struct StructuralParamMemberCollector {
     durable_objects: DurableObjectCalls,
     pub(super) members: FxHashMap<String, FxHashSet<String>>,
     pub(super) property_members: FxHashMap<String, FxHashSet<(String, String)>>,
+    /// Receivers that a computed key can read any member of:
+    /// `param[key as keyof T]()`.
+    pub(super) whole_object: FxHashSet<String>,
+    /// Computed keys whose values depend on the binding of an identifier:
+    /// `param[action]()`.
+    computed_keys: Vec<(ResolvedReceiver, Vec<ComputedKeyPart>)>,
 }
 
 impl StructuralParamMemberCollector {
@@ -114,16 +121,42 @@ impl StructuralParamMemberCollector {
             durable_objects: DurableObjectCalls::default(),
             members: FxHashMap::default(),
             property_members: FxHashMap::default(),
+            whole_object: FxHashSet::default(),
+            computed_keys: Vec::new(),
         }
     }
 
-    pub(super) fn collect_function_body(&mut self, body: BodyRef<'_, '_>) {
+    /// Collect the member reads of the tracked parameters in `body`.
+    /// `key_members` gives the members that the parts of a computed key can
+    /// name, or `None` when the key can name any member.
+    pub(super) fn collect_function_body(
+        &mut self,
+        body: BodyRef<'_, '_>,
+        key_members: &dyn Fn(&[ComputedKeyPart]) -> Option<Vec<String>>,
+    ) {
         self.shadowed_stack.push(FxHashSet::default());
         self.alias_stack.push(FxHashMap::default());
         body.visit(self);
         self.alias_stack.pop();
         self.shadowed_stack.pop();
+        for (receiver, parts) in std::mem::take(&mut self.computed_keys) {
+            match key_members(&parts) {
+                Some(members) => {
+                    for member in members {
+                        self.record_member_access(receiver.clone(), member);
+                    }
+                }
+                None => self.record_whole_object_read(receiver),
+            }
+        }
         self.commit_namespace_method_accesses();
+    }
+
+    /// A key that can name any member reads the whole receiver.
+    fn record_whole_object_read(&mut self, receiver: ResolvedReceiver) {
+        if receiver.path.is_empty() && !receiver.via_stub {
+            self.whole_object.insert(receiver.param);
+        }
     }
 
     fn tracks_receiver_name(&self, name: &str) -> bool {
@@ -212,9 +245,14 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
-        if let Expression::StringLiteral(property) = &expr.expression {
+        // An index such as `items[0]` names no class member.
+        if !matches!(expr.expression, Expression::NumericLiteral(_)) {
+            let parts = computed_key_parts(&expr.expression);
             for receiver in self.resolve_member_receivers(&expr.object) {
-                self.record_member_access(receiver, property.value.text().into_owned());
+                match &parts {
+                    Some(parts) => self.computed_keys.push((receiver, parts.clone())),
+                    None => self.record_whole_object_read(receiver),
+                }
             }
         }
         walk::walk_computed_member_expression(self, expr);
