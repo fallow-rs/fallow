@@ -54,6 +54,13 @@ sections of a combined run. It does not scope `health` or `security`, alone or
 in a combined run. A `--diff-file` or `--workspace` scope applies on top of the
 map, so a finding must be in both.
 
+`fallow_engine::workspace_scope::WorkspaceScope` decides if a file is in the
+scope of `--workspace`, `--changed-workspaces` and a positional path. A file is
+in scope when the deepest selected or excluded root that holds it is a selected
+root. A `!` pattern thus removes a nested workspace from a selected parent. A
+nested workspace that the selection does not name stays in scope. New code
+calls `WorkspaceScope::contains` and does not test a prefix of `roots()`.
+
 The failure policy follows `--changed-since`. The config loader rejects a
 malformed key (absolute, `..`, `.`, empty segment, trailing slash, backslash)
 for every command, and a malformed ref fails the run with exit 2. A map that
