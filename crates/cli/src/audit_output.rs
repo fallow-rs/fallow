@@ -1479,7 +1479,10 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         .map(|health| report::api_health_sarif_document(&health.report, &health.config.root));
     let combined = fallow_api::build_audit_sarif(AuditSarifOutputInput {
         dead_code: check_sarif.as_ref(),
-        duplication: result.dupes.as_ref().map(|dupes| &dupes.report),
+        duplication: result
+            .dupes
+            .as_ref()
+            .map(|dupes| report::api_duplication_sarif_input(&dupes.report, &dupes.config.root)),
         health: health_sarif.as_ref(),
         diff_risk: Some(&result.diff_risk),
     });
