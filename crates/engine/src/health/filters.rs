@@ -87,7 +87,7 @@ pub(super) fn collect_candidate_paths(
     files: &[DiscoveredFile],
     config: &ResolvedConfig,
     changed_files: Option<&FxHashSet<PathBuf>>,
-    ws_roots: Option<&[PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
     ignore_set: &globset::GlobSet,
 ) -> FxHashSet<PathBuf> {
     let capacity = changed_files.map_or(files.len(), |changed| files.len().min(changed.len()));
@@ -118,7 +118,7 @@ fn path_in_health_scope(
     path: &Path,
     config: &ResolvedConfig,
     changed_files: Option<&FxHashSet<PathBuf>>,
-    ws_roots: Option<&[PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
     ignore_set: &globset::GlobSet,
 ) -> bool {
     if let Some(changed) = changed_files
@@ -127,7 +127,7 @@ fn path_in_health_scope(
         return false;
     }
     if let Some(ws) = ws_roots
-        && !ws.iter().any(|root| path.starts_with(root))
+        && !ws.contains(path)
     {
         return false;
     }
@@ -145,7 +145,7 @@ pub(super) fn filter_coverage_gaps(
     runtime_paths: &mut Vec<PathBuf>,
     config: &ResolvedConfig,
     changed_files: Option<&FxHashSet<PathBuf>>,
-    ws_roots: Option<&[PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
     ignore_set: &globset::GlobSet,
 ) {
     runtime_paths

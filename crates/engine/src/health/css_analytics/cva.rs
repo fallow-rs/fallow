@@ -226,7 +226,7 @@ fn read_js_style_scan_source(
         return None;
     }
     if let Some(roots) = ws_roots
-        && !roots.iter().any(|root| path.starts_with(root))
+        && !roots.contains(path)
     {
         return None;
     }

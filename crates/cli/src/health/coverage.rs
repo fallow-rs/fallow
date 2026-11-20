@@ -12,6 +12,7 @@ use fallow_cov_protocol::{
     FunctionIdentity, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Request, Response,
     StaticFile, StaticFindings, StaticFunction, Verdict, Watermark, function_identity_id,
 };
+use fallow_engine::workspace_scope::WorkspaceScope;
 use fallow_v8_coverage::V8CoverageDump;
 use globset::GlobSet;
 use oxc_coverage_instrument::{FileCoverage, FnEntry, Location, Position};
@@ -204,7 +205,7 @@ pub(super) struct RuntimeCoverageAnalysisInput<'a> {
     pub file_paths: &'a FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a GlobSet,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pub ws_roots: Option<&'a [PathBuf]>,
+    pub ws_roots: Option<&'a WorkspaceScope>,
     pub top: Option<usize>,
     pub codeowners_path: Option<&'a str>,
     pub quiet: bool,
@@ -621,7 +622,7 @@ fn build_request(
     static_signals: &StaticSignalIndex,
     coverage_sources: Vec<CoverageSource>,
 ) -> (Request, FunctionLocations) {
-    let project_root = match input.ws_roots {
+    let project_root = match input.ws_roots.map(WorkspaceScope::roots) {
         Some([only]) => only.as_path(),
         _ => input.root,
     };
@@ -707,9 +708,7 @@ fn module_is_eligible(
     {
         return false;
     }
-    if let Some(ws) = input.ws_roots
-        && !ws.iter().any(|r| path.starts_with(r))
-    {
+    if input.ws_roots.is_some_and(|scope| !scope.contains(path)) {
         return false;
     }
     !module.complexity.is_empty()
@@ -3025,7 +3024,7 @@ mod tests {
     fn build_request_uses_workspace_root_for_sidecar_project_root() {
         let root = PathBuf::from("/repo");
         let ws_root = root.join("packages/app");
-        let ws_roots = [ws_root.clone()];
+        let ws_roots: fallow_engine::workspace_scope::WorkspaceScope = vec![ws_root.clone()].into();
         let options = RuntimeCoverageOptions {
             path: root.join("coverage"),
             min_invocations_hot: 100,
@@ -3246,7 +3245,7 @@ mod tests {
         changed_files.insert(app_dir.join("src").join("app.ts"));
         changed_files.insert(app_dir.join("src").join("ignored.ts"));
         changed_files.insert(other_dir.join("src").join("other.ts"));
-        let ws_roots = [app_dir];
+        let ws_roots: fallow_engine::workspace_scope::WorkspaceScope = vec![app_dir].into();
         let mut ignore_builder = GlobSetBuilder::new();
         ignore_builder.add(
             Glob::new("packages/app/src/ignored.ts")

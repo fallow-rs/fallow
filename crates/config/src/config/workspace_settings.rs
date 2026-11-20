@@ -107,10 +107,12 @@ struct BoundWorkspace {
     include_entry_exports: Option<bool>,
 }
 
-/// Discovered workspaces with at least one selecting key, deepest root first.
+/// The discovered workspaces of one pass. `owners` gives the position in
+/// `workspaces` of the deepest workspace that holds a path.
 #[derive(Debug, Default)]
 struct BoundWorkspaces {
     workspaces: Vec<BoundWorkspace>,
+    owners: crate::WorkspaceOwners,
 }
 
 /// Compiled `workspaces.settings`.
@@ -204,9 +206,6 @@ impl ResolvedWorkspaceSettings {
                 .filter(|(_, key)| key.selector.as_ref().is_some_and(|s| s.selects(&relative)))
                 .map(|(index, _)| index)
                 .collect();
-            if keys.is_empty() {
-                continue;
-            }
             for &index in &keys {
                 selected[index] = true;
             }
@@ -232,9 +231,14 @@ impl ResolvedWorkspaceSettings {
                 ));
             }
         }
-        bound.sort_by_key(|workspace| std::cmp::Reverse(workspace.root.components().count()));
+        let owners = crate::WorkspaceOwners::from_roots(
+            bound.iter().map(|workspace| workspace.root.as_path()),
+        );
         if let Ok(mut slot) = self.bound.write() {
-            *slot = Arc::new(BoundWorkspaces { workspaces: bound });
+            *slot = Arc::new(BoundWorkspaces {
+                workspaces: bound,
+                owners,
+            });
         }
     }
 
@@ -288,10 +292,11 @@ impl ResolvedWorkspaceSettings {
         if self.keys.is_empty() {
             return global;
         }
-        self.bound()
-            .workspaces
-            .iter()
-            .find(|workspace| path.starts_with(&workspace.root))
+        let bound = self.bound();
+        bound
+            .owners
+            .owner_of(path)
+            .and_then(|index| bound.workspaces.get(index))
             .and_then(|workspace| workspace.include_entry_exports)
             .unwrap_or(global)
     }
@@ -306,9 +311,9 @@ impl ResolvedWorkspaceSettings {
         }
         let bound = self.bound();
         let Some(workspace) = bound
-            .workspaces
-            .iter()
-            .find(|workspace| path.starts_with(&workspace.root))
+            .owners
+            .owner_of(path)
+            .and_then(|index| bound.workspaces.get(index))
         else {
             return false;
         };
@@ -433,6 +438,30 @@ mod tests {
         assert!(!s.include_entry_exports_for(nested, false));
         assert!(!s.suppresses_dependency_at(nested, "expo-a"));
         assert!(s.include_entry_exports_for(Path::new("/p/apps/mobile/index.ts"), false));
+    }
+
+    #[test]
+    fn a_nested_workspace_that_no_key_selects_uses_the_global_values() {
+        let root = Path::new("/p");
+        let layout = workspaces(root, &["packages/app", "packages/app/plugin"]);
+        let nested = Path::new("/p/packages/app/plugin/src/a.ts");
+        let parent = Path::new("/p/packages/app/src/a.ts");
+
+        let s = settings(&[("packages/*", &["lodash"], Some(true))]);
+        s.bind(root, &layout);
+        assert!(!s.include_entry_exports_for(nested, false));
+        assert!(!s.suppresses_dependency_at(nested, "lodash"));
+        assert!(s.include_entry_exports_for(parent, false));
+        assert!(s.suppresses_dependency_at(parent, "lodash"));
+
+        let both = settings(&[
+            ("packages/*", &["lodash"], Some(true)),
+            ("packages/app/plugin", &["react"], Some(false)),
+        ]);
+        both.bind(root, &layout);
+        assert!(!both.include_entry_exports_for(nested, true));
+        assert!(both.suppresses_dependency_at(nested, "react"));
+        assert!(!both.suppresses_dependency_at(nested, "lodash"));
     }
 
     #[test]

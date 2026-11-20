@@ -168,12 +168,13 @@ pub(crate) fn aggregate_flags(
     in_scope: &dyn Fn(&Path) -> bool,
 ) -> Vec<RetirementFlag> {
     let mut groups: FxHashMap<FlagKey, Vec<RetirementSiteInput>> = FxHashMap::default();
+    let owners = fallow_config::WorkspaceOwners::new(workspaces);
     for site in sites {
         let key = FlagKey {
             kind: site.kind,
             sdk_name: site.sdk_name.clone(),
             flag_name: site.flag_name.clone(),
-            workspace: workspace_of(&site.path, root, workspaces),
+            workspace: workspace_of(&site.path, root, workspaces, &owners),
         };
         groups.entry(key).or_default().push(site);
     }
@@ -608,11 +609,16 @@ fn compare_identity(a: &RetirementFlag, b: &RetirementFlag) -> std::cmp::Orderin
 
 /// Root-relative workspace path of the deepest workspace that holds `path`,
 /// or `None` for a file outside every workspace or a project without them.
-fn workspace_of(path: &Path, root: &Path, workspaces: &[WorkspaceInfo]) -> Option<String> {
-    workspaces
-        .iter()
-        .filter(|ws| path.starts_with(&ws.root) && ws.root != root)
-        .max_by_key(|ws| ws.root.components().count())
+fn workspace_of(
+    path: &Path,
+    root: &Path,
+    workspaces: &[WorkspaceInfo],
+    owners: &fallow_config::WorkspaceOwners,
+) -> Option<String> {
+    owners
+        .owner_of(path)
+        .and_then(|index| workspaces.get(index))
+        .filter(|ws| ws.root != root)
         .map(|ws| relative(&ws.root, root))
 }
 

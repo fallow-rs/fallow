@@ -146,7 +146,7 @@ fn load_feature_flags_session(
 /// The files a flags run reports on, from the workspace, changed-since and
 /// diff options.
 struct FeatureFlagsScope<'a> {
-    workspace_roots: Option<Vec<std::path::PathBuf>>,
+    workspace_roots: Option<fallow_engine::workspace_scope::WorkspaceScope>,
     changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>>,
     diff: Option<&'a DiffIndex>,
 }
@@ -159,7 +159,7 @@ impl FeatureFlagsScope<'_> {
     fn contains(&self, path: &Path, root: &Path) -> bool {
         self.workspace_roots
             .as_ref()
-            .is_none_or(|roots| roots.iter().any(|workspace| path.starts_with(workspace)))
+            .is_none_or(|scope| scope.contains(path))
             && self
                 .changed_files
                 .as_ref()

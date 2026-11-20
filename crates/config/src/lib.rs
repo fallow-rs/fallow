@@ -54,6 +54,7 @@ mod run_inputs;
 mod source_walk;
 pub mod toml_input;
 mod workspace;
+mod workspace_owners;
 /// YAML parsing behind one internal API.
 pub mod yaml;
 
@@ -71,6 +72,7 @@ pub use rule_pack::*;
 pub use run_inputs::*;
 pub use source_walk::{source_walk_builder, source_walked_workspaces};
 pub use workspace::*;
+pub use workspace_owners::WorkspaceOwners;
 
 use std::path::{Path, PathBuf};
 

@@ -23,7 +23,7 @@ pub(super) struct HealthRuntimeSectionsInput<'a> {
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) diff_index: Option<&'a fallow_output::DiffIndex>,
     pub(super) loaded_baseline: Option<&'a HealthBaselineData>,
     pub(super) findings: &'a [ComplexityViolation],

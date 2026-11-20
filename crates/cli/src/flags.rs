@@ -559,7 +559,7 @@ fn load_flags_config<'a>(
 /// and `--changed-workspaces`.
 struct FlagScope {
     changed: Option<rustc_hash::FxHashSet<std::path::PathBuf>>,
-    workspace_roots: Option<Vec<std::path::PathBuf>>,
+    workspace_roots: Option<fallow_engine::workspace_scope::WorkspaceScope>,
 }
 
 impl FlagScope {
@@ -575,7 +575,7 @@ impl FlagScope {
             && self
                 .workspace_roots
                 .as_ref()
-                .is_none_or(|roots| roots.iter().any(|root| path.starts_with(root)))
+                .is_none_or(|scope| scope.contains(path))
     }
 }
 

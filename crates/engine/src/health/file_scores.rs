@@ -28,7 +28,7 @@ pub struct FileScoresAndChurnInput<'a> {
     pub(crate) file_paths:
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(crate) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(crate) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(crate) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pub(crate) needs_file_scores: bool,
@@ -118,7 +118,7 @@ struct FileScoreInput<'a> {
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     ignore_set: &'a globset::GlobSet,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pre_computed: Option<DeadCodeAnalysisArtifacts>,
@@ -155,9 +155,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
     ) {
         Ok(mut output) => {
             if let Some(ws) = input.ws_roots {
-                output
-                    .scores
-                    .retain(|s| ws.iter().any(|r| s.path.starts_with(r)));
+                output.scores.retain(|s| ws.contains(&s.path));
             }
             if !input.ignore_set.is_empty() {
                 output.scores.retain(|s| {

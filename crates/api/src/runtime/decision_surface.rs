@@ -175,11 +175,7 @@ pub(super) fn run_decision_analysis(
     fallow_engine::dead_code::apply_rule_severities(&mut output.results, severity);
 
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
-    filter_decision_results(
-        &mut output.results,
-        workspace_roots.as_deref(),
-        changed_files,
-    );
+    filter_decision_results(&mut output.results, workspace_roots.as_ref(), changed_files);
 
     let graph_signals =
         decision_graph_signals(output.graph.as_ref(), &session, &root, changed_files);
@@ -246,7 +242,7 @@ fn decision_graph_signals(
 
 fn filter_decision_results(
     results: &mut fallow_types::results::AnalysisResults,
-    workspace_roots: Option<&[PathBuf]>,
+    workspace_roots: Option<&fallow_engine::workspace_scope::WorkspaceScope>,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) {
     if let Some(workspace_roots) = workspace_roots {

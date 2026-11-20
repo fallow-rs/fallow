@@ -965,7 +965,7 @@ fn compute_brief_co_change_gaps(
     let settings = coupling::ChangeCouplingSettings::from(&check.config.health.change_coupling);
     let mut analysis = coupling::analyze_change_history(&churn.commits, &links, &settings);
     // The check already reported an invalid workspace selection.
-    let ws_roots = fallow_engine::workspace_scope::resolve_workspace_scope_roots(
+    let ws_roots = fallow_engine::workspace_scope::resolve_workspace_scope(
         root,
         opts.workspace,
         opts.changed_workspaces,
@@ -977,7 +977,7 @@ fn compute_brief_co_change_gaps(
     let scope = coupling::PairScope {
         root,
         ignore_set: &ignore_set,
-        ws_roots: ws_roots.as_deref(),
+        ws_roots: ws_roots.as_ref(),
         diff_index: None,
     };
     analysis

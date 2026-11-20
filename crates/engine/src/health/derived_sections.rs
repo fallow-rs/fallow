@@ -25,7 +25,7 @@ pub struct HealthDerivedSectionInput<'a> {
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(crate) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(crate) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(crate) file_scores: &'a [FileHealthScore],
     pub(crate) churn_fetch: Option<hotspots::ChurnFetchResult>,
     pub(crate) diff_index: Option<&'a fallow_output::DiffIndex>,
@@ -181,7 +181,7 @@ struct HealthHotspotSectionInput<'a> {
     config: &'a ResolvedConfig,
     file_scores: &'a [FileHealthScore],
     ignore_set: &'a globset::GlobSet,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
     diff_index: Option<&'a fallow_output::DiffIndex>,
     dispersion: Option<
@@ -266,7 +266,7 @@ struct FilteredHotspotInput<'a> {
     config: &'a ResolvedConfig,
     file_scores_slice: &'a [FileHealthScore],
     ignore_set: &'a globset::GlobSet,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
     diff_index: Option<&'a fallow_output::DiffIndex>,
     dispersion: Option<
@@ -362,7 +362,7 @@ struct HealthDuplicationDataInput<'a> {
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     ignore_set: &'a globset::GlobSet,
     pre_computed_duplication: Option<DuplicationReport>,
 }

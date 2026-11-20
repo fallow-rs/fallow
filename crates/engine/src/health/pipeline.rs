@@ -100,7 +100,7 @@ pub struct HealthScopeInputs<'a, R> {
     /// Diff index scoping findings to changed lines.
     pub diff_index: Option<&'a DiffIndex>,
     /// Workspace roots limiting the analysis scope.
-    pub ws_roots: Option<Vec<PathBuf>>,
+    pub ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     /// Grouping resolver for `--group-by` output; `None` disables grouping.
     pub group_resolver: Option<R>,
 }
@@ -138,7 +138,7 @@ pub(super) struct HealthScope<'a, R> {
     pub(super) ignore_set: globset::GlobSet,
     pub(super) changed_files: Option<FxHashSet<PathBuf>>,
     pub(super) diff_index: Option<&'a DiffIndex>,
-    pub(super) ws_roots: Option<Vec<PathBuf>>,
+    pub(super) ws_roots: Option<crate::workspace_scope::WorkspaceScope>,
     pub(super) group_resolver: Option<R>,
     pub(super) file_paths: FxHashMap<crate::discover::FileId, &'a PathBuf>,
 }

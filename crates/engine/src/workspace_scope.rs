@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::WorkspaceInfo;
+use fallow_config::{WorkspaceInfo, WorkspaceOwners};
 use globset::Glob;
 use rustc_hash::FxHashSet;
 
@@ -60,25 +60,91 @@ pub enum WorkspaceScopeError {
     MutuallyExclusive,
 }
 
+/// The files that `--workspace`, `--changed-workspaces` and a positional
+/// path select.
+///
+/// A file is in scope when the deepest root that holds it, over the
+/// selected and the excluded roots, is a selected root. A workspace that
+/// the selection does not name, below a selected root, is in scope.
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceScope {
+    selected: Vec<PathBuf>,
+    excluded: Vec<PathBuf>,
+    owners: WorkspaceOwners,
+}
+
+impl WorkspaceScope {
+    /// A scope of `selected` roots with no excluded root.
+    #[must_use]
+    fn from_roots(selected: Vec<PathBuf>) -> Self {
+        Self::new(selected, Vec::new())
+    }
+
+    fn new(selected: Vec<PathBuf>, excluded: Vec<PathBuf>) -> Self {
+        let owners = Self::owners_of(&selected, &excluded);
+        Self {
+            selected,
+            excluded,
+            owners,
+        }
+    }
+
+    /// The selected roots come first, so an owner below `selected.len()`
+    /// is a selected root, also for a root in both lists.
+    fn owners_of(selected: &[PathBuf], excluded: &[PathBuf]) -> WorkspaceOwners {
+        WorkspaceOwners::from_roots(selected.iter().chain(excluded).map(PathBuf::as_path))
+    }
+
+    /// `scope` with `root` added as a selected root, for the positional
+    /// path of a command. Without a root, `scope` comes back as it is.
+    #[must_use]
+    pub fn with_root(scope: Option<Self>, root: Option<&PathBuf>) -> Option<Self> {
+        let Some(root) = root else {
+            return scope;
+        };
+        let mut scope = scope.unwrap_or_default();
+        scope.selected.push(root.clone());
+        scope.owners = Self::owners_of(&scope.selected, &scope.excluded);
+        Some(scope)
+    }
+
+    /// Whether `path` is in scope.
+    #[must_use]
+    pub fn contains(&self, path: &Path) -> bool {
+        self.owners
+            .owner_of(path)
+            .is_some_and(|owner| owner < self.selected.len())
+    }
+
+    /// The selected roots, for output and for manifest paths. The
+    /// workspace roots come first, in sorted order.
+    #[must_use]
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.selected
+    }
+}
+
+impl From<Vec<PathBuf>> for WorkspaceScope {
+    fn from(selected: Vec<PathBuf>) -> Self {
+        Self::from_roots(selected)
+    }
+}
+
 /// Resolve either explicit or changed workspace scope against discovered metadata.
 ///
 /// # Errors
 ///
 /// Returns a typed scope error when the selection is invalid or git cannot
 /// resolve changed files.
-pub fn resolve_workspace_scope_roots(
+pub fn resolve_workspace_scope(
     root: &Path,
     workspace: Option<&[String]>,
     changed_workspaces: Option<&str>,
     workspaces: &[WorkspaceInfo],
-) -> Result<Option<Vec<PathBuf>>, WorkspaceScopeError> {
+) -> Result<Option<WorkspaceScope>, WorkspaceScopeError> {
     match (workspace, changed_workspaces) {
-        (Some(patterns), None) => {
-            resolve_workspace_filter_roots(root, patterns, workspaces).map(Some)
-        }
-        (None, Some(git_ref)) => {
-            resolve_changed_workspace_roots(root, git_ref, workspaces).map(Some)
-        }
+        (Some(patterns), None) => resolve_workspace_filter(root, patterns, workspaces).map(Some),
+        (None, Some(git_ref)) => resolve_changed_workspaces(root, git_ref, workspaces).map(Some),
         (None, None) => Ok(None),
         (Some(_), Some(_)) => Err(WorkspaceScopeError::MutuallyExclusive),
     }
@@ -90,11 +156,11 @@ pub fn resolve_workspace_scope_roots(
 ///
 /// Returns a typed scope error when no workspaces are available, a pattern is
 /// invalid, a positive pattern is unmatched, or negation excludes everything.
-fn resolve_workspace_filter_roots(
+fn resolve_workspace_filter(
     root: &Path,
     patterns: &[String],
     workspaces: &[WorkspaceInfo],
-) -> Result<Vec<PathBuf>, WorkspaceScopeError> {
+) -> Result<WorkspaceScope, WorkspaceScopeError> {
     if workspaces.is_empty() {
         return Err(WorkspaceScopeError::NoWorkspaces {
             mode: WorkspaceScopeMode::Workspace,
@@ -107,9 +173,11 @@ fn resolve_workspace_filter_roots(
     let (positive, negative) = split_workspace_patterns(patterns);
     let mut matched = match_positive_workspace_patterns(&positive, workspaces, &rel_paths)?;
 
+    let mut excluded_indices = FxHashSet::default();
     for pattern in &negative {
         for index in find_workspace_matches(pattern, workspaces, &rel_paths)? {
             matched.remove(&index);
+            excluded_indices.insert(index);
         }
     }
 
@@ -120,12 +188,18 @@ fn resolve_workspace_filter_roots(
         });
     }
 
-    let mut roots = matched
-        .into_iter()
-        .map(|index| workspaces[index].root.clone())
-        .collect::<Vec<_>>();
-    roots.sort();
-    Ok(roots)
+    let roots_of = |indices: FxHashSet<usize>| {
+        let mut roots = indices
+            .into_iter()
+            .map(|index| workspaces[index].root.clone())
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots
+    };
+    Ok(WorkspaceScope::new(
+        roots_of(matched),
+        roots_of(excluded_indices),
+    ))
 }
 
 /// Resolve workspace roots that contain files changed since `git_ref`.
@@ -133,11 +207,11 @@ fn resolve_workspace_filter_roots(
 /// # Errors
 ///
 /// Returns a typed scope error when no workspaces are available or git fails.
-fn resolve_changed_workspace_roots(
+fn resolve_changed_workspaces(
     root: &Path,
     git_ref: &str,
     workspaces: &[WorkspaceInfo],
-) -> Result<Vec<PathBuf>, WorkspaceScopeError> {
+) -> Result<WorkspaceScope, WorkspaceScopeError> {
     if workspaces.is_empty() {
         return Err(WorkspaceScopeError::NoWorkspaces {
             mode: WorkspaceScopeMode::ChangedWorkspaces,
@@ -162,7 +236,7 @@ fn resolve_changed_workspace_roots(
         .map(|workspace| workspace.root.clone())
         .collect::<Vec<_>>();
     roots.sort();
-    Ok(roots)
+    Ok(WorkspaceScope::from_roots(roots))
 }
 
 fn match_positive_workspace_patterns(
@@ -317,14 +391,17 @@ mod tests {
     #[test]
     fn workspace_filter_exact_name_short_circuits_glob_metachars() {
         let workspaces = vec![ws("web-[staging]", "apps/web-staging")];
-        let roots = resolve_workspace_filter_roots(
+        let roots = resolve_workspace_filter(
             Path::new("/project"),
             &["web-[staging]".to_owned()],
             &workspaces,
         )
         .expect("resolve workspace");
 
-        assert_eq!(roots, vec![PathBuf::from("/project/apps/web-staging")]);
+        assert_eq!(
+            roots.roots(),
+            vec![PathBuf::from("/project/apps/web-staging")]
+        );
     }
 
     #[test]
@@ -334,39 +411,30 @@ mod tests {
             ws("admin", "apps/admin"),
             ws("web", "apps/web"),
         ];
-        let roots = resolve_workspace_filter_roots(
-            Path::new("/project"),
-            &["apps/*".to_owned()],
-            &workspaces,
-        )
-        .expect("resolve workspace");
+        let roots =
+            resolve_workspace_filter(Path::new("/project"), &["apps/*".to_owned()], &workspaces)
+                .expect("resolve workspace");
 
         assert_eq!(
-            roots,
+            roots.roots(),
             vec![
                 PathBuf::from("/project/apps/admin"),
                 PathBuf::from("/project/apps/web")
             ]
         );
 
-        let roots = resolve_workspace_filter_roots(
-            Path::new("/project"),
-            &["@scope/*".to_owned()],
-            &workspaces,
-        )
-        .expect("resolve workspace");
-        assert_eq!(roots, vec![PathBuf::from("/project/packages/ui")]);
+        let roots =
+            resolve_workspace_filter(Path::new("/project"), &["@scope/*".to_owned()], &workspaces)
+                .expect("resolve workspace");
+        assert_eq!(roots.roots(), vec![PathBuf::from("/project/packages/ui")]);
     }
 
     #[test]
     fn workspace_filter_reports_invalid_glob_after_no_literal_match() {
         let workspaces = vec![ws("web", "apps/web")];
-        let err = resolve_workspace_filter_roots(
-            Path::new("/project"),
-            &["web-[bad".to_owned()],
-            &workspaces,
-        )
-        .expect_err("invalid glob");
+        let err =
+            resolve_workspace_filter(Path::new("/project"), &["web-[bad".to_owned()], &workspaces)
+                .expect_err("invalid glob");
 
         assert!(matches!(err, WorkspaceScopeError::InvalidPattern { .. }));
     }
@@ -378,7 +446,7 @@ mod tests {
             ws("docs", "apps/docs"),
             ws("legacy", "apps/legacy"),
         ];
-        let roots = resolve_workspace_filter_roots(
+        let roots = resolve_workspace_filter(
             Path::new("/project"),
             &["apps/*".to_owned(), "!apps/legacy".to_owned()],
             &workspaces,
@@ -386,7 +454,7 @@ mod tests {
         .expect("resolve workspace");
 
         assert_eq!(
-            roots,
+            roots.roots(),
             vec![
                 PathBuf::from("/project/apps/docs"),
                 PathBuf::from("/project/apps/web")
@@ -397,25 +465,22 @@ mod tests {
     #[test]
     fn workspace_filter_only_negation_starts_from_all_workspaces() {
         let workspaces = vec![ws("web", "apps/web"), ws("legacy", "apps/legacy")];
-        let roots = resolve_workspace_filter_roots(
+        let roots = resolve_workspace_filter(
             Path::new("/project"),
             &["!apps/legacy".to_owned()],
             &workspaces,
         )
         .expect("resolve workspace");
 
-        assert_eq!(roots, vec![PathBuf::from("/project/apps/web")]);
+        assert_eq!(roots.roots(), vec![PathBuf::from("/project/apps/web")]);
     }
 
     #[test]
     fn workspace_filter_reports_unmatched_patterns_with_available_list() {
         let workspaces = vec![ws("web", "apps/web"), ws("docs", "apps/docs")];
-        let err = resolve_workspace_filter_roots(
-            Path::new("/project"),
-            &["missing".to_owned()],
-            &workspaces,
-        )
-        .expect_err("unmatched pattern");
+        let err =
+            resolve_workspace_filter(Path::new("/project"), &["missing".to_owned()], &workspaces)
+                .expect_err("unmatched pattern");
 
         assert_eq!(
             err,
@@ -429,7 +494,7 @@ mod tests {
     #[test]
     fn workspace_filter_reports_empty_after_exclusions() {
         let workspaces = vec![ws("web", "apps/web")];
-        let err = resolve_workspace_filter_roots(
+        let err = resolve_workspace_filter(
             Path::new("/project"),
             &["!apps/web".to_owned()],
             &workspaces,
@@ -507,5 +572,88 @@ mod tests {
             .collect::<Vec<_>>();
         roots.sort();
         roots
+    }
+
+    fn nested_layout() -> Vec<WorkspaceInfo> {
+        vec![
+            ws("web", "apps/web"),
+            ws("plugin", "apps/web/plugin"),
+            ws("docs", "apps/docs"),
+        ]
+    }
+
+    fn scope_of(patterns: &[&str]) -> WorkspaceScope {
+        let patterns = patterns.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+        resolve_workspace_filter(Path::new("/project"), &patterns, &nested_layout()).expect("scope")
+    }
+
+    fn with_root(scope: WorkspaceScope, root: &str) -> WorkspaceScope {
+        WorkspaceScope::with_root(Some(scope), Some(&PathBuf::from(root))).expect("scope")
+    }
+
+    #[test]
+    fn an_excluded_nested_workspace_is_out_of_scope() {
+        let scope = scope_of(&["apps/web", "!apps/web/plugin"]);
+        assert!(scope.contains(Path::new("/project/apps/web/src/a.ts")));
+        assert!(!scope.contains(Path::new("/project/apps/web/plugin/src/a.ts")));
+        assert_eq!(scope.roots(), vec![PathBuf::from("/project/apps/web")]);
+    }
+
+    #[test]
+    fn an_unnamed_nested_workspace_below_a_selected_root_stays_in_scope() {
+        let scope = scope_of(&["apps/web"]);
+        assert!(scope.contains(Path::new("/project/apps/web/plugin/src/a.ts")));
+    }
+
+    #[test]
+    fn a_file_outside_every_selected_root_is_out_of_scope() {
+        let scope = scope_of(&["apps/web"]);
+        assert!(!scope.contains(Path::new("/project/apps/docs/src/a.ts")));
+        assert!(!scope.contains(Path::new("/project/src/root.ts")));
+    }
+
+    #[test]
+    fn a_sibling_with_the_same_name_prefix_is_out_of_scope() {
+        let scope = scope_of(&["apps/web"]);
+        assert!(!scope.contains(Path::new("/project/apps/web-admin/src/a.ts")));
+    }
+
+    #[test]
+    fn a_positional_path_below_an_excluded_workspace_is_in_scope() {
+        let scope = with_root(
+            scope_of(&["apps/web", "!apps/web/plugin"]),
+            "/project/apps/web/plugin/src",
+        );
+        assert!(scope.contains(Path::new("/project/apps/web/plugin/src/a.ts")));
+        assert!(!scope.contains(Path::new("/project/apps/web/plugin/test/a.ts")));
+    }
+
+    #[test]
+    fn a_positional_path_equal_to_an_excluded_root_is_in_scope() {
+        let scope = with_root(
+            scope_of(&["apps/web", "!apps/web/plugin"]),
+            "/project/apps/web/plugin",
+        );
+        assert!(scope.contains(Path::new("/project/apps/web/plugin/src/a.ts")));
+    }
+
+    #[test]
+    fn a_selected_workspace_below_an_excluded_parent_is_in_scope() {
+        let scope = scope_of(&["apps/web/plugin", "!apps/web"]);
+        assert!(scope.contains(Path::new("/project/apps/web/plugin/src/a.ts")));
+        assert!(!scope.contains(Path::new("/project/apps/web/src/a.ts")));
+    }
+
+    #[test]
+    fn a_positional_path_alone_is_a_scope() {
+        let path = PathBuf::from("/project/apps/web");
+        let scope = WorkspaceScope::with_root(None, Some(&path)).expect("scope");
+        assert!(scope.contains(Path::new("/project/apps/web/src/a.ts")));
+        assert!(WorkspaceScope::with_root(None, None).is_none());
+    }
+
+    #[test]
+    fn an_empty_scope_contains_nothing() {
+        assert!(!WorkspaceScope::default().contains(Path::new("/project/apps/web/src/a.ts")));
     }
 }

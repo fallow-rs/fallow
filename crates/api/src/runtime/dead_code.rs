@@ -965,7 +965,7 @@ fn apply_dead_code_scope(
     fallow_engine::dead_code::apply_scope(
         results,
         &fallow_engine::dead_code::DeadCodeScope {
-            workspace_roots: workspace_roots.as_deref(),
+            workspace_roots: workspace_roots.as_ref(),
             changes: Some(change_scope),
             diff: resolved.diff.as_ref().map(|diff| (diff, session.root())),
             files: files.as_ref(),

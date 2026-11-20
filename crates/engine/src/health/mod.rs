@@ -242,7 +242,7 @@ pub struct RuntimeCoverageSeamInput<'a> {
     /// Diff scope when the run is limited to changed files.
     pub changed_files: Option<&'a rustc_hash::FxHashSet<PathBuf>>,
     /// Workspace roots when the run is workspace-scoped.
-    pub ws_roots: Option<&'a [PathBuf]>,
+    pub ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     /// Cap on rendered findings, forwarded from `--top`.
     pub top: Option<usize>,
     /// CODEOWNERS override path for ownership attribution on findings.

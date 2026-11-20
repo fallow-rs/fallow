@@ -180,16 +180,15 @@ fn build_health_scope_inputs<'a>(
         .and_then(|git_ref| crate::requests::resolve_changed_since(opts.root, git_ref));
     crate::requests::measure_changed_since_scope(files);
     let diff_index = health_diff_index(opts);
-    let mut ws_roots = resolve_workspace_scope(
+    let ws_roots = resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         &config.workspace_patterns,
         opts.output,
     )?;
-    if let Some(scope) = opts.scope.as_ref() {
-        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
-    }
+    let ws_roots =
+        fallow_engine::workspace_scope::WorkspaceScope::with_root(ws_roots, opts.scope.as_ref());
     let group_resolver = build_health_group_resolver(opts, config)?;
     Ok(HealthScopeInputs {
         changed_files,

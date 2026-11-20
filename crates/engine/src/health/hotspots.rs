@@ -350,10 +350,10 @@ fn is_excluded_from_hotspots(
     path: &std::path::Path,
     root: &std::path::Path,
     ignore_set: &globset::GlobSet,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
 ) -> bool {
     if let Some(ws) = ws_roots
-        && !ws.iter().any(|r| path.starts_with(r))
+        && !ws.contains(path)
     {
         return true;
     }
@@ -394,7 +394,7 @@ pub(super) struct HotspotComputationInput<'a> {
     pub(super) config: &'a fallow_config::ResolvedConfig,
     pub(super) file_scores: &'a [FileHealthScore],
     pub(super) ignore_set: &'a globset::GlobSet,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) churn_fetch: ChurnFetchResult,
     /// Change dispersion per file, when change coupling ran.
     pub(super) dispersion: Option<
@@ -604,7 +604,7 @@ struct HotspotEntryCtx<'a> {
     file_scores: &'a [FileHealthScore],
     root: &'a std::path::Path,
     ignore_set: &'a globset::GlobSet,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     churn_files: &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn>,
     min_commits: u32,
     max_weighted: f64,
@@ -820,7 +820,8 @@ mod tests {
     fn excluded_workspace_filter_mismatch() {
         let path = std::path::Path::new("/project/packages/b/src/foo.ts");
         let root = std::path::Path::new("/project");
-        let ws_roots = [std::path::PathBuf::from("/project/packages/a")];
+        let ws_roots: crate::workspace_scope::WorkspaceScope =
+            vec![std::path::PathBuf::from("/project/packages/a")].into();
         let ignore_set = globset::GlobSet::empty();
 
         assert!(is_excluded_from_hotspots(
@@ -835,7 +836,8 @@ mod tests {
     fn excluded_workspace_filter_match() {
         let path = std::path::Path::new("/project/packages/a/src/foo.ts");
         let root = std::path::Path::new("/project");
-        let ws_roots = [std::path::PathBuf::from("/project/packages/a")];
+        let ws_roots: crate::workspace_scope::WorkspaceScope =
+            vec![std::path::PathBuf::from("/project/packages/a")].into();
         let ignore_set = globset::GlobSet::empty();
 
         assert!(!is_excluded_from_hotspots(
@@ -1375,7 +1377,8 @@ mod tests {
     fn excluded_workspace_and_glob_combined() {
         let path = std::path::Path::new("/project/packages/a/src/generated/types.ts");
         let root = std::path::Path::new("/project");
-        let ws_roots = [std::path::PathBuf::from("/project/packages/a")];
+        let ws_roots: crate::workspace_scope::WorkspaceScope =
+            vec![std::path::PathBuf::from("/project/packages/a")].into();
         let mut builder = globset::GlobSetBuilder::new();
         builder.add(globset::Glob::new("**/generated/**").unwrap());
         let ignore_set = builder.build().unwrap();
@@ -1392,7 +1395,8 @@ mod tests {
     fn excluded_workspace_match_but_glob_no_match() {
         let path = std::path::Path::new("/project/packages/a/src/index.ts");
         let root = std::path::Path::new("/project");
-        let ws_roots = [std::path::PathBuf::from("/project/packages/a")];
+        let ws_roots: crate::workspace_scope::WorkspaceScope =
+            vec![std::path::PathBuf::from("/project/packages/a")].into();
         let mut builder = globset::GlobSetBuilder::new();
         builder.add(globset::Glob::new("**/generated/**").unwrap());
         let ignore_set = builder.build().unwrap();

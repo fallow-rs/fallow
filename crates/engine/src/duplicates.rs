@@ -7,6 +7,7 @@ use fallow_types::discover::DiscoveredFile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::results::DuplicationAnalysis;
+use crate::workspace_scope::WorkspaceScope;
 
 #[path = "duplication_detector/mod.rs"]
 mod detector;
@@ -72,9 +73,8 @@ pub struct DuplicationScope<'a> {
     pub changes: Option<&'a crate::change_scope::ChangeScope>,
     /// A unified diff. Finding paths resolve against the report root.
     pub diff: Option<&'a fallow_output::DiffIndex>,
-    /// `--workspace`, `--changed-workspaces` and a positional path: the union
-    /// of these roots.
-    pub workspace_roots: Option<&'a [PathBuf]>,
+    /// `--workspace`, `--changed-workspaces` and a positional path.
+    pub workspace_roots: Option<&'a WorkspaceScope>,
 }
 
 /// Narrow a duplication report to the scope of the run.
@@ -96,24 +96,24 @@ pub fn apply_scope(report: &mut DuplicationReport, scope: &DuplicationScope<'_>,
     }
 }
 
-/// Keep only the clone groups with at least one instance under one of the
-/// workspace roots.
+/// Keep only the clone groups with at least one instance in the workspace
+/// scope.
 ///
 /// The full cross-workspace index is still built, so a group can hold an
 /// instance in the selected workspace and one in another workspace. The group
 /// stays whole: the documented rule is that a group is in scope when one of
 /// its instances is. Clone families, statistics and the order are rebuilt from
 /// the groups that stay.
-pub fn filter_to_workspaces(report: &mut DuplicationReport, roots: &[PathBuf], root: &Path) {
+pub fn filter_to_workspaces(report: &mut DuplicationReport, scope: &WorkspaceScope, root: &Path) {
     report.clone_groups.retain(|group| {
         group
             .instances
             .iter()
-            .any(|instance| roots.iter().any(|scope| instance.file.starts_with(scope)))
+            .any(|instance| scope.contains(&instance.file))
     });
     report
         .range_marker_problems
-        .retain(|finding| roots.iter().any(|scope| finding.path.starts_with(scope)));
+        .retain(|finding| scope.contains(&finding.path));
     refresh_scoped_report(report, root);
 }
 

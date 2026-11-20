@@ -182,7 +182,7 @@ fn workspace_filter_keeps_findings_under_workspace_root() {
             path: PathBuf::from("/repo/packages/docs/src/unused.ts"),
         }));
 
-    filter_to_workspaces(&mut results, std::slice::from_ref(&root));
+    filter_to_workspaces(&mut results, &vec![root.clone()].into());
 
     assert_eq!(results.unused_files.len(), 1);
     assert_eq!(

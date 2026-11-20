@@ -419,7 +419,7 @@ fn run_similar_code_inner_with_embedder(
         options,
         resolved,
         changed_files.as_ref(),
-        workspace_roots.as_deref(),
+        workspace_roots.as_ref(),
     );
     let in_scope = |path: &str| {
         !scope_active
@@ -428,7 +428,7 @@ fn run_similar_code_inner_with_embedder(
                 options,
                 resolved,
                 changed_files.as_ref(),
-                workspace_roots.as_deref(),
+                workspace_roots.as_ref(),
             )
     };
     let ignore = build_ignore_set(&session.config().similar_code.ignore)?;
@@ -1632,7 +1632,7 @@ fn similar_code_scope_active(
     options: &SimilarCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
-    workspace_roots: Option<&[PathBuf]>,
+    workspace_roots: Option<&fallow_engine::workspace_scope::WorkspaceScope>,
 ) -> bool {
     !options.files.is_empty()
         || changed_files.is_some()
@@ -1645,7 +1645,7 @@ fn similar_code_path_in_scope(
     options: &SimilarCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
-    workspace_roots: Option<&[PathBuf]>,
+    workspace_roots: Option<&fallow_engine::workspace_scope::WorkspaceScope>,
 ) -> bool {
     if !options.files.is_empty()
         && !options
@@ -1667,9 +1667,7 @@ fn similar_code_path_in_scope(
         return false;
     }
     if let Some(workspace_roots) = workspace_roots
-        && !workspace_roots
-            .iter()
-            .any(|workspace| resolved.root().join(path).starts_with(workspace))
+        && !workspace_roots.contains(&resolved.root().join(path))
     {
         return false;
     }

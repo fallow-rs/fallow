@@ -33,7 +33,7 @@ struct HealthReportSideEffectsInput<'a> {
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     dead_code_results: Option<&'a fallow_types::results::AnalysisResults>,
     styling_artifacts: Option<&'a StylingAnalysisArtifacts>,
 }
@@ -122,7 +122,7 @@ pub(super) fn finalize_health_result<R>(
         config: &config,
         ignore_set: &scope.ignore_set,
         changed_files: scope.changed_files.as_ref(),
-        ws_roots: scope.ws_roots.as_deref(),
+        ws_roots: scope.ws_roots.as_ref(),
         dead_code_results,
         styling_artifacts,
     });

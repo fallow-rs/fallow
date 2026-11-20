@@ -8,7 +8,7 @@ pub(super) struct TokenConsumersInput<'a> {
     pub(super) config: &'a ResolvedConfig,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
 }
 
 fn collect_located_utility_consumers(

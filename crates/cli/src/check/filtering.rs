@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
-use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
+use fallow_engine::workspace_scope::{WorkspaceScope, WorkspaceScopeError, WorkspaceScopeMode};
 
 use crate::error::emit_input_error;
 /// Scope results to the union of the given workspace roots.
@@ -10,11 +10,12 @@ use crate::error::emit_input_error;
 /// The full cross-workspace graph is still built (so cross-package imports
 /// are resolved), but only issues from files under any `ws_root` are reported.
 ///
-/// Any issue whose path starts with one of the roots passes; dependency-level
-/// issues are scoped to the matching workspaces' own `package.json` files.
+/// An issue passes when `WorkspaceScope::contains` holds its path;
+/// dependency-level issues are scoped to the matching workspaces' own
+/// `package.json` files.
 pub fn filter_to_workspaces(
     results: &mut fallow_types::results::AnalysisResults,
-    ws_roots: &[PathBuf],
+    ws_roots: &WorkspaceScope,
 ) {
     fallow_engine::dead_code::filter_to_workspaces(results, ws_roots);
 }
@@ -112,12 +113,12 @@ pub fn resolve_workspace_scope(
     changed_workspaces: Option<&str>,
     workspace_patterns: &[String],
     output: OutputFormat,
-) -> Result<Option<Vec<PathBuf>>, ExitCode> {
+) -> Result<Option<WorkspaceScope>, ExitCode> {
     let workspaces = fallow_engine::discover::discover_workspace_packages_with_patterns(
         root,
         workspace_patterns,
     );
-    fallow_engine::workspace_scope::resolve_workspace_scope_roots(
+    fallow_engine::workspace_scope::resolve_workspace_scope(
         root,
         workspace,
         changed_workspaces,
@@ -201,7 +202,7 @@ mod tests {
 
     /// Test shim: single-workspace variant on top of `filter_to_workspaces`.
     fn filter_to_workspace(results: &mut AnalysisResults, ws_root: &Path) {
-        filter_to_workspaces(results, std::slice::from_ref(&ws_root.to_path_buf()));
+        filter_to_workspaces(results, &vec![ws_root.to_path_buf()].into());
     }
 
     pub(super) fn unresolved_callee_diagnostic(
@@ -1269,7 +1270,7 @@ mod tests {
             PathBuf::from("/project/packages/ui"),
             PathBuf::from("/project/packages/api"),
         ];
-        filter_to_workspaces(&mut results, &roots);
+        filter_to_workspaces(&mut results, &roots.to_vec().into());
 
         assert_eq!(results.unused_files.len(), 2);
     }
@@ -1312,7 +1313,7 @@ mod tests {
             PathBuf::from("/project/packages/ui"),
             PathBuf::from("/project/packages/api"),
         ];
-        filter_to_workspaces(&mut results, &roots);
+        filter_to_workspaces(&mut results, &roots.to_vec().into());
 
         assert_eq!(results.unused_dependencies.len(), 2);
         let names: Vec<&str> = results
@@ -1333,7 +1334,7 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from("/project/packages/ui/src/a.ts"),
             }));
-        filter_to_workspaces(&mut results, &[]);
+        filter_to_workspaces(&mut results, &WorkspaceScope::default());
         assert_eq!(results.unused_files.len(), 0);
     }
 
