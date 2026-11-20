@@ -92,7 +92,8 @@ impl<'a> RunChange<'a> {
 
     /// The diff of the run: the shared diff when one is active, else the
     /// merge-base worktree diff. One run reads the worktree diff at most one
-    /// time. `None` when git gives no diff.
+    /// time, and it does not read again after a failed read. `None` when git
+    /// gives no diff.
     pub(super) fn diff_index(&self) -> Option<&fallow_output::DiffIndex> {
         if let Some(shared) = self.shared {
             return Some(shared.index);

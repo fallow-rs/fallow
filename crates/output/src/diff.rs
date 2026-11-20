@@ -14,8 +14,9 @@ pub const MAX_ADDED_LINES: usize = 1_000_000;
 /// Parsed, command-neutral index of files and added lines in a unified diff.
 ///
 /// Keys are the decoded paths of the `+++ b/<path>` headers of the diff,
-/// without the quotes and the trailing tab that git can write, so they live in whatever namespace produced the diff — for `git diff`,
-/// relative to the repository toplevel. [`DiffIndex::base`] records the
+/// without the quotes and the trailing tab that git can write. They live in
+/// the namespace that produced the diff (for `git diff`, relative to the
+/// repository toplevel). [`DiffIndex::base`] records the
 /// directory those keys are relative to, so a finding's absolute path can be
 /// mapped into the same namespace before lookup. Without it, an analysis root
 /// below the toplevel silently misses every key.
