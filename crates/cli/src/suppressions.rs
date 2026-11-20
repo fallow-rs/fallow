@@ -167,30 +167,7 @@ fn apply_file_scope(active: &mut Vec<ActiveSuppression>, opts: &SuppressionsOpti
         return;
     }
 
-    let resolved_files: Vec<PathBuf> = opts
-        .file
-        .iter()
-        .map(|path| {
-            if crate::path_util::is_absolute_path_any_platform(path) {
-                path.clone()
-            } else {
-                opts.root.join(path)
-            }
-        })
-        .collect();
-
-    if !opts.quiet {
-        for (original, resolved) in opts.file.iter().zip(&resolved_files) {
-            if !resolved.exists() {
-                eprintln!(
-                    "Warning: --file '{}' (resolved to '{}') was not found in the project",
-                    original.display(),
-                    resolved.display()
-                );
-            }
-        }
-    }
-
+    let resolved_files = crate::path_util::resolve_file_inputs(opts.root, opts.file, opts.quiet);
     let file_set: rustc_hash::FxHashSet<PathBuf> = resolved_files.into_iter().collect();
     active.retain(|s| file_set.contains(&s.path));
 }

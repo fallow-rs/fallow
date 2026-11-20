@@ -937,31 +937,11 @@ fn file_scope(opts: &CheckOptions<'_>) -> Option<rustc_hash::FxHashSet<std::path
     if opts.file.is_empty() {
         return None;
     }
-    // Resolve into a `Vec` first: a hash set has no order, so a zip of the
-    // input paths with the set pairs each input with a random resolved path.
-    let resolved_files: Vec<std::path::PathBuf> = opts
-        .file
-        .iter()
-        .map(|path| {
-            if crate::path_util::is_absolute_path_any_platform(path) {
-                path.clone()
-            } else {
-                opts.root.join(path)
-            }
-        })
-        .collect();
-    if !opts.quiet {
-        for (original, resolved) in opts.file.iter().zip(&resolved_files) {
-            if !resolved.exists() {
-                eprintln!(
-                    "Warning: --file '{}' (resolved to '{}') was not found in the project",
-                    original.display(),
-                    resolved.display()
-                );
-            }
-        }
-    }
-    Some(resolved_files.into_iter().collect())
+    Some(
+        crate::path_util::resolve_file_inputs(opts.root, opts.file, opts.quiet)
+            .into_iter()
+            .collect(),
+    )
 }
 
 fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {

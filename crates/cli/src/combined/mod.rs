@@ -289,17 +289,30 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
 /// Refuse `--format badge` before the analysis when the run includes the
 /// dead-code or the duplication analysis. Only the health analysis renders a
 /// badge, so each other renderer would print the same error and the run
-/// would exit with the code of its findings instead of the input error.
+/// would exit with the code of its findings instead of the input error. A
+/// health-only run without a score has no badge value, so it is also refused.
 fn refuse_badge_for_combined_run(opts: &CombinedOptions<'_>) -> Option<ExitCode> {
-    if !matches!(opts.output, OutputFormat::Badge) || !(opts.run_check || opts.run_dupes) {
+    if !matches!(opts.output, OutputFormat::Badge) {
         return None;
     }
-    Some(crate::error::emit_error_with_hint(
-        "badge format is only supported for the health command",
-        "run `fallow health --format badge`, or `fallow --only health --score --format badge`",
-        crate::exit_codes::INVALID_INPUT,
-        opts.output,
-    ))
+    if opts.run_check || opts.run_dupes {
+        return Some(crate::error::emit_error_with_hint(
+            "badge format is only supported for the health command",
+            "run `fallow health --format badge`, or `fallow --only health --score --format badge`",
+            crate::exit_codes::INVALID_INPUT,
+            opts.output,
+        ));
+    }
+    let computes_score = opts.score || opts.trend || opts.trend_from.is_some();
+    if opts.run_health && !computes_score {
+        return Some(crate::error::emit_error_with_hint(
+            "badge format requires --score",
+            "run `fallow health --format badge`, or `fallow --only health --score --format badge`",
+            crate::exit_codes::INVALID_INPUT,
+            opts.output,
+        ));
+    }
+    None
 }
 
 /// The unrendered results of the analyses a combined run selected.
