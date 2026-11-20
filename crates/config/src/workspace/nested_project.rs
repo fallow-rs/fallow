@@ -253,5 +253,8 @@ fn prefix_member_pattern(prefix: &str, pattern: &str) -> Option<String> {
     {
         return None;
     }
-    Some(format!("{negation}{prefix}/{body}"))
+    Some(format!(
+        "{negation}{}",
+        crate::glob_validation::literal_dir_glob(prefix, body)
+    ))
 }
