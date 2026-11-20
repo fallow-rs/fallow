@@ -247,11 +247,7 @@ impl ModuleInfoExtractor {
 
     /// Record the types of a `satisfies` clause on a module-level binding.
     /// These types are in use, but they do not form the type of the binding.
-    pub(super) fn record_local_satisfies_refs(
-        &mut self,
-        owner_name: &str,
-        refs: Vec<(String, Span)>,
-    ) {
+    fn record_local_satisfies_refs(&mut self, owner_name: &str, refs: Vec<(String, Span)>) {
         self.push_local_signature_refs(owner_name, refs, true);
     }
 
@@ -352,9 +348,33 @@ impl ModuleInfoExtractor {
         collector.refs
     }
 
-    pub(super) fn collect_variable_signature_refs(
+    /// Record the signature type references of a module-level variable, and
+    /// the module bindings that its initializer holds when it has no type
+    /// annotation (see `signature_value_aliases`).
+    pub(super) fn record_module_variable_signature_refs(
+        &mut self,
         declarator: &VariableDeclarator<'_>,
-    ) -> Vec<(String, Span)> {
+    ) {
+        let refs = Self::collect_variable_signature_refs(declarator);
+        let satisfies_refs = Self::collect_variable_satisfies_refs(declarator);
+        for id in declarator.id.get_binding_identifiers() {
+            self.record_local_signature_refs(&id.name, refs.clone());
+            self.record_local_satisfies_refs(&id.name, satisfies_refs.clone());
+        }
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && declarator.type_annotation.is_none()
+            && let Some(init) = &declarator.init
+        {
+            let mut held = Vec::new();
+            crate::visitor::signature_value_aliases::collect_initializer_value_aliases(
+                init, &mut held,
+            );
+            self.local_value_aliases
+                .extend(held.into_iter().map(|held| (id.name.to_string(), held)));
+        }
+    }
+
+    fn collect_variable_signature_refs(declarator: &VariableDeclarator<'_>) -> Vec<(String, Span)> {
         let mut refs = Vec::new();
         if let Some(annotation) = declarator.type_annotation.as_deref() {
             refs.extend(Self::collect_type_refs_from_annotation(annotation));
@@ -452,9 +472,7 @@ impl ModuleInfoExtractor {
 
     /// Collect the types of the `satisfies` clauses on a variable initializer,
     /// for example `Provider` in `["a"] as const satisfies readonly Provider[]`.
-    pub(super) fn collect_variable_satisfies_refs(
-        declarator: &VariableDeclarator<'_>,
-    ) -> Vec<(String, Span)> {
+    fn collect_variable_satisfies_refs(declarator: &VariableDeclarator<'_>) -> Vec<(String, Span)> {
         let mut collector = SignatureTypeCollector::default();
         let mut current = declarator.init.as_ref();
         while let Some(expression) = current {

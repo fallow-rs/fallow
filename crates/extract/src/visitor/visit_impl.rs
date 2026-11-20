@@ -1801,12 +1801,7 @@ impl ModuleInfoExtractor {
             self.record_binding_declaration(id.name.as_str(), id.span);
         }
         if self.is_module_scope() {
-            let refs = Self::collect_variable_signature_refs(declarator);
-            let satisfies_refs = Self::collect_variable_satisfies_refs(declarator);
-            for id in declarator.id.get_binding_identifiers() {
-                self.record_local_signature_refs(&id.name, refs.clone());
-                self.record_local_satisfies_refs(&id.name, satisfies_refs.clone());
-            }
+            self.record_module_variable_signature_refs(declarator);
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id

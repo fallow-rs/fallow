@@ -1,0 +1,6 @@
+{
+  "name": "issue-4850-inferred-signature-backing",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/game.ts" }
+}

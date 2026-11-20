@@ -10,6 +10,7 @@ mod remap;
 mod requirements;
 mod semantic_calls;
 mod shared_state;
+mod signature_value_aliases;
 mod ssr_load_module;
 mod this_scope;
 
@@ -873,6 +874,9 @@ pub(crate) struct ModuleInfoExtractor {
     local_type_declarations: Vec<LocalTypeDeclaration>,
     public_signature_type_references: Vec<PublicSignatureTypeReference>,
     local_signature_type_references: Vec<LocalSignatureTypeReference>,
+    /// `(owner, held)`: the module binding `owner` has no type annotation, and
+    /// its initializer holds the module binding `held` as a value.
+    local_value_aliases: Vec<(String, String)>,
     local_class_exports: FxHashMap<String, LocalClassExportInfo>,
     subclass_declarations: FxHashMap<String, SubclassDeclaration>,
     direct_binding_values: Vec<DirectBindingValue>,
@@ -2333,43 +2337,6 @@ impl ModuleInfoExtractor {
                         target_name: target_name.to_string(),
                     },
                 ));
-        }
-    }
-
-    fn map_local_signature_refs_to_exports(&mut self) {
-        if self.local_signature_type_references.is_empty() {
-            return;
-        }
-
-        let mut references_by_owner: FxHashMap<&str, Vec<&LocalSignatureTypeReference>> =
-            FxHashMap::default();
-        // Appending to each owner bucket preserves collection order. Iterating
-        // exports below preserves export and alias order while avoiding a full
-        // reference scan for every export.
-        for reference in &self.local_signature_type_references {
-            references_by_owner
-                .entry(reference.owner_name.as_str())
-                .or_default()
-                .push(reference);
-        }
-
-        for export in &self.exports {
-            let export_name = export.name.to_string();
-            let local_name = export.local_name.as_deref().unwrap_or(&export_name);
-            let Some(references) = references_by_owner.get(local_name) else {
-                continue;
-            };
-            self.public_signature_type_references
-                .extend(
-                    references
-                        .iter()
-                        .map(|reference| PublicSignatureTypeReference {
-                            export_name: export_name.clone(),
-                            type_name: reference.type_name.clone(),
-                            span: reference.span,
-                            from_satisfies: reference.from_satisfies,
-                        }),
-                );
         }
     }
 
