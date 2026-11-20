@@ -764,3 +764,32 @@ defaults. A call whose options argument is not an object literal, or whose
 `dirs` is not static, gives no entries. The `exclude` globs are relative to
 each page directory, and an excluded file is not an entry point. The plugin
 also marks `vite.config.*` as always used. The entries have the runtime role.
+
+## GNOME Shell extensions
+
+GNOME Shell loads an extension from a folder that holds `metadata.json`. It
+imports `extension.js` from that folder, and `prefs.js` for the preferences
+window. The `gnome-shell-extension` plugin has no enabler package. It is active
+when a discovered `extension.js` has a `metadata.json` beside it. It then reads
+each `metadata.json` and seeds `extension.js` and `prefs.js` of that folder as
+entry points, but only when the manifest has a `uuid` string and a
+`shell-version` array. GNOME Shell requires both keys, so a `metadata.json` of
+another tool seeds nothing.
+
+## Expo packages with no import
+
+`plugins/expo_packages.rs` credits two kinds of dependency that an Expo app
+uses with no import. The `expo` and `expo-router` plugins both call it.
+
+- A font file path in the app config names the package that holds the file,
+  with or without a `node_modules/` prefix:
+  `"@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"`.
+- Expo autolinking adds each installed package with an
+  `expo-module.config.json` file to the native build. Such a package with no
+  entry key in its `package.json` and no index file is native only, so no
+  module can import it. A native module with a JavaScript entry gets no
+  credit: when no file imports it, the report is correct.
+
+Both credits apply only to a dependency that the `package.json` beside the app
+config declares and that is installed in a `node_modules` folder at or above
+that directory, inside the project root.

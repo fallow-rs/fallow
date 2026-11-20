@@ -8885,7 +8885,7 @@
     ]
   },
   "plugins": {
-    "count": 156,
+    "count": 158,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -9025,6 +9025,8 @@
       "plop",
       "gulp",
       "c8",
+      "coderabbit",
+      "gnome-shell-extension",
       "nyc",
       "msw",
       "napi-rs",

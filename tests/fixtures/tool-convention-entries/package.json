@@ -1,0 +1,9 @@
+{
+  "name": "tool-convention-entries",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "devDependencies": {
+    "@coderabbitai/config": "1.2.0"
+  }
+}

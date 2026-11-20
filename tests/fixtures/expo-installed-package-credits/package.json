@@ -1,0 +1,12 @@
+{
+  "name": "expo-installed-package-credits",
+  "private": true,
+  "main": "App.tsx",
+  "dependencies": {
+    "@expo-google-fonts/inter": "0.4.0",
+    "expo": "58.0.0",
+    "font-without-reference": "1.0.0",
+    "native-only-module": "file:./modules/native-only",
+    "native-with-js": "1.0.0"
+  }
+}

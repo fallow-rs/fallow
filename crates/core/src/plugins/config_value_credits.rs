@@ -11,6 +11,8 @@
 
 use rustc_hash::FxHashMap;
 
+use super::PluginResult;
+
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
 /// time, a green `catalogue_parses` test guarantees the released binary parses.
 const CATALOGUE_TOML: &str = include_str!("../../data/config_value_credits.toml");
@@ -130,6 +132,56 @@ pub fn credited_packages(surface: CreditSurface, value: &str) -> Option<&'static
     catalogue()
         .get(&(surface, value.to_string()))
         .map(Vec::as_slice)
+}
+
+/// Credit the optional peer dependencies a test environment loads at runtime.
+///
+/// The rules are data: see the `test-environment-optional-peer` rows in
+/// `crates/core/data/config_value_credits.toml`. `jsdom` requires its optional
+/// peer `canvas` lazily when it is installed, so a project installing it for
+/// real canvas support has no import of it anywhere and would see the
+/// dependency reported as unused (issue #2005). Environments without such a
+/// peer, like `happy-dom`, have no row.
+///
+/// Only names already declared in the manifest can be credited, so this never
+/// invents an unlisted dependency.
+pub(super) fn credit_environment_optional_peers(environment: &str, result: &mut PluginResult) {
+    credit_config_value(
+        CreditSurface::TestEnvironmentOptionalPeer,
+        canonical_test_environment(environment),
+        result,
+    );
+}
+
+/// Record the catalogue credits for a config value, if any.
+///
+/// Returns whether a rule matched, which callers use when the credited packages
+/// replace the dependencies derived from the value itself.
+pub(super) fn credit_config_value(
+    surface: CreditSurface,
+    value: &str,
+    result: &mut PluginResult,
+) -> bool {
+    let Some(packages) = credited_packages(surface, value) else {
+        return false;
+    };
+    result
+        .referenced_dependencies
+        .extend(packages.iter().cloned());
+    true
+}
+
+/// Strip the runner prefix from a test environment specifier.
+///
+/// Both runners accept the bare name and the package it resolves to, so
+/// `testEnvironment: "jest-environment-jsdom"` and `environment: "jsdom"` select
+/// the same environment. A match on the short name only missed the fully
+/// qualified form that the Jest docs use, so that form lost its credit.
+pub(super) fn canonical_test_environment(environment: &str) -> &str {
+    environment
+        .strip_prefix("jest-environment-")
+        .or_else(|| environment.strip_prefix("vitest-environment-"))
+        .unwrap_or(environment)
 }
 
 #[cfg(test)]

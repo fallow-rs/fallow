@@ -1804,6 +1804,9 @@ macro_rules! define_plugin {
 mod config_dependencies;
 pub mod config_parser;
 mod config_value_credits;
+use config_value_credits::{
+    canonical_test_environment, credit_config_value, credit_environment_optional_peers,
+};
 mod flue;
 mod jasmine;
 mod manifest;
@@ -1839,56 +1842,6 @@ pub use used_export_names::UsedExportNames;
 pub(crate) use used_export_rule::{ConfigExportCredit, is_export_ignored};
 pub use used_export_rule::{PluginUsedExportRule, UsedExportRule};
 
-/// Credit the optional peer dependencies a test environment loads at runtime.
-///
-/// The rules are data: see the `test-environment-optional-peer` rows in
-/// `crates/core/data/config_value_credits.toml`. `jsdom` requires its optional
-/// peer `canvas` lazily when it is installed, so a project installing it for
-/// real canvas support has no import of it anywhere and would see the
-/// dependency reported as unused (issue #2005). Environments without such a
-/// peer, like `happy-dom`, have no row.
-///
-/// Only names already declared in the manifest can be credited, so this never
-/// invents an unlisted dependency.
-fn credit_environment_optional_peers(environment: &str, result: &mut PluginResult) {
-    credit_config_value(
-        config_value_credits::CreditSurface::TestEnvironmentOptionalPeer,
-        canonical_test_environment(environment),
-        result,
-    );
-}
-
-/// Record the catalogue credits for a config value, if any.
-///
-/// Returns whether a rule matched, which callers use when the credited packages
-/// replace the dependencies derived from the value itself.
-fn credit_config_value(
-    surface: config_value_credits::CreditSurface,
-    value: &str,
-    result: &mut PluginResult,
-) -> bool {
-    let Some(packages) = config_value_credits::credited_packages(surface, value) else {
-        return false;
-    };
-    result
-        .referenced_dependencies
-        .extend(packages.iter().cloned());
-    true
-}
-
-/// Strip the runner prefix from a test environment specifier.
-///
-/// Both runners accept the bare name and the package it resolves to, so
-/// `testEnvironment: "jest-environment-jsdom"` and `environment: "jsdom"` select
-/// the same environment. A match on the short name only missed the fully
-/// qualified form that the Jest docs use, so that form lost its credit.
-fn canonical_test_environment(environment: &str) -> &str {
-    environment
-        .strip_prefix("jest-environment-")
-        .or_else(|| environment.strip_prefix("vitest-environment-"))
-        .unwrap_or(environment)
-}
-
 mod adonis;
 mod ag_ui;
 mod alchemy;
@@ -1903,6 +1856,7 @@ mod bun;
 mod c8;
 mod capacitor;
 mod changesets;
+mod coderabbit;
 mod commit_and_tag_version;
 mod commitizen;
 mod commitlint;
@@ -1926,12 +1880,14 @@ mod entry_point_roles;
 mod eslint;
 mod eve;
 mod expo;
+mod expo_packages;
 mod expo_router;
 mod extends_walk;
 mod firebase;
 mod fumadocs;
 mod gatsby;
 mod github_action;
+mod gnome_shell_extension;
 mod graphql_codegen;
 mod graphql_config;
 mod gulp;

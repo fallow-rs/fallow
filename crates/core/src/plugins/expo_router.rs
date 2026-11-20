@@ -32,6 +32,7 @@ define_plugin!(
         "metro.config.{ts,js,mjs,cjs}",
         "babel.config.{ts,js,mjs,cjs}",
         "expo-env.d.ts",
+        super::expo::FINGERPRINT_CONFIG,
     ],
     tooling_dependencies: &[
         "expo",
@@ -41,24 +42,39 @@ define_plugin!(
         "@expo/metro-runtime",
     ],
     resolve_config(config_path, source, root) {
-        let mut result = PluginResult::default();
-
-        for import in config_parser::extract_imports(source, config_path) {
-            result
-                .referenced_dependencies
-                .push(crate::resolve::extract_package_name(&import));
-        }
-
-        super::expo::add_config_plugins(&mut result, source, config_path, root);
-        super::expo::add_system_ui_requirement(&mut result, source, config_path);
-
-        let route_root = extract_route_root(source, config_path, root)
-            .unwrap_or_else(|| default_route_root(root).to_string());
-        add_route_root_patterns(&mut result, &route_root);
-
+        resolve_app_config(config_path, source, root)
+    },
+    resolve_config_in_project(config_path, source, root, project_root) {
+        let mut result = resolve_app_config(config_path, source, root);
+        super::expo_packages::add_installed_package_credits(
+            &mut result,
+            source,
+            config_path,
+            project_root,
+        );
         result
     },
 );
+
+/// The dependencies, config plugins and route files of an app config.
+fn resolve_app_config(config_path: &Path, source: &str, root: &Path) -> PluginResult {
+    let mut result = PluginResult::default();
+
+    for import in config_parser::extract_imports(source, config_path) {
+        result
+            .referenced_dependencies
+            .push(crate::resolve::extract_package_name(&import));
+    }
+
+    super::expo::add_config_plugins(&mut result, source, config_path, root);
+    super::expo::add_system_ui_requirement(&mut result, source, config_path);
+
+    let route_root = extract_route_root(source, config_path, root)
+        .unwrap_or_else(|| default_route_root(root).to_string());
+    add_route_root_patterns(&mut result, &route_root);
+
+    result
+}
 
 fn extract_route_root(source: &str, config_path: &Path, root: &Path) -> Option<String> {
     let raw = config_parser::extract_config_plugin_option_string_from_paths(

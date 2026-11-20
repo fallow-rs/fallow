@@ -1,0 +1,6 @@
+{
+  "uuid": "capture@example.org",
+  "name": "Capture",
+  "description": "Captures a region of the screen.",
+  "shell-version": ["46", "47"]
+}
