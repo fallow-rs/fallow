@@ -108,3 +108,12 @@ fn an_unnamed_nested_workspace_stays_in_scope() {
         "{files:?}"
     );
 }
+
+#[test]
+fn an_excluded_nested_workspace_is_not_analyzed_by_health() {
+    let dir = nested_monorepo();
+    let selected = run(dir.path(), "health", &["--workspace", "apps/web"]);
+    let excluded = run(dir.path(), "health", &EXCLUDE_PLUGIN);
+    assert_eq!(selected["summary"]["files_analyzed"], 4, "{selected}");
+    assert_eq!(excluded["summary"]["files_analyzed"], 2, "{excluded}");
+}

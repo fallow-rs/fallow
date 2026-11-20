@@ -76,7 +76,7 @@ pub struct WorkspaceScope {
 impl WorkspaceScope {
     /// A scope of `selected` roots with no excluded root.
     #[must_use]
-    pub(crate) fn from_roots(selected: Vec<PathBuf>) -> Self {
+    fn from_roots(selected: Vec<PathBuf>) -> Self {
         Self::new(selected, Vec::new())
     }
 
