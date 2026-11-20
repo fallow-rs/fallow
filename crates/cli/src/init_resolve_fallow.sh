@@ -39,8 +39,10 @@ fi
 # The `--staged` flag of `fallow audit` exists since fallow 3.43.0. An older
 # fallow stops with a parser error, so the hook names the runner and the fix
 # instead. A version that does not parse as numbers skips this check.
+# The npm launcher prints a `verified:` line after the version line, so the
+# version ends at the first space or newline.
 FALLOW_NUM="${FALLOW_VERSION#fallow }"
-FALLOW_NUM="${FALLOW_NUM%% *}"
+FALLOW_NUM="${FALLOW_NUM%%[[:space:]]*}"
 FALLOW_MAJOR="${FALLOW_NUM%%.*}"
 FALLOW_MINOR="${FALLOW_NUM#*.}"
 FALLOW_MINOR="${FALLOW_MINOR%%.*}"
