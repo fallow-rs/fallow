@@ -12,7 +12,8 @@ use super::*;
 /// allowance for them. This transfer keeps such a baseline valid. The
 /// allowance moves per category, only to named buckets in the same file whose
 /// current count is above their own allowance, and only up to the count that
-/// the placeholder bucket no longer uses. After a re-save, a placeholder bucket has unused allowance only when
+/// the placeholder bucket no longer uses. A slot that hides a finding of a
+/// lower severity in the placeholder bucket is in use. After a re-save, a placeholder bucket has unused allowance only when
 /// an unnamed finding was fixed. Count mode has the same tolerance per file.
 ///
 /// Returns `None` when no allowance moves, so callers can keep borrowing the
@@ -40,28 +41,45 @@ pub(super) fn identity_counts_with_placeholder_allowance(
         let Some(recipients) = named_by_path.get(path) else {
             continue;
         };
-        for (category, placeholder_count) in placeholder_counts {
-            let mut unused = placeholder_count
-                .count
-                .saturating_sub(bucket_category_count(current_counts, key, category));
-            for (recipient_key, recipient_counts) in recipients {
-                if unused == 0 {
-                    break;
+        for dimension in HEALTH_FINDING_DIMENSIONS {
+            let saved = severity_counts_for_dimension(Some(placeholder_counts), dimension);
+            let used = match_severity_slots(
+                severity_counts_for_dimension(current_counts.get(key), dimension),
+                saved,
+            )
+            .used;
+            for severity in [
+                fallow_output::FindingSeverity::Moderate,
+                fallow_output::FindingSeverity::High,
+                fallow_output::FindingSeverity::Critical,
+            ] {
+                let index = severity_index(severity);
+                let category = HealthFindingCategory {
+                    dimension,
+                    severity,
                 }
-                let current = recipient_counts
-                    .get(category)
-                    .map_or(0, |entry| entry.count);
-                let own_allowance = bucket_category_count(baseline_counts, recipient_key, category);
-                let given = transferred
-                    .entry((*recipient_key).clone())
-                    .or_default()
-                    .entry(category.clone())
-                    .or_insert(HealthBaselineCount { count: 0 });
-                let take = current
-                    .saturating_sub(own_allowance + given.count)
-                    .min(unused);
-                given.count += take;
-                unused -= take;
+                .key();
+                let mut unused = saved[index] - used[index];
+                for (recipient_key, recipient_counts) in recipients {
+                    if unused == 0 {
+                        break;
+                    }
+                    let current = recipient_counts
+                        .get(category)
+                        .map_or(0, |entry| entry.count);
+                    let own_allowance =
+                        bucket_category_count(baseline_counts, recipient_key, category);
+                    let given = transferred
+                        .entry((*recipient_key).clone())
+                        .or_default()
+                        .entry(category.to_owned())
+                        .or_insert(HealthBaselineCount { count: 0 });
+                    let take = current
+                        .saturating_sub(own_allowance + given.count)
+                        .min(unused);
+                    given.count += take;
+                    unused -= take;
+                }
             }
         }
     }
