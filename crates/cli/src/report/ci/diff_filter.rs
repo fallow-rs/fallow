@@ -891,7 +891,7 @@ mod tests {
              --- a/package.json\n\
              +++ b/package.json\n\
              @@ -11,1 +11,2 @@\n\
-              \"dependencies\": {\n\
+              \x20\"dependencies\": {\n\
              +  \"lodash\": \"^4.17.21\"\n",
         )
         .expect("write");

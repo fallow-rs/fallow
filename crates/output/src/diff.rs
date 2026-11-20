@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::unified_diff::{DiffEvent, DiffFileHeader, unified_diff_events};
+
 /// Refuse to parse a unified diff larger than this.
 pub const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
 
@@ -11,8 +13,8 @@ pub const MAX_ADDED_LINES: usize = 1_000_000;
 
 /// Parsed, command-neutral index of files and added lines in a unified diff.
 ///
-/// Keys are exactly the paths the diff names in its `+++ b/<path>` headers,
-/// so they live in whatever namespace produced the diff — for `git diff`,
+/// Keys are the decoded paths of the `+++ b/<path>` headers of the diff,
+/// without the quotes and the trailing tab that git can write, so they live in whatever namespace produced the diff — for `git diff`,
 /// relative to the repository toplevel. [`DiffIndex::base`] records the
 /// directory those keys are relative to, so a finding's absolute path can be
 /// mapped into the same namespace before lookup. Without it, an analysis root
@@ -79,9 +81,6 @@ struct DiffParseState {
     current_file: Option<String>,
     new_line: u64,
     old_line: u64,
-    pending_old_path: Option<String>,
-    pending_rename_from: Option<String>,
-    pending_new_file: bool,
 }
 
 impl DiffIndex {
@@ -94,99 +93,87 @@ impl DiffIndex {
         let mut index = Self::default();
         let mut state = DiffParseState::default();
 
-        for line in diff.lines() {
-            if index.handle_diff_header_line(line, &mut state) {
-                continue;
+        for event in unified_diff_events(diff) {
+            match event {
+                DiffEvent::File(header) => state.current_file = index.record_file(header),
+                DiffEvent::Hunk {
+                    old_start,
+                    old_len,
+                    new_start,
+                    new_len,
+                } => {
+                    // A side with no line names the line before the hunk.
+                    state.old_line = if old_len == 0 {
+                        old_start + 1
+                    } else {
+                        old_start
+                    };
+                    state.new_line = if new_len == 0 {
+                        new_start + 1
+                    } else {
+                        new_start
+                    };
+                    index.hunk_count += 1;
+                }
+                DiffEvent::Added(_) => index.record_added_line(&mut state),
+                DiffEvent::Removed(_) => index.record_removed_line(&mut state),
+                DiffEvent::Context(_) => {
+                    state.new_line += 1;
+                    state.old_line += 1;
+                }
+                DiffEvent::NoNewline => {}
             }
-            index.handle_diff_content_line(line, &mut state);
         }
 
         index
     }
 
-    fn handle_diff_header_line(&mut self, line: &str, state: &mut DiffParseState) -> bool {
-        if line.starts_with("diff --git ") {
-            state.current_file = None;
-            state.pending_new_file = false;
-            state.pending_old_path = None;
-            state.pending_rename_from = None;
-            return true;
-        }
-        if let Some(rest) = line.strip_prefix("rename from ") {
-            state.pending_rename_from = Some(rest.to_owned());
-            return true;
-        }
-        if let Some(rest) = line.strip_prefix("rename to ") {
-            if let Some(from) = state.pending_rename_from.take() {
-                self.rename_pairs.insert(rest.to_owned(), from);
-                self.changed_paths.insert(rest.to_owned());
-                self.touched_files.insert(rest.to_owned());
+    /// Record the paths of one file section. Returns the file that the lines
+    /// of the section belong to: the head path, or the base path of a
+    /// deleted file.
+    fn record_file(&mut self, header: DiffFileHeader<'_>) -> Option<String> {
+        if let Some(path) = header.new_path {
+            let path = path.into_owned();
+            self.changed_paths.insert(path.clone());
+            self.touched_files.insert(path.clone());
+            if let Some(from) = header.renamed_from {
+                self.rename_pairs.insert(path.clone(), from.into_owned());
             }
-            return true;
-        }
-        if let Some(path) = line.strip_prefix("--- a/") {
-            state.pending_old_path = Some(path.to_string());
-            return true;
-        }
-        if line.starts_with("--- /dev/null") {
-            state.pending_old_path = None;
-            state.pending_new_file = true;
-            return true;
-        }
-        if let Some(path) = line.strip_prefix("+++ b/") {
-            state.pending_old_path = None;
-            if std::mem::take(&mut state.pending_new_file) {
-                self.base_lines.new_files.insert(path.to_string());
+            if header.is_new {
+                self.base_lines.new_files.insert(path.clone());
             }
-            state.current_file = Some(path.to_string());
-            self.changed_paths.insert(path.to_string());
-            self.touched_files.insert(path.to_string());
-            return true;
+            return Some(path);
         }
-        if line.starts_with("+++ /dev/null") {
-            state.current_file = state.pending_old_path.take();
-            if let Some(path) = state.current_file.as_ref() {
-                self.changed_paths.insert(path.clone());
-            }
-            return true;
-        }
-        if let Some(header) = line.strip_prefix("@@ ") {
-            if let Some(start) = parse_new_hunk_start(header) {
-                state.old_line = hunk_next_line(header, '-').unwrap_or(start);
-                state.new_line = hunk_next_line(header, '+').unwrap_or(start);
-                self.hunk_count += 1;
-            }
-            return true;
-        }
-        false
+        let old = header.old_path.filter(|_| header.is_deleted)?.into_owned();
+        self.changed_paths.insert(old.clone());
+        Some(old)
     }
 
-    fn handle_diff_content_line(&mut self, line: &str, state: &mut DiffParseState) {
+    fn record_added_line(&mut self, state: &mut DiffParseState) {
         let Some(path) = state.current_file.as_ref() else {
             return;
         };
-        if line.starts_with('+') {
-            self.total_added_lines += 1;
-            if !line.starts_with("+++") && self.added_line_count < MAX_ADDED_LINES {
-                self.added_lines
-                    .entry(path.clone())
-                    .or_default()
-                    .insert(state.new_line);
-                self.added_line_count += 1;
-                self.record_change_line(state, true);
-            } else {
-                self.base_lines.lines_capped = true;
-            }
-            state.new_line += 1;
-        } else if line.starts_with('-') {
-            self.total_removed_lines += 1;
-            self.record_change_line(state, false);
-            state.old_line += 1;
-        } else if !line.starts_with('\\') {
-            // A `\ No newline at end of file` marker is not a file line.
-            state.new_line += 1;
-            state.old_line += 1;
+        self.total_added_lines += 1;
+        if self.added_line_count < MAX_ADDED_LINES {
+            self.added_lines
+                .entry(path.clone())
+                .or_default()
+                .insert(state.new_line);
+            self.added_line_count += 1;
+            self.record_change_line(state, true);
+        } else {
+            self.base_lines.lines_capped = true;
         }
+        state.new_line += 1;
+    }
+
+    fn record_removed_line(&mut self, state: &mut DiffParseState) {
+        if state.current_file.is_none() {
+            return;
+        }
+        self.total_removed_lines += 1;
+        self.record_change_line(state, false);
+        state.old_line += 1;
     }
 
     /// Add one removed or added line to the change block that ends at the
@@ -476,20 +463,6 @@ fn head_line_place(blocks: &[ChangeBlock], line: u64) -> HeadLinePlace {
     HeadLinePlace::Unchanged(u64::try_from(i128::from(line) + shift).unwrap_or(0))
 }
 
-/// The first line of one side of a `@@ -a,b +c,d @@` hunk. `side` is `-` for
-/// the base and `+` for the head. A side with no line (`b` or `d` is 0) names
-/// the line before the hunk, so its first line is the next one.
-fn hunk_next_line(header: &str, side: char) -> Option<u64> {
-    let range = header
-        .split_whitespace()
-        .find_map(|part| part.strip_prefix(side))?;
-    let (start, len) = match range.split_once(',') {
-        Some((start, len)) => (start.parse::<u64>().ok()?, len.parse::<u64>().ok()?),
-        None => (range.parse::<u64>().ok()?, 1),
-    };
-    Some(if len == 0 { start + 1 } else { start })
-}
-
 /// Parse the new-file start line out of a `@@ -a,b +c,d @@` hunk header.
 pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
     let plus = header.find('+')?;
@@ -596,6 +569,71 @@ mod tests {
             i64::try_from(MAX_ADDED_LINES + 100).ok()
         );
         assert_eq!(index.hunk_count(), 1);
+        assert_eq!(
+            index.base_line_range("other.txt", 1, 1),
+            None,
+            "a real cap still stops the base-line map"
+        );
+    }
+
+    #[test]
+    fn added_plus_plus_line_is_indexed_and_keeps_base_line_ranges() {
+        let diff = "diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1,0 +2,2 @@ let count = 0;\n+++count;\n+--count;\n";
+        let index = DiffIndex::from_unified_diff(diff);
+        assert!(index.line_is_added("src/a.js", 2));
+        assert!(index.line_is_added("src/a.js", 3));
+        assert_eq!(index.base_line_range("src/a.js", 1, 1), Some((1, 1)));
+        assert_eq!(index.base_line_range("src/other.js", 4, 9), Some((4, 9)));
+    }
+
+    #[test]
+    fn header_shaped_added_line_keeps_the_current_file() {
+        let diff = "diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -0,0 +1,2 @@\n+++ b/other.js\n+x\n";
+        let index = DiffIndex::from_unified_diff(diff);
+        assert!(!index.changes_path("other.js"));
+        assert!(index.line_is_added("a.js", 1));
+        assert!(index.line_is_added("a.js", 2));
+    }
+
+    #[test]
+    fn quoted_and_tab_suffixed_paths_are_index_keys() {
+        let diff = "\
+diff --git \"a/src/caf\\303\\251.ts\" \"b/src/caf\\303\\251.ts\"
+--- \"a/src/caf\\303\\251.ts\"
++++ \"b/src/caf\\303\\251.ts\"
+@@ -1,0 +2 @@ x
++x2
+diff --git \"a/src/del \\303\\251.ts\" \"b/src/del \\303\\251.ts\"
+deleted file mode 100644
+--- \"a/src/del \\303\\251.ts\"\t
++++ /dev/null
+@@ -1 +0,0 @@
+-gone
+diff --git a/src/my file.ts b/src/my file.ts
+--- a/src/my file.ts\t
++++ b/src/my file.ts\t
+@@ -1,0 +2 @@ y
++y2
+\\ No newline at end of file
+diff --git a/src/old name.ts b/src/new name.ts
+similarity index 82%
+rename from src/old name.ts
+rename to src/new name.ts
+--- a/src/old name.ts\t
++++ b/src/new name.ts\t
+@@ -6,0 +7 @@ six
++seven
+";
+        let index = DiffIndex::from_unified_diff(diff);
+        assert!(index.line_is_added("src/café.ts", 2));
+        assert!(index.changes_path("src/del é.ts"));
+        assert!(!index.touches_file("src/del é.ts"));
+        assert!(index.line_is_added("src/my file.ts", 2));
+        assert!(index.line_is_added("src/new name.ts", 7));
+        assert_eq!(
+            index.old_path_for("src/new name.ts"),
+            Some("src/old name.ts")
+        );
     }
 
     #[test]
