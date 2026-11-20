@@ -18,7 +18,7 @@
 //! to different surfaces: Git hooks write into `.git/hooks/` or `.husky/`, and
 //! agent hooks write into `.claude/` / `AGENTS.md`.
 
-use std::io::{ErrorKind, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -30,6 +30,7 @@ pub use symlink_guard::{execute_agent_hooks, symlinked_component, symlinked_hook
 
 #[path = "setup_hooks_gitignore.rs"]
 mod gitignore;
+use crate::state_file::read_optional_text;
 pub use gitignore::ensure_gitignore_entry;
 use gitignore::gitignore_needs_entry;
 
@@ -1457,14 +1458,6 @@ fn find_tooling_insertion_point(text: &str) -> Option<usize> {
     None
 }
 
-pub fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err),
-    }
-}
-
 pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -1607,6 +1600,7 @@ pub fn display_rel(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
     use tempfile::tempdir;
 
     #[test]

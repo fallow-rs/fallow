@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::read_optional_text;
+use crate::state_file::read_optional_text;
 
 /// Append `entry` to `.gitignore` under `root`. Returns `false` when the file
 /// already lists the entry and nothing changed.

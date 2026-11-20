@@ -8,9 +8,8 @@ use serde::Serialize;
 use super::{
     Harness, NextAction, SCHEMA_VERSION, Step, display_path, hosts, mcp, resolve_root, skill,
 };
-use crate::setup_hooks::{
-    build_hooks_status, find_managed_block_bounds, home_dir, read_optional_text,
-};
+use crate::setup_hooks::{build_hooks_status, find_managed_block_bounds, home_dir};
+use crate::state_file::read_optional_text;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

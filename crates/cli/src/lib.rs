@@ -99,6 +99,7 @@ mod setup_hooks;
 mod signal;
 mod similar_code_cli;
 mod similar_code_help;
+mod state_file;
 mod suppressions;
 mod task_matrix;
 mod telemetry;
@@ -129,9 +130,7 @@ use cli_startup::{
     reject_global_baseline_flags, run_pre_dispatch_checks, setup_tracing, validate_inputs,
 };
 #[cfg(test)]
-use cli_telemetry::TelemetryRun;
-#[cfg(test)]
-use cli_telemetry::{fallback_failure_reason_for, telemetry_workflow_for_command};
+use cli_telemetry::{TelemetryRun, fallback_failure_reason_for, telemetry_workflow_for_command};
 use cli_telemetry::{record_run_epilogue, start_telemetry_run};
 use error::{emit_error, emit_input_error};
 pub(crate) use runtime_support::{AnalysisKind, GroupBy};

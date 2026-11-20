@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
-use crate::setup_hooks::read_optional_text;
+use crate::state_file::read_optional_text;
 
 const SERVER_KEY: &str = "fallow";
 const CLAUDE_PROJECT_FILE: &str = ".mcp.json";
