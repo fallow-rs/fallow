@@ -10,8 +10,7 @@
 )]
 
 use std::fmt::Write as _;
-use std::io::Read as _;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use crate::common::{
     fallow_bin, parse_json, run_fallow_in_root, run_fallow_raw_in_dir, scrub_analysis_env,
@@ -126,6 +125,9 @@ fn trace_path_without_a_route_prints_the_answer_once() {
 #[cfg(unix)]
 #[test]
 fn config_schema_into_a_closed_pipe_exits_cleanly() {
+    use std::io::Read as _;
+    use std::process::Stdio;
+
     let mut child = Command::new(fallow_bin())
         .env("RUST_LOG", "")
         .arg("config-schema")
