@@ -5,7 +5,7 @@
 //! that contains the root when the working directory is inside that tree too,
 //! or inside a shared directory: the CI workspace (`GITHUB_WORKSPACE`, GitLab
 //! `CI_PROJECT_DIR`) and the temp directories (`RUNNER_TEMP`, the system temp
-//! directory), each when it is set. An existing character device or named
+//! directory, and `/tmp` on Unix), each when it is set. An existing character device or named
 //! pipe (`/dev/null`, `/dev/stdout`, process substitution) is also allowed,
 //! because a write to it cannot put a file anywhere. On Windows the null
 //! device (`NUL`) is allowed for the same reason.
@@ -98,7 +98,7 @@ impl WriteScope {
             return None;
         }
         Some(format!(
-            "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or the temp directory (RUNNER_TEMP or the system temp directory).",
+            "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or a temp directory (RUNNER_TEMP, the system temp directory, or /tmp on Unix).",
             path.display(),
             resolved.display(),
             self.root.display(),
@@ -118,19 +118,45 @@ const SHARED_DIR_VARIABLES: [&str; 3] = ["GITHUB_WORKSPACE", "CI_PROJECT_DIR", "
 
 /// The shared directories a run may write into: each directory in
 /// `GITHUB_WORKSPACE`, `CI_PROJECT_DIR` and `RUNNER_TEMP` that is set and not
-/// empty, and the system temp directory. The CI workspace keeps a job working that checks the
-/// repository out into a subdirectory and writes its report beside it. A
-/// directory that does not exist is skipped, because it cannot be resolved.
+/// empty, and the system temp directories (see [`system_temp_dirs`]). The CI
+/// workspace keeps a job working that checks the repository out into a
+/// subdirectory and writes its report beside it. A directory that does not
+/// exist is skipped, because it cannot be resolved.
 #[must_use]
 pub fn shared_dirs() -> Vec<PathBuf> {
+    shared_dirs_for(std::env::temp_dir())
+}
+
+fn shared_dirs_for(temp_dir: PathBuf) -> Vec<PathBuf> {
     SHARED_DIR_VARIABLES
         .iter()
         .filter_map(std::env::var_os)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .chain(std::iter::once(std::env::temp_dir()))
+        .chain(temp_dirs_with(temp_dir))
         .filter_map(|dir| dir.canonicalize().ok())
         .collect()
+}
+
+/// The system temp directory on Unix. It is listed on its own because macOS
+/// sets `TMPDIR` to a per-user folder, so `std::env::temp_dir()` is not
+/// `/tmp` there.
+const UNIX_SYSTEM_TEMP_DIR: &str = "/tmp";
+
+/// The system temp directories: `std::env::temp_dir()`, and on Unix also
+/// `/tmp`. The paths are not resolved. `/var/tmp` is not in the list: Linux
+/// keeps it across reboots, and people keep long-lived clones there.
+#[must_use]
+pub fn system_temp_dirs() -> Vec<PathBuf> {
+    temp_dirs_with(std::env::temp_dir())
+}
+
+fn temp_dirs_with(temp_dir: PathBuf) -> Vec<PathBuf> {
+    let mut dirs = vec![temp_dir];
+    if cfg!(unix) {
+        dirs.push(PathBuf::from(UNIX_SYSTEM_TEMP_DIR));
+    }
+    dirs
 }
 
 /// Whether `path` is an existing character device or named pipe. A write to
@@ -457,7 +483,27 @@ fn append_missing(mut resolved: PathBuf, missing: &[Component<'_>]) -> PathBuf {
 mod tests {
     use std::path::Path;
 
-    use super::{WriteScope, create_checked, names_windows_null_device, resolve};
+    use super::{WriteScope, create_checked, names_windows_null_device, resolve, shared_dirs_for};
+
+    /// macOS sets `TMPDIR` to a per-user folder, but a user who passes
+    /// `/tmp/x.json` means the system temp directory. Each Unix allows it,
+    /// whatever `TMPDIR` names.
+    #[cfg(unix)]
+    #[test]
+    fn scope_accepts_the_unix_system_temp_dir_when_tmpdir_names_another_folder() {
+        let project = tempfile::tempdir().expect("project dir");
+        let other_temp = tempfile::tempdir().expect("temp dir");
+        let scope = WriteScope::new(
+            project.path(),
+            project.path(),
+            shared_dirs_for(other_temp.path().to_path_buf()),
+        )
+        .expect("scope");
+        assert_eq!(
+            scope.check("--save-baseline", Path::new("/tmp/x.json"), project.path()),
+            None
+        );
+    }
 
     /// The Windows null device is named by `NUL` alone, in any case, with an
     /// optional colon, or by its device path. A file name that only starts
