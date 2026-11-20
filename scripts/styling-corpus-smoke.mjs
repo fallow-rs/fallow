@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { cargoFallowBin } from "./cargo-target.mjs";
+import { parseOptions, parsePositiveInt } from "./lib/options.mjs";
+import { parseJsonReport, resolveFallowBin, runTool } from "./lib/tool-run.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -133,60 +136,34 @@ const REQUIRED_STACKS = [
   "template-heavy",
 ];
 
-const VALUE_OPTION_SETTERS = {
-  "--cache-dir": (opts, value) => {
-    opts.cacheDir = value;
-  },
-  "--out-dir": (opts, value) => {
-    opts.outDir = value;
-  },
-  "--fallow-bin": (opts, value) => {
-    opts.fallowBin = value;
-  },
-  "--baseline": (opts, value) => {
-    opts.baseline = value;
-  },
-  "--project": (opts, value) => {
-    opts.projects.push(value);
-  },
-  "--max-projects": (opts, value) => {
-    opts.maxProjects = Number(value);
-  },
-  "--timeout-ms": (opts, value) => {
-    opts.timeoutMs = Number(value);
-  },
-};
-
-const FLAG_OPTION_SETTERS = {
-  "--refresh": (opts) => {
-    opts.refresh = true;
-  },
-  "--skip-clone": (opts) => {
-    opts.skipClone = true;
-  },
-  "--fail-on-spikes": (opts) => {
-    opts.failOnSpikes = true;
-  },
-  "--list": (opts) => {
-    opts.list = true;
-  },
-  "--help": (opts) => {
-    opts.help = true;
-  },
-  "-h": (opts) => {
-    opts.help = true;
-  },
+const OPTION_SPEC = {
+  "--cache-dir": { key: "cacheDir", type: "string" },
+  "--out-dir": { key: "outDir", type: "string" },
+  "--fallow-bin": { key: "fallowBin", type: "string" },
+  "--baseline": { key: "baseline", type: "string" },
+  "--project": { key: "projects", type: "string", repeat: true },
+  "--max-projects": { key: "maxProjects", type: "positiveInt" },
+  "--timeout-ms": { key: "timeoutMs", type: "positiveInt" },
+  "--refresh": { key: "refresh", type: "flag" },
+  "--skip-clone": { key: "skipClone", type: "flag" },
+  "--fail-on-spikes": { key: "failOnSpikes", type: "flag" },
+  "--list": { key: "list", type: "flag" },
+  "--help": { key: "help", type: "flag" },
+  "-h": { key: "help", type: "flag" },
 };
 
 const parseArgs = (argv) => {
-  const opts = {
+  const defaults = {
     cacheDir: process.env.FALLOW_STYLING_CORPUS_CACHE || DEFAULT_CACHE_DIR,
     outDir: DEFAULT_OUT_DIR,
     fallowBin: process.env.FALLOW_BIN || "",
     baseline: DEFAULT_BASELINE,
     projects: [],
-    maxProjects: 0,
-    timeoutMs: Number(process.env.FALLOW_STYLING_CORPUS_TIMEOUT_MS || 120_000),
+    maxProjects: null,
+    timeoutMs: parsePositiveInt(
+      "FALLOW_STYLING_CORPUS_TIMEOUT_MS",
+      process.env.FALLOW_STYLING_CORPUS_TIMEOUT_MS || 120_000,
+    ),
     refresh: false,
     skipClone: false,
     failOnSpikes: false,
@@ -194,55 +171,11 @@ const parseArgs = (argv) => {
     help: false,
   };
 
-  for (let index = 0; index < argv.length; index += 1) {
-    index = applyArg(argv, index, opts);
-  }
-
+  const opts = parseOptions(argv, OPTION_SPEC, defaults);
   opts.cacheDir = resolve(opts.cacheDir);
   opts.outDir = resolve(opts.outDir);
   opts.baseline = resolve(opts.baseline);
-  if (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) {
-    throw new Error("--timeout-ms must be a positive number");
-  }
   return opts;
-};
-
-const applyArg = (argv, index, opts) => {
-  const arg = argv[index];
-  const inline = parseInlineValue(arg);
-  if (inline) {
-    setValueOption(opts, inline.name, inline.value);
-    return index;
-  }
-  if (VALUE_OPTION_SETTERS[arg]) {
-    setValueOption(opts, arg, readNextValue(argv, index, arg));
-    return index + 1;
-  }
-  if (FLAG_OPTION_SETTERS[arg]) {
-    FLAG_OPTION_SETTERS[arg](opts);
-    return index;
-  }
-  throw new Error(`Unknown argument: ${arg}`);
-};
-
-const parseInlineValue = (arg) => {
-  const separator = arg.indexOf("=");
-  if (separator === -1) return null;
-  const name = arg.slice(0, separator);
-  if (!VALUE_OPTION_SETTERS[name]) return null;
-  return { name, value: arg.slice(separator + 1) };
-};
-
-const readNextValue = (argv, index, arg) => {
-  const nextIndex = index + 1;
-  if (nextIndex >= argv.length) throw new Error(`Missing value for ${arg}`);
-  return argv[nextIndex];
-};
-
-const setValueOption = (opts, name, value) => {
-  const setter = VALUE_OPTION_SETTERS[name];
-  if (!setter) throw new Error(`Unknown argument: ${name}`);
-  setter(opts, value);
 };
 
 const usage = () => `Usage: node scripts/styling-corpus-smoke.mjs [options]
@@ -270,33 +203,12 @@ const selectedCorpus = (opts) => {
     const missing = opts.projects.filter((name) => !found.has(name));
     if (missing.length > 0) throw new Error(`Unknown project(s): ${missing.join(", ")}`);
   }
-  if (opts.maxProjects > 0) selected = selected.slice(0, opts.maxProjects);
+  if (opts.maxProjects !== null) selected = selected.slice(0, opts.maxProjects);
   return selected;
 };
 
-const findFallowBin = (opts) => {
-  const candidates = [
-    opts.fallowBin,
-    join(REPO_ROOT, "target", "release", "fallow"),
-    join(REPO_ROOT, "target", "debug", "fallow"),
-    "fallow",
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    const check = spawnSync(candidate, ["--version"], { encoding: "utf8" });
-    if (check.status === 0) {
-      const hasPathSeparator = candidate.includes("/") || candidate.includes("\\");
-      return hasPathSeparator ? resolve(candidate) : candidate;
-    }
-  }
-  throw new Error("fallow binary not found. Build fallow or pass --fallow-bin PATH");
-};
-
 const run = (cmd, args, options = {}) =>
-  spawnSync(cmd, args, {
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-    ...options,
-  });
+  runTool(cmd, args, { maxBuffer: 16 * 1024 * 1024, ...options });
 
 const projectDir = (cacheDir, entry) => join(cacheDir, entry.name);
 
@@ -318,15 +230,15 @@ const cloneProject = (entry, dest, opts) => {
     `https://github.com/${entry.repo}.git`,
     dest,
   ]);
-  if (clone.status !== 0) {
-    return { ok: false, error: (clone.stderr || clone.stdout || "git clone failed").trim() };
+  if (!clone.ok) {
+    return { ok: false, error: (clone.stderr || clone.stdout || clone.reason).trim() };
   }
   return { ok: true, cached: false };
 };
 
 const gitHead = (dir) => {
   const out = run("git", ["-C", dir, "rev-parse", "HEAD"]);
-  return out.status === 0 ? out.stdout.trim() : "";
+  return out.ok ? out.stdout.trim() : "";
 };
 
 const loadBaseline = (path) => {
@@ -337,14 +249,6 @@ const loadBaseline = (path) => {
     counts: parsed.counts || {},
     allowlist: parsed.allowlist || parsed.allowed_spikes || [],
   };
-};
-
-const parseJson = (stdout) => {
-  try {
-    return { ok: true, value: JSON.parse(stdout) };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
 };
 
 const collectObjectArrayEntries = (value, arrayKey) => {
@@ -525,8 +429,9 @@ const runFallowCommand = (fallowBin, entry, dir, command, opts) => {
     cwd: dir,
     timeout: opts.timeoutMs,
     env: { ...process.env, FALLOW_QUIET: "1" },
+    okStatuses: [0, 1],
   });
-  const parsed = parseJson(proc.stdout || "");
+  const parsed = parseJsonReport(proc.stdout);
   const findings = parsed.ok ? collectStylingFindings(parsed.value) : [];
   const stylexThemeCoverage =
     entry.name === "stylex" && command.id === "health-css" && parsed.ok
@@ -536,11 +441,11 @@ const runFallowCommand = (fallowBin, entry, dir, command, opts) => {
     id: command.id,
     args: fullArgs,
     status: proc.status,
-    signal: proc.signal || null,
-    timed_out: Boolean(proc.error && proc.error.code === "ETIMEDOUT"),
-    spawn_error: proc.error ? proc.error.message : null,
+    signal: proc.signal,
+    timed_out: proc.timedOut,
+    spawn_error: proc.spawnError,
     parse_error: parsed.ok ? null : parsed.error,
-    stderr_sample: (proc.stderr || "").trim().slice(0, 2000),
+    stderr_sample: proc.stderr.trim().slice(0, 2000),
     finding_groups: groupFindings(findings),
     total_styling_findings: findings.length,
     stylex_theme_coverage: stylexThemeCoverage,
@@ -751,7 +656,11 @@ const main = () => {
     return 0;
   }
 
-  const fallowBin = findFallowBin(opts);
+  const fallowBin = resolveFallowBin(
+    opts.fallowBin
+      ? [opts.fallowBin]
+      : [cargoFallowBin(REPO_ROOT, "release"), cargoFallowBin(REPO_ROOT, "debug"), "fallow"],
+  );
   mkdirSync(opts.cacheDir, { recursive: true });
   mkdirSync(opts.outDir, { recursive: true });
   const baseline = loadBaseline(opts.baseline);
