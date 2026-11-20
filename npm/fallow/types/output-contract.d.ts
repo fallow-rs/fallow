@@ -2081,8 +2081,9 @@ attribution: AuditAttribution
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * `_meta` block with metric / rule definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the metric
+ * and rule definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -2116,6 +2117,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * `CheckOutput::next_steps` for the contract.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `audit`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "audit"
 }
 /**
  * Per-category summary counts for the audit result.
@@ -2295,9 +2300,11 @@ panicked: boolean
 reason?: (GateFileReason | null)
 }
 /**
- * Metric and rule definitions emitted under `_meta` when `--explain` is
- * passed (always present in MCP responses). Helps AI agents and CI systems
- * interpret metric values without re-reading the docs site.
+ * The `_meta` block of an envelope. A `--format json` run of the CLI always
+ * sets `telemetry.analysis_run_id`. With `--explain` (and in each MCP
+ * response), the block also holds the docs URL and the field, metric and
+ * rule definitions, so that a CI system can read the metric values without
+ * the docs site.
  */
 export interface Meta {
 /**
@@ -2749,6 +2756,10 @@ omissions?: SemanticOmission[]
  * Plain next actions for a user or automation consumer.
  */
 actions?: string[]
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * Package API surface result shared by inspect and private-leak analysis.
@@ -2864,6 +2875,10 @@ omissions?: SemanticOmission[]
  * Plain next actions.
  */
 actions?: string[]
+/**
+ * Output discriminator. The root envelope always has the value `impact`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "impact"
 }
 /**
  * One production file or test reached by exact-symbol impact analysis.
@@ -3729,8 +3744,9 @@ request_outcomes?: (RequestOutcomes | null)
  */
 package_baselines?: PackageBaselineStatus[]
 /**
- * `_meta` block with docs and rule definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+ * URL and the rule definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -3795,6 +3811,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `dead-code`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "dead-code"
 }
 /**
  * Entry-point detection summary embedded in `CheckOutput` and the combined
@@ -5955,7 +5975,9 @@ from_zone: string
  */
 to_zone: string
 /**
- * The raw import specifier from the source file.
+ * The project-root-relative path of the imported file, as the analysis
+ * resolved it (`src/services/orders.ts`). It is not the specifier text
+ * of the import statement (`../services/orders`).
  */
 import_specifier: string
 /**
@@ -8764,11 +8786,14 @@ threshold_overrides?: ThresholdOverrideState[]
  */
 vital_signs?: (VitalSigns | null)
 /**
- * Project-wide health score (only populated with `--score`).
+ * Project-wide health score. A plain `fallow health` run prints it. A run
+ * that selects sections prints it only with `--score`, `--min-score` or
+ * `--trend`.
  */
 health_score?: (HealthScore | null)
 /**
- * Per-file health scores. Only present when --file-scores is used. Sorted
+ * Per-file health scores. A plain `fallow health` run prints them. A run
+ * that selects sections prints them only with `--file-scores`. Sorted
  * by risk-aware triage concern, combining low maintainability and high
  * CRAP risk. Zero-function files (barrels) are excluded by default.
  */
@@ -13127,6 +13152,10 @@ how_to_fix: string
  * Public documentation URL for the issue type.
  */
 docs: string
+/**
+ * Output discriminator. The root envelope always has the value `explain`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "explain"
 }
 /**
  * Envelope emitted by `fallow inspect --format json`.
@@ -13143,6 +13172,10 @@ warnings: string[]
  * `_meta` block with type-aware backend info, when applicable.
  */
 _meta?: (Meta | null)
+/**
+ * Output discriminator. The root envelope always has the value `inspect_target`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "inspect_target"
 }
 /**
  * Graph identity facts for a file target. `Value`-typed fields carry the
@@ -13532,6 +13565,10 @@ reason: string
  * Exact checker-backed references when type-aware tracing is enabled.
  */
 semantic?: (SemanticSymbolTrace | null)
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * A direct reference to an export.
@@ -13688,6 +13725,10 @@ reason: string
  * Exact checker-backed member references when type-aware tracing is enabled.
  */
 semantic?: (SemanticSymbolTrace | null)
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * Result of tracing all edges for a file.
@@ -13733,6 +13774,10 @@ entry_script?: (string | null)
  * exposes the file (issue #2796).
  */
 sources?: TraceSource[]
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * An export with usage information.
@@ -13876,6 +13921,10 @@ unused_in?: string[]
  * `schema_version`.
  */
 usage?: (DependencyUsage | null)
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * Why the unused devDependency check counts a dependency as used tooling
@@ -14182,6 +14231,10 @@ matched_instance?: (CloneInstance | null)
  * Clone groups matched by the trace request.
  */
 clone_groups: TracedCloneGroup[]
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * One clone group returned from a clone trace request.
@@ -14234,6 +14287,10 @@ affected_not_shown: string[]
  * Coordination gaps between the seed and consumers.
  */
 coordination_gap: ImpactClosureGap[]
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * One coordination-gap entry in an [`ImpactClosureTrace`].
@@ -14308,6 +14365,10 @@ path: ImportPathHop[]
  * Human-readable summary of the outcome.
  */
 reason: string
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * One import edge on an [`ImportPathTrace`].
@@ -14399,6 +14460,10 @@ star_export_ambiguity?: (StarExportAmbiguity | null)
  * A human-readable summary of the trace outcome.
  */
 reason: string
+/**
+ * Output discriminator. The root envelope always has the value `trace`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace"
 }
 /**
  * One hop in a caller / callee chain.
@@ -14467,6 +14532,10 @@ counts: ErrorTraceCounts
  * Human-readable summary of the outcome.
  */
 reason: string
+/**
+ * Output discriminator. The root envelope always has the value `trace-error`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "trace-error"
 }
 /**
  * One frame read from the input stack trace.
@@ -14639,6 +14708,10 @@ comments: ReviewComment[]
 marker_regex?: string
 marker_regex_flags?: string
 meta: ReviewEnvelopeMeta
+/**
+ * Output discriminator. The root envelope always has the value `review-envelope`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "review-envelope"
 }
 /**
  * Summary block on [`ReviewEnvelopeOutput`].
@@ -14827,6 +14900,10 @@ failed_fingerprints?: string[]
  * Fingerprints left unprocessed after a failure aborted the apply loop.
  */
 unapplied_fingerprints?: string[]
+/**
+ * Output discriminator. The root envelope always has the value `review-reconcile`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "review-reconcile"
 }
 /**
  * `fallow coverage setup --json` envelope.
@@ -14886,6 +14963,10 @@ cloud?: (CoverageSetupCloud | null)
 _meta?: {
 [k: string]: unknown
 }
+/**
+ * Output discriminator. The root envelope always has the value `coverage-setup`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "coverage-setup"
 }
 /**
  * Per-workspace-member setup guidance inside [`CoverageSetupOutput::members`].
@@ -15070,10 +15151,15 @@ version: ToolVersion
 elapsed_ms: ElapsedMs
 runtime_coverage: RuntimeCoverageReport
 /**
- * `_meta` block with docs and metric definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+ * URL and the metric definitions.
  */
 _meta?: (Meta | null)
+/**
+ * Output discriminator. The root envelope always has the value `coverage-analyze`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "coverage-analyze"
 }
 /**
  * Envelope emitted by `fallow list --boundaries --format json`. Surfaces
@@ -15083,6 +15169,10 @@ _meta?: (Meta | null)
  */
 export interface ListBoundariesOutput {
 boundaries: BoundariesListing
+/**
+ * Output discriminator. The root envelope always has the value `list-boundaries`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "list-boundaries"
 }
 /**
  * `boundaries` block carried by [`ListBoundariesOutput`].
@@ -15240,6 +15330,10 @@ workspaces: WorkspaceInfo[]
  * contract, even when empty.
  */
 workspace_diagnostics: WorkspaceDiagnostic[]
+/**
+ * Output discriminator. The root envelope always has the value `list-workspaces`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "list-workspaces"
 }
 /**
  * One workspace package emitted by `fallow workspaces --format json`.
@@ -15306,11 +15400,14 @@ threshold_overrides?: ThresholdOverrideState[]
  */
 vital_signs?: (VitalSigns | null)
 /**
- * Project-wide health score (only populated with `--score`).
+ * Project-wide health score. A plain `fallow health` run prints it. A run
+ * that selects sections prints it only with `--score`, `--min-score` or
+ * `--trend`.
  */
 health_score?: (HealthScore | null)
 /**
- * Per-file health scores. Only present when --file-scores is used. Sorted
+ * Per-file health scores. A plain `fallow health` run prints them. A run
+ * that selects sections prints them only with `--file-scores`. Sorted
  * by risk-aware triage concern, combining low maintainability and high
  * CRAP risk. Zero-function files (barrels) are excluded by default.
  */
@@ -15460,7 +15557,9 @@ gate_outcomes?: (GateOutcomes | null)
  */
 request_outcomes?: (RequestOutcomes | null)
 /**
- * `_meta` block with metric definitions, when `--explain` was passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the metric
+ * definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -15475,6 +15574,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * `CheckOutput::next_steps` for the contract.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `health`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "health"
 }
 /**
  * A health report scoped to a single group.
@@ -15719,8 +15822,9 @@ request_outcomes?: (RequestOutcomes | null)
  */
 package_baselines?: PackageBaselineStatus[]
 /**
- * `_meta` block with metric / rule definitions, emitted when `--explain`
- * is passed (always present in MCP responses).
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain` (and in each MCP
+ * response), it also holds the metric and rule definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -15738,6 +15842,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * `CheckOutput::next_steps` for the contract.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `dupes`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "dupes"
 }
 /**
  * A single grouped duplication bucket. Per-group `stats` are dedup-aware and
@@ -15942,8 +16050,9 @@ request_outcomes?: (RequestOutcomes | null)
  */
 package_baselines?: PackageBaselineStatus[]
 /**
- * `_meta` block with docs and rule definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+ * URL and the rule definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -15956,6 +16065,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * See [`CheckOutput::next_steps`] for the contract.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `dead-code-grouped`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "dead-code-grouped"
 }
 /**
  * Single resolver bucket inside `CheckGroupedOutput`. Carries the group's
@@ -16457,8 +16570,9 @@ request_outcomes?: (RequestOutcomes | null)
  */
 package_baselines?: PackageBaselineStatus[]
 /**
- * `_meta` block with docs and rule definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+ * URL and the rule definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -16471,6 +16585,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * See [`CheckOutput::next_steps`] for the contract.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `architecture-grouped`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "architecture-grouped"
 }
 /**
  * The rendered impact report, derived purely from the store.
@@ -16487,8 +16605,9 @@ enabled_source: EnabledSource
  */
 record_count: number
 /**
- * `_meta` block with docs and field definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+ * URL and the field definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -16578,6 +16697,10 @@ onboarding_declined: boolean
  * this to offer the impact opt-in exactly once per project.
  */
 explicit_decision: boolean
+/**
+ * Output discriminator. The root envelope always has the value `impact`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "impact"
 }
 /**
  * Per-category issue counts captured at a recorded run.
@@ -16716,6 +16839,10 @@ totals: CrossRepoTotals
  * Per-project rows, one for each store with recorded history.
  */
 projects: CrossRepoProjectEntry[]
+/**
+ * Output discriminator. The root envelope always has the value `impact-cross-repo`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "impact-cross-repo"
 }
 /**
  * Grand totals across every tracked project (including repos whose directory no
@@ -16797,7 +16924,9 @@ gate_outcomes?: (GateOutcomes | null)
  */
 request_outcomes?: (RequestOutcomes | null)
 /**
- * Security-specific rule and field metadata, emitted with `--explain`.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the
+ * security rule and field definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -16837,6 +16966,10 @@ unresolved_callee_sites: number
  * Bounded diagnostics for unresolved callee blind spots.
  */
 unresolved_callee_diagnostics?: (SecurityUnresolvedCalleeDiagnostics | null)
+/**
+ * Output discriminator. The root envelope always has the value `security`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "security"
 }
 /**
  * Allowlisted config context for `fallow security --format json`.
@@ -17442,7 +17575,9 @@ gate_outcomes?: (GateOutcomes | null)
  */
 request_outcomes?: (RequestOutcomes | null)
 /**
- * Security-specific rule and field metadata, emitted with `--explain`.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the
+ * security rule and field definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -17454,6 +17589,10 @@ gate?: (SecurityGate | null)
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 summary: SecuritySummary
+/**
+ * Output discriminator. The root envelope always has the value `security`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "security"
 }
 /**
  * Aggregate counts for `fallow security --summary --format json`.
@@ -17591,6 +17730,10 @@ survivors: {
 needs_human_review: {
 [k: string]: SecuritySurvivor
 }
+/**
+ * Output discriminator. The root envelope always has the value `security-survivors`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "security-survivors"
 }
 /**
  * Aggregate counts for survivor rendering.
@@ -17668,6 +17811,10 @@ summary: SecurityBlindSpotsSummary
  * Grouped unresolved callee diagnostics, derived from existing samples.
  */
 groups: SecurityBlindSpotGroup[]
+/**
+ * Output discriminator. The root envelope always has the value `security-blind-spots`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "security-blind-spots"
 }
 /**
  * Aggregate counts for blind-spot output.
@@ -18197,8 +18344,9 @@ request_outcomes?: (RequestOutcomes | null)
  */
 package_baselines?: PackageBaselineStatus[]
 /**
- * `_meta` block with docs and rule definitions, when `--explain` was
- * passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+ * URL and the rule definitions.
  */
 _meta?: (Meta | null)
 /**
@@ -18263,6 +18411,10 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
  */
 next_steps?: NextStep[]
+/**
+ * Output discriminator. The root envelope always has the value `architecture`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "architecture"
 }
 /**
  * Bare `fallow --format json` envelope.
@@ -18307,7 +18459,9 @@ request_outcomes?: (RequestOutcomes | null)
  */
 package_baselines?: PackageBaselineStatus[]
 /**
- * Per-section `_meta` blocks, when `--explain` was passed.
+ * `_meta` block. A `--format json` run of the CLI always sets
+ * `telemetry.analysis_run_id`. With `--explain`, it also holds one block
+ * for each section.
  */
 _meta?: (CombinedMeta | null)
 /**
@@ -18342,6 +18496,10 @@ next_steps?: NextStep[]
  * CLI leaves it absent. Omitted when the run skips no analysis.
  */
 skipped?: SkippedAnalysis[]
+/**
+ * Output discriminator. The root envelope always has the value `combined`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "combined"
 }
 /**
  * Optional `_meta` block for [`CombinedOutput`].
@@ -18478,6 +18636,10 @@ retirement?: (FlagRetirementReport | null)
  * `_meta` block; see [`FeatureFlagsMeta`].
  */
 _meta?: (FeatureFlagsMeta | null)
+/**
+ * Output discriminator. The root envelope always has the value `feature-flags`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "feature-flags"
 }
 /**
  * One feature flag finding in JSON output.
@@ -19042,6 +19204,10 @@ branching?: (BranchingReport | null)
  * is known.
  */
 test_reach?: (TestReachFacts | null)
+/**
+ * Output discriminator. The root envelope always has the value `audit-brief`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "audit-brief"
 }
 /**
  * The ranked, capped decision surface plus the set of signal_ids the
@@ -20060,6 +20226,10 @@ truncated?: (TruncationNote | null)
  * Count of fallow-emitted signal_ids (the anti-hallucination allowlist size).
  */
 signal_count: number
+/**
+ * Output discriminator. The root envelope always has the value `decision-surface`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "decision-surface"
 }
 /**
  * One decision plus its structured `actions[]`.
@@ -20187,6 +20357,10 @@ agent_schema: AgentSchema
  * The injection-resistance note (digest is graph-only; PR prose untrusted).
  */
 injection_note: string
+/**
+ * Output discriminator. The root envelope always has the value `review-walkthrough-guide`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "review-walkthrough-guide"
 }
 /**
  * The full `fallow audit --brief --format json` envelope. Carries the
@@ -20404,6 +20578,10 @@ rejected_count: number
  * no rejections (the clean done-condition).
  */
 unanchored_count: number
+/**
+ * Output discriminator. The root envelope always has the value `review-walkthrough-validation`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "review-walkthrough-validation"
 }
 /**
  * One accepted judgment: the real anchored signal passed through with the
@@ -20506,6 +20684,10 @@ summary: SuppressionInventorySummary
  * Per-file suppression listings, sorted by path then line.
  */
 files: SuppressionInventoryFile[]
+/**
+ * Output discriminator. The root envelope always has the value `suppression-inventory`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "suppression-inventory"
 }
 /**
  * Project-level totals for the suppression inventory.
@@ -20614,6 +20796,10 @@ summary: DoctorSummary
  * Checks in stable contract order.
  */
 checks: DoctorCheck[]
+/**
+ * Output discriminator. The root envelope always has the value `doctor`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "doctor"
 }
 /**
  * Counts for every per-check status.
@@ -20709,6 +20895,10 @@ backend_version?: (string | null)
  * How to make the companion available, when it is not.
  */
 remediation?: (string | null)
+/**
+ * Output discriminator. The root envelope always has the value `type-aware-status`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "type-aware-status"
 }
 /**
  * Raw `fallow similar-code --format json` output.
@@ -20727,6 +20917,10 @@ completion: SimilarCodeCompletion
  * Non-severity diagnostics in deterministic order.
  */
 diagnostics: SimilarCodeDiagnostic[]
+/**
+ * Output discriminator. The root envelope always has the value `similar-code`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "similar-code"
 }
 /**
  * Complete provenance needed to reproduce candidate generation.
@@ -21075,6 +21269,10 @@ completion: SimilarCodeCompletion
  * Non-severity diagnostics in deterministic order.
  */
 diagnostics: SimilarCodeDiagnostic[]
+/**
+ * Output discriminator. The root envelope always has the value `similar-code-inspect`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "similar-code-inspect"
 }
 /**
  * Bounded source-grounded packet for one immutable candidate.
@@ -21196,6 +21394,10 @@ completion: SimilarCodeCompletion
  * Non-severity diagnostics in deterministic order.
  */
 diagnostics: SimilarCodeDiagnostic[]
+/**
+ * Output discriminator. The root envelope always has the value `similar-code-review`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "similar-code-review"
 }
 /**
  * Digests that make the review join reproducible without exposing source.
@@ -21318,6 +21520,10 @@ problem?: (string | null)
  * Whether this setup invocation downloaded new bytes.
  */
 downloaded?: (boolean | null)
+/**
+ * Output discriminator. The root envelope always has the value `similar-code-status`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "similar-code-status"
 }
 /**
  * Result of explicitly clearing the derived project-namespaced vector cache.
@@ -21333,6 +21539,10 @@ removed: boolean
  * Whether model artifacts were removed. Version 1 always emits false.
  */
 model_removed: boolean
+/**
+ * Output discriminator. The root envelope always has the value `similar-code-cache-clear`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "similar-code-cache-clear"
 }
 /**
  * The envelope of `fallow mutation`.
@@ -21436,6 +21646,10 @@ gate_outcomes?: (GateOutcomes | null)
  * `--record-args`. It holds counts and reasons, never argument values.
  */
 recording?: (MutationRecordingOutput | null)
+/**
+ * Output discriminator. The root envelope always has the value `mutation`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "mutation"
 }
 /**
  * The completion status of a run.
@@ -22459,6 +22673,10 @@ unmatched_paths: string[]
  */
 unmatched_path_reasons?: MutationUnmatchedPath[]
 runner: MutationPlanRunner
+/**
+ * Output discriminator. The root envelope always has the value `mutation-plan`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "mutation-plan"
 }
 /**
  * The totals of a plan.
@@ -22711,6 +22929,10 @@ kill_matrix_complete: boolean
  * The replay of the mutant. Present only with `--replay`.
  */
 replay?: (MutationReplayOutput | null)
+/**
+ * Output discriminator. The root envelope always has the value `mutation-inspect`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "mutation-inspect"
 }
 /**
  * The code of one mutant, from the current file.
@@ -22839,6 +23061,10 @@ summary: MutationTasksSummary
  * The tasks, sorted by file, line, column and mutant id.
  */
 tasks: MutationTask[]
+/**
+ * Output discriminator. The root envelope always has the value `mutation-tasks`. An envelope nested in another envelope has no `kind`.
+ */
+kind?: "mutation-tasks"
 }
 /**
  * The number of tasks for each status.

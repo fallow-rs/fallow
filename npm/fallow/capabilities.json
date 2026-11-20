@@ -3882,7 +3882,7 @@
       "default_severity": "error",
       "opt_in": false,
       "frameworks": [],
-      "note": null,
+      "note": "`fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#circular-dependencies"
@@ -3923,7 +3923,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": null,
+      "note": "`fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#re-export-cycles"
@@ -3962,7 +3962,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires a workspace with two or more packages",
+      "note": "Requires a workspace with two or more packages. `fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#package-cycles"
@@ -3999,7 +3999,7 @@
       "default_severity": "error",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires configured boundary zones (boundaries config)",
+      "note": "Requires configured boundary zones (boundaries config). `fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
@@ -4035,7 +4035,7 @@
       "default_severity": "error",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires boundaries.coverage.requireAllFiles",
+      "note": "Requires boundaries.coverage.requireAllFiles. `fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
@@ -4072,7 +4072,7 @@
       "default_severity": "error",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires boundaries.calls.forbidden patterns",
+      "note": "Requires boundaries.calls.forbidden patterns. `fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#boundary-violations"
@@ -4108,7 +4108,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires a configured rule pack (rulePacks config)",
+      "note": "Requires a configured rule pack (rulePacks config). `fallow architecture` also reports this finding.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#policy-violations"
@@ -4211,8 +4211,8 @@
       },
       "counts_in_total": true,
       "fixable": true,
-      "suppressible": false,
-      "suppress_comment": null,
+      "suppressible": true,
+      "suppress_comment": "# fallow-ignore-next-line unused-catalog-entry",
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],

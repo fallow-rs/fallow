@@ -22,7 +22,9 @@ pub struct BoundaryViolation {
     pub from_zone: String,
     /// The zone the imported file belongs to.
     pub to_zone: String,
-    /// The raw import specifier from the source file.
+    /// The project-root-relative path of the imported file, as the analysis
+    /// resolved it (`src/services/orders.ts`). It is not the specifier text
+    /// of the import statement (`../services/orders`).
     pub import_specifier: String,
     /// 1-based line number of the import statement in the source file.
     pub line: u32,

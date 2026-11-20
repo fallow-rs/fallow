@@ -372,9 +372,10 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
 /// Returns `None` when the section's findings have no inline suppression surface:
 /// a kind with no dedicated `suppress_token` whose findings live in package.json
 /// (the dependency sections) would otherwise print a token that parses but points
-/// at a comment the user cannot place. Catalog entries (YAML comment surface) and
-/// catalog references / dependency overrides (config-entry surface) keep a hint,
-/// routed through [`is_yaml_comment_only`] / [`is_config_only_suppression`].
+/// at a comment the user cannot place. Catalog references and dependency
+/// overrides (config-entry surface) keep a hint, routed through
+/// [`is_config_only_suppression`]. Catalog entries have their own token and
+/// print a YAML comment, see [`is_yaml_comment_only`].
 fn section_suppress_rule(title: &str) -> Option<&'static str> {
     let kind = section_issue_kind(title)?;
     let meta = issue_meta_by_kind(kind)?;

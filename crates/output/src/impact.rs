@@ -175,8 +175,9 @@ pub struct ImpactReport {
     pub enabled_source: EnabledSource,
     /// Number of recorded runs in the store.
     pub record_count: usize,
-    /// `_meta` block with docs and field definitions, when `--explain` was
-    /// passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the docs
+    /// URL and the field definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Timestamp of the earliest recorded run; absent with no records.

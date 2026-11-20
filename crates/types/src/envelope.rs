@@ -362,9 +362,11 @@ pub enum RegressionToleranceKind {
     Percentage,
 }
 
-/// Metric and rule definitions emitted under `_meta` when `--explain` is
-/// passed (always present in MCP responses). Helps AI agents and CI systems
-/// interpret metric values without re-reading the docs site.
+/// The `_meta` block of an envelope. A `--format json` run of the CLI always
+/// sets `telemetry.analysis_run_id`. With `--explain` (and in each MCP
+/// response), the block also holds the docs URL and the field, metric and
+/// rule definitions, so that a CI system can read the metric values without
+/// the docs site.
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Meta {

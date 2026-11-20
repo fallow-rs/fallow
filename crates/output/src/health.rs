@@ -77,7 +77,9 @@ pub struct HealthOutput<Report, Group> {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
-    /// `_meta` block with metric definitions, when `--explain` was passed.
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain`, it also holds the metric
+    /// definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Workspace-discovery, source-discovery, and analysis-stage diagnostics

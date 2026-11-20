@@ -80,7 +80,7 @@ use fallow_output::{
 use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateOutput, CodeClimateSeverity, LEAN_PROFILE_KINDS, LeanOutput,
+    CodeClimateOutput, CodeClimateSeverity, LeanOutput,
 };
 use fallow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -597,10 +597,15 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "SimilarCodeReviewProvenance",
 ];
 
+#[cfg(test)]
+#[path = "schema_emit_parts/contract_text_tests.rs"]
+mod contract_text_tests;
 #[path = "schema_emit_parts/mutation.rs"]
 mod mutation_names;
 #[path = "schema_emit_parts/prune.rs"]
 mod prune;
+#[path = "schema_emit_parts/root_variants.rs"]
+mod root_variants;
 
 fn derived_definition_names() -> &'static [&'static str] {
     static NAMES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
@@ -1382,7 +1387,7 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "feature-flags",
         &["FeatureFlagsOutput"],
-        "`fallow flags --format json`. Required `findings`, `summary`, and\n`meta` for feature-flag discovery.",
+        "`fallow flags --format json`. Required `schema_version`, `version`,\n`elapsed_ms`, `feature_flags`, and `total_flags`.",
     ),
     (
         "audit-brief",
@@ -1479,50 +1484,13 @@ fn rewrite_fallow_output_definition(definitions: &mut Map<String, Value>) -> Res
     let one_of = FALLOW_OUTPUT_VARIANTS
         .iter()
         .map(|(kind, definitions, description)| {
-            fallow_output_variant_schema(kind, definitions, description)
+            root_variants::fallow_output_variant_schema(kind, definitions, description)
         })
         .collect();
 
     output.remove("anyOf");
     output.insert("oneOf".to_string(), Value::Array(one_of));
-    Ok(())
-}
-
-fn fallow_output_variant_schema(kind: &str, definitions: &[&str], description: &str) -> Value {
-    let mut discriminator = serde_json::json!({
-        "type": "object",
-        "properties": { "kind": { "type": "string", "const": kind } },
-        "required": ["kind"]
-    });
-    // A `--lean` document validates against `LeanOutput`, not the full envelope.
-    if LEAN_PROFILE_KINDS.contains(&kind) {
-        discriminator["not"] = serde_json::json!({ "required": ["profile"] });
-    }
-    serde_json::json!({
-        "description": description,
-        "allOf": [fallow_output_payload_schema(definitions), discriminator]
-    })
-}
-
-fn fallow_output_payload_schema(definitions: &[&str]) -> Value {
-    if definitions.len() == 1 {
-        serde_json::json!({ "$ref": format!("#/definitions/{}", definitions[0]) })
-    } else {
-        serde_json::json!({
-            "oneOf": definitions
-                .iter()
-                .map(|definition| serde_json::json!({ "$ref": format!("#/definitions/{definition}") }))
-                .collect::<Vec<_>>()
-        })
-    }
-}
-
-fn fallow_output_kind_list() -> String {
-    FALLOW_OUTPUT_VARIANTS
-        .iter()
-        .map(|(kind, _, _)| format!("`{kind}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
+    root_variants::add_kind_properties(definitions)
 }
 
 /// Drive the document-root `oneOf` from the typed `FallowOutput` enum.
@@ -1553,7 +1521,7 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
              stdout with a non-zero exit; it carries no `kind` and is \
              discriminated by the `error: true` field. A `--lean` document \
              is not a root branch: it validates against `LeanOutput`.",
-            fallow_output_kind_list()
+            root_variants::fallow_output_kind_list()
         )),
     );
 
@@ -2158,7 +2126,10 @@ mod drift_tests {
                 architecture_keys, dead_code_keys,
                 "{architecture} and {dead_code} must have the same properties"
             );
-            for (name, schema) in dead_code_properties {
+            for (name, schema) in dead_code_properties
+                .iter()
+                .filter(|(name, _)| *name != "kind")
+            {
                 if name == "schema_version" {
                     assert_eq!(
                         architecture_properties[name]
@@ -2166,6 +2137,16 @@ mod drift_tests {
                             .and_then(Value::as_str),
                         Some("#/definitions/ArchitectureSchemaVersion"),
                         "{architecture}.schema_version must reference its own version"
+                    );
+                    continue;
+                }
+                if name == "kind" {
+                    assert!(
+                        architecture_properties[name]
+                            .get("const")
+                            .and_then(Value::as_str)
+                            .is_some_and(|kind| kind.starts_with("architecture")),
+                        "{architecture}.kind must name an architecture kind"
                     );
                     continue;
                 }

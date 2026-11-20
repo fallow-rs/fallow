@@ -101,8 +101,9 @@ pub struct DupesOutput<Report, Group> {
     /// Applied package Git refs, omitted outside package-baseline runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub package_baselines: Vec<crate::PackageBaselineStatus>,
-    /// `_meta` block with metric / rule definitions, emitted when `--explain`
-    /// is passed (always present in MCP responses).
+    /// `_meta` block. A `--format json` run of the CLI always sets
+    /// `telemetry.analysis_run_id`. With `--explain` (and in each MCP
+    /// response), it also holds the metric and rule definitions.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     /// Workspace-discovery and source-discovery diagnostics for the run

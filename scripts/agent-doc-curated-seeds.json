@@ -2220,25 +2220,25 @@
       "section": "issue-types",
       "row": "boundary-call-violation",
       "column": "Description",
-      "seed": "Zoned file calls a callee its zone forbids; Requires boundaries.calls.forbidden patterns"
+      "seed": "Zoned file calls a callee its zone forbids; Requires boundaries.calls.forbidden patterns. `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",
       "row": "boundary-coverage",
       "column": "Description",
-      "seed": "Source file matches no configured architecture boundary zone; Requires boundaries.coverage.requireAllFiles"
+      "seed": "Source file matches no configured architecture boundary zone; Requires boundaries.coverage.requireAllFiles. `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",
       "row": "boundary-violation",
       "column": "Description",
-      "seed": "Import crosses a configured architecture boundary; Requires configured boundary zones (boundaries config)"
+      "seed": "Import crosses a configured architecture boundary; Requires configured boundary zones (boundaries config). `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",
       "row": "circular-dependency",
       "column": "Description",
-      "seed": "Circular dependency chain detected"
+      "seed": "Circular dependency chain detected; `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",
@@ -2424,13 +2424,13 @@
       "section": "issue-types",
       "row": "package-cycle",
       "column": "Description",
-      "seed": "Two or more workspace packages import each other in a loop; Requires a workspace with two or more packages"
+      "seed": "Two or more workspace packages import each other in a loop; Requires a workspace with two or more packages. `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",
       "row": "policy-violation",
       "column": "Description",
-      "seed": "Usage violates a configured rule-pack policy; Requires a configured rule pack (rulePacks config)"
+      "seed": "Usage violates a configured rule-pack policy; Requires a configured rule pack (rulePacks config). `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",
@@ -2448,7 +2448,7 @@
       "section": "issue-types",
       "row": "re-export-cycle",
       "column": "Description",
-      "seed": "Two or more barrel files re-export from each other in a loop"
+      "seed": "Two or more barrel files re-export from each other in a loop; `fallow architecture` also reports this finding."
     },
     {
       "section": "issue-types",

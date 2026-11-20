@@ -84,10 +84,13 @@ pub struct HealthReport {
     /// Project-wide vital signs (always computed from available data).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
-    /// Project-wide health score (only populated with `--score`).
+    /// Project-wide health score. A plain `fallow health` run prints it. A run
+    /// that selects sections prints it only with `--score`, `--min-score` or
+    /// `--trend`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
-    /// Per-file health scores. Only present when --file-scores is used. Sorted
+    /// Per-file health scores. A plain `fallow health` run prints them. A run
+    /// that selects sections prints them only with `--file-scores`. Sorted
     /// by risk-aware triage concern, combining low maintainability and high
     /// CRAP risk. Zero-function files (barrels) are excluded by default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

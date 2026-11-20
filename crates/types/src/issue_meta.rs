@@ -705,7 +705,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         config_key: Some("unused-catalog-entries"),
         filter_flag: Some("--unused-catalog-entries"),
         mcp_issue_type: Some("unused-catalog-entries"),
-        suppress_token: None,
+        suppress_token: Some("unused-catalog-entry"),
         suppress_file_level: false,
         lsp: true,
         docs_category: "dependency",
