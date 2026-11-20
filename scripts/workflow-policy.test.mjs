@@ -1201,6 +1201,27 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(releaseReady, /Release tag .* appeared before the release workflow completed/u);
 });
 
+test("release retries the public fallow tarball download while the CDN catches up", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const sites = workflow.match(/^\s+tarball_url=\$\(/gmu) ?? [];
+  const downloads = workflow.match(/^\s+curl\b[^\n]*tarball_url[^\n]*$/gmu) ?? [];
+
+  assert.ok(sites.length >= 1, "release.yml must download the public fallow tarball");
+  assert.equal(downloads.length, sites.length, "each tarball URL needs exactly one curl download");
+  for (const download of downloads) {
+    assert.match(
+      download,
+      /\bcurl -fsSL /u,
+      "the download must fail on HTTP errors and follow the CDN redirect",
+    );
+    assert.match(
+      download,
+      /--max-time [1-9]\d* --retry [1-9]\d* --retry-delay [1-9]\d* --retry-all-errors/u,
+      "a fresh npm version can answer 404 from the CDN for some minutes",
+    );
+  }
+});
+
 test("release stages the fallow npm root for maintainer approval", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
