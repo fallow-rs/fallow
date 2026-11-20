@@ -40,8 +40,11 @@ pub(super) fn placeholder_loans(
             named_by_path.entry(path).or_default().push((key, counts));
         }
     }
-    let mut loans = Vec::new();
-    let mut given: FxHashMap<(&str, &'static str), usize> = FxHashMap::default();
+    let mut book = LoanBook {
+        saved_counts,
+        given: FxHashMap::default(),
+        loans: Vec::new(),
+    };
     for (key, placeholder_counts) in saved_counts {
         let Some((path, name)) = identity_bucket_parts(key) else {
             continue;
@@ -70,33 +73,56 @@ pub(super) fn placeholder_loans(
                     severity,
                 }
                 .key();
-                let mut unused = saved[index] - used[index];
-                for (recipient_key, recipient_counts) in recipients {
-                    if unused == 0 {
-                        break;
-                    }
-                    let current = recipient_counts
-                        .get(category)
-                        .map_or(0, |entry| entry.count);
-                    let own = bucket_category_count(saved_counts, recipient_key, category);
-                    let given = given.entry((recipient_key.as_str(), category)).or_default();
-                    let take = current.saturating_sub(own + *given).min(unused);
-                    if take == 0 {
-                        continue;
-                    }
-                    *given += take;
-                    unused -= take;
-                    loans.push(PlaceholderLoan {
-                        from: key.clone(),
-                        to: (*recipient_key).clone(),
-                        category,
-                        count: take,
-                    });
-                }
+                book.lend(key, category, saved[index] - used[index], recipients);
             }
         }
     }
-    loans
+    book.loans
+}
+
+/// The loans of one run and the slots that each named bucket got so far.
+struct LoanBook<'a> {
+    saved_counts: &'a HealthFindingCountMap,
+    given: FxHashMap<(&'a str, &'static str), usize>,
+    loans: Vec<PlaceholderLoan>,
+}
+
+impl<'a> LoanBook<'a> {
+    /// Lend up to `unused` slots of `category` from the placeholder bucket
+    /// `from` to the named buckets that have more findings than slots.
+    fn lend(
+        &mut self,
+        from: &str,
+        category: &'static str,
+        mut unused: usize,
+        recipients: &[NamedBucket<'a>],
+    ) {
+        for (recipient_key, recipient_counts) in recipients {
+            if unused == 0 {
+                break;
+            }
+            let current = recipient_counts
+                .get(category)
+                .map_or(0, |entry| entry.count);
+            let own = bucket_category_count(self.saved_counts, recipient_key, category);
+            let given = self
+                .given
+                .entry((recipient_key.as_str(), category))
+                .or_default();
+            let take = current.saturating_sub(own + *given).min(unused);
+            if take == 0 {
+                continue;
+            }
+            *given += take;
+            unused -= take;
+            self.loans.push(PlaceholderLoan {
+                from: from.to_owned(),
+                to: (*recipient_key).clone(),
+                category,
+                count: take,
+            });
+        }
+    }
 }
 
 /// A current identity bucket with a function name: the key and its counts.

@@ -77,7 +77,7 @@ pub(super) struct HealthMatch {
 impl HealthMatch {
     /// `true` when the baseline does not cover every finding of `category`
     /// in the current bucket `bucket`.
-    pub(super) fn overflows(&self, bucket: &str, category: &str) -> bool {
+    fn overflows(&self, bucket: &str, category: &str) -> bool {
         self.overflow
             .get(bucket)
             .is_some_and(|categories| categories.contains(category))
@@ -93,7 +93,7 @@ impl HealthMatch {
     }
 
     /// The staleness counts of this match.
-    pub(super) fn overlap(&self) -> HealthBaselineOverlap {
+    fn overlap(&self) -> HealthBaselineOverlap {
         HealthBaselineOverlap {
             matched_entries: self.used.values().map(slot_total).sum(),
             moved_entries: self.moved_entries,
