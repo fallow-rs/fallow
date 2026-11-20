@@ -834,6 +834,7 @@ pub fn apply_rule_severities(results: &mut AnalysisResults, config: &ResolvedCon
     apply_base_collection_rules(results, rules);
     hide_cascade_findings(results, config);
     apply_effective_severities(results, config);
+    crate::dead_code_export_hints::add_unused_export_config_actions(results, config);
 }
 
 /// Hide the export and member findings of unused files.

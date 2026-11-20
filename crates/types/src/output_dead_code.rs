@@ -62,7 +62,7 @@ pub const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*`
 /// JSON Schema fragment URL for the `add-to-config` `ignoreExports` action's
 /// `value` payload. Pinned to the main branch so users browsing the action
 /// value can navigate directly to the rule shape.
-const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
+pub const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
     "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports";
 
 /// JSON Schema fragment URL for the `ignoreCatalogReferences` rule items

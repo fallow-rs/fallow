@@ -2,6 +2,9 @@
 
 use super::*;
 
+#[path = "check_export_config_hints.rs"]
+pub(super) mod export_config_hints;
+
 /// Emit a config-quality advisory to stderr when unused files are dominated by one directory.
 ///
 /// Called from `print_human` (not `build_human_lines`) so it respects the `quiet` flag

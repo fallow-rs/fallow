@@ -278,6 +278,16 @@ export type UnknownStateRelation = "unknown"
  *   `false` inside a monorepo subpackage with no workspace-root config
  *   (the applier refuses to fragment per-package configs across the
  *   monorepo and points at the workspace root instead).
+ * - `remove-export` (`unused-exports`, `unused-types`) in a generated file:
+ *   `false`, with
+ *   the reason in `note`. A generator writes the file again, so `fallow fix`
+ *   keeps the file. Such a finding has no `suppress-line` action, because
+ *   the generator removes the comment too. It has an `add-to-config` action
+ *   with the `ignoreExports` rule for the file.
+ * - `add-to-config` for `ignoreExports` (`unused-exports`, `unused-types`):
+ *   always `false`. The action is present on a finding in a generated file,
+ *   and on an unused export in a shadcn/ui folder that `components.json`
+ *   names.
  * - `update-catalog-reference` (`unresolved-catalog-references`): always
  *   `false` today (the catalog-switching applier is not wired in yet); the
  *   field is non-singleton so that future enablement does not require a
