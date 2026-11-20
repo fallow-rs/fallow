@@ -2,7 +2,6 @@
 
 use fallow_config::{AuditGate, AuditWorsened};
 use fallow_output::{AuditCommand, CodeClimateIssue, codeclimate_issues_to_value};
-use fallow_types::duplicates::DuplicationReport;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
@@ -161,9 +160,9 @@ pub fn audit_run_notices<'a>(
 pub struct AuditSarifOutputInput<'a> {
     /// Prebuilt dead-code SARIF document whose runs are merged in.
     pub dead_code: Option<&'a serde_json::Value>,
-    /// Duplication report converted into a dedicated SARIF run; skipped when
-    /// it has no clone groups.
-    pub duplication: Option<&'a DuplicationReport>,
+    /// Duplication input of the dedicated SARIF run; skipped when the report
+    /// has no clone groups.
+    pub duplication: Option<fallow_output::DuplicationSarifInput<'a>>,
     /// Prebuilt health SARIF document whose runs are merged in.
     pub health: Option<&'a serde_json::Value>,
     /// Diff-risk findings, converted into a dedicated SARIF run; skipped when
@@ -431,10 +430,12 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
         );
     }
 
-    if let Some(duplication) = input.duplication
-        && !duplication.clone_groups.is_empty()
-    {
-        all_runs.push(build_audit_duplication_sarif_run(duplication));
+    if let Some(duplication) = input.duplication {
+        fallow_output::extend_sarif_runs_with_duplication(
+            &mut all_runs,
+            duplication,
+            fallow_output::SARIF_CATEGORY_AUDIT_DUPES,
+        );
     }
 
     if let Some(sarif) = input.health {
@@ -455,33 +456,6 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": all_runs,
-    })
-}
-
-fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_json::Value {
-    serde_json::json!({
-        "tool": {
-            "driver": {
-                "name": "fallow",
-                "version": env!("CARGO_PKG_VERSION"),
-                "informationUri": "https://github.com/fallow-rs/fallow",
-            }
-        },
-        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_AUDIT_DUPES },
-        "results": duplication.clone_groups.iter().enumerate().map(|(i, group)| {
-            serde_json::json!({
-                "ruleId": "fallow/code-duplication",
-                "level": "warning",
-                "message": {
-                    "text": format!(
-                        "Clone group {} ({} lines, {} instances)",
-                        i + 1,
-                        group.line_count,
-                        group.instances.len()
-                    ),
-                },
-            })
-        }).collect::<Vec<_>>()
     })
 }
 
@@ -608,6 +582,7 @@ pub fn build_audit_codeclimate(input: AuditCodeClimateOutputInput) -> serde_json
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::duplicates::DuplicationReport;
 
     #[test]
     fn audit_verdict_uses_snake_case_wire_names() {
@@ -719,19 +694,47 @@ mod tests {
         let dead_code = serde_json::json!({"runs": [{"automationDetails": {"id": "check"}}]});
         let health = serde_json::json!({"runs": [{"automationDetails": {"id": "health"}}]});
 
+        let rule_builder = |id: &str, short: &str, level: &str| {
+            serde_json::json!({
+                "id": id,
+                "shortDescription": { "text": short },
+                "defaultConfiguration": { "level": level },
+            })
+        };
+
         let value = build_audit_sarif(AuditSarifOutputInput {
             dead_code: Some(&dead_code),
-            duplication: Some(&duplication),
+            duplication: Some(fallow_output::DuplicationSarifInput {
+                report: &duplication,
+                root: std::path::Path::new(""),
+                rule_builder: &rule_builder,
+            }),
             health: Some(&health),
             diff_risk: None,
         });
 
         assert_eq!(value["version"], "2.1.0");
         assert_eq!(value["runs"].as_array().expect("runs").len(), 3);
+        let run = &value["runs"][1];
         assert_eq!(
-            value["runs"][1]["automationDetails"]["id"],
+            run["automationDetails"]["id"],
             fallow_output::SARIF_CATEGORY_AUDIT_DUPES
         );
+        assert_eq!(
+            run["tool"]["driver"]["rules"][0]["id"],
+            "fallow/code-duplication"
+        );
+        let uris: Vec<&str> = run["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .map(|result| {
+                result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                    .as_str()
+                    .expect("each result has a file location")
+            })
+            .collect();
+        assert_eq!(uris, ["src/a.ts", "src/b.ts"]);
     }
 
     #[test]

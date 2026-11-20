@@ -1,0 +1,4 @@
+### Fixed
+
+- **The SARIF results of the bare `fallow` run and of `fallow audit` now have a location per clone.** Before, the duplication run of these documents gave one result per clone group with no file location and no rule definition, so a code scanning service could not show the result at a file. The duplication run now has the shape of `fallow dupes --format sarif`: one result per clone instance, with a file location and a source snippet, and a declared `fallow/code-duplication` rule. The message text is `Code clone group N (...)`, as in `fallow dupes`. `fallow report --from` of a saved bare run or audit gives the same run. The rule id and the run categories (`fallow/dupes/`, `fallow/audit/dupes/`) do not change. A code scanning service that matched the old results by fingerprint sees new alerts once.
+  (Closes [#4873](https://github.com/fallow-rs/fallow/issues/4873))

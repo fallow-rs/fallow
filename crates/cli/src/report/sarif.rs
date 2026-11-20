@@ -46,6 +46,20 @@ pub fn api_sarif_document(
     fallow_api::build_sarif(results, root, rules, &sarif_rule)
 }
 
+/// The duplication input of a multi-run SARIF document, with the rule
+/// definitions of the explain module.
+#[must_use]
+pub fn api_duplication_sarif_input<'a>(
+    report: &'a DuplicationReport,
+    root: &'a Path,
+) -> fallow_output::DuplicationSarifInput<'a> {
+    fallow_output::DuplicationSarifInput {
+        report,
+        root,
+        rule_builder: &sarif_rule,
+    }
+}
+
 /// Attach semantic provenance to a SARIF run without manufacturing findings.
 pub fn annotate_type_aware_sarif(
     sarif: &mut serde_json::Value,
@@ -509,7 +523,9 @@ fn saved_audit_sarif(
     Some(fallow_api::build_audit_sarif(
         fallow_api::AuditSarifOutputInput {
             dead_code: dead_code.as_ref(),
-            duplication: duplication.as_ref(),
+            duplication: duplication
+                .as_ref()
+                .map(|report| api_duplication_sarif_input(report, root)),
             health: health.as_ref(),
             diff_risk: diff_risk.as_ref(),
         },
@@ -545,8 +561,12 @@ fn saved_combined_sarif(
             fallow_output::SARIF_CATEGORY_DEAD_CODE,
         );
     }
-    if let Some(report) = duplication.filter(|report| !report.clone_groups.is_empty()) {
-        runs.push(combined_duplication_sarif_run(&report));
+    if let Some(report) = duplication {
+        fallow_output::extend_sarif_runs_with_duplication(
+            &mut runs,
+            api_duplication_sarif_input(&report, root),
+            fallow_output::SARIF_CATEGORY_DUPES,
+        );
     }
     if let Some(report) = health {
         fallow_output::extend_sarif_runs_with_category(
@@ -570,33 +590,6 @@ fn parse_optional_section<T: serde::de::DeserializeOwned>(
         return Ok(None);
     };
     T::deserialize(value).map(Some)
-}
-
-fn combined_duplication_sarif_run(report: &DuplicationReport) -> serde_json::Value {
-    serde_json::json!({
-        "tool": {
-            "driver": {
-                "name": "fallow",
-                "version": env!("CARGO_PKG_VERSION"),
-                "informationUri": "https://github.com/fallow-rs/fallow",
-            }
-        },
-        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_DUPES },
-        "results": report.clone_groups.iter().enumerate().map(|(index, group)| {
-            serde_json::json!({
-                "ruleId": "fallow/code-duplication",
-                "level": "warning",
-                "message": {
-                    "text": format!(
-                        "Clone group {} ({} lines, {} instances)",
-                        index + 1,
-                        group.line_count,
-                        group.instances.len(),
-                    ),
-                },
-            })
-        }).collect::<Vec<_>>(),
-    })
 }
 
 fn annotate_saved_sarif_grouping(

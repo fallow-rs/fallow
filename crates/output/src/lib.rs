@@ -103,8 +103,8 @@ mod unified_diff;
 mod walkthrough_render;
 
 pub use analysis_sarif::{
-    annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
-    build_health_sarif,
+    DuplicationSarifInput, annotate_sarif_results, build_duplication_sarif,
+    build_grouped_duplication_sarif, build_health_sarif, extend_sarif_runs_with_duplication,
 };
 pub use audit_branching::{
     BranchingCognitive, BranchingFileDelta, BranchingMetric, BranchingReport, BranchingScope,

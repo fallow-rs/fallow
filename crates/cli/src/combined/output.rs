@@ -1307,25 +1307,12 @@ fn print_combined_sarif(
         );
     }
 
-    if let Some(result) = dupes.filter(|r| !r.report.clone_groups.is_empty()) {
-        let run = serde_json::json!({
-            "tool": {
-                "driver": {
-                    "name": "fallow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                }
-            },
-            "automationDetails": { "id": fallow_output::SARIF_CATEGORY_DUPES },
-            "results": result.report.clone_groups.iter().enumerate().map(|(i, g)| {
-                serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
-                    "level": "warning",
-                    "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
-                })
-            }).collect::<Vec<_>>()
-        });
-        all_runs.push(run);
+    if let Some(result) = dupes {
+        fallow_output::extend_sarif_runs_with_duplication(
+            &mut all_runs,
+            report::api_duplication_sarif_input(&result.report, &result.config.root),
+            fallow_output::SARIF_CATEGORY_DUPES,
+        );
     }
 
     if let Some(result) = health {

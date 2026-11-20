@@ -7,7 +7,8 @@ use crate::{
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageReport,
     RuntimeCoverageVerdict, SarifDocumentInput, SarifSourceSnippetCache as SourceSnippetCache,
     StylingFindingSeverity, build_sarif_document,
-    build_sarif_result_with_snippet as sarif_result_with_snippet, normalize_uri,
+    build_sarif_result_with_snippet as sarif_result_with_snippet, extend_sarif_runs_with_category,
+    normalize_uri,
 };
 use fallow_types::duplicates::{CloneGroup, DuplicationReport};
 use fallow_types::output_dead_code::EffectiveSeverity;
@@ -22,6 +23,37 @@ pub fn build_duplication_sarif(
     rule_builder: &SarifRuleBuilder<'_>,
 ) -> serde_json::Value {
     build_duplication_sarif_with_group(report, root, rule_builder, |_| None)
+}
+
+/// The input of the duplication run of a multi-run SARIF document.
+#[derive(Clone, Copy)]
+pub struct DuplicationSarifInput<'a> {
+    /// The duplication report whose clone instances become results.
+    pub report: &'a DuplicationReport,
+    /// The project root that result URIs are relative to.
+    pub root: &'a Path,
+    /// The builder of the `fallow/code-duplication` rule definition.
+    pub rule_builder: &'a SarifRuleBuilder<'a>,
+}
+
+/// Append the duplication run to the runs of a multi-run SARIF document.
+///
+/// The bare command, `fallow audit` and `fallow report --from` merge several
+/// analyses into one document. Their duplication run has the shape of
+/// `fallow dupes --format sarif`: one result per clone instance, with a file
+/// location, and a declared `fallow/code-duplication` rule. A run without an
+/// `automationDetails.id` gets `category`. A report with no clone groups adds
+/// no run.
+pub fn extend_sarif_runs_with_duplication(
+    runs: &mut Vec<serde_json::Value>,
+    input: DuplicationSarifInput<'_>,
+    category: &str,
+) {
+    if input.report.clone_groups.is_empty() {
+        return;
+    }
+    let sarif = build_duplication_sarif(input.report, input.root, input.rule_builder);
+    extend_sarif_runs_with_category(runs, &sarif, category);
 }
 
 /// Build grouped SARIF output from duplication analysis results.
@@ -754,6 +786,59 @@ mod tests {
                 ["uri"],
             "src/a.ts"
         );
+    }
+
+    #[test]
+    fn duplication_run_of_a_multi_run_document_has_the_dupes_shape() {
+        let root = PathBuf::from("/repo");
+        let instance = |file: &str| CloneInstance {
+            is_symlink: false,
+            file: root.join(file),
+            start_line: 2,
+            end_line: 5,
+            start_col: 0,
+            end_col: 1,
+            fragment: "copy();".to_string(),
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![instance("src/a.ts"), instance("src/b.ts")],
+                token_count: 10,
+                line_count: 4,
+                similarity: None,
+            }],
+            ..DuplicationReport::default()
+        };
+        let input = DuplicationSarifInput {
+            report: &report,
+            root: &root,
+            rule_builder: &rule,
+        };
+
+        let mut runs = Vec::new();
+        extend_sarif_runs_with_duplication(&mut runs, input, "fallow/test/dupes/");
+
+        let dupes = build_duplication_sarif(&report, &root, &rule);
+        let mut expected = dupes["runs"][0].clone();
+        expected["automationDetails"] = serde_json::json!({ "id": "fallow/test/dupes/" });
+        assert_eq!(runs, vec![expected]);
+    }
+
+    #[test]
+    fn duplication_run_is_skipped_without_clone_groups() {
+        let root = PathBuf::from("/repo");
+        let report = DuplicationReport::default();
+        let mut runs = Vec::new();
+        extend_sarif_runs_with_duplication(
+            &mut runs,
+            DuplicationSarifInput {
+                report: &report,
+                root: &root,
+                rule_builder: &rule,
+            },
+            "fallow/test/dupes/",
+        );
+        assert!(runs.is_empty());
     }
 
     fn sarif_message_violation(

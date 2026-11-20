@@ -1548,6 +1548,7 @@ pub use fallow_api::build_health_markdown;
 pub use fallow_api::build_markdown;
 pub(crate) use json::api_check_json_payload_with_config_fixable;
 pub(crate) use json::{build_baseline_deltas_output, check_json_extras};
+pub(crate) use sarif::api_duplication_sarif_input;
 pub(crate) use sarif::api_health_sarif_document;
 pub(crate) use sarif::api_sarif_document;
 

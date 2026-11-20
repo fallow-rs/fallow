@@ -43,23 +43,6 @@ JSON contract has one schema. A move puts the fill code next to the types.
 | `crates/api/src/health_codeclimate.rs:213` (`build_health_codeclimate`) | health CodeClimate | move after the JSON envelopes; no known need |
 | `crates/api/src/dupes_output.rs:448` (`build_duplication_codeclimate`) | duplication CodeClimate | move after the JSON envelopes; no known need |
 
-## Duplication SARIF runs
-
-| Site | What it builds | Verdict |
-|---|---|---|
-| `crates/cli/src/combined/output.rs:1228` (in `print_combined_sarif`) | the duplication run of the bare-run SARIF | contract decision |
-| `crates/cli/src/report/sarif.rs:575` (`combined_duplication_sarif_run`) | the same run for `fallow report --from` of a saved bare run | contract decision |
-| `crates/api/src/audit_output.rs:461` (`build_audit_duplication_sarif_run`) | the duplication run of the audit SARIF | contract decision |
-
-The three sites build the same run with one result per clone group and no
-location. Only the category differs (`SARIF_CATEGORY_DUPES` against
-`SARIF_CATEGORY_AUDIT_DUPES`). `fallow dupes --format sarif` uses
-`build_duplication_sarif` in `crates/output/src/analysis_sarif.rs:19`, which
-gives a location for each clone instance. One builder in `fallow-output`
-removes the three copies. The open decision is whether the bare run and the
-audit then give locations too, which changes their SARIF.
-Issue [#4873](https://github.com/fallow-rs/fallow/issues/4873) tracks this move.
-
 ## Saved-envelope renderers of `fallow report --from`
 
 | Site | What it builds | Verdict |
