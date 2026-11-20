@@ -193,9 +193,7 @@ pub use coverage_envelopes::{
     serialize_coverage_analyze_json_output, serialize_coverage_setup_json_output,
 };
 pub use dead_code_sarif::build_dead_code_sarif;
-pub use diff::{
-    DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
-};
+pub use diff::{DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, relative_to_diff_path};
 pub use doctor::{
     DOCTOR_SCHEMA_VERSION, DoctorCheck, DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus,
     DoctorOutput, DoctorRemediation, DoctorStatus, DoctorSummary, serialize_doctor_json_output,

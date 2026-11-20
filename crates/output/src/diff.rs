@@ -463,16 +463,6 @@ fn head_line_place(blocks: &[ChangeBlock], line: u64) -> HeadLinePlace {
     HeadLinePlace::Unchanged(u64::try_from(i128::from(line) + shift).unwrap_or(0))
 }
 
-/// Parse the new-file start line out of a `@@ -a,b +c,d @@` hunk header.
-pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
-    let plus = header.find('+')?;
-    let rest = &header[plus + 1..];
-    let end = rest
-        .find(|c: char| c == ',' || c.is_ascii_whitespace())
-        .unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

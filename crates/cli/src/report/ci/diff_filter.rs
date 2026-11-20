@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES, parse_new_hunk_start};
+pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES};
 
 use fallow_output::CiIssue;
 
