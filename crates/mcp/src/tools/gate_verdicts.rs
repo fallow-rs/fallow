@@ -231,27 +231,17 @@ fn baseline_warning(
     noun: &'static str,
     gate_runs: bool,
 ) -> Option<String> {
-    let advisory = staleness
-        .get("warning")
-        .and_then(Value::as_str)
-        .unwrap_or("none");
-    let gate_trips = staleness
-        .get("gate_trips")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let baseline_entries = count(staleness, "baseline_entries");
-    let total = entries(baseline_entries);
-    let stale = count(staleness, "stale_entries");
+    let verdict = fallow_output::read_baseline_verdict(staleness);
+    let advisory = verdict.warning.as_str();
+    let gate_trips = verdict.gate_trips;
+    let total = entries(verdict.baseline_entries);
+    let stale = verdict.stale_entries;
     let subject = analysis.map_or_else(
         || "the loaded baseline".to_string(),
         |analysis| format!("the {analysis} baseline"),
     );
-    if staleness
-        .get("unrecognised_format")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        let mut message = saved_by(staleness).map_or_else(
+    if verdict.unrecognised_format {
+        let mut message = verdict.saved_by.as_deref().map_or_else(
             || {
                 format!(
                     "Baseline staleness: {subject} has no entries this command recognises. It \
@@ -275,7 +265,7 @@ fn baseline_warning(
         return Some(message);
     }
     if advisory == "none" && !gate_trips {
-        return unjudged_baseline_warning(staleness, &subject, &total, baseline_entries);
+        return unjudged_baseline_warning(&verdict, &subject, &total);
     }
 
     let mut message = match advisory {
@@ -296,20 +286,6 @@ fn baseline_warning(
     }
     message.push_str(" Re-save it with the save_baseline parameter (CLI --save-baseline).");
     Some(message)
-}
-
-/// The command that saved a foreign baseline, from `saved_by`. The value set is
-/// open, so any kebab-case token passes. Any other value reads as absent.
-fn saved_by(staleness: &Value) -> Option<&str> {
-    staleness
-        .get("saved_by")
-        .and_then(Value::as_str)
-        .filter(|token| {
-            !token.is_empty()
-                && token
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
-        })
 }
 
 /// Whether the command that produced this envelope runs the stale-baseline gate
@@ -341,29 +317,22 @@ fn stale_baseline_gate_runs(root: &Map<String, Value>) -> bool {
 /// parenthetical names `scope_reasons`; an envelope from a version that
 /// predates that member drops the clause rather than guessing.
 fn unjudged_baseline_warning(
-    staleness: &Value,
+    verdict: &fallow_output::BaselineVerdict,
     subject: &str,
     total: &str,
-    baseline_entries: u64,
 ) -> Option<String> {
-    if baseline_entries == 0 {
+    if verdict.baseline_entries == 0 || !verdict.change_scoped {
         return None;
     }
-    if !staleness
-        .get("change_scoped")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    let reasons = scope_reasons(staleness);
+    let reasons = verdict.scope_reasons.join(", ");
     let scope = if reasons.is_empty() {
         "only part of the project".to_string()
     } else {
         format!("only part of the project ({reasons})")
     };
-    let package_map = if reasons
-        .split(", ")
+    let package_map = if verdict
+        .scope_reasons
+        .iter()
         .any(|reason| reason == "package-baselines")
     {
         " Under a workspaces.changedSince map, set no_package_baselines to analyze every package."
@@ -374,26 +343,6 @@ fn unjudged_baseline_warning(
         "Baseline staleness: {subject} has {total} and was not judged on this run, which \
          analyzed {scope}. Run the command over the whole project to judge it.{package_map}"
     ))
-}
-
-/// The run's `scope_reasons` as a comma-joined list, empty when the member is
-/// absent or carries nothing readable.
-fn scope_reasons(staleness: &Value) -> String {
-    staleness
-        .get("scope_reasons")
-        .and_then(Value::as_array)
-        .map(|reasons| {
-            reasons
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .unwrap_or_default()
-}
-
-fn count(value: &Value, key: &str) -> u64 {
-    value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
 fn entries(count: u64) -> String {
@@ -416,34 +365,23 @@ fn entries(count: u64) -> String {
 /// carries the counts and the remedy. An armed gate still reports, because
 /// "this run exited non-zero for it" is not in the baseline sentence.
 fn gate_warnings(root: &Map<String, Value>, baseline_reported: bool) -> Vec<String> {
-    let Some(gates) = root.get("gate_outcomes").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    gates
+    fallow_output::read_gate_verdicts(root.get("gate_outcomes"))
         .iter()
-        .filter(|(name, outcome)| {
-            !(baseline_reported
-                && name.as_str() == "stale-baseline"
-                && outcome.get("enforced").and_then(Value::as_bool) != Some(true))
-        })
-        .filter_map(|(name, outcome)| gate_warning(name, outcome))
+        .filter(|gate| !(baseline_reported && gate.name == "stale-baseline" && !gate.enforced))
+        .filter_map(gate_warning)
         .collect()
 }
 
-fn gate_warning(name: &str, outcome: &Value) -> Option<String> {
-    let status = outcome.get("status").and_then(Value::as_str)?;
+fn gate_warning(gate: &fallow_output::GateVerdict) -> Option<String> {
+    let status = gate.status.as_str();
     let verdict = match status {
         "fail" => "failed",
         "warn" => "reported warn",
         _ => return None,
     };
-    let enforced = outcome
-        .get("enforced")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     // An enforced failure is the sentence an agent is most likely to misread,
     // because the result it arrives in reports success. Say why both are true.
-    let enforcement = match (status, enforced) {
+    let enforcement = match (status, gate.enforced) {
         ("fail", true) => {
             "enforced, so the CLI exited non-zero for it, and this result still \
                            carries the full report"
@@ -451,9 +389,10 @@ fn gate_warning(name: &str, outcome: &Value) -> Option<String> {
         (_, true) => "armed, though a warn does not fail the run",
         _ => "not enforced on this run, so it did not change the exit code",
     };
-    let measurement = gate_measurement(outcome);
+    let measurement = gate_measurement(gate);
     Some(format!(
-        "Gate {name} {verdict}{measurement}; {enforcement}."
+        "Gate {} {verdict}{measurement}; {enforcement}.",
+        gate.name
     ))
 }
 
@@ -462,20 +401,21 @@ fn gate_warning(name: &str, outcome: &Value) -> Option<String> {
 /// `threshold_label` is carried alongside `threshold` rather than instead of
 /// it: on `regression` the number is the allowance in issues while the label
 /// is the tolerance as the user spelled it, and dropping either loses half the
-/// verdict.
-fn gate_measurement(outcome: &Value) -> String {
+/// verdict. The number text comes from `fallow_output`, so the CLI line shows
+/// the same numbers.
+fn gate_measurement(gate: &fallow_output::GateVerdict) -> String {
     let mut parts = Vec::new();
-    if let Some(observed) = outcome.get("observed").and_then(Value::as_f64) {
-        parts.push(format!("observed {}", number(observed)));
+    if let Some(observed) = gate.observed_text() {
+        parts.push(format!("observed {observed}"));
     }
-    let threshold = outcome.get("threshold").and_then(Value::as_f64);
-    let label = outcome.get("threshold_label").and_then(Value::as_str);
-    match (threshold, label) {
-        (Some(threshold), Some(label)) => parts.push(format!(
-            "threshold {} spelled \"{label}\"",
-            number(threshold)
-        )),
-        (Some(threshold), None) => parts.push(format!("threshold {}", number(threshold))),
+    match (
+        gate.threshold_number_text(),
+        gate.threshold_label.as_deref(),
+    ) {
+        (Some(threshold), Some(label)) => {
+            parts.push(format!("threshold {threshold} spelled \"{label}\""));
+        }
+        (Some(threshold), None) => parts.push(format!("threshold {threshold}")),
         (None, Some(label)) => parts.push(format!("threshold \"{label}\"")),
         (None, None) => {}
     }
@@ -483,25 +423,6 @@ fn gate_measurement(outcome: &Value) -> String {
         return String::new();
     }
     format!(" ({})", parts.join(", "))
-}
-
-/// Render a gate number the way the gate meant it.
-///
-/// Counts arrive as JSON numbers with a zero fraction, and `observed 3` reads
-/// as a count where `observed 3.0` reads as a measurement. A measured
-/// percentage arrives at full `f64` precision, which is a number for computing
-/// with and not for reading: `97.82608695652172` in a sentence is noise around
-/// the two digits that carry the verdict. The sentence rounds; the envelope's
-/// own `observed` keeps every digit for anything that computes on it.
-fn number(value: f64) -> String {
-    if value.fract() == 0.0 {
-        return format!("{value:.0}");
-    }
-    let rounded = format!("{value:.2}");
-    rounded
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string()
 }
 
 /// One sentence for every degrading diagnostic together, never one per kind.
@@ -637,22 +558,23 @@ fn no_client_roots_warning(root: &Map<String, Value>) -> Option<String> {
 /// that an unwritten file widened the analysis. A class this build does not
 /// recognise is reported without either claim rather than assumed to narrow.
 fn unapplied_request_warning(root: &Map<String, Value>) -> Option<String> {
-    let requests = root.get("request_outcomes")?.as_object()?;
     let mut widened: Vec<String> = Vec::new();
     let mut withheld: Vec<String> = Vec::new();
     let mut unclassified: Vec<String> = Vec::new();
-    for (name, outcome) in requests {
-        if outcome.get("status").and_then(Value::as_str) == Some("applied") {
+    for request in fallow_output::read_request_verdicts(root.get("request_outcomes")) {
+        if request.applied() {
             continue;
         }
-        let described = match outcome.get("reason").and_then(Value::as_str) {
-            Some(reason) => format!("{name} ({reason})"),
-            None => name.clone(),
+        let described = match request.reason.as_deref() {
+            Some(reason) => format!("{} ({reason})", request.name),
+            None => request.name.clone(),
         };
-        match outcome.get("affects").and_then(Value::as_str) {
-            Some("scope") => widened.push(described),
-            Some("artifact") => withheld.push(described),
-            _ => unclassified.push(described),
+        if request.affects_scope() {
+            widened.push(described);
+        } else if request.withholds_artifact() {
+            withheld.push(described);
+        } else {
+            unclassified.push(described);
         }
     }
     let mut sentences: Vec<String> = Vec::new();
@@ -691,25 +613,24 @@ fn unapplied_request_warning(root: &Map<String, Value>) -> Option<String> {
 /// Restricted to `affects == "scope"`: a request that writes a file beside the
 /// report never narrows what was analyzed, so a size it measured says nothing
 /// about the findings.
+///
+/// Only a change scope (`changed-since`, `diff-filter`) gets the advice to
+/// check the diff or the ref. A group selector that matched no group has
+/// neither, the same rule as the CLI line.
 fn empty_scope_request_warning(root: &Map<String, Value>) -> Option<String> {
-    let requests = root.get("request_outcomes")?.as_object()?;
-    let empty: Vec<&str> = requests
-        .iter()
-        .filter(|(_, outcome)| {
-            outcome.get("status").and_then(Value::as_str) == Some("applied")
-                && outcome.get("affects").and_then(Value::as_str) == Some("scope")
-                && outcome.get("scope_size").and_then(Value::as_u64) == Some(0)
-        })
-        .map(|(name, _)| name.as_str())
-        .collect();
-    (!empty.is_empty()).then(|| {
-        format!(
-            "Requests applied over an empty scope: {}. No finding can survive a scope that \
-             measured nothing, so this report is clean because nothing in it was analyzable, not \
-             because the code is clean; check the diff or ref the run was given.",
-            empty.join(", ")
-        )
-    })
+    let requests = fallow_output::read_request_verdicts(root.get("request_outcomes"));
+    let empty = fallow_output::EmptyScope::of(&requests)?;
+    let advice = if empty.change_scope_only {
+        "check the diff or ref the run was given"
+    } else {
+        "check the value each request was given"
+    };
+    Some(format!(
+        "Requests applied over an empty scope: {}. No finding can survive a scope that \
+         measured nothing, so this report is clean because nothing in it was analyzable, not \
+         because the code is clean; {advice}.",
+        empty.names.join(", ")
+    ))
 }
 
 /// The `(path, kind)` of one diagnostic, the key that one walk records once.
@@ -1233,6 +1154,46 @@ mod tests {
         );
     }
 
+    /// The mutation score shows one decimal, rounded down, the same as the CLI
+    /// line: a score just below the minimum never shows as equal to it.
+    #[test]
+    fn the_mutation_score_is_rounded_down_to_one_decimal() {
+        let warnings = warnings_of(&serde_json::json!({
+            "gate_outcomes": {
+                "mutation-min-score": {
+                    "status": "fail",
+                    "enforced": true,
+                    "observed": 79.98,
+                    "threshold": 80.0,
+                },
+            },
+        }));
+
+        assert!(
+            warnings[0].contains("observed 79.9, threshold 80"),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn a_failing_gate_just_over_its_threshold_never_reads_as_equal_to_it() {
+        let warnings = warnings_of(&serde_json::json!({
+            "gate_outcomes": {
+                "duplication-threshold": {
+                    "status": "fail",
+                    "enforced": true,
+                    "observed": 5.004,
+                    "threshold": 5.0,
+                },
+            },
+        }));
+
+        assert!(
+            warnings[0].contains("observed 5.004, threshold 5"),
+            "{warnings:?}"
+        );
+    }
+
     #[test]
     fn a_warn_tier_gate_reports_its_tier_and_its_spelled_threshold() {
         let warnings = warnings_of(&serde_json::json!({
@@ -1720,6 +1681,33 @@ mod tests {
         assert!(
             warnings[0].starts_with("Requests applied over an empty scope: changed-since."),
             "{warnings:?}"
+        );
+    }
+
+    /// A group selector that matched no group is not a change scope, so the
+    /// advice to check the diff or the ref does not apply. The sentence names
+    /// the request, the same as the CLI line.
+    #[test]
+    fn a_group_filter_over_an_empty_scope_gives_no_diff_advice() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "dead-code",
+            "request_outcomes": {
+                "group-filter": {
+                    "status": "applied",
+                    "affects": "scope",
+                    "requested": "--group web",
+                    "scope_size": 0
+                }
+            },
+        }));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("Requests applied over an empty scope: group-filter."),
+            "{warnings:?}"
+        );
+        assert!(
+            !warnings[0].contains("diff or ref"),
+            "a group selector has no diff or ref: {warnings:?}"
         );
     }
 

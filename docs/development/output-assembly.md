@@ -58,15 +58,29 @@ analysis result, and only the CLI has that input.
 
 | Site | What it builds | Verdict |
 |---|---|---|
-| `crates/cli/src/report/gate_outcome_text.rs:149` (`read_gate_outcomes`), `:262` (`summary_line`) | the gate verdict lines from `gate_outcomes` | move the sentence builders to `fallow-output` |
-| `crates/cli/src/report/baseline_advisory_text.rs:36` (`advisory_line`) | the stale baseline advisory from `baseline_staleness` | move the sentence builders to `fallow-output` |
-| `crates/cli/src/report/request_outcome_text.rs:132` (`summary_line`) | the request lines from `request_outcomes` | move the sentence builders to `fallow-output` |
-| `crates/mcp/src/tools/gate_verdicts.rs:66` (`annotate_gate_verdicts`) | the verdicts of a CLI-backed MCP tool, from `gate_outcomes` and `baseline_staleness` | move the sentence builders to `fallow-output` |
+| `crates/output/src/verdict_facts.rs` (`read_gate_verdicts`, `read_request_verdicts`, `read_baseline_verdict`, `EmptyScope`, `gate_number_text`) | the facts of a verdict: which gates an envelope reports, the enforced default, the gate number text, the requests that applied over an empty scope, and the facts of each loaded baseline | owned by `fallow-output` |
+| `crates/cli/src/report/gate_outcome_text.rs` (`summary_line`, `gate_rows`, `exit_reason_line`) | the CLI gate lines from `gate_outcomes` | sentences stay in the CLI; facts from `verdict_facts` |
+| `crates/cli/src/report/request_outcome_text.rs` (`summary_line`) | the CLI request lines from `request_outcomes` | sentences stay in the CLI; facts from `verdict_facts` |
+| `crates/cli/src/report/baseline_advisory_text.rs` (`advisory_line`) | the stale baseline advisory from `baseline_staleness` | sentences stay in the CLI; facts from `verdict_facts` |
+| `crates/mcp/src/tools/gate_verdicts.rs` (`annotate_gate_verdicts`) | the verdicts of a CLI-backed MCP tool | sentences stay in the MCP server; facts from `verdict_facts` |
 
-The CLI and the MCP server each read the same envelope members and write
-their own sentences. `fallow-mcp` cannot depend on `fallow-cli`, so the two
-readers do not share code. A sentence fix in one does not reach the other.
-Issue [#4874](https://github.com/fallow-rs/fallow/issues/4874) tracks this move.
+The CLI and the MCP server write different sentences on purpose. For example,
+the CLI baseline advisory uses Markdown and a remedy without a channel, and
+the MCP sentence names the `save_baseline` parameter. So each surface keeps
+its sentences. The facts under the sentences must agree, so both surfaces read
+them from `fallow-output`:
+
+- A gate number shows two decimals at most, and a whole number shows no
+  fraction. The mutation score shows one decimal, rounded down. An observed
+  number that differs from its threshold never shows as equal to it: the
+  text then shows more decimals, for example `5.004` against `5`.
+- A gate entry without `enforced` reports as not enforced.
+- A baseline reads `warning`, `gate_trips`, the entry counts,
+  `change_scoped`, `unrecognised_format` and `scope_reasons` with one set of
+  defaults. A `saved_by` value that is not a kebab-case command name reads as
+  absent.
+- Only a change scope (`changed-since`, `diff-filter`) that applied over an
+  empty scope gets the advice to check the diff or the base ref.
 
 ## Surface-owned members and text
 

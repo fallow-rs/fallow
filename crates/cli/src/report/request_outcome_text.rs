@@ -29,58 +29,15 @@
 //! findings reads as a clean result, and nothing else in the body says the scope
 //! it was computed over was empty.
 
+use fallow_output::RequestVerdict as RequestLine;
 use serde_json::Value;
 
-/// One request's fate, read off a saved or live envelope.
-struct RequestLine {
-    name: String,
-    status: String,
-    affects: Option<String>,
-    reason: Option<String>,
-    scope_size: Option<u64>,
-}
-
-impl RequestLine {
-    /// `changed-since (invalid-ref)`, or the bare name when no reason was
-    /// published (which is every applied request).
-    fn described(&self) -> String {
-        match self.reason.as_deref() {
-            Some(reason) => format!("{} ({reason})", self.name),
-            None => self.name.clone(),
-        }
-    }
-
-    fn applied(&self) -> bool {
-        self.status == "applied"
-    }
-
-    /// Whether this entry describes the report's scope rather than a file
-    /// written beside it. Unapplied, that means the report widened; applied over
-    /// an empty scope, that it covers nothing.
-    ///
-    /// An entry that does not say is not assumed to narrow: the class travels
-    /// with every entry this build emits, so a missing or unrecognised value
-    /// comes from a producer this build does not know, and claiming a widened
-    /// report on its behalf is the defect `affects` exists to remove.
-    fn affects_scope(&self) -> bool {
-        self.affects.as_deref() == Some("scope")
-    }
-
-    /// Whether an unapplied entry means a requested file was not written.
-    fn withholds_artifact(&self) -> bool {
-        self.affects.as_deref() == Some("artifact")
-    }
-
-    /// Whether this entry narrowed the run to a scope it measured as empty.
-    ///
-    /// The opposite shape of a scope request that stood down, and the case a
-    /// clean report cannot state for itself: every finding filters out of an
-    /// empty scope, so a reader takes the emptiness for a clean result. An
-    /// envelope from a producer that measures no size says nothing here, which
-    /// keeps a saved envelope written before the member existed rendering as it
-    /// always did.
-    fn applied_over_empty_scope(&self) -> bool {
-        self.applied() && self.affects_scope() && self.scope_size == Some(0)
+/// `changed-since (invalid-ref)`, or the bare name when no reason was
+/// published (which is every applied request).
+fn described(request: &RequestLine) -> String {
+    match request.reason.as_deref() {
+        Some(reason) => format!("{} ({reason})", request.name),
+        None => request.name.clone(),
     }
 }
 
@@ -90,26 +47,7 @@ impl RequestLine {
 /// run produced before this object existed and every run that narrowed
 /// nothing.
 fn read_request_outcomes(envelope: &Value) -> Vec<RequestLine> {
-    let Some(map) = envelope.get("request_outcomes").and_then(Value::as_object) else {
-        return Vec::new();
-    };
-    map.iter()
-        .filter_map(|(name, entry)| {
-            Some(RequestLine {
-                name: name.clone(),
-                status: entry.get("status")?.as_str()?.to_owned(),
-                affects: entry
-                    .get("affects")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                reason: entry
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                scope_size: entry.get("scope_size").and_then(Value::as_u64),
-            })
-        })
-        .collect()
+    fallow_output::read_request_verdicts(envelope.get("request_outcomes"))
 }
 
 /// The sentence for a narrowing request that applied over an empty scope:
@@ -136,17 +74,13 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     }
     let (applied, unapplied): (Vec<&RequestLine>, Vec<&RequestLine>) =
         requests.iter().partition(|request| request.applied());
-    let empty: Vec<&RequestLine> = applied
-        .iter()
-        .copied()
-        .filter(|request| request.applied_over_empty_scope())
-        .collect();
-    let empty_scope = !empty.is_empty();
+    let empty = fallow_output::EmptyScope::of(&requests);
+    let empty_scope = empty.is_some();
     if unapplied.is_empty() && !empty_scope {
         return None;
     }
     if unapplied.is_empty() {
-        return Some(empty_scope_text(&empty));
+        return empty.as_ref().map(empty_scope_text);
     }
     let mut clauses: Vec<String> = Vec::new();
     if !unapplied.is_empty() {
@@ -174,9 +108,9 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     // the report under this line is clean because nothing reached the analysis,
     // and the Action and the merge-request template state the same fact from the
     // envelope they captured (issue #2734).
-    if empty_scope {
+    if let Some(empty) = &empty {
         line.push(' ');
-        line.push_str(&empty_scope_text(&empty));
+        line.push_str(&empty_scope_text(empty));
     }
     Some(line)
 }
@@ -185,22 +119,17 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
 /// gets the advice to check the diff or the base ref; any other narrowing
 /// request, such as a group selector, is named, because that advice does not
 /// apply to it.
-fn empty_scope_text(empty: &[&RequestLine]) -> String {
-    const CHANGE_SCOPES: [&str; 2] = ["changed-since", "diff-filter"];
-    if empty
-        .iter()
-        .all(|request| CHANGE_SCOPES.contains(&request.name.as_str()))
-    {
+fn empty_scope_text(empty: &fallow_output::EmptyScope) -> String {
+    if empty.change_scope_only {
         return EMPTY_SCOPE_TEXT.to_owned();
     }
-    let names: Vec<&str> = empty.iter().map(|request| request.name.as_str()).collect();
-    format!("{} left nothing to analyze.", names.join(", "))
+    format!("{} left nothing to analyze.", empty.names.join(", "))
 }
 
 fn join(requests: &[&RequestLine]) -> String {
     requests
         .iter()
-        .map(|request| request.described())
+        .map(|request| described(request))
         .collect::<Vec<_>>()
         .join(", ")
 }
