@@ -960,8 +960,12 @@ fn print_boundary_zones(zones: &[fallow_api::ZoneInfo]) {
     }
     eprintln!("\nZones:");
     for zone in zones {
+        let root = zone
+            .root
+            .as_deref()
+            .map_or_else(String::new, |root| format!(" (root {root})"));
         eprintln!(
-            "  {:<20} {} {}  {}",
+            "  {:<20} {} {}  {}{root}",
             zone.name,
             zone.file_count,
             pluralize("file", zone.file_count),
@@ -1205,12 +1209,14 @@ mod tests {
                 ZoneInfo {
                     name: "features/auth".to_string(),
                     patterns: vec!["src/features/auth/**".to_string()],
+                    root: None,
                     file_count: 3,
                     public_files: vec![],
                 },
                 ZoneInfo {
                     name: "features/billing".to_string(),
                     patterns: vec!["src/features/billing/**".to_string()],
+                    root: None,
                     file_count: 5,
                     public_files: vec![],
                 },
@@ -1298,6 +1304,7 @@ mod tests {
             zones: vec![ZoneInfo {
                 name: "features".to_string(),
                 patterns: vec!["src/features/**".to_string()],
+                root: None,
                 file_count: 2,
                 public_files: vec![],
             }],

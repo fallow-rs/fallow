@@ -677,6 +677,10 @@ pub(super) fn normalize_user_glob_pattern(pattern: &str) -> &str {
 /// exception that the ignore set applies after the union, so it can lift a
 /// built-in for its own subtree (issue #2940). The `node_modules` and `.git`
 /// patterns can never be lifted.
+///
+/// The root `fallow-viz.html` is the default output file of `fallow viz`.
+/// Without this entry, discovery parses the map as an HTML source file on
+/// the next run, and the next map shows the map itself.
 pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "**/node_modules/**",
     "**/dist/**",
@@ -687,6 +691,7 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "**/*.min.mjs",
     "**/*.min.cjs",
     "**/*.bundle.js",
+    "fallow-viz.html",
 ];
 
 #[expect(

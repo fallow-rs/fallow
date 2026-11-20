@@ -115,9 +115,9 @@ type ExclusionTally = FxHashMap<usize, ExcludedByPattern>;
 /// would report a five-figure count whose only honest remedy is "that is your
 /// dependency tree", and it would be the one built-in able to dominate the
 /// walk's memory with per-package scope directories. `**/.git/**` cannot fire
-/// at all, because hidden directories are not traversed; it is listed so the
-/// two exclusions read as one policy rather than as an accident.
-const UNREPORTED_DEFAULT_IGNORES: &[&str] = &["**/node_modules/**", "**/.git/**"];
+/// at all, because hidden directories are not traversed. `VIZ_MAP` is fallow's own output.
+const UNREPORTED_DEFAULT_IGNORES: &[&str] = &["**/node_modules/**", "**/.git/**", VIZ_MAP];
+const VIZ_MAP: &str = "fallow-viz.html";
 
 /// The directory a built-in pattern excluded a file "at": the LONGEST prefix
 /// of the file's project-relative parent directory ending in the pattern's

@@ -147,6 +147,11 @@ pub struct BoundariesListZone {
     pub name: String,
     /// Glob patterns that classify files into the zone.
     pub patterns: Vec<String>,
+    /// Project-relative folder that `patterns` are relative to (`root` in the
+    /// boundary config), without a trailing slash. Omitted when the zone has
+    /// no root and the patterns are relative to the project root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
     /// Number of analyzable files the zone matched.
     pub file_count: usize,
     /// Globs of the public entry files of the zone (`publicFiles` in the

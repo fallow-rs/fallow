@@ -733,6 +733,7 @@ fn the_compiled_ignore_union_puts_user_patterns_first_and_the_built_ins_in_order
             "**/*.min.mjs" => "a.min.mjs",
             "**/*.min.cjs" => "a.min.cjs",
             "**/*.bundle.js" => "a.bundle.js",
+            "fallow-viz.html" => "fallow-viz.html",
             other => panic!("no sample path for built-in ignore {other}"),
         };
         assert_eq!(

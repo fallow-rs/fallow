@@ -143,6 +143,10 @@ pub struct ZoneInfo {
     pub name: String,
     /// Glob patterns that assign files to the zone.
     pub patterns: Vec<String>,
+    /// Folder that the patterns are relative to, without a trailing slash.
+    /// `None` when the zone has no `root` and the patterns are relative to
+    /// the project root.
+    pub root: Option<String>,
     /// Number of discovered files matching the zone.
     pub file_count: usize,
     /// Globs of the public entry files of the zone (`publicFiles`).
@@ -482,10 +486,19 @@ fn build_boundary_zones(
         .map(|zone| ZoneInfo {
             name: zone.name.clone(),
             patterns: zone.patterns.clone(),
+            root: zone_root_display(zone.root.as_deref()),
             file_count: file_counts.get(zone.name.as_str()).copied().unwrap_or(0),
             public_files: zone.public_files.clone(),
         })
         .collect()
+}
+
+/// The zone root as a user wrote it: the resolved root carries a trailing
+/// slash, and an empty root means the project root.
+fn zone_root_display(root: Option<&str>) -> Option<String> {
+    root.map(|root| root.trim_end_matches('/'))
+        .filter(|root| !root.is_empty())
+        .map(str::to_owned)
 }
 
 fn count_boundary_files_by_zone<'a>(
@@ -594,6 +607,7 @@ pub fn boundary_data_to_output(data: &BoundaryData) -> BoundariesListing {
             .map(|zone| BoundariesListZone {
                 name: zone.name.clone(),
                 patterns: zone.patterns.clone(),
+                root: zone.root.clone(),
                 file_count: zone.file_count,
                 public_files: zone.public_files.clone(),
             })
@@ -1084,6 +1098,7 @@ mod tests {
             zones: vec![ZoneInfo {
                 name: "features/auth".to_string(),
                 patterns: vec!["src/features/auth/**".to_string()],
+                root: None,
                 file_count: 3,
                 public_files: vec![],
             }],
