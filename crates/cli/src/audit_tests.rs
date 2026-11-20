@@ -2414,6 +2414,111 @@ fn materialize_base_dependency_context_preserves_real_worktree_dir() {
     );
 }
 
+/// pnpm links workspace dependencies into the `node_modules` of each package.
+/// The base view links that directory for a package that the base has, and
+/// skips a package that exists only in the checkout.
+#[test]
+fn materialize_base_dependency_context_links_workspace_package_node_modules() {
+    let host = tempfile::TempDir::new().expect("host tempdir should be created");
+    let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+    fs::write(
+        host.path().join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest should be written");
+    for name in ["app", "new"] {
+        let package = host.path().join("packages").join(name);
+        fs::create_dir_all(package.join("node_modules/@acme"))
+            .expect("package node_modules should be created");
+        fs::write(
+            package.join("package.json"),
+            format!(r#"{{"name":"@acme/{name}"}}"#),
+        )
+        .expect("package manifest should be written");
+    }
+    fs::create_dir_all(worktree.path().join("packages/app"))
+        .expect("base package dir should be created");
+
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
+
+    let linked = worktree.path().join("packages/app/node_modules");
+    assert!(
+        fs::symlink_metadata(&linked).is_ok_and(|metadata| metadata.file_type().is_symlink()),
+        "base view should link the node_modules of a package that the base has"
+    );
+    assert!(linked.join("@acme").is_dir());
+    assert!(
+        !worktree.path().join("packages/new").exists(),
+        "base view should not create a package dir that only the checkout has"
+    );
+}
+
+/// SvelteKit writes `.svelte-kit/tsconfig.json`, which holds the path
+/// aliases of the app, and git ignores it.
+#[test]
+fn materialize_base_dependency_context_symlinks_svelte_kit_generated_dir() {
+    let host = tempfile::TempDir::new().expect("host tempdir should be created");
+    let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+    let dot_svelte_kit = host.path().join(".svelte-kit");
+    fs::create_dir_all(&dot_svelte_kit).expect(".svelte-kit dir should be created");
+    fs::write(
+        dot_svelte_kit.join("tsconfig.json"),
+        r#"{"compilerOptions":{}}"#,
+    )
+    .expect(".svelte-kit/tsconfig.json should be written");
+
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
+
+    let copied = worktree.path().join(".svelte-kit");
+    assert!(
+        fs::symlink_metadata(&copied).is_ok_and(|metadata| metadata.file_type().is_dir()),
+        "base view should get a real .svelte-kit dir, so relative paths resolve in the base"
+    );
+    assert!(
+        copied.join("tsconfig.json").is_file(),
+        "base view should expose the generated SvelteKit tsconfig"
+    );
+
+    fs::write(dot_svelte_kit.join("tsconfig.json"), r#"{"_source":"new"}"#)
+        .expect(".svelte-kit/tsconfig.json should be rewritten");
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
+    let refreshed =
+        fs::read_to_string(copied.join("tsconfig.json")).expect("copied tsconfig should read");
+    assert!(
+        refreshed.contains("new"),
+        "a reused base view should get the current tsconfig"
+    );
+}
+
+/// A `.svelte-kit` dir that the base commit tracks has no copy marker, so the
+/// base view keeps its own files.
+#[test]
+fn materialize_base_dependency_context_preserves_tracked_svelte_kit_dir() {
+    let host = tempfile::TempDir::new().expect("host tempdir should be created");
+    let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
+
+    fs::create_dir_all(host.path().join(".svelte-kit")).expect("host dir should be created");
+    fs::write(
+        host.path().join(".svelte-kit/tsconfig.json"),
+        r#"{"_source":"host"}"#,
+    )
+    .expect("host tsconfig should be written");
+    fs::create_dir_all(worktree.path().join(".svelte-kit")).expect("base dir should be created");
+    fs::write(
+        worktree.path().join(".svelte-kit/tsconfig.json"),
+        r#"{"_source":"base"}"#,
+    )
+    .expect("base tsconfig should be written");
+
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
+
+    let contents = fs::read_to_string(worktree.path().join(".svelte-kit/tsconfig.json"))
+        .expect("base tsconfig should read");
+    assert!(contents.contains("base"), "{contents}");
+}
+
 #[test]
 fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
