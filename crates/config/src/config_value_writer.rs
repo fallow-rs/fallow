@@ -111,6 +111,13 @@ fn set_json_value(
         ConfigWriteError::InvalidShape("fallow config root must be an object".into())
     })?;
     for key in parents {
+        if let Some(prop) = object.get(key)
+            && prop
+                .value()
+                .is_some_and(|node| node.as_null_keyword().is_some())
+        {
+            prop.set_value(CstInputValue::Object(Vec::new()));
+        }
         object = object.object_value_or_create(key).ok_or_else(|| {
             ConfigWriteError::InvalidShape(format!("{key} must be an object in fallow config"))
         })?;

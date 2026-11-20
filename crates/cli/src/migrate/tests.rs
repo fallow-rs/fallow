@@ -1499,3 +1499,24 @@ fn toml_and_jsonc_output_hold_the_same_settings() {
     let parsed: serde_json::Value = toml::from_str(&generate_toml(&result)).unwrap();
     assert_eq!(parsed, result.config);
 }
+
+#[test]
+fn toml_output_clamps_jscpd_count_above_i64_max() {
+    let jscpd: serde_json::Value =
+        serde_json::from_str(r#"{"minTokens": 18446744073709551615}"#).unwrap();
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_jscpd(&jscpd, &mut config_map, &mut warnings);
+    let result = MigrationResult {
+        config: serde_json::Value::Object(config_map),
+        warnings: vec![],
+        sources: vec![".jscpd.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert_eq!(
+        u64::try_from(config.duplicates.min_tokens).unwrap(),
+        u64::try_from(i64::MAX).unwrap(),
+        "{output}"
+    );
+}

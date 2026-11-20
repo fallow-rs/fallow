@@ -221,10 +221,49 @@ fn render_writes_each_header_line_as_comment() {
 fn render_puts_root_scalar_before_tables() {
     let config = json!({"rules": {"unused-files": "error"}, "includeEntryExports": true});
     let out = render_toml_config(&config, None).unwrap();
+    assert!(
+        out.find("includeEntryExports") < out.find("[rules]"),
+        "{out}"
+    );
     assert_eq!(
         toml::from_str::<serde_json::Value>(&out).unwrap(),
         config,
         "{out}"
+    );
+}
+
+#[test]
+fn json_replaces_null_parent() {
+    let out = set_json(r#"{"regression": null}"#).unwrap();
+    assert_eq!(parse_jsonc(&out)["regression"]["baseline"], baseline());
+}
+
+#[test]
+fn toml_replace_keeps_comment_above_header_and_drops_old_sub_table() {
+    let input = "[rules]\nunused-files = \"warn\"\n\n# saved counts\n[regression.baseline]\ntotalIssues = 99\n\n[regression.baseline.analysisIdentity]\nmode = \"syntactic\"\nstale = 1\n";
+    let out = set_toml(input).unwrap();
+    assert!(
+        out.contains("# saved counts\n[regression.baseline]"),
+        "{out}"
+    );
+    assert!(!out.contains("stale"), "{out}");
+    let parsed = parse_toml(&out);
+    assert_eq!(
+        parsed["regression"]["baseline"]["analysisIdentity"]["mode"].as_str(),
+        Some("type-aware")
+    );
+}
+
+#[test]
+fn toml_sets_value_under_dotted_keys() {
+    let out =
+        set_toml("regression.tolerance = \"5%\"\nregression.baseline.totalIssues = 99\n").unwrap();
+    assert!(!out.contains("99"), "{out}");
+    let parsed = parse_toml(&out);
+    assert_eq!(parsed["regression"]["tolerance"].as_str(), Some("5%"));
+    assert_eq!(
+        parsed["regression"]["baseline"]["totalIssues"].as_integer(),
+        Some(5)
     );
 }
 
