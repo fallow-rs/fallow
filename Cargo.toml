@@ -373,6 +373,40 @@ allow = [
     { path = "crates/mutation/src/regex.rs", max = 1 },
 ]
 
+# A path glob compiles through `fallow_config::compile_path_glob`, which keeps
+# `*` inside one path segment and drops a leading `./`. The listed files
+# compile globs that match names or import specifiers, or that keep another
+# rule for a stated reason. A new call needs a decision: use
+# `compile_path_glob` for a path glob, else add the file here.
+[[workspace.metadata.fallow.boundaries.sources]]
+rule = "path-globs-through-compile-path-glob"
+paths = ["crates"]
+deny = ["Glob::new(", "Pattern::new("]
+scope = "production"
+message = "{path} compiles a glob outside the listed sites. Use fallow_config::compile_path_glob for a path glob, or add the file to the allow list of this rule in Cargo.toml"
+# dead_code.rs and mutation/mod.rs of the engine compile the plugin config patterns with the rule of plugins/registry/mod.rs.
+allow = [
+    { path = "crates/cli/src/coverage/upload_inventory/mod.rs", max = 1 },
+    { path = "crates/cli/src/coverage/upload_source_maps.rs", max = 2 },
+    { path = "crates/config/src/config/dependency_ignore.rs", max = 1 },
+    { path = "crates/config/src/config/glob_validation.rs", max = 1 },
+    { path = "crates/config/src/config/legacy_glob.rs", max = 1 },
+    { path = "crates/config/src/config/resolution.rs", max = 1 },
+    { path = "crates/config/src/workspace/mod.rs", max = 1 },
+    { path = "crates/core/src/analyze/members/mod.rs", max = 1 },
+    { path = "crates/core/src/discover/entry_points.rs", max = 1 },
+    { path = "crates/core/src/plugins/graphql_config.rs", max = 1 },
+    { path = "crates/core/src/plugins/registry/helpers.rs", max = 2 },
+    { path = "crates/core/src/plugins/registry/mod.rs", max = 1 },
+    { path = "crates/core/src/plugins/registry/tooling_evidence.rs", max = 1 },
+    { path = "crates/core/src/plugins/rstest.rs", max = 1 },
+    { path = "crates/core/src/plugins/typescript.rs", max = 1 },
+    { path = "crates/engine/src/dead_code.rs", max = 1 },
+    { path = "crates/engine/src/health/grouping.rs", max = 1 },
+    { path = "crates/engine/src/mutation/mod.rs", max = 1 },
+    { path = "crates/engine/src/workspace_scope.rs", max = 1 },
+]
+
 # Each config file load goes through
 # `fallow_engine::project_config::load_config_file`, so each surface gets the
 # same trust policy for remote `extends` and the same error detail. Config
