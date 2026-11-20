@@ -227,7 +227,8 @@ echo "=== Action input descriptions ==="
 # analyze.sh passes these flags only for `true`, so `false` keeps the value of
 # the fallow config. The description must say so, because a config can turn
 # the option on (and ignoreImports is on by default).
-for input in production skip-local cross-language ignore-imports; do
+for input in production production-dead-code production-health production-dupes \
+  skip-local cross-language ignore-imports; do
   input_description=$(awk -v name="  ${input}:" '
     $0 == name { found = 1; next }
     found && /^    description:/ { sub(/^    description: /, ""); print; exit }

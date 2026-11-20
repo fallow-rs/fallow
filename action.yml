@@ -31,15 +31,15 @@ inputs:
     required: false
     default: 'false'
   production-dead-code:
-    description: 'Combined mode only: run dead-code analysis in production mode'
+    description: 'Combined mode only: run dead-code analysis in production mode. `true` passes `--production-dead-code`. `false` keeps the config value `production.deadCode`, which is off by default.'
     required: false
     default: 'false'
   production-health:
-    description: 'Combined mode only: run health analysis in production mode'
+    description: 'Combined mode only: run health analysis in production mode. `true` passes `--production-health`. `false` keeps the config value `production.health`, which is off by default.'
     required: false
     default: 'false'
   production-dupes:
-    description: 'Combined mode only: run duplication analysis in production mode'
+    description: 'Combined mode only: run duplication analysis in production mode. `true` passes `--production-dupes`. `false` keeps the config value `production.dupes`, which is off by default.'
     required: false
     default: 'false'
   fail-on-issues:

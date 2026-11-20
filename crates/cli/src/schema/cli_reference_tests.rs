@@ -756,9 +756,10 @@ fn lean_help_names_its_commands_in_the_first_sentence() {
         .find(|option| option["long"] == "--lean")
         .unwrap();
     let first = first_sentence(lean["help"].as_str().unwrap());
-    for command in ["dead-code", "health", "combined report"] {
-        assert!(first.contains(command), "{command} is missing in: {first}");
-    }
+    assert!(
+        first.contains("JSON of dead-code, health and the combined report"),
+        "the command limit is missing in: {first}"
+    );
 }
 
 #[test]
