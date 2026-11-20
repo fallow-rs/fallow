@@ -231,27 +231,17 @@ fn baseline_warning(
     noun: &'static str,
     gate_runs: bool,
 ) -> Option<String> {
-    let advisory = staleness
-        .get("warning")
-        .and_then(Value::as_str)
-        .unwrap_or("none");
-    let gate_trips = staleness
-        .get("gate_trips")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let baseline_entries = count(staleness, "baseline_entries");
-    let total = entries(baseline_entries);
-    let stale = count(staleness, "stale_entries");
+    let verdict = fallow_output::read_baseline_verdict(staleness);
+    let advisory = verdict.warning.as_str();
+    let gate_trips = verdict.gate_trips;
+    let total = entries(verdict.baseline_entries);
+    let stale = verdict.stale_entries;
     let subject = analysis.map_or_else(
         || "the loaded baseline".to_string(),
         |analysis| format!("the {analysis} baseline"),
     );
-    if staleness
-        .get("unrecognised_format")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        let mut message = saved_by(staleness).map_or_else(
+    if verdict.unrecognised_format {
+        let mut message = verdict.saved_by.as_deref().map_or_else(
             || {
                 format!(
                     "Baseline staleness: {subject} has no entries this command recognises. It \
@@ -275,7 +265,7 @@ fn baseline_warning(
         return Some(message);
     }
     if advisory == "none" && !gate_trips {
-        return unjudged_baseline_warning(staleness, &subject, &total, baseline_entries);
+        return unjudged_baseline_warning(&verdict, &subject, &total);
     }
 
     let mut message = match advisory {
@@ -296,20 +286,6 @@ fn baseline_warning(
     }
     message.push_str(" Re-save it with the save_baseline parameter (CLI --save-baseline).");
     Some(message)
-}
-
-/// The command that saved a foreign baseline, from `saved_by`. The value set is
-/// open, so any kebab-case token passes. Any other value reads as absent.
-fn saved_by(staleness: &Value) -> Option<&str> {
-    staleness
-        .get("saved_by")
-        .and_then(Value::as_str)
-        .filter(|token| {
-            !token.is_empty()
-                && token
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
-        })
 }
 
 /// Whether the command that produced this envelope runs the stale-baseline gate
@@ -341,29 +317,22 @@ fn stale_baseline_gate_runs(root: &Map<String, Value>) -> bool {
 /// parenthetical names `scope_reasons`; an envelope from a version that
 /// predates that member drops the clause rather than guessing.
 fn unjudged_baseline_warning(
-    staleness: &Value,
+    verdict: &fallow_output::BaselineVerdict,
     subject: &str,
     total: &str,
-    baseline_entries: u64,
 ) -> Option<String> {
-    if baseline_entries == 0 {
+    if verdict.baseline_entries == 0 || !verdict.change_scoped {
         return None;
     }
-    if !staleness
-        .get("change_scoped")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    let reasons = scope_reasons(staleness);
+    let reasons = verdict.scope_reasons.join(", ");
     let scope = if reasons.is_empty() {
         "only part of the project".to_string()
     } else {
         format!("only part of the project ({reasons})")
     };
-    let package_map = if reasons
-        .split(", ")
+    let package_map = if verdict
+        .scope_reasons
+        .iter()
         .any(|reason| reason == "package-baselines")
     {
         " Under a workspaces.changedSince map, set no_package_baselines to analyze every package."
@@ -374,26 +343,6 @@ fn unjudged_baseline_warning(
         "Baseline staleness: {subject} has {total} and was not judged on this run, which \
          analyzed {scope}. Run the command over the whole project to judge it.{package_map}"
     ))
-}
-
-/// The run's `scope_reasons` as a comma-joined list, empty when the member is
-/// absent or carries nothing readable.
-fn scope_reasons(staleness: &Value) -> String {
-    staleness
-        .get("scope_reasons")
-        .and_then(Value::as_array)
-        .map(|reasons| {
-            reasons
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .unwrap_or_default()
-}
-
-fn count(value: &Value, key: &str) -> u64 {
-    value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
 fn entries(count: u64) -> String {
@@ -1222,6 +1171,25 @@ mod tests {
 
         assert!(
             warnings[0].contains("observed 79.9, threshold 80"),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn a_failing_gate_just_over_its_threshold_never_reads_as_equal_to_it() {
+        let warnings = warnings_of(&serde_json::json!({
+            "gate_outcomes": {
+                "duplication-threshold": {
+                    "status": "fail",
+                    "enforced": true,
+                    "observed": 5.004,
+                    "threshold": 5.0,
+                },
+            },
+        }));
+
+        assert!(
+            warnings[0].contains("observed 5.004, threshold 5"),
             "{warnings:?}"
         );
     }

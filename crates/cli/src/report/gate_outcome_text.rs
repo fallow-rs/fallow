@@ -494,6 +494,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_failing_gate_just_over_its_threshold_never_reads_as_equal_to_it() {
+        let value = envelope(&serde_json::json!({
+            "duplication-threshold": {
+                "status": "fail", "enforced": true, "observed": 5.004, "threshold": 5.0
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("a gate ran"),
+            "Gates: failed duplication-threshold (5.004 against 5)."
+        );
+    }
+
     /// The render never escalates. `enforced` is the CLI's statement about its
     /// own exit code, and the integrations deliberately do not pass
     /// `--fail-on-issues` to the CLI, so an error-level annotation here would

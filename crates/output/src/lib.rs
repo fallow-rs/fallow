@@ -485,8 +485,8 @@ pub use type_aware_envelopes::{
 };
 pub use unified_diff::{DiffEvent, DiffFileHeader, UnifiedDiffEvents, unified_diff_events};
 pub use verdict_facts::{
-    EmptyScope, GateVerdict, GateVerdictFile, RequestVerdict, gate_number_text, read_gate_verdicts,
-    read_request_verdicts,
+    BaselineVerdict, EmptyScope, GateVerdict, GateVerdictFile, RequestVerdict, gate_number_text,
+    read_baseline_verdict, read_gate_verdicts, read_request_verdicts,
 };
 pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_member_list, cap_names, clean_decision_fact,

@@ -61,16 +61,9 @@ pub fn advisory_line_for_staleness(
 
 /// One sentence for one loaded baseline, or `None` when it earned no advisory.
 fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String> {
-    let warning = staleness
-        .get("warning")
-        .and_then(Value::as_str)
-        .unwrap_or("none");
-    let gate_trips = staleness
-        .get("gate_trips")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let entries = count(staleness, "baseline_entries");
-    let stale = count(staleness, "stale_entries");
+    let verdict = fallow_output::read_baseline_verdict(staleness);
+    let entries = verdict.baseline_entries;
+    let stale = verdict.stale_entries;
     let subject = subject(analysis);
     // Checked before the advisory arms, and before the `gate_trips` fallback the
     // same file now reaches: its counts are all zero, so that arm would render
@@ -78,12 +71,8 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
     // problem is that nothing read it. Word for word the job summary's line for a
     // baseline whose path the Action never saw. The summary names the file when it
     // has one. This renderer never can, because the envelope carries no path.
-    if staleness
-        .get("unrecognised_format")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        if let Some(writer) = saved_by(staleness) {
+    if verdict.unrecognised_format {
+        if let Some(writer) = verdict.saved_by.as_deref() {
             return Some(format!(
                 "**{subject} recognises nothing.** `fallow {writer}` saved this baseline, so \
                  this command reads nothing from it and it suppresses nothing."
@@ -95,7 +84,7 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
              way it suppresses nothing."
         ));
     }
-    match warning {
+    match verdict.warning.as_str() {
         "partial" => Some(format!(
             "**{subject} is partially stale.** {stale} of {entries} saved entries matched \
              nothing this run, so the baseline protects less than what was saved. Re-save it \
@@ -109,30 +98,13 @@ fn advisory_sentence(staleness: &Value, analysis: Option<&str>) -> Option<String
         // "none", and any advisory this build does not recognise: an unknown
         // value must not invent a sentence, but `gate_trips` is a separate
         // member and a run whose gate rule holds still has something to say.
-        _ if gate_trips => Some(format!(
+        _ if verdict.gate_trips => Some(format!(
             "**{subject} has stale entries.** {stale} of {entries} saved entries matched \
              nothing this run. The project may be clean, or the baseline may no longer \
              describe it."
         )),
         _ => None,
     }
-}
-
-/// The command that saved a foreign baseline, from `saved_by`.
-///
-/// The value set is open, so any command-shaped token renders. A value that is
-/// not a plain kebab-case token renders nothing, so the sentence falls back to
-/// the hedged wording instead of quoting unexpected text into Markdown.
-fn saved_by(staleness: &Value) -> Option<&str> {
-    staleness
-        .get("saved_by")
-        .and_then(Value::as_str)
-        .filter(|token| {
-            !token.is_empty()
-                && token
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
-        })
 }
 
 /// What the sentence calls the baseline it is about.
@@ -155,10 +127,6 @@ fn capitalize(value: &str) -> String {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
     }
-}
-
-fn count(staleness: &Value, key: &str) -> u64 {
-    staleness.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
 #[cfg(test)]
