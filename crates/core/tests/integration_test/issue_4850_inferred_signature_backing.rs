@@ -42,3 +42,27 @@ fn private_type_of_a_held_binding_is_a_private_type_leak() {
     // export, so declaration emit fails with TS4025.
     assert!(leaks.contains(&("heldLeak", "Hidden")), "found: {leaks:?}");
 }
+
+#[test]
+fn types_that_flow_into_an_inferred_type_through_other_shapes_are_not_unused() {
+    let root = fixture_path("issue-4850-inferred-type-flow");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_types: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    unused_types.sort_unstable();
+
+    // Each `*Box` type reaches an inferred export type: through the return of
+    // an arrow or a function, an unannotated class field, the return
+    // annotation of a called local function, `export default`, and a property
+    // read of a local object. Declaration emit fails with TS4029 without the
+    // export of each one. The four other types do not reach an export type.
+    assert_eq!(
+        unused_types,
+        vec!["CallParam", "MemberOther", "ShadowedBox", "Unrelated"]
+    );
+}

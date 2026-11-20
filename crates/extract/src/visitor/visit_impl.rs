@@ -77,6 +77,8 @@ mod visit_member_destructuring;
 #[path = "visit_impl_value_alias.rs"]
 pub(super) mod visit_value_alias;
 use visit_value_alias::unwrap_static_expr;
+#[path = "visit_impl_type_flow.rs"]
+mod type_flow;
 #[path = "visit_impl_module_require.rs"]
 mod visit_module_require;
 #[path = "visit_impl_node_runtime.rs"]
@@ -1420,8 +1422,8 @@ impl ModuleInfoExtractor {
                     generic_instance_bindings: extract_class_generic_instance_bindings(class),
                 },
             );
-            let refs = Self::collect_class_signature_refs(class);
-            self.record_local_signature_refs(&id.name, refs);
+            let flow = Self::collect_class_type_flow(class);
+            self.record_type_flow(&id.name, flow);
         }
     }
 
@@ -1454,8 +1456,7 @@ impl ModuleInfoExtractor {
             self.record_risky_regex_binding(id.name.as_str(), None);
             self.record_path_sink_binding(id.name.as_str(), None);
             self.record_path_relative_binding(id.name.as_str(), None);
-            let refs = Self::collect_function_signature_refs(function);
-            self.record_local_signature_refs(&id.name, refs);
+            self.record_function_type_flow(&id.name, function);
             let type_parameter_scope_pushed = function
                 .type_parameters
                 .as_deref()
@@ -2269,38 +2270,6 @@ impl<'a> ModuleInfoExtractor {
                     is_type_only: spec_type_only,
                     span: spec.span,
                 });
-        }
-    }
-
-    /// Record public-API / local signature type references for a default export
-    /// class, function, or interface declaration. A named declaration records a
-    /// local type declaration + local refs; an anonymous one records public refs
-    /// keyed on `"default"`.
-    fn record_default_export_signature_refs(&mut self, decl: &ExportDefaultDeclaration<'a>) {
-        match &decl.declaration {
-            ExportDefaultDeclarationKind::ClassDeclaration(class) => {
-                let refs = Self::collect_class_signature_refs(class);
-                if let Some(id) = class.id.as_ref() {
-                    self.record_local_type_declaration(&id.name, id.span);
-                    self.record_local_signature_refs(&id.name, refs);
-                } else {
-                    self.record_public_signature_refs("default", refs);
-                }
-            }
-            ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
-                let refs = Self::collect_function_signature_refs(function);
-                if let Some(id) = function.id.as_ref() {
-                    self.record_local_signature_refs(&id.name, refs);
-                } else {
-                    self.record_public_signature_refs("default", refs);
-                }
-            }
-            ExportDefaultDeclarationKind::TSInterfaceDeclaration(iface) => {
-                self.record_local_type_declaration(&iface.id.name, iface.id.span);
-                let refs = Self::collect_interface_signature_refs(iface);
-                self.record_public_signature_refs("default", refs);
-            }
-            _ => {}
         }
     }
 
