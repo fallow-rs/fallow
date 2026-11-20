@@ -423,3 +423,22 @@ pub(super) fn sarif_location(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::security_help_uri;
+
+    /// The SARIF `helpUri` is a public contract. A rule with its own page
+    /// links to that page; a rule without one links to the page of its family.
+    #[test]
+    fn help_uri_links_a_rule_page_or_the_page_of_its_family() {
+        assert_eq!(
+            security_help_uri("security/command-injection", "security/tainted-sink"),
+            "https://fallow.tools/docs/rules/command-injection/"
+        );
+        assert_eq!(
+            security_help_uri("security/server-only-import", "security/client-server-leak"),
+            "https://fallow.tools/docs/rules/client-server-leak/"
+        );
+    }
+}
