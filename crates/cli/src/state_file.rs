@@ -17,6 +17,15 @@ pub fn read_optional_text(path: &Path) -> std::io::Result<Option<String>> {
     }
 }
 
+/// Read `path` as bytes. A missing file is `Ok(None)`.
+pub fn read_optional_bytes(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 /// What a command found at the path of a file that it writes again.
 #[derive(Debug)]
 pub enum Existing<T> {
@@ -101,6 +110,26 @@ mod tests {
         });
         assert!(
             matches!(result, Existing::Unreadable(err) if err.kind() == ErrorKind::InvalidData)
+        );
+    }
+
+    #[test]
+    fn read_optional_bytes_reads_invalid_utf8() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+        assert_eq!(
+            read_optional_bytes(&path).unwrap(),
+            Some(vec![0xff, 0xfe, 0xfd])
+        );
+    }
+
+    #[test]
+    fn read_optional_bytes_reports_a_missing_file_as_none() {
+        let dir = tempdir().unwrap();
+        assert_eq!(
+            read_optional_bytes(&dir.path().join("absent")).unwrap(),
+            None
         );
     }
 }
