@@ -32,6 +32,7 @@ mod component_contracts;
 pub(crate) mod cost;
 pub mod css;
 pub mod css_classes;
+mod css_composes;
 pub mod css_in_js;
 mod css_mask;
 mod css_masked_bytes;

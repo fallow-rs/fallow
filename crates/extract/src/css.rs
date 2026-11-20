@@ -113,7 +113,7 @@ fn is_css_module_file(path: &Path) -> bool {
 }
 
 /// Returns true if a CSS import source is a remote URL or data URI that should be skipped.
-fn is_css_url_import(source: &str) -> bool {
+pub(crate) fn is_css_url_import(source: &str) -> bool {
     source.starts_with("http://") || source.starts_with("https://") || source.starts_with("data:")
 }
 
@@ -129,7 +129,7 @@ fn is_css_url_import(source: &str) -> bool {
 /// Scoped npm packages (`@scope/pkg`) are always kept bare, even when they have
 /// CSS extensions (e.g., `@fontsource/monaspace-neon/400.css`). Bundlers like
 /// Vite resolve these from node_modules, not as relative paths.
-fn normalize_css_import_path(path: String, is_scss: bool) -> String {
+pub(crate) fn normalize_css_import_path(path: String, is_scss: bool) -> String {
     if path.starts_with('.') || path.starts_with('/') || path.contains("://") {
         return path;
     }
@@ -267,7 +267,7 @@ pub(crate) fn import_sources_from_masked(stripped: &str, is_scss: bool) -> Vec<C
     out
 }
 
-fn trimmed_match_with_span(m: regex::Match<'_>) -> (String, Span) {
+pub(crate) fn trimmed_match_with_span(m: regex::Match<'_>) -> (String, Span) {
     let raw = m.as_str();
     let trimmed_start = raw.len() - raw.trim_start().len();
     let trimmed_end = raw.trim_end().len();
@@ -1075,9 +1075,9 @@ pub(crate) fn parse_css_to_module(
         .is_some_and(|ext| matches!(ext, "scss" | "sass" | "less"));
 
     let stripped = crate::css_mask::mask_sass_shorthand(mask_css_comments(source, is_scss), path);
-    let imports = build_css_imports(&stripped, is_scss);
-
+    let mut imports = build_css_imports(&stripped, is_scss);
     let exports = if is_css_module_file(path) {
+        crate::css_composes::push_composes_from_imports(&stripped, &mut imports);
         css_module_exports(source, &stripped, is_scss)
     } else {
         Vec::new()
