@@ -8,22 +8,15 @@
 //! to a generated position through the source map, and the line lengths turn
 //! that position into the offset that the V8 ranges use.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use oxc_coverage_instrument::{
     FileCoverage, Location, Position, V8CoverageRange, V8FunctionCoverage,
 };
 use rustc_hash::FxHashSet;
-use serde::Deserialize;
 use srcmap_sourcemap::{Bias, SourceMap};
 
-/// One `source-map-cache` entry of a V8 dump.
-#[derive(Deserialize)]
-pub(super) struct SourceMapCacheEntry {
-    #[serde(rename = "lineLengths")]
-    line_lengths: Vec<u32>,
-    data: serde_json::Value,
-}
+use super::source_map_cache::{SourceMapCacheEntry, resolve_original_source, source_map_base_dir};
 
 /// The generated side of a source-mapped script.
 pub(super) struct GeneratedScript {
@@ -53,21 +46,23 @@ impl GeneratedScript {
         })
     }
 
-    /// The sources of the map as file paths, resolved against the directory
-    /// of the generated script. A virtual `webpack://` or `vite://` source
-    /// resolves to the first existing file in that directory or one of its
-    /// ancestors. Remote sources are left out.
-    pub(super) fn source_paths(&self, script_url: &str) -> Vec<(u32, PathBuf)> {
-        let script_dir = url::Url::parse(script_url)
-            .ok()
-            .and_then(|url| url.to_file_path().ok())
-            .and_then(|path| path.parent().map(Path::to_path_buf));
+    /// The sources of the map as file paths. A relative source resolves
+    /// against the directory of the external map, or of the generated script
+    /// when the entry names no map. A virtual `webpack://` or `vite://`
+    /// source resolves to the first existing file in that directory or one
+    /// of its ancestors. Remote sources are left out.
+    pub(super) fn source_paths(
+        &self,
+        script_url: &str,
+        source_map_url: Option<&str>,
+    ) -> Vec<(u32, PathBuf)> {
+        let base_dir = source_map_base_dir(script_url, source_map_url);
         self.map
             .sources
             .iter()
             .enumerate()
             .filter_map(|(index, source)| {
-                let path = source_path(source, script_dir.as_deref())?;
+                let path = resolve_original_source(source, base_dir.as_deref())?;
                 Some((u32::try_from(index).ok()?, path))
             })
             .collect()
@@ -174,47 +169,6 @@ fn contains(location: &Location, position: &Position) -> bool {
     key(&location.start) <= key(position) && key(position) < key(&location.end)
 }
 
-fn source_path(source: &str, script_dir: Option<&Path>) -> Option<PathBuf> {
-    if let Ok(url) = url::Url::parse(source) {
-        return match url.scheme() {
-            "file" => url.to_file_path().ok(),
-            "webpack" | "vite" => resolve_virtual_source(&url, script_dir?),
-            _ if fallow_types::path_util::looks_like_windows_absolute_path(source) => {
-                Some(PathBuf::from(source))
-            }
-            _ => None,
-        };
-    }
-    let path = PathBuf::from(source);
-    if fallow_types::path_util::is_absolute_path_any_platform(&path) {
-        return Some(path);
-    }
-    Some(script_dir?.join(path))
-}
-
-/// Same candidates as the runtime-coverage remapper in
-/// `crates/cli/src/health/coverage.rs`: the namespace plus the path, then the
-/// path alone.
-fn resolve_virtual_source(url: &url::Url, script_dir: &Path) -> Option<PathBuf> {
-    let path = url.path().trim_start_matches('/');
-    let mut candidates = Vec::new();
-    if let Some(host) = url.host_str().map(|host| host.trim_matches('/'))
-        && !host.is_empty()
-        && !matches!(host, "." | "_N_E")
-    {
-        candidates.push(PathBuf::from(host).join(path));
-    }
-    if !path.is_empty() {
-        candidates.push(PathBuf::from(path));
-    }
-    script_dir.ancestors().find_map(|base| {
-        candidates
-            .iter()
-            .map(|candidate| base.join(candidate))
-            .find(|resolved| resolved.is_file())
-    })
-}
-
 fn ranges_by_width(functions: &[V8FunctionCoverage]) -> Vec<V8CoverageRange> {
     let mut ranges: Vec<V8CoverageRange> = functions
         .iter()
@@ -235,11 +189,14 @@ fn smallest_range_count(ranges_by_width: &[V8CoverageRange], offset: u32) -> u32
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
     fn line_lengths_give_line_starts_and_length() {
         let entry = SourceMapCacheEntry {
+            url: None,
             line_lengths: vec![10, 0, 5],
             data: serde_json::json!({ "version": 3, "sources": [], "mappings": "" }),
         };
@@ -255,6 +212,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("dist")).unwrap();
         std::fs::write(dir.path().join("src/a.ts"), "export const a = 1;\n").unwrap();
         let entry = SourceMapCacheEntry {
+            url: None,
             line_lengths: vec![1],
             data: serde_json::json!({
                 "version": 3,
@@ -264,7 +222,7 @@ mod tests {
         };
         let script = GeneratedScript::parse(&entry).unwrap();
         let bundle = url::Url::from_file_path(dir.path().join("dist/bundle.js")).unwrap();
-        let paths = script.source_paths(bundle.as_str());
+        let paths = script.source_paths(bundle.as_str(), None);
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].0, 0);
         assert!(paths[0].1.ends_with(Path::new("src/a.ts")));
@@ -278,6 +236,7 @@ mod tests {
             "file:///p/dist/"
         };
         let entry = SourceMapCacheEntry {
+            url: None,
             line_lengths: vec![1],
             data: serde_json::json!({
                 "version": 3,
@@ -286,7 +245,7 @@ mod tests {
             }),
         };
         let script = GeneratedScript::parse(&entry).unwrap();
-        let paths = script.source_paths(&format!("{dir}bundle.js"));
+        let paths = script.source_paths(&format!("{dir}bundle.js"), None);
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].0, 0);
         assert!(paths[0].1.ends_with(Path::new("dist/../src/a.ts")));

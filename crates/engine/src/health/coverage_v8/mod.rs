@@ -36,7 +36,7 @@ use std::sync::Arc;
 
 use oxc_coverage_instrument::{FileCoverage, Location, V8FunctionCoverage};
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
 /// The trailer Node's type stripping appends to a `.ts` module before V8
@@ -49,7 +49,7 @@ struct V8Dump {
     result: Vec<V8Script>,
     /// Source maps of transpiled scripts, keyed by script URL.
     #[serde(default, rename = "source-map-cache")]
-    source_map_cache: Option<BTreeMap<String, mapped::SourceMapCacheEntry>>,
+    source_map_cache: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -115,7 +115,14 @@ pub(super) fn load_v8_coverage_map(
             }
         };
         parsed_dumps += 1;
-        let mut source_maps = dump.source_map_cache.unwrap_or_default();
+        let source_maps: FxHashMap<String, Arc<source_map_cache::SourceMapCacheEntry>> = dump
+            .source_map_cache
+            .as_ref()
+            .map(source_map_cache::parse_source_map_cache)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(url, entry)| (url, Arc::new(entry)))
+            .collect();
         for (script_index, script) in dump.result.into_iter().enumerate() {
             let id = (dump_index, script_index);
             let functions: Arc<[V8FunctionCoverage]> = Arc::from(script.functions);
@@ -129,14 +136,14 @@ pub(super) fn load_v8_coverage_map(
                         functions: Arc::clone(&functions),
                     });
             }
-            let Some(entry) = source_maps.remove(&script.url) else {
+            let Some(entry) = source_maps.get(&script.url) else {
                 continue;
             };
-            let Some(generated) = mapped::GeneratedScript::parse(&entry) else {
+            let Some(generated) = mapped::GeneratedScript::parse(entry) else {
                 continue;
             };
-            let entry = Arc::new(entry);
-            for (source_index, source) in generated.source_paths(&script.url) {
+            for (source_index, source) in generated.source_paths(&script.url, entry.url.as_deref())
+            {
                 if let Some(path) = project_path(source, scope) {
                     views_by_file
                         .entry(path)
@@ -144,7 +151,7 @@ pub(super) fn load_v8_coverage_map(
                         .push(ScriptView::Mapped {
                             id,
                             functions: Arc::clone(&functions),
-                            entry: Arc::clone(&entry),
+                            entry: Arc::clone(entry),
                             source_index,
                         });
                 }
@@ -197,7 +204,7 @@ enum ScriptView {
     Mapped {
         id: ScriptId,
         functions: Arc<[V8FunctionCoverage]>,
-        entry: Arc<mapped::SourceMapCacheEntry>,
+        entry: Arc<source_map_cache::SourceMapCacheEntry>,
         source_index: u32,
     },
 }
@@ -744,6 +751,135 @@ mod tests {
 
         let map = load_v8_coverage_map(&[dump_path], &scope).unwrap();
         assert!(map.contains_key(canonical.to_string_lossy().as_ref()));
+    }
+
+    /// Writes `dump` to the fixture directory as `name` and loads it, with
+    /// `sources` as the discovered project sources.
+    fn load_one_dump(
+        fixture: &MappedFixture,
+        name: &str,
+        dump: &serde_json::Value,
+        sources: &[&Path],
+    ) -> Result<BTreeMap<String, FileCoverage>, String> {
+        let dump_path = fixture.dir.path().join(name);
+        std::fs::write(&dump_path, dump.to_string()).map_err(|e| e.to_string())?;
+        let sources: FxHashSet<PathBuf> = sources
+            .iter()
+            .map(|path| dunce::canonicalize(path).unwrap())
+            .collect();
+        let scope = V8ScriptScope {
+            coverage_root: None,
+            project_root: Some(fixture.dir.path()),
+            discovered_sources: Some(&sources),
+        };
+        load_v8_coverage_map(&[dump_path], &scope)
+    }
+
+    fn dist_script_url(fixture: &MappedFixture) -> String {
+        url::Url::from_file_path(fixture.dir.path().join("dist/index.js"))
+            .unwrap()
+            .to_string()
+    }
+
+    fn coverage_key(path: &Path) -> String {
+        dunce::canonicalize(path)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    const PICK_SOURCE: &str = "export function pick(x) {\n  if (x) { return 1; }\n  return 2;\n}\n";
+
+    #[test]
+    fn a_source_relative_to_an_external_map_gets_coverage() {
+        let mut fixture = mapped_fixture(PICK_SOURCE, true);
+        std::fs::create_dir_all(fixture.dir.path().join("dist/maps")).unwrap();
+        fixture.entry["url"] = serde_json::json!("maps/index.js.map");
+        fixture.entry["data"]["sources"] = serde_json::json!(["../../pick.ts"]);
+        let script_url = dist_script_url(&fixture);
+        let dump = serde_json::json!({
+            "result": [{ "url": script_url, "functions": fixture.functions }],
+            "source-map-cache": { script_url: fixture.entry },
+        });
+        let map = load_one_dump(&fixture, "coverage-1.json", &dump, &[&fixture.path]).unwrap();
+        assert!(map.contains_key(&coverage_key(&fixture.path)));
+    }
+
+    #[test]
+    fn a_virtual_source_with_a_space_gets_coverage() {
+        let mut fixture = mapped_fixture(PICK_SOURCE, true);
+        let copy = fixture.dir.path().join("src dir/pick file.ts");
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        std::fs::copy(&fixture.path, &copy).unwrap();
+        fixture.entry["data"]["sources"] =
+            serde_json::json!(["webpack://app/./src dir/pick file.ts"]);
+        let script_url = dist_script_url(&fixture);
+        let dump = serde_json::json!({
+            "result": [{ "url": script_url, "functions": fixture.functions }],
+            "source-map-cache": { script_url: fixture.entry },
+        });
+        let map = load_one_dump(&fixture, "coverage-1.json", &dump, &[&copy]).unwrap();
+        assert!(map.contains_key(&coverage_key(&copy)));
+    }
+
+    #[test]
+    fn a_malformed_map_entry_keeps_the_other_evidence() {
+        let fixture = mapped_fixture(PICK_SOURCE, true);
+        let direct_path = fixture.dir.path().join("a.js");
+        let direct_source = "export const a = 1;\n";
+        std::fs::write(&direct_path, direct_source).unwrap();
+        let direct_url = url::Url::from_file_path(dunce::canonicalize(&direct_path).unwrap())
+            .unwrap()
+            .to_string();
+        let script_url = dist_script_url(&fixture);
+        let dump = serde_json::json!({
+            "result": [
+                { "url": direct_url, "functions": [{
+                    "functionName": "",
+                    "isBlockCoverage": false,
+                    "ranges": [{ "startOffset": 0, "endOffset": direct_source.len(), "count": 1 }]
+                }]},
+                { "url": script_url, "functions": fixture.functions },
+            ],
+            "source-map-cache": {
+                script_url: fixture.entry,
+                "file:///x1.js": { "data": {} },
+                "file:///x2.js": { "lineLengths": [1], "data": "x" },
+                "file:///x3.js": { "lineLengths": "x", "data": {} },
+            },
+        });
+        let sources = [direct_path.as_path(), fixture.path.as_path()];
+        let map = load_one_dump(&fixture, "coverage-1.json", &dump, &sources).unwrap();
+        assert!(map.contains_key(&coverage_key(&direct_path)));
+        assert!(map.contains_key(&coverage_key(&fixture.path)));
+    }
+
+    #[test]
+    fn two_script_records_with_one_url_both_use_the_map() {
+        let fixture = mapped_fixture(PICK_SOURCE, true);
+        let script_url = dist_script_url(&fixture);
+        let mut longer = fixture.functions.clone();
+        longer[0].ranges[0].end_offset += 7;
+        let statement_counts = |name: &str, records: &[&[V8FunctionCoverage]]| {
+            let result: Vec<serde_json::Value> = records
+                .iter()
+                .map(|functions| serde_json::json!({ "url": script_url, "functions": functions }))
+                .collect();
+            let dump = serde_json::json!({
+                "result": result,
+                "source-map-cache": { script_url.clone(): fixture.entry },
+            });
+            let map = load_one_dump(&fixture, name, &dump, &[&fixture.path]).unwrap();
+            map[&coverage_key(&fixture.path)].s.clone()
+        };
+        let one = statement_counts("coverage-1.json", &[&fixture.functions]);
+        let two = statement_counts("coverage-2.json", &[&fixture.functions, &fixture.functions]);
+        let mismatch = statement_counts("coverage-3.json", &[&fixture.functions, &longer]);
+        assert!(one.values().any(|count| *count > 0));
+        for (id, count) in &one {
+            assert_eq!(two[id], count * 2, "statement {id}");
+        }
+        assert_eq!(mismatch, one);
     }
 
     #[test]
