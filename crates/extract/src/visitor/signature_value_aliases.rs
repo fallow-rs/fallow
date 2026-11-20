@@ -23,7 +23,7 @@ use super::{LocalSignatureTypeReference, ModuleInfoExtractor};
 /// contains as a whole value.
 ///
 /// The walk follows object property values, array elements, conditional and
-/// logical branches, parentheses, `!`, `satisfies` and `as const`. It stops at
+/// logical branches, parentheses, `x!`, `satisfies` and `as const`. It stops at
 /// a member read, a call, a spread, a function, and any other type assertion,
 /// because the type of these expressions is not the type of a held binding.
 pub(super) fn collect_initializer_value_aliases(init: &Expression<'_>, aliases: &mut Vec<String>) {
@@ -190,5 +190,24 @@ impl ModuleInfoExtractor {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closure_follows_held_bindings_and_stops_at_a_cycle() {
+        let mut held_by_owner: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
+        held_by_owner.insert("status", vec!["a"]);
+        held_by_owner.insert("a", vec!["b"]);
+        held_by_owner.insert("b", vec!["a", "status", "c"]);
+
+        assert_eq!(
+            held_value_closure(&held_by_owner, "status"),
+            vec!["a", "b", "c"]
+        );
+        assert!(held_value_closure(&held_by_owner, "unknown").is_empty());
     }
 }

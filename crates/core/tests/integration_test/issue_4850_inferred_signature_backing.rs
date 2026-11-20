@@ -24,3 +24,21 @@ fn types_of_a_typed_binding_in_an_exported_initializer_are_not_unused() {
     // initializer reads a property of, and `Unrelated` has no use.
     assert_eq!(unused_types, vec!["Detached", "Unrelated"]);
 }
+
+#[test]
+fn private_type_of_a_held_binding_is_a_private_type_leak() {
+    let root = fixture_path("issue-4850-inferred-signature-backing");
+    let mut config = create_config(root);
+    config.rules.private_type_leaks = fallow_config::Severity::Warn;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let leaks: Vec<(&str, &str)> = results
+        .private_type_leaks
+        .iter()
+        .map(|leak| (leak.leak.export_name.as_str(), leak.leak.type_name.as_str()))
+        .collect();
+
+    // The declaration of `heldLeak` names `Hidden`, which the module does not
+    // export, so declaration emit fails with TS4025.
+    assert!(leaks.contains(&("heldLeak", "Hidden")), "found: {leaks:?}");
+}
