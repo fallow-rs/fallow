@@ -165,7 +165,11 @@ pub fn add_ignore_exports_rule_to_string(
     })
 }
 
-const BOM: char = '\u{FEFF}';
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "lib.rs glob re-exports this module, so `pub` would leak the item into the public API; config_value_writer shares it"
+)]
+pub(crate) const BOM: char = '\u{FEFF}';
 
 fn is_json_config(path: &Path) -> bool {
     matches!(
@@ -255,7 +259,11 @@ fn append_json_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResu
     Ok((root.to_string(), true))
 }
 
-fn parse_toml_document(content: &str) -> ConfigWriteResult<DocumentMut> {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "lib.rs glob re-exports this module, so `pub` would leak the item into the public API; config_value_writer shares it"
+)]
+pub(crate) fn parse_toml_document(content: &str) -> ConfigWriteResult<DocumentMut> {
     crate::toml_input::check_nesting(content).map_err(ConfigWriteError::TomlTooDeep)?;
     content
         .parse::<DocumentMut>()
@@ -411,7 +419,11 @@ fn exports_array(entry: &IgnoreExportRule) -> Array {
     exports
 }
 
-fn preserve_line_endings(rendered: &str, original: &str) -> String {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "lib.rs glob re-exports this module, so `pub` would leak the item into the public API; config_value_writer shares it"
+)]
+pub(crate) fn preserve_line_endings(rendered: &str, original: &str) -> String {
     if original.contains("\r\n") {
         rendered.replace("\r\n", "\n").replace('\n', "\r\n")
     } else {

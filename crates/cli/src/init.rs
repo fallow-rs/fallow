@@ -473,19 +473,13 @@ fn agents_module_boundaries_line(info: &ProjectInfo) -> String {
     }
 }
 
-/// Render a JSON string array as a TOML inline array of double-quoted strings.
-///
-/// Used to render the detection-derived arrays (`entry`, `ignorePatterns`,
-/// `workspaces.patterns`) sourced from the shared recommend core into the TOML
-/// scaffold. The values are globs with no `"`/`\` characters, so a simple quote
-/// wrap is sufficient (matching the JSON scaffold's rendering of the same data).
+/// Render the string values of a JSON array as a TOML inline array.
 fn toml_string_array(values: &[serde_json::Value]) -> String {
-    let items: Vec<String> = values
+    let items: Vec<&str> = values
         .iter()
         .filter_map(serde_json::Value::as_str)
-        .map(|s| format!("\"{s}\""))
         .collect();
-    format!("[{}]", items.join(", "))
+    fallow_config::toml_string_array(&items)
 }
 
 /// Build a TOML config string tailored to the detected project.

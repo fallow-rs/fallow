@@ -34,6 +34,7 @@
 
 mod config;
 mod config_inputs;
+mod config_value_writer;
 mod config_writer;
 mod external_plugin;
 /// Extglob groups, such as `!(*.spec)`, rewritten for `globset`.
@@ -56,6 +57,7 @@ pub mod yaml;
 
 pub use config::*;
 pub use config_inputs::*;
+pub use config_value_writer::*;
 pub use config_writer::*;
 pub use external_plugin::*;
 pub use fixability::*;

@@ -1256,7 +1256,7 @@ fn toml_output_ignore_exports_used_in_file_kind_form() {
         sources: vec!["knip.json".to_string()],
     };
     let output = generate_toml(&result);
-    assert!(output.contains("ignoreExportsUsedInFile = { type = true, interface = false }"));
+    assert!(output.contains("[ignoreExportsUsedInFile]"));
     let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
     assert!(!config.ignore_exports_used_in_file.suppresses(false));
     assert!(config.ignore_exports_used_in_file.suppresses(true));
@@ -1443,4 +1443,80 @@ fn knip_notes_fit_eighty_columns_with_the_docs_url_on_its_own_line() {
             );
         }
     }
+}
+
+#[test]
+fn toml_output_keeps_include_entry_exports() {
+    let knip: serde_json::Value =
+        serde_json::from_str(r#"{"entry": ["src/index.ts"], "includeEntryExports": true}"#)
+            .unwrap();
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_knip(&knip, &mut config_map, &mut warnings);
+    let result = MigrationResult {
+        config: serde_json::Value::Object(config_map),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert!(config.include_entry_exports, "{output}");
+}
+
+#[test]
+fn toml_output_keeps_jscpd_weak_mode_normalization() {
+    let jscpd: serde_json::Value = serde_json::from_str(r#"{"mode": "weak"}"#).unwrap();
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_jscpd(&jscpd, &mut config_map, &mut warnings);
+    let result = MigrationResult {
+        config: serde_json::Value::Object(config_map),
+        warnings: vec![],
+        sources: vec![".jscpd.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    assert!(output.contains("[duplicates.normalization]"), "{output}");
+    assert!(output.contains("ignoreStringValues = false"), "{output}");
+    toml::from_str::<fallow_config::FallowConfig>(&output).unwrap();
+}
+
+#[test]
+fn toml_and_jsonc_output_hold_the_same_settings() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "entry": ["src/index.ts"],
+            "supportEntry": ["scripts/build.ts"],
+            "ignoreBinaries": ["tsc"],
+            "includeEntryExports": true,
+            "ignoreExports": [{"file": "src/a.ts", "exports": ["*"]}],
+            "overrides": [{"files": ["src/b.ts"], "rules": {"unused-files": "off"}}],
+            "workspaces": {"settings": {"packages/a": {"ignoreDependencies": ["lodash"]}}},
+            "duplicates": {"mode": "weak", "normalization": {"ignoreStringValues": false}}
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let parsed: serde_json::Value = toml::from_str(&generate_toml(&result)).unwrap();
+    assert_eq!(parsed, result.config);
+}
+
+#[test]
+fn toml_output_clamps_jscpd_count_above_i64_max() {
+    let jscpd: serde_json::Value =
+        serde_json::from_str(r#"{"minTokens": 18446744073709551615}"#).unwrap();
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_jscpd(&jscpd, &mut config_map, &mut warnings);
+    let result = MigrationResult {
+        config: serde_json::Value::Object(config_map),
+        warnings: vec![],
+        sources: vec![".jscpd.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert_eq!(
+        u64::try_from(config.duplicates.min_tokens).unwrap(),
+        u64::try_from(i64::MAX).unwrap(),
+        "{output}"
+    );
 }

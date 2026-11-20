@@ -215,11 +215,23 @@ pub fn save_baseline_to_config_with_identity(
     baseline.analysis_identity = analysis_identity.clone();
     let is_toml = config_path.extension().is_some_and(|ext| ext == "toml");
 
-    let updated = if is_toml {
-        Ok(update_toml_regression(&content, &baseline))
+    let format = if is_toml {
+        fallow_config::ConfigFormat::Toml
     } else {
-        update_json_regression(&content, &baseline)
-    }
+        fallow_config::ConfigFormat::Json
+    };
+    let value = serde_json::to_value(&baseline).map_err(|e| {
+        emit_input_error(
+            &format!("failed to serialize regression baseline: {e}"),
+            output,
+        )
+    })?;
+    let updated = fallow_config::set_config_value_in_string(
+        &content,
+        format,
+        &["regression", "baseline"],
+        &value,
+    )
     .map_err(|e| {
         emit_input_error(
             &format!(
@@ -250,268 +262,6 @@ pub fn save_baseline_to_config_with_identity(
         config_path.display()
     );
     Ok(())
-}
-
-/// Update a JSONC config file with regression baseline, preserving comments.
-/// Find a JSON key in content, skipping `//` line comments and `/* */` block comments.
-/// Returns the byte offset of the opening `"` of the key.
-fn find_json_key(content: &str, key: &str) -> Option<usize> {
-    let needle = format!("\"{key}\"");
-    let mut search_from = 0;
-    while let Some(pos) = content[search_from..].find(&needle) {
-        let abs_pos = search_from + pos;
-        let line_start = content[..abs_pos].rfind('\n').map_or(0, |i| i + 1);
-        let line_prefix = content[line_start..abs_pos].trim_start();
-        if line_prefix.starts_with("//") {
-            search_from = abs_pos + needle.len();
-            continue;
-        }
-        let before = &content[..abs_pos];
-        let last_open = before.rfind("/*");
-        let last_close = before.rfind("*/");
-        if let Some(open_pos) = last_open
-            && last_close.is_none_or(|close_pos| close_pos < open_pos)
-        {
-            search_from = abs_pos + needle.len();
-            continue;
-        }
-        return Some(abs_pos);
-    }
-    None
-}
-
-/// Replace an existing `"regression": { ... }` object whose key starts at
-/// `key_start`. Returns `Ok(None)` when the key is not followed by an object
-/// (caller falls back to append), `Err` on an unmatched brace.
-fn replace_json_regression_object(
-    content: &str,
-    key_start: usize,
-    regression_block: &str,
-) -> Result<Option<String>, String> {
-    let after_key = &content[key_start..];
-    let Some(brace_start) = after_key.find('{') else {
-        return Ok(None);
-    };
-    let abs_brace = key_start + brace_start;
-    let mut depth = 0;
-    let mut end = abs_brace;
-    let mut found_close = false;
-    for (i, ch) in content[abs_brace..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = abs_brace + i + 1;
-                    found_close = true;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    if !found_close {
-        return Err("malformed JSON: unmatched brace in regression object".to_string());
-    }
-    let mut result = String::new();
-    result.push_str(&content[..key_start]);
-    result.push_str(&regression_block[2..]); // skip leading two spaces: reuse original indent
-    result.push_str(&content[end..]);
-    Ok(Some(result))
-}
-
-fn update_json_regression(
-    content: &str,
-    baseline: &fallow_config::RegressionBaseline,
-) -> Result<String, String> {
-    let baseline_json =
-        serde_json::to_string_pretty(baseline).map_err(|e| format!("serialization error: {e}"))?;
-
-    let indented: String = baseline_json
-        .lines()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == 0 {
-                format!("    {line}")
-            } else {
-                format!("\n    {line}")
-            }
-        })
-        .collect();
-
-    let regression_block = format!("  \"regression\": {{\n    \"baseline\": {indented}\n  }}");
-
-    if let Some(start) = find_json_key(content, "regression")
-        && let Some(replaced) = replace_json_regression_object(content, start, &regression_block)?
-    {
-        return Ok(replaced);
-    }
-
-    if let Some(last_brace) = content.rfind('}') {
-        let before_brace = content[..last_brace].trim_end();
-        let needs_comma = !before_brace.ends_with('{') && !before_brace.ends_with(',');
-
-        let mut result = String::new();
-        result.push_str(before_brace);
-        if needs_comma {
-            result.push(',');
-        }
-        result.push('\n');
-        result.push_str(&regression_block);
-        result.push('\n');
-        result.push_str(&content[last_brace..]);
-        Ok(result)
-    } else {
-        Err("config file has no closing brace".to_string())
-    }
-}
-
-/// Update a TOML config file with regression baseline.
-fn update_toml_regression(content: &str, baseline: &fallow_config::RegressionBaseline) -> String {
-    let section = render_toml_regression_section(baseline);
-    splice_toml_regression_section(content, &section)
-}
-
-/// Render the `[regression.baseline]` TOML section body from the baseline.
-fn render_toml_regression_section(baseline: &fallow_config::RegressionBaseline) -> String {
-    let mut section = String::from("[regression.baseline]\n");
-    render_toml_core_baseline_fields(&mut section, baseline);
-    render_toml_unused_dependency_baseline_fields(&mut section, baseline);
-    render_toml_member_baseline_fields(&mut section, baseline);
-    render_toml_import_dependency_baseline_fields(&mut section, baseline);
-    render_toml_graph_baseline_fields(&mut section, baseline);
-    render_toml_usage_dependency_baseline_fields(&mut section, baseline);
-    section
-}
-
-fn render_toml_core_baseline_fields(
-    section: &mut String,
-    baseline: &fallow_config::RegressionBaseline,
-) {
-    use std::fmt::Write;
-    let _ = writeln!(section, "totalIssues = {}", baseline.total_issues);
-    let _ = writeln!(section, "unusedFiles = {}", baseline.unused_files);
-    let _ = writeln!(section, "unusedExports = {}", baseline.unused_exports);
-    let _ = writeln!(section, "unusedTypes = {}", baseline.unused_types);
-}
-
-fn render_toml_unused_dependency_baseline_fields(
-    section: &mut String,
-    baseline: &fallow_config::RegressionBaseline,
-) {
-    use std::fmt::Write;
-    let _ = writeln!(
-        section,
-        "unusedDependencies = {}",
-        baseline.unused_dependencies
-    );
-    let _ = writeln!(
-        section,
-        "unusedDevDependencies = {}",
-        baseline.unused_dev_dependencies
-    );
-    let _ = writeln!(
-        section,
-        "unusedOptionalDependencies = {}",
-        baseline.unused_optional_dependencies
-    );
-}
-
-fn render_toml_member_baseline_fields(
-    section: &mut String,
-    baseline: &fallow_config::RegressionBaseline,
-) {
-    use std::fmt::Write;
-    let _ = writeln!(
-        section,
-        "unusedEnumMembers = {}",
-        baseline.unused_enum_members
-    );
-    let _ = writeln!(
-        section,
-        "unusedClassMembers = {}",
-        baseline.unused_class_members
-    );
-}
-
-fn render_toml_import_dependency_baseline_fields(
-    section: &mut String,
-    baseline: &fallow_config::RegressionBaseline,
-) {
-    use std::fmt::Write;
-    let _ = writeln!(
-        section,
-        "unresolvedImports = {}",
-        baseline.unresolved_imports
-    );
-    let _ = writeln!(
-        section,
-        "unlistedDependencies = {}",
-        baseline.unlisted_dependencies
-    );
-    let _ = writeln!(section, "unlistedBinaries = {}", baseline.unlisted_binaries);
-}
-
-fn render_toml_graph_baseline_fields(
-    section: &mut String,
-    baseline: &fallow_config::RegressionBaseline,
-) {
-    use std::fmt::Write;
-    let _ = writeln!(section, "duplicateExports = {}", baseline.duplicate_exports);
-    let _ = writeln!(
-        section,
-        "circularDependencies = {}",
-        baseline.circular_dependencies
-    );
-}
-
-fn render_toml_usage_dependency_baseline_fields(
-    section: &mut String,
-    baseline: &fallow_config::RegressionBaseline,
-) {
-    use std::fmt::Write;
-    let _ = writeln!(
-        section,
-        "typeOnlyDependencies = {}",
-        baseline.type_only_dependencies
-    );
-    let _ = writeln!(
-        section,
-        "testOnlyDependencies = {}",
-        baseline.test_only_dependencies
-    );
-    let _ = writeln!(
-        section,
-        "devDependenciesInProduction = {}",
-        baseline.dev_dependencies_in_production
-    );
-}
-
-/// Replace an existing `[regression.baseline]` section in `content`, or append
-/// the rendered `section` when none is present.
-fn splice_toml_regression_section(content: &str, section: &str) -> String {
-    if let Some(start) = content.find("[regression.baseline]") {
-        let after = &content[start + "[regression.baseline]".len()..];
-        let end_offset = after.find("\n[").map_or(content.len(), |i| {
-            start + "[regression.baseline]".len() + i + 1
-        });
-
-        let mut result = String::new();
-        result.push_str(&content[..start]);
-        result.push_str(section);
-        if end_offset < content.len() {
-            result.push_str(&content[end_offset..]);
-        }
-        result
-    } else {
-        let mut result = content.to_string();
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
-        result.push('\n');
-        result.push_str(section);
-        result
-    }
 }
 
 /// Build the human-readable schema-version mismatch message. Factored out so
@@ -782,115 +532,6 @@ mod tests {
     use fallow_types::output_dead_code::*;
     use fallow_types::results::*;
     use std::path::PathBuf;
-
-    fn sample_baseline() -> fallow_config::RegressionBaseline {
-        fallow_config::RegressionBaseline {
-            total_issues: 5,
-            unused_files: 2,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn json_insert_into_empty_object() {
-        let result = update_json_regression("{}", &sample_baseline()).unwrap();
-        assert!(result.contains("\"regression\""));
-        assert!(result.contains("\"totalIssues\": 5"));
-        serde_json::from_str::<serde_json::Value>(&result).unwrap();
-    }
-
-    #[test]
-    fn json_insert_into_existing_config() {
-        let config = r#"{
-  "entry": ["src/main.ts"],
-  "production": true
-}"#;
-        let result = update_json_regression(config, &sample_baseline()).unwrap();
-        assert!(result.contains("\"regression\""));
-        assert!(result.contains("\"entry\""));
-        serde_json::from_str::<serde_json::Value>(&result).unwrap();
-    }
-
-    #[test]
-    fn json_replace_existing_regression() {
-        let config = r#"{
-  "entry": ["src/main.ts"],
-  "regression": {
-    "baseline": {
-      "totalIssues": 99
-    }
-  }
-}"#;
-        let result = update_json_regression(config, &sample_baseline()).unwrap();
-        assert!(!result.contains("99"));
-        assert!(result.contains("\"totalIssues\": 5"));
-        serde_json::from_str::<serde_json::Value>(&result).unwrap();
-    }
-
-    #[test]
-    fn json_skips_regression_in_comment() {
-        let config = "{\n  // See \"regression\" docs\n  \"entry\": []\n}";
-        let result = update_json_regression(config, &sample_baseline()).unwrap();
-        assert!(result.contains("\"regression\":"));
-        assert!(result.contains("\"entry\""));
-    }
-
-    #[test]
-    fn json_malformed_brace_returns_error() {
-        let config = r#"{ "regression": { "baseline": { "totalIssues": 1 }"#;
-        let result = update_json_regression(config, &sample_baseline());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn toml_insert_into_empty() {
-        let result = update_toml_regression("", &sample_baseline());
-        assert!(result.contains("[regression.baseline]"));
-        assert!(result.contains("totalIssues = 5"));
-    }
-
-    #[test]
-    fn toml_insert_after_existing_content() {
-        let config = "[rules]\nunused-files = \"warn\"\n";
-        let result = update_toml_regression(config, &sample_baseline());
-        assert!(result.contains("[rules]"));
-        assert!(result.contains("[regression.baseline]"));
-        assert!(result.contains("totalIssues = 5"));
-    }
-
-    #[test]
-    fn toml_replace_existing_section() {
-        let config =
-            "[regression.baseline]\ntotalIssues = 99\n\n[rules]\nunused-files = \"warn\"\n";
-        let result = update_toml_regression(config, &sample_baseline());
-        assert!(!result.contains("99"));
-        assert!(result.contains("totalIssues = 5"));
-        assert!(result.contains("[rules]"));
-    }
-
-    #[test]
-    fn find_json_key_basic() {
-        assert_eq!(find_json_key(r#"{"foo": 1}"#, "foo"), Some(1));
-    }
-
-    #[test]
-    fn find_json_key_skips_comment() {
-        let content = "{\n  // \"foo\" is important\n  \"bar\": 1\n}";
-        assert_eq!(find_json_key(content, "foo"), None);
-        assert!(find_json_key(content, "bar").is_some());
-    }
-
-    #[test]
-    fn find_json_key_not_found() {
-        assert_eq!(find_json_key("{}", "missing"), None);
-    }
-
-    #[test]
-    fn find_json_key_skips_block_comment() {
-        let content = "{\n  /* \"foo\": old value */\n  \"foo\": 1\n}";
-        let pos = find_json_key(content, "foo").unwrap();
-        assert!(content[pos..].starts_with("\"foo\": 1"));
-    }
 
     #[test]
     fn chrono_now_format() {
@@ -1167,78 +808,67 @@ mod tests {
     }
 
     #[test]
-    fn json_insert_with_trailing_comma() {
-        let config = r#"{
-  "entry": ["src/main.ts"],
-}"#;
-        let result = update_json_regression(config, &sample_baseline()).unwrap();
-        assert!(result.contains("\"regression\""));
+    fn save_to_json_config_keeps_an_object_after_a_regression_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &config_path,
+            r#"{"ignorePatterns": ["regression"], "rules": {"unused-files": "warn"}}"#,
+        )
+        .unwrap();
+
+        let counts = CheckCounts {
+            total_issues: 7,
+            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+        };
+        save_baseline_to_config(&config_path, &counts, OutputFormat::Human).unwrap();
+
+        let content = std::fs::read_to_string(&config_path).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(saved["rules"], serde_json::json!({"unused-files": "warn"}));
+        assert_eq!(saved["ignorePatterns"], serde_json::json!(["regression"]));
+        assert_eq!(saved["regression"]["baseline"]["totalIssues"], 7);
     }
 
     #[test]
-    fn json_no_closing_brace_returns_error() {
-        let result = update_json_regression("", &sample_baseline());
-        assert!(result.is_err());
-    }
+    fn save_to_toml_config_round_trips_the_identity_and_all_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("fallow.toml");
+        std::fs::write(&config_path, "[rules]\nunused-files = \"warn\"\n").unwrap();
 
-    #[test]
-    fn json_nested_regression_object_replaced_correctly() {
-        let config = r#"{
-  "regression": {
-    "baseline": {
-      "totalIssues": 99,
-      "unusedFiles": 10
-    },
-    "tolerance": "5%"
-  },
-  "entry": ["src/main.ts"]
-}"#;
-        let result = update_json_regression(config, &sample_baseline()).unwrap();
-        assert!(!result.contains("99"));
-        assert!(result.contains("\"totalIssues\": 5"));
-        assert!(result.contains("\"entry\""));
-    }
-
-    #[test]
-    fn toml_content_without_trailing_newline() {
-        let config = "[rules]\nunused-files = \"warn\"";
-        let result = update_toml_regression(config, &sample_baseline());
-        assert!(result.contains("[regression.baseline]"));
-        assert!(result.contains("[rules]"));
-    }
-
-    #[test]
-    fn toml_replace_section_not_at_end() {
-        let config = "[regression.baseline]\ntotalIssues = 99\nunusedFiles = 10\n\n[rules]\nunused-files = \"warn\"\n";
-        let result = update_toml_regression(config, &sample_baseline());
-        assert!(!result.contains("99"));
-        assert!(result.contains("totalIssues = 5"));
-        assert!(result.contains("[rules]"));
-        assert!(result.contains("unused-files = \"warn\""));
-    }
-
-    #[test]
-    fn toml_replace_section_at_end() {
-        let config =
-            "[rules]\nunused-files = \"warn\"\n\n[regression.baseline]\ntotalIssues = 99\n";
-        let result = update_toml_regression(config, &sample_baseline());
-        assert!(!result.contains("99"));
-        assert!(result.contains("totalIssues = 5"));
-        assert!(result.contains("[rules]"));
-    }
-
-    #[test]
-    fn find_json_key_multiple_same_keys() {
-        let content = r#"{"foo": 1, "bar": {"foo": 2}}"#;
-        let pos = find_json_key(content, "foo").unwrap();
-        assert_eq!(pos, 1);
-    }
-
-    #[test]
-    fn find_json_key_in_nested_comment_then_real() {
-        let content = "{\n  // \"entry\": old\n  /* \"entry\": also old */\n  \"entry\": []\n}";
-        let pos = find_json_key(content, "entry").unwrap();
-        assert!(content[pos..].starts_with("\"entry\": []"));
+        let identity = fallow_types::semantic::SemanticAnalysisIdentity {
+            mode: fallow_types::semantic::SemanticAnalysisMode::TypeAware,
+            ..fallow_types::semantic::SemanticAnalysisIdentity::syntactic()
+        };
+        let counts = CheckCounts {
+            total_issues: 5,
+            boundary_violations: 3,
+            policy_violations: 2,
+            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+        };
+        save_baseline_to_config_with_identity(
+            &config_path,
+            &counts,
+            OutputFormat::Human,
+            &identity,
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(&config_path).unwrap();
+        let config: fallow_config::FallowConfig = toml::from_str(&content).unwrap();
+        let loaded = config.regression.unwrap().baseline.unwrap();
+        assert_eq!(loaded.analysis_identity, identity);
+        assert_eq!(loaded.boundary_violations, 3);
+        assert_eq!(loaded.policy_violations, 2);
+        assert!(
+            ensure_regression_identity(
+                &loaded.analysis_identity,
+                &identity,
+                &config_path,
+                OutputFormat::Human,
+                "dead-code",
+            )
+            .is_ok()
+        );
     }
 
     fn make_opts(
