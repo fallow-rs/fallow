@@ -1,0 +1,6 @@
+{
+  "name": "issue-4824-whole-object-same-name-local",
+  "version": "1.0.0",
+  "main": "src/main.ts",
+  "exports": { ".": "./src/main.ts", "./partial": "./src/partial.ts" }
+}
