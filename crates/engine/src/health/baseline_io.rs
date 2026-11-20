@@ -5,9 +5,7 @@
     reason = "health baseline save/load preserves existing human stderr notes"
 )]
 
-use crate::baseline::{
-    BaselineStalenessWarning, HealthBaselineData, HealthBaselineMode, filter_new_health_findings,
-};
+use crate::baseline::{BaselineStalenessWarning, HealthBaselineData, HealthBaselineMode};
 
 use super::HealthError;
 
@@ -187,8 +185,9 @@ pub(super) fn load_health_baseline(
     }
     let baseline_entries = baseline.finding_entry_count();
     let before = findings.len();
-    let overlap = baseline.overlap_entries(findings, root, mode);
-    *findings = filter_new_health_findings(std::mem::take(findings), &baseline, root, mode);
+    let compared = baseline.compare(std::mem::take(findings), root, mode);
+    let overlap = compared.overlap;
+    *findings = compared.new_findings;
     if !quiet {
         eprintln!(
             "Comparing against health baseline: {}",
