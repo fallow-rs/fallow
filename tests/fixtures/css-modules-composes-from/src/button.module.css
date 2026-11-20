@@ -1,0 +1,5 @@
+.primary {
+  composes: base rounded from "./shared.module.css";
+  composes: helper from global;
+  color: white;
+}

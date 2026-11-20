@@ -296,6 +296,8 @@ mod computed_enum_key_members;
 mod config_file_loading;
 #[path = "integration_test/create_require_inline.rs"]
 mod create_require_inline;
+#[path = "integration_test/css_modules_composes_from.rs"]
+mod css_modules_composes_from;
 #[path = "integration_test/css_modules_unused.rs"]
 mod css_modules_unused;
 #[path = "integration_test/dev_dep_in_prod.rs"]
