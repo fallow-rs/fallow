@@ -1793,7 +1793,7 @@ fn circular_deps_grouped_by_hub() {
 fn summary_footer_uses_short_labels() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let footer = build_summary_footer(&results, 0, 0);
+    let footer = build_summary_footer(&results);
     assert!(footer.contains("1 file"));
     assert!(footer.contains("1 export"));
     assert!(footer.contains("1 circular"));
@@ -1814,7 +1814,7 @@ fn summary_footer_counts_misconfigured_dependency_overrides() {
             line: 3,
         }),
     );
-    assert!(build_summary_footer(&results, 0, 0).contains("1 misconfigured dependency override"));
+    assert!(build_summary_footer(&results).contains("1 misconfigured dependency override"));
 }
 
 #[test]
@@ -1841,7 +1841,7 @@ fn summary_footer_singularizes_pre_pluralized_labels_for_count_1() {
             kind: MemberKind::ClassMethod,
         }),
     );
-    let footer = build_summary_footer(&results, 0, 0);
+    let footer = build_summary_footer(&results);
     assert!(
         footer.contains("1 enum member"),
         "Expected '1 enum member' but got: {footer}"
@@ -1877,13 +1877,13 @@ fn summary_footer_pluralizes_noun_before_trailing_qualifier() {
     let mut results = AnalysisResults::default();
     push_dev_dependency_in_production(&mut results, "vitest");
     assert_eq!(
-        build_summary_footer(&results, 0, 0),
+        build_summary_footer(&results),
         "1 dev dependency in production"
     );
 
     push_dev_dependency_in_production(&mut results, "tinyspy");
     assert_eq!(
-        build_summary_footer(&results, 0, 0),
+        build_summary_footer(&results),
         "2 dev dependencies in production"
     );
 }

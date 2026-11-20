@@ -104,6 +104,10 @@ impl std::fmt::Display for EntryPointSource {
             Self::PackageJsonModule => f.write_str("package.json module"),
             Self::PackageJsonExports => f.write_str("package.json exports"),
             Self::PackageJsonBin => f.write_str("package.json bin"),
+            Self::PackageJsonTypes => f.write_str("package.json types"),
+            Self::PackageJsonTypings => f.write_str("package.json typings"),
+            Self::PackageJsonSource => f.write_str("package.json source"),
+            Self::PackageJsonBrowser => f.write_str("package.json browser"),
             Self::PackageJsonScript { .. } => f.write_str("package.json script"),
             Self::Plugin { name } => write!(f, "{name}"),
             Self::TestFile => f.write_str("test file"),
@@ -147,6 +151,14 @@ pub enum EntryPointSource {
     PackageJsonExports,
     /// The `bin` field in package.json.
     PackageJsonBin,
+    /// The `types` field in package.json.
+    PackageJsonTypes,
+    /// The `typings` field in package.json.
+    PackageJsonTypings,
+    /// The `source` field in package.json.
+    PackageJsonSource,
+    /// The `browser` field in package.json.
+    PackageJsonBrowser,
     /// A script command in package.json.
     PackageJsonScript {
         /// The key of the script in `scripts`, e.g. `build`.
@@ -220,6 +232,22 @@ mod tests {
         assert_eq!(
             EntryPointSource::PackageJsonBin.to_string(),
             "package.json bin"
+        );
+        assert_eq!(
+            EntryPointSource::PackageJsonTypes.to_string(),
+            "package.json types"
+        );
+        assert_eq!(
+            EntryPointSource::PackageJsonTypings.to_string(),
+            "package.json typings"
+        );
+        assert_eq!(
+            EntryPointSource::PackageJsonSource.to_string(),
+            "package.json source"
+        );
+        assert_eq!(
+            EntryPointSource::PackageJsonBrowser.to_string(),
+            "package.json browser"
         );
         assert_eq!(
             EntryPointSource::PackageJsonScript {

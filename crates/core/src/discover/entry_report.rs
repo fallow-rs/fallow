@@ -20,6 +20,10 @@ pub fn summarize_entry_points(entry_points: &[EntryPoint]) -> EntryPointSummary 
             | EntryPointSource::PackageJsonModule
             | EntryPointSource::PackageJsonExports
             | EntryPointSource::PackageJsonBin
+            | EntryPointSource::PackageJsonTypes
+            | EntryPointSource::PackageJsonTypings
+            | EntryPointSource::PackageJsonSource
+            | EntryPointSource::PackageJsonBrowser
             | EntryPointSource::PackageJsonScript { .. } => "package.json",
             EntryPointSource::Plugin { .. } => "plugin",
             EntryPointSource::TestFile => "test file",

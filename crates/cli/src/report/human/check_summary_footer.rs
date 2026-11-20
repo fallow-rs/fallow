@@ -42,26 +42,10 @@ fn count_duplicate_export_pairs(results: &AnalysisResults) -> usize {
 }
 
 /// Appends the unused-code and dependency summary parts.
-fn push_summary_core_parts(
-    parts: &mut Vec<String>,
-    results: &AnalysisResults,
-    suppressed_exports: usize,
-    suppressed_types: usize,
-) {
+fn push_summary_core_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
     push_summary_part(parts, results.unused_files.len(), "file");
-    push_summary_part(
-        parts,
-        results
-            .unused_exports
-            .len()
-            .saturating_sub(suppressed_exports),
-        "export",
-    );
-    push_summary_part(
-        parts,
-        results.unused_types.len().saturating_sub(suppressed_types),
-        "type",
-    );
+    push_summary_part(parts, results.unused_exports.len(), "export");
+    push_summary_part(parts, results.unused_types.len(), "type");
     push_summary_part(
         parts,
         results.private_type_leaks.len(),
@@ -326,17 +310,9 @@ fn push_summary_component_health_parts(parts: &mut Vec<String>, results: &Analys
 }
 
 /// Build a one-line summary footer showing counts per issue type.
-///
-/// `suppressed_exports` / `suppressed_types` are subtracted from the raw
-/// counts so the footer reflects the *visible* items when export suppression
-/// is active (exports from unused files are hidden).
-pub(super) fn build_summary_footer(
-    results: &AnalysisResults,
-    suppressed_exports: usize,
-    suppressed_types: usize,
-) -> String {
+pub(super) fn build_summary_footer(results: &AnalysisResults) -> String {
     let mut parts = Vec::new();
-    push_summary_core_parts(&mut parts, results, suppressed_exports, suppressed_types);
+    push_summary_core_parts(&mut parts, results);
     push_summary_framework_parts(&mut parts, results);
     parts.join(" \u{00b7} ")
 }

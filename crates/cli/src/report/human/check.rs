@@ -561,27 +561,6 @@ fn push_category_header(lines: &mut Vec<String>, label: &str) {
     lines.push(String::new());
 }
 
-/// Insert "(N more in files already reported as unused)" note before the
-/// trailing blank line of a section (so any test/src split annotation stays
-/// last). No-op when `suppressed` is zero.
-fn push_suppressed_count_note(lines: &mut Vec<String>, suppressed: usize) {
-    if suppressed == 0 {
-        return;
-    }
-    let pos = if lines.last().is_some_and(String::is_empty) {
-        lines.len() - 1
-    } else {
-        lines.len()
-    };
-    lines.insert(
-        pos,
-        format!(
-            "  {}",
-            format!("({suppressed} more in files already reported as unused)").dimmed()
-        ),
-    );
-}
-
 /// The compact dimmed parenthetical a finding line carries when a degraded
 /// parse could have distorted its verdict, matching how `(re-export)` and the
 /// other per-finding annotations render. Empty when there is no caveat, so a
@@ -1055,33 +1034,13 @@ struct UnusedCodeSectionInput<'a> {
     total_issues: usize,
 }
 
+/// The "Unused Code" category. The rule pass of the engine already hides the
+/// export and member findings of unused files unless `showCascade` is set,
+/// so this section lists every finding that the results hold.
 fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
-    let unused_file_set: FxHashSet<&Path> = input
-        .results
-        .unused_files
-        .iter()
-        .map(|f| f.file.path.as_path())
-        .collect();
-    let filtered_exports: Vec<UnusedExportFinding> = input
-        .results
-        .unused_exports
-        .iter()
-        .filter(|e| !unused_file_set.contains(e.export.path.as_path()))
-        .cloned()
-        .collect();
-    let filtered_types: Vec<UnusedTypeFinding> = input
-        .results
-        .unused_types
-        .iter()
-        .filter(|e| !unused_file_set.contains(e.export.path.as_path()))
-        .cloned()
-        .collect();
-    let suppressed_exports = input.results.unused_exports.len() - filtered_exports.len();
-    let suppressed_types = input.results.unused_types.len() - filtered_types.len();
-
     let has_unused_code = !input.results.unused_files.is_empty()
-        || !filtered_exports.is_empty()
-        || !filtered_types.is_empty()
+        || !input.results.unused_exports.is_empty()
+        || !input.results.unused_types.is_empty()
         || !input.results.private_type_leaks.is_empty()
         || !input.results.unused_enum_members.is_empty()
         || !input.results.unused_class_members.is_empty()
@@ -1094,13 +1053,7 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
     push_category_header(input.lines, "Unused Code");
 
     push_unused_files_section(input);
-    push_unused_export_sections(
-        input,
-        &filtered_exports,
-        &filtered_types,
-        suppressed_exports,
-        suppressed_types,
-    );
+    push_unused_export_sections(input);
 
     build_unused_member_sections(
         input.lines,
@@ -1147,21 +1100,17 @@ fn push_unused_files_section(input: &mut UnusedCodeSectionInput<'_>) {
 }
 
 /// Renders the unused-export, unused-type, and private-type-leak grouped sections.
-fn push_unused_export_sections(
-    input: &mut UnusedCodeSectionInput<'_>,
-    filtered_exports: &[UnusedExportFinding],
-    filtered_types: &[UnusedTypeFinding],
-    suppressed_exports: usize,
-    suppressed_types: usize,
-) {
-    let has_fixable_export = filtered_exports
+fn push_unused_export_sections(input: &mut UnusedCodeSectionInput<'_>) {
+    let exports = &input.results.unused_exports;
+    let types = &input.results.unused_types;
+    let has_fixable_export = exports
         .iter()
         .flat_map(|finding| &finding.actions)
         .any(fallow_types::output::IssueAction::is_auto_fixable);
     build_human_grouped_section_with_fixability(
         GroupedSectionInput {
             lines: input.lines,
-            items: filtered_exports,
+            items: exports,
             title: "Unused exports",
             level: severity_to_level(input.rules.unused_exports),
             root: input.root,
@@ -1173,19 +1122,16 @@ fn push_unused_export_sections(
         },
         has_fixable_export,
     );
-    push_suppressed_count_note(input.lines, suppressed_exports);
-    insert_test_src_split(input.lines, filtered_exports, input.root, |e| {
-        &e.export.path
-    });
+    insert_test_src_split(input.lines, exports, input.root, |e| &e.export.path);
 
-    let has_fixable_type = filtered_types
+    let has_fixable_type = types
         .iter()
         .flat_map(|finding| &finding.actions)
         .any(fallow_types::output::IssueAction::is_auto_fixable);
     build_human_grouped_section_with_fixability(
         GroupedSectionInput {
             lines: input.lines,
-            items: filtered_types,
+            items: types,
             title: "Unused type exports",
             level: severity_to_level(input.rules.unused_types),
             root: input.root,
@@ -1197,7 +1143,6 @@ fn push_unused_export_sections(
         },
         has_fixable_type,
     );
-    push_suppressed_count_note(input.lines, suppressed_types);
 
     build_human_grouped_section(GroupedSectionInput {
         lines: input.lines,
@@ -3613,7 +3558,7 @@ fn grouped_header_text(
     total: usize,
 ) -> String {
     let issue_word = if total == 1 { "issue" } else { "issues" };
-    let breakdown = build_summary_footer(&group.results, 0, 0);
+    let breakdown = build_summary_footer(&group.results);
     let signals = fallow_api::health_signal_header_part(&group.results);
     let header_text = if breakdown.is_empty() {
         format!("{} ({total} {issue_word}{signals})", group.key)

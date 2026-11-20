@@ -11,25 +11,7 @@ pub(super) fn print_human_footer(input: &PrintHumanInput<'_>, total: usize) {
         return;
     }
 
-    let unused_file_set: FxHashSet<&std::path::Path> = input
-        .results
-        .unused_files
-        .iter()
-        .map(|f| f.file.path.as_path())
-        .collect();
-    let suppressed_exports = input
-        .results
-        .unused_exports
-        .iter()
-        .filter(|e| unused_file_set.contains(e.export.path.as_path()))
-        .count();
-    let suppressed_types = input
-        .results
-        .unused_types
-        .iter()
-        .filter(|e| unused_file_set.contains(e.export.path.as_path()))
-        .count();
-    let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
+    let summary = build_summary_footer(input.results);
     eprintln!(
         "{}",
         super::super::findings_status_line(

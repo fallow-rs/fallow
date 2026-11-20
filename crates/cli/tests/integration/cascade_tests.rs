@@ -256,6 +256,49 @@ fn sarif_run_properties_carry_the_hidden_count() {
     );
 }
 
+/// The human report lists the findings of unused files with `--show-cascade`,
+/// as the JSON report does, and counts them in the summary line. Without the
+/// flag, it hides them and the footer names the flag (issue #4832).
+#[test]
+fn human_output_lists_the_hidden_findings_with_show_cascade() {
+    let root = super::common::fixture_path(FIXTURE);
+    let human = |extra: &[&str]| {
+        let mut args = vec!["--no-cache"];
+        args.extend_from_slice(extra);
+        run_fallow_in_root("dead-code", &root, &args)
+    };
+
+    let hidden = human(&[]);
+    assert!(!hidden.stdout.contains("deadUnused"), "{}", hidden.stdout);
+    assert!(
+        hidden
+            .stderr
+            .contains("4 findings in unused files are hidden \u{00b7} --show-cascade shows them"),
+        "{}",
+        hidden.stderr
+    );
+
+    let shown = human(&["--show-cascade"]);
+    for name in ["deadUsed", "deadUnused", "DeadType"] {
+        assert!(shown.stdout.contains(name), "{name}: {}", shown.stdout);
+    }
+    assert!(
+        !shown.stdout.contains("in files already reported as unused"),
+        "{}",
+        shown.stdout
+    );
+    assert!(!shown.stderr.contains("--show-cascade"), "{}", shown.stderr);
+
+    let json = dead_code_json(&root, &["--show-cascade"]);
+    let exports = json["unused_exports"].as_array().unwrap().len();
+    let summary_exports = format!("{exports} export");
+    assert!(
+        shown.stderr.contains(&summary_exports),
+        "summary must count {exports} exports: {}",
+        shown.stderr
+    );
+}
+
 /// Markdown has no entry for a hidden finding, so one line names the count.
 #[test]
 fn markdown_names_the_hidden_count() {

@@ -175,44 +175,57 @@ impl OrientationHeader<'_> {
 
         let target_count = self.health.report.targets.len();
         let total_issues = self.check.map_or(0, |c| c.results.total_issues());
-        if total_issues > 500 {
-            eprintln!(
-                "{}",
-                format!(
-                    "  {target_count} refactoring target{} \u{2014} try `fallow dead-code --workspace <name>` to scope",
-                    if target_count == 1 { "" } else { "s" },
-                )
-                .dimmed()
-            );
-        } else if let Some(top) = self
-            .health
-            .report
-            .targets
-            .iter()
-            .find(|t| !is_non_production_path(&t.path, self.root))
-        {
-            let file_name = report::format_display_path(&top.path, self.root);
-            eprintln!(
-                "{}",
-                format!(
-                    "  {target_count} refactoring target{} \u{2014} start with {file_name} ({})",
-                    if target_count == 1 { "" } else { "s" },
-                    top.category.label()
-                )
-                .dimmed()
-            );
+        let start = if total_issues > SCOPE_HINT_ISSUE_THRESHOLD {
+            None
         } else {
-            eprintln!(
-                "{}",
-                format!(
-                    "  {target_count} refactoring target{}",
-                    if target_count == 1 { "" } else { "s" },
-                )
-                .dimmed()
-            );
-        }
+            self.health
+                .report
+                .targets
+                .iter()
+                .find(|t| !is_non_production_path(&t.path, self.root))
+                .map(|top| {
+                    (
+                        report::format_display_path(&top.path, self.root),
+                        top.category.label(),
+                    )
+                })
+        };
+        let line = target_hint_line(
+            target_count,
+            total_issues,
+            start.as_ref().map(|(file, label)| (file.as_str(), *label)),
+        );
+        eprintln!("{}", line.dimmed());
     }
 }
+
+/// Above this issue count the target hint suggests a workspace scope instead
+/// of one file to start with.
+const SCOPE_HINT_ISSUE_THRESHOLD: usize = 500;
+
+/// Text of the refactoring-target hint. `start` is the display path and the
+/// category label of the first production target, when one exists.
+fn target_hint_line(
+    target_count: usize,
+    total_issues: usize,
+    start: Option<(&str, &str)>,
+) -> String {
+    let plural = if target_count == 1 { "" } else { "s" };
+    if total_issues > SCOPE_HINT_ISSUE_THRESHOLD {
+        return format!(
+            "  {target_count} refactoring target{plural}: try `fallow dead-code --workspace <name>` to scope"
+        );
+    }
+    match start {
+        Some((file_name, label)) => {
+            format!("  {target_count} refactoring target{plural}: start with {file_name} ({label})")
+        }
+        None => format!("  {target_count} refactoring target{plural}"),
+    }
+}
+
+/// Warning that the combined report prints when no entry point was found.
+const NO_ENTRY_POINTS_WARNING: &str = "  \u{26a0} No entry points detected. Exports may appear unused. Run: fallow list --entry-points";
 
 /// Directory names of sample, benchmark and snapshot code. These paths are
 /// not tests, but they are also no good start for a refactor.
@@ -278,11 +291,7 @@ pub fn print_entry_point_summary(results: &fallow_types::results::AnalysisResult
         return;
     };
     if summary.total == 0 {
-        eprintln!(
-            "{}",
-            "  \u{26a0} No entry points detected \u{2014} exports may appear unused. Run: fallow list --entry-points"
-                .yellow()
-        );
+        eprintln!("{}", NO_ENTRY_POINTS_WARNING.yellow());
         return;
     }
     use std::fmt::Write as _;
@@ -300,4 +309,38 @@ pub fn print_entry_point_summary(results: &fallow_types::results::AnalysisResult
         let _ = write!(line, " ({})", parts.join(", "));
     }
     eprintln!("{}", line.dimmed());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NO_ENTRY_POINTS_WARNING, target_hint_line};
+
+    #[test]
+    fn orientation_messages_use_no_em_dash() {
+        let messages = [
+            target_hint_line(3, 900, None),
+            target_hint_line(3, 10, Some(("src/big.ts", "high complexity"))),
+            target_hint_line(1, 10, None),
+            NO_ENTRY_POINTS_WARNING.to_string(),
+        ];
+        for message in &messages {
+            assert!(
+                !message.contains('\u{2014}'),
+                "orientation message contains U+2014: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn target_hint_line_names_scope_or_start_file() {
+        assert_eq!(
+            target_hint_line(3, 900, Some(("src/a.ts", "complexity"))),
+            "  3 refactoring targets: try `fallow dead-code --workspace <name>` to scope"
+        );
+        assert_eq!(
+            target_hint_line(1, 10, Some(("src/a.ts", "complexity"))),
+            "  1 refactoring target: start with src/a.ts (complexity)"
+        );
+        assert_eq!(target_hint_line(2, 10, None), "  2 refactoring targets");
+    }
 }
