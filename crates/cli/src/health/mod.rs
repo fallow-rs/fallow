@@ -268,17 +268,8 @@ pub fn load_health_config_in(
 ///
 /// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
 /// `pre_computed_duplication` is a duplication report over the same files and
-/// duplicates config; health then skips its own duplicate detection.
-pub fn execute_health_with_shared_parse(
-    opts: &HealthOptions<'_>,
-    shared: HealthSharedParseData,
-    pre_computed_duplication: Option<fallow_engine::duplicates::DuplicationReport>,
-) -> Result<HealthResult, ExitCode> {
-    execute_health_with_shared_parse_in(opts, shared, pre_computed_duplication, None)
-}
-
-/// [`execute_health_with_shared_parse`] with the health analysis of a
-/// resolved run.
+/// duplicates config; health then skips its own duplicate detection. `run`
+/// is the health analysis of a resolved run; `None` loads the config.
 pub fn execute_health_with_shared_parse_in(
     opts: &HealthOptions<'_>,
     shared: HealthSharedParseData,
@@ -286,6 +277,24 @@ pub fn execute_health_with_shared_parse_in(
     run: Option<Runnable<'_>>,
 ) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config_in(opts, run)?;
+    execute_health_with_shared_parse_and_config(
+        opts,
+        shared,
+        pre_computed_duplication,
+        config,
+        config_ms,
+    )
+}
+
+/// [`execute_health_with_shared_parse_in`] with a config that the caller loaded
+/// through [`load_health_config_in`]. `config_ms` is the time of that load.
+pub fn execute_health_with_shared_parse_and_config(
+    opts: &HealthOptions<'_>,
+    shared: HealthSharedParseData,
+    pre_computed_duplication: Option<fallow_engine::duplicates::DuplicationReport>,
+    config: fallow_config::ResolvedConfig,
+    config_ms: f64,
+) -> Result<HealthResult, ExitCode> {
     let scope_inputs = build_health_scope_inputs(opts, &config, &shared.files)?;
     let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
     let workspaces = shared.workspaces;
