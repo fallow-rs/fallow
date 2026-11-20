@@ -11,6 +11,7 @@ use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
 use crate::check::resolve_workspace_scope;
 use crate::report;
 use crate::{error::emit_input_error, exit_codes::INVALID_INPUT, load_config_for_analysis};
+use fallow_engine::workspace_scope::WorkspaceScope;
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum DupesMode {
@@ -363,22 +364,20 @@ fn filter_dupes_report(
         None if opts.use_shared_diff_index => crate::report::ci::diff_filter::shared_diff_index(),
         None => None,
     };
-    let mut ws_roots = resolve_workspace_scope(
+    let ws_roots = resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         &config.workspace_patterns,
         opts.output,
     )?;
-    if let Some(scope) = opts.scope.as_ref() {
-        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
-    }
+    let ws_roots = WorkspaceScope::with_root(ws_roots, opts.scope.as_ref());
     fallow_engine::duplicates::apply_scope(
         report,
         &fallow_engine::duplicates::DuplicationScope {
             changes: Some(change_scope),
             diff: diff_index,
-            workspace_roots: ws_roots.as_deref(),
+            workspace_roots: ws_roots.as_ref(),
         },
         &config.root,
     );
@@ -2751,7 +2750,7 @@ mod tests {
         let mut report = make_report(vec![group], 10, 1000);
         let roots = vec![PathBuf::from("/p/packages/ui")];
 
-        filter_by_workspaces(&mut report, &roots, Path::new("/p"));
+        filter_by_workspaces(&mut report, &roots.into(), Path::new("/p"));
 
         assert_eq!(report.clone_groups.len(), 1);
         assert_eq!(
@@ -2774,7 +2773,7 @@ mod tests {
         let mut report = make_report(vec![group], 10, 1000);
         let roots = vec![PathBuf::from("/p/packages/ui")];
 
-        filter_by_workspaces(&mut report, &roots, Path::new("/p"));
+        filter_by_workspaces(&mut report, &roots.into(), Path::new("/p"));
 
         assert!(report.clone_groups.is_empty());
     }
@@ -2811,7 +2810,7 @@ mod tests {
             PathBuf::from("/p/packages/api"),
         ];
 
-        filter_by_workspaces(&mut report, &roots, Path::new("/p"));
+        filter_by_workspaces(&mut report, &roots.into(), Path::new("/p"));
 
         assert_eq!(
             report.clone_groups.len(),
@@ -2826,7 +2825,7 @@ mod tests {
         let mut report = make_report(vec![group], 10, 1000);
         let roots: Vec<PathBuf> = vec![];
 
-        filter_by_workspaces(&mut report, &roots, Path::new("/p"));
+        filter_by_workspaces(&mut report, &roots.into(), Path::new("/p"));
 
         assert!(report.clone_groups.is_empty());
     }

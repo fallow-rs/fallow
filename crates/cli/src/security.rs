@@ -992,16 +992,15 @@ fn apply_security_scopes(
     workspace_patterns: &[String],
     analysis: &mut SecurityAnalysisState,
 ) -> Result<(), ExitCode> {
-    let mut ws_roots = crate::check::filtering::resolve_workspace_scope(
+    let ws_roots = crate::check::filtering::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         workspace_patterns,
         opts.output,
     )?;
-    if let Some(scope) = opts.scope.as_ref() {
-        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
-    }
+    let ws_roots =
+        fallow_engine::workspace_scope::WorkspaceScope::with_root(ws_roots, opts.scope.as_ref());
     if let Some(ref roots) = ws_roots {
         crate::check::filtering::filter_to_workspaces(&mut analysis.results, roots);
     }

@@ -894,7 +894,7 @@ fn apply_scope_filters(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
     results: &mut AnalysisResults,
-    ws_roots: Option<&Vec<std::path::PathBuf>>,
+    ws_roots: Option<&fallow_engine::workspace_scope::WorkspaceScope>,
     change_scope: &fallow_engine::change_scope::ChangeScope,
 ) {
     let diff_index = match opts.diff_index {
@@ -906,7 +906,7 @@ fn apply_scope_filters(
     fallow_engine::dead_code::apply_scope(
         results,
         &fallow_engine::dead_code::DeadCodeScope {
-            workspace_roots: ws_roots.map(Vec::as_slice),
+            workspace_roots: ws_roots,
             changes: Some(change_scope),
             diff: diff_index.map(|index| (index, opts.root)),
             files: files.as_ref(),
@@ -1178,16 +1178,15 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let mut config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
     validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
-    let mut ws_roots = filtering::resolve_workspace_scope(
+    let ws_roots = filtering::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         &config.workspace_patterns,
         opts.output,
     )?;
-    if let Some(scope) = opts.scope.as_ref() {
-        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
-    }
+    let ws_roots =
+        fallow_engine::workspace_scope::WorkspaceScope::with_root(ws_roots, opts.scope.as_ref());
 
     let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> =
         opts.changed_since.and_then(|git_ref| {

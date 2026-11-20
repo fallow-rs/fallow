@@ -20,7 +20,7 @@ pub(super) struct FileLinesInput<'a> {
     pub(super) config_root: &'a std::path::Path,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) threshold_resolver: &'a ThresholdOverrideResolver,
 }
 
@@ -47,9 +47,7 @@ pub(super) fn append_file_lines_findings(
             || input
                 .changed_files
                 .is_some_and(|changed| !changed.contains(path))
-            || input
-                .ws_roots
-                .is_some_and(|roots| !roots.iter().any(|root| path.starts_with(root)))
+            || input.ws_roots.is_some_and(|roots| !roots.contains(path))
         {
             continue;
         }

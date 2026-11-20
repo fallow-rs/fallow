@@ -741,7 +741,7 @@ fn css_computation_3d_with_filters(
     files: &[DiscoveredFile],
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     output_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
 ) -> CssAnalyticsComputation {
     let config = config_at(root);
     let modules: Vec<fallow_types::extract::ModuleInfo> = files

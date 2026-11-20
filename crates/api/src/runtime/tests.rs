@@ -1727,7 +1727,7 @@ fn workspace_scope_keeps_a_clone_group_whole_when_one_instance_is_in_scope() {
 
     fallow_engine::duplicates::filter_to_workspaces(
         &mut report,
-        &[root.join("packages/app")],
+        &vec![root.join("packages/app")].into(),
         &root,
     );
 

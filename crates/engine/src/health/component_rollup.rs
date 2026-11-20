@@ -49,7 +49,7 @@ pub(super) struct ComponentTemplateUnitScope<'a> {
     pub(super) config_root: &'a Path,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<PathBuf>>,
-    pub(super) ws_roots: Option<&'a [PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
 }
 
 /// Collect every in-scope synthetic `<template>` unit, keyed by its component
@@ -112,7 +112,7 @@ fn template_module_in_scope(path: &Path, scope: &ComponentTemplateUnitScope<'_>)
         return false;
     }
     if let Some(ws) = scope.ws_roots
-        && !ws.iter().any(|root| path.starts_with(root))
+        && !ws.contains(path)
     {
         return false;
     }

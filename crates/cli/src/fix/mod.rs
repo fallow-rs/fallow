@@ -245,7 +245,7 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
     // The report hides these findings, so `fix` offers no fix for them.
     fallow_engine::dead_code::hide_cascade_findings(&mut results, &config);
     if let Some(scope) = opts.scope.as_ref() {
-        fallow_engine::dead_code::filter_to_workspaces(&mut results, std::slice::from_ref(scope));
+        fallow_engine::dead_code::filter_to_workspaces(&mut results, &vec![scope.clone()].into());
     }
 
     if results.total_issues() == 0 {

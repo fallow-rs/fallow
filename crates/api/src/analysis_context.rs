@@ -8,7 +8,7 @@ use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_engine::change_scope::{
     ChangeScope, ChangeScopeOwner, ChangeScopeRequest, PackageBaselineCache,
 };
-use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
+use fallow_engine::workspace_scope::{WorkspaceScope, WorkspaceScopeError, WorkspaceScopeMode};
 use fallow_output::{DiffIndex, MAX_DIFF_BYTES, RequestName, RequestOutcome, RequestOutcomes};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::FxHashSet;
@@ -649,7 +649,7 @@ pub fn validate_workspace_selection(
 pub fn workspace_roots_for_session(
     resolved: &ProgrammaticAnalysisContext,
     workspaces: &[WorkspaceInfo],
-) -> ProgrammaticResult<Option<Vec<PathBuf>>> {
+) -> ProgrammaticResult<Option<WorkspaceScope>> {
     resolve_workspace_scope_from_workspaces(
         &resolved.root,
         resolved.workspace.as_deref(),
@@ -663,8 +663,8 @@ fn resolve_workspace_scope_from_workspaces(
     workspace: Option<&[String]>,
     changed_workspaces: Option<&str>,
     workspaces: &[WorkspaceInfo],
-) -> ProgrammaticResult<Option<Vec<PathBuf>>> {
-    fallow_engine::workspace_scope::resolve_workspace_scope_roots(
+) -> ProgrammaticResult<Option<WorkspaceScope>> {
+    fallow_engine::workspace_scope::resolve_workspace_scope(
         root,
         workspace,
         changed_workspaces,

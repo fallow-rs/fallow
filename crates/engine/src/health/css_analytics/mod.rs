@@ -39,7 +39,7 @@ pub(super) struct HealthScanCtx<'a> {
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
 }
 
 /// Session-owned styling inputs that can be reused by health, audit, and future
@@ -769,7 +769,7 @@ fn read_markup_scan_source(
         return None;
     }
     if let Some(roots) = ws_roots
-        && !roots.iter().any(|root| path.starts_with(root))
+        && !roots.contains(path)
     {
         return None;
     }

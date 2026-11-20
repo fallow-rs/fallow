@@ -55,7 +55,7 @@ pub(super) struct HealthFindingsInput<'a> {
         &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) diff_index: Option<&'a fallow_output::DiffIndex>,
     pub(super) enforce_crap: bool,
     /// Run-wide override resolver, constructed once in
@@ -176,7 +176,7 @@ struct HealthCrapMergeContext<'a> {
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     enforce_crap: bool,
     score_output: Option<&'a scoring::FileScoreOutput>,
     config_root: &'a std::path::Path,
@@ -315,7 +315,7 @@ pub(super) fn annotate_outstanding_dimensions(
 fn should_emit_no_match_threshold_overrides(
     opts: &HealthOptions<'_>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&[std::path::PathBuf]>,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
     diff_index: Option<&fallow_output::DiffIndex>,
 ) -> bool {
     opts.changed_since.is_none()

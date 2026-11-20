@@ -16,7 +16,7 @@ pub(super) struct LargeFunctionInput<'a> {
     pub(super) config_root: &'a std::path::Path,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(super) thresholds: &'a super::threshold_overrides::ThresholdOverrideResolver,
 }
 
@@ -47,7 +47,7 @@ pub(super) fn collect_large_functions(
             continue;
         }
         if let Some(ws) = input.ws_roots
-            && !ws.iter().any(|r| path.starts_with(r))
+            && !ws.contains(path)
         {
             continue;
         }

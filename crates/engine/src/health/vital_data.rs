@@ -44,7 +44,7 @@ pub struct HealthVitalDataInput<'a> {
     pub(crate) config: &'a ResolvedConfig,
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    pub(crate) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(crate) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     pub(crate) diff_index: Option<&'a fallow_output::DiffIndex>,
     pub(crate) needs_file_scores: bool,
     /// Run-wide override resolver from `prepare_health_core_sections`, reused
@@ -270,7 +270,7 @@ struct FilteredLargeFunctionInput<'a> {
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
-    ws_roots: Option<&'a [std::path::PathBuf]>,
+    ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     diff_index: Option<&'a fallow_output::DiffIndex>,
     threshold_resolver: &'a super::threshold_overrides::ThresholdOverrideResolver,
 }

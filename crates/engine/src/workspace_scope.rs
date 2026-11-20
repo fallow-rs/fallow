@@ -150,21 +150,6 @@ pub fn resolve_workspace_scope(
     }
 }
 
-/// The selected roots of [`resolve_workspace_scope`].
-///
-/// # Errors
-///
-/// Returns the error of [`resolve_workspace_scope`].
-pub fn resolve_workspace_scope_roots(
-    root: &Path,
-    workspace: Option<&[String]>,
-    changed_workspaces: Option<&str>,
-    workspaces: &[WorkspaceInfo],
-) -> Result<Option<Vec<PathBuf>>, WorkspaceScopeError> {
-    resolve_workspace_scope(root, workspace, changed_workspaces, workspaces)
-        .map(|scope| scope.map(|scope| scope.roots().to_vec()))
-}
-
 /// Resolve explicit workspace filters against known workspace metadata.
 ///
 /// # Errors
