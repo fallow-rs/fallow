@@ -4655,16 +4655,11 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
-)]
 fn audit_dupes_only_materializes_groups_touching_changed_files() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let root_path = tmp
-        .path()
-        .canonicalize()
-        .expect("temp root should canonicalize");
+    // The audit names files under the `dunce` spelling of the root, without
+    // the Windows `\\?\` verbatim prefix that `std::fs::canonicalize` adds.
+    let root_path = dunce::canonicalize(tmp.path()).expect("temp root should canonicalize");
     let root = root_path.as_path();
     fs::create_dir_all(root.join("src")).expect("src dir should be created");
     fs::write(
