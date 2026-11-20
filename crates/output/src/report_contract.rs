@@ -219,7 +219,7 @@ pub fn coverage_setup_meta() -> Value {
             "files_to_edit": "Compatibility copy of the primary member's files, with workspace prefixes when the primary member is not the root.",
             "snippets": "Compatibility copy of the primary member's snippets, with workspace prefixes when the primary member is not the root.",
             "dockerfile_snippet": "Environment snippet for file-system capture in containerized Node runtimes, or null when not applicable.",
-            "commands": "Package-manager commands needed to install the runtime beacon and sidecar packages.",
+            "commands": "Package-manager commands needed to install the runtime beacon and the runtime coverage add-on.",
             "next_steps": "Ordered setup workflow after applying the emitted snippets.",
             "warnings": "Actionable setup caveats discovered while building the recipe.",
             "cloud": "Fallow Cloud plan, present only with --cloud. With --cloud the snippets send coverage over HTTP with the deployed commit SHA and the production origin.",

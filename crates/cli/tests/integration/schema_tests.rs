@@ -183,9 +183,19 @@ fn explain_accepts_security_catalogue_ids() {
     assert_eq!(json["id"].as_str(), Some("security/sql-injection"));
     assert_eq!(json["name"].as_str(), Some("SQL injection sink"));
     assert!(
-        json["rationale"]
+        json["summary"]
             .as_str()
             .is_some_and(|s| s.contains("CWE-89"))
+    );
+    assert!(
+        json["rationale"]
+            .as_str()
+            .is_some_and(|s| s.contains("parses the string as SQL"))
+    );
+    assert!(
+        json["example"]
+            .as_str()
+            .is_some_and(|s| s.contains("db.query("))
     );
 
     let output = run_fallow_raw(&["explain", "security/ssrf", "--format", "json", "--quiet"]);

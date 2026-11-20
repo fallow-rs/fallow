@@ -92,7 +92,7 @@ pub enum EmailMode {
     /// a known list of org emails can be brute-forced into a rainbow table.
     /// Use in regulated environments where even local-parts are sensitive.
     Anonymized,
-    /// Legacy spelling for [`EmailMode::Anonymized`].
+    /// Older spelling of `anonymized`.
     Hash,
 }
 

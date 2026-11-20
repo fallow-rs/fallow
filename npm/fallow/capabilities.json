@@ -99,22 +99,6 @@
       ]
     },
     {
-      "name": "--no-cache",
-      "type": "bool",
-      "required": false,
-      "description": "Disable incremental caching",
-      "possible_values": [
-        "true",
-        "false"
-      ]
-    },
-    {
-      "name": "--threads",
-      "type": "string",
-      "required": false,
-      "description": "Number of parser threads"
-    },
-    {
       "name": "--changed-since",
       "type": "string",
       "required": false,
@@ -268,16 +252,6 @@
       "description": "Keep only the matching groups of a `--group-by` health run. Accepts exact group keys, glob patterns, and `!`-prefixed negations. Values can be comma-separated or repeated. Project-level sections are not filtered. Supported by `fallow health` only"
     },
     {
-      "name": "--performance",
-      "type": "bool",
-      "required": false,
-      "description": "Show pipeline performance timing breakdown",
-      "possible_values": [
-        "true",
-        "false"
-      ]
-    },
-    {
       "name": "--explain",
       "type": "bool",
       "required": false,
@@ -321,7 +295,7 @@
       "name": "--fail-on-issues",
       "type": "bool",
       "required": false,
-      "description": "Exit 1 on issues, also where the default is 0: bare json, sarif, codeclimate and dupes",
+      "description": "Exit 1 on issues, also where the default is 0: `dupes`, and bare `fallow` in the json, sarif, codeclimate, GitHub, comment and review formats",
       "possible_values": [
         "true",
         "false"
@@ -651,6 +625,32 @@
       "possible_values": [
         "best-effort",
         "complete"
+      ]
+    },
+    {
+      "name": "--no-cache",
+      "type": "bool",
+      "required": false,
+      "description": "Disable incremental caching",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--threads",
+      "type": "string",
+      "required": false,
+      "description": "Number of parser threads"
+    },
+    {
+      "name": "--performance",
+      "type": "bool",
+      "required": false,
+      "description": "Show pipeline performance timing breakdown",
+      "possible_values": [
+        "true",
+        "false"
       ]
     }
   ],
@@ -1101,19 +1101,13 @@
           "name": "--impact-closure",
           "type": "string",
           "required": false,
-          "description": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains; powers the `inspect_target` MCP tool"
+          "description": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains. `fallow inspect` reports the same closure"
         },
         {
           "name": "--symbol-impact",
           "type": "string",
           "required": false,
           "description": "Compute exact-symbol consumers, affected files, and targeted tests"
-        },
-        {
-          "name": "--top",
-          "type": "string",
-          "required": false,
-          "description": "Show only the top N items per category. Human output only: the JSON, SARIF, and CodeClimate envelopes drive exit codes and CI baselines, so they always carry every finding and a consumer slices the arrays itself"
         },
         {
           "name": "--file",
@@ -1126,6 +1120,12 @@
           "type": "string",
           "required": false,
           "description": "Only report the findings with these `finding_id` values. Repeat the flag or pass a comma-separated list. Ids stay the same under every filter. The JSON output adds `finding_id_query`: a missing id means \"resolved\" only when `conclusive` is true"
+        },
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the top N items per category. Human output only: the JSON, SARIF, and CodeClimate envelopes drive exit codes and CI baselines, so they always carry every finding and a consumer slices the arrays itself"
         },
         {
           "name": "path",
@@ -1207,7 +1207,7 @@
           "name": "--no-clear",
           "type": "bool",
           "required": false,
-          "description": "Don't clear the screen between re-analyses",
+          "description": "Do not clear the screen between re-analyses",
           "possible_values": [
             "true",
             "false"
@@ -1217,7 +1217,7 @@
     },
     {
       "name": "type-aware",
-      "description": "Inspect the optional TypeScript semantic companion",
+      "description": "Inspect the optional type-aware companion for TypeScript semantic analysis",
       "flags": []
     },
     {
@@ -1317,7 +1317,7 @@
           "name": "--concurrency",
           "type": "string",
           "required": false,
-          "description": "The number of companion processes (default: half the logical cores)"
+          "description": "The number of mutation runner processes (default: half the logical cores)"
         },
         {
           "name": "--runtime",
@@ -1395,7 +1395,7 @@
           "name": "--typecheck",
           "type": "bool",
           "required": false,
-          "description": "Type-check each survived mutant through the `--type-aware` companion. A survivor that does not type-check becomes `compile_error` and leaves the score. An optional-chaining or nullish-fallback survivor on a receiver whose type excludes `null` and `undefined` gets an advisory `equivalence_hint`. Its status and the score do not change",
+          "description": "Type-check each survived mutant through the type-aware companion. A survivor that does not type-check becomes `compile_error` and leaves the score. An optional-chaining or nullish-fallback survivor on a receiver whose type excludes `null` and `undefined` gets an advisory `equivalence_hint`. Its status and the score do not change",
           "possible_values": [
             "true",
             "false"
@@ -1493,7 +1493,7 @@
           "name": "--symbol-chain",
           "type": "bool",
           "required": false,
-          "description": "OPT-IN: also attach the best-effort symbol-level call chain (`fallow trace`) as the `symbol_chain` evidence section. Only meaningful for a `--symbol` target. Default off (best-effort, syntactic, OFF the ranked path)",
+          "description": "Opt-in: also attach the best-effort symbol-level call chain (`fallow trace`) as the `symbol_chain` evidence section. Only meaningful for a `--symbol` target. Default off (best-effort, syntactic, not part of the ranked brief)",
           "possible_values": [
             "true",
             "false"
@@ -1503,7 +1503,7 @@
           "name": "--churn",
           "type": "bool",
           "required": false,
-          "description": "OPT-IN: attach target-level git churn evidence from the health hotspot subsystem. Default off to avoid git-history latency",
+          "description": "Opt-in: attach target-level git churn evidence from the health hotspot subsystem. Default off to avoid git-history latency",
           "possible_values": [
             "true",
             "false"
@@ -1513,7 +1513,7 @@
           "name": "--cloud",
           "type": "bool",
           "required": false,
-          "description": "OPT-IN: attach Fallow Cloud production evidence for a `--file` target as the `cloud` evidence section: calls, errors, CPU and never-run branches per function. The API key is $FALLOW_API_KEY, else the key that `fallow cloud login` stored. A missing key, a plan gate or an unreachable cloud is a section status, never a failed run",
+          "description": "Opt-in: attach Fallow Cloud production evidence for a `--file` target as the `cloud` evidence section: calls, errors, CPU and never-run branches per function. The API key is $FALLOW_API_KEY, else the key that `fallow cloud login` stored. A missing key, a plan gate or an unreachable cloud is a section status, never a failed run",
           "possible_values": [
             "true",
             "false"
@@ -1534,7 +1534,7 @@
     },
     {
       "name": "trace",
-      "description": "Trace a symbol's call chain, or the shortest import path between two modules (best-effort, syntactic; OFF the ranked path)",
+      "description": "Trace a symbol's call chain, or the shortest import path between two modules (best-effort, syntactic; not part of the ranked brief)",
       "flags": [
         {
           "name": "symbol",
@@ -1596,7 +1596,7 @@
           "name": "--callers",
           "type": "bool",
           "required": false,
-          "description": "Walk UP to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked",
+          "description": "Walk up to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked",
           "possible_values": [
             "true",
             "false"
@@ -1606,7 +1606,7 @@
           "name": "--callees",
           "type": "bool",
           "required": false,
-          "description": "Walk DOWN to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked",
+          "description": "Walk down to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked",
           "possible_values": [
             "true",
             "false"
@@ -1944,7 +1944,7 @@
           "name": "path",
           "type": "string",
           "required": false,
-          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
+          "description": "Limit the listed files, entry points and entry weights to this file or directory (default: whole project). Fallow still builds the full graph"
         }
       ]
     },
@@ -1961,7 +1961,7 @@
           "name": "--mode",
           "type": "string",
           "required": false,
-          "description": "Detection mode: strict, mild, weak, or semantic (defaults to the value in `.fallowrc.jsonc`, or `mild` if unset)",
+          "description": "Detection mode: strict, mild, weak, or semantic (defaults to the value in the config file, or `mild` if unset)",
           "possible_values": [
             "strict",
             "mild",
@@ -1983,25 +1983,19 @@
           "name": "--min-tokens",
           "type": "string",
           "required": false,
-          "description": "Minimum token count for a clone (defaults to the value in `.fallowrc.jsonc`, or `50` if unset)"
+          "description": "Minimum token count for a clone (defaults to the value in the config file, or `50` if unset)"
         },
         {
           "name": "--min-lines",
           "type": "string",
           "required": false,
-          "description": "Minimum line count for a clone (defaults to the value in `.fallowrc.jsonc`, or `5` if unset)"
+          "description": "Minimum line count for a clone (defaults to the value in the config file, or `5` if unset)"
         },
         {
           "name": "--min-occurrences",
           "type": "string",
           "required": false,
-          "description": "Minimum number of occurrences before a clone group is reported. Raise to focus on widespread copy-paste worth refactoring and skip pair-only clones. (defaults to the value in `.fallowrc.jsonc`, or `2` if unset)"
-        },
-        {
-          "name": "--threshold",
-          "type": "string",
-          "required": false,
-          "description": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in `.fallowrc.jsonc`, or `0` if unset)"
+          "description": "Minimum number of occurrences before a clone group is reported. Raise to focus on widespread copy-paste worth refactoring and skip pair-only clones. (defaults to the value in the config file, or `2` if unset)"
         },
         {
           "name": "--skip-local",
@@ -2086,6 +2080,12 @@
           "description": "Trace the clones at a location (`FILE:LINE`, for example `src/utils.ts:42`) or the clone group of a fingerprint (`dup:<fingerprint>`, for example `dup:f42424e8`)"
         },
         {
+          "name": "--threshold",
+          "type": "string",
+          "required": false,
+          "description": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in the config file, or `0` if unset)"
+        },
+        {
           "name": "path",
           "type": "string",
           "required": false,
@@ -2122,25 +2122,6 @@
           "description": "Maximum physical lines per file (overrides config `health.maxFileLines`, default 0 = off). A longer file is reported as a complexity finding with `exceeded: \"file_lines\"`"
         },
         {
-          "name": "--top",
-          "type": "string",
-          "required": false,
-          "description": "Show only the N most complex functions"
-        },
-        {
-          "name": "--sort",
-          "type": "string",
-          "required": false,
-          "description": "Sort by: cyclomatic (default), cognitive, lines, or severity",
-          "default": "cyclomatic",
-          "possible_values": [
-            "severity",
-            "cyclomatic",
-            "cognitive",
-            "lines"
-          ]
-        },
-        {
           "name": "--complexity",
           "type": "bool",
           "required": false,
@@ -2158,6 +2139,25 @@
           "possible_values": [
             "true",
             "false"
+          ]
+        },
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the N most complex functions"
+        },
+        {
+          "name": "--sort",
+          "type": "string",
+          "required": false,
+          "description": "Sort by: cyclomatic (default), cognitive, lines, or severity",
+          "default": "cyclomatic",
+          "possible_values": [
+            "severity",
+            "cyclomatic",
+            "cognitive",
+            "lines"
           ]
         },
         {
@@ -2359,13 +2359,13 @@
           "name": "--min-observation-volume",
           "type": "string",
           "required": false,
-          "description": "Minimum total trace volume before the sidecar allows high-confidence `safe_to_delete` / `review_required` verdicts. Below this the sidecar caps confidence at `medium` to protect against overconfident verdicts on new or low-traffic services. Omit to use the sidecar's spec default (5000)"
+          "description": "Minimum total trace volume before the runtime coverage add-on gives high-confidence `safe_to_delete` / `review_required` verdicts. Below this, the add-on caps confidence at `medium` to protect against overconfident verdicts on new or low-traffic services. Omit to use the add-on default (5000)"
         },
         {
           "name": "--low-traffic-threshold",
           "type": "string",
           "required": false,
-          "description": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the sidecar's spec default (0.001)"
+          "description": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the runtime coverage add-on default (0.001)"
         },
         {
           "name": "path",
@@ -2379,12 +2379,6 @@
       "name": "flags",
       "description": "Detect feature flag patterns in the codebase",
       "flags": [
-        {
-          "name": "--top",
-          "type": "string",
-          "required": false,
-          "description": "Show only the top N flags"
-        },
         {
           "name": "--retirement",
           "type": "bool",
@@ -2449,6 +2443,12 @@
           "type": "string",
           "required": false,
           "description": "Vendor flag export (JSON, read offline) that adds the fully-rolled-out, archived-in-vendor, missing-in-vendor and vendor-only reasons"
+        },
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the top N flags"
         },
         {
           "name": "--max-flag-age",
@@ -2631,13 +2631,13 @@
           "name": "--runtime-coverage",
           "type": "string",
           "required": false,
-          "description": "Runtime coverage input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Runs the `fallow-cov` sidecar inside the audit, so the `hot-path-touched` verdict shows next to the dead-code and complexity findings without a second `fallow health` run in CI. The verdict is informational and does not change the exit code. A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`)"
+          "description": "Runtime coverage input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Runs the runtime coverage add-on inside the audit, so the `hot-path-touched` verdict shows next to the dead-code and complexity findings without a second `fallow health` run in CI. The verdict is informational and does not change the exit code. A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`)"
         },
         {
           "name": "--min-invocations-hot",
           "type": "string",
           "required": false,
-          "description": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set",
+          "description": "Threshold for hot-path classification, passed to the runtime coverage add-on when `--runtime-coverage` is set",
           "default": "100"
         },
         {
@@ -2666,7 +2666,7 @@
           "name": "--brief",
           "type": "bool",
           "required": false,
-          "description": "Render the deterministic review brief instead of the gating audit report. The brief answers \"where do I look?\" rather than \"will CI block this?\", runs the same analysis, and ALWAYS exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format`",
+          "description": "Render the deterministic review brief instead of the gating audit report. The brief answers \"where do I look?\" rather than \"will CI block this?\", runs the same analysis, and always exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format`",
           "possible_values": [
             "true",
             "false"
@@ -2676,14 +2676,14 @@
           "name": "--max-decisions",
           "type": "string",
           "required": false,
-          "description": "Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1). Only consulted on the brief path",
+          "description": "Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the range 3 to 5. Only consulted on the brief path",
           "default": "4"
         },
         {
           "name": "--walkthrough-guide",
           "type": "bool",
           "required": false,
-          "description": "Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`",
+          "description": "Emit the walkthrough guide for an agent: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`",
           "possible_values": [
             "true",
             "false"
@@ -2693,13 +2693,13 @@
           "name": "--walkthrough-file",
           "type": "string",
           "required": false,
-          "description": "Ingest an agent's judgment JSON and POST-VALIDATE it against the LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit (anti-hallucination); refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved); rejects an `action` outside `block`, `address`, `consider`, `fyi` (`invalid-action`). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing and action label are fenced as non-deterministic and never gate or auto-post"
+          "description": "Read the judgment JSON of an agent and check it against the current graph. Rejects any judgment whose `signal_id` fallow did not emit; refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved); rejects an `action` outside `block`, `address`, `consider`, `fyi` (`invalid-action`). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing and action label are fenced as non-deterministic and never gate or auto-post"
         },
         {
           "name": "--walkthrough",
           "type": "bool",
           "required": false,
-          "description": "Render the existing walkthrough guide as a staged HUMAN terminal tour (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`",
+          "description": "Render the existing walkthrough guide as a staged terminal tour for a person (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`",
           "possible_values": [
             "true",
             "false"
@@ -2709,7 +2709,7 @@
           "name": "--mark-viewed",
           "type": "string",
           "required": false,
-          "description": "Record one or more changed files as VIEWED in the local walkthrough viewed-state ledger (`.fallow/walkthrough-state.json`), then render the tour. Files already viewed (and still current) collapse into the Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on render but never deleted. Only consulted on the `--walkthrough` path"
+          "description": "Record one or more changed files as viewed in the local walkthrough viewed-state ledger (`.fallow/walkthrough-state.json`), then render the tour. Files already viewed (and still current) collapse into the Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on render but never deleted. Only consulted on the `--walkthrough` path"
         },
         {
           "name": "--show-cleared",
@@ -2725,7 +2725,7 @@
           "name": "--show-deprioritized",
           "type": "bool",
           "required": false,
-          "description": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path",
+          "description": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is always present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path",
           "possible_values": [
             "true",
             "false"
@@ -2751,13 +2751,13 @@
     },
     {
       "name": "decision-surface",
-      "description": "Surface the consequential structural DECISIONS a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask",
+      "description": "Surface the consequential structural decisions a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask",
       "flags": [
         {
           "name": "--max-decisions",
           "type": "string",
           "required": false,
-          "description": "Cap on the number of surfaced decisions (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1)",
+          "description": "Cap on the number of surfaced decisions (the working-memory limit). Default 4; clamped to the range 3 to 5",
           "default": "4"
         }
       ]
@@ -2811,7 +2811,7 @@
           "name": "--min-invocations-hot",
           "type": "string",
           "required": false,
-          "description": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set",
+          "description": "Threshold for hot-path classification, passed to the runtime coverage add-on when `--runtime-coverage` is set",
           "default": "100"
         },
         {
@@ -2881,7 +2881,18 @@
     {
       "name": "schema",
       "description": "Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format",
-      "flags": []
+      "flags": [
+        {
+          "name": "--cli-reference",
+          "type": "bool",
+          "required": false,
+          "description": "Print the CLI reference instead of the capability manifest: every command and subcommand at each depth with its usage and full help, every option, the exit codes, the environment variables, the output formats and the explanation of each issue type",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
     },
     {
       "name": "ci-template",
@@ -3025,7 +3036,7 @@
           "name": "--no-open",
           "type": "bool",
           "required": false,
-          "description": "Don't open the output file in the browser",
+          "description": "Do not open the output file in the browser",
           "possible_values": [
             "true",
             "false"
@@ -4441,7 +4452,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires the project to declare next",
+      "note": "Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#mixed-client-server-barrels"
@@ -4477,7 +4488,7 @@
       "default_severity": "warn",
       "opt_in": false,
       "frameworks": [],
-      "note": "Requires the project to declare next",
+      "note": "Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#misplaced-directives"
@@ -4523,7 +4534,7 @@
       "rule_id": "fallow/unrendered-component",
       "command": "dead-code",
       "category": "Dead code",
-      "description": "A Vue / Svelte component is reachable through a barrel but rendered nowhere",
+      "description": "A component is reachable through a barrel but rendered nowhere",
       "label": "Unrendered Components",
       "config_key": "unrendered-components",
       "registry_index": 33,
@@ -4991,7 +5002,7 @@
       "rule_id": "fallow/prop-drilling",
       "command": "dead-code",
       "category": "Dead code",
-      "description": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
+      "description": "A React/Preact prop is forwarded unchanged through 2 or more components to a distant consumer",
       "label": "Prop Drilling",
       "config_key": "prop-drilling",
       "registry_index": 60,
@@ -5175,7 +5186,7 @@
       "category": "Health",
       "description": "Function has high cyclomatic complexity",
       "label": null,
-      "config_key": null,
+      "config_key": "complexity-cyclomatic",
       "registry_index": null,
       "aliases": [],
       "lsp": false,
@@ -5190,8 +5201,8 @@
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line complexity",
-      "default_severity": null,
-      "opt_in": null,
+      "default_severity": "error",
+      "opt_in": false,
       "frameworks": [],
       "note": null,
       "license": "free",
@@ -5205,7 +5216,7 @@
       "category": "Health",
       "description": "Function has high cognitive complexity",
       "label": null,
-      "config_key": null,
+      "config_key": "complexity-cognitive",
       "registry_index": null,
       "aliases": [],
       "lsp": false,
@@ -5220,8 +5231,8 @@
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line complexity",
-      "default_severity": null,
-      "opt_in": null,
+      "default_severity": "error",
+      "opt_in": false,
       "frameworks": [],
       "note": null,
       "license": "free",
@@ -5265,7 +5276,7 @@
       "category": "Health",
       "description": "Function has a high CRAP score (complexity combined with low coverage)",
       "label": null,
-      "config_key": null,
+      "config_key": "complexity-crap",
       "registry_index": null,
       "aliases": [],
       "lsp": false,
@@ -5280,8 +5291,8 @@
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line complexity",
-      "default_severity": null,
-      "opt_in": null,
+      "default_severity": "error",
+      "opt_in": false,
       "frameworks": [],
       "note": null,
       "license": "free",
@@ -5295,7 +5306,7 @@
       "category": "Health",
       "description": "File has more lines than the file-length threshold",
       "label": null,
-      "config_key": null,
+      "config_key": "complexity-file-lines",
       "registry_index": null,
       "aliases": [],
       "lsp": false,
@@ -5310,8 +5321,8 @@
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-file complexity",
-      "default_severity": null,
-      "opt_in": null,
+      "default_severity": "error",
+      "opt_in": false,
       "frameworks": [],
       "note": null,
       "license": "free",
@@ -5563,7 +5574,7 @@
       "rule_id": "fallow/runtime-safe-to-delete",
       "command": "health",
       "category": "Health",
-      "description": "Statically unused AND never invoked in production with V8 tracking",
+      "description": "Statically unused and never invoked in production",
       "label": null,
       "config_key": null,
       "registry_index": null,
@@ -5683,7 +5694,7 @@
       "rule_id": "fallow/runtime-coverage",
       "command": "health",
       "category": "Health",
-      "description": "Runtime coverage finding",
+      "description": "Runtime coverage gave no verdict for this function",
       "label": null,
       "config_key": null,
       "registry_index": null,
@@ -7563,19 +7574,19 @@
     "github-summary"
   ],
   "exit_codes": {
-    "0": "Success: no enforced gate failed. Bare fallow in a machine format (json, sarif, codeclimate, the GitHub formats, the comment and review formats) does not enforce findings without --fail-on-issues, so it exits 0 on findings. Read gate_outcomes: status \"fail\" with enforced false is a failing gate that did not set the exit code",
-    "1": "An enforced gate failed, for example error-severity findings (per rules config, or --fail-on-issues promotes warn to error). This is an analysis result, not a tool failure",
-    "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}",
-    "3": "Requested resource unavailable: config --path found no config, or a license is missing, invalid, or beyond its offline hard-fail window",
-    "4": "Runtime coverage sidecar is unavailable, unverifiable, protocol-incompatible, or terminated unexpectedly",
-    "5": "Runtime coverage input could not be prepared or parsed",
-    "6": "Runtime coverage sidecar reported an internal error",
-    "7": "Network or cloud request failed during a license, coverage, or CI operation",
-    "8": "Security gate matched a candidate selected by --gate",
-    "10": "Coverage inventory or static-findings upload input or project validation failed",
-    "11": "Coverage inventory or static-findings upload exceeded the server payload limit",
-    "12": "Coverage inventory or static-findings upload authentication or authorization was rejected",
-    "13": "Coverage inventory or static-findings upload failed after retries or returned another server error"
+    "0": "Success: no enforced gate failed. Bare fallow in a machine format (json, sarif, codeclimate, the GitHub formats, the comment and review formats) does not enforce findings without --fail-on-issues, so it exits 0 on findings. Read gate_outcomes: status \"fail\" with enforced false is a failing gate that did not set the exit code.",
+    "1": "An enforced gate failed, for example error-severity findings (per rules config, or --fail-on-issues promotes warn to error). This is an analysis result, not a tool failure.",
+    "2": "Invalid input or an execution error, for example an invalid config. With --format json, fallow writes the error to stdout as a JSON object with error true, a message and the exit_code.",
+    "3": "Requested resource unavailable: config --path found no config, or a license is missing, invalid, or beyond its offline hard-fail window.",
+    "4": "The runtime coverage add-on is unavailable, unverifiable, protocol-incompatible, or stopped unexpectedly.",
+    "5": "Runtime coverage input could not be prepared or parsed.",
+    "6": "The runtime coverage add-on reported an internal error.",
+    "7": "Network or cloud request failed during a license, coverage, or CI operation.",
+    "8": "Security gate matched a candidate selected by --gate.",
+    "10": "Coverage inventory or static-findings upload input or project validation failed.",
+    "11": "Coverage inventory or static-findings upload exceeded the server payload limit.",
+    "12": "Coverage inventory or static-findings upload authentication or authorization was rejected.",
+    "13": "Coverage inventory or static-findings upload failed after retries or returned another server error."
   },
   "environment_variables": {
     "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge/github-annotations/github-summary). CLI --format flag overrides this.",
@@ -7594,25 +7605,28 @@
     "FALLOW_API_RETRIES": "Maximum HTTP attempts for review-comment reconciliation API calls (default 3).",
     "FALLOW_API_RETRY_DELAY": "Floor delay in seconds between HTTP retry attempts (default 2); a server-supplied Retry-After overrides it on 429 responses.",
     "FALLOW_CACHE_DIR": "Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",
-    "FALLOW_CACHE_MAX_SIZE": "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field.",
+    "FALLOW_CACHE_MAX_SIZE": "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field. When the cache file grows past 80 percent of the cap, fallow drops the least recently used entries until the file is below 60 percent.",
     "FALLOW_PACKAGE_BASELINES": "Set to false, 0, no or off to ignore workspaces.changedSince for every run of the process, like --no-package-baselines.",
     "FALLOW_EXTENDS_TIMEOUT_SECS": "Timeout in seconds for fetching https:// configs referenced via the extends field (default 5).",
     "FALLOW_COVERAGE": "Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage (a NODE_V8_COVERAGE directory or one V8 JSON file) for accurate per-function CRAP scores. CLI --coverage flag overrides this; it wins over the health.coverage config field. Honored by the health, bare fallow, audit, and viz CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage parameter overrides it. Viz reads it through the same precedence and has no coverage flag of its own.",
     "FALLOW_COVERAGE_ROOT": "Absolute coverage-data path prefix for rebasing Istanbul paths in CI or containers. CLI --coverage-root flag overrides this; it wins over the health.coverageRoot config field. Honored by the health, bare fallow, audit, and viz CLI commands and by the MCP audit and check_health tools on both their typed route and their CLI fallback, where the explicit coverage_root parameter overrides it. Viz reads it through the same precedence and has no coverage flag of its own.",
     "FALLOW_MAX_FILE_SIZE": "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
     "FALLOW_TYPE_AWARE": "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
-    "FALLOW_TYPE_AWARE_TIMEOUT_SECS": "Wall clock in seconds allowed for one TypeScript semantic sidecar request (default 120; unset, 0, or a non-numeric value keeps the default). Raise it for very large TypeScript programs, where a semantic query scans the whole program.",
-    "FALLOW_TYPE_AWARE_BACKEND": "Experimental. Type-checker backend for the TypeScript semantic sidecar: typescript-go (default) or tsrs. The tsrs backend needs a tsrs npm package in the supported range of the type-aware protocol manifest, where fallow-type-aware can resolve it. An unknown value makes the type-aware pass unavailable.",
-    "FALLOW_TYPE_AWARE_BIN": "Trusted executable override for the TypeScript semantic refinement sidecar used by dead-code --type-aware. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
+    "FALLOW_TYPE_AWARE_PROJECTS": "The TypeScript project configs of type-aware analysis, separated by the path separator of the platform. The --type-aware-project flag wins over it, and it wins over typeAware.projects.",
+    "FALLOW_TYPE_AWARE_REQUIRE": "The completeness policy of type-aware analysis: best-effort or complete. The --type-aware-require flag wins over it, and it wins over typeAware.require.",
+    "FALLOW_TYPE_AWARE_TIMEOUT_SECS": "Wall clock in seconds allowed for one request to the type-aware companion (default 120; unset, 0, or a non-numeric value keeps the default). Raise it for very large TypeScript programs, where a semantic query scans the whole program.",
+    "FALLOW_TYPE_AWARE_BACKEND": "Experimental. Type-checker backend for the type-aware companion: typescript-go (default) or tsrs. The tsrs backend needs a tsrs npm package in the supported range of the type-aware protocol manifest, where fallow-type-aware can resolve it. An unknown value makes the type-aware pass unavailable.",
+    "FALLOW_TYPE_AWARE_BIN": "Trusted executable override for the type-aware companion that --type-aware runs. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
-    "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
+    "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep). Each cache version keeps only its 32 newest snapshot files.",
     "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+    "FALLOW_CLOCK_EPOCH": "Reference instant in unix seconds for commit recency and ownership staleness. Default: the committer timestamp of HEAD. Set it to compare two checkouts against one fixed instant. An empty or non-numeric value is ignored with a warning.",
     "FALLOW_ROOT": "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
-    "FALLOW_LICENSE": "License JWT (full string) for Fallow Cloud, the paid product; intended for shared CI runners.",
+    "FALLOW_LICENSE": "License JWT (full string) for Fallow Cloud; intended for shared CI runners.",
     "FALLOW_LICENSE_PATH": "File path containing the license JWT.",
     "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS": "Clock-skew tolerance applied to the license JWT's iat claim (default 86400).",
-    "FALLOW_COV_BIN": "Explicit path override for the fallow-cov runtime-coverage sidecar binary.",
-    "FALLOW_COV_BINARY_PATH": "Secondary explicit path override for the fallow-cov sidecar, checked after FALLOW_COV_BIN (air-gapped installs, distro-packaged sidecars, shared Docker images).",
+    "FALLOW_COV_BIN": "Path to the runtime coverage add-on (`fallow-cov`). Fallow checks it before every other location.",
+    "FALLOW_COV_BINARY_PATH": "Second path to the runtime coverage add-on (`fallow-cov`), checked after FALLOW_COV_BIN (air-gapped installs, distro packages, shared Docker images).",
     "FALLOW_RUNTIME_COVERAGE_SOURCE": "Set to cloud to select cloud runtime coverage in fallow coverage analyze without passing --cloud.",
     "FALLOW_REPO": "owner/repo fallback for fallow coverage analyze --cloud and fallow inspect --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
     "FALLOW_API_URL": "Base URL override for Fallow Cloud API calls (license refresh, trial, coverage uploads).",
@@ -7627,14 +7641,19 @@
     "FALLOW_TELEMETRY_DEBUG": "Truthy values alias FALLOW_TELEMETRY=inspect.",
     "FALLOW_AGENT_SOURCE": "Normalized agent vendor for telemetry classification (e.g. claude_code, codex, cursor). Only read when telemetry is on.",
     "DO_NOT_TRACK": "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention).",
-    "FALLOW_BIN": "Path to the fallow binary (used by the fallow-mcp server to spawn the CLI).",
+    "FALLOW_BIN": "Path to the fallow binary that the fallow-mcp server runs. When it is unset, the server runs the `fallow` file next to its own executable, else `fallow` on PATH.",
     "FALLOW_TIMEOUT_SECS": "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120). Raise for long runs like production coverage on large dumps.",
+    "FALLOW_MCP_MAX_OUTPUT_BYTES": "MCP server: response cap in bytes for each tool call (default 1000000, highest 16777216). A larger response is refused with FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT and a narrow list of parameters. The max_output_bytes parameter of a call can only lower this cap.",
     "FALLOW_DIFF_FILE": "MCP server: path to a unified diff that scopes all findings by changed line.",
     "FALLOW_CHANGED_SINCE": "MCP server: git ref that scopes file discovery for analysis tools.",
     "FALLOW_MCP_WARM_SESSION": "MCP server: set to 0, false, off or no to stop typed tool calls from keeping parsed modules in memory between calls (default on).",
     "FALLOW_INTEGRATION_SURFACE": "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
     "FALLOW_MCP_TOOL": "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp.",
-    "FALLOW_LSP_REUSE_SESSION": "Language server: set to 0/false/off/no to load a new project session on each analysis run. By default the server keeps one session per project root between saves and parses only the changed files."
+    "FALLOW_LSP_REUSE_SESSION": "Language server: set to 0/false/off/no to load a new project session on each analysis run. By default the server keeps one session per project root between saves and parses only the changed files.",
+    "FALLOW_GATE_REPORT": "Agent gate script of fallow agent install: path of the full JSON report that the gate writes on a block (default .fallow/gate-report.json). The fallow binary does not read it.",
+    "FALLOW_GATE_OUTPUT": "Agent gate script of fallow agent install: set to json to print the full JSON report on stderr instead of the compact block message. The fallow binary does not read it.",
+    "FALLOW_GATE_MIN_VERSION": "Agent gate script of fallow agent install: lowest fallow version that the gate accepts. Set it to the empty string to disable the check. The fallow binary does not read it.",
+    "FALLOW_GATE_DEBUG": "Agent gate script of fallow agent install: set to a non-empty value to log each command that the gate skips because it is not a git commit or push. The fallow binary does not read it."
   },
   "severity_levels": [
     "error",
@@ -7645,7 +7664,7 @@
     "default_severity": "The rule's severity under zero config (error/warn/off). null means the finding is not gated by a rules.* severity (a metric or command-driven finding, or a security-catalogue row).",
     "opt_in": "true when the rule defaults to off and reports nothing until enabled. Enabling an opt_in rule blindly is the most common way to flood a repo with findings, so treat true as a deliberate decision.",
     "frameworks": "Non-empty ONLY when the rule's DETECTOR self-gates on that framework (it does nothing unless the framework is declared). An EMPTY array does NOT mean the rule is framework-agnostic: many rules are framework-relevant (see the description) yet fire on any matching syntax, so never disable a rule solely because frameworks is empty.",
-    "config_key": "The canonical key under `rules` in the config file, i.e. rules.<config_key>. The `id` is an accepted alias. null for findings that are not configured via a rules.* severity."
+    "config_key": "The canonical key under `rules` in the config file, i.e. rules.<config_key>. The `id` is an accepted alias, except on the complexity and file-length rows. null for findings that are not configured via a rules.* severity of their own."
   },
   "related_schemas": {
     "note": "This manifest lists RULES, capabilities, presets, and the taste catalog. To author a config FILE you also need its shape, which is a separate schema.",
@@ -8465,7 +8484,7 @@
       {
         "name": "get_token_blast_radius",
         "kind": "analysis",
-        "description": "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate",
+        "description": "Design-token blast radius for Tailwind v4 @theme tokens and CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate",
         "cli_command": "fallow health --css --format json --quiet",
         "key_params": [],
         "license": "free",

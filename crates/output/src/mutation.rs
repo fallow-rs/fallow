@@ -320,9 +320,9 @@ pub struct MutationRunnerOutput {
     pub version: String,
     /// The wire protocol version of the companion.
     pub protocol_version: u32,
-    /// The runtime of the companion.
+    /// The runtime of the mutation runner.
     pub runtime: MutationRuntimeOutput,
-    /// The number of companion processes that ran mutants.
+    /// The number of mutation runner processes that ran mutants.
     pub concurrency: usize,
     /// Facts of the runner setup that limit the result, kebab-case.
     /// `typecheck-not-run`: the project config enables the Vitest type-check

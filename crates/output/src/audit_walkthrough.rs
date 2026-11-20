@@ -41,16 +41,16 @@ pub fn is_judgment_action(action: &str) -> bool {
     JUDGMENT_ACTIONS.contains(&action)
 }
 
-/// One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
-/// judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
-/// graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
-/// only a changed REGION ("fallow confirms this region changed") , a strictly
+/// One stable per-hunk change anchor: a changed region the agent may cite as a
+/// judgment anchor in addition to a `signal_id`. Where a `signal_id` anchors a
+/// graph finding ("fallow emitted this exact finding"), a change_anchor anchors
+/// only a changed region ("fallow confirms this region changed") , a strictly
 /// weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
-/// consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
+/// consumer can tell the two apart. Graph/diff-derived; never from prose.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChangeAnchor {
-    /// Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
+    /// Stable, content-addressed id: `chg:<16-hex>` over the file path + the
     /// normalized added text (line numbers are NOT hashed, so an edit above the
     /// hunk or a whitespace-only change does not move the id).
     pub change_anchor: String,
@@ -87,7 +87,7 @@ pub enum TestAdjacency {
 
 /// One directed review unit projected from the graph: a file the change touches,
 /// the concern to check, the out-of-diff consumers it must account for, and the
-/// routed expert. Graph-derived only (routing + impact closure), NEVER from prose.
+/// routed expert. Graph-derived only (routing + impact closure), never from prose.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DirectionUnit {
@@ -97,7 +97,7 @@ pub struct DirectionUnit {
     /// unit's risk signals (impact-closure consumers vs a plain touched file).
     pub concern_lens: String,
     /// Per-unit review-effort budget: the weighted-focus composite score for
-    /// this file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this
+    /// this file. A cloud fan-out spends AI passes/verifiers proportional to this
     /// (higher = review harder); a local single-agent loop can ignore it.
     pub scoring_budget: u32,
     /// Root-relative paths of modules affected by this unit but NOT in the diff
@@ -113,7 +113,7 @@ pub struct DirectionUnit {
 
 /// The review direction artifact: the order to review in, the coherent units,
 /// and per-unit concern lens + out-of-diff + expert. A minimal projection of the
-/// EXISTING graph facts (routing units + impact closure); the full weighted-focus
+/// existing graph facts (routing units + impact closure); the full weighted-focus
 /// engine is a later epic. Graph-derived only (injection-resistant).
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -136,8 +136,8 @@ pub struct AgentSchema {
     /// an optional `concern`, and an optional `action` from the closed
     /// vocabulary.
     pub judgment_shape: &'static str,
-    /// The agent MUST echo this `graph_snapshot_hash` back in its JSON; a
-    /// mismatch on reentry REFUSES the payload as stale.
+    /// The agent must echo this `graph_snapshot_hash` back in its JSON; a
+    /// mismatch on reentry refuses the payload as stale.
     pub echo_field: &'static str,
     /// The anchoring rule name.
     pub anchoring_rule: &'static str,
@@ -232,7 +232,7 @@ pub struct AgentJudgment {
 }
 
 /// One accepted judgment: the real anchored signal passed through with the
-/// agent's framing FENCED as non-deterministic.
+/// agent's framing fenced as non-deterministic.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AcceptedJudgment {
@@ -242,8 +242,8 @@ pub struct AcceptedJudgment {
     /// The fallow-emitted `change_anchor` (verified against the allowlist). Empty
     /// when this judgment was anchored by a `signal_id`.
     pub change_anchor: String,
-    /// Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
-    /// `"change"` (a changed REGION only, the weaker anchor). Lets a consumer
+    /// Which anchor resolved: `"signal"` (a graph finding, the strong anchor) or
+    /// `"change"` (a changed region only, the weaker anchor). Lets a consumer
     /// distinguish a finding-anchored judgment from a region-anchored one rather
     /// than collapsing both into one accepted bucket.
     pub anchor_kind: String,
@@ -302,7 +302,7 @@ pub struct WalkthroughValidation {
     /// The current run's deterministic graph-snapshot hash.
     pub graph_snapshot_hash: String,
     /// `true` when the agent's echoed hash != the current hash (the tree moved):
-    /// the WHOLE payload is refused, `accepted` is empty.
+    /// the whole payload is refused, `accepted` is empty.
     pub stale: bool,
     /// Judgments that cite a real fallow-emitted signal, framing fenced.
     pub accepted: Vec<AcceptedJudgment>,

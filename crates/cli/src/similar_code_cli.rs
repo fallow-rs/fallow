@@ -31,7 +31,7 @@ const MAX_CANDIDATE_INPUT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Subcommand)]
 pub enum SimilarCodeSubcommand {
-    /// Show exact companion and pinned-model readiness without reading project source.
+    /// Show the readiness of the similar-code companion and the pinned model without reading project source.
     Status,
     /// Download and verify the pinned local model after explicit confirmation.
     Setup {

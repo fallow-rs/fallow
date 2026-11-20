@@ -14,8 +14,8 @@ use crate::report::sink::outln;
 pub use fallow_api::{
     AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, MUTATION_RULES, RuleDef,
     RuleGuide, SECURITY_RULES, coverage_analyze_meta, coverage_setup_meta, rule_by_id,
-    rule_by_token, rule_docs_url, rule_guide, rule_severity_key, security_meta,
-    serialize_explain_programmatic_json,
+    rule_by_token, rule_docs_url, rule_guide, rule_has_guide, rule_rationale, rule_severity_key,
+    security_meta, serialize_explain_programmatic_json,
 };
 
 /// Run the standalone explain subcommand.
@@ -79,7 +79,7 @@ fn print_explain_human(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
     println!("{}", rule.short);
     println!();
     println!("{}", "Why it matters".bold());
-    println!("{}", rule.full);
+    println!("{}", rule_rationale(rule));
     println!();
     println!("{}", "Example".bold());
     println!("{}", guide.example);
@@ -105,7 +105,7 @@ fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
     println!();
     println!("## Why it matters");
     println!();
-    println!("{}", rule.full);
+    println!("{}", rule_rationale(rule));
     println!();
     println!("## Example");
     println!();

@@ -424,7 +424,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "get_token_blast_radius",
         kind: "analysis",
-        description: "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate",
+        description: "Design-token blast radius for Tailwind v4 @theme tokens and CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate",
         cli_command: Some("fallow health --css --format json --quiet"),
         key_params: &[],
         license: McpToolLicense::Free,

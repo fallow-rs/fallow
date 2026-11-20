@@ -1199,7 +1199,7 @@ fn check_health_description_mentions_runtime_coverage() {
 }
 
 #[test]
-fn decision_surface_description_frames_solid_3_cap_and_anchoring() {
+fn decision_surface_description_frames_categories_cap_and_anchoring() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "decision_surface").unwrap();
@@ -1207,8 +1207,8 @@ fn decision_surface_description_frames_solid_3_cap_and_anchoring() {
     for expected in [
         "decision-surface",
         "signal_id",
-        "REJECTED",
-        "SOLID-3",
+        "rejected",
+        "clamped to 3-5",
         "coupling-boundary",
         "public-api-contract",
         "dependency",

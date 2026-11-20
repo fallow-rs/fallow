@@ -101,7 +101,7 @@ pub struct VitalSigns {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub coupling_high_pct: Option<f64>,
     /// Number of located prop-drilling chains (React/Preact props forwarded
-    /// unchanged through 3+ pass-through components). `None` unless the opt-in
+    /// unchanged through 2 or more components). `None` unless the opt-in
     /// `prop-drilling` rule is enabled (it defaults to off), so the small capped
     /// penalty and the hotspot surface are dormant by default.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -110,7 +110,7 @@ pub struct VitalSigns {
     /// when no chains were found or the rule is off. Descriptive context only.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub prop_drilling_max_depth: Option<u32>,
-    /// 95th-percentile DISTINCT-PARENTS render fan-in across React/Preact
+    /// 95th-percentile distinct-parent render fan-in across React/Preact
     /// components (the component-graph analogue of `p95_fan_in`, which percentiles
     /// per-FILE module fan-in). `None` on non-React runs. Descriptive
     /// blast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`.
@@ -121,8 +121,8 @@ pub struct VitalSigns {
     /// tunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub render_fan_in_high_pct: Option<f64>,
-    /// The single highest DISTINCT-PARENTS count across all components (the
-    /// headline blast-radius number: the most distinct render LOCATIONS any one
+    /// The single highest distinct-parent count across all components (the
+    /// headline blast-radius number: the most distinct render locations any one
     /// component is rendered from, the honest edit-ripple count). `render_sites`
     /// (incl. repeats) is secondary per-component context, never the headline.
     /// `None` on non-React runs. Descriptive context, no threshold.
@@ -132,7 +132,7 @@ pub struct VitalSigns {
     /// project-relative path + render-site / distinct-parent counts), sorted by
     /// distinct parents (the honest headline axis) descending, tie-broken on
     /// render sites descending, and capped at a small N. Lets a consumer see
-    /// WHICH component carries the headline `max_render_fan_in`, not just the
+    /// which component carries the headline `max_render_fan_in`, not just the
     /// number. Empty (and omitted from JSON) on non-React runs, so the contract
     /// stays byte-identical there. Descriptive blast-radius context, NOT a gate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -172,9 +172,9 @@ pub struct CyclomaticUnitPopulation {
 /// `top_render_fan_in` blast-radius list on [`VitalSigns`].
 ///
 /// The component-graph analogue of a high-fan-in module: `distinct_parents` is
-/// the HEADLINE axis (the honest count of distinct parent components / render
-/// LOCATIONS that render this component), `render_sites` is secondary "incl.
-/// repeats" context (every JSX render SITE, so a single parent rendering one
+/// the headline axis (the honest count of distinct parent components / render
+/// locations that render this component), `render_sites` is secondary "incl.
+/// repeats" context (every JSX render site, so a single parent rendering one
 /// child five times is five sites but one parent). Undercount-safe like the
 /// underlying metric: a child rendered via a JSX spread / dynamic /
 /// member-expression tag resolves to no component, so a true high-fan-in
@@ -188,11 +188,11 @@ pub struct RenderFanInTopComponent {
     /// forward slashes (same serializer the other relativized health paths use).
     #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
-    /// Total JSX render SITES that resolve to this component across the project.
-    /// SECONDARY "incl. repeats" context, not the headline (see `distinct_parents`).
+    /// Total JSX render sites that resolve to this component across the project.
+    /// Secondary "incl. repeats" context, not the headline (see `distinct_parents`).
     pub render_sites: u32,
     /// Distinct `(parent_file, parent_component)` keys that render this component.
-    /// The HEADLINE blast-radius axis: distinct render LOCATIONS.
+    /// The headline blast-radius axis: distinct render locations.
     pub distinct_parents: u32,
 }
 

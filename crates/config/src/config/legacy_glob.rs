@@ -81,9 +81,9 @@ impl LegacyGlobNarrowing {
     pub fn message(&self) -> String {
         let count = self.legacy_only_files.len();
         let (noun, lost) = if count == 1 {
-            ("file", "This file no longer matches")
+            ("file", "This file does not match")
         } else {
-            ("files", "These files no longer match")
+            ("files", "These files do not match")
         };
         let named = self.legacy_only_files[..count.min(NAMED_FILES)].join(", ");
         let files = if count > NAMED_FILES {
@@ -92,10 +92,10 @@ impl LegacyGlobNarrowing {
             named
         };
         format!(
-            "fallow: {} glob \"{}\" matches {count} fewer {noun} than before fallow 3.34.0. A \
-             single \"*\" or \"?\" now matches in one folder level only. {lost}: {files}. To \
+            "fallow: {} glob \"{}\" does not match {count} {noun} in a nested folder. A \
+             single \"*\" or \"?\" matches in one folder level only. {lost}: {files}. To \
              keep the one-level match and stop this warning, write the names in place of \"*\" \
-             or \"?\", for example \"{{name1,name2}}\". To match nested folders again, use \
+             or \"?\", for example \"{{name1,name2}}\". To match nested folders, use \
              \"{}\".",
             self.field, self.pattern, self.suggestion
         )
@@ -470,11 +470,10 @@ mod tests {
         assert_eq!(found[0].suggestion, "**/*.test.ts");
         assert_eq!(
             found[0].message(),
-            "fallow: health.ignore glob \"*.test.ts\" matches 2 fewer files than before fallow \
-             3.34.0. A single \"*\" or \"?\" now matches in one folder level only. These files no \
-             longer match: src/b.test.ts, src/deep/c.test.ts. To keep the one-level match and \
+            "fallow: health.ignore glob \"*.test.ts\" does not match 2 files in a nested folder. A single \"*\" or \"?\" matches in one folder level only. These files do \
+             not match: src/b.test.ts, src/deep/c.test.ts. To keep the one-level match and \
              stop this warning, write the names in place of \"*\" or \"?\", for example \
-             \"{name1,name2}\". To match nested folders again, use \"**/*.test.ts\"."
+             \"{name1,name2}\". To match nested folders, use \"**/*.test.ts\"."
         );
     }
 
@@ -490,11 +489,11 @@ mod tests {
         let found = find_legacy_glob_narrowings(&[group("entry", &["src/*.ts"])], &files);
         assert_eq!(
             found[0].message(),
-            "fallow: entry glob \"src/*.ts\" matches 5 fewer files than before fallow 3.34.0. A \
-             single \"*\" or \"?\" now matches in one folder level only. These files no longer \
+            "fallow: entry glob \"src/*.ts\" does not match 5 files in a nested folder. A \
+             single \"*\" or \"?\" matches in one folder level only. These files do not \
              match: src/a/a.ts, src/b/b.ts, src/c/c.ts, and 2 more. To keep the one-level match \
              and stop this warning, write the names in place of \"*\" or \"?\", for example \
-             \"{name1,name2}\". To match nested folders again, use \"src/**/*.ts\"."
+             \"{name1,name2}\". To match nested folders, use \"src/**/*.ts\"."
         );
     }
 
@@ -505,12 +504,12 @@ mod tests {
         assert!(
             found[0]
                 .message()
-                .contains("matches 1 fewer file than before fallow 3.34.0")
+                .contains("does not match 1 file in a nested folder")
         );
         assert!(
             found[0]
                 .message()
-                .contains("This file no longer matches: src/a/a.ts. To keep")
+                .contains("This file does not match: src/a/a.ts. To keep")
         );
     }
 

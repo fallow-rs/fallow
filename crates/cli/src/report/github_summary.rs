@@ -771,7 +771,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
         SectionSpec {
             name: "Unused class members",
             key: "unused_class_members",
-            header: "Class methods or properties never referenced outside their class.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n",
+            header: "Class methods or properties that no code uses, also not through `this`.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n",
             row: member_row,
         },
         SectionSpec {

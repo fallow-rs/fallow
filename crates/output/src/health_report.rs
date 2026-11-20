@@ -13,7 +13,7 @@ use fallow_types::output_dead_code::PropDrillingChainFinding;
 ///
 /// A section is in [`HealthReport::sections`] when the run computed it and
 /// the report carries its result, also when that result is empty. The value
-/// set is OPEN: a later release can add a section, so a consumer must accept
+/// set is open: a later release can add a section, so a consumer must accept
 /// a token that it does not know.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -68,7 +68,7 @@ pub struct HealthReport {
     /// The sections that this run produced, in a fixed order. A renderer
     /// reads it to tell an empty section from a section that the run did not
     /// produce: `findings` is the complexity list only when `complexity` is
-    /// in this array. The value set is OPEN (see [`HealthSection`]). Absent
+    /// in this array. The value set is open (see [`HealthSection`]). Absent
     /// in an envelope from a fallow version before this member, and on a
     /// report that no health run built.
     #[serde(
@@ -100,7 +100,7 @@ pub struct HealthReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
     /// Located prop-drilling chains (React/Preact props forwarded unchanged
-    /// through 3+ pass-through components). Only present when the opt-in
+    /// through 2 or more components). Only present when the opt-in
     /// `prop-drilling` rule is enabled (it defaults to off). Each entry carries
     /// the source, every pass-through hop, and the consumer with file + line +
     /// component, so CI / an agent can act. Surfaced alongside hotspots as a
@@ -126,8 +126,8 @@ pub struct HealthReport {
     /// Advisory: no health score weight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change_coupling: Option<ChangeCouplingReport>,
-    /// Runtime coverage findings from the paid sidecar (only populated with
-    /// `--runtime-coverage`).
+    /// Runtime coverage findings from the runtime coverage add-on (only
+    /// populated with `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
     /// The join of a saved mutation report with the complexity findings
@@ -170,14 +170,14 @@ pub struct HealthReport {
     /// over-complex selectors, deep nesting). Present only with `--css`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub css_analytics: Option<CssAnalyticsReport>,
-    /// Styling-health score and letter grade: a SECOND health axis derived from
+    /// Styling-health score and letter grade: a second health axis derived from
     /// the CSS analytics (the design-system axis), orthogonal to the JS/TS code
     /// `health_score`. Present only with `--css` (the same condition as
     /// `css_analytics`), so a plain `fallow health` run is byte-unchanged. The
     /// code score is never affected by this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub styling_health: Option<StylingHealth>,
-    /// Advisory STYLING FINDINGS: the graduation of the descriptive css
+    /// Advisory styling findings: the graduation of the descriptive css
     /// candidates into first-class, severity-aware, suppressible findings
     /// surfaced in `fallow audit`. Verdict-neutral by default (the rule defaults
     /// to `warn`); the styling domain's OWN findings collection, not the dead-code

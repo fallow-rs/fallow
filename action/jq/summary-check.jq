@@ -120,7 +120,7 @@ else
     "Enum members never referenced outside their declaration.\n\n| File | Line | Enum | Member |\n|------|-----:|------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unused class members"; "unused_class_members";
-    "Class methods or properties never referenced outside their class.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
+    "Class methods or properties that no code uses, also not through `this`.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
   section("Unused namespace members"; "unused_namespace_members";
     "Exported members of an exported TypeScript namespace that no code reads.\n\n| File | Line | Namespace | Member |\n|------|-----:|-----------|--------|\n";

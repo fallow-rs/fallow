@@ -106,10 +106,10 @@ pub struct CloneSiblingEvidence {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFindingAction {
     /// Action type identifier. A single finding's `actions` array can carry
-    /// MULTIPLE entries of different types: e.g., a finding that exceeded
-    /// both cyclomatic and CRAP at `coverage_tier`: partial will get BOTH
-    /// `increase-coverage` AND `refactor-function`, plus `suppress-line`.
-    /// Consumers that select a single action should treat the FIRST
+    /// multiple entries of different types: e.g., a finding that exceeded
+    /// both cyclomatic and CRAP at `coverage_tier`: partial will get both
+    /// `increase-coverage` and `refactor-function`, plus `suppress-line`.
+    /// Consumers that select a single action should treat the first
     /// non-`suppress-{line,file}` action as primary. `add-tests` is emitted
     /// when CRAP triggered the finding, the function has no test coverage
     /// (`coverage_tier`: none), and full coverage can bring CRAP below
@@ -179,7 +179,7 @@ pub struct HealthFindingAction {
 /// emitted by `build_health_finding_actions`. A single finding's `actions`
 /// array may carry multiple entries of different types: a finding that
 /// exceeded both cyclomatic and CRAP at `coverage_tier: partial` will get
-/// BOTH `increase-coverage` AND `refactor-function`, plus the trailing
+/// both `increase-coverage` and `refactor-function`, plus the trailing
 /// `suppress-line`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -189,7 +189,7 @@ pub enum HealthFindingActionType {
     /// cyclomatic/cognitive triggered the finding, when full coverage
     /// still cannot bring CRAP below `max_crap_threshold`, or as a
     /// secondary action when cyclomatic is within the configured
-    /// `health.crapRefactorBand` of the cyclomatic threshold AND cognitive
+    /// `health.crapRefactorBand` of the cyclomatic threshold and cognitive
     /// is at or above the cognitive floor.
     RefactorFunction,
     /// Add tests for a CRAP-triggered finding whose coverage tier is
@@ -297,7 +297,7 @@ pub enum HotspotActionHeuristic {
 /// declaration site), so a per-line placement hint would have no
 /// referent. Consumers that want the placement metadata should follow
 /// the target's `evidence.complex_functions` back to the matching
-/// `ComplexityViolation` and read placement from THAT action instead.
+/// `ComplexityViolation` and read placement from that action instead.
 ///
 /// [`RefactoringTarget`]: ../../fallow-output/src/health_targets.rs
 #[derive(Debug, Clone, Serialize, Deserialize)]

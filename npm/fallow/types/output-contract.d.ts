@@ -248,7 +248,7 @@ export type UnknownStateRelation = "unknown"
  * ## `auto_fixable` is per-finding, not per action type
  *
  * Every action variant carries an `auto_fixable: bool` field. The value is
- * evaluated PER FINDING, not per action type: the same action type may
+ * evaluated per finding, not per action type: the same action type may
  * appear with `auto_fixable: true` on one finding and `auto_fixable: false`
  * on another, depending on per-instance guards in the `fallow fix` applier.
  * Agents that filter on `auto_fixable: true` must branch on the bool of
@@ -360,7 +360,7 @@ export type EffectiveSeverity = ("error" | "warn")
  *
  * Advisory provenance, in the same spirit as the fix path's
  * `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
- * reasons: a caveat NEVER withholds, reorders, downgrades, or re-severities
+ * reasons: a caveat never withholds, reorders, downgrades, or re-severities
  * the finding, and never changes an exit code. It records that the verdict
  * was computed over an import graph fallow already knows is incomplete, so a
  * reader who sees the finding also sees the caveat instead of having to
@@ -507,7 +507,7 @@ export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
  * One channel that narrows a run, or that differs between a run and a saved
  * baseline.
  *
- * Serialized as kebab-case inside `scope_reasons` and published as an OPEN
+ * Serialized as kebab-case inside `scope_reasons` and published as an open
  * set, the same tolerate-unknown contract `gate_outcomes` keys carry: a name
  * this build does not emit means "some narrowing", not an error.
  *
@@ -523,7 +523,7 @@ export type ScopeReason = ("diff" | "changed-since" | "package-baselines" | "cha
 /**
  * One reason why a missing id does not prove that the finding is gone.
  *
- * Serialized as kebab-case inside `inconclusive_reasons`. The set is OPEN: a
+ * Serialized as kebab-case inside `inconclusive_reasons`. The set is open: a
  * name this build does not emit means "some reason", not an error, and the
  * query stays inconclusive.
  */
@@ -539,7 +539,7 @@ export type RegressionToleranceKind = ("absolute" | "percentage")
 /**
  * What became of one request on this run.
  *
- * Two-valued today. The value set is OPEN so a later `partial` needs no bump,
+ * Two-valued today. The value set is open so a later `partial` needs no bump,
  * and it is deliberately not added now: nothing emits it, and a permanently
  * unused value reads as a measurement nobody takes.
  */
@@ -554,7 +554,7 @@ export type RequestStatus = ("applied" | "not-applied")
  * reported as an unscoped run. A request name added later carries its own
  * class, so a consumer written today keeps saying the right thing about it.
  *
- * The value set is OPEN, like the names and the statuses: read a class this
+ * The value set is open, like the names and the statuses: read a class this
  * build does not recognise as "some request", not as an error, and do not read
  * it as `scope`.
  */
@@ -578,7 +578,7 @@ path: string
  */
 message: string
 /**
- * True when this diagnostic reports a run whose RESULTS are degraded:
+ * True when this diagnostic reports a run whose results are degraded:
  * something the user installed, wrote, or expected did not reach the
  * analysis. Projected from [`WorkspaceDiagnosticKind::warns_on_stderr`],
  * which is the same classification that decides whether the CLI prints a
@@ -1073,7 +1073,7 @@ export type ThresholdSource = "override"
  * emitted by `build_health_finding_actions`. A single finding's `actions`
  * array may carry multiple entries of different types: a finding that
  * exceeded both cyclomatic and CRAP at `coverage_tier: partial` will get
- * BOTH `increase-coverage` AND `refactor-function`, plus the trailing
+ * both `increase-coverage` and `refactor-function`, plus the trailing
  * `suppress-line`.
  */
 export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line" | "split-file")
@@ -1115,7 +1115,7 @@ export type CoverageSourceConsistency = ("uniform" | "mixed")
  *
  * A section is in [`HealthReport::sections`] when the run computed it and
  * the report carries its result, also when that result is empty. The value
- * set is OPEN: a later release can add a section, so a consumer must accept
+ * set is open: a later release can add a section, so a consumer must accept
  * a token that it does not know.
  */
 export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "mutation" | "css")
@@ -1180,7 +1180,7 @@ export type ClockSource = ("environment" | "head_commit" | "wall_clock")
 export type RuntimeCoverageSchemaVersion = "1"
 /**
  * Top-level verdict for the whole runtime-coverage report. Mirrors
- * `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
+ * `fallow_cov_protocol::ReportVerdict`. The verdict is the single most
  * actionable finding; for the full set of findings see
  * [`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`
  * above `cold-code-detected` in PR-review context (when the CLI was
@@ -1330,8 +1330,8 @@ export type UnusedAtRuleKind = ("property-registration" | "layer")
 export type ConsumerKind = ("theme-var" | "css-var" | "utility" | "apply" | "js-member" | "js-call")
 /**
  * Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
- * `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
- * PURPOSE: styling confidence is binary (the grade is either reliable for the
+ * `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) on
+ * purpose: styling confidence is binary (the grade is either reliable for the
  * analyzed surface or it is not), not three distinct evidence tiers, so a
  * never-emitted `Medium` would be dead surface. Serializes lowercase (`"high"` /
  * `"low"`), matching the sibling confidence enums' vocabulary.
@@ -1616,7 +1616,7 @@ export type SecurityGateMode = ("new" | "newly-reachable")
  */
 export type SecurityGateVerdict = ("pass" | "fail")
 /**
- * The kind of security candidate. Findings are CANDIDATES for downstream agent
+ * The kind of security candidate. Findings are candidates for downstream agent
  * verification, NOT verified vulnerabilities.
  */
 export type SecurityFindingKind = ("client-server-leak" | "tainted-sink")
@@ -1749,8 +1749,8 @@ export type RiskClass = ("low" | "medium" | "high")
  */
 export type ReviewEffort = ("glance" | "review" | "deep_dive")
 /**
- * The focus label for a review unit. `Skip` is the SAFE explicit-skip label and
- * is runtime-backed ONLY: it is producible solely on the paid runtime path
+ * The focus label for a review unit. `Skip` is the safe explicit-skip label and
+ * is runtime-backed only: it is producible solely on the paid runtime path
  * and solely for a unit runtime-proves cold with zero risk signals. Free mode
  * (no runtime evidence) emits only `ReviewHere` / `NotPrioritized`, never `Skip`
  * (the build-focus-map labeller cannot reach the `Skip` arm without runtime
@@ -1758,10 +1758,10 @@ export type ReviewEffort = ("glance" | "review" | "deep_dive")
  */
 export type FocusLabel = ("review-here" | "not-prioritized" | "skip")
 /**
- * A per-unit confidence flag. The EXACT panel-decided strings: a dynamically-
+ * A per-unit confidence flag. The exact panel-decided strings: a dynamically-
  * wired or re-export-heavy unit carries one so its static-reachability signal is
  * not trusted as complete (the anti-silent-de-prioritization guard). The flag
- * NEVER lowers the score; it is advisory provenance.
+ * never lowers the score; it is advisory provenance.
  */
 export type ConfidenceFlag = ("dynamic-dispatch" | "re-export-indirection")
 /**
@@ -2075,7 +2075,7 @@ attribution: AuditAttribution
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
@@ -2209,7 +2209,7 @@ diff_risk_introduced: number
  * name, and the members are in the order of the names. A tool never writes an
  * empty object. When no gate ran, the member is absent.
  *
- * The key set is OPEN. A name that a consumer does not recognize means "some
+ * The key set is open. A name that a consumer does not recognize means "some
  * gate", not an error.
  *
  * The names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require`, `type-aware-fallback`, `parse-error` and `mutation-min-score`. `GateName` describes each name and the default entries of each command.
@@ -2225,7 +2225,7 @@ export interface GateOutcomes {
  * gate makes the run exit non-zero. A run that was told never to fail reports
  * a failed gate as `status: fail` with `enforced: false`.
  *
- * **A gate fails the build when `status` is `fail` AND `enforced` is true.**
+ * **A gate fails the build when `status` is `fail` and `enforced` is true.**
  * One member alone does not decide it. `enforced` is true on every armed
  * gate, also on a gate that passed. Thus a gate rule on `enforced` alone
  * fails every run that armed a gate. Read `status` alone to decide what to
@@ -3511,7 +3511,7 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  */
 invalid_client_exports?: InvalidClientExportFinding[]
 /**
- * Barrel files that re-export BOTH a `"use client"` origin module AND a
+ * Barrel files that re-export both a `"use client"` origin module and a
  * server-only origin module (the Next.js App Router footgun). Wrapped in
  * [`MixedClientServerBarrelFinding`] so each entry carries a typed
  * `actions` array natively. Default severity is `warn`.
@@ -3641,7 +3641,7 @@ unused_load_data_keys_global_abstain?: boolean
  * pass-through components until a consumer (located per-chain records).
  * Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
  * `actions` array natively. Health signal: the rule defaults to `off`
- * (opt-in), so this is dormant and populated ONLY when the user enables it.
+ * (opt-in), so this is dormant and populated only when the user enables it.
  */
 prop_drilling_chains?: PropDrillingChainFinding[]
 /**
@@ -3649,7 +3649,7 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  * child render (`return <Child {...props}/>`): pure structural indirection,
  * a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
  * so each entry carries a typed `actions` array natively. Health signal: the
- * rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+ * rule defaults to `off` (opt-in), so this is dormant and populated only
  * when the user enables it.
  */
 thin_wrappers?: ThinWrapperFinding[]
@@ -3660,7 +3660,7 @@ thin_wrappers?: ThinWrapperFinding[]
  * names (a missing shared `Props` type / base component). Wrapped in
  * [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
  * array and its sibling roster natively. Health signal: the rule defaults to
- * `off` (opt-in), so this is dormant and populated ONLY when the user
+ * `off` (opt-in), so this is dormant and populated only when the user
  * enables it.
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
@@ -3708,16 +3708,16 @@ regression?: (RegressionResult | null)
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -3774,7 +3774,7 @@ _meta?: (Meta | null)
  * and withholds the removal while a caveat stands.
  *
  * `excluded-by-default-ignore` is the one source-discovery kind that
- * reports unseen files WITHOUT raising a caveat. It names a built-in
+ * reports unseen files without raising a caveat. It names a built-in
  * ignore pattern (`** /dist/**`, `** /build/**`, `** /coverage/**`, or one
  * of the four minified-bundle globs) that removed candidate source files
  * from the walk, which is designed behavior on generated output rather
@@ -4236,8 +4236,8 @@ reachability_caveats?: ReachabilityCaveat[]
 export interface FixAction {
 type: FixActionType
 /**
- * Whether `fallow fix` can apply this fix automatically. Evaluated PER
- * FINDING, not per action type: the same `type` may carry
+ * Whether `fallow fix` can apply this fix automatically. Evaluated per
+ * finding, not per action type: the same `type` may carry
  * `auto_fixable: true` on one finding and `auto_fixable: false` on
  * another when per-instance guards in the applier discriminate (e.g.
  * `remove-catalog-entry` flips on `hardcoded_consumers` and catalog
@@ -4335,9 +4335,9 @@ export interface AddToConfigAction {
 type: AddToConfigKind
 /**
  * True when `fallow fix` can apply this config action automatically.
- * Evaluated PER FINDING, not per action type: `ignoreExports`
+ * Evaluated per finding, not per action type: `ignoreExports`
  * duplicate-export actions are auto-fixable when `fallow fix` can
- * safely write the rule, which today means EITHER a fallow config
+ * safely write the rule, which today means either a fallow config
  * file already exists OR no config exists and the working directory
  * is NOT inside a monorepo subpackage (in which case the applier
  * creates `.fallowrc.json` from `fallow init`'s framework-aware
@@ -5760,19 +5760,19 @@ effective_severity?: (EffectiveSeverity | null)
  * One import hop in a circular dependency: the file containing the import
  * and where that import statement sits.
  *
- * `edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's
- * `files[i]`) that points to the NEXT file in the cycle
+ * `edges[i]` is the import in `path` (the hop source, equal to the cycle's
+ * `files[i]`) that points to the next file in the cycle
  * (`files[(i + 1) % files.len()]`); the target is not repeated here to keep
  * the wire compact. Enables a per-file diagnostic squiggly anchored under
  * the offending import rather than a single squiggly on the first file.
  *
- * `col` is a 0-based BYTE column, matching the cycle's top-level `col`;
+ * `col` is a 0-based byte column, matching the cycle's top-level `col`;
  * converting it to a UTF-16 code-unit column for LSP clients is a tracked
  * follow-up shared with the existing field.
  */
 export interface CircularDependencyEdge {
 /**
- * The file containing the import (the hop SOURCE; equal to `files[i]`).
+ * The file containing the import (the hop source; equal to `files[i]`).
  */
 path: string
 /**
@@ -6789,7 +6789,7 @@ effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
- * guaranteed `next build` failure, so the PRIMARY action is manual guidance
+ * guaranteed `next build` failure, so the primary action is manual guidance
  * (move or merge one of the colliding files), NOT a suppress: suppressing a
  * build error never makes the build pass. A file-level suppress is offered as
  * an escape hatch only.
@@ -7680,11 +7680,11 @@ effective_severity?: (EffectiveSeverity | null)
  */
 export interface PropDrillingChainFinding {
 /**
- * The drilled prop name as declared at the chain SOURCE.
+ * The drilled prop name as declared at the chain source.
  */
 prop: string
 /**
- * The chain depth = the number of components the prop is forwarded THROUGH
+ * The chain depth = the number of components the prop is forwarded through
  * (source + intermediates + consumer = `hops.len()`). Always `>= N`.
  */
 depth: number
@@ -7817,7 +7817,7 @@ line: number
  */
 component: string
 /**
- * The shared SIGNIFICANT prop-name set (sorted, denylist-stripped). The
+ * The shared significant prop-name set (sorted, denylist-stripped). The
  * unit being grouped; identical across every member of the group.
  */
 shape: string[]
@@ -7827,7 +7827,7 @@ shape: string[]
  */
 group_size: number
 /**
- * The OTHER components sharing this exact prop shape (path-sorted). A
+ * The other components sharing this exact prop shape (path-sorted). A
  * file-level-suppressed member drops from its own finding but still appears
  * here, because the group is real regardless of suppression.
  */
@@ -7860,7 +7860,7 @@ introduced?: (AuditIntroduced | null)
 effective_severity?: (EffectiveSeverity | null)
 }
 /**
- * One member of a duplicate-prop-shape group: the OTHER components that share
+ * One member of a duplicate-prop-shape group: the other components that share
  * the same significant prop-name set, listed in each member's
  * `sharing_components`. Path-sorted for stable output. A located reference (no
  * `shape`, which is carried once on the owning [`DuplicatePropShape`]).
@@ -8054,7 +8054,7 @@ unrecognised_format?: boolean
  * Absent, never null, for this command's own baseline, for a file that
  * names no writer (an empty file, or a baseline saved before `kind`
  * existed) and for a `kind` token this version does not know. The value
- * set is OPEN: a later release can add a writer, so treat an unknown value
+ * set is open: a later release can add a writer, so treat an unknown value
  * as "another command". The CLI computes it once per loaded baseline and
  * uses the same value for its stderr note.
  */
@@ -8065,7 +8065,7 @@ saved_by?: string
  * some entries use the clone key that older versions shared between
  * unrelated groups whose code did not parse on its own. The run still
  * applies the file. `--save-baseline` rewrites it with current keys.
- * Absent for a current baseline and on `health`. The value set is OPEN.
+ * Absent for a current baseline and on `health`. The value set is open.
  */
 format?: string
 /**
@@ -8084,7 +8084,7 @@ format?: string
  * caller's own choice about what to analyze and an unscoped repeat would
  * contradict it.
  *
- * The name set is OPEN and the names a command can emit differ per
+ * The name set is open and the names a command can emit differ per
  * command; see [`ScopeReason`].
  */
 scope_reasons?: ScopeReason[]
@@ -8195,7 +8195,7 @@ exceeded: boolean
 reason?: (string | null)
 }
 /**
- * Every narrowing or shaping request a run RECEIVED, keyed by name.
+ * Every narrowing or shaping request a run received, keyed by name.
  *
  * Received, not failed: a request the run honoured is published with
  * `status: "applied"`, so a consumer can say "scoped to the change"
@@ -8214,10 +8214,10 @@ reason?: (string | null)
  * for `package-baselines`, `oversize`,
  * `unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for
  * `diff-filter`, and `directory-create-failed`, `write-failed` and
- * `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
+ * `serialize-failed` for `sarif-file`. Every set is open: a name a consumer
  * does not recognise means "some request", not an error.
  *
- * `sarif-file` reports a SECONDARY artifact rather than the scope of the
+ * `sarif-file` reports a secondary artifact rather than the scope of the
  * report it travels in, and it is in the same object for the same reason the
  * others are: the run was asked to do something and did something else, and
  * nothing in the primary report says so. Which of the two an entry is, every
@@ -8279,12 +8279,12 @@ requested: string
  * Read the unit off the name the entry is keyed under, never across names,
  * and read an absent member as "not measured" rather than as zero.
  *
- * The count is what the run INDEXED rather than the true total:
+ * The count is what the run indexed rather than the true total:
  * `diff-filter` indexes at most one million added lines and reports that
  * cap for a larger diff, so read any non-zero value as a lower bound.
  *
  * `0` is the case this member exists for: a request that applied over an
- * EMPTY scope. Every finding then filters out and the report reads clean,
+ * empty scope. Every finding then filters out and the report reads clean,
  * so a consumer that sees no findings beside `scope_size: 0` learns that
  * nothing was analyzable rather than that the code is clean.
  */
@@ -8327,7 +8327,7 @@ reference: string
  *
  * ## Two hard contracts
  *
- * 1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating
+ * 1. **Read-only.** A `next_step` never suggests `fallow fix` or any mutating
  *    command. Fallow surfaces evidence and verification paths; deciding and
  *    applying the remediation is the agent's job.
  * 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
@@ -8339,7 +8339,7 @@ reference: string
  * Both contracts are enforced by unit tests in
  * `crates/cli/src/report/suggestions.rs`.
  *
- * Note: a SEPARATE, unrelated `next_steps` field exists on the
+ * Note: a separate, unrelated `next_steps` field exists on the
  * `coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain
  * `Vec<String>` of human onboarding steps. Consumers that read multiple
  * envelope kinds must route on the envelope's `kind` before interpreting a
@@ -8749,7 +8749,7 @@ summary: HealthSummary
  * The sections that this run produced, in a fixed order. A renderer
  * reads it to tell an empty section from a section that the run did not
  * produce: `findings` is the complexity list only when `complexity` is
- * in this array. The value set is OPEN (see [`HealthSection`]). Absent
+ * in this array. The value set is open (see [`HealthSection`]). Absent
  * in an envelope from a fallow version before this member, and on a
  * report that no health run built.
  */
@@ -8783,7 +8783,7 @@ file_scores?: FileHealthScore[]
 coverage_gaps?: (CoverageGaps | null)
 /**
  * Located prop-drilling chains (React/Preact props forwarded unchanged
- * through 3+ pass-through components). Only present when the opt-in
+ * through 2 or more components). Only present when the opt-in
  * `prop-drilling` rule is enabled (it defaults to off). Each entry carries
  * the source, every pass-through hop, and the consumer with file + line +
  * component, so CI / an agent can act. Surfaced alongside hotspots as a
@@ -8813,8 +8813,8 @@ hotspot_summary?: (HotspotSummary | null)
  */
 change_coupling?: (ChangeCouplingReport | null)
 /**
- * Runtime coverage findings from the paid sidecar (only populated with
- * `--runtime-coverage`).
+ * Runtime coverage findings from the runtime coverage add-on (only
+ * populated with `--runtime-coverage`).
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
 /**
@@ -8867,7 +8867,7 @@ framework_health?: (FrameworkHealthDiagnostics | null)
  */
 css_analytics?: (CssAnalyticsReport | null)
 /**
- * Styling-health score and letter grade: a SECOND health axis derived from
+ * Styling-health score and letter grade: a second health axis derived from
  * the CSS analytics (the design-system axis), orthogonal to the JS/TS code
  * `health_score`. Present only with `--css` (the same condition as
  * `css_analytics`), so a plain `fallow health` run is byte-unchanged. The
@@ -8875,7 +8875,7 @@ css_analytics?: (CssAnalyticsReport | null)
  */
 styling_health?: (StylingHealth | null)
 /**
- * Advisory STYLING FINDINGS: the graduation of the descriptive css
+ * Advisory styling findings: the graduation of the descriptive css
  * candidates into first-class, severity-aware, suppressible findings
  * surfaced in `fallow audit`. Verdict-neutral by default (the rule defaults
  * to `warn`); the styling domain's OWN findings collection, not the dead-code
@@ -9004,7 +9004,7 @@ inherited_from?: (string | null)
  */
 component_rollup?: (ComponentRollup | null)
 /**
- * Per-decision-point complexity breakdown explaining WHICH constructs drove
+ * Per-decision-point complexity breakdown explaining which constructs drove
  * the cyclomatic and cognitive scores. Populated only when the caller opts
  * in via `health --complexity-breakdown`; empty (and omitted from JSON)
  * otherwise so default and CI output stay lean.
@@ -9070,7 +9070,7 @@ gate_exemption?: (AuditGateExemption | null)
  * function, so non-React findings stay byte-identical on the wire. The
  * per-kind counts cover hooks recorded by the React visitor (calls inside an
  * identified component); a `use*` call inside a plain helper function is
- * counted in `react_hook_count` but NOT here, so the breakdown can sum to LESS
+ * counted in `react_hook_count` but not here, so the breakdown can sum to less
  * than `react_hook_count`. `react_hook_count` remains the headline total; this
  * is an additive refinement.
  */
@@ -9672,7 +9672,7 @@ p95_fan_in?: (number | null)
 coupling_high_pct?: (number | null)
 /**
  * Number of located prop-drilling chains (React/Preact props forwarded
- * unchanged through 3+ pass-through components). `None` unless the opt-in
+ * unchanged through 2 or more components). `None` unless the opt-in
  * `prop-drilling` rule is enabled (it defaults to off), so the small capped
  * penalty and the hotspot surface are dormant by default.
  */
@@ -9683,7 +9683,7 @@ prop_drilling_chain_count?: (number | null)
  */
 prop_drilling_max_depth?: (number | null)
 /**
- * 95th-percentile DISTINCT-PARENTS render fan-in across React/Preact
+ * 95th-percentile distinct-parent render fan-in across React/Preact
  * components (the component-graph analogue of `p95_fan_in`, which percentiles
  * per-FILE module fan-in). `None` on non-React runs. Descriptive
  * blast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`.
@@ -9696,8 +9696,8 @@ p95_render_fan_in?: (number | null)
  */
 render_fan_in_high_pct?: (number | null)
 /**
- * The single highest DISTINCT-PARENTS count across all components (the
- * headline blast-radius number: the most distinct render LOCATIONS any one
+ * The single highest distinct-parent count across all components (the
+ * headline blast-radius number: the most distinct render locations any one
  * component is rendered from, the honest edit-ripple count). `render_sites`
  * (incl. repeats) is secondary per-component context, never the headline.
  * `None` on non-React runs. Descriptive context, no threshold.
@@ -9708,7 +9708,7 @@ max_render_fan_in?: (number | null)
  * project-relative path + render-site / distinct-parent counts), sorted by
  * distinct parents (the honest headline axis) descending, tie-broken on
  * render sites descending, and capped at a small N. Lets a consumer see
- * WHICH component carries the headline `max_render_fan_in`, not just the
+ * which component carries the headline `max_render_fan_in`, not just the
  * number. Empty (and omitted from JSON) on non-React runs, so the contract
  * stays byte-identical there. Descriptive blast-radius context, NOT a gate.
  */
@@ -9818,9 +9818,9 @@ very_high_risk: number
  * `top_render_fan_in` blast-radius list on [`VitalSigns`].
  *
  * The component-graph analogue of a high-fan-in module: `distinct_parents` is
- * the HEADLINE axis (the honest count of distinct parent components / render
- * LOCATIONS that render this component), `render_sites` is secondary "incl.
- * repeats" context (every JSX render SITE, so a single parent rendering one
+ * the headline axis (the honest count of distinct parent components / render
+ * locations that render this component), `render_sites` is secondary "incl.
+ * repeats" context (every JSX render site, so a single parent rendering one
  * child five times is five sites but one parent). Undercount-safe like the
  * underlying metric: a child rendered via a JSX spread / dynamic /
  * member-expression tag resolves to no component, so a true high-fan-in
@@ -9837,13 +9837,13 @@ component: string
  */
 path: string
 /**
- * Total JSX render SITES that resolve to this component across the project.
- * SECONDARY "incl. repeats" context, not the headline (see `distinct_parents`).
+ * Total JSX render sites that resolve to this component across the project.
+ * Secondary "incl. repeats" context, not the headline (see `distinct_parents`).
  */
 render_sites: number
 /**
  * Distinct `(parent_file, parent_component)` keys that render this component.
- * The HEADLINE blast-radius axis: distinct render LOCATIONS.
+ * The headline blast-radius axis: distinct render locations.
  */
 distinct_parents: number
 }
@@ -10611,7 +10611,7 @@ data_source: RuntimeCoverageDataSource
  */
 last_received_at?: (string | null)
 /**
- * Number of functions the sidecar could observe in the V8 or Istanbul
+ * Number of functions the runtime coverage add-on could observe in the V8 or Istanbul
  * dump. Null for a positive-only capture, which cannot observe a
  * function that did not run.
  */
@@ -10626,7 +10626,7 @@ functions_hit: number
  */
 functions_unhit?: (number | null)
 /**
- * Functions the sidecar could not track (lazy-parsed, worker thread,
+ * Functions the runtime coverage add-on could not track (lazy-parsed, worker thread,
  * dynamic code, unresolved source map).
  */
 functions_untracked: number
@@ -10651,8 +10651,8 @@ period_days: number
  */
 deployments_seen: number
 /**
- * Capture-quality telemetry. `None` for protocol-0.2 sidecars; protocol-0.3+
- * sidecars always populate it. Fuels the human-output short-window warning
+ * Capture-quality telemetry. An add-on of protocol 0.2 omits it; protocol
+ * 0.3 and later always fill it. Fuels the human-output short-window warning
  * and the quantified trial CTA, and is passed through to JSON consumers so
  * agent pipelines can surface the same signal.
  */
@@ -10665,7 +10665,7 @@ capture_quality?: (RuntimeCoverageCaptureQuality | null)
 capture_policy?: (RuntimeCoverageCapturePolicy | null)
 }
 /**
- * Quality-of-capture signals emitted by the sidecar so the CLI can explain
+ * Quality-of-capture signals emitted by the runtime coverage add-on so the CLI can explain
  * short-window captures honestly instead of letting users blame the tool.
  */
 export interface RuntimeCoverageCaptureQuality {
@@ -10679,7 +10679,7 @@ window_seconds: number
  */
 instances_observed: number
 /**
- * True when the untracked-function ratio exceeds the sidecar's lazy-parse
+ * True when the untracked-function ratio exceeds the lazy-parse
  * threshold (30%). Signals that many untracked functions likely reflect
  * lazy-parsed code rather than unreachable code.
  */
@@ -10817,8 +10817,8 @@ export interface RuntimeCoverageAction {
  * Action identifier, normalized to `type` in JSON output. Known values
  * emitted by `fallow coverage analyze`: `delete-cold-code`
  * (verdict=safe_to_delete), `review-runtime` (verdict=review_required).
- * The sidecar may emit additional protocol-specific identifiers;
- * consumers should treat unknown values as forward-compat extensions.
+ * The runtime coverage add-on can emit other protocol-specific
+ * identifiers; consumers should accept unknown values.
  */
 type: string
 /**
@@ -10831,10 +10831,10 @@ description: string
 auto_fixable: boolean
 }
 /**
- * Discriminator inputs that PRODUCED a finding's verdict,
+ * Discriminator inputs that produced a finding's verdict,
  * emitted alongside the verdict so an agent can reproduce it and see the
  * minimum-observation confidence cap instead of re-deriving them from scratch.
- * F4: these make the EXISTING Fallow-owned discriminators legible; they are not
+ * F4: these make the existing Fallow-owned discriminators legible; they are not
  * a new or external signal and gate nothing. Pairs with `evidence.static_status`
  * (the static half of the discriminator set).
  */
@@ -10842,7 +10842,7 @@ export interface RuntimeCoverageDiscriminators {
 /**
  * Three-state runtime tracking: `called` (invocations > 0), `never_called`
  * (V8 tracked it, invocations == 0), or `untracked` (V8 never saw it). The
- * ONLY signal that can issue a deletion verdict.
+ * only signal that can issue a deletion verdict.
  */
 tracking_state: string
 /**
@@ -10901,8 +10901,8 @@ line: number
 /**
  * 1-indexed line the function ends on (inclusive). Mirrors
  * `fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
- * Older 0.4-shape sidecars omit the field on the wire; serde defaults
- * to `0`, which the line-overlap filter MUST treat as a single-line
+ * An add-on of protocol 0.4 omits the field on the wire; serde defaults
+ * to `0`, which the line-overlap filter must treat as a single-line
  * range (`line..=line`) rather than a span.
  */
 end_line: number
@@ -11529,7 +11529,7 @@ degree: number
  * declaration site), so a per-line placement hint would have no
  * referent. Consumers that want the placement metadata should follow
  * the target's `evidence.complex_functions` back to the matching
- * `ComplexityViolation` and read placement from THAT action instead.
+ * `ComplexityViolation` and read placement from that action instead.
  *
  * [`RefactoringTarget`]: ../../fallow-output/src/health_targets.rs
  */
@@ -11952,7 +11952,7 @@ notable_rules: CssRuleMetric[]
  */
 notable_truncated: boolean
 /**
- * Distinct color VALUES in the stylesheet, sorted (a palette-size /
+ * Distinct color values in the stylesheet, sorted (a palette-size /
  * design-token-sprawl signal). The parser canonicalizes notation, so the
  * authored format is NOT preserved: `red`, `#f00`, `#ff0000`, and
  * `rgb(255,0,0)` all collapse to one entry, and every legacy sRGB notation
@@ -11982,44 +11982,44 @@ border_radii: string[]
  */
 line_heights: string[]
 /**
- * Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
+ * Distinct custom properties (`--x`) defined in the stylesheet, sorted.
  */
 defined_custom_properties: string[]
 /**
- * Distinct custom properties REFERENCED via `var()` in the stylesheet.
+ * Distinct custom properties referenced via `var()` in the stylesheet.
  */
 referenced_custom_properties: string[]
 /**
- * Distinct `@keyframes` names DEFINED in the stylesheet, sorted.
+ * Distinct `@keyframes` names defined in the stylesheet, sorted.
  */
 defined_keyframes: string[]
 /**
- * Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
+ * Distinct `@keyframes` names referenced via `animation` / `animation-name`.
  */
 referenced_keyframes: string[]
 /**
- * Distinct custom properties REGISTERED via an `@property` rule, sorted.
+ * Distinct custom properties registered via an `@property` rule, sorted.
  */
 registered_custom_properties: string[]
 /**
- * Distinct cascade layers DECLARED (via `@layer a, b;` statements or named
+ * Distinct cascade layers declared (via `@layer a, b;` statements or named
  * `@layer a { }` blocks), sorted.
  */
 declared_layers: string[]
 /**
- * Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.
+ * Distinct cascade layers populated by a named `@layer a { }` block, sorted.
  * A layer declared but never populated (and not imported into) is a
  * cleanup candidate.
  */
 populated_layers: string[]
 /**
- * Distinct font families DECLARED by an `@font-face` rule in the stylesheet,
+ * Distinct font families declared by an `@font-face` rule in the stylesheet,
  * sorted. A declared family referenced by no `font-family` anywhere is a
  * dead web-font payload (cleanup candidate).
  */
 defined_font_faces: string[]
 /**
- * Distinct font families REFERENCED via `font-family` / `font` in the
+ * Distinct font families referenced via `font-family` / `font` in the
  * stylesheet, sorted (generic keywords like `serif` excluded).
  */
 referenced_font_families: string[]
@@ -12135,13 +12135,13 @@ custom_properties_defined: number
 /**
  * Custom properties defined but never referenced via `var()` in any
  * stylesheet (the defined-but-unused direction). These are cleanup
- * CANDIDATES, not confirmed dead: a property may still be read or set from
+ * candidates, not confirmed dead: a property may still be read or set from
  * JavaScript or inline HTML styles.
  */
 custom_properties_unreferenced: number
 /**
  * Distinct custom properties referenced via `var()` that are defined in no
- * stylesheet anywhere (the used-but-undefined direction). A COUNT only, not
+ * stylesheet anywhere (the used-but-undefined direction). A count only, not
  * a located list: a `var(--x)` with no CSS definition is extremely common
  * in JavaScript-driven theming and design-token libraries, so locating
  * these would be net-noise. The count is an architecture signal (how much
@@ -12155,7 +12155,7 @@ keyframes_defined: number
 /**
  * `@keyframes` defined but never referenced via `animation` /
  * `animation-name` in any stylesheet (the defined-but-unused direction;
- * cleanup CANDIDATES; an animation name can still be applied from
+ * cleanup candidates; an animation name can still be applied from
  * JavaScript).
  */
 keyframes_unreferenced: number
@@ -12714,8 +12714,8 @@ actions: CssCandidateAction[]
 /**
  * A location-aware reverse index of where one design token is consumed, so an
  * agent editing the token can see its blast radius before changing or removing
- * it. Covers TWO token origins. The always-available discriminator is the `token`
- * SHAPE: a Tailwind token is the `--`-prefixed custom property (`--color-brand`),
+ * it. Covers two token origins. The always-available discriminator is the `token`
+ * shape: a Tailwind token is the `--`-prefixed custom property (`--color-brand`),
  * a CSS-in-JS token is a dotted access path with no `--` prefix
  * (`vars.color.primary`). The per-consumer `kind` also discriminates origin, but
  * only when `consumer_count > 0` (a `consumer_count: 0` entry has an empty
@@ -12729,22 +12729,22 @@ actions: CssCandidateAction[]
  * - CSS-in-JS tokens (kind `js-member` / `js-call`) from StyleX `defineVars` /
  *   `unstable_defineVarsNested`, vanilla-extract `createTheme` family definitions,
  *   and PandaCSS `defineTokens`, consumed via same-file or cross-module member
- *   access, StyleX theme-group calls, or PandaCSS `token('...')` calls. NOTE:
+ *   access, StyleX theme-group calls, or PandaCSS `token('...')` calls. Note:
  *   CSS-in-JS has NO corroborating dead-token finding (there is no
  *   `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a weaker
  *   signal than the Tailwind case (and unresolved dynamic imports or computed
  *   accesses are not counted).
  *
- * This is DESCRIPTIVE context (a blast-radius lookup), not a finding, so it
+ * This is descriptive context (a blast-radius lookup), not a finding, so it
  * deliberately carries no `actions` array (unlike the cleanup-candidate types in
- * this module). `consumer_count` is always a STATIC lower bound (a computed class
+ * this module). `consumer_count` is always a static lower bound (a computed class
  * name like `bg-${color}`, or a CSS-in-JS access through an unresolved alias
  * import, is not counted).
  */
 export interface TokenConsumers {
 /**
  * The token identity. For a Tailwind `@theme` token this is the full custom
- * property as authored, INCLUDING the `--` prefix (`--color-brand`). For a
+ * property as authored, including the `--` prefix (`--color-brand`). For a
  * CSS-in-JS token (kind `js-member` / `js-call`) this is the binding-qualified dotted
  * access path, NO `--` prefix (`vars.color.primary`), matching how consumers
  * read it. The presence of the `--` prefix distinguishes the two origins.
@@ -12753,7 +12753,7 @@ token: string
 /**
  * For a Tailwind token, the v4 theme namespace (`color`, `radius`,
  * `font-weight`, ...). For a CSS-in-JS token (kind `js-member` / `js-call`), the defining
- * export BINDING the token set is accessed through (`vars`), which identifies
+ * export binding the token set is accessed through (`vars`), which identifies
  * the token set, NOT a semantic group. (The field is thus overloaded by
  * origin; branch on `consumers[].kind` or the `token` shape.)
  */
@@ -12770,10 +12770,10 @@ definition_path: string
  */
 definition_line: number
 /**
- * The FULL number of consumer locations found, a STATIC LOWER BOUND: a
+ * The full number of consumer locations found, a static lower bound: a
  * computed class name (`bg-${color}`), unresolved import, dynamic token
  * structure, or computed CSS-in-JS access is not counted. This is the
- * aggregate over every consumer, computed BEFORE
+ * aggregate over every consumer, computed before
  * [`consumers`](Self::consumers) is capped to a sample.
  */
 consumer_count: number
@@ -12839,7 +12839,7 @@ notation: string
 count: number
 }
 /**
- * Project-level styling-health score: a SECOND health axis computed purely from
+ * Project-level styling-health score: a second health axis computed purely from
  * the structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS
  * code-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so
  * a plain `fallow health` run is byte-unchanged. The code score and grade stay
@@ -12905,7 +12905,7 @@ broken_references: number
 /**
  * Design-token erosion: mixed `font-size` units (`font_size_unit_mix`),
  * Tailwind arbitrary-value bypasses (`tailwind_arbitrary_values`), and
- * distinct HARDCODED `box-shadow`/`border-radius`/`line-height` values above
+ * distinct hardcoded `box-shadow`/`border-radius`/`line-height` values above
  * per-axis baselines (the v3 value-sprawl drift sub-term; `var(--*)`-
  * referenced values are not counted). Capped at 10pt.
  */
@@ -12917,7 +12917,7 @@ token_erosion: number
 structural: number
 }
 /**
- * One advisory STYLING FINDING: the graduation of a descriptive css candidate
+ * One advisory styling finding: the graduation of a descriptive css candidate
  * into a first-class, severity-aware, suppressible finding surfaced in
  * `fallow audit`. The styling domain's OWN finding type (not borrowed into the
  * dead-code `AnalysisResults`, and not glued in the CLI). `code` is the kebab
@@ -13630,10 +13630,10 @@ plugin: string
 pattern: string
 }
 /**
- * Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
+ * Result of tracing a class / enum / store member: the `--trace FILE:NAME`
  * fallback when `NAME` is not a top-level export but a member declared on one
  * (issue #1744). The trace runs on the module graph only, so it reports the
- * OWNING export's reachability and usage (the gating precondition for
+ * owning export's reachability and usage (the gating precondition for
  * member-level crediting) plus a pointer to the right `--unused-*-members`
  * command, rather than per-member crediting provenance.
  */
@@ -14376,7 +14376,7 @@ best_effort: boolean
  */
 callers?: (ChainHop[] | null)
 /**
- * Callee chain hops (DOWN) resolved to an import-symbol edge. Present only
+ * Callee chain hops (down) resolved to an import-symbol edge. Present only
  * when `--callees` was requested.
  */
 callees?: (ChainHop[] | null)
@@ -14527,7 +14527,7 @@ candidates: ErrorTraceCandidate[]
 candidates_omitted: number
 /**
  * Set when this frame's own line disagrees with the definition its
- * identifier matched: some OTHER definition in the same file is declared
+ * identifier matched: some other definition in the same file is declared
  * closer above the line the runtime reported.
  *
  * The look-up matches on the identifier alone, so a `resolved` frame is
@@ -15291,7 +15291,7 @@ summary: HealthSummary
  * The sections that this run produced, in a fixed order. A renderer
  * reads it to tell an empty section from a section that the run did not
  * produce: `findings` is the complexity list only when `complexity` is
- * in this array. The value set is OPEN (see [`HealthSection`]). Absent
+ * in this array. The value set is open (see [`HealthSection`]). Absent
  * in an envelope from a fallow version before this member, and on a
  * report that no health run built.
  */
@@ -15325,7 +15325,7 @@ file_scores?: FileHealthScore[]
 coverage_gaps?: (CoverageGaps | null)
 /**
  * Located prop-drilling chains (React/Preact props forwarded unchanged
- * through 3+ pass-through components). Only present when the opt-in
+ * through 2 or more components). Only present when the opt-in
  * `prop-drilling` rule is enabled (it defaults to off). Each entry carries
  * the source, every pass-through hop, and the consumer with file + line +
  * component, so CI / an agent can act. Surfaced alongside hotspots as a
@@ -15355,8 +15355,8 @@ hotspot_summary?: (HotspotSummary | null)
  */
 change_coupling?: (ChangeCouplingReport | null)
 /**
- * Runtime coverage findings from the paid sidecar (only populated with
- * `--runtime-coverage`).
+ * Runtime coverage findings from the runtime coverage add-on (only
+ * populated with `--runtime-coverage`).
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
 /**
@@ -15409,7 +15409,7 @@ framework_health?: (FrameworkHealthDiagnostics | null)
  */
 css_analytics?: (CssAnalyticsReport | null)
 /**
- * Styling-health score and letter grade: a SECOND health axis derived from
+ * Styling-health score and letter grade: a second health axis derived from
  * the CSS analytics (the design-system axis), orthogonal to the JS/TS code
  * `health_score`. Present only with `--css` (the same condition as
  * `css_analytics`), so a plain `fallow health` run is byte-unchanged. The
@@ -15417,7 +15417,7 @@ css_analytics?: (CssAnalyticsReport | null)
  */
 styling_health?: (StylingHealth | null)
 /**
- * Advisory STYLING FINDINGS: the graduation of the descriptive css
+ * Advisory styling findings: the graduation of the descriptive css
  * candidates into first-class, severity-aware, suppressible findings
  * surfaced in `fallow audit`. Verdict-neutral by default (the rule defaults
  * to `warn`); the styling domain's OWN findings collection, not the dead-code
@@ -15444,16 +15444,16 @@ group_filter?: (string[] | null)
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -15700,15 +15700,15 @@ baseline_staleness?: (BaselineStaleness | null)
  * it armed none. `dupes` has no default exit rule: a run with no armed
  * gate always exits 0, so an absent object means that the run passed.
  * `--fail-on-issues` and `--ci` arm `duplication-findings`, which fails
- * on any clone group. A gate fails the build when `status` is `fail` AND
+ * on any clone group. A gate fails the build when `status` is `fail` and
  * `enforced` is true. See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -15741,7 +15741,7 @@ next_steps?: NextStep[]
 }
 /**
  * A single grouped duplication bucket. Per-group `stats` are dedup-aware and
- * computed over the FULL group BEFORE any `--top` truncation.
+ * computed over the full group before any `--top` truncation.
  */
 export interface DuplicationGroup {
 /**
@@ -15922,16 +15922,16 @@ finding_id_query?: (FindingIdQuery | null)
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -16218,7 +16218,7 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  */
 invalid_client_exports?: InvalidClientExportFinding[]
 /**
- * Barrel files that re-export BOTH a `"use client"` origin module AND a
+ * Barrel files that re-export both a `"use client"` origin module and a
  * server-only origin module (the Next.js App Router footgun). Wrapped in
  * [`MixedClientServerBarrelFinding`] so each entry carries a typed
  * `actions` array natively. Default severity is `warn`.
@@ -16348,7 +16348,7 @@ unused_load_data_keys_global_abstain?: boolean
  * pass-through components until a consumer (located per-chain records).
  * Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
  * `actions` array natively. Health signal: the rule defaults to `off`
- * (opt-in), so this is dormant and populated ONLY when the user enables it.
+ * (opt-in), so this is dormant and populated only when the user enables it.
  */
 prop_drilling_chains?: PropDrillingChainFinding[]
 /**
@@ -16356,7 +16356,7 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  * child render (`return <Child {...props}/>`): pure structural indirection,
  * a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
  * so each entry carries a typed `actions` array natively. Health signal: the
- * rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+ * rule defaults to `off` (opt-in), so this is dormant and populated only
  * when the user enables it.
  */
 thin_wrappers?: ThinWrapperFinding[]
@@ -16367,7 +16367,7 @@ thin_wrappers?: ThinWrapperFinding[]
  * names (a missing shared `Props` type / base component). Wrapped in
  * [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
  * array and its sibling roster natively. Health signal: the rule defaults to
- * `off` (opt-in), so this is dormant and populated ONLY when the user
+ * `off` (opt-in), so this is dormant and populated only when the user
  * enables it.
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
@@ -16437,16 +16437,16 @@ finding_id_query?: (FindingIdQuery | null)
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -16497,7 +16497,7 @@ _meta?: (Meta | null)
 first_recorded?: (string | null)
 /**
  * Git SHA of the most recent recorded run, so a consumer can tell which
- * commit the `surfacing` counts belong to. This is an ABBREVIATED SHA
+ * commit the `surfacing` counts belong to. This is an abbreviated SHA
  * (`git rev-parse --short`), so it is for display/correlation only and will
  * not match a full 40-character SHA from `$GITHUB_SHA` or the git API
  * without expansion. None when the latest run had no SHA (not a git repo)
@@ -16505,7 +16505,7 @@ first_recorded?: (string | null)
  */
 latest_git_sha?: (string | null)
 /**
- * Counts from the most recent recorded run. These are CHANGED-FILE scoped
+ * Counts from the most recent recorded run. These are changed-file scoped
  * (each record comes from a `fallow audit` run, whose default `new-only`
  * gate counts only findings in the changed files of that run), NOT a
  * whole-project total.
@@ -16518,7 +16518,7 @@ surfacing?: (ImpactCounts | null)
  */
 trend?: (TrendSummary | null)
 /**
- * Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+ * Counts from the most recent whole-project `fallow` run. Whole-project
  * scope (not changed-file), so this is the current issue total across the
  * whole repo, context next to the actionable changed-file `surfacing`
  * count. None until a full `fallow` run has been recorded. v1.6.
@@ -16736,7 +16736,7 @@ suppressed_total: number
 containment_count: number
 /**
  * Sum of whole-project issue totals across projects that have a full-run
- * baseline, as of EACH project's last full `fallow` run (not a simultaneous
+ * baseline, as of each project's last full `fallow` run (not a simultaneous
  * snapshot).
  */
 project_wide_issues: number
@@ -16751,7 +16751,7 @@ projects_with_baseline: number
 export interface CrossRepoProjectEntry {
 /**
  * Stable, non-reversible project key (the store filename stem); the
- * cross-tool/cross-run JOIN key. NEVER a path.
+ * cross-tool/cross-run join key. Never a path.
  */
 project_key: string
 /**
@@ -16781,16 +16781,16 @@ config: SecurityOutputConfig
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -16881,7 +16881,7 @@ verdict: SecurityGateVerdict
 new_count: number
 }
 /**
- * A local security CANDIDATE for downstream agent verification, NOT a verified
+ * A local security candidate for downstream agent verification, not a verified
  * vulnerability. Emitted only by `fallow security`, never under bare `fallow`
  * or the `audit` gate. There is deliberately no `confidence` or
  * `signal_strength` field: fallow does not prove exploitability, so the trace
@@ -17084,7 +17084,7 @@ crosses_boundary: boolean
 }
 /**
  * An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
- * `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
+ * `source_kind`, `sink`, and `boundary`. The exploitability impact is
  * deliberately NOT a field: `severity` on the parent finding is only a
  * review-priority tier, while deciding exploitability remains the consuming
  * agent's job. A perpetually-null `impact` key would only train consumers to
@@ -17097,7 +17097,7 @@ export interface SecurityCandidate {
  * source id (`"http-request-input"`, `"process-env"`, `"process-argv"`,
  * `"message-event-data"`, `"location-input"`, ...). `None`/absent when no
  * untrusted source was matched (always `None` for `client-server-leak`).
- * This is an OPEN string set, driven by the data-driven source catalogue; a
+ * This is an open string set, driven by the data-driven source catalogue; a
  * consumer should treat an unknown id as "untrusted source of unknown kind"
  * and never drop the candidate on that basis.
  */
@@ -17163,7 +17163,7 @@ url_shape?: (SecurityUrlShape | null)
  * boundary is a stronger review target than a self-contained one; the boundary
  * is fallow's structural signal over a pure source-sink match.
  *
- * Two further boundary kinds are RESERVED for a follow-up and are deliberately
+ * Two further boundary kinds are reserved for a follow-up and are deliberately
  * absent here rather than emitted as always-false: `export_visibility` (is the
  * sink on a publicly-exported symbol?) and a package boundary (does the flow
  * cross an npm-package edge?). Both need new graph derivation that does not
@@ -17213,7 +17213,7 @@ to: string
 export interface SecurityNetworkContext {
 /**
  * The network call's destination as a static URL string literal, or absent
- * when the destination is DYNAMIC (not a literal). A dynamic destination is
+ * when the destination is dynamic (not a literal). A dynamic destination is
  * the higher-signal exfil case; a literal provider host is usually intended
  * auth.
  */
@@ -17426,16 +17426,16 @@ config: SecurityOutputConfig
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -17979,7 +17979,7 @@ misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
  */
 invalid_client_exports?: InvalidClientExportFinding[]
 /**
- * Barrel files that re-export BOTH a `"use client"` origin module AND a
+ * Barrel files that re-export both a `"use client"` origin module and a
  * server-only origin module (the Next.js App Router footgun). Wrapped in
  * [`MixedClientServerBarrelFinding`] so each entry carries a typed
  * `actions` array natively. Default severity is `warn`.
@@ -18109,7 +18109,7 @@ unused_load_data_keys_global_abstain?: boolean
  * pass-through components until a consumer (located per-chain records).
  * Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
  * `actions` array natively. Health signal: the rule defaults to `off`
- * (opt-in), so this is dormant and populated ONLY when the user enables it.
+ * (opt-in), so this is dormant and populated only when the user enables it.
  */
 prop_drilling_chains?: PropDrillingChainFinding[]
 /**
@@ -18117,7 +18117,7 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  * child render (`return <Child {...props}/>`): pure structural indirection,
  * a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
  * so each entry carries a typed `actions` array natively. Health signal: the
- * rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+ * rule defaults to `off` (opt-in), so this is dormant and populated only
  * when the user enables it.
  */
 thin_wrappers?: ThinWrapperFinding[]
@@ -18128,7 +18128,7 @@ thin_wrappers?: ThinWrapperFinding[]
  * names (a missing shared `Props` type / base component). Wrapped in
  * [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
  * array and its sibling roster natively. Health signal: the rule defaults to
- * `off` (opt-in), so this is dormant and populated ONLY when the user
+ * `off` (opt-in), so this is dormant and populated only when the user
  * enables it.
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
@@ -18176,16 +18176,16 @@ regression?: (RegressionResult | null)
  * always emits it, with the command's default exit rule in it also when
  * no flag armed a gate, so a CI integration reads the verdict instead of
  * guessing from a process status it usually cannot see. A gate fails the
- * build when `status` is `fail` AND `enforced` is true. The typed
+ * build when `status` is `fail` and `enforced` is true. The typed
  * programmatic API runs no CLI gate and leaves it absent. See
  * [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -18242,7 +18242,7 @@ _meta?: (Meta | null)
  * and withholds the removal while a caveat stands.
  *
  * `excluded-by-default-ignore` is the one source-discovery kind that
- * reports unseen files WITHOUT raising a caveat. It names a built-in
+ * reports unseen files without raising a caveat. It names a built-in
  * ignore pattern (`** /dist/**`, `** /build/**`, `** /coverage/**`, or one
  * of the four minified-bundle globs) that removed candidate source files
  * from the walk, which is designed behavior on generated output rather
@@ -18286,16 +18286,16 @@ elapsed_ms: ElapsedMs
  * `health-findings`), `status` gives the verdict of the human run. An
  * advisory entry can report `fail` without a failure of the human run: an
  * example is a `stale-baseline` entry that `--fail-on-stale-baseline` did
- * not arm. A gate fails the build when `status` is `fail` AND `enforced`
+ * not arm. A gate fails the build when `status` is `fail` and `enforced`
  * is true. The typed
  * programmatic API leaves it absent. See [`crate::GateOutcomes`].
  */
 gate_outcomes?: (GateOutcomes | null)
 /**
- * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * Every narrowing or shaping request this run received, keyed by name,
  * absent when it was asked for nothing. An entry whose `status` is not
  * `applied` means the run could not do what it was asked and reported
- * something WIDER instead, so what follows is a valid report of a scope
+ * something wider instead, so what follows is a valid report of a scope
  * nobody requested. Honoured requests are published too, with
  * `status: "applied"`, so an absent object means "nothing was asked for",
  * never "nothing failed". See [`crate::RequestOutcomes`].
@@ -19057,7 +19057,7 @@ decisions: Decision[]
  */
 truncated?: (TruncationNote | null)
 /**
- * Every signal_id the deterministic layer emitted, INCLUDING those whose
+ * Every signal_id the deterministic layer emitted, including those whose
  * decision was collapsed below the cap or suppressed. The anti-hallucination
  * allowlist: an agent decision whose id is absent is rejected.
  */
@@ -19091,7 +19091,7 @@ anchor_line: number
  */
 signal_key: string
 /**
- * The `signal_id` this decision WOULD have had before any rename in this
+ * The `signal_id` this decision would have had before any rename in this
  * change (the anchor file's pre-rename path). Present only when the anchor was
  * renamed. A review-memory layer carries a dismissal across a `git mv`: if
  * `previous_signal_id` was dismissed in an earlier PR, treat this decision as
@@ -19116,8 +19116,8 @@ expert: string[]
  */
 bus_factor_one?: boolean
 /**
- * Honest per-decision count: in-repo modules OUTSIDE the diff that already
- * depend on this decision's anchor. This is the DISPLAY number (taste
+ * Honest per-decision count: in-repo modules outside the diff that already
+ * depend on this decision's anchor. This is the display number (taste
  * ownership: the human reads reversibility from the count itself), distinct
  * from `blast` (the project-wide proxy used only for ranking). Never a door
  * label. Internal-only by construction, so it cannot see a published library's
@@ -19197,9 +19197,9 @@ boundaries_touched: string[]
 /**
  * Stage 2 of the brief: the partition + order. The changed files split into
  * coherent BY-MODULE units (the only byte-identical-deterministic clustering
- * definition straight from the graph), plus a dependency-sensible review ORDER
+ * definition straight from the graph), plus a dependency-sensible review order
  * over those units (definitions before consumers, mechanical/leaf units last,
- * ties broken by the path sort). Stage 2 sits UNDER the decision surface as a
+ * ties broken by the path sort). Stage 2 sits under the decision surface as a
  * drill-down; it is the backbone the directed-review loop hands the agent.
  *
  * Feature-cluster and concern partitioning are deferred (they need scoring
@@ -19252,9 +19252,9 @@ files: string[]
  */
 export interface ImpactClosureFacts {
 /**
- * The FULL number of files transitively affected by the changeset
- * (reverse-deps + re-export chains) that are NOT in the diff. Computed
- * BEFORE [`affected_not_shown`](Self::affected_not_shown) is capped to a
+ * The full number of files transitively affected by the changeset
+ * (reverse-deps + re-export chains) that are not in the diff. Computed
+ * before [`affected_not_shown`](Self::affected_not_shown) is capped to a
  * sample, so it is always the true magnitude of the blast radius.
  */
 affected_count: number
@@ -19263,7 +19263,7 @@ affected_count: number
  * [`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in
  * [`affected_count`](Self::affected_count) and the distribution in
  * [`affected_by_dir`](Self::affected_by_dir); use this list to jump to
- * representative files, NEVER to enumerate the blast radius or to infer its
+ * representative files, never to enumerate the blast radius or to infer its
  * shape. Because it is a prefix of the sorted set, it clusters in whichever
  * directory sorts first. To reconstruct the full set, run
  * `fallow dead-code --impact-closure <path>` once per changed file and union the
@@ -19274,7 +19274,7 @@ affected_not_shown: string[]
 /**
  * The blast radius rolled up by parent directory: how the affected files
  * distribute, heaviest directory first, ties broken by directory path so the
- * order is deterministic. This is the SHAPE signal, and unlike
+ * order is deterministic. This is the shape signal, and unlike
  * [`affected_not_shown`](Self::affected_not_shown) its counts are exact for
  * every directory it lists. At most [`AFFECTED_DIR_CAP`] entries.
  */
@@ -19449,7 +19449,7 @@ reason?: (SearchGapReason | null)
 search_as?: (string | null)
 }
 /**
- * The weighted focus map: the ranked `review-here` units plus the FULL
+ * The weighted focus map: the ranked `review-here` units plus the full
  * `deprioritized` escape-hatch list, so nothing is hidden.
  *
  * Completeness invariant (the escape-hatch done-condition): the two lists
@@ -19463,7 +19463,7 @@ export interface FocusMap {
  */
 review_here: FocusUnit[]
 /**
- * EVERY de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`
+ * Every de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`
  * units on the paid path) -- the escape hatch. Always present and fully
  * enumerated so a reviewer can always "show me what you de-prioritized"; the
  * human brief collapses it by default and re-expands under
@@ -19569,7 +19569,7 @@ total: number
  */
 export interface ReviewDeltas {
 /**
- * Cross-zone boundary EDGES introduced vs base (R2 first-edge-only: one per
+ * Cross-zone boundary edges introduced vs base (R2 first-edge-only: one per
  * `<from_zone>-><to_zone>` pair, never per import). New-vs-pre-existing.
  */
 boundary_introduced: string[]
@@ -20034,7 +20034,7 @@ mocked_targets?: (string[] | null)
 }
 /**
  * The separable `decision-surface` envelope: the single call that puts taste-
- * decisions in front of a human, callable WITHOUT the full pipeline (the
+ * decisions in front of a human, callable without the full pipeline (the
  * `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
  * structured `actions[]` per decision.
  */
@@ -20088,7 +20088,7 @@ anchor_line: number
  */
 signal_key: string
 /**
- * The `signal_id` this decision WOULD have had before any rename in this
+ * The `signal_id` this decision would have had before any rename in this
  * change (the anchor file's pre-rename path). Present only when the anchor was
  * renamed. A review-memory layer carries a dismissal across a `git mv`: if
  * `previous_signal_id` was dismissed in an earlier PR, treat this decision as
@@ -20113,8 +20113,8 @@ expert: string[]
  */
 bus_factor_one?: boolean
 /**
- * Honest per-decision count: in-repo modules OUTSIDE the diff that already
- * depend on this decision's anchor. This is the DISPLAY number (taste
+ * Honest per-decision count: in-repo modules outside the diff that already
+ * depend on this decision's anchor. This is the display number (taste
  * ownership: the human reads reversibility from the count itself), distinct
  * from `blast` (the project-wide proxy used only for ranking). Never a door
  * label. Internal-only by construction, so it cannot see a published library's
@@ -20241,7 +20241,7 @@ test_reach?: (TestReachFacts | null)
 /**
  * The review direction artifact: the order to review in, the coherent units,
  * and per-unit concern lens + out-of-diff + expert. A minimal projection of the
- * EXISTING graph facts (routing units + impact closure); the full weighted-focus
+ * existing graph facts (routing units + impact closure); the full weighted-focus
  * engine is a later epic. Graph-derived only (injection-resistant).
  */
 export interface ReviewDirection {
@@ -20259,7 +20259,7 @@ units: DirectionUnit[]
 /**
  * One directed review unit projected from the graph: a file the change touches,
  * the concern to check, the out-of-diff consumers it must account for, and the
- * routed expert. Graph-derived only (routing + impact closure), NEVER from prose.
+ * routed expert. Graph-derived only (routing + impact closure), never from prose.
  */
 export interface DirectionUnit {
 /**
@@ -20273,7 +20273,7 @@ file: string
 concern_lens: string
 /**
  * Per-unit review-effort budget: the weighted-focus composite score for
- * this file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this
+ * this file. A cloud fan-out spends AI passes/verifiers proportional to this
  * (higher = review harder); a local single-agent loop can ignore it.
  */
 scoring_budget: number
@@ -20293,16 +20293,16 @@ expert: string[]
 test_adjacency?: (TestAdjacency | null)
 }
 /**
- * One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
- * judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
- * graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
- * only a changed REGION ("fallow confirms this region changed") , a strictly
+ * One stable per-hunk change anchor: a changed region the agent may cite as a
+ * judgment anchor in addition to a `signal_id`. Where a `signal_id` anchors a
+ * graph finding ("fallow emitted this exact finding"), a change_anchor anchors
+ * only a changed region ("fallow confirms this region changed") , a strictly
  * weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
- * consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
+ * consumer can tell the two apart. Graph/diff-derived; never from prose.
  */
 export interface ChangeAnchor {
 /**
- * Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
+ * Stable, content-addressed id: `chg:<16-hex>` over the file path + the
  * normalized added text (line numbers are NOT hashed, so an edit above the
  * hunk or a whitespace-only change does not move the id).
  */
@@ -20340,8 +20340,8 @@ export interface AgentSchema {
  */
 judgment_shape: string
 /**
- * The agent MUST echo this `graph_snapshot_hash` back in its JSON; a
- * mismatch on reentry REFUSES the payload as stale.
+ * The agent must echo this `graph_snapshot_hash` back in its JSON; a
+ * mismatch on reentry refuses the payload as stale.
  */
 echo_field: string
 /**
@@ -20379,7 +20379,7 @@ command: string
 graph_snapshot_hash: string
 /**
  * `true` when the agent's echoed hash != the current hash (the tree moved):
- * the WHOLE payload is refused, `accepted` is empty.
+ * the whole payload is refused, `accepted` is empty.
  */
 stale: boolean
 /**
@@ -20407,7 +20407,7 @@ unanchored_count: number
 }
 /**
  * One accepted judgment: the real anchored signal passed through with the
- * agent's framing FENCED as non-deterministic.
+ * agent's framing fenced as non-deterministic.
  */
 export interface AcceptedJudgment {
 /**
@@ -20421,8 +20421,8 @@ signal_id: string
  */
 change_anchor: string
 /**
- * Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
- * `"change"` (a changed REGION only, the weaker anchor). Lets a consumer
+ * Which anchor resolved: `"signal"` (a graph finding, the strong anchor) or
+ * `"change"` (a changed region only, the weaker anchor). Lets a consumer
  * distinguish a finding-anchored judgment from a region-anchored one rather
  * than collapsing both into one accepted bucket.
  */
@@ -20525,7 +20525,7 @@ files: number
 without_reason: number
 /**
  * Markers that also appear as stale-suppression findings this run. This
- * is a JOIN against the existing stale-suppression detector's output
+ * is a join against the existing stale-suppression detector's output
  * (matched by file and kind), not a new detection.
  */
 stale: number
@@ -21593,7 +21593,7 @@ version: string
 protocol_version: number
 runtime: MutationRuntimeOutput
 /**
- * The number of companion processes that ran mutants.
+ * The number of mutation runner processes that ran mutants.
  */
 concurrency: number
 /**

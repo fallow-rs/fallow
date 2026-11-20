@@ -232,7 +232,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
                 }),
             )
         }
-        Command::Schema => unreachable!("handled above"),
+        Command::Schema(_) => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
         Command::License { subcommand } => {
             dispatch_license_command(subcommand, output, dispatch.json_style)
@@ -1717,7 +1717,7 @@ struct AuditDispatchArgs {
     walkthrough_file: Option<PathBuf>,
     /// Render the existing walkthrough guide as a staged human/markdown tour.
     walkthrough: bool,
-    /// Changed files to record as VIEWED before rendering the tour.
+    /// Changed files to record as viewed before rendering the tour.
     mark_viewed: Vec<PathBuf>,
     /// Expand the Cleared panel (de-prioritized + viewed) in the tour.
     show_cleared: bool,

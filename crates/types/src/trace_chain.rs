@@ -40,7 +40,7 @@ pub struct SymbolChainTrace {
     /// Caller chain hops (UP). Present only when `--callers` was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callers: Option<Vec<ChainHop>>,
-    /// Callee chain hops (DOWN) resolved to an import-symbol edge. Present only
+    /// Callee chain hops (down) resolved to an import-symbol edge. Present only
     /// when `--callees` was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callees: Option<Vec<ChainHop>>,

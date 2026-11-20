@@ -31,9 +31,9 @@ use crate::mutation_human::{
 use crate::mutation_progress::MutationProgressReporter;
 
 /// The exit code of a run with a score below the minimum.
-const MIN_SCORE_EXIT_CODE: u8 = 1;
+pub const MIN_SCORE_EXIT_CODE: u8 = 1;
 /// The exit code of invalid input and execution errors.
-const INPUT_EXIT_CODE: u8 = 2;
+pub const INPUT_EXIT_CODE: u8 = 2;
 
 /// The values of `--record-args`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -115,80 +115,85 @@ pub enum MutationSubcommand {
 #[derive(Args, Debug, Clone, Default)]
 pub struct MutationArgs {
     /// Mutate every source file instead of the changed code.
-    #[arg(long, conflicts_with = "paths")]
+    #[arg(long, conflicts_with = "paths", help_heading = "Scope")]
     pub all: bool,
     /// Build the plan only: select, map and rank mutants. Runs no code.
-    #[arg(long)]
+    #[arg(long, help_heading = "Run")]
     pub plan: bool,
     /// Run at most N covered mutants, in rank order. Uncovered mutants do not
     /// count. The others are `pending`.
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", help_heading = "Scope")]
     pub max_mutants: Option<usize>,
     /// Keep at most N mutants on each source line. The plan keeps the most
     /// productive mutants of the line (relational, condition, arithmetic and
     /// logical operators first). The others are `pending` with the reason
     /// `sampled-out` and do not run (default: the `mutation.mutantsPerLine`
     /// key, else each mutant).
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", help_heading = "Scope")]
     pub mutants_per_line: Option<usize>,
     /// Widen each changed line to the whole function that holds it, so that a
     /// changed parameter or signature selects the mutants of the function.
     /// Only the changed-code scope uses it (default: the
     /// `mutation.functionScope` key, else the changed lines only).
-    #[arg(long, conflicts_with_all = ["all", "paths"])]
+    #[arg(long, conflicts_with_all = ["all", "paths"], help_heading = "Scope")]
     pub function_scope: bool,
     /// Stop starting mutants after this time, for example `90s`, `10m` or `1h`.
     /// The others are `pending`.
-    #[arg(long, value_name = "DURATION")]
+    #[arg(long, value_name = "DURATION", help_heading = "Run")]
     pub time_budget: Option<String>,
-    /// The number of companion processes (default: half the logical cores).
-    #[arg(long, value_name = "N")]
+    /// The number of mutation runner processes (default: half the logical cores).
+    #[arg(long, value_name = "N", help_heading = "Run")]
     pub concurrency: Option<usize>,
     /// The JavaScript runtime: a name on PATH such as `node`, or a file path
     /// (default from PATH: `node` for node:test, `bun` for bun test, and
     /// `node`, then `bun`, for Vitest).
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", help_heading = "Run")]
     pub runtime: Option<PathBuf>,
     /// Run in a dirty git worktree. The run still reports the paths that it
     /// changed.
-    #[arg(long)]
+    #[arg(long, help_heading = "Run")]
     pub allow_dirty: bool,
     /// Keep mutants in functions that reach a file system, process, network
     /// or database sink. A mutant can then remove a guard of a real side
     /// effect. This is a flag only, never a config key.
-    #[arg(long)]
+    #[arg(long, help_heading = "Scope")]
     pub allow_side_effects: bool,
     /// Record the arguments of the changed exported functions in a record pass
     /// (off by default). `shapes` keeps their types, `values` keeps the
     /// values for `fallow mutation inspect --replay`. The values stay in the
     /// gitignored cache directory for 7 days, and an input with a secret
     /// (by key name or by entropy) is not kept.
-    #[arg(long, value_name = "MODE", value_enum)]
+    #[arg(long, value_name = "MODE", value_enum, help_heading = "Detection")]
     pub record_args: Option<RecordArgsFlag>,
     /// Exit with code 1 when the mutation score is below this percentage.
-    #[arg(long, value_name = "0-100")]
+    #[arg(long, value_name = "0-100", help_heading = "Gates")]
     pub min_score: Option<f64>,
     /// The operators to use, comma-separated. Default: the default set. The
     /// opt-in operators (block-statement, array-literal, object-literal,
     /// method-expression, switch-case, call-expression, throw-statement,
     /// regex-constructor, regex-assertion, nullish-fallback) run only when
     /// named here.
-    #[arg(long, value_name = "NAMES", value_delimiter = ',')]
+    #[arg(
+        long,
+        value_name = "NAMES",
+        value_delimiter = ',',
+        help_heading = "Scope"
+    )]
     pub operators: Vec<String>,
     /// A verdict document that marks mutants as equivalent. Equivalent
     /// mutants leave the score.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", help_heading = "Detection")]
     pub verdicts: Option<PathBuf>,
     /// Wait this long for each runner process to start, finish its dry run or
     /// reload, for example `5m` on a slow or busy host (default: `2m`).
-    #[arg(long, value_name = "DURATION")]
+    #[arg(long, value_name = "DURATION", help_heading = "Run")]
     pub setup_timeout: Option<String>,
     /// The config file of the test runner, for example
     /// `vitest.integration.config.mjs` (default: the
     /// `mutation.runnerConfig` key, else the runner's own discovery). The file
     /// must be inside the project root. Only Vitest reads it. This is not
     /// `--config`, which selects the Fallow config.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", help_heading = "Run")]
     pub runner_config: Option<PathBuf>,
     /// Use only this Vitest project, as the Vitest `--project` flag does.
     /// Repeat the flag for more projects. A name can hold a `*` wildcard.
@@ -196,24 +201,24 @@ pub struct MutationArgs {
     /// project from a separate config file (default: the
     /// `mutation.runnerProjects` key, else each project). Only Vitest reads
     /// it.
-    #[arg(long = "runner-project", value_name = "NAME")]
+    #[arg(long = "runner-project", value_name = "NAME", help_heading = "Run")]
     pub runner_projects: Vec<String>,
-    /// Type-check each survived mutant through the `--type-aware`
+    /// Type-check each survived mutant through the type-aware
     /// companion. A survivor that does not type-check becomes
     /// `compile_error` and leaves the score. An optional-chaining or
     /// nullish-fallback survivor on a receiver whose type excludes `null` and
     /// `undefined` gets an advisory `equivalence_hint`. Its status and the
     /// score do not change.
-    #[arg(long)]
+    #[arg(long, help_heading = "Detection")]
     pub typecheck: bool,
     /// Continue an interrupted or partial run: reuse the killed and confirmed
     /// survived mutants in its journal and run only the others. A journal of
     /// other inputs exits 2.
-    #[arg(long)]
+    #[arg(long, help_heading = "Reruns")]
     pub resume: bool,
     /// Collect all killing tests and report redundant-test candidates for
     /// individual review. Run every covering test without stopping at a failure.
-    #[arg(long)]
+    #[arg(long, help_heading = "Detection")]
     pub kill_matrix: bool,
     /// Check whether this test is redundant: a test file (each test in it) or
     /// a test id (`file::name`). Repeat the flag for more targets. Only the
@@ -221,13 +226,18 @@ pub struct MutationArgs {
     /// mutant that no target kills is `not_killed_by_target` and runs no
     /// other test. After a target kill, the other covering tests run up to
     /// the first failure.
-    #[arg(long, value_name = "TARGET", conflicts_with = "kill_matrix")]
+    #[arg(
+        long,
+        value_name = "TARGET",
+        conflicts_with = "kill_matrix",
+        help_heading = "Detection"
+    )]
     pub kill_matrix_for: Vec<String>,
     /// With `--kill-matrix-for`: also run the other covering tests of a
     /// mutant that no target kills, and retry each survivor. Each mutant
     /// then gets a normal status, and the run has a score. Without this
     /// flag, the run has no score and `--min-score` is an error. Slower.
-    #[arg(long, requires = "kill_matrix_for")]
+    #[arg(long, requires = "kill_matrix_for", help_heading = "Detection")]
     pub kill_matrix_full: bool,
     /// Rerun the open tasks of a saved report (its `survived` and
     /// `no_coverage` mutants) against the current tests. The worktree may
@@ -239,13 +249,19 @@ pub struct MutationArgs {
     /// are still open.
     #[arg(
         long,
-        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "function_scope", "min_score"]
+        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "function_scope", "min_score"],
+        help_heading = "Reruns",
     )]
     pub recheck: bool,
     /// The saved report of `--recheck` (default: the report of the last run).
     /// A recheck without `--mutant` replaces this file and the report of the
     /// last run.
-    #[arg(long, value_name = "PATH", requires = "recheck")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        requires = "recheck",
+        help_heading = "Reruns"
+    )]
     pub report: Option<PathBuf>,
     /// Recheck only these mutant ids of the report, comma-separated or
     /// repeated (default: each open task). The saved report then stays as it
@@ -254,14 +270,15 @@ pub struct MutationArgs {
         long = "mutant",
         value_name = "ID",
         value_delimiter = ',',
-        requires = "recheck"
+        requires = "recheck",
+        help_heading = "Reruns"
     )]
     pub mutants: Vec<String>,
     /// Compare this run with a saved complete report: list each mutant that
     /// the report detects (`killed` or `timeout`) and this run does not
     /// (`survived` or `no_coverage`), with its earlier killing tests. A
     /// report or a run that is not complete exits 2.
-    #[arg(long, value_name = "PATH", conflicts_with_all = ["plan", "recheck"])]
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["plan", "recheck"], help_heading = "Reruns")]
     pub compare: Option<PathBuf>,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]

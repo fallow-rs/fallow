@@ -42,7 +42,7 @@
       "default": "support"
     },
     "manifestEntries": {
-      "description": "Entry points DERIVED from framework manifest files.\n\nUnlike `entryPoints` (static globs), each rule finds manifest files by a\nrecursive glob, parses them, and seeds sibling entries resolved relative\nto each manifest's directory, gated on the manifest's own fields. Seeded\nentries use this plugin's `entryPointRole`.",
+      "description": "Entry points derived from framework manifest files.\n\nUnlike `entryPoints` (static globs), each rule finds manifest files by a\nrecursive glob, parses them, and seeds sibling entries resolved relative\nto each manifest's directory, gated on the manifest's own fields. Seeded\nentries use this plugin's `entryPointRole`.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/ManifestEntryRule"
@@ -206,7 +206,7 @@
       ]
     },
     "ManifestEntryRule": {
-      "description": "A rule that seeds entry points DERIVED from framework manifest files.\n\nFor every file matching `manifests` (a recursive glob) that passes the\nmanifest-level `when` gate, each rule in `entries` is resolved relative to\nthe manifest's directory (with `${dotted.field}` interpolation) into an entry\npoint. Seeded entries use the owning plugin's `entryPointRole`.\n\n```jsonc\n{\n  \"manifests\": \"**/kibana.jsonc\",\n  \"when\": { \"type\": \"plugin\" },\n  \"entries\": [\n    { \"path\": \"public/index.{ts,tsx}\", \"when\": { \"plugin.browser\": true } },\n    { \"path\": \"server/index.{ts,tsx}\", \"when\": { \"plugin.server\": true } },\n    { \"path\": \"${plugin.extraPublicDirs}/index.{ts,tsx}\" }\n  ]\n}\n```",
+      "description": "A rule that seeds entry points derived from framework manifest files.\n\nFor every file matching `manifests` (a recursive glob) that passes the\nmanifest-level `when` gate, each rule in `entries` is resolved relative to\nthe manifest's directory (with `${dotted.field}` interpolation) into an entry\npoint. Seeded entries use the owning plugin's `entryPointRole`.\n\n```jsonc\n{\n  \"manifests\": \"**/kibana.jsonc\",\n  \"when\": { \"type\": \"plugin\" },\n  \"entries\": [\n    { \"path\": \"public/index.{ts,tsx}\", \"when\": { \"plugin.browser\": true } },\n    { \"path\": \"server/index.{ts,tsx}\", \"when\": { \"plugin.server\": true } },\n    { \"path\": \"${plugin.extraPublicDirs}/index.{ts,tsx}\" }\n  ]\n}\n```",
       "type": "object",
       "properties": {
         "manifests": {

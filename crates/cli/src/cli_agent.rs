@@ -18,34 +18,34 @@ pub enum AgentCli {
     /// is detected only harness-neutral files are written.
     Install {
         /// Harness to wire; repeatable. Defaults to `auto`.
-        #[arg(long, value_enum, value_delimiter = ',')]
+        #[arg(long, value_enum, value_delimiter = ',', help_heading = "Scope")]
         harness: Vec<HarnessArg>,
 
         /// Write user-scoped files (skill and MCP config under $HOME) instead
         /// of project files. The `AGENTS.md` guide is project-only and is
         /// skipped under this flag.
-        #[arg(long)]
+        #[arg(long, help_heading = "Scope")]
         user: bool,
 
         /// Skip a step; repeatable.
-        #[arg(long, value_enum, value_delimiter = ',')]
+        #[arg(long, value_enum, value_delimiter = ',', help_heading = "Scope")]
         without: Vec<Step>,
 
         /// Print the plan without touching the filesystem.
-        #[arg(long)]
+        #[arg(long, help_heading = "Run")]
         dry_run: bool,
 
         /// Replace skills, hook scripts, or config files fallow did not write.
-        #[arg(long)]
+        #[arg(long, help_heading = "Run")]
         force: bool,
 
         /// Pre-approve the project-scoped MCP server for yourself by listing it
         /// in `.claude/settings.local.json` (Claude Code asks otherwise).
-        #[arg(long)]
+        #[arg(long, help_heading = "Scope")]
         approve: bool,
 
         /// Append `.claude/` to the project's `.gitignore`.
-        #[arg(long)]
+        #[arg(long, help_heading = "Scope")]
         gitignore_claude: bool,
     },
 

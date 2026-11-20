@@ -740,7 +740,7 @@ fn recommendation_human_report(rec: &Recommendation) -> String {
     );
     let _ = writeln!(
         out,
-        "\nTip: run `fallow recommend --format json` for the full structured decision set: the detected project shape, every decision's auto/default/taste tier and rationale, and the AskUserQuestion-shaped options behind each taste question."
+        "\nTip: run `fallow recommend --format json` for the full structured decision set: the detected project shape, every decision's auto/default/taste tier and rationale, and the multiple-choice options behind each taste question."
     );
     out
 }

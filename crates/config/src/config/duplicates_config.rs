@@ -347,7 +347,7 @@ impl ResolvedNormalization {
 ///
 /// Since fallow uses AST-based tokenization (not lexer-based), whitespace and
 /// comments are inherently absent from the token stream. The `Strict` and `Mild`
-/// modes are currently equivalent. `Weak` mode additionally blinds string
+/// modes give the same result. `Weak` mode additionally blinds string
 /// literals. `Semantic` mode blinds all identifiers and literal values for
 /// Type-2 (renamed variable) clone detection.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

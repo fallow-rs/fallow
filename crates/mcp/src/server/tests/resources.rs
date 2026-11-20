@@ -229,8 +229,15 @@ fn issue_types_resource_carries_severity_fixable_and_explain_uri() {
         .iter()
         .find(|r| r["id"] == "high-cyclomatic-complexity")
         .expect("complexity row");
-    assert!(complexity["default_severity"].is_null());
-    assert!(complexity["opt_in"].is_null());
+    assert_eq!(complexity["config_key"], "complexity-cyclomatic");
+    assert_eq!(complexity["default_severity"], "error");
+    assert_eq!(complexity["opt_in"], false);
+    let combined = rows
+        .iter()
+        .find(|r| r["id"] == "high-complexity")
+        .expect("combined complexity row");
+    assert!(combined["default_severity"].is_null());
+    assert!(combined["opt_in"].is_null());
 }
 
 #[test]

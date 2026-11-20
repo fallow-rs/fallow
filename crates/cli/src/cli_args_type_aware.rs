@@ -6,15 +6,15 @@ use clap::Subcommand;
 
 #[derive(Clone, Subcommand)]
 pub enum TypeAwareCli {
-    /// Report companion availability and version compatibility without analysis.
+    /// Report the availability of the type-aware companion and its version compatibility without analysis.
     Status,
-    /// Install the signed companion of this version into your user directory.
+    /// Install the signed type-aware companion of this version into your user directory.
     ///
     /// For a binary that is not the npm install (Homebrew, `cargo install`, a
     /// release archive). Asks Node for its platform, downloads the bundle from
     /// the GitHub release, checks its signature with the release key, and
     /// unpacks it. Honors HTTPS_PROXY, HTTP_PROXY, NO_PROXY and
-    /// FALLOW_CA_BUNDLE. The companion needs Node.js 20 or later on PATH.
+    /// FALLOW_CA_BUNDLE. The type-aware companion needs Node.js 20 or later on PATH.
     Setup {
         /// Confirm non-interactively. Required when stdin is not a terminal.
         #[arg(long)]
@@ -24,9 +24,9 @@ pub enum TypeAwareCli {
         #[arg(long, value_name = "FILE")]
         from: Option<PathBuf>,
     },
-    /// Remove the companions of other versions from the setup directory.
+    /// Remove the type-aware companions of other versions from the setup directory.
     ///
-    /// Keeps the companion that Fallow uses now.
+    /// Keeps the type-aware companion that Fallow uses now.
     Cleanup {
         /// Confirm non-interactively. Required when stdin is not a terminal.
         #[arg(long)]

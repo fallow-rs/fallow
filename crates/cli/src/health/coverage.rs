@@ -360,7 +360,7 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
             return Ok(candidate);
         }
         return Err(format!(
-            "FALLOW_COV_BIN is set to {path} but no file exists there. Unset FALLOW_COV_BIN to fall back to sidecar auto-discovery, or point it at the fallow-cov binary."
+            "FALLOW_COV_BIN is set to {path} but no file exists there. Unset FALLOW_COV_BIN to let fallow find the runtime coverage add-on, or point it at the fallow-cov binary."
         ));
     }
 
@@ -370,7 +370,7 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
             return Ok(candidate);
         }
         return Err(format!(
-            "FALLOW_COV_BINARY_PATH is set to {path} but no file exists there. Unset FALLOW_COV_BINARY_PATH to fall back to sidecar auto-discovery, or point it at the fallow-cov binary."
+            "FALLOW_COV_BINARY_PATH is set to {path} but no file exists there. Unset FALLOW_COV_BINARY_PATH to let fallow find the runtime coverage add-on, or point it at the fallow-cov binary."
         ));
     }
 
@@ -627,7 +627,7 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
         }
     }
     format!(
-        "Sidecar binary fallow-cov not found. Checked {}. Install with your package manager (for example `{install_example}`) or set FALLOW_COV_BIN.",
+        "The runtime coverage add-on (fallow-cov) was not found. Checked {}. Install with your package manager (for example `{install_example}`) or set FALLOW_COV_BIN.",
         checks.join(", "),
     )
 }
@@ -1645,14 +1645,14 @@ fn verify_sidecar_signature(binary: &Path) -> Result<(), String> {
 
     let sig_bytes = fs::read(&sig_path).map_err(|err| {
         format!(
-            "Sidecar binary at {} is missing its signature file {}: {err}. The fallow CLI refuses to spawn an unsigned sidecar. Reinstall @fallow-cli/fallow-cov.",
+            "The runtime coverage add-on at {} is missing its signature file {}: {err}. Fallow does not run an unsigned add-on. Reinstall @fallow-cli/fallow-cov.",
             binary.display(),
             sig_path.display()
         )
     })?;
     let sig_array: [u8; 64] = sig_bytes.as_slice().try_into().map_err(|_| {
         format!(
-            "Sidecar signature file at {} is {} bytes; expected 64. Reinstall @fallow-cli/fallow-cov.",
+            "The signature file of the runtime coverage add-on at {} is {} bytes; expected 64. Reinstall @fallow-cli/fallow-cov.",
             sig_path.display(),
             sig_bytes.len()
         )
@@ -1665,14 +1665,14 @@ fn verify_sidecar_signature(binary: &Path) -> Result<(), String> {
 
     let binary_bytes = fs::read(binary).map_err(|err| {
         format!(
-            "failed to read sidecar binary at {} for signature verification: {err}",
+            "failed to read the runtime coverage add-on at {} for signature verification: {err}",
             binary.display()
         )
     })?;
 
     key.verify(&binary_bytes, &signature).map_err(|err| {
         format!(
-            "Sidecar binary at {} failed Ed25519 signature verification: {err}. The .sig file does not match the fallow CLI's compiled-in binary-signing public key. Reinstall @fallow-cli/fallow-cov from npm, or if you are building from a pre-release fallow source, rebuild against the published fallow release.",
+            "The runtime coverage add-on at {} failed Ed25519 signature verification: {err}. The .sig file does not match the fallow CLI's compiled-in binary-signing public key. Reinstall @fallow-cli/fallow-cov from npm, or if you are building from a pre-release fallow source, rebuild against the published fallow release.",
             binary.display()
         )
     })?;
@@ -1708,7 +1708,7 @@ fn run_sidecar(
 
     let output_data = child.wait_with_output().map_err(|err| {
         emit_printed(
-            &format!("failed to wait for sidecar: {err}"),
+            &format!("failed to wait for the runtime coverage add-on: {err}"),
             RUNTIME_COVERAGE_SIDECAR,
             output,
         )
@@ -1727,7 +1727,7 @@ fn run_sidecar(
 fn decode_sidecar_response(bytes: &[u8], output: OutputFormat) -> Result<Response, u8> {
     let response: Response = serde_json::from_slice(bytes).map_err(|err| {
         emit_printed(
-            &format!("failed to parse sidecar response: {err}"),
+            &format!("failed to parse the response of the runtime coverage add-on: {err}"),
             RUNTIME_COVERAGE_SIDECAR,
             output,
         )
@@ -1758,14 +1758,14 @@ fn write_sidecar_request(
 ) -> Result<(), u8> {
     if let Err(err) = serde_json::to_writer(&mut stdin, request) {
         return Err(emit_printed(
-            &format!("failed to serialize sidecar request: {err}"),
+            &format!("failed to serialize the request to the runtime coverage add-on: {err}"),
             RUNTIME_COVERAGE_SIDECAR,
             output,
         ));
     }
     if let Err(err) = stdin.flush() {
         return Err(emit_printed(
-            &format!("failed to flush sidecar request: {err}"),
+            &format!("failed to flush the request to the runtime coverage add-on: {err}"),
             RUNTIME_COVERAGE_SIDECAR,
             output,
         ));
@@ -1781,7 +1781,7 @@ fn check_sidecar_exit_status(
     match output_data.status.code() {
         Some(0) => Ok(()),
         Some(code) if code == i32::from(RUNTIME_COVERAGE_SIDECAR_EXIT_CODE) => Err(emit_printed(
-            &stderr_message(&output_data.stderr, "sidecar protocol mismatch"),
+            &stderr_message(&output_data.stderr, "runtime coverage protocol mismatch"),
             RUNTIME_COVERAGE_SIDECAR,
             output,
         )),
@@ -1794,19 +1794,19 @@ fn check_sidecar_exit_status(
             output,
         )),
         Some(code) if code == i32::from(RUNTIME_COVERAGE_INTERNAL_EXIT_CODE) => Err(emit_printed(
-            &stderr_message(&output_data.stderr, "sidecar internal error"),
+            &stderr_message(&output_data.stderr, "runtime coverage internal error"),
             RUNTIME_COVERAGE_INTERNAL,
             output,
         )),
         Some(code) => Err(emit_printed(
-            &stderr_message(&output_data.stderr, "sidecar execution failed"),
+            &stderr_message(&output_data.stderr, "runtime coverage add-on failed"),
             ErrorExitCode::passthrough(
                 u8::try_from(code).unwrap_or(RUNTIME_COVERAGE_SIDECAR_EXIT_CODE),
             ),
             output,
         )),
         None => Err(emit_printed(
-            "sidecar terminated by signal",
+            "runtime coverage add-on stopped by a signal",
             RUNTIME_COVERAGE_SIDECAR,
             output,
         )),
@@ -1820,12 +1820,12 @@ fn check_response_protocol(response: &Response, output: OutputFormat) -> Result<
     if response_major != supported_major {
         let message = if response_major > supported_major {
             format!(
-                "sidecar emits protocol v{}; this fallow supports up to v{}. Upgrade fallow.",
+                "the runtime coverage add-on uses protocol v{}; this fallow supports up to v{}. Upgrade fallow.",
                 response.protocol_version, PROTOCOL_VERSION
             )
         } else {
             format!(
-                "sidecar emits protocol v{}; this fallow requires v{}+. Upgrade @fallow-cli/fallow-cov.",
+                "the runtime coverage add-on uses protocol v{}; this fallow requires v{}+. Upgrade @fallow-cli/fallow-cov.",
                 response.protocol_version, PROTOCOL_VERSION
             )
         };

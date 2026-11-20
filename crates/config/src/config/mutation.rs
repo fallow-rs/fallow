@@ -179,7 +179,7 @@ pub struct MutationConfig {
     #[schemars(range(min = 0.0, max = 100.0))]
     pub min_score: Option<f64>,
 
-    /// The number of companion processes. Unset uses half the logical cores.
+    /// The number of mutation runner processes. Unset uses half the logical cores.
     /// `--concurrency` wins.
     #[serde(
         default,
@@ -209,7 +209,7 @@ pub struct MutationConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub function_scope: Option<bool>,
 
-    /// Type-check each survived mutant through the TypeScript-Go companion
+    /// Type-check each survived mutant through the type-aware companion
     /// of `--type-aware`. A survivor that does not type-check becomes
     /// `compile_error` and does not count in the score. A survivor that
     /// removes an optional-chaining link or a nullish fallback from a

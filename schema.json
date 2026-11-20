@@ -5,7 +5,7 @@
   "type": "object",
   "properties": {
     "$schema": {
-      "description": "A string pointing at fallow's JSON Schema URL, used only by editors for autocomplete and validation of the config file; it has no effect on analysis and is stripped before serialization (serde skip_serializing, writeOnly in the schema). Set it to `./node_modules/fallow/schema.json` for npm installs (version-aligned, offline, avoids VS Code's untrusted-remote-schema prompt), or `https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json` for non-npm installs; any other value is ignored by fallow.",
+      "description": "A string pointing at fallow's JSON Schema URL, used only by editors for autocomplete and validation of the config file; it has no effect on analysis, and fallow does not write it back when it saves a config. Set it to `./node_modules/fallow/schema.json` for npm installs (version-aligned, offline, avoids VS Code's untrusted-remote-schema prompt), or `https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json` for non-npm installs; any other value is ignored by fallow.",
       "type": [
         "string",
         "null"
@@ -13,14 +13,14 @@
       "writeOnly": true
     },
     "minimumVersion": {
-      "description": "The lowest fallow version this config is written for, as `MAJOR.MINOR.PATCH`. An older binary stops with a message naming both versions instead of failing on the first field it does not recognize, so a config committed to a shared repository says which upgrade it needs rather than reading like a typo. Optional and unset by default; set it in the same change that adds a field introduced in a newer version. It gates nothing on its own: an unknown key still fails on a binary at or above this version, because there the key really is a typo.",
+      "description": "The lowest fallow version this config is written for, as `MAJOR.MINOR.PATCH`. An older binary stops with a message naming both versions instead of failing on the first field it does not recognize, so a config committed to a shared repository says which upgrade it needs rather than reading like a typo. Optional and unset by default; set it in the same change that adds a field introduced in a newer version. Only digits are accepted: a pre-release suffix such as `-beta.1` is a config error. A parent config of `extends` can set it too. It gates nothing on its own: an unknown key still fails on a binary at or above this version, because there the key really is a typo.",
       "type": [
         "string",
         "null"
       ]
     },
     "extends": {
-      "description": "A single parent config source, or an ordered array of them, to inherit before this file's own keys apply; each source is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with cycle and depth guards. Set it to share a base config across a monorepo or team; it is consumed at load and stripped before serialization (serde skip_serializing).",
+      "description": "A single parent config source, or an ordered array of them, to inherit before this file's own keys apply; each source is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with a cycle guard and a depth limit of 10 levels. An `https://` source loads only with `--allow-remote-extends`; fallow waits 5 seconds for it (`FALLOW_EXTENDS_TIMEOUT_SECS` changes this) and refuses a response over 1 MB. Set it to share a base config across a monorepo or team; fallow reads it at load and does not write it back when it saves a config.",
       "anyOf": [
         {
           "type": "string"
@@ -55,14 +55,16 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "ignoreFindings": {
-      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A matching file that parses with errors reports no `source-parse-degraded` diagnostic, and its partial parse does not mark other findings as incomplete; use this only for files that are broken on purpose, such as syntax-error test fixtures. A single `*` stays within one path segment; use `**` to match across directories.",
+      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. The human output names each pattern that matched no finding in the run. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A matching file that parses with errors reports no `source-parse-degraded` diagnostic, and its partial parse does not mark other findings as incomplete; use this only for files that are broken on purpose, such as syntax-error test fixtures. A single `*` stays within one path segment; use `**` to match across directories.",
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "framework": {
       "description": "Declares inline external framework plugins as data (array of plugin objects), each with `name` plus optional `enablers` (package names that activate it) or richer `detection` (dependency/file-existence/`all`/`any` checks, taking priority over `enablers`); an entry with neither never activates, and config load warns. Each entry can also have `entryPoints` (+ `entryPointRole` runtime/support/test), `configPatterns`, `alwaysUsed`, `toolingDependencies`, `usedExports` (`{ pattern, exports }`), and `usedClassMembers`. Set it to keep a custom or in-house framework's entry points, config files, and conventions reachable without a Rust plugin; these definitions are appended to plugins discovered via `plugins`, `.fallow/plugins/`, and root `fallow-plugin-*` files (first occurrence of a name wins), and cannot do AST-based config parsing.",
@@ -85,7 +87,7 @@
       "default": null
     },
     "ignoreDependencies": {
-      "description": "A list of package names or package-name globs excluded from BOTH unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob in the `ignorePatterns` syntax matched against the package name, so `@acme/*` covers every package in the `@acme` scope.",
+      "description": "A list of package names or package-name globs excluded from both unused-dependency and unlisted-dependency detection, so a runtime-provided or otherwise-untracked package (e.g. `bun:sqlite`, a peer supplied at deploy time) is never flagged as unused when declared nor as unlisted when imported. Set it for packages fallow cannot observe being used and cannot observe being declared. An entry without glob characters matches the package name exactly; an entry with `*`, `?`, `[` or `{` is a glob in the `ignorePatterns` syntax matched against the package name, so `@acme/*` covers every package in the `@acme` scope. The human output names each entry that hid no dependency finding and each glob that matched no declared dependency in the run.",
       "type": "array",
       "items": {
         "type": "string"
@@ -97,17 +99,19 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "ignoreCommandEntries": {
       "description": "A list of command names whose file arguments fallow does not make entry points. Fallow reads commands in package.json scripts (root and workspace packages), CI files (GitHub Actions and GitLab CI), Dockerfiles, Procfiles, and fly.toml files, and a file that a command names (such as `node scripts/seed.ts`) normally becomes an entry point. A listed command still counts as a used dependency, and its `--config` file is still tracked. Formatters and linters (ESLint, Prettier, Oxlint, Oxfmt, Biome, Stylelint, and similar tools) never make their targets entry points, so they do not need to be listed. Set it for a command whose file arguments are data, not code that runs (e.g. `[\"my-codegen\"]`), or use `[\"*\"]` to turn off entry points from all commands and declare real entries in `entry`. A name matches the command after environment, package-manager, and wrapper prefixes (`npx`, `pnpm exec`, `yarn run`, `varlock run --`), by exact file name; `*` is the only wildcard.",
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "ignoreUnresolvedImports": {
-      "description": "A list of glob patterns that suppress only `unresolved-import` findings whose raw import specifier matches; it does not change dependency usage accounting or resolver behavior. Patterns match the import string as written (not a filesystem path), so list both `@example/icons` and `@example/icons/**` to cover a bare package and its subpaths; parent-relative generated specifiers like `../generated/**` are valid, and broad values like `**` can hide real missing modules.",
+      "description": "A list of glob patterns that suppress only `unresolved-import` findings whose raw import specifier matches; it does not change dependency usage accounting or resolver behavior. Patterns match the import string as written (not a filesystem path), so list both `@example/icons` and `@example/icons/**` to cover a bare package and its subpaths; parent-relative generated specifiers like `../generated/**` are valid, and broad values like `**` can hide real missing modules. An invalid glob is a config error.",
       "type": "array",
       "items": {
         "type": "string"
@@ -115,7 +119,7 @@
       "default": []
     },
     "ignoreExports": {
-      "description": "A list of per-file rules that exempt named exports from `unused-export` and from duplicate-exports grouping for files matching a glob. Each entry is `{ file: <glob>, exports: [<name>, ...] }` where `exports: [\"*\"]` exempts every export in the file and a name list exempts only those names; built for component-library barrels (shadcn/Radix/bits-ui `index.ts`) that intentionally re-export the same short names across many files. A single `*` stays within one path segment; use `**` to match across directories.",
+      "description": "A list of per-file rules that exempt named exports from `unused-export` and from duplicate-exports grouping for files matching a glob. Each entry is `{ file: <glob>, exports: [<name>, ...] }` where `exports: [\"*\"]` exempts every export in the file and a name list exempts only those names; built for component-library barrels (shadcn/Radix/bits-ui `index.ts`) that intentionally re-export the same short names across many files. A single `*` stays within one path segment; use `**` to match across directories. An invalid `file` glob is a config error. `fallow fix` can add an entry for a duplicate export.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/IgnoreExportRule"
@@ -123,18 +127,20 @@
       "default": []
     },
     "ignoreCatalogReferences": {
-      "description": "A list of rules that suppress `unresolved-catalog-reference` findings (a workspace `package.json` referencing a `catalog:` or `catalog:<name>` that the catalog does not declare); config-only because `package.json` has no inline-suppression comment surface. Each entry needs a `package` (exact match) plus optional `catalog` (exact catalog-name match) and `consumer` (glob on the consuming package.json path); use it for staged catalog migrations where the catalog edit lands in a separate change.",
+      "description": "A list of rules that suppress `unresolved-catalog-reference` findings (a workspace `package.json` referencing a `catalog:` or `catalog:<name>` that the catalog does not declare); config-only because `package.json` has no inline-suppression comment surface. Each entry needs a `package` (exact match) plus optional `catalog` (exact catalog-name match) and `consumer` (glob on the consuming package.json path); use it for staged catalog migrations where the catalog edit lands in a separate change. An invalid `consumer` glob is a config error.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/IgnoreCatalogReferenceRule"
-      }
+      },
+      "default": []
     },
     "ignoreDependencyOverrides": {
-      "description": "A list of rules that suppress `unused-dependency-override` and `misconfigured-dependency-override` findings for pnpm `overrides` entries; config-only, matched against the override's target package. Each entry needs a `package` (exact match) plus an optional `source` to scope the suppression to `\"pnpm-workspace.yaml\"` or `\"package.json\"`.",
+      "description": "A list of rules that suppress `unused-dependency-override` and `misconfigured-dependency-override` findings for override entries: pnpm `overrides` in `pnpm-workspace.yaml` or `package.json`, npm and bun `overrides`, and bun `resolutions`; config-only, matched against the override's target package. Each entry needs a `package` (exact match) plus an optional `source` to scope the suppression to `\"pnpm-workspace.yaml\"` or `\"package.json\"`.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/IgnoreDependencyOverrideRule"
-      }
+      },
+      "default": []
     },
     "ignoreExportsUsedInFile": {
       "description": "Controls whether an export referenced only by another symbol in the same file is treated as used (suppressed from `unused-export`) until it becomes completely unreferenced; references inside an export specifier itself (`export { foo }`, `export default foo`) do not count as same-file uses. Accepts `true`/`false` (default `false`, suppress nothing) or the knip-parity object `{ \"type\": true, \"interface\": true }`, which restricts the suppression to type-only exports; fallow groups type aliases and interfaces under one kind, so both object fields behave identically.",
@@ -146,7 +152,8 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "usedClassMembers": {
       "description": "A list of class-member names or glob patterns treated as framework-used, so a method a library invokes reflectively (ag-Grid `agInit`/`refresh`, Web Component `connectedCallback`) is not reported as `unused-class-member`; it applies to class members only, not enum members. Each entry is either a plain string/glob (`\"agInit\"`, `\"enter*\"`, `\"*\"`) applied to every class, or a scoped object `{ extends?, implements?, members: [...] }` that applies only when the class matches that heritage clause (a scoped rule requires `extends` or `implements`); patterns matching zero members warn once.",
@@ -309,15 +316,15 @@
       }
     },
     "unusedComponentProps": {
-      "description": "Options for the `unused-component-props` rule, currently only `ignorePattern`: a regex matched against each declared prop's local destructure binding name (falling back to the public prop name when unaliased) to exempt intentionally-unused props such as the leading-underscore convention. Set `{ \"ignorePattern\": \"^_\" }` to skip props like `_stage`; matching is unanchored (substring, like ESLint's `RegExp.test`) so anchor with `^`, the pattern is validated at config load (invalid regex fails load), and it applies to Vue, Svelte, Astro, and React/Preact props (unset leaves the rule unchanged).",
+      "description": "Options for the `unused-component-props` rule. It has one key, `ignorePattern`: a regex matched against each declared prop's local destructure binding name (falling back to the public prop name when unaliased) to exempt intentionally-unused props such as the leading-underscore convention. Set `{ \"ignorePattern\": \"^_\" }` to skip props like `_stage`; matching is unanchored (substring, like ESLint's `RegExp.test`) so anchor with `^`, the pattern is validated at config load (invalid regex fails load), and it applies to Vue, Svelte, Astro, and React/Preact props (unset leaves the rule unchanged).",
       "$ref": "#/$defs/UnusedComponentPropsConfig"
     },
     "circularDependencies": {
-      "description": "Options for the `circular-dependencies` rule, currently only `ignoreLazyImports`. Set `{ \"ignoreLazyImports\": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL, a webpack worker loader request such as `worker-loader!./work.js`) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.",
+      "description": "Options for the `circular-dependencies` rule: `ignoreLazyImports` and `allow`, a list of accepted cycles. Set `{ \"ignoreLazyImports\": true }` to skip import edges that load on demand or on another thread (an `import()` inside a function, a template `import()`, a lazy `import.meta.glob`, a worker URL, a webpack worker loader request such as `worker-loader!./work.js`) when fallow looks for cycles. A top-level `await import()`, `require()`, an eager glob, and an edge that also has a static import stay in the cycle graph. Default `false` leaves the rule unchanged.",
       "$ref": "#/$defs/CircularDependenciesConfig"
     },
     "effect": {
-      "description": "Options for projects that use the Effect library, currently only `schemaExportsAsTypes`. Set `{ \"schemaExportsAsTypes\": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand(\"Id\"))`) as an unused type under the `unused-types` rule, not as an unused export, so `\"unused-types\": \"off\"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand(\"Id\"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. Default `false` leaves every report unchanged.",
+      "description": "Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ \"schemaExportsAsTypes\": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand(\"Id\"))`) as an unused type under the `unused-types` rule, not as an unused export, so `\"unused-types\": \"off\"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand(\"Id\"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. Default `false` leaves every report unchanged.",
       "$ref": "#/$defs/EffectConfig"
     },
     "boundaries": {
@@ -336,7 +343,7 @@
       }
     },
     "sharedStateAllowlist": {
-      "description": "Exact [global root, direct slot] pairs excluded from shared-state inventory.",
+      "description": "Global slots that `fallow architecture --shared-state` leaves out of its inventory. Each entry is an exact pair of a global root (`window`, `globalThis`, `self` or `global`) and a direct slot, for example `[\"window\", \"analyticsQueue\"]`.",
       "type": "array",
       "items": {
         "type": "array",
@@ -345,7 +352,8 @@
         },
         "minItems": 2,
         "maxItems": 2
-      }
+      },
+      "default": []
     },
     "security": {
       "description": "Scopes the opt-in `fallow security` catalogue: which candidate categories run and which extra local identifiers count as HTTP request objects. Set when tuning security-candidate detection; the object holds `categories` (an object with `include` and/or `exclude` string arrays of catalogue category ids, where `include` restricts to a whitelist and `exclude` removes from the admitted set, both unset admits all ordinary categories) and `requestReceivers` (a string array of project-local names that extend, not replace, the built-in `*.query`/`*.params`/`*.body` source-receiver allowlist). The `hardcoded-secret` and `secret-to-network` categories are include-required: they fire only when explicitly listed in `categories.include`, even when no include list is otherwise set. The valid category ids are enumerated (with title, CWE, and include-required flag) in the `security_categories` block of `fallow schema`, and also listed by `fallow security --help`; they are not in this config-schema.",
@@ -353,7 +361,7 @@
       "default": {}
     },
     "fix": {
-      "description": "Configures `fallow fix` behavior. Currently holds one nested section, `catalog` (a `CatalogFixConfig`), whose only key `deletePrecedingComments` (`auto` default, `always`, `never`) governs whether comment lines directly above a removed unused `pnpm-workspace.yaml` catalog entry are deleted with it.",
+      "description": "Configures `fallow fix` behavior. It holds one nested section, `catalog`, whose only key `deletePrecedingComments` (`auto` default, `always`, `never`) governs whether comment lines directly above a removed unused `pnpm-workspace.yaml` catalog entry are deleted with it.",
       "$ref": "#/$defs/FixConfig",
       "default": {
         "catalog": {
@@ -367,12 +375,12 @@
       "default": {}
     },
     "production": {
-      "description": "Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes?, ignore? }` that scopes production mode to individual analyses in combined `fallow` and `fallow audit` (each analysis key a boolean, default false). The object key `ignore` is a glob array of extra paths that discovery drops in production mode only. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).",
+      "description": "Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes?, ignore? }` that scopes production mode to individual analyses: `deadCode` applies to `fallow dead-code`, `health` to `fallow health` and `dupes` to `fallow dupes`, and each applies to its part of combined `fallow` and `fallow audit` (each analysis key a boolean, default false). The object key `ignore` is a glob array of extra paths that discovery drops in production mode only. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).",
       "$ref": "#/$defs/ProductionConfig",
       "default": false
     },
     "plugins": {
-      "description": "List of paths (relative to the project root, must resolve within it) to external plugin definition files or directories in JSONC/JSON/TOML, loaded in addition to the auto-discovered `.fallow/plugins/` directory and root `fallow-plugin-*` files. Set it to load plugin definitions kept outside those default locations; a path resolving outside the project root is skipped with a `tracing::warn`, and paths listed here are searched before the auto-discovered locations (first occurrence of a plugin name wins).",
+      "description": "List of paths (relative to the project root, must resolve within it) to external plugin definition files or directories in JSONC/JSON/TOML, loaded in addition to the auto-discovered `.fallow/plugins/` directory and root `fallow-plugin-*` files. Set it to load plugin definitions kept outside those default locations; a path resolving outside the project root is skipped with a warning, and paths listed here are searched before the auto-discovered locations (first occurrence of a plugin name wins).",
       "type": "array",
       "items": {
         "type": "string"
@@ -384,7 +392,8 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "dynamicallyLoaded": {
       "description": "An array of project-root-relative glob patterns for files loaded at runtime by a mechanism the static graph cannot see (dynamic path resolution, config-driven loading); matching files are seeded as entry points so they and their imports stay reachable. Empty by default; set it (e.g. `[\"plugins/**/*.ts\", \"locales/**/*.json\"]`) for plugin or locale trees pulled in dynamically. A single `*` stays within one path segment; use `**` to match across directories.",
@@ -399,7 +408,8 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "default": []
     },
     "overrides": {
       "description": "An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten a rule for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict). For most rules, an override cannot start a detector for a rule that is off at top level, so set the top-level rule on and use an override to set `off` for the other paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, unlisted-binaries, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. A single `*` stays within one path segment; use `**` to match across directories.",
@@ -436,7 +446,7 @@
       ]
     },
     "audit": {
-      "description": "Sets in-repo defaults for `fallow audit` (the changed-files quality gate) so CLI flags need not repeat per run. Set to pin audit behavior; the object holds `gate` (`new-only` or `all`, which findings drive the verdict), `css`/`cssDeep` (booleans toggling styling analysis and the project-wide CSS reachability pass), `deadCodeBaseline`/`healthBaseline`/`dupesBaseline` (per-sub-analysis baseline file paths), and `cacheMaxAgeDays` (GC window in days for the reusable base-snapshot worktree cache). The matching CLI flag overrides each field.",
+      "description": "Sets in-repo defaults for `fallow audit` (the changed-files quality gate) so CLI flags need not repeat per run. Set to pin audit behavior; the object holds `gate` (`new-only` or `all`, which findings drive the verdict), `css`/`cssDeep` (booleans toggling styling analysis and the project-wide CSS reachability pass), `deadCodeBaseline`/`healthBaseline`/`dupesBaseline` (per-sub-analysis baseline file paths), and `cacheMaxAgeDays` (the age in days after which fallow removes an entry of the reusable base-snapshot worktree cache). The matching CLI flag overrides each field.",
       "$ref": "#/$defs/AuditConfig"
     },
     "sealed": {
@@ -445,7 +455,7 @@
       "default": false
     },
     "includeEntryExports": {
-      "description": "When true, exports of entry-point files are subject to unused-export detection instead of being auto-credited as used, so a typo'd or stray export in a framework route or package entry (e.g. meatdata for metadata) is flagged; plugin used_exports allowlists are still honored. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.",
+      "description": "When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (e.g. meatdata for metadata) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.",
       "type": "boolean",
       "default": false
     },
@@ -515,7 +525,7 @@
           "default": "support"
         },
         "manifestEntries": {
-          "description": "Entry points DERIVED from framework manifest files.\n\nUnlike `entryPoints` (static globs), each rule finds manifest files by a\nrecursive glob, parses them, and seeds sibling entries resolved relative\nto each manifest's directory, gated on the manifest's own fields. Seeded\nentries use this plugin's `entryPointRole`.",
+          "description": "Entry points derived from framework manifest files.\n\nUnlike `entryPoints` (static globs), each rule finds manifest files by a\nrecursive glob, parses them, and seeds sibling entries resolved relative\nto each manifest's directory, gated on the manifest's own fields. Seeded\nentries use this plugin's `entryPointRole`.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ManifestEntryRule"
@@ -679,7 +689,7 @@
       ]
     },
     "ManifestEntryRule": {
-      "description": "A rule that seeds entry points DERIVED from framework manifest files.\n\nFor every file matching `manifests` (a recursive glob) that passes the\nmanifest-level `when` gate, each rule in `entries` is resolved relative to\nthe manifest's directory (with `${dotted.field}` interpolation) into an entry\npoint. Seeded entries use the owning plugin's `entryPointRole`.\n\n```jsonc\n{\n  \"manifests\": \"**/kibana.jsonc\",\n  \"when\": { \"type\": \"plugin\" },\n  \"entries\": [\n    { \"path\": \"public/index.{ts,tsx}\", \"when\": { \"plugin.browser\": true } },\n    { \"path\": \"server/index.{ts,tsx}\", \"when\": { \"plugin.server\": true } },\n    { \"path\": \"${plugin.extraPublicDirs}/index.{ts,tsx}\" }\n  ]\n}\n```",
+      "description": "A rule that seeds entry points derived from framework manifest files.\n\nFor every file matching `manifests` (a recursive glob) that passes the\nmanifest-level `when` gate, each rule in `entries` is resolved relative to\nthe manifest's directory (with `${dotted.field}` interpolation) into an entry\npoint. Seeded entries use the owning plugin's `entryPointRole`.\n\n```jsonc\n{\n  \"manifests\": \"**/kibana.jsonc\",\n  \"when\": { \"type\": \"plugin\" },\n  \"entries\": [\n    { \"path\": \"public/index.{ts,tsx}\", \"when\": { \"plugin.browser\": true } },\n    { \"path\": \"server/index.{ts,tsx}\", \"when\": { \"plugin.server\": true } },\n    { \"path\": \"${plugin.extraPublicDirs}/index.{ts,tsx}\" }\n  ]\n}\n```",
       "type": "object",
       "properties": {
         "manifests": {
@@ -844,7 +854,7 @@
       "type": "object",
       "properties": {
         "patterns": {
-          "description": "Additional workspace patterns (beyond what's in root package.json).\n\n`packages` is accepted as a back-compat alias: an older `fallow init --toml`\nwrote `[workspaces]` with a `packages` key, and reading it as `patterns`\nkeeps those existing configs scoping correctly. schemars omits serde\naliases, so `schema.json` documents only `patterns`.",
+          "description": "Additional workspace patterns (beyond what's in root package.json).\n\n`packages` is accepted as an older name of `patterns`, which an older\n`fallow init --toml` wrote.",
           "type": "array",
           "items": {
             "type": "string"
@@ -967,7 +977,7 @@
           "type": "boolean"
         },
         {
-          "description": "Knip-parity object form restricting the suppression to type-only\nexports.",
+          "description": "Object form that restricts the suppression to type-only exports.",
           "$ref": "#/$defs/IgnoreExportsUsedInFileByKind"
         }
       ]
@@ -1098,7 +1108,7 @@
       }
     },
     "DetectionMode": {
-      "description": "Detection mode controlling how aggressively tokens are normalized.\n\nSince fallow uses AST-based tokenization (not lexer-based), whitespace and\ncomments are inherently absent from the token stream. The `Strict` and `Mild`\nmodes are currently equivalent. `Weak` mode additionally blinds string\nliterals. `Semantic` mode blinds all identifiers and literal values for\nType-2 (renamed variable) clone detection.",
+      "description": "Detection mode controlling how aggressively tokens are normalized.\n\nSince fallow uses AST-based tokenization (not lexer-based), whitespace and\ncomments are inherently absent from the token stream. The `Strict` and `Mild`\nmodes give the same result. `Weak` mode additionally blinds string\nliterals. `Semantic` mode blinds all identifiers and literal values for\nType-2 (renamed variable) clone detection.",
       "oneOf": [
         {
           "description": "All tokens preserved including identifier names and literal values (Type-1 only).",
@@ -1216,7 +1226,7 @@
           "maximum": 100.0
         },
         "concurrency": {
-          "description": "The number of companion processes. Unset uses half the logical cores.\n`--concurrency` wins.",
+          "description": "The number of mutation runner processes. Unset uses half the logical cores.\n`--concurrency` wins.",
           "type": [
             "integer",
             "null"
@@ -1241,7 +1251,7 @@
           ]
         },
         "typecheck": {
-          "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. A survivor that\nremoves an optional-chaining link or a nullish fallback from a\nreceiver whose type excludes `null` and `undefined` gets an advisory\n`equivalence_hint`. Its status\nand the score do not change. Unset or `false` checks no survivor.\n`--typecheck` turns the check on.",
+          "description": "Type-check each survived mutant through the type-aware companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. A survivor that\nremoves an optional-chaining link or a nullish fallback from a\nreceiver whose type excludes `null` and `undefined` gets an advisory\n`equivalence_hint`. Its status\nand the score do not change. Unset or `false` checks no survivor.\n`--typecheck` turns the check on.",
           "type": [
             "boolean",
             "null"
@@ -1671,7 +1681,7 @@
           "const": "anonymized"
         },
         {
-          "description": "Legacy spelling for [`EmailMode::Anonymized`].",
+          "description": "Older spelling of `anonymized`.",
           "type": "string",
           "const": "hash"
         }
@@ -1817,7 +1827,7 @@
           "default": "off"
         },
         "unused-store-members": {
-          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an OPEN declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an open declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -1907,12 +1917,12 @@
           "default": "off"
         },
         "css-token-drift": {
-          "description": "A CSS / CSS-in-JS design-token DRIFT finding (a hardcoded value where a\ndesign token exists, e.g. a Tailwind arbitrary value). A styling-domain\nadvisory surfaced in `fallow audit`; defaults to `warn` (verdict-neutral).\nSet to `error` to gate CI on styling drift, or `off` to silence.",
+          "description": "A CSS / CSS-in-JS design-token drift finding (a hardcoded value where a\ndesign token exists, e.g. a Tailwind arbitrary value). A styling-domain\nadvisory surfaced in `fallow audit`; defaults to `warn` (verdict-neutral).\nSet to `error` to gate CI on styling drift, or `off` to silence.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "css-duplicate-block": {
-          "description": "A CSS / CSS-in-JS DUPLICATE declaration block (copy-pasted rule body).\nA styling-domain advisory surfaced in `fallow audit`; defaults to `warn`\n(verdict-neutral). Set to `error` to gate, or `off` to silence.",
+          "description": "A CSS / CSS-in-JS duplicate declaration block (copy-pasted rule body).\nA styling-domain advisory surfaced in `fallow audit`; defaults to `warn`\n(verdict-neutral). Set to `error` to gate, or `off` to silence.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -2077,7 +2087,7 @@
           "default": "warn"
         },
         "mixed-client-server-barrel": {
-          "description": "A barrel file that re-exports BOTH a `\"use client\"` origin module AND a\nserver-only origin module. Importing one name from such a barrel drags\nthe other's directive context across the React Server Components\nboundary (the Next.js App Router footgun). Defaults to `warn`.",
+          "description": "A barrel file that re-exports both a `\"use client\"` origin module and a\nserver-only origin module. Importing one name from such a barrel drags\nthe other's directive context across the React Server Components\nboundary (the Next.js App Router footgun). Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -2142,7 +2152,7 @@
           "const": "warn"
         },
         {
-          "description": "Don't detect or report.",
+          "description": "Do not detect or report.",
           "type": "string",
           "const": "off"
         }
@@ -2153,7 +2163,7 @@
       "type": "object",
       "properties": {
         "ignorePattern": {
-          "description": "Regex matched against each declared prop's LOCAL destructure binding name\n(e.g. `_stage` in `let { stage: _stage } = $props()`), which falls back\nto the public prop name when there is no alias. A prop whose local name\nmatches is treated as intentionally unused and never reported as\n`unused-component-props`. Matching is unanchored (substring), like\nESLint's `RegExp.test`, so anchor with `^_` to match a leading\nunderscore. Compiled and validated at config load (an invalid regex fails\nload). Applies to Vue, Svelte, Astro, and React/Preact props.",
+          "description": "Regex matched against each declared prop's local destructure binding name\n(e.g. `_stage` in `let { stage: _stage } = $props()`), which falls back\nto the public prop name when there is no alias. A prop whose local name\nmatches is treated as intentionally unused and never reported as\n`unused-component-props`. Matching is unanchored (substring), like\nESLint's `RegExp.test`, so anchor with `^_` to match a leading\nunderscore. Compiled and validated at config load (an invalid regex fails\nload). Applies to Vue, Svelte, Astro, and React/Preact props.",
           "type": [
             "string",
             "null"
@@ -2190,7 +2200,8 @@
       "properties": {
         "schemaExportsAsTypes": {
           "description": "Report an unused exported Effect schema as an unused type, under the\n`unused-types` rule, and not as an unused export. An Effect schema\ndefines a runtime value and a type (`typeof User.Type`), so a team\nthat keeps exported types as contracts can keep schemas too. With\n`\"unused-types\": \"off\"`, fallow does not report them. A schema is a\nclass that extends a `Schema` class factory (`Schema.Class`,\n`Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,\n`Schema.Error`, `Schema.Opaque`), or a const whose\nvalue is a `Schema` constructor, member or pipe chain\n(`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand(\"Id\"))`).\nEach `pipe` argument must be a `Schema` transform.\n`Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.\nDefault `false`.",
-          "type": "boolean"
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -2554,7 +2565,7 @@
       "type": "object",
       "properties": {
         "conditions": {
-          "description": "Additional export/import condition names to honor during module\nresolution. Merged with fallow's built-in conditions (`development`,\n`import`, `require`, `default`, `types`, `node`; plus `react-native`\nand `browser` when the React Native or Expo plugin is active).\n\nUser conditions are matched with higher priority than the baseline,\nso a package.json `exports` entry like:\n\n```json\n{ \"./api\": { \"worker\": \"./src/api.worker.ts\", \"import\": \"./dist/api.js\" } }\n```\n\nresolves to the `worker` branch when `\"worker\"` is listed here.\n\nSee <https://nodejs.org/api/packages.html#community-conditions-definitions>\nfor the set of community-defined conditions.",
+          "description": "Additional export/import condition names to honor during module\nresolution. Merged with fallow's built-in conditions (`development`,\n`import`, `require`, `default`, `types`, `node`; plus `react-native`\nand `browser` when the React Native or Expo plugin is active).\n\nUser conditions are matched with higher priority than the baseline,\nso a package.json `exports` entry like:\n\n```json\n{ \"./api\": { \"worker\": \"./src/api.worker.ts\", \"import\": \"./dist/api.js\" } }\n```\n\nresolves to the `worker` branch when `\"worker\"` is listed here.\n\nThe [community conditions of Node.js](https://nodejs.org/api/packages.html#community-conditions-definitions)\nlist the conditions that tools define.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2631,7 +2642,7 @@
       "type": "object",
       "properties": {
         "unused-files": {
-          "description": "Optional override for [`RulesConfig::unused_files`].",
+          "description": "Severity of the `unused-files` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2642,7 +2653,7 @@
           ]
         },
         "unused-exports": {
-          "description": "Optional override for [`RulesConfig::unused_exports`].",
+          "description": "Severity of the `unused-exports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2653,7 +2664,7 @@
           ]
         },
         "unused-types": {
-          "description": "Optional override for [`RulesConfig::unused_types`].",
+          "description": "Severity of the `unused-types` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2664,7 +2675,7 @@
           ]
         },
         "private-type-leaks": {
-          "description": "Optional override for [`RulesConfig::private_type_leaks`].",
+          "description": "Severity of the `private-type-leaks` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2675,7 +2686,7 @@
           ]
         },
         "deprecated-exports-in-use": {
-          "description": "Optional override for [`RulesConfig::deprecated_exports_in_use`].",
+          "description": "Severity of the `deprecated-exports-in-use` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2686,7 +2697,7 @@
           ]
         },
         "unused-dependencies": {
-          "description": "Optional override for [`RulesConfig::unused_dependencies`].",
+          "description": "Severity of the `unused-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2697,7 +2708,7 @@
           ]
         },
         "unused-dev-dependencies": {
-          "description": "Optional override for [`RulesConfig::unused_dev_dependencies`].",
+          "description": "Severity of the `unused-dev-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2708,7 +2719,7 @@
           ]
         },
         "unused-optional-dependencies": {
-          "description": "Optional override for [`RulesConfig::unused_optional_dependencies`].",
+          "description": "Severity of the `unused-optional-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2719,7 +2730,7 @@
           ]
         },
         "unused-enum-members": {
-          "description": "Optional override for [`RulesConfig::unused_enum_members`].",
+          "description": "Severity of the `unused-enum-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2730,7 +2741,7 @@
           ]
         },
         "unused-class-members": {
-          "description": "Optional override for [`RulesConfig::unused_class_members`].",
+          "description": "Severity of the `unused-class-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2741,7 +2752,7 @@
           ]
         },
         "unused-namespace-members": {
-          "description": "Optional override for [`RulesConfig::unused_namespace_members`].",
+          "description": "Severity of the `unused-namespace-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2752,7 +2763,7 @@
           ]
         },
         "unused-protected-class-members": {
-          "description": "Optional override for [`RulesConfig::unused_protected_class_members`].",
+          "description": "Severity of the `unused-protected-class-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2763,7 +2774,7 @@
           ]
         },
         "unused-store-members": {
-          "description": "Optional override for [`RulesConfig::unused_store_members`].",
+          "description": "Severity of the `unused-store-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2774,7 +2785,7 @@
           ]
         },
         "unprovided-injects": {
-          "description": "Optional override for [`RulesConfig::unprovided_injects`].",
+          "description": "Severity of the `unprovided-injects` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2785,7 +2796,7 @@
           ]
         },
         "unrendered-components": {
-          "description": "Optional override for [`RulesConfig::unrendered_components`].",
+          "description": "Severity of the `unrendered-components` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2796,7 +2807,7 @@
           ]
         },
         "unused-component-props": {
-          "description": "Optional override for [`RulesConfig::unused_component_props`].",
+          "description": "Severity of the `unused-component-props` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2829,7 +2840,7 @@
           ]
         },
         "unused-component-emits": {
-          "description": "Optional override for [`RulesConfig::unused_component_emits`].",
+          "description": "Severity of the `unused-component-emits` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2840,7 +2851,7 @@
           ]
         },
         "unused-component-inputs": {
-          "description": "Optional override for [`RulesConfig::unused_component_inputs`].",
+          "description": "Severity of the `unused-component-inputs` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2851,7 +2862,7 @@
           ]
         },
         "unused-component-outputs": {
-          "description": "Optional override for [`RulesConfig::unused_component_outputs`].",
+          "description": "Severity of the `unused-component-outputs` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2862,7 +2873,7 @@
           ]
         },
         "unused-svelte-events": {
-          "description": "Optional override for [`RulesConfig::unused_svelte_events`].",
+          "description": "Severity of the `unused-svelte-events` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2873,7 +2884,7 @@
           ]
         },
         "unused-effect-layers": {
-          "description": "Optional override for [`RulesConfig::unused_effect_layers`].",
+          "description": "Severity of the `unused-effect-layers` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2884,7 +2895,7 @@
           ]
         },
         "unused-tagged-errors": {
-          "description": "Optional override for [`RulesConfig::unused_tagged_errors`].",
+          "description": "Severity of the `unused-tagged-errors` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2895,7 +2906,7 @@
           ]
         },
         "unproduced-catch-tags": {
-          "description": "Optional override for [`RulesConfig::unproduced_catch_tags`].",
+          "description": "Severity of the `unproduced-catch-tags` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2906,7 +2917,7 @@
           ]
         },
         "unused-server-actions": {
-          "description": "Optional override for [`RulesConfig::unused_server_actions`].",
+          "description": "Severity of the `unused-server-actions` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2917,7 +2928,7 @@
           ]
         },
         "unused-load-data-keys": {
-          "description": "Optional override for [`RulesConfig::unused_load_data_keys`].",
+          "description": "Severity of the `unused-load-data-keys` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2928,7 +2939,7 @@
           ]
         },
         "prop-drilling": {
-          "description": "Optional override for [`RulesConfig::prop_drilling`].",
+          "description": "Severity of the `prop-drilling` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2939,7 +2950,7 @@
           ]
         },
         "thin-wrapper": {
-          "description": "Optional override for [`RulesConfig::thin_wrapper`].",
+          "description": "Severity of the `thin-wrapper` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2950,7 +2961,7 @@
           ]
         },
         "duplicate-prop-shape": {
-          "description": "Optional override for [`RulesConfig::duplicate_prop_shape`].",
+          "description": "Severity of the `duplicate-prop-shape` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2961,7 +2972,7 @@
           ]
         },
         "css-token-drift": {
-          "description": "Optional override for [`RulesConfig::css_token_drift`].",
+          "description": "Severity of the `css-token-drift` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2972,7 +2983,7 @@
           ]
         },
         "css-duplicate-block": {
-          "description": "Optional override for [`RulesConfig::css_duplicate_block`].",
+          "description": "Severity of the `css-duplicate-block` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2983,7 +2994,7 @@
           ]
         },
         "css-selector-complexity": {
-          "description": "Optional override for [`RulesConfig::css_selector_complexity`].",
+          "description": "Severity of the `css-selector-complexity` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -2994,7 +3005,7 @@
           ]
         },
         "css-dead-surface": {
-          "description": "Optional override for [`RulesConfig::css_dead_surface`].",
+          "description": "Severity of the `css-dead-surface` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3005,7 +3016,7 @@
           ]
         },
         "css-broken-reference": {
-          "description": "Optional override for [`RulesConfig::css_broken_reference`].",
+          "description": "Severity of the `css-broken-reference` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3016,7 +3027,7 @@
           ]
         },
         "complexity-cyclomatic": {
-          "description": "Optional override for [`RulesConfig::complexity_cyclomatic`].",
+          "description": "Severity of the `complexity-cyclomatic` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3027,7 +3038,7 @@
           ]
         },
         "complexity-cognitive": {
-          "description": "Optional override for [`RulesConfig::complexity_cognitive`].",
+          "description": "Severity of the `complexity-cognitive` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3038,7 +3049,7 @@
           ]
         },
         "complexity-crap": {
-          "description": "Optional override for [`RulesConfig::complexity_crap`].",
+          "description": "Severity of the `complexity-crap` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3049,7 +3060,7 @@
           ]
         },
         "complexity-file-lines": {
-          "description": "Optional override for [`RulesConfig::complexity_file_lines`].",
+          "description": "Severity of the `complexity-file-lines` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3060,7 +3071,7 @@
           ]
         },
         "unresolved-imports": {
-          "description": "Optional override for [`RulesConfig::unresolved_imports`].",
+          "description": "Severity of the `unresolved-imports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3071,7 +3082,7 @@
           ]
         },
         "unlisted-dependencies": {
-          "description": "Optional override for [`RulesConfig::unlisted_dependencies`].",
+          "description": "Severity of the `unlisted-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3082,7 +3093,7 @@
           ]
         },
         "unlisted-binaries": {
-          "description": "Optional override for [`RulesConfig::unlisted_binaries`].",
+          "description": "Severity of the `unlisted-binaries` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3093,7 +3104,7 @@
           ]
         },
         "duplicate-exports": {
-          "description": "Optional override for [`RulesConfig::duplicate_exports`].",
+          "description": "Severity of the `duplicate-exports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3104,7 +3115,7 @@
           ]
         },
         "duplicate-export-aliases": {
-          "description": "Optional override for [`RulesConfig::duplicate_export_aliases`].",
+          "description": "Severity of the `duplicate-export-aliases` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3115,7 +3126,7 @@
           ]
         },
         "type-only-dependencies": {
-          "description": "Optional override for [`RulesConfig::type_only_dependencies`].",
+          "description": "Severity of the `type-only-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3126,7 +3137,7 @@
           ]
         },
         "test-only-dependencies": {
-          "description": "Optional override for [`RulesConfig::test_only_dependencies`].",
+          "description": "Severity of the `test-only-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3137,7 +3148,7 @@
           ]
         },
         "dev-dependencies-in-production": {
-          "description": "Optional override for [`RulesConfig::dev_dependencies_in_production`].",
+          "description": "Severity of the `dev-dependencies-in-production` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3148,7 +3159,7 @@
           ]
         },
         "circular-dependencies": {
-          "description": "Optional override for [`RulesConfig::circular_dependencies`].",
+          "description": "Severity of the `circular-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3159,7 +3170,7 @@
           ]
         },
         "re-export-cycle": {
-          "description": "Optional override for [`RulesConfig::re_export_cycle`].",
+          "description": "Severity of the `re-export-cycle` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3170,7 +3181,7 @@
           ]
         },
         "package-cycle": {
-          "description": "Optional override for [`RulesConfig::package_cycle`].",
+          "description": "Severity of the `package-cycle` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3181,7 +3192,7 @@
           ]
         },
         "boundary-violation": {
-          "description": "Optional override for [`RulesConfig::boundary_violation`].",
+          "description": "Severity of the `boundary-violation` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3192,7 +3203,7 @@
           ]
         },
         "coverage-gaps": {
-          "description": "Optional override for [`RulesConfig::coverage_gaps`].",
+          "description": "Severity of the `coverage-gaps` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3203,7 +3214,7 @@
           ]
         },
         "feature-flags": {
-          "description": "Optional override for [`RulesConfig::feature_flags`].",
+          "description": "Severity of the `feature-flags` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3214,7 +3225,7 @@
           ]
         },
         "stale-suppressions": {
-          "description": "Optional override for [`RulesConfig::stale_suppressions`].",
+          "description": "Severity of the `stale-suppressions` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3225,7 +3236,7 @@
           ]
         },
         "require-suppression-reason": {
-          "description": "Optional override for [`RulesConfig::require_suppression_reason`].",
+          "description": "Severity of the `require-suppression-reason` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3236,7 +3247,7 @@
           ]
         },
         "unused-catalog-entries": {
-          "description": "Optional override for [`RulesConfig::unused_catalog_entries`].",
+          "description": "Severity of the `unused-catalog-entries` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3247,7 +3258,7 @@
           ]
         },
         "empty-catalog-groups": {
-          "description": "Optional override for [`RulesConfig::empty_catalog_groups`].",
+          "description": "Severity of the `empty-catalog-groups` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3258,7 +3269,7 @@
           ]
         },
         "unresolved-catalog-references": {
-          "description": "Optional override for [`RulesConfig::unresolved_catalog_references`].",
+          "description": "Severity of the `unresolved-catalog-references` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3269,7 +3280,7 @@
           ]
         },
         "unused-dependency-overrides": {
-          "description": "Optional override for [`RulesConfig::unused_dependency_overrides`].",
+          "description": "Severity of the `unused-dependency-overrides` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3280,7 +3291,7 @@
           ]
         },
         "misconfigured-dependency-overrides": {
-          "description": "Optional override for [`RulesConfig::misconfigured_dependency_overrides`].",
+          "description": "Severity of the `misconfigured-dependency-overrides` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3291,7 +3302,7 @@
           ]
         },
         "security-client-server-leak": {
-          "description": "Optional override for [`RulesConfig::security_client_server_leak`].",
+          "description": "Severity of the `security-client-server-leak` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3302,7 +3313,7 @@
           ]
         },
         "security-sink": {
-          "description": "Optional override for [`RulesConfig::security_sink`].",
+          "description": "Severity of the `security-sink` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3313,7 +3324,7 @@
           ]
         },
         "policy-violation": {
-          "description": "Optional override for [`RulesConfig::policy_violation`].",
+          "description": "Severity of the `policy-violation` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3324,7 +3335,7 @@
           ]
         },
         "invalid-client-export": {
-          "description": "Optional override for [`RulesConfig::invalid_client_export`].",
+          "description": "Severity of the `invalid-client-export` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3335,7 +3346,7 @@
           ]
         },
         "mixed-client-server-barrel": {
-          "description": "Optional override for [`RulesConfig::mixed_client_server_barrel`].",
+          "description": "Severity of the `mixed-client-server-barrel` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3346,7 +3357,7 @@
           ]
         },
         "misplaced-directive": {
-          "description": "Optional override for [`RulesConfig::misplaced_directive`].",
+          "description": "Severity of the `misplaced-directive` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3357,7 +3368,7 @@
           ]
         },
         "route-collision": {
-          "description": "Optional override for [`RulesConfig::route_collision`].",
+          "description": "Severity of the `route-collision` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3368,7 +3379,7 @@
           ]
         },
         "dynamic-segment-name-conflict": {
-          "description": "Optional override for [`RulesConfig::dynamic_segment_name_conflict`].",
+          "description": "Severity of the `dynamic-segment-name-conflict` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3379,7 +3390,7 @@
           ]
         },
         "weakened-tests": {
-          "description": "Optional override for [`RulesConfig::weakened_tests`].",
+          "description": "Severity of the `weakened-tests` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3390,7 +3401,7 @@
           ]
         },
         "added-suppression": {
-          "description": "Optional override for [`RulesConfig::added_suppression`].",
+          "description": "Severity of the `added-suppression` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3401,7 +3412,7 @@
           ]
         },
         "test-only-branch": {
-          "description": "Optional override for [`RulesConfig::test_only_branch`].",
+          "description": "Severity of the `test-only-branch` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3412,7 +3423,7 @@
           ]
         },
         "diverged-clone-sibling": {
-          "description": "Optional override for [`RulesConfig::diverged_clone_sibling`].",
+          "description": "Severity of the `diverged-clone-sibling` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3423,7 +3434,7 @@
           ]
         },
         "added-dependency": {
-          "description": "Optional override for [`RulesConfig::added_dependency`].",
+          "description": "Severity of the `added-dependency` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3434,7 +3445,7 @@
           ]
         },
         "introduced-clone-group": {
-          "description": "Optional override for [`RulesConfig::introduced_clone_group`].",
+          "description": "Severity of the `introduced-clone-group` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"
@@ -3896,13 +3907,14 @@
           ]
         },
         "maxSizeMb": {
-          "description": "Maximum size of the persistent extraction cache, in megabytes.",
+          "description": "Maximum size of the persistent extraction cache, in megabytes.\nDefault 256.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint32",
-          "minimum": 0
+          "minimum": 0,
+          "default": 256
         }
       },
       "additionalProperties": false

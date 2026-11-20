@@ -45,7 +45,7 @@ pub enum AuditCacheCli {
     /// Remove reusable audit caches owned by an explicit project root.
     ///
     /// Deletes this project's cache entries unconditionally, warm or not. To
-    /// apply the age-based GC policy across every cache entry instead, use
+    /// apply the age-based cleanup policy across every cache entry instead, use
     /// `fallow audit-cache prune`.
     Remove {
         /// Print what would be removed without touching the filesystem.
@@ -57,10 +57,10 @@ pub enum AuditCacheCli {
         yes: bool,
     },
 
-    /// Apply the audit cache GC policy now and report every entry.
+    /// Apply the audit cache cleanup policy and report every entry.
     ///
     /// Runs the same reclaim policy every `fallow audit` run already applies
-    /// silently: orphaned-sidecar cleanup, age-based reclaim under the
+    /// silently: cleanup of orphaned marker files, age-based reclaim under the
     /// resolved threshold, and cross-repo reclaim of abandoned entries whose
     /// recorded owner root no longer exists. It also bounds the base-snapshot
     /// files in the project cache directory (`pass: "snapshot"`): files older
@@ -79,7 +79,7 @@ pub enum AuditCacheCli {
         /// Age threshold in days for this invocation. Overrides
         /// FALLOW_AUDIT_CACHE_MAX_AGE_DAYS and the `audit.cacheMaxAgeDays`
         /// config field (default 30). `0` disables age-based reclaim but
-        /// still reclaims orphaned sidecars and entries whose recorded owner
+        /// still reclaims orphaned marker files and entries whose recorded owner
         /// root is gone; unconditional deletion of one project's caches is
         /// `fallow audit-cache remove --root <path> --yes`.
         #[arg(long, value_name = "N")]
@@ -105,6 +105,6 @@ pub struct AuditGateRunArgs {
     /// is staged and then deleted from the working tree is still audited.
     /// The base is HEAD, so `--base` and `--changed-since` are rejected.
     /// The generated pre-commit hook uses this flag.
-    #[arg(long)]
+    #[arg(long, help_heading = "Scope")]
     pub staged: bool,
 }

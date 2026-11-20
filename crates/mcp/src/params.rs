@@ -758,20 +758,20 @@ pub struct InspectTargetParams {
     /// Whether incomplete semantic evidence is advisory or gating.
     pub type_aware_require: Option<TypeAwareRequireParam>,
 
-    /// OPT-IN (default off): attach target-level git churn evidence. Missing
+    /// Opt-in (default off): attach target-level git churn evidence. Missing
     /// git history is returned as an explicit unavailable evidence section.
     pub include_churn: Option<bool>,
 
-    /// OPT-IN (default off): also attach the best-effort symbol-level call chain
+    /// Opt-in (default off): also attach the best-effort symbol-level call chain
     /// (`fallow trace`) as the `symbol_chain` evidence section. Only
-    /// meaningful for a SYMBOL target. Best-effort, syntactic (ADR-001), and
-    /// EXPLICITLY OFF the ranked path: resolved-vs-unresolved callees are
+    /// meaningful for a symbol target. Best-effort and syntactic, and kept
+    /// off the ranked path: resolved-vs-unresolved callees are
     /// reported honestly, the chain is never folded into the ranked brief and is
     /// never a focus-map / ranking input.
     pub symbol_chain: Option<bool>,
 
-    /// OPT-IN (default off): attach the Fallow Cloud `cloud` evidence section
-    /// for a FILE target: production data per local function. The CLI reads
+    /// Opt-in (default off): attach the Fallow Cloud `cloud` evidence section
+    /// for a file target: production data per local function. The CLI reads
     /// the key: `FALLOW_API_KEY` in the server environment, else the key that
     /// `fallow cloud login` stored. The section `status` is `ok`, `no_key`,
     /// `plan_required`, `unavailable` or `untracked`. A status other than `ok`

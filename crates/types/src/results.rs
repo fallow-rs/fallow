@@ -108,8 +108,8 @@ pub struct RenderFanInMetric {
     /// `max(p95, 10)` threshold (the same floor coupling concentration uses).
     /// `None` on an empty population.
     pub high_pct: Option<f64>,
-    /// The single highest DISTINCT-PARENTS count across all components (the
-    /// headline blast-radius number: the most distinct render LOCATIONS any one
+    /// The single highest distinct-parent count across all components (the
+    /// headline blast-radius number: the most distinct render locations any one
     /// component is rendered from, the honest edit-ripple count). `None` on an
     /// empty population. `render_sites` (incl. repeats) is secondary per-component
     /// context, never the headline.
@@ -124,7 +124,7 @@ pub struct RenderFanInComponent {
     pub file: PathBuf,
     /// The component name.
     pub component: String,
-    /// Total JSX render SITES that resolve to this component across the project
+    /// Total JSX render sites that resolve to this component across the project
     /// (each capitalized / member JSX tag is one site). SECONDARY context ("incl.
     /// repeats"): a single parent rendering one child five times is five sites but
     /// one distinct parent, so render_sites overcounts blast radius.
@@ -453,7 +453,7 @@ pub struct AnalysisResults {
     /// carries a typed `actions` array natively. Default severity is `warn`.
     #[serde(default)]
     pub invalid_client_exports: Vec<InvalidClientExportFinding>,
-    /// Barrel files that re-export BOTH a `"use client"` origin module AND a
+    /// Barrel files that re-export both a `"use client"` origin module and a
     /// server-only origin module (the Next.js App Router footgun). Wrapped in
     /// [`MixedClientServerBarrelFinding`] so each entry carries a typed
     /// `actions` array natively. Default severity is `warn`.
@@ -564,14 +564,14 @@ pub struct AnalysisResults {
     /// pass-through components until a consumer (located per-chain records).
     /// Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
     /// `actions` array natively. Health signal: the rule defaults to `off`
-    /// (opt-in), so this is dormant and populated ONLY when the user enables it.
+    /// (opt-in), so this is dormant and populated only when the user enables it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prop_drilling_chains: Vec<PropDrillingChainFinding>,
     /// React/Preact components whose entire body is a single spread-forwarded
     /// child render (`return <Child {...props}/>`): pure structural indirection,
     /// a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
     /// so each entry carries a typed `actions` array natively. Health signal: the
-    /// rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+    /// rule defaults to `off` (opt-in), so this is dormant and populated only
     /// when the user enables it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thin_wrappers: Vec<ThinWrapperFinding>,
@@ -581,7 +581,7 @@ pub struct AnalysisResults {
     /// names (a missing shared `Props` type / base component). Wrapped in
     /// [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
     /// array and its sibling roster natively. Health signal: the rule defaults to
-    /// `off` (opt-in), so this is dormant and populated ONLY when the user
+    /// `off` (opt-in), so this is dormant and populated only when the user
     /// enables it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub duplicate_prop_shapes: Vec<DuplicatePropShapeFinding>,
@@ -608,7 +608,7 @@ pub struct AnalysisResults {
     /// Number of component props exempted from `unused-component-props` this run
     /// because their local destructure binding name matched
     /// `unusedComponentProps.ignorePattern`. Drives a human-output note so a
-    /// typo'd pattern (matching nothing) is not a silent no-op; skipped in
+    /// mistyped pattern (matching nothing) is not a silent no-op; skipped in
     /// machine output, like [`Self::suppression_count`].
     #[serde(skip)]
     pub unused_component_props_exempted: usize,
@@ -2102,7 +2102,7 @@ pub struct InvalidClientExport {
     pub col: u32,
 }
 
-/// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+/// A barrel file that re-exports both a `"use client"` origin module and a
 /// server-only origin module. Importing one name from such a barrel drags the
 /// other's directive context across the React Server Components boundary (the
 /// Next.js App Router footgun); fallow catches it statically.
@@ -2427,9 +2427,9 @@ pub struct PropDrillHop {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PropDrillingChain {
-    /// The drilled prop name as declared at the chain SOURCE.
+    /// The drilled prop name as declared at the chain source.
     pub prop: String,
-    /// The chain depth = the number of components the prop is forwarded THROUGH
+    /// The chain depth = the number of components the prop is forwarded through
     /// (source + intermediates + consumer = `hops.len()`). Always `>= N`.
     pub depth: u32,
     /// The ordered hop trail from source to consumer. The first hop owns the
@@ -2462,7 +2462,7 @@ pub struct ThinWrapper {
     pub child_component: String,
 }
 
-/// One member of a duplicate-prop-shape group: the OTHER components that share
+/// One member of a duplicate-prop-shape group: the other components that share
 /// the same significant prop-name set, listed in each member's
 /// `sharing_components`. Path-sorted for stable output. A located reference (no
 /// `shape`, which is carried once on the owning [`DuplicatePropShape`]).
@@ -2501,13 +2501,13 @@ pub struct DuplicatePropShape {
     pub line: u32,
     /// This component name.
     pub component: String,
-    /// The shared SIGNIFICANT prop-name set (sorted, denylist-stripped). The
+    /// The shared significant prop-name set (sorted, denylist-stripped). The
     /// unit being grouped; identical across every member of the group.
     pub shape: Vec<String>,
     /// The total number of components in this group (this one plus every
     /// sibling).
     pub group_size: u32,
-    /// The OTHER components sharing this exact prop shape (path-sorted). A
+    /// The other components sharing this exact prop shape (path-sorted). A
     /// file-level-suppressed member drops from its own finding but still appears
     /// here, because the group is real regardless of suppression.
     pub sharing_components: Vec<DuplicatePropShapeMember>,
@@ -2840,7 +2840,7 @@ pub struct TypeOnlyDependency {
     pub line: u32,
 }
 
-/// The kind of security candidate. Findings are CANDIDATES for downstream agent
+/// The kind of security candidate. Findings are candidates for downstream agent
 /// verification, NOT verified vulnerabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2866,7 +2866,7 @@ pub enum TraceHopRole {
     /// where the candidate's sink argument actually traces back to that read in
     /// the same statement (arg-level, the strong intra-module association).
     UntrustedSource,
-    /// A module that merely CONTAINS an untrusted-input source somewhere and is
+    /// A module that merely contains an untrusted-input source somewhere and is
     /// import-reachable to the sink module (module-level, issue #885). This is a
     /// reachability signal, NOT a proven value path: the specific source value
     /// is not shown to reach the sink argument. Labeled distinctly from
@@ -2913,7 +2913,7 @@ pub struct TraceHop {
 #[serde(rename_all = "kebab-case")]
 pub enum TaintConfidence {
     /// The sink's argument traces back to a known untrusted-source read in the
-    /// SAME statement / module (the intra-module back-trace, issue #859). The
+    /// same statement / module (the intra-module back-trace, issue #859). The
     /// strong, high-value candidate: a specific source expression is implicated.
     ArgLevel,
     /// The sink merely lives in a module that is import-reachable from a module
@@ -3071,7 +3071,7 @@ pub struct SecurityZoneCrossing {
 /// boundary is a stronger review target than a self-contained one; the boundary
 /// is fallow's structural signal over a pure source-sink match.
 ///
-/// Two further boundary kinds are RESERVED for a follow-up and are deliberately
+/// Two further boundary kinds are reserved for a follow-up and are deliberately
 /// absent here rather than emitted as always-false: `export_visibility` (is the
 /// sink on a publicly-exported symbol?) and a package boundary (does the flow
 /// cross an npm-package edge?). Both need new graph derivation that does not
@@ -3103,7 +3103,7 @@ pub struct SecurityCandidateBoundary {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityNetworkContext {
     /// The network call's destination as a static URL string literal, or absent
-    /// when the destination is DYNAMIC (not a literal). A dynamic destination is
+    /// when the destination is dynamic (not a literal). A dynamic destination is
     /// the higher-signal exfil case; a literal provider host is usually intended
     /// auth.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3111,7 +3111,7 @@ pub struct SecurityNetworkContext {
 }
 
 /// An agent-actionable candidate record on a [`SecurityFinding`]. fallow fills
-/// `source_kind`, `sink`, and `boundary`. The exploitability IMPACT is
+/// `source_kind`, `sink`, and `boundary`. The exploitability impact is
 /// deliberately NOT a field: `severity` on the parent finding is only a
 /// review-priority tier, while deciding exploitability remains the consuming
 /// agent's job. A perpetually-null `impact` key would only train consumers to
@@ -3124,7 +3124,7 @@ pub struct SecurityCandidate {
     /// source id (`"http-request-input"`, `"process-env"`, `"process-argv"`,
     /// `"message-event-data"`, `"location-input"`, ...). `None`/absent when no
     /// untrusted source was matched (always `None` for `client-server-leak`).
-    /// This is an OPEN string set, driven by the data-driven source catalogue; a
+    /// This is an open string set, driven by the data-driven source catalogue; a
     /// consumer should treat an unknown id as "untrusted source of unknown kind"
     /// and never drop the candidate on that basis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3290,7 +3290,7 @@ pub struct SecurityAttackSurfaceEntry {
     pub defensive_boundary: SecurityDefensiveBoundary,
 }
 
-/// A local security CANDIDATE for downstream agent verification, NOT a verified
+/// A local security candidate for downstream agent verification, not a verified
 /// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
 /// or the `audit` gate. There is deliberately no `confidence` or
 /// `signal_strength` field: fallow does not prove exploitability, so the trace
@@ -3650,19 +3650,19 @@ pub struct DevDependencyInProduction {
 /// One import hop in a circular dependency: the file containing the import
 /// and where that import statement sits.
 ///
-/// `edges[i]` is the import IN `path` (the hop SOURCE, equal to the cycle's
-/// `files[i]`) that points to the NEXT file in the cycle
+/// `edges[i]` is the import in `path` (the hop source, equal to the cycle's
+/// `files[i]`) that points to the next file in the cycle
 /// (`files[(i + 1) % files.len()]`); the target is not repeated here to keep
 /// the wire compact. Enables a per-file diagnostic squiggly anchored under
 /// the offending import rather than a single squiggly on the first file.
 ///
-/// `col` is a 0-based BYTE column, matching the cycle's top-level `col`;
+/// `col` is a 0-based byte column, matching the cycle's top-level `col`;
 /// converting it to a UTF-16 code-unit column for LSP clients is a tracked
 /// follow-up shared with the existing field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CircularDependencyEdge {
-    /// The file containing the import (the hop SOURCE; equal to `files[i]`).
+    /// The file containing the import (the hop source; equal to `files[i]`).
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number of the import statement pointing to the next file.

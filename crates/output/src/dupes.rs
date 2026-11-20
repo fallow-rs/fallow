@@ -85,14 +85,14 @@ pub struct DupesOutput<Report, Group> {
     /// it armed none. `dupes` has no default exit rule: a run with no armed
     /// gate always exits 0, so an absent object means that the run passed.
     /// `--fail-on-issues` and `--ci` arm `duplication-findings`, which fails
-    /// on any clone group. A gate fails the build when `status` is `fail` AND
+    /// on any clone group. A gate fails the build when `status` is `fail` and
     /// `enforced` is true. See [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
-    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// Every narrowing or shaping request this run received, keyed by name,
     /// absent when it was asked for nothing. An entry whose `status` is not
     /// `applied` means the run could not do what it was asked and reported
-    /// something WIDER instead, so what follows is a valid report of a scope
+    /// something wider instead, so what follows is a valid report of a scope
     /// nobody requested. Honoured requests are published too, with
     /// `status: "applied"`, so an absent object means "nothing was asked for",
     /// never "nothing failed". See [`crate::RequestOutcomes`].

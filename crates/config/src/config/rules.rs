@@ -17,7 +17,7 @@ pub enum Severity {
     Error,
     /// Report without an effect on the exit code.
     Warn,
-    /// Don't detect or report.
+    /// Do not detect or report.
     Off,
 }
 
@@ -144,7 +144,7 @@ pub struct RulesConfig {
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Defaults to `warn`, not `error` like the closed-set
-    /// class/enum member rules: a store has an OPEN declaration surface
+    /// class/enum member rules: a store has an open declaration surface
     /// (plugins, `$onAction`, dynamic dispatch) so analyzer confidence is
     /// genuinely lower. A `warn` finding does not change the CLI exit code
     /// unless `--fail-on-issues` is set. The dead-code count gate of the GitHub
@@ -292,13 +292,13 @@ pub struct RulesConfig {
     /// dormant until the user enables the rule.
     #[serde(default = "Severity::default_off", alias = "duplicate-prop-shape")]
     pub duplicate_prop_shape: Severity,
-    /// A CSS / CSS-in-JS design-token DRIFT finding (a hardcoded value where a
+    /// A CSS / CSS-in-JS design-token drift finding (a hardcoded value where a
     /// design token exists, e.g. a Tailwind arbitrary value). A styling-domain
     /// advisory surfaced in `fallow audit`; defaults to `warn` (verdict-neutral).
     /// Set to `error` to gate CI on styling drift, or `off` to silence.
     #[serde(default = "Severity::default_warn", alias = "css-token-drift")]
     pub css_token_drift: Severity,
-    /// A CSS / CSS-in-JS DUPLICATE declaration block (copy-pasted rule body).
+    /// A CSS / CSS-in-JS duplicate declaration block (copy-pasted rule body).
     /// A styling-domain advisory surfaced in `fallow audit`; defaults to `warn`
     /// (verdict-neutral). Set to `error` to gate, or `off` to silence.
     #[serde(default = "Severity::default_warn", alias = "css-duplicate-block")]
@@ -469,7 +469,7 @@ pub struct RulesConfig {
     /// Defaults to `warn`.
     #[serde(default = "Severity::default_warn", alias = "invalid-client-exports")]
     pub invalid_client_export: Severity,
-    /// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+    /// A barrel file that re-exports both a `"use client"` origin module and a
     /// server-only origin module. Importing one name from such a barrel drags
     /// the other's directive context across the React Server Components
     /// boundary (the Next.js App Router footgun). Defaults to `warn`.
@@ -940,112 +940,112 @@ impl PartialRulesConfig {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct PartialRulesConfig {
-    /// Optional override for [`RulesConfig::unused_files`].
+    /// Severity of the `unused-files` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-file",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_files: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_exports`].
+    /// Severity of the `unused-exports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-export",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_exports: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_types`].
+    /// Severity of the `unused-types` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-type",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_types: Option<Severity>,
-    /// Optional override for [`RulesConfig::private_type_leaks`].
+    /// Severity of the `private-type-leaks` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "private-type-leak",
         skip_serializing_if = "Option::is_none"
     )]
     pub private_type_leaks: Option<Severity>,
-    /// Optional override for [`RulesConfig::deprecated_exports_in_use`].
+    /// Severity of the `deprecated-exports-in-use` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "deprecated-export-in-use",
         skip_serializing_if = "Option::is_none"
     )]
     pub deprecated_exports_in_use: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_dependencies`].
+    /// Severity of the `unused-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_dev_dependencies`].
+    /// Severity of the `unused-dev-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-dev-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_dev_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_optional_dependencies`].
+    /// Severity of the `unused-optional-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-optional-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_optional_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_enum_members`].
+    /// Severity of the `unused-enum-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-enum-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_enum_members: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_class_members`].
+    /// Severity of the `unused-class-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-class-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_class_members: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_namespace_members`].
+    /// Severity of the `unused-namespace-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-namespace-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_namespace_members: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_protected_class_members`].
+    /// Severity of the `unused-protected-class-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-protected-class-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_protected_class_members: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_store_members`].
+    /// Severity of the `unused-store-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-store-member",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_store_members: Option<Severity>,
-    /// Optional override for [`RulesConfig::unprovided_injects`].
+    /// Severity of the `unprovided-injects` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unprovided-inject",
         skip_serializing_if = "Option::is_none"
     )]
     pub unprovided_injects: Option<Severity>,
-    /// Optional override for [`RulesConfig::unrendered_components`].
+    /// Severity of the `unrendered-components` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unrendered-component",
         skip_serializing_if = "Option::is_none"
     )]
     pub unrendered_components: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_component_props`].
+    /// Severity of the `unused-component-props` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-component-prop",
@@ -1066,201 +1066,201 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub constant_parameters: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_component_emits`].
+    /// Severity of the `unused-component-emits` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-component-emit",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_emits: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_component_inputs`].
+    /// Severity of the `unused-component-inputs` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-component-input",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_inputs: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_component_outputs`].
+    /// Severity of the `unused-component-outputs` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-component-output",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_outputs: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_svelte_events`].
+    /// Severity of the `unused-svelte-events` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-svelte-event",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_svelte_events: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_effect_layers`].
+    /// Severity of the `unused-effect-layers` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-effect-layer",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_effect_layers: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_tagged_errors`].
+    /// Severity of the `unused-tagged-errors` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-tagged-error",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_tagged_errors: Option<Severity>,
-    /// Optional override for [`RulesConfig::unproduced_catch_tags`].
+    /// Severity of the `unproduced-catch-tags` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unproduced-catch-tag",
         skip_serializing_if = "Option::is_none"
     )]
     pub unproduced_catch_tags: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_server_actions`].
+    /// Severity of the `unused-server-actions` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-server-action",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_server_actions: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_load_data_keys`].
+    /// Severity of the `unused-load-data-keys` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-load-data-key",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_load_data_keys: Option<Severity>,
-    /// Optional override for [`RulesConfig::prop_drilling`].
+    /// Severity of the `prop-drilling` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "prop-drilling",
         skip_serializing_if = "Option::is_none"
     )]
     pub prop_drilling: Option<Severity>,
-    /// Optional override for [`RulesConfig::thin_wrapper`].
+    /// Severity of the `thin-wrapper` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "thin-wrapper",
         skip_serializing_if = "Option::is_none"
     )]
     pub thin_wrapper: Option<Severity>,
-    /// Optional override for [`RulesConfig::duplicate_prop_shape`].
+    /// Severity of the `duplicate-prop-shape` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "duplicate-prop-shape",
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_prop_shape: Option<Severity>,
-    /// Optional override for [`RulesConfig::css_token_drift`].
+    /// Severity of the `css-token-drift` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "css-token-drift",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_token_drift: Option<Severity>,
-    /// Optional override for [`RulesConfig::css_duplicate_block`].
+    /// Severity of the `css-duplicate-block` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "css-duplicate-block",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_duplicate_block: Option<Severity>,
-    /// Optional override for [`RulesConfig::css_selector_complexity`].
+    /// Severity of the `css-selector-complexity` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "css-selector-complexity",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_selector_complexity: Option<Severity>,
-    /// Optional override for [`RulesConfig::css_dead_surface`].
+    /// Severity of the `css-dead-surface` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "css-dead-surface",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_dead_surface: Option<Severity>,
-    /// Optional override for [`RulesConfig::css_broken_reference`].
+    /// Severity of the `css-broken-reference` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "css-broken-reference",
         skip_serializing_if = "Option::is_none"
     )]
     pub css_broken_reference: Option<Severity>,
-    /// Optional override for [`RulesConfig::complexity_cyclomatic`].
+    /// Severity of the `complexity-cyclomatic` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity_cyclomatic: Option<Severity>,
-    /// Optional override for [`RulesConfig::complexity_cognitive`].
+    /// Severity of the `complexity-cognitive` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity_cognitive: Option<Severity>,
-    /// Optional override for [`RulesConfig::complexity_crap`].
+    /// Severity of the `complexity-crap` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity_crap: Option<Severity>,
-    /// Optional override for [`RulesConfig::complexity_file_lines`].
+    /// Severity of the `complexity-file-lines` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity_file_lines: Option<Severity>,
-    /// Optional override for [`RulesConfig::unresolved_imports`].
+    /// Severity of the `unresolved-imports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
     pub unresolved_imports: Option<Severity>,
-    /// Optional override for [`RulesConfig::unlisted_dependencies`].
+    /// Severity of the `unlisted-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unlisted-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub unlisted_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::unlisted_binaries`].
+    /// Severity of the `unlisted-binaries` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unlisted-binary",
         skip_serializing_if = "Option::is_none"
     )]
     pub unlisted_binaries: Option<Severity>,
-    /// Optional override for [`RulesConfig::duplicate_exports`].
+    /// Severity of the `duplicate-exports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "duplicate-export",
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_exports: Option<Severity>,
-    /// Optional override for [`RulesConfig::duplicate_export_aliases`].
+    /// Severity of the `duplicate-export-aliases` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "duplicate-export-alias",
         skip_serializing_if = "Option::is_none"
     )]
     pub duplicate_export_aliases: Option<Severity>,
-    /// Optional override for [`RulesConfig::type_only_dependencies`].
+    /// Severity of the `type-only-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "type-only-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub type_only_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::test_only_dependencies`].
+    /// Severity of the `test-only-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "test-only-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub test_only_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::dev_dependencies_in_production`].
+    /// Severity of the `dev-dependencies-in-production` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "dev-dependency-in-production",
         skip_serializing_if = "Option::is_none"
     )]
     pub dev_dependencies_in_production: Option<Severity>,
-    /// Optional override for [`RulesConfig::circular_dependencies`].
+    /// Severity of the `circular-dependencies` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "circular-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub circular_dependencies: Option<Severity>,
-    /// Optional override for [`RulesConfig::re_export_cycle`].
+    /// Severity of the `re-export-cycle` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "re-export-cycles",
@@ -1269,163 +1269,163 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub re_export_cycle: Option<Severity>,
-    /// Optional override for [`RulesConfig::package_cycle`].
+    /// Severity of the `package-cycle` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "package-cycles",
         skip_serializing_if = "Option::is_none"
     )]
     pub package_cycle: Option<Severity>,
-    /// Optional override for [`RulesConfig::boundary_violation`].
+    /// Severity of the `boundary-violation` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "boundary-violations",
         skip_serializing_if = "Option::is_none"
     )]
     pub boundary_violation: Option<Severity>,
-    /// Optional override for [`RulesConfig::coverage_gaps`].
+    /// Severity of the `coverage-gaps` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "coverage-gap",
         skip_serializing_if = "Option::is_none"
     )]
     pub coverage_gaps: Option<Severity>,
-    /// Optional override for [`RulesConfig::feature_flags`].
+    /// Severity of the `feature-flags` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "feature-flag",
         skip_serializing_if = "Option::is_none"
     )]
     pub feature_flags: Option<Severity>,
-    /// Optional override for [`RulesConfig::stale_suppressions`].
+    /// Severity of the `stale-suppressions` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "stale-suppression",
         skip_serializing_if = "Option::is_none"
     )]
     pub stale_suppressions: Option<Severity>,
-    /// Optional override for [`RulesConfig::require_suppression_reason`].
+    /// Severity of the `require-suppression-reason` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "suppression-reason",
         skip_serializing_if = "Option::is_none"
     )]
     pub require_suppression_reason: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_catalog_entries`].
+    /// Severity of the `unused-catalog-entries` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-catalog-entry",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_catalog_entries: Option<Severity>,
-    /// Optional override for [`RulesConfig::empty_catalog_groups`].
+    /// Severity of the `empty-catalog-groups` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "empty-catalog-group",
         skip_serializing_if = "Option::is_none"
     )]
     pub empty_catalog_groups: Option<Severity>,
-    /// Optional override for [`RulesConfig::unresolved_catalog_references`].
+    /// Severity of the `unresolved-catalog-references` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unresolved-catalog-reference",
         skip_serializing_if = "Option::is_none"
     )]
     pub unresolved_catalog_references: Option<Severity>,
-    /// Optional override for [`RulesConfig::unused_dependency_overrides`].
+    /// Severity of the `unused-dependency-overrides` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "unused-dependency-override",
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_dependency_overrides: Option<Severity>,
-    /// Optional override for [`RulesConfig::misconfigured_dependency_overrides`].
+    /// Severity of the `misconfigured-dependency-overrides` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "misconfigured-dependency-override",
         skip_serializing_if = "Option::is_none"
     )]
     pub misconfigured_dependency_overrides: Option<Severity>,
-    /// Optional override for [`RulesConfig::security_client_server_leak`].
+    /// Severity of the `security-client-server-leak` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_client_server_leak: Option<Severity>,
-    /// Optional override for [`RulesConfig::security_sink`].
+    /// Severity of the `security-sink` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_sink: Option<Severity>,
-    /// Optional override for [`RulesConfig::policy_violation`].
+    /// Severity of the `policy-violation` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "policy-violations",
         skip_serializing_if = "Option::is_none"
     )]
     pub policy_violation: Option<Severity>,
-    /// Optional override for [`RulesConfig::invalid_client_export`].
+    /// Severity of the `invalid-client-export` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "invalid-client-exports",
         skip_serializing_if = "Option::is_none"
     )]
     pub invalid_client_export: Option<Severity>,
-    /// Optional override for [`RulesConfig::mixed_client_server_barrel`].
+    /// Severity of the `mixed-client-server-barrel` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "mixed-client-server-barrels",
         skip_serializing_if = "Option::is_none"
     )]
     pub mixed_client_server_barrel: Option<Severity>,
-    /// Optional override for [`RulesConfig::misplaced_directive`].
+    /// Severity of the `misplaced-directive` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "misplaced-directives",
         skip_serializing_if = "Option::is_none"
     )]
     pub misplaced_directive: Option<Severity>,
-    /// Optional override for [`RulesConfig::route_collision`].
+    /// Severity of the `route-collision` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "route-collisions",
         skip_serializing_if = "Option::is_none"
     )]
     pub route_collision: Option<Severity>,
-    /// Optional override for [`RulesConfig::dynamic_segment_name_conflict`].
+    /// Severity of the `dynamic-segment-name-conflict` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "dynamic-segment-name-conflicts",
         skip_serializing_if = "Option::is_none"
     )]
     pub dynamic_segment_name_conflict: Option<Severity>,
-    /// Optional override for [`RulesConfig::weakened_tests`].
+    /// Severity of the `weakened-tests` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weakened_tests: Option<Severity>,
-    /// Optional override for [`RulesConfig::added_suppression`].
+    /// Severity of the `added-suppression` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "added-suppressions",
         skip_serializing_if = "Option::is_none"
     )]
     pub added_suppression: Option<Severity>,
-    /// Optional override for [`RulesConfig::test_only_branch`].
+    /// Severity of the `test-only-branch` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "test-only-branches",
         skip_serializing_if = "Option::is_none"
     )]
     pub test_only_branch: Option<Severity>,
-    /// Optional override for [`RulesConfig::diverged_clone_sibling`].
+    /// Severity of the `diverged-clone-sibling` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "diverged-clone-siblings",
         skip_serializing_if = "Option::is_none"
     )]
     pub diverged_clone_sibling: Option<Severity>,
-    /// Optional override for [`RulesConfig::added_dependency`].
+    /// Severity of the `added-dependency` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "added-dependencies",
         skip_serializing_if = "Option::is_none"
     )]
     pub added_dependency: Option<Severity>,
-    /// Optional override for [`RulesConfig::introduced_clone_group`].
+    /// Severity of the `introduced-clone-group` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
         alias = "introduced-clone-groups",

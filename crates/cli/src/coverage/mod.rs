@@ -54,11 +54,12 @@ mod generated_line_starts;
 pub mod login;
 mod partial_capture;
 mod setup_cli;
-mod setup_cloud;
+pub mod setup_cloud;
 mod source_map_sources;
 pub mod upload_common;
 mod upload_inventory;
 mod upload_source_maps;
+pub use upload_source_maps::UPLOAD_INCOMPLETE_EXIT_CODE;
 mod upload_static_findings;
 mod vercel_upload;
 

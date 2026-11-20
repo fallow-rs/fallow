@@ -2088,6 +2088,7 @@ mod tests {
             changed_files: Vec::new(),
             base_ref: "origin/main".to_string(),
             base_description: None,
+            base_sha: None,
             head_sha: None,
             output,
             performance: false,
@@ -2109,7 +2110,6 @@ mod tests {
 
     #[test]
     fn brief_mode_always_returns_success_even_when_verdict_is_fail() {
-        // Human path.
         let human = audit_result(AuditVerdict::Fail, OutputFormat::Human);
         assert_eq!(
             print_brief_result(

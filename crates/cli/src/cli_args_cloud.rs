@@ -13,14 +13,14 @@ pub enum CloudCli {
         machine_name: Option<String>,
 
         /// Fallow Cloud API base URL. Default: $FALLOW_API_URL, else
-        /// <https://api.fallow.cloud>.
+        /// `https://api.fallow.cloud`.
         #[arg(long, value_name = "URL")]
         api_url: Option<String>,
     },
     /// Remove the stored API key from the keychain and the credentials file.
     Logout {
         /// Fallow Cloud API base URL of the key to remove. Default:
-        /// $FALLOW_API_URL, else <https://api.fallow.cloud>.
+        /// $FALLOW_API_URL, else `https://api.fallow.cloud`.
         #[arg(long, value_name = "URL")]
         api_url: Option<String>,
     },
@@ -70,7 +70,7 @@ pub enum LicenseCli {
         /// JWT cannot be refreshed.
         ///
         /// Precedence: this flag > $FALLOW_API_KEY. Generate at
-        /// <https://fallow.cloud/settings#api-keys>.
+        /// `https://fallow.cloud/settings#api-keys`.
         ///
         /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
         /// secret on the command line may be visible to other processes via

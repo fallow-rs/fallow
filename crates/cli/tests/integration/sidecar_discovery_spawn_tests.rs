@@ -175,7 +175,7 @@ fn runtime_coverage_commands_start_no_package_manager() {
             );
             // Without this, a command that stops before discovery would pass.
             assert!(
-                combined.contains("Sidecar binary fallow-cov not found"),
+                combined.contains("The runtime coverage add-on (fallow-cov) was not found"),
                 "`{command}` in {root} did not reach sidecar discovery:\n{combined}"
             );
         }
@@ -221,7 +221,7 @@ fn missing_sidecar_message_names_no_package_manager_command() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        combined.contains("Sidecar binary fallow-cov not found"),
+        combined.contains("The runtime coverage add-on (fallow-cov) was not found"),
         "expected the missing-sidecar message, got:\n{combined}"
     );
     assert!(

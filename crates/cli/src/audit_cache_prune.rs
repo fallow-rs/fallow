@@ -239,14 +239,14 @@ fn print_prune_human(
         };
         let s = plural(counts.lock_reclaimed);
         println!(
-            "  {verb} {} lock sidecar{s} with no cache",
+            "  {verb} {} lock file{s} with no cache",
             counts.lock_reclaimed,
         );
     }
     if counts.lock_only > 0 {
         let s = plural(counts.lock_only);
         println!(
-            "  {} lock sidecar{s} with no cache remain (harmless)",
+            "  {} lock file{s} with no cache remain (harmless)",
             counts.lock_only,
         );
     }
@@ -355,7 +355,7 @@ fn entry_row(entry: &SweepEntry, dry_run: bool) -> String {
                 segments.push("owner missing".to_string());
             }
         }
-        "orphaned-sidecars" => segments.push("orphaned sidecars".to_string()),
+        "orphaned-sidecars" => segments.push("orphaned marker files".to_string()),
         "legacy-registered" => segments.push("legacy git registration".to_string()),
         "over-capacity" => {
             push_age(&mut segments, entry);

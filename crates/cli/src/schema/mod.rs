@@ -1,4 +1,7 @@
+mod cli_reference;
 mod environment;
+mod exit_code_table;
+mod issue_labels;
 
 use std::process::ExitCode;
 
@@ -19,9 +22,15 @@ use crate::explain::{
     SECURITY_RULES, rule_docs_url, rule_severity_key,
 };
 
-pub fn run_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
+pub use cli_reference::SchemaArgs;
+
+pub fn run_schema(args: SchemaArgs, json_style: crate::json_style::JsonStyle) -> ExitCode {
     let cmd = Cli::command();
-    let schema = build_cli_schema(&cmd);
+    let schema = if args.cli_reference {
+        cli_reference::build_cli_reference(&cmd)
+    } else {
+        build_cli_schema(&cmd)
+    };
     match json_style.serialize(&schema) {
         Ok(json) => {
             crate::report::sink::stdoutln!("{json}");
@@ -85,7 +94,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "default_severity": "The rule's severity under zero config (error/warn/off). null means the finding is not gated by a rules.* severity (a metric or command-driven finding, or a security-catalogue row).",
             "opt_in": "true when the rule defaults to off and reports nothing until enabled. Enabling an opt_in rule blindly is the most common way to flood a repo with findings, so treat true as a deliberate decision.",
             "frameworks": "Non-empty ONLY when the rule's DETECTOR self-gates on that framework (it does nothing unless the framework is declared). An EMPTY array does NOT mean the rule is framework-agnostic: many rules are framework-relevant (see the description) yet fire on any matching syntax, so never disable a rule solely because frameworks is empty.",
-            "config_key": "The canonical key under `rules` in the config file, i.e. rules.<config_key>. The `id` is an accepted alias. null for findings that are not configured via a rules.* severity."
+            "config_key": "The canonical key under `rules` in the config file, i.e. rules.<config_key>. The `id` is an accepted alias, except on the complexity and file-length rows. null for findings that are not configured via a rules.* severity of their own."
         },
         "related_schemas": {
             "note": "This manifest lists RULES, capabilities, presets, and the taste catalog. To author a config FILE you also need its shape, which is a separate schema.",
@@ -121,65 +130,10 @@ fn output_formats_schema() -> Vec<String> {
 }
 
 fn exit_codes_schema() -> serde_json::Value {
-    let entries = [
-        (
-            0,
-            "Success: no enforced gate failed. Bare fallow in a machine format (json, sarif, codeclimate, the GitHub formats, the comment and review formats) does not enforce findings without --fail-on-issues, so it exits 0 on findings. Read gate_outcomes: status \"fail\" with enforced false is a failing gate that did not set the exit code",
-        ),
-        (
-            1,
-            "An enforced gate failed, for example error-severity findings (per rules config, or --fail-on-issues promotes warn to error). This is an analysis result, not a tool failure",
-        ),
-        (
-            2,
-            "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}",
-        ),
-        (
-            crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE,
-            "Requested resource unavailable: config --path found no config, or a license is missing, invalid, or beyond its offline hard-fail window",
-        ),
-        (
-            crate::exit_codes::RUNTIME_COVERAGE_SIDECAR_EXIT_CODE,
-            "Runtime coverage sidecar is unavailable, unverifiable, protocol-incompatible, or terminated unexpectedly",
-        ),
-        (
-            crate::exit_codes::RUNTIME_COVERAGE_INPUT_EXIT_CODE,
-            "Runtime coverage input could not be prepared or parsed",
-        ),
-        (
-            crate::exit_codes::RUNTIME_COVERAGE_INTERNAL_EXIT_CODE,
-            "Runtime coverage sidecar reported an internal error",
-        ),
-        (
-            crate::exit_codes::NETWORK_EXIT_CODE,
-            "Network or cloud request failed during a license, coverage, or CI operation",
-        ),
-        (
-            crate::exit_codes::SECURITY_GATE_EXIT_CODE,
-            "Security gate matched a candidate selected by --gate",
-        ),
-        (
-            crate::exit_codes::COVERAGE_UPLOAD_VALIDATION_EXIT_CODE,
-            "Coverage inventory or static-findings upload input or project validation failed",
-        ),
-        (
-            crate::exit_codes::COVERAGE_UPLOAD_PAYLOAD_TOO_LARGE_EXIT_CODE,
-            "Coverage inventory or static-findings upload exceeded the server payload limit",
-        ),
-        (
-            crate::exit_codes::COVERAGE_UPLOAD_AUTH_REJECTED_EXIT_CODE,
-            "Coverage inventory or static-findings upload authentication or authorization was rejected",
-        ),
-        (
-            crate::exit_codes::COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE,
-            "Coverage inventory or static-findings upload failed after retries or returned another server error",
-        ),
-    ];
-
     serde_json::Value::Object(
-        entries
-            .into_iter()
-            .map(|(code, description)| (code.to_string(), description.into()))
+        exit_code_table::EXIT_CODES
+            .iter()
+            .map(|def| (def.code.to_string(), def.description.into()))
             .collect(),
     )
 }
@@ -377,7 +331,7 @@ fn issue_type_row(
         "category": rule.category,
         "description": rule.short,
         "label": meta.label,
-        "config_key": meta.config_key,
+        "config_key": fallow_api::rule_config_key(rule),
         "registry_index": meta.registry_index,
         "aliases": meta.aliases,
         "lsp": meta.lsp,
@@ -542,8 +496,13 @@ fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         "policy-violation" => {
             m.note = Some("Requires a configured rule pack (rulePacks config)");
         }
-        "invalid-client-export" | "mixed-client-server-barrel" | "misplaced-directive" => {
+        "invalid-client-export" => {
             m.note = Some("Requires the project to declare next");
+        }
+        "mixed-client-server-barrel" | "misplaced-directive" => {
+            m.note = Some(
+                "Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc",
+            );
         }
         _ => return false,
     }
@@ -667,7 +626,12 @@ fn plugins_schema() -> serde_json::Value {
 fn environment_variables_schema() -> serde_json::Value {
     let map: serde_json::Map<String, serde_json::Value> = ENVIRONMENT_VARIABLES
         .iter()
-        .map(|(name, description)| ((*name).to_string(), serde_json::Value::from(*description)))
+        .map(|variable| {
+            (
+                variable.name.to_string(),
+                serde_json::Value::from(variable.description),
+            )
+        })
         .collect();
     serde_json::Value::Object(map)
 }
@@ -1092,8 +1056,10 @@ mod tests {
                     row["label"].is_null(),
                     "unregistered row {id} must not invent a label"
                 );
-                assert!(
-                    row["config_key"].is_null(),
+                let rule = crate::explain::rule_by_token(id).unwrap();
+                assert_eq!(
+                    row["config_key"].as_str(),
+                    fallow_api::rule_config_key(rule),
                     "unregistered row {id} must not invent a config key"
                 );
                 assert!(

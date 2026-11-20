@@ -89,6 +89,15 @@ export const contractSurfaces = Object.freeze([
     newIssueKind: true,
   },
   {
+    id: "cli-reference",
+    owner: "fallow schema --cli-reference",
+    generatedPaths: ["docs/cli-reference.json"],
+    checkCommand: "npm run generate:contracts:check",
+    docs: ["docs/reference/cli-internals.md"],
+    publicStability: "stable",
+    newIssueKind: true,
+  },
+  {
     id: "output-schema",
     owner: "fallow-schema-emit",
     generatedPaths: ["docs/output-schema.json"],

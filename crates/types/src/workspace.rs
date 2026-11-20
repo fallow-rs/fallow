@@ -219,7 +219,7 @@ pub enum WorkspaceDiagnosticKind {
     /// channel so the skip is visible in `workspace_diagnostics[]` on
     /// `fallow dead-code / dupes / health` JSON.
     ///
-    /// Unlike the two skipped-file kinds beside it, this one is CAPPED. To
+    /// Unlike the two skipped-file kinds beside it, this one is capped. To
     /// bound the directory reads the check costs, a run classifies at most 64
     /// candidate directories and spends at most 1024 directory entries across
     /// all of them, so on a project that exceeds either ceiling the array is a
@@ -328,7 +328,7 @@ pub enum WorkspaceDiagnosticKind {
     /// boundary detector never ran. Its summary counters are therefore
     /// structurally zero and say nothing about the project.
     ///
-    /// This is the UNCONFIGURED zero, not the user-chosen one: a project that
+    /// This is the unconfigured zero, not the user-chosen one: a project that
     /// sets `boundary-violation: off` asked for silence and can see that
     /// choice in `fallow config`. A project that left `boundaries` empty
     /// cannot distinguish "no violations" from "nothing was measured".
@@ -388,7 +388,7 @@ pub enum WorkspaceDiagnosticKind {
     /// size. `path` anchors at the matched directory holding the most excluded
     /// files for that pattern, ties broken by the lexicographically first
     /// path, so two runs on one tree report the same location. On a nested
-    /// match it is the DEEPEST segment the pattern matched
+    /// match it is the deepest segment the pattern matched
     /// (`build/tools/build`, not `build`), because that is the directory the
     /// `--root` remedy names and re-rooting at a shallower one would leave a
     /// matching segment behind. That directory is the
@@ -826,7 +826,7 @@ pub struct WorkspaceDiagnostic {
     /// Human-readable rendering derived from `kind` + `path`. Always ends
     /// with a next-step hint.
     pub message: String,
-    /// True when this diagnostic reports a run whose RESULTS are degraded:
+    /// True when this diagnostic reports a run whose results are degraded:
     /// something the user installed, wrote, or expected did not reach the
     /// analysis. Projected from [`WorkspaceDiagnosticKind::warns_on_stderr`],
     /// which is the same classification that decides whether the CLI prints a

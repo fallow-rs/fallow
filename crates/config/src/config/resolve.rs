@@ -33,8 +33,8 @@ pub struct ResolveConfig {
     ///
     /// resolves to the `worker` branch when `"worker"` is listed here.
     ///
-    /// See <https://nodejs.org/api/packages.html#community-conditions-definitions>
-    /// for the set of community-defined conditions.
+    /// The [community conditions of Node.js](https://nodejs.org/api/packages.html#community-conditions-definitions)
+    /// list the conditions that tools define.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<String>,
 }

@@ -747,7 +747,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
         Command::DecisionSurface { .. } => Some("decision-surface"),
         Command::Impact { .. } => Some("impact"),
         Command::Report { .. } => Some("report"),
-        Command::Schema => Some("schema"),
+        Command::Schema(_) => Some("schema"),
         Command::CiTemplate { .. } => Some("ci-template"),
         Command::Migrate { .. } => Some("migrate"),
         Command::License { .. } => Some("license"),
@@ -789,7 +789,7 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
                 | Command::PluginSchema
                 | Command::PluginCheck
                 | Command::RulePackSchema
-                | Command::Schema
+                | Command::Schema(_)
                 | Command::Explain { .. }
                 | Command::CiTemplate { .. }
                 | Command::Config(_)
