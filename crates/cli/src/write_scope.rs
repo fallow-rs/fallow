@@ -41,6 +41,9 @@ use crate::{Cli, Command};
 /// The check fails closed: when the working directory or the root cannot be
 /// resolved, a write is rejected.
 pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
+    if let Some(message) = report_input_alias_error(cli) {
+        return Some(message);
+    }
     let targets = write_targets(cli, root);
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
@@ -76,6 +79,90 @@ pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
         write_guard::confine(cwd, scope, config_scope);
     }
     error
+}
+
+/// `--output-file` is opened, and so truncated, before `fallow report` reads
+/// its saved inputs. An output file that is one of those inputs would erase
+/// the saved report before it is parsed, so refuse it up front.
+fn report_input_alias_error(cli: &Cli) -> Option<String> {
+    let output_file = cli.output_file.as_deref()?;
+    let Some(Command::Report {
+        from,
+        mutation_report,
+        ..
+    }) = cli.command.as_ref()
+    else {
+        return None;
+    };
+    [
+        ("--from", Some(from.as_path())),
+        ("--mutation-report", mutation_report.as_deref()),
+    ]
+    .into_iter()
+    .find_map(|(flag, input)| {
+        let input = input?;
+        same_file(input, output_file).then(|| {
+            format!(
+                "--output-file {} is the same file as {flag} {}. Write the report to another file, so that the saved report stays readable.",
+                output_file.display(),
+                input.display()
+            )
+        })
+    })
+}
+
+/// Whether `output` names the existing file `input`, through a symlink,
+/// another spelling or a hard link. An output path through a folder that does
+/// not exist yet, such as `new/../report.json`, is resolved the way the writer
+/// will open it: it creates the missing folder, so a `..` after it returns to
+/// the resolved folder before it.
+fn same_file(input: &Path, output: &Path) -> bool {
+    if same_existing_file(input, output) {
+        return true;
+    }
+    std::fs::symlink_metadata(output).is_err()
+        && std::path::absolute(output)
+            .is_ok_and(|absolute| same_existing_file(input, &resolve_step_by_step(&absolute)))
+}
+
+/// Resolve `path` one component at a time. Each existing prefix is
+/// canonicalized, so a `..` after a symlinked folder leaves its target, as
+/// the operating system does. A missing component is kept as written.
+fn resolve_step_by_step(path: &Path) -> PathBuf {
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            other => {
+                resolved.push(other);
+                if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+                    resolved = canonical;
+                }
+            }
+        }
+    }
+    resolved
+}
+
+fn same_existing_file(left: &Path, right: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(left), Ok(right)) = (std::fs::metadata(left), std::fs::metadata(right)) {
+            return left.dev() == right.dev() && left.ino() == right.ino();
+        }
+        false
+    }
+    #[cfg(not(unix))]
+    {
+        matches!(
+            (std::fs::canonicalize(left), std::fs::canonicalize(right)),
+            (Ok(left), Ok(right)) if left == right
+        )
+    }
 }
 
 /// When the default cache directory `<root>/.fallow` resolves outside the

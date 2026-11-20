@@ -6,7 +6,7 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-use crate::common::{fallow_bin, fixture_path, run_fallow, run_fallow_raw};
+use crate::common::{fallow_bin, fixture_path, run_fallow, run_fallow_raw, run_fallow_raw_in_dir};
 use std::process::Command;
 
 const FIXTURE: &str = "basic-project";
@@ -256,4 +256,173 @@ fn bare_combined_mode_writes_json_to_file() {
     let value: serde_json::Value =
         serde_json::from_str(&read(&out)).expect("combined JSON report should parse");
     assert!(value.is_object());
+}
+
+/// A saved JSON report of the fixture, written to `dir/name`.
+fn saved_report(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let path = dir.join(name);
+    let result = run_fallow(
+        "dead-code",
+        FIXTURE,
+        &["--format", "json", "-o", path.to_str().expect("utf8 path")],
+    );
+    assert!(
+        result.code <= 1,
+        "saving the report failed: {}",
+        result.stderr
+    );
+    path
+}
+
+fn assert_refused_alias(dir: &std::path::Path, from: &str, output_file: &str, saved: &str) {
+    let result = run_fallow_raw_in_dir(
+        dir,
+        &[
+            "report",
+            "--from",
+            from,
+            "--format",
+            "markdown",
+            "--output-file",
+            output_file,
+        ],
+    );
+
+    assert_eq!(result.code, 2, "an aliased destination should exit 2");
+    assert!(
+        result.stderr.contains("--output-file") && result.stderr.contains("--from"),
+        "error should name both flags, got: {}",
+        result.stderr
+    );
+    assert_eq!(
+        read(&dir.join("report.json")),
+        saved,
+        "the saved report must keep its bytes"
+    );
+}
+
+#[test]
+fn report_refuses_an_output_file_that_is_its_from_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+
+    assert_refused_alias(dir.path(), "report.json", "report.json", &saved);
+}
+
+#[test]
+fn report_refuses_another_spelling_of_its_from_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir(dir.path().join("sub")).expect("mkdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+
+    assert_refused_alias(dir.path(), "report.json", "sub/../report.json", &saved);
+}
+
+#[test]
+fn report_refuses_a_spelling_through_a_missing_folder() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+
+    assert_refused_alias(dir.path(), "report.json", "new/../report.json", &saved);
+}
+
+#[cfg(unix)]
+#[test]
+fn report_refuses_a_link_to_its_from_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+    std::os::unix::fs::symlink("report.json", dir.path().join("link.json")).expect("symlink");
+
+    assert_refused_alias(dir.path(), "report.json", "link.json", &saved);
+}
+
+#[cfg(unix)]
+#[test]
+fn report_refuses_a_hard_link_to_its_from_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+    std::fs::hard_link(dir.path().join("report.json"), dir.path().join("copy.json"))
+        .expect("hard link");
+
+    assert_refused_alias(dir.path(), "report.json", "copy.json", &saved);
+}
+
+#[cfg(unix)]
+#[test]
+fn report_refuses_a_spelling_through_a_linked_folder_and_a_missing_folder() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("d/sub")).expect("mkdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+    std::fs::rename(
+        dir.path().join("report.json"),
+        dir.path().join("d/report.json"),
+    )
+    .expect("move report");
+    std::fs::write(dir.path().join("report.json"), &saved).expect("decoy");
+    std::os::unix::fs::symlink("d/sub", dir.path().join("lk")).expect("symlink");
+
+    let result = run_fallow_raw_in_dir(
+        dir.path(),
+        &[
+            "report",
+            "--from",
+            "d/report.json",
+            "--format",
+            "markdown",
+            "--output-file",
+            "lk/missing/../../report.json",
+        ],
+    );
+
+    assert_eq!(result.code, 2, "an aliased destination should exit 2");
+    assert_eq!(read(&dir.path().join("d/report.json")), saved);
+}
+
+#[cfg(unix)]
+#[test]
+fn report_writes_through_a_linked_folder_to_a_different_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("d/sub")).expect("mkdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+    std::os::unix::fs::symlink("d/sub", dir.path().join("lk")).expect("symlink");
+
+    let result = run_fallow_raw_in_dir(
+        dir.path(),
+        &[
+            "report",
+            "--from",
+            "report.json",
+            "--format",
+            "markdown",
+            "--output-file",
+            "lk/../report.json",
+        ],
+    );
+
+    assert!(result.code <= 1, "report should render: {}", result.stderr);
+    assert!(!read(&dir.path().join("d/report.json")).is_empty());
+    assert_eq!(read(&dir.path().join("report.json")), saved);
+}
+
+#[test]
+fn report_from_a_saved_file_writes_a_separate_output_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let saved = read(&saved_report(dir.path(), "report.json"));
+
+    let result = run_fallow_raw_in_dir(
+        dir.path(),
+        &[
+            "report",
+            "--from",
+            "report.json",
+            "--format",
+            "markdown",
+            "--output-file",
+            "report.md",
+        ],
+    );
+
+    assert!(result.code <= 1, "report should render: {}", result.stderr);
+    assert!(!read(&dir.path().join("report.md")).is_empty());
+    assert_eq!(read(&dir.path().join("report.json")), saved);
 }
