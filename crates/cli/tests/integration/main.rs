@@ -95,6 +95,7 @@ mod export_assignment_forward_tests;
 mod file_lines_tests;
 mod finding_id_filter_tests;
 mod finding_id_tests;
+mod fix_export_list_import_tests;
 mod fix_multiline_reexport_tests;
 mod fix_shared_declaration_tests;
 mod fix_tests;

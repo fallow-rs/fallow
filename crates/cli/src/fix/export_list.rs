@@ -34,6 +34,9 @@ pub(super) struct ListRewriteOutcome {
     /// The requested names that the statement exports, so the rewrite
     /// removes them.
     pub(super) removed: Vec<String>,
+    /// The local name of each removed specifier, once per specifier. Empty
+    /// for a statement with a `from` clause, which binds no local name.
+    pub(super) removed_locals: Vec<String>,
     pub(super) rewrite: ListRewrite,
 }
 
@@ -147,9 +150,13 @@ fn rewrite_parsed(parsed: &ParsedStatement, names: &[&str]) -> Option<ListRewrit
         .collect();
 
     let mut removed: Vec<String> = Vec::new();
+    let mut removed_locals: Vec<String> = Vec::new();
     for (spec, _) in specifiers.iter().zip(&matched).filter(|(_, m)| **m) {
         if !removed.contains(&spec.name) {
             removed.push(spec.name.clone());
+        }
+        if !parsed.list.has_source {
+            removed_locals.push(spec.local.clone());
         }
     }
     if removed.is_empty() {
@@ -159,6 +166,7 @@ fn rewrite_parsed(parsed: &ParsedStatement, names: &[&str]) -> Option<ListRewrit
     if matched.iter().all(|m| *m) {
         return is_trivia_only(&text[parsed.list.end..]).then_some(ListRewriteOutcome {
             removed,
+            removed_locals,
             rewrite: ListRewrite::DeleteStatement,
         });
     }
@@ -173,6 +181,7 @@ fn rewrite_parsed(parsed: &ParsedStatement, names: &[&str]) -> Option<ListRewrit
     new_text.push_str(&text[cursor..]);
     Some(ListRewriteOutcome {
         removed,
+        removed_locals,
         rewrite: ListRewrite::Replace(new_text.split('\n').map(str::to_owned).collect()),
     })
 }
@@ -333,6 +342,8 @@ struct Specifier {
     comma: Option<usize>,
     /// The name that the specifier exports.
     name: String,
+    /// The name that the specifier reads: `a` in `a as b`.
+    local: String,
 }
 
 struct ParsedList {
@@ -343,6 +354,8 @@ struct ParsedList {
     /// belong to it. Without `;`, a `from` or `with` clause on a later line
     /// is still part of the statement.
     closed: bool,
+    /// True when the statement has a `from` clause.
+    has_source: bool,
 }
 
 /// Parse `export [type] { ... } [from '...' [with { ... }]] [;]` at `start`.
@@ -371,7 +384,8 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
     if !c.skip_trivia() {
         return None;
     }
-    if c.eat_keyword("from") {
+    let has_source = c.eat_keyword("from");
+    if has_source {
         if !c.skip_trivia() {
             return None;
         }
@@ -398,7 +412,17 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
         specifiers,
         end: c.pos,
         closed,
+        has_source,
     })
+}
+
+/// The local name of a specifier from its tokens: `a` in `a`, `type a`,
+/// `a as b`, or `type a as b`.
+fn local_name(tokens: &[String]) -> Option<String> {
+    match tokens {
+        [name] | [_, name] | [name, _, _] | [_, name, _, _] => Some(name.clone()),
+        _ => None,
+    }
 }
 
 /// The exported name of a specifier from its tokens: `a`, `type a`,
@@ -558,6 +582,7 @@ impl Cursor<'_> {
             }
         }
         let name = exported_name(&tokens)?;
+        let local = local_name(&tokens)?;
         let comma = if self.peek() == Some(',') {
             let comma = self.pos;
             self.pos += 1;
@@ -570,6 +595,7 @@ impl Cursor<'_> {
             end,
             comma,
             name,
+            local,
         })
     }
 }
@@ -694,6 +720,22 @@ mod tests {
             rewrite(source, 5, &["C"]).as_deref(),
             Some("export type {\n  A,\n  B,\n} from './types';\nexport {\n  d,\n} from './mod';\n")
         );
+    }
+
+    fn removed_locals(source: &str, names: &[&str]) -> Vec<String> {
+        let lines = lines(source);
+        let mut index = ExportListIndex::default();
+        let statement = index.statement_for_line(&lines, 0).unwrap();
+        index.rewrite(statement, names).unwrap().removed_locals
+    }
+
+    #[test]
+    fn reports_the_local_name_of_each_removed_specifier() {
+        assert_eq!(
+            removed_locals("export { a as b, type c, a, d };\n", &["b", "c", "a"]),
+            vec!["a".to_owned(), "c".to_owned(), "a".to_owned()]
+        );
+        assert!(removed_locals("export { a } from './mod';\n", &["a"]).is_empty());
     }
 
     #[test]
