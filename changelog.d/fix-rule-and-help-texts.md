@@ -27,7 +27,3 @@
   as an empty range. The line now prints the merge base of the base ref and
   `HEAD`, the commit that the changed-file diff starts from.
   (Closes [#4838](https://github.com/fallow-rs/fallow/issues/4838))
-- **The commit gate reads only the first line of `fallow --version`.** The
-  npm launcher prints a second `verified:` line, which the gate put into its
-  block message and its version check.
-  (Closes [#4842](https://github.com/fallow-rs/fallow/issues/4842))

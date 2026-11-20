@@ -16129,6 +16129,18 @@
       "description": "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled."
     },
     {
+      "name": "FALLOW_TYPE_AWARE_PROJECTS",
+      "group": "type-aware",
+      "default": null,
+      "description": "The TypeScript project configs of type-aware analysis, separated by the path separator of the platform. The --type-aware-project flag wins over it, and it wins over typeAware.projects."
+    },
+    {
+      "name": "FALLOW_TYPE_AWARE_REQUIRE",
+      "group": "type-aware",
+      "default": null,
+      "description": "The completeness policy of type-aware analysis: best-effort or complete. The --type-aware-require flag wins over it, and it wins over typeAware.require."
+    },
+    {
       "name": "FALLOW_TYPE_AWARE_TIMEOUT_SECS",
       "group": "type-aware",
       "default": "120",

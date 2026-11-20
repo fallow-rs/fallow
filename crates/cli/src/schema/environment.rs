@@ -195,6 +195,18 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "Enable or disable TypeScript semantic (type-aware) analysis for the run (true/false/1/0/yes/no/on/off). Precedence: --type-aware/--no-type-aware CLI flags, then FALLOW_TYPE_AWARE, then the audit.typeAware config field, then typeAware.enabled.",
     ),
     var(
+        "FALLOW_TYPE_AWARE_PROJECTS",
+        TYPE_AWARE,
+        None,
+        "The TypeScript project configs of type-aware analysis, separated by the path separator of the platform. The --type-aware-project flag wins over it, and it wins over typeAware.projects.",
+    ),
+    var(
+        "FALLOW_TYPE_AWARE_REQUIRE",
+        TYPE_AWARE,
+        None,
+        "The completeness policy of type-aware analysis: best-effort or complete. The --type-aware-require flag wins over it, and it wins over typeAware.require.",
+    ),
+    var(
         "FALLOW_TYPE_AWARE_TIMEOUT_SECS",
         TYPE_AWARE,
         Some("120"),
