@@ -83,6 +83,15 @@ impl HealthMatch {
             .is_some_and(|categories| categories.contains(category))
     }
 
+    /// The slots of `category` in the saved bucket `bucket` that a current
+    /// finding uses.
+    pub(super) fn used_slots(&self, bucket: &str, category: &str) -> usize {
+        self.used
+            .get(bucket)
+            .and_then(|counts| counts.get(category))
+            .map_or(0, |entry| entry.count)
+    }
+
     /// The staleness counts of this match.
     pub(super) fn overlap(&self) -> HealthBaselineOverlap {
         HealthBaselineOverlap {

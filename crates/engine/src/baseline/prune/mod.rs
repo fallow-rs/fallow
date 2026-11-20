@@ -15,9 +15,9 @@ use fallow_types::identity::IdentityPaths;
 use super::{
     BASELINE_KEY_SCHEME, BaselineData, BaselineFileKind, BaselineKind, DuplicationBaselineData,
     HEALTH_FINDING_DIMENSIONS, HealthBaselineCount, HealthBaselineData, HealthBaselineMode,
-    HealthFindingCategory, HealthFindingCountMap, canonical_keys, classify_baseline_value,
-    clone_group_fingerprint_key, consume_baseline_key, health_finding_counts, match_severity_slots,
-    moved_identity_bucket_remaps, severity_counts_for_dimension, severity_index,
+    HealthFindingCategory, HealthFindingCountMap, HealthMatch, canonical_keys,
+    classify_baseline_value, clone_group_fingerprint_key, consume_baseline_key,
+    health_finding_counts, match_health_baseline, severity_counts_for_dimension, severity_index,
 };
 use crate::duplicates::{CloneFingerprintSet, DuplicationReport};
 
@@ -439,9 +439,11 @@ fn retain_rows(rows: &mut Vec<String>, keep: &[bool]) {
 ///
 /// `finding_counts` and `identity_finding_counts` lose the slots that matched
 /// no current finding. Identity buckets follow a moved file as `--baseline`
-/// does and keep their saved key. An emptied identity bucket stays as an empty
-/// map when the run reports its key, so the move matching does not change. The runtime-coverage keys and the refactoring
-/// target keys stay as they are, because this run does not compute them.
+/// does and keep their saved key. A placeholder bucket keeps a slot that
+/// covers a named function of its file. An emptied identity bucket stays as an
+/// empty map when the run reports its key, so the move matching does not
+/// change. The runtime-coverage keys and the refactoring target keys stay as
+/// they are, because this run does not compute them.
 ///
 /// # Errors
 ///
@@ -471,10 +473,15 @@ pub fn prune_health_baseline(
     let mut removed = Vec::new();
     let counting = baseline.file_length_counting();
     let current_counts = health_finding_counts(findings, root, HealthBaselineMode::Count, counting);
+    let matched = match_health_baseline(
+        &baseline.finding_counts,
+        &current_counts,
+        HealthBaselineMode::Count,
+        root,
+    );
     prune_count_buckets(
         &mut baseline.finding_counts,
-        &current_counts,
-        &FxHashMap::default(),
+        &matched,
         "finding_counts",
         &mut removed,
     );
@@ -484,17 +491,15 @@ pub fn prune_health_baseline(
     if !baseline.identity_finding_counts.is_empty() {
         let current_identity =
             health_finding_counts(findings, root, HealthBaselineMode::Identity, counting);
-        let remaps: FxHashMap<String, String> = moved_identity_bucket_remaps(
+        let matched = match_health_baseline(
             &baseline.identity_finding_counts,
             &current_identity,
+            HealthBaselineMode::Identity,
             root,
-        )
-        .into_iter()
-        .collect();
+        );
         prune_count_buckets(
             &mut baseline.identity_finding_counts,
-            &current_identity,
-            &remaps,
+            &matched,
             "identity_finding_counts",
             &mut removed,
         );
@@ -524,47 +529,37 @@ pub fn prune_health_baseline(
 /// Reduce each saved bucket to the slots that the `--baseline` match uses.
 fn prune_count_buckets(
     saved: &mut HealthFindingCountMap,
-    current: &HealthFindingCountMap,
-    remaps: &FxHashMap<String, String>,
+    matched: &HealthMatch,
     field: &str,
     removed: &mut Vec<PrunedEntry>,
 ) {
     for (bucket, saved_counts) in saved.iter_mut() {
-        let current_key = remaps.get(bucket).unwrap_or(bucket);
-        let current_counts = current.get(current_key);
         for dimension in HEALTH_FINDING_DIMENSIONS {
             let baseline = severity_counts_for_dimension(Some(saved_counts), dimension);
-            let used = match_severity_slots(
-                severity_counts_for_dimension(current_counts, dimension),
-                baseline,
-            )
-            .used;
             for severity in [
                 fallow_output::FindingSeverity::Moderate,
                 fallow_output::FindingSeverity::High,
                 fallow_output::FindingSeverity::Critical,
             ] {
                 let index = severity_index(severity);
-                if used[index] == baseline[index] {
-                    continue;
-                }
                 let category = HealthFindingCategory {
                     dimension,
                     severity,
                 }
                 .key();
+                let used = matched.used_slots(bucket, category);
+                if used == baseline[index] {
+                    continue;
+                }
                 removed.push(PrunedEntry {
                     category: format!("{field}.{category}"),
                     key: bucket.clone(),
-                    count: baseline[index] - used[index],
+                    count: baseline[index] - used,
                 });
-                if used[index] == 0 {
+                if used == 0 {
                     saved_counts.remove(category);
                 } else {
-                    saved_counts.insert(
-                        category.to_owned(),
-                        HealthBaselineCount { count: used[index] },
-                    );
+                    saved_counts.insert(category.to_owned(), HealthBaselineCount { count: used });
                 }
             }
         }
