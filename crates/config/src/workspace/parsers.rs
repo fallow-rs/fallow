@@ -395,6 +395,17 @@ fn maybe_emit_glob_no_pkg_diag(
     diagnostics.push(diag);
 }
 
+/// The directory segments of `pattern` before its first segment that has a
+/// glob character. The recursive walk starts there.
+fn literal_dir_prefix(pattern: &str) -> &str {
+    let Some(meta) = pattern.find(['*', '?', '[', '{']) else {
+        return pattern;
+    };
+    pattern[..meta]
+        .rfind('/')
+        .map_or("", |slash| &pattern[..slash])
+}
+
 /// Expand a recursive workspace glob pattern (containing `**`) by walking the
 /// directory tree manually, pruning `node_modules` during traversal.
 ///
@@ -410,36 +421,31 @@ fn expand_recursive_workspace_pattern(
     expanded_pattern: &str,
     canonical_root: &Path,
 ) -> Vec<(PathBuf, PathBuf)> {
-    // The walk below collects normalized paths, which have no `./` segment.
-    // The matchers must see the same form, or `./packages/**` matches nothing.
-    let mut expanded_pattern = expanded_pattern;
-    while let Some(rest) = expanded_pattern.strip_prefix("./") {
-        expanded_pattern = rest;
-    }
-    let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
-    let Ok(matcher) = glob::Pattern::new(&full_pattern) else {
+    let pattern = crate::glob_validation::normalize_path_pattern(expanded_pattern);
+    let Ok(glob) = crate::glob_validation::compile_path_glob(pattern) else {
         tracing::warn!("invalid workspace glob pattern '{raw_pattern}'");
         return Vec::new();
     };
+    let matcher = glob.compile_matcher();
 
     // pnpm reads `**` as zero or more folders, so `pkgs/**` also matches
-    // `pkgs` itself. `glob::Pattern` needs at least one folder for a trailing
-    // `**`, so the pattern without that segment matches the zero-folder case.
-    let zero_depth_matcher = expanded_pattern
+    // `pkgs` itself. The glob needs at least one folder for a trailing `**`,
+    // so the pattern without that segment matches the zero-folder case.
+    let zero_depth_matcher = pattern
         .strip_suffix("/**")
-        .and_then(|prefix| glob::Pattern::new(&root.join(prefix).to_string_lossy()).ok());
+        .and_then(|prefix| crate::glob_validation::compile_path_glob(prefix).ok())
+        .map(|glob| glob.compile_matcher());
 
-    let base_dir: PathBuf = match expanded_pattern.find('*') {
-        Some(idx) => root.join(&expanded_pattern[..idx]),
-        None => root.join(expanded_pattern),
-    }
-    .components()
-    .collect();
+    let base_dir: PathBuf = root
+        .join(literal_dir_prefix(pattern))
+        .components()
+        .collect();
 
     let mut results = Vec::new();
     let mut input = WorkspaceDirWalkInput {
         matcher: &matcher,
         zero_depth_matcher: zero_depth_matcher.as_ref(),
+        root,
         canonical_root,
         results: &mut results,
     };
@@ -452,8 +458,9 @@ fn expand_recursive_workspace_pattern(
 
 /// Borrowed inputs of the recursive workspace directory walk.
 struct WorkspaceDirWalkInput<'a> {
-    matcher: &'a glob::Pattern,
-    zero_depth_matcher: Option<&'a glob::Pattern>,
+    matcher: &'a globset::GlobMatcher,
+    zero_depth_matcher: Option<&'a globset::GlobMatcher>,
+    root: &'a Path,
     canonical_root: &'a Path,
     results: &'a mut Vec<(PathBuf, PathBuf)>,
 }
@@ -481,10 +488,17 @@ fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
 /// Collect `path` when the pattern matches it and it has a package manifest
 /// inside the project root.
 fn collect_matched_workspace_dir(path: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
-    let matches = input.matcher.matches_path(path)
+    let Ok(relative) = path.strip_prefix(input.root) else {
+        return;
+    };
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    if relative.is_empty() {
+        return;
+    }
+    let matches = input.matcher.is_match(relative.as_str())
         || input
             .zero_depth_matcher
-            .is_some_and(|matcher| matcher.matches_path(path));
+            .is_some_and(|matcher| matcher.is_match(relative.as_str()));
     if matches
         && dir_has_package_manifest(path)
         && let Ok(cp) = dunce::canonicalize(path)
@@ -1388,5 +1402,96 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    fn write_member(root: &Path, relative: &str) {
+        let dir = root.join(relative);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name": "member"}"#).unwrap();
+    }
+
+    fn expanded_members(root: &Path, pattern: &str) -> Vec<String> {
+        let canonical_root = dunce::canonicalize(root).unwrap();
+        let mut paths: Vec<String> = expand_workspace_glob(root, pattern, &canonical_root)
+            .iter()
+            .map(|(path, _)| {
+                path.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn expand_recursive_glob_under_a_root_with_glob_characters() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("repo[old]");
+        write_member(&root, "packages/a");
+
+        assert_eq!(expanded_members(&root, "packages/**"), ["packages/a"]);
+    }
+
+    #[test]
+    fn expand_recursive_glob_with_a_wildcard_directory_prefix() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path();
+        write_member(root, "pkg-a");
+        write_member(root, "pkg-a/lib");
+        write_member(root, "other/lib");
+
+        assert_eq!(expanded_members(root, "pkg-*/**"), ["pkg-a", "pkg-a/lib"]);
+    }
+
+    #[test]
+    fn expand_recursive_glob_with_a_character_class() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path();
+        write_member(root, "packages/a/x");
+        write_member(root, "packages/b/x");
+        write_member(root, "packages/c/x");
+
+        assert_eq!(
+            expanded_members(root, "packages/[ab]/**"),
+            ["packages/a/x", "packages/b/x"]
+        );
+    }
+
+    #[test]
+    fn expand_recursive_glob_matches_the_zero_depth_folder() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path();
+        write_member(root, "packages");
+        write_member(root, "packages/a");
+
+        assert_eq!(
+            expanded_members(root, "packages/**"),
+            ["packages", "packages/a"]
+        );
+    }
+
+    #[test]
+    fn expand_recursive_glob_keeps_the_dot_slash_form() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path();
+        write_member(root, "packages");
+        write_member(root, "packages/a");
+        write_member(root, "packages/a/b");
+
+        assert_eq!(
+            expanded_members(root, "./packages/**"),
+            expanded_members(root, "packages/**")
+        );
+        assert_eq!(expanded_members(root, "./packages/**").len(), 3);
+    }
+
+    #[test]
+    fn literal_dir_prefix_stops_before_the_first_glob_segment() {
+        assert_eq!(literal_dir_prefix("packages/**"), "packages");
+        assert_eq!(literal_dir_prefix("pkg-*/**"), "");
+        assert_eq!(literal_dir_prefix("a/b/[xy]/**"), "a/b");
+        assert_eq!(literal_dir_prefix("**"), "");
     }
 }
