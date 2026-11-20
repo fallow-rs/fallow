@@ -10,14 +10,22 @@ npm install @fallow-cli/fallow-node   # or: pnpm/yarn/bun add @fallow-cli/fallow
 
 ## Usage
 
+ES modules:
+
 ```js
-// ES modules
 import { detectDeadCode } from "@fallow-cli/fallow-node";
 
-// CommonJS
+const report = await detectDeadCode({ root: "." });
+```
+
+CommonJS:
+
+```js
 const { detectDeadCode } = require("@fallow-cli/fallow-node");
 
-const report = await detectDeadCode({ root: "." });
+detectDeadCode({ root: "." }).then((report) => {
+  console.log(report);
+});
 ```
 
 The ES module entry also has a default export with all functions.

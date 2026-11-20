@@ -23,8 +23,9 @@ const bindingFunctions = Object.keys(required).filter(
   (name) => typeof required[name] === "function",
 );
 assert.ok(bindingFunctions.length > 0, "the binding exports functions");
+const namedExports = new Map(Object.entries(namespace));
 for (const name of bindingFunctions) {
-  assert.equal(namespace[name], required[name], `named ESM export ${name}`);
+  assert.equal(namedExports.get(name), required[name], `named ESM export ${name}`);
 }
 
 const report = await detectDeadCode({ root: process.cwd(), noCache: true });
