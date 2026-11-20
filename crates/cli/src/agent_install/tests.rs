@@ -605,6 +605,109 @@ fn codex_toml_merge_keeps_comments_and_other_tables() {
     assert!(text.contains("[mcp_servers.other]"));
 }
 
+fn npx_fallow_command() -> mcp::McpCommand {
+    mcp::McpCommand {
+        command: "npx".to_string(),
+        args: vec!["--no".to_string(), "fallow-mcp".to_string()],
+        source: mcp::McpSource::NodeModules,
+    }
+}
+
+#[test]
+fn codex_toml_merge_keeps_siblings_in_an_inline_servers_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "mcp_servers = { other = { command = \"x\" } }\n").unwrap();
+    let command = npx_fallow_command();
+
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&command), false, false).unwrap(),
+        mcp::FileOutcome::Changed
+    );
+    let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    assert_eq!(doc["mcp_servers"]["other"]["command"].as_str(), Some("x"));
+    assert_eq!(
+        doc["mcp_servers"]["fallow"]["command"].as_str(),
+        Some("npx")
+    );
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&command), false, false).unwrap(),
+        mcp::FileOutcome::Unchanged
+    );
+
+    assert_eq!(
+        mcp::merge_codex(&path, None, false, false).unwrap(),
+        mcp::FileOutcome::Changed
+    );
+    let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    assert_eq!(doc["mcp_servers"]["other"]["command"].as_str(), Some("x"));
+    assert!(doc["mcp_servers"].get("fallow").is_none());
+}
+
+#[test]
+fn codex_toml_merge_refuses_a_servers_value_that_is_not_a_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let original = "mcp_servers = \"managed elsewhere\"\n";
+    std::fs::write(&path, original).unwrap();
+
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&npx_fallow_command()), false, false).unwrap(),
+        mcp::FileOutcome::ServersNotATable
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&npx_fallow_command()), false, true).unwrap(),
+        mcp::FileOutcome::Changed
+    );
+    let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    assert_eq!(
+        doc["mcp_servers"]["fallow"]["command"].as_str(),
+        Some("npx")
+    );
+}
+
+#[test]
+fn codex_toml_uninstall_removes_a_file_whose_inline_table_held_only_fallow() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "mcp_servers = { fallow = { command = \"npx\", args = [\"--no\", \"fallow-mcp\"] } }\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        mcp::merge_codex(&path, None, false, false).unwrap(),
+        mcp::FileOutcome::Deleted
+    );
+    assert!(!path.exists());
+}
+
+#[test]
+fn json_merge_refuses_a_servers_value_that_is_not_an_object() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".mcp.json");
+    let original = "{\n  \"mcpServers\": [\"other\"]\n}\n";
+    std::fs::write(&path, original).unwrap();
+    let entry = serde_json::json!({"command": "fallow-mcp"});
+
+    assert_eq!(
+        mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, false).unwrap(),
+        mcp::FileOutcome::ServersNotATable
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+    assert_eq!(
+        mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, true).unwrap(),
+        mcp::FileOutcome::Changed
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(value["mcpServers"]["fallow"]["command"], "fallow-mcp");
+}
+
 #[test]
 fn dry_run_touches_nothing() {
     let dir = tempfile::tempdir().unwrap();

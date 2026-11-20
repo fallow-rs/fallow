@@ -416,6 +416,10 @@ fn outcome_report(
                 .reason(Reason::McpEntryForeign)
                 .detail("the fallow entry here was not written by fallow; pass --force to replace it")
         }
+        Ok(FileOutcome::ServersNotATable) => base
+            .with_status(StepStatus::Refused)
+            .reason(Reason::McpEntryForeign)
+            .detail("the MCP server section here is not a table; fix it or pass --force to replace it"),
         Ok(FileOutcome::InvalidPreserved) => base
             .with_status(StepStatus::Refused)
             .reason(invalid)
@@ -528,6 +532,9 @@ pub enum FileOutcome {
     NotPresent,
     /// A `fallow` entry exists that fallow did not write.
     Foreign,
+    /// The server section holds a value that is not a table or object, so
+    /// fallow cannot add its entry next to it without `--force`.
+    ServersNotATable,
     InvalidPreserved,
     NotAnObject,
 }
@@ -699,6 +706,9 @@ pub fn merge_json_server(
                 .entry(section)
                 .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
             if !servers.is_object() {
+                if !force {
+                    return Ok(FileOutcome::ServersNotATable);
+                }
                 *servers = serde_json::Value::Object(serde_json::Map::new());
             }
             if let Some(servers) = servers.as_object_mut() {
@@ -915,13 +925,21 @@ pub fn merge_codex(
             let servers = doc
                 .entry("mcp_servers")
                 .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
-            if !servers.is_table() {
+            // An inline `mcp_servers = { ... }` is a table too and keeps its
+            // siblings. Any other value is the user's, so only `--force`
+            // replaces it.
+            if servers.as_table_like().is_none() {
+                if !force {
+                    return Ok(FileOutcome::ServersNotATable);
+                }
                 *servers = toml_edit::Item::Table(toml_edit::Table::new());
             }
-            let Some(servers) = servers.as_table_mut() else {
+            if let Some(table) = servers.as_table_mut() {
+                table.set_implicit(true);
+            }
+            let Some(servers) = servers.as_table_like_mut() else {
                 return Err(format!("{}: mcp_servers is not a table", path.display()));
             };
-            servers.set_implicit(true);
             let mut entry = toml_edit::Table::new();
             entry.insert("command", toml_edit::value(command.command.as_str()));
             let mut args = toml_edit::Array::new();
@@ -934,7 +952,7 @@ pub fn merge_codex(
         None => {
             let Some(servers) = doc
                 .get_mut("mcp_servers")
-                .and_then(toml_edit::Item::as_table_mut)
+                .and_then(toml_edit::Item::as_table_like_mut)
             else {
                 return Ok(FileOutcome::Unchanged);
             };
