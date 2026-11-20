@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/human_summary_line_tests.rs
+expression: health_status_line(&output)
+---
+✓ 0 above threshold (1 in the baseline) · 4 analyzed · maintainability 95.0 (good) (Ns)
