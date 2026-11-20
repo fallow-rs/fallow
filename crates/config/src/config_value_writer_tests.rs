@@ -248,3 +248,17 @@ fn render_rejects_non_object_root() {
     let err = render_toml_config(&json!([1]), None).unwrap_err();
     assert!(matches!(err, ConfigWriteError::InvalidShape(_)), "{err}");
 }
+
+#[test]
+fn string_array_escapes_quotes_and_backslashes() {
+    assert_eq!(toml_string_array(&["packages/*"]), r#"["packages/*"]"#);
+    let out = toml_string_array(&["a\"b", "c\\d"]);
+    let parsed = toml::from_str::<toml::Value>(&format!("x = {out}")).unwrap();
+    let items: Vec<&str> = parsed["x"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    assert_eq!(items, ["a\"b", "c\\d"]);
+}

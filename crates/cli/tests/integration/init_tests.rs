@@ -199,6 +199,29 @@ fn init_creates_toml_with_flag() {
 }
 
 #[test]
+fn init_toml_escapes_workspace_globs() {
+    let dir = init_temp_dir("toml-escape");
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "init-test", "workspaces": ["packages/*", "apps/a\"b\\c"]}"#,
+    )
+    .unwrap();
+    let output = run_fallow_raw(&["init", "--toml", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let content = fs::read_to_string(dir.join("fallow.toml")).unwrap();
+    assert!(content.contains("[workspaces]"), "{content}");
+    let parsed: toml::Value = toml::from_str(&content).unwrap();
+    let patterns: Vec<&str> = parsed["workspaces"]["patterns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    assert_eq!(patterns, ["packages/*", "apps/a\"b\\c"]);
+    cleanup(&dir);
+}
+
+#[test]
 fn init_exits_nonzero_if_config_exists() {
     let dir = init_temp_dir("exists");
     run_fallow_raw(&["init", "--root", dir.to_str().unwrap(), "--quiet"]);

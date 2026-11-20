@@ -89,6 +89,16 @@ pub fn render_toml_config(
     Ok(out)
 }
 
+/// Render strings as one TOML inline array, with TOML string escapes.
+#[must_use]
+pub fn toml_string_array(values: &[&str]) -> String {
+    let mut array = Array::new();
+    for value in values {
+        array.push(*value);
+    }
+    array.to_string()
+}
+
 fn set_json_value(
     body: &str,
     parents: &[&str],
