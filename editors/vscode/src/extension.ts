@@ -13,6 +13,7 @@ import { cancelReleaseRetry } from "./download.js";
 import { enableFeature } from "./enableFeature.js";
 import { openSettingsSearch } from "./openSettings.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
+import { createLazyView } from "./lazyView.js";
 import {
   getHealthEnabled,
   getSecurityEnabled,
@@ -687,56 +688,55 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // never wired into triggerCliAnalysis, runAnalysis, the analysisComplete
   // notification, or REANALYSIS_CONFIG_KEYS. A user who never touches coverage
   // pays zero cost.
-  const loadCoverage = async (): Promise<void> => {
-    // Intentionally leaves the shared status bar (dead-code/dupes counts)
-    // untouched: runtime coverage is an independent surface (#902). The
-    // progress notification is enough feedback for the load itself.
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Loading runtime coverage...",
-        cancellable: false,
-      },
-      async () => {
-        const report = await runCoverageAnalysis(context, outputChannel);
-        // A null report means cancelled / no path / failure; only surfacing a
-        // loaded report flips the view out of its welcome state. A failed run
-        // already showed its own toast inside runCoverageAnalysis.
-        if (report) {
-          lastCoverageReport = report;
-          coverageProvider.update(report);
-          void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
+  const coverageLoader = createLazyView<RuntimeCoverageReport>({
+    enabled: () => true,
+    // A reveal loads only when the user already pointed at a capture. The
+    // welcome view starts the first load in the other case.
+    autoLoad: () => lastCoverageReport === null && getCoveragePath() !== "",
+    // Constant: the run can store `fallow.coverage.capturePath` itself, so a
+    // key that holds the path would change during the first load.
+    inputKey: () => "",
+    reloadStaleWhen: () => false,
+    // Leaves the shared status bar (dead-code/dupes counts) untouched:
+    // runtime coverage is an independent surface (#902). The progress
+    // notification is enough feedback for the load itself.
+    run: async () => {
+      const report = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Fallow: Loading runtime coverage...",
+          cancellable: false,
+        },
+        () => runCoverageAnalysis(context, outputChannel),
+      );
+      // A null report means cancelled, no path or failure. The run showed its
+      // own toast, and the view keeps its content.
+      return report ? { kind: "loaded", value: report } : { kind: "skipped" };
+    },
+    apply: (report) => {
+      lastCoverageReport = report;
+      coverageProvider.update(report);
+      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", true);
 
-          // A grace/trial watermark means these candidates were produced under a
-          // stale or expired license: surface it once per load so "Safe to
-          // Delete" rows are not mistaken for authoritative deletions.
-          const watermark = coverageWatermarkMessage(report);
-          if (watermark) {
-            void vscode.window.showWarningMessage(`Fallow runtime coverage: ${watermark}`);
-          }
-        }
-      },
-    );
-  };
-
-  let coverageLoadAttempted = false;
-  const onCoverageViewVisible = (): void => {
-    if (coverageLoadAttempted || lastCoverageReport) {
-      return;
-    }
-    // Lazy auto-load only when the user already pointed at a capture; otherwise
-    // the welcome view's call-to-action drives the first load.
-    if (!getCoveragePath()) {
-      return;
-    }
-    coverageLoadAttempted = true;
-    void loadCoverage();
-  };
+      // A grace/trial watermark means these candidates were produced under a
+      // stale or expired license: surface it once per load so "Safe to
+      // Delete" rows are not mistaken for authoritative deletions.
+      const watermark = coverageWatermarkMessage(report);
+      if (watermark) {
+        void vscode.window.showWarningMessage(`Fallow runtime coverage: ${watermark}`);
+      }
+    },
+    reset: () => {
+      lastCoverageReport = null;
+      coverageProvider.update(null);
+      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", false);
+    },
+  });
 
   context.subscriptions.push(
     coverageView.onDidChangeVisibility((e) => {
       if (e.visible) {
-        onCoverageViewVisible();
+        void coverageLoader.reveal();
       }
     }),
   );
@@ -799,23 +799,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.loadCoverage", async () => {
-      coverageLoadAttempted = true;
-      await loadCoverage();
-    }),
+    vscode.commands.registerCommand("fallow.loadCoverage", () => coverageLoader.reload()),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.reloadCoverage", async () => {
-      coverageLoadAttempted = true;
-      await loadCoverage();
-    }),
+    vscode.commands.registerCommand("fallow.reloadCoverage", () => coverageLoader.reload()),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.clearCoverage", () => {
-      lastCoverageReport = null;
-      coverageLoadAttempted = false;
-      coverageProvider.update(null);
-      void vscode.commands.executeCommand("setContext", "fallow.hasCoverage", false);
+      coverageLoader.clear();
     }),
   );
 
@@ -1162,7 +1153,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       // changes, but only if a capture was already loaded, so changing the
       // setting never kicks off work for a user who has not opted in.
       if (e.affectsConfiguration("fallow.coverage.capturePath") && lastCoverageReport) {
-        void loadCoverage();
+        void coverageLoader.reload();
       }
     }),
   );
