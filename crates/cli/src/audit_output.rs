@@ -5,7 +5,7 @@ use colored::Colorize;
 use fallow_api::{
     AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput, DupesReportPayload,
 };
-use fallow_config::{AuditGate, AuditWorsened, OutputFormat, RulesConfig, Severity};
+use fallow_config::{AuditGate, OutputFormat, RulesConfig, Severity};
 use fallow_output::{
     AUDIT_SCHEMA_VERSION, AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput,
     PrDecisionConclusion,
@@ -25,11 +25,14 @@ use super::keys::{
 };
 use super::{AuditResult, AuditSummary, AuditVerdict, DupeDemotionDiffSource};
 use complexity_notes::worsened_class_label;
+use inherited_count::{gate_excluded_inherited, pass_issue_noun};
 
 #[path = "audit_output_codeclimate.rs"]
 mod codeclimate;
 #[path = "audit_complexity_notes.rs"]
 mod complexity_notes;
+#[path = "audit_inherited_count.rs"]
+mod inherited_count;
 #[path = "audit_quiet.rs"]
 mod quiet;
 #[cfg(test)]
@@ -1119,37 +1122,6 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
                     .bold()
             );
         }
-    }
-}
-
-/// The inherited findings that the audit gate left out. Zero under
-/// `--gate all`, because that gate judges every finding.
-fn gate_excluded_inherited(result: &AuditResult) -> usize {
-    if matches!(result.attribution.gate, AuditGate::All) {
-        return 0;
-    }
-    // The same classification gives `complexity_worsened` and
-    // `complexity_inherited`, and every worsened finding is also counted as
-    // inherited. Under `--worsened error` the worsened findings take part in
-    // the gate, so they are not excluded.
-    let gated_worsened = if result.attribution.worsened == AuditWorsened::Error {
-        result.attribution.complexity_worsened
-    } else {
-        0
-    };
-    (result.attribution.dead_code_inherited
-        + result.attribution.complexity_inherited
-        + result.attribution.duplication_inherited)
-        .saturating_sub(gated_worsened)
-}
-
-/// `issues` for the pass status line, or `introduced issues` when the gate
-/// left out inherited findings that the output lists above the line.
-fn pass_issue_noun(result: &AuditResult) -> &'static str {
-    if gate_excluded_inherited(result) > 0 {
-        "introduced issues"
-    } else {
-        "issues"
     }
 }
 
