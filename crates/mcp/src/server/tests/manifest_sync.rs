@@ -113,7 +113,7 @@ fn manifest_read_only_matches_live_annotations() {
 
 /// The manifest's `modifies_source` flag must match the live rmcp
 /// `destructive_hint` annotation: only a tool that edits source files is
-/// destructive. A read-only tool has no destructive hint at all.
+/// destructive, with the MCP defaults for a missing hint.
 #[test]
 fn manifest_modifies_source_matches_live_destructive_hint() {
     let server = FallowMcp::new();
@@ -123,11 +123,13 @@ fn manifest_modifies_source_matches_live_destructive_hint() {
             .iter()
             .find(|t| t.name.as_ref() == entry.name)
             .unwrap_or_else(|| panic!("manifest tool {} is not registered", entry.name));
-        let live_destructive = tool
-            .annotations
-            .as_ref()
-            .and_then(|a| a.destructive_hint)
-            .unwrap_or(false);
+        // MCP defaults `readOnlyHint` to false and `destructiveHint` to true,
+        // and a read-only tool is never destructive. A tool that leaves the
+        // hint out is therefore destructive to an MCP host.
+        let annotations = tool.annotations.as_ref();
+        let read_only = annotations.and_then(|a| a.read_only_hint).unwrap_or(false);
+        let live_destructive =
+            !read_only && annotations.and_then(|a| a.destructive_hint).unwrap_or(true);
         assert_eq!(
             entry.modifies_source, live_destructive,
             "manifest modifies_source for {} diverges from the live destructive_hint annotation",
