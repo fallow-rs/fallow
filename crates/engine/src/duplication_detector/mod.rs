@@ -698,6 +698,21 @@ mod tests {
     }
 
     #[test]
+    fn ignore_defaults_config_doc_names_every_default_pattern() {
+        let schema = fallow_config::FallowConfig::json_schema();
+        let doc =
+            schema["$defs"]["DuplicatesConfig"]["properties"]["ignoreDefaults"]["description"]
+                .as_str()
+                .expect("ignoreDefaults has a description");
+        for pattern in DUPES_DEFAULT_IGNORES {
+            assert!(
+                doc.contains(&format!("`{pattern}`")),
+                "the ignoreDefaults doc does not name {pattern}"
+            );
+        }
+    }
+
+    #[test]
     fn find_duplicates_empty_files() {
         let config = DuplicatesConfig::default();
         let report = find_duplicates(Path::new("/tmp"), &[], &config);

@@ -1636,12 +1636,12 @@ pub enum Command {
         subcommand: CoverageCli,
     },
 
-    /// Install or remove a Claude Code PreToolUse hook that gates
+    /// Deprecated: install or remove a Claude Code PreToolUse hook that gates
     /// `git commit` / `git push` on `fallow audit`, so the agent cleans
     /// findings before the command runs.
     ///
-    /// Deprecated: use `fallow agent install` (one pass for every harness)
-    /// or `fallow hooks install --target agent` (the gate alone). This
+    /// Use `fallow agent install` (one pass for every harness)
+    /// or `fallow hooks install --target agent` (the gate alone) instead. This
     /// command keeps working throughout fallow 3 and is removed in the next
     /// major. It writes into `.claude/settings.json` +
     /// `.claude/hooks/fallow-gate.sh`, or for Codex into `.codex/hooks.json` +
