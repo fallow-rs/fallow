@@ -427,7 +427,7 @@
       ]
     },
     "publicPackages": {
-      "description": "An array of internal workspace package names (or globs matched against workspace package names) whose public API is intentionally consumed outside the analyzed graph; their entry points and re-export surface become reachability roots, so their exported files, exports, and class members are not reported as unused. Set it (e.g. `[\"@myorg/shared-lib\", \"@myorg/*\"]`) for library packages in a monorepo that ship an API to external consumers; only meaningful when workspaces are present (an empty list or no workspaces is a no-op).",
+      "description": "An array of internal workspace package names (or globs matched against workspace package names) whose public API is intentionally consumed outside the analyzed graph; their entry points and re-export surface become reachability roots, so their exported files, the exports on that surface, and the class and enum members of a class or enum on that surface are not reported as unused. Exports and members that the surface cannot reach are still reported. Set it (e.g. `[\"@myorg/shared-lib\", \"@myorg/*\"]`) for library packages in a monorepo that ship an API to external consumers; only meaningful when workspaces are present (an empty list or no workspaces is a no-op).",
       "type": "array",
       "items": {
         "type": "string"
