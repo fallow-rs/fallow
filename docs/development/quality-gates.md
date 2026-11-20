@@ -785,6 +785,27 @@ feature-only dependency in `crates/cli/Cargo.toml`. `unify-features` in
 `[workspace.metadata.fallow.deps]` names the member. The rule runs in each
 `cargo fallow check` (see [Rust structure](#rust-structure)).
 
+## Resolved run guards
+
+The library tests of `fallow-cli` hold the guards of the resolved run. Run
+them with `cargo test -p fallow-cli --lib -- cli_production`. Each guard
+lists its allowed sites with an exact count, so a new site fails and a
+removed site asks for a smaller count.
+
+- `config_load_guard_tests.rs`: each CLI production call that loads a config
+  or opens a session without a resolved run.
+- `env_read_guard_tests.rs`: each production string literal, in every crate,
+  that is the name of a run variable of `fallow_config::EnvVar`. Literals in
+  macro bodies and attributes count. Doc comments and test code do not.
+- `testing_feature_tests.rs`: no manifest turns on the `testing` feature
+  outside `[dev-dependencies]`. A release build then has no session
+  constructor that takes a config without a run.
+- `runs_by_default_owner_tests.rs`: each production call of
+  `DuplicatesConfig::runs_by_default` outside `fallow-config`. The plan of the
+  run decides the duplication analysis; the health score is the one owner.
+- `selection_key_guard_tests.rs`: each read of a selection key outside
+  `fallow-config`.
+
 ## Hook parity
 
 Codex does not execute `.claude/settings.json` hooks. Mirror the repository

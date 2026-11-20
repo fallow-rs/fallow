@@ -102,6 +102,28 @@ protocol and package parity.
   `fallow_engine::project_config::find_config_file`. Its allow list holds the
   engine loader, the fixability check of `fallow-config` (which cannot call
   the engine) and the config parse bench, each with the exact count of calls.
+- A session of a release build comes from a resolved run
+  (`fallow_engine::resolved_run`): `Runnable::open_session` or
+  `open_session_adjusted`, or `fallow_api::EditorAnalysisSession::open`. The
+  constructors that load or take a config without a run
+  (`AnalysisSession::load*`, `AnalysisSession::from_config`, the
+  `EditorAnalysisSession::load*` constructors, the `config_for_project*`
+  loads, `ProjectConfig`) exist only under `cfg(test)` and the `testing`
+  feature of `fallow-config`, `fallow-engine` and `fallow-api`. Only a
+  `[dev-dependencies]` entry may turn that feature on; the test
+  `crates/cli/src/testing_feature_tests.rs` reads each manifest and fails on
+  another entry.
+- Two parts of the CLI still build a config or a session without a run:
+  the fallback of an option struct with `run: None` (benchmark hooks and unit
+  tests) through `runtime_support::load_config_for_analysis`, and its session
+  through `AnalysisSession::from_resolved_config`. So
+  `from_resolved_config`, `ProductionFlags` and
+  `ConfigFile::{for_analysis, validate, resolve}` stay public.
+  `crates/cli/src/config_load_guard_tests.rs` counts each such call.
+- The resolver reads each run variable of `fallow_config::EnvVar` from the
+  `EnvSnapshot` of the run. `crates/cli/src/env_read_guard_tests.rs` fails
+  when a production file outside its list holds a string literal that is the
+  name of a run variable.
 - The base side of a comparison with a base ref resolves through
   `fallow_engine::resolved_run::resolve_base_run`: the inputs of the head run
   on the base root, with the config file of a `BaseConfig` rule. `Head` reuses
