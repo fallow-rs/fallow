@@ -59,11 +59,10 @@ impl Plugin for MintlifyPlugin {
         let relative_dir = relative_dir.to_string_lossy().replace('\\', "/");
         let relative_dir = relative_dir.trim_matches('/');
 
-        let pattern = if relative_dir.is_empty() {
-            format!("**/*.{CONTENT_EXTENSIONS}")
-        } else {
-            format!("{relative_dir}/**/*.{CONTENT_EXTENSIONS}")
-        };
+        let pattern = fallow_config::glob_validation::literal_dir_glob(
+            relative_dir,
+            &format!("**/*.{CONTENT_EXTENSIONS}"),
+        );
         result.push_entry_pattern(pattern);
 
         result
@@ -176,5 +175,20 @@ mod tests {
         let result = plugin.resolve_config(&root.join("docs.json"), "{ not valid json", root);
 
         assert_eq!(entry_patterns(&result), vec!["**/*.{md,mdx}".to_string()]);
+    }
+
+    #[test]
+    fn resolve_config_escapes_the_docs_directory() {
+        let root = Path::new("/repo");
+        let config_path = root.join("docs[v2]/docs.json");
+
+        let result = MintlifyPlugin.resolve_config(&config_path, "{}", root);
+
+        let patterns = entry_patterns(&result);
+        let entry = fallow_config::compile_path_glob(&patterns[0])
+            .unwrap()
+            .compile_matcher();
+        assert!(entry.is_match("docs[v2]/intro.mdx"));
+        assert!(!entry.is_match("docsv/intro.mdx"));
     }
 }

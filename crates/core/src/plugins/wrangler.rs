@@ -60,10 +60,15 @@ const WRANGLER_CONFIG_PRECEDENCE: &[&str] = &["wrangler.json", "wrangler.jsonc",
 
 fn extract_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
     let extension = config_path.extension().and_then(|ext| ext.to_str());
-    let mut entries = match extension {
+    let literal_paths = match extension {
         Some("toml") => extract_toml_main_entries(config_path, source, root),
         _ => extract_js_main_entries(config_path, source, root),
     };
+    // Each entry is a literal file path, not a glob.
+    let mut entries: Vec<String> = literal_paths
+        .iter()
+        .map(|path| globset::escape(path))
+        .collect();
     entries.sort();
     entries.dedup();
     entries
@@ -307,5 +312,20 @@ mod tests {
             entries.contains(&"apps/a/src/toml-worker.ts"),
             "configs in different directories should not suppress each other: {entries:?}"
         );
+    }
+
+    #[test]
+    fn main_entry_with_brackets_is_literal() {
+        let result = WranglerPlugin.resolve_config(
+            Path::new("/repo/wrangler.jsonc"),
+            r#"{ "main": "src/[worker].ts" }"#,
+            Path::new("/repo"),
+        );
+
+        let entry = fallow_config::compile_path_glob(&result.entry_patterns[0].pattern)
+            .unwrap()
+            .compile_matcher();
+        assert!(entry.is_match("src/[worker].ts"));
+        assert!(!entry.is_match("src/w.ts"));
     }
 }

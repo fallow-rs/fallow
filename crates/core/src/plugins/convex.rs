@@ -62,7 +62,10 @@ impl Plugin for ConvexPlugin {
             replace_entry_patterns: true,
             ..PluginResult::default()
         };
-        result.push_entry_pattern(format!("{functions_dir}/**/*.{{ts,js}}"));
+        result.push_entry_pattern(fallow_config::glob_validation::literal_dir_glob(
+            &functions_dir,
+            "**/*.{ts,js}",
+        ));
         result.always_used_files.extend(
             [
                 "_generated/**/*",
@@ -71,7 +74,7 @@ impl Plugin for ConvexPlugin {
                 "auth.{ts,js}",
                 "http.{ts,js}",
             ]
-            .map(|suffix| format!("{functions_dir}/{suffix}")),
+            .map(|suffix| fallow_config::glob_validation::literal_dir_glob(&functions_dir, suffix)),
         );
         result
     }
@@ -194,5 +197,28 @@ mod tests {
             assert!(result.entry_patterns.is_empty(), "source: {source}");
             assert!(result.always_used_files.is_empty(), "source: {source}");
         }
+    }
+
+    #[test]
+    fn custom_functions_directory_with_brackets_is_literal() {
+        let result = ConvexPlugin.resolve_config(
+            std::path::Path::new("/project/convex.json"),
+            r#"{ "functions": "app[v2]" }"#,
+            std::path::Path::new("/project"),
+        );
+
+        let entry = fallow_config::compile_path_glob(&result.entry_patterns[0].pattern)
+            .unwrap()
+            .compile_matcher();
+        assert!(entry.is_match("app[v2]/tasks.ts"));
+        assert!(!entry.is_match("appv/tasks.ts"));
+        assert!(!entry.is_match("app2/tasks.ts"));
+
+        assert!(result.always_used_files.iter().any(|pattern| {
+            fallow_config::compile_path_glob(pattern)
+                .unwrap()
+                .compile_matcher()
+                .is_match("app[v2]/schema.ts")
+        }));
     }
 }
