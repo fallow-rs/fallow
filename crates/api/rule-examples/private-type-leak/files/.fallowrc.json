@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "private-type-leaks": "warn"
+  }
+}

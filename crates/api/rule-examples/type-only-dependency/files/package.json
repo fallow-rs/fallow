@@ -1,0 +1,8 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "zod": "^3.23.0"
+  }
+}

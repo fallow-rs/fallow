@@ -168,6 +168,7 @@ mod report_mutation_tests;
 mod report_parity_tests;
 mod request_outcome_tests;
 mod requested_rule_off_tests;
+mod rule_example_tests;
 mod rule_pack_gdp_tests;
 mod rule_pack_tests;
 mod run_notice_tests;

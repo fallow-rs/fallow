@@ -1,0 +1,6 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/app.ts",
+  "workspaces": ["packages/*"]
+}

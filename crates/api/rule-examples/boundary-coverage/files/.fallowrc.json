@@ -1,0 +1,22 @@
+{
+  "boundaries": {
+    "zones": [
+      {
+        "name": "app",
+        "patterns": [
+          "src/index.ts",
+          "src/app/**"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": "app",
+        "allow": []
+      }
+    ],
+    "coverage": {
+      "requireAllFiles": true
+    }
+  }
+}

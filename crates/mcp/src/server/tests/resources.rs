@@ -551,6 +551,9 @@ fn every_registered_rule_resolves_through_the_explain_template() {
             ] {
                 assert!(json[key].is_string(), "{uri} missing {key}");
             }
+            for key in ["example_files", "example_base_files"] {
+                assert!(json[key].is_array(), "{uri} missing {key}");
+            }
         }
     }
 }

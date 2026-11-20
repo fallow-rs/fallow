@@ -1,0 +1,39 @@
+{
+  "boundaries": {
+    "zones": [
+      {
+        "name": "app",
+        "patterns": [
+          "src/app/**"
+        ]
+      },
+      {
+        "name": "features",
+        "patterns": [
+          "src/features/**"
+        ]
+      },
+      {
+        "name": "shared",
+        "patterns": [
+          "src/shared/**"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": "app",
+        "allow": [
+          "features",
+          "shared"
+        ]
+      },
+      {
+        "from": "features",
+        "allow": [
+          "shared"
+        ]
+      }
+    ]
+  }
+}

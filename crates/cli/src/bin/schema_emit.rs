@@ -1271,7 +1271,7 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "explain",
         &["ExplainOutput"],
-        "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
+        "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `example_files`, `example_base_files`, `how_to_fix`,\n`docs`; no `schema_version`.",
     ),
     (
         "inspect_target",

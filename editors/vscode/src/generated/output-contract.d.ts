@@ -13155,6 +13155,17 @@ rationale: string
  */
 example: string
 /**
+ * The files of a small project that makes the rule report a finding.
+ * For a rule that reports on a change, the files after the change.
+ * Empty when the rule has no example project.
+ */
+example_files: ExplainExampleFile[]
+/**
+ * The files of the example project before the change. Empty unless the
+ * rule reports on a change.
+ */
+example_base_files: ExplainExampleFile[]
+/**
  * How to resolve findings of this type.
  */
 how_to_fix: string
@@ -13166,6 +13177,19 @@ docs: string
  * Output discriminator. The root envelope always has the value `explain`. An envelope nested in another envelope has no `kind`.
  */
 kind?: "explain"
+}
+/**
+ * One file of the example project of a rule.
+ */
+export interface ExplainExampleFile {
+/**
+ * The path from the project root, with `/` separators.
+ */
+path: string
+/**
+ * The text of the file.
+ */
+code: string
 }
 /**
  * Envelope emitted by `fallow inspect --format json`.

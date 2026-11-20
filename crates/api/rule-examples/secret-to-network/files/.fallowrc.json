@@ -1,0 +1,9 @@
+{
+  "security": {
+    "categories": {
+      "include": [
+        "secret-to-network"
+      ]
+    }
+  }
+}

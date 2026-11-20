@@ -1,0 +1,5 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/features/billing/invoice.ts"
+}

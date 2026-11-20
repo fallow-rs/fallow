@@ -960,7 +960,7 @@ fn member_rule_guide(id: &str) -> Option<RuleGuide> {
             how_to_fix: "Inline the wrapper at its call sites (use <Button .../> directly) or delete it. Keep it only if it is a deliberate seam (a planned divergence point, a public-API re-brand): an exported wrapper already abstains. Enable the rule with rules.thin-wrapper = \"warn\" (it defaults to off). To accept one wrapper, suppress it with // fallow-ignore-next-line thin-wrapper above the component definition.",
         },
         "fallow/duplicate-prop-shape" => RuleGuide {
-            example: "FieldText, FieldNumber, and FieldSelect (across three files) each declare exactly { name, label, value, onChange, error }. The five significant prop names are identical, so they form one duplicate-prop-shape group.",
+            example: "FieldText, FieldNumber, and FieldSelect (across three files) each declare exactly { name, label, value, error, hint, onChange }. The four significant prop names (label, value, error, hint) are identical, so they form one duplicate-prop-shape group.",
             how_to_fix: "Extract one shared Props type (e.g. type FieldProps = { name; label; value; onChange; error }) that every member reuses, or a base component the variants compose. Keep them separate only if a per-variant prop divergence is planned. Enable the rule with rules.duplicate-prop-shape = \"warn\" (it defaults to off). To accept one member, suppress it with // fallow-ignore-next-line duplicate-prop-shape above the component definition; the suppressed member still appears in its siblings' sharing_components because the group is real regardless of suppression.",
         },
         _ => return None,
@@ -996,7 +996,7 @@ fn import_rule_guide(id: &str) -> Option<RuleGuide> {
 fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
     Some(match id {
         "fallow/circular-dependency" => RuleGuide {
-            example: "src/a.ts imports src/b.ts, and src/b.ts imports src/a.ts.",
+            example: "src/cart.ts imports src/order.ts, and src/order.ts imports src/cart.ts.",
             how_to_fix: "Extract shared code to a third module, invert the dependency, or split initialization-time side effects from type-only contracts.",
         },
         "fallow/boundary-violation" => RuleGuide {
@@ -1173,12 +1173,15 @@ pub fn explain_issue_type(
         return Err(unknown_explain_error(issue_type));
     };
     let guide = rule_guide(rule);
+    let (example_files, example_base_files) = crate::explain_examples::visible_example_files(rule);
     Ok(fallow_output::ExplainOutput {
         id: rule.id.to_string(),
         name: rule_explain_name(rule).to_string(),
         summary: rule_explain_summary(rule).to_string(),
         rationale: rule_rationale(rule).to_string(),
         example: guide.example.to_string(),
+        example_files,
+        example_base_files,
         how_to_fix: guide.how_to_fix.to_string(),
         docs: rule_docs_url(rule),
     })

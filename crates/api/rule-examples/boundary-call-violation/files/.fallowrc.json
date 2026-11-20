@@ -1,0 +1,26 @@
+{
+  "boundaries": {
+    "zones": [
+      {
+        "name": "domain",
+        "patterns": [
+          "src/domain/**"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": "domain",
+        "allow": []
+      }
+    ],
+    "calls": {
+      "forbidden": [
+        {
+          "from": "domain",
+          "callee": "child_process.*"
+        }
+      ]
+    }
+  }
+}

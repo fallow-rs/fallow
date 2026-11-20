@@ -1,0 +1,8 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "left-pad": "^1.3.0"
+  }
+}

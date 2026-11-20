@@ -324,6 +324,20 @@
           "type": "string",
           "description": "Illustrative code example of the issue."
         },
+        "example_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExplainExampleFile"
+          },
+          "description": "The files of a small project that makes the rule report a finding.\nFor a rule that reports on a change, the files after the change.\nEmpty when the rule has no example project."
+        },
+        "example_base_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExplainExampleFile"
+          },
+          "description": "The files of the example project before the change. Empty unless the\nrule reports on a change."
+        },
         "how_to_fix": {
           "type": "string",
           "description": "How to resolve findings of this type."
@@ -344,6 +358,8 @@
         "summary",
         "rationale",
         "example",
+        "example_files",
+        "example_base_files",
         "how_to_fix",
         "docs"
       ],
@@ -9926,7 +9942,7 @@
           ]
         },
         {
-          "description": "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.",
+          "description": "`fallow explain <issue-type> --format json`. Required `id`, `name`,\n`rationale`, `example`, `example_files`, `example_base_files`, `how_to_fix`,\n`docs`; no `schema_version`.",
           "allOf": [
             {
               "$ref": "#/definitions/ExplainOutput"
@@ -39772,6 +39788,24 @@
         "col"
       ],
       "description": "One non-public env read on a `secret-source` trace hop."
+    },
+    "ExplainExampleFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path from the project root, with `/` separators."
+        },
+        "code": {
+          "type": "string",
+          "description": "The text of the file."
+        }
+      },
+      "required": [
+        "path",
+        "code"
+      ],
+      "description": "One file of the example project of a rule."
     }
   }
 }

@@ -1,0 +1,13 @@
+.sidebar {
+  nav {
+    ul {
+      li {
+        a.active {
+          color: red !important;
+          font-weight: bold !important;
+          text-decoration: none !important;
+        }
+      }
+    }
+  }
+}

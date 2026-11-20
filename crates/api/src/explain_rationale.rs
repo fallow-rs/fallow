@@ -301,7 +301,7 @@ const SECURITY_CATEGORY_TEXTS: &[SecurityCategoryText] = &[
     SecurityCategoryText {
         id: "security/unsafe-buffer-alloc",
         rationale: "The buffer holds old memory of the process until the code overwrites it. If the code sends the buffer before it fills it, earlier data such as secrets can leak.",
-        example: "`Buffer.allocUnsafe(Number(req.query.size));`",
+        example: "`const buffer = Buffer.allocUnsafe(size);`",
     },
     SecurityCategoryText {
         id: "security/unsafe-deserialization",
@@ -316,7 +316,7 @@ const SECURITY_CATEGORY_TEXTS: &[SecurityCategoryText] = &[
     SecurityCategoryText {
         id: "security/nextjs-open-redirect",
         rationale: "The route sends users to a URL that the input chooses. An attacker can use a trusted link of your domain to send users to a phishing page.",
-        example: "`redirect(searchParams.get('next'));`",
+        example: "`redirect(request.nextUrl.searchParams.get('next'));`",
     },
     SecurityCategoryText {
         id: "security/dom-document-write",

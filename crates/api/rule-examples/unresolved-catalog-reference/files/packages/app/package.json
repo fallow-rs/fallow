@@ -1,0 +1,9 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "old-react": "catalog:react17",
+    "react": "catalog:react17"
+  }
+}

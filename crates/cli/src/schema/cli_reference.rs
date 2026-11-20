@@ -407,7 +407,8 @@ fn environment_variables() -> Vec<Value> {
 /// The registry rows of `fallow schema`, each with the text that
 /// `fallow explain <id> --format json` prints and a sentence-case
 /// `display_label`. `example` and `how_to_fix` are null when the issue type
-/// has no guide of its own.
+/// has no guide of its own. `example_files` and `example_base_files` are
+/// empty when the issue type has no example project.
 fn issue_types() -> Vec<Value> {
     let Value::Array(rows) = super::issue_types_schema() else {
         return Vec::new();
@@ -437,6 +438,8 @@ fn explanation_json(rule_id: &str) -> Value {
         "summary": output.summary,
         "rationale": output.rationale,
         "example": has_guide.then_some(output.example),
+        "example_files": output.example_files,
+        "example_base_files": output.example_base_files,
         "how_to_fix": has_guide.then_some(output.how_to_fix),
         "docs": output.docs,
     })
