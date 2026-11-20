@@ -24,4 +24,5 @@ Use this file when editing `editors/vscode/**`.
 - Source edit: run `pnpm --dir editors/vscode run lint` and the focused tests.
 - Generated contract edit: run `pnpm --dir editors/vscode run check:contracts`.
 - Bundle-affecting edit: run `pnpm --dir editors/vscode run build` as a compile check. `dist/` is gitignored and rebuilt by CI/release, so there is nothing to commit.
+- Extension-host integration tests: run `pnpm --dir editors/vscode run test:integration`. The `prebuild` hook of `build` regenerates the contracts with `cargo run`. When the change leaves the contracts as they are and a Rust build is not wanted, run `test:integration:no-codegen`. It runs the same suite on the committed contract files.
 - Packaging or manifest edit: run the manifest or packaging tests that cover the touched surface.
