@@ -35,6 +35,7 @@ pub(super) const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "expo-router",
     "flue",
     "gatsby",
+    "gnome-shell-extension",
     "hardhat",
     "kibana",
     "module-federation",

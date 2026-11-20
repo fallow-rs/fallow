@@ -28,7 +28,12 @@ const ALWAYS_USED: &[&str] = &[
     "app.config.{ts,js,mjs,cjs}",
     "metro.config.{ts,js,mjs,cjs}",
     "babel.config.{ts,js,mjs,cjs}",
+    FINGERPRINT_CONFIG,
 ];
+
+/// The config file of `@expo/fingerprint`, which the Expo CLI and EAS load
+/// from the app root by name.
+pub(super) const FINGERPRINT_CONFIG: &str = "fingerprint.config.js";
 
 const CONFIG_PATTERNS: &[&str] = &["app.json", "app.config.{ts,js,mjs,cjs}"];
 
@@ -84,10 +89,26 @@ impl Plugin for ExpoPlugin {
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
+        self.resolve_config_in_project(config_path, source, root, root)
+    }
+
+    fn resolve_config_in_project(
+        &self,
+        config_path: &Path,
+        source: &str,
+        root: &Path,
+        project_root: &Path,
+    ) -> PluginResult {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
         add_config_plugins(&mut result, source, config_path, root);
         add_system_ui_requirement(&mut result, source, config_path);
+        super::expo_packages::add_installed_package_credits(
+            &mut result,
+            source,
+            config_path,
+            project_root,
+        );
         result
     }
 }

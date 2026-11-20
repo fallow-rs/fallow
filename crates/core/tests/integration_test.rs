@@ -261,6 +261,8 @@ mod stylelint_config_strings;
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
+#[path = "integration_test/tool_convention_entries.rs"]
+mod tool_convention_entries;
 #[path = "integration_test/tsconfig_paths_into_node_modules.rs"]
 mod tsconfig_paths_into_node_modules;
 #[path = "integration_test/tsdown_root_workspace_globs.rs"]

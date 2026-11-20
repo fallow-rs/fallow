@@ -312,7 +312,7 @@ fn all_builtin_plugins_have_activation_signals() {
     // Plugins activated from package metadata or filesystem sentinels rather
     // than dependency enablers (napi binary name; deno.json presence;
     // kibana.jsonc presence; action.yml with a node runtime; the package.json
-    // n8n block).
+    // n8n block; an extension.js beside a metadata.json).
     const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &[
         "napi-rs",
         "deno",
@@ -320,6 +320,7 @@ fn all_builtin_plugins_have_activation_signals() {
         "typescript-content-mapper",
         "github-action",
         "n8n",
+        "gnome-shell-extension",
     ];
     let plugins = registry::builtin::create_builtin_plugins();
     for p in &plugins {
