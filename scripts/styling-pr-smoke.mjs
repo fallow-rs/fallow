@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { cargoFallowBin } from "./cargo-target.mjs";
+import { runCliMain } from "./cli-main.mjs";
 import { parseOptions, parsePositiveInt } from "./lib/options.mjs";
 import { parseJsonReport, resolveFallowBin, runTool } from "./lib/tool-run.mjs";
 
@@ -435,13 +436,7 @@ const renderMarkdownReport = (report) => {
   for (const result of report.results) {
     const href = `[${result.repo}#${result.number}](${result.url})`;
     if (!result.ok) {
-      const reason = String(
-        result.error ||
-          result.audit?.stdout_error ||
-          result.audit?.parse_error ||
-          result.audit?.reason ||
-          "",
-      )
+      const reason = String(result.error || result.audit?.reason || "")
         .replace(/\n/g, " ")
         .slice(0, 180);
       lines.push(`| ${href} | ${result.state} | ${result.stage}: failed | - | ${reason} |`);
@@ -473,11 +468,11 @@ const main = () => {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
     console.log(usage());
-    return;
+    return 0;
   }
   if (opts.list) {
     console.log(JSON.stringify(CANDIDATES, null, 2));
-    return;
+    return 0;
   }
   if (!opts.selectOnly) {
     opts.fallowBin = resolveFallowBin(
@@ -509,7 +504,7 @@ const main = () => {
         2,
       ),
     );
-    return;
+    return 0;
   }
 
   const results = runSelectedPrs(selection.selected, opts);
@@ -517,15 +512,11 @@ const main = () => {
   console.log(JSON.stringify({ count: report.count, valid_audits: report.valid_audits }, null, 2));
   if (results.length > 0 && report.valid_audits === 0) {
     console.error("styling PR smoke: no audit gave a usable report");
-    process.exitCode = 1;
+    return 1;
   }
+  return 0;
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    main();
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  }
+  runCliMain(main);
 }
