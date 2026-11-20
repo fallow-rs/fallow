@@ -218,6 +218,9 @@ pub fn resolve_architecture_selection(
 }
 
 pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
+    if let Some(code) = refuse_badge_for_combined_run(opts) {
+        return code;
+    }
     // Combined saves through its dead-code sub-pass, which is the last step of a
     // full three-analysis run.
     if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
@@ -281,6 +284,22 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
         health_result.as_ref(),
         total_elapsed,
     )
+}
+
+/// Refuse `--format badge` before the analysis when the run includes the
+/// dead-code or the duplication analysis. Only the health analysis renders a
+/// badge, so each other renderer would print the same error and the run
+/// would exit with the code of its findings instead of the input error.
+fn refuse_badge_for_combined_run(opts: &CombinedOptions<'_>) -> Option<ExitCode> {
+    if !matches!(opts.output, OutputFormat::Badge) || !(opts.run_check || opts.run_dupes) {
+        return None;
+    }
+    Some(crate::error::emit_error_with_hint(
+        "badge format is only supported for the health command",
+        "run `fallow health --format badge`, or `fallow --only health --score --format badge`",
+        crate::exit_codes::INVALID_INPUT,
+        opts.output,
+    ))
 }
 
 /// The unrendered results of the analyses a combined run selected.

@@ -159,6 +159,7 @@ impl CacheStore {
         }
         if store.config_hash != expected_config_hash {
             tracing::warn!(
+                target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
                 "Cache was built under different extraction config, rebuilding from cold"
             );
             return Err(CacheRejection::ConfigHashMismatch);

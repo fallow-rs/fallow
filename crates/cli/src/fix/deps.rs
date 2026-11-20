@@ -74,7 +74,7 @@ pub(super) fn apply_dependency_fixes(input: &mut DependencyFixInput<'_>) {
         );
     }
 
-    for (&pkg_path, removals) in &deps_by_pkg {
+    for (&pkg_path, removals) in super::in_path_order(&deps_by_pkg) {
         process_package_dependency_removals(input, pkg_path, removals.as_slice());
     }
 }
