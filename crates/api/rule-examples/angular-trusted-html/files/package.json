@@ -1,0 +1,1 @@
+{"name":"example","private":true,"main":"src/comment-html.ts","dependencies":{"@angular/core":"^17.0.0","@angular/platform-browser":"^17.0.0"}}

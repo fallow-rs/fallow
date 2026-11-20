@@ -8,6 +8,7 @@
     "reference/knip/**",
     "fuzz/corpus/**",
     "crates/cli/viz-assets/**",
+    "crates/api/rule-examples/**",
     "crates/api/src/mutation/companion/**",
     "crates/api/src/mutation/cache_model/runner-trace/**",
     "tools/mutation-runner/test/fixtures/**",

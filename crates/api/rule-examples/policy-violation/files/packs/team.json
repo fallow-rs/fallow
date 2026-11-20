@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "name": "team",
+  "rules": [
+    {
+      "id": "no-moment",
+      "kind": "banned-import",
+      "specifiers": [
+        "moment"
+      ],
+      "message": "Use date-fns."
+    }
+  ]
+}

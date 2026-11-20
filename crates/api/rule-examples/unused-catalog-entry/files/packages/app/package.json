@@ -1,0 +1,8 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "zod": "catalog:"
+  }
+}

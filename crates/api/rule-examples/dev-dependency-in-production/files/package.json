@@ -1,0 +1,8 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/config.ts",
+  "devDependencies": {
+    "yaml": "^2.5.0"
+  }
+}

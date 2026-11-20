@@ -1,0 +1,8 @@
+{
+  "name": "example",
+  "private": true,
+  "main": "src/order.ts",
+  "dependencies": {
+    "left-pad": "^1.3.0"
+  }
+}

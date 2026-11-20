@@ -1,0 +1,8 @@
+{
+  "name": "@acme/db",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@acme/api": "workspace:*"
+  }
+}

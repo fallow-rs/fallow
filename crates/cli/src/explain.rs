@@ -12,10 +12,10 @@ use fallow_config::OutputFormat;
 use crate::report::sink::outln;
 
 pub use fallow_api::{
-    AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, MUTATION_RULES, RuleDef,
-    RuleGuide, SECURITY_RULES, coverage_analyze_meta, coverage_setup_meta, rule_by_id,
-    rule_by_token, rule_docs_url, rule_guide, rule_has_guide, rule_rationale, rule_severity_key,
-    security_meta, serialize_explain_programmatic_json,
+    AUDIT_RULES, CHECK_RULES, DUPES_RULES, ExampleFile, FLAGS_RULES, HEALTH_RULES, MUTATION_RULES,
+    RuleDef, RuleExample, RuleGuide, SECURITY_RULES, coverage_analyze_meta, coverage_setup_meta,
+    rule_by_id, rule_by_token, rule_docs_url, rule_example, rule_guide, rule_has_guide,
+    rule_rationale, rule_severity_key, security_meta, serialize_explain_programmatic_json,
 };
 
 /// Run the standalone explain subcommand.
@@ -84,11 +84,70 @@ fn print_explain_human(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
     println!("{}", "Example".bold());
     println!("{}", guide.example);
     println!();
+    if let Some(example) = rule_example(rule) {
+        print_example_human(example);
+    }
     println!("{}", "How to fix".bold());
     println!("{}", guide.how_to_fix);
     println!();
     println!("{} {}", "Docs:".dimmed(), rule_docs_url(rule).dimmed());
     ExitCode::SUCCESS
+}
+
+const BEFORE_CHANGE: &str = "Before the change";
+const AFTER_CHANGE: &str = "After the change";
+
+/// The visible files of `example` in groups: one group with no title, or
+/// the files before the change and the files after it.
+fn example_groups(example: &RuleExample) -> Vec<(Option<&'static str>, Vec<&ExampleFile>)> {
+    let visible =
+        |files: &'static [ExampleFile]| files.iter().filter(|file| !file.hidden).collect();
+    if example.base.is_empty() {
+        return vec![(None, visible(example.files))];
+    }
+    vec![
+        (Some(BEFORE_CHANGE), visible(example.base)),
+        (Some(AFTER_CHANGE), visible(example.files)),
+    ]
+}
+
+fn print_example_human(example: &RuleExample) {
+    for (title, files) in example_groups(example) {
+        if let Some(title) = title {
+            println!("{title}:");
+            println!();
+        }
+        for file in files {
+            println!("  {}", file.path.dimmed());
+            for line in file.code.lines() {
+                println!("    {line}");
+            }
+            println!();
+        }
+    }
+}
+
+/// The language of a Markdown code fence for `path`: its file extension.
+fn fence_language(path: &str) -> &str {
+    let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+    name.rsplit_once('.').map_or("", |(_, extension)| extension)
+}
+
+fn print_example_markdown(example: &RuleExample) {
+    for (title, files) in example_groups(example) {
+        if let Some(title) = title {
+            println!("**{title}**");
+            println!();
+        }
+        for file in files {
+            println!("`{}`", file.path);
+            println!();
+            println!("```{}", fence_language(file.path));
+            println!("{}", file.code.trim_end());
+            println!("```");
+            println!();
+        }
+    }
 }
 
 fn print_explain_compact(rule: &RuleDef) -> ExitCode {
@@ -111,6 +170,9 @@ fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
     println!();
     println!("{}", guide.example);
     println!();
+    if let Some(example) = rule_example(rule) {
+        print_example_markdown(example);
+    }
     println!("## How to fix");
     println!();
     println!("{}", guide.how_to_fix);

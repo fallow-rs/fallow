@@ -1,0 +1,8 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/app.ts",
+  "dependencies": {
+    "moment": "^2.30.0"
+  }
+}

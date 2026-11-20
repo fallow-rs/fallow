@@ -1495,7 +1495,10 @@ The document has these top-level fields:
 - `issue_types[]`: the issue type rows of `fallow schema`, each with an
   `explanation` object that holds the text of
   `fallow explain <id> --format json`. `example` and `how_to_fix` are null
-  for an issue type that has no guide of its own.
+  for an issue type that has no guide of its own. `example_files` and
+  `example_base_files` hold the visible files of the example project in
+  `crates/api/rule-examples/<id>/`, and are empty for an issue type that
+  has none.
 
 Each option has `id`, `long`, `short`, `aliases[]` (each with `visible`),
 `value_name`, `action`, `takes_value`, `multiple`, `possible_values[]` (each

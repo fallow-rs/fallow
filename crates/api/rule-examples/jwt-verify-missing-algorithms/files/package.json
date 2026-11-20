@@ -1,0 +1,1 @@
+{"name":"example","private":true,"main":"src/auth.ts","dependencies":{"jsonwebtoken":"^9.0.0"}}

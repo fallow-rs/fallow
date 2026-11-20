@@ -1,0 +1,8 @@
+{
+  "name": "shop",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "pinia": "^2.2.0"
+  }
+}

@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+
+catalog:
+  is-even: ^1.0.0
+  zod: ^3.23.0

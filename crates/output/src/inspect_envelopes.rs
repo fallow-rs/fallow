@@ -26,10 +26,27 @@ pub struct ExplainOutput {
     pub rationale: String,
     /// Illustrative code example of the issue.
     pub example: String,
+    /// The files of a small project that makes the rule report a finding.
+    /// For a rule that reports on a change, the files after the change.
+    /// Empty when the rule has no example project.
+    pub example_files: Vec<ExplainExampleFile>,
+    /// The files of the example project before the change. Empty unless the
+    /// rule reports on a change.
+    pub example_base_files: Vec<ExplainExampleFile>,
     /// How to resolve findings of this type.
     pub how_to_fix: String,
     /// Public documentation URL for the issue type.
     pub docs: String,
+}
+
+/// One file of the example project of a rule.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExplainExampleFile {
+    /// The path from the project root, with `/` separators.
+    pub path: String,
+    /// The text of the file.
+    pub code: String,
 }
 
 /// Serialize the `fallow explain --format json` envelope.
@@ -509,6 +526,8 @@ mod tests {
             summary: "summary".to_string(),
             rationale: "rationale".to_string(),
             example: "example".to_string(),
+            example_files: Vec::new(),
+            example_base_files: Vec::new(),
             how_to_fix: "fix".to_string(),
             docs: "https://example.test".to_string(),
         };

@@ -59,6 +59,8 @@ fn create_explain_output() -> ExplainOutput {
         summary: "Export is not referenced by reachable code.".to_string(),
         rationale: "Unused exports increase maintenance cost.".to_string(),
         example: "export const unused = true;".to_string(),
+        example_files: Vec::new(),
+        example_base_files: Vec::new(),
         how_to_fix: "Remove the export or reference it from an entry point.".to_string(),
         docs: "https://fallow.tools/docs/explanations/dead-code/#unused-exports".to_string(),
     }

@@ -1,0 +1,5 @@
+{
+  "health": {
+    "maxCyclomatic": 5
+  }
+}

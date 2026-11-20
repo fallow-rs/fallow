@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "deprecated-exports-in-use": "warn"
+  }
+}
