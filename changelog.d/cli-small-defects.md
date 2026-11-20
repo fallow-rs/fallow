@@ -1,0 +1,6 @@
+### Fixed
+
+- **A bare `fallow --format badge` run prints one error and exits with code 2.** The run stops before the analysis when it includes the dead-code or the duplication analysis, because only the health analysis renders a badge. A health-only badge run without `--score` also stops with one error and exit code 2. Before, each analysis printed the same error and the run exited with code 1. `fallow --only health --score --format badge` still renders the badge.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **Small CLI output defects.** `fallow trace --path` with no route prints "No import path." once. `fallow config-schema`, `plugin-schema` and `rule-pack-schema` exit cleanly when the reader closes the pipe, for example `| head`. The `--file` warning of `fallow dead-code` names the path that is missing. `--quiet` hides the "boundary zone matched 0 files" and "Cache was built under different extraction config" warnings. `fallow fix` walks the files of each fix type in path order, so `--dry-run` lines and JSON fix entries have a stable order. The human section of test-only production dependencies has a description and a docs link.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))

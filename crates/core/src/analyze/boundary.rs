@@ -498,7 +498,11 @@ fn warn_unmatched_boundary_zones(
         zone_cache.values().filter_map(|z| z.as_deref()).collect();
     for zone in &config.boundaries.zones {
         if !classified_zones.contains(zone.name.as_str()) {
-            tracing::warn!("{}", unmatched_zone_warning(&zone.name, config));
+            tracing::warn!(
+                target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
+                "{}",
+                unmatched_zone_warning(&zone.name, config)
+            );
         }
     }
 }

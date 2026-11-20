@@ -937,27 +937,11 @@ fn file_scope(opts: &CheckOptions<'_>) -> Option<rustc_hash::FxHashSet<std::path
     if opts.file.is_empty() {
         return None;
     }
-    let file_set: rustc_hash::FxHashSet<std::path::PathBuf> = opts
-        .file
-        .iter()
-        .map(|path| {
-            if crate::path_util::is_absolute_path_any_platform(path) {
-                path.clone()
-            } else {
-                opts.root.join(path)
-            }
-        })
-        .collect();
-    for (original, resolved) in opts.file.iter().zip(file_set.iter()) {
-        if !resolved.exists() {
-            eprintln!(
-                "Warning: --file '{}' (resolved to '{}') was not found in the project",
-                original.display(),
-                resolved.display()
-            );
-        }
-    }
-    Some(file_set)
+    Some(
+        crate::path_util::resolve_file_inputs(opts.root, opts.file, opts.quiet)
+            .into_iter()
+            .collect(),
+    )
 }
 
 fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {

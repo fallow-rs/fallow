@@ -1762,29 +1762,7 @@ fn filter_to_files(results: &mut AnalysisResults, root: &Path, files: &[PathBuf]
         return;
     }
 
-    let resolved_files: Vec<PathBuf> = files
-        .iter()
-        .map(|path| {
-            if crate::path_util::is_absolute_path_any_platform(path) {
-                path.clone()
-            } else {
-                root.join(path)
-            }
-        })
-        .collect();
-
-    if !quiet {
-        for (original, resolved) in files.iter().zip(&resolved_files) {
-            if !resolved.exists() {
-                eprintln!(
-                    "Warning: --file '{}' (resolved to '{}') was not found in the project",
-                    original.display(),
-                    resolved.display()
-                );
-            }
-        }
-    }
-
+    let resolved_files = crate::path_util::resolve_file_inputs(root, files, quiet);
     let file_set: rustc_hash::FxHashSet<PathBuf> = resolved_files.into_iter().collect();
     fallow_engine::changed_files::filter_results_by_changed_files(results, &file_set);
 }

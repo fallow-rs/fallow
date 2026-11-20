@@ -24,6 +24,17 @@ pub use fallow_config::is_config_fixable;
 use crate::exit_codes::exit_invalid_input;
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
+/// The entries of a per-file grouping, sorted by path.
+///
+/// The fixers group their findings in hash maps, which have no order. Each
+/// fixer walks its files in this order, so the `--dry-run` lines and the JSON
+/// fix entries come out in path order on every run.
+fn in_path_order<K: Ord, V>(grouping: impl IntoIterator<Item = (K, V)>) -> Vec<(K, V)> {
+    let mut entries: Vec<(K, V)> = grouping.into_iter().collect();
+    entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    entries
+}
+
 /// Compose the hard error for a `fix` run whose type-aware pass could not run.
 ///
 /// `fix` is the one surface that still stops here, so it is also the one place

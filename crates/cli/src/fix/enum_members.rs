@@ -138,7 +138,7 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         dry_run,
         fixes,
     } = input;
-    for (path, file_members) in members_by_file {
+    for (path, file_members) in super::in_path_order(members_by_file) {
         let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
             continue;
         };

@@ -129,6 +129,8 @@ fn print_human(trace: &ImportPathTrace, quiet: bool, eager_only: bool) {
     outln!("  hops:      {}", trace.hops);
     outln!();
     if trace.path.is_empty() {
+        // The reason of an empty path only repeats this line and the header,
+        // so the human output prints the answer once.
         outln!(
             "{}",
             if trace.reachable {
@@ -137,28 +139,28 @@ fn print_human(trace: &ImportPathTrace, quiet: bool, eager_only: bool) {
                 "No import path."
             }
         );
-    } else {
-        for (index, hop) in trace.path.iter().enumerate() {
-            // The line belongs to the IMPORTING file: it anchors the binding
-            // that creates the edge, not anything in the imported module.
-            let line = hop
-                .import_line
-                .map_or_else(String::new, |line| format!(":{line}"));
-            outln!(
-                "  [{}] {}{} -> {}{}",
-                index + 1,
-                hop.from,
-                line,
-                hop.to,
-                if hop.type_only {
-                    " [type-only]"
-                } else if hop.dynamic {
-                    " [dynamic]"
-                } else {
-                    ""
-                }
-            );
-        }
+        return;
+    }
+    for (index, hop) in trace.path.iter().enumerate() {
+        // The line belongs to the IMPORTING file: it anchors the binding
+        // that creates the edge, not anything in the imported module.
+        let line = hop
+            .import_line
+            .map_or_else(String::new, |line| format!(":{line}"));
+        outln!(
+            "  [{}] {}{} -> {}{}",
+            index + 1,
+            hop.from,
+            line,
+            hop.to,
+            if hop.type_only {
+                " [type-only]"
+            } else if hop.dynamic {
+                " [dynamic]"
+            } else {
+                ""
+            }
+        );
     }
     // Prose, like the other trace surfaces: `--quiet` drops the explanation from
     // human output while the JSON payload keeps it either way.

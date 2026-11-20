@@ -72,7 +72,7 @@ pub(super) fn apply_class_member_fixes(input: ClassMemberFixInput<'_>) {
             .push(finding);
     }
 
-    for (path, findings) in by_file {
+    for (path, findings) in super::in_path_order(by_file) {
         apply_file(ClassMemberFileInput {
             root,
             path: &path,

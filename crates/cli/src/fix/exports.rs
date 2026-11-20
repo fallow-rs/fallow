@@ -277,7 +277,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
 fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPlan<'a>> {
     let root = input.root;
     let mut file_plans = Vec::new();
-    for (path, file_exports) in input.exports_by_file {
+    for (path, file_exports) in super::in_path_order(input.exports_by_file) {
         let relative = path.strip_prefix(root).unwrap_or(path);
 
         let caveats = input

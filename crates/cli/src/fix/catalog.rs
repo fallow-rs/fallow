@@ -67,7 +67,7 @@ pub(super) fn apply_catalog_entry_fixes(
 
     let by_path = group_unused_catalog_entries_by_path(entries);
 
-    for (relative_path, file_entries) in by_path {
+    for (relative_path, file_entries) in super::in_path_order(by_path) {
         process_catalog_entry_file(&mut CatalogEntryFileInput {
             root,
             relative_path,
@@ -464,7 +464,7 @@ pub(super) fn apply_empty_catalog_group_fixes(
 
     let by_path = group_empty_catalog_groups_by_path(groups);
 
-    for (relative_path, file_groups) in by_path {
+    for (relative_path, file_groups) in super::in_path_order(by_path) {
         process_empty_catalog_group_file(&mut EmptyCatalogGroupFileInput {
             root,
             relative_path,

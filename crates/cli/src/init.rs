@@ -1105,7 +1105,7 @@ pub fn run_config_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
     let schema = FallowConfig::json_schema();
     match json_style.serialize(&schema) {
         Ok(json) => {
-            println!("{json}");
+            crate::report::sink::stdoutln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -1119,7 +1119,7 @@ pub fn run_plugin_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
     let schema = ExternalPluginDef::json_schema();
     match json_style.serialize(&schema) {
         Ok(json) => {
-            println!("{json}");
+            crate::report::sink::stdoutln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -1133,7 +1133,7 @@ pub fn run_rule_pack_schema(json_style: crate::json_style::JsonStyle) -> ExitCod
     let schema = fallow_config::RulePackDef::json_schema();
     match json_style.serialize(&schema) {
         Ok(json) => {
-            println!("{json}");
+            crate::report::sink::stdoutln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => {
