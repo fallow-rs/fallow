@@ -17,7 +17,8 @@ use super::rendered_gate_script;
 
 const STUB_FALLOW: &str = "#!/bin/sh\n\
 if [ \"$1\" = \"hooks\" ]; then exit 2; fi\n\
-if [ \"$1\" = \"--version\" ]; then echo 'fallow 9.0.0'; exit 0; fi\n\
+if [ \"$1\" = \"--version\" ]; then echo 'fallow 9.0.0'; \
+if [ -n \"$FALLOW_STUB_VERSION_TAIL\" ]; then echo \"$FALLOW_STUB_VERSION_TAIL\"; fi; exit 0; fi\n\
 pwd -P >> \"$FALLOW_STUB_LOG\"\n\
 if [ -f .stub-error ]; then echo '{\"error\":true,\"message\":\"stub\"}'; exit 2; fi\n\
 if [ -f .stub-report ]; then cat .stub-report; exit 1; fi\n\
@@ -410,6 +411,50 @@ fn gate_block_message_lists_the_introduced_findings() {
         "*\n",
         "the report directory must ignore itself"
     );
+}
+
+/// The npm launcher prints a `verified:` line after the version line. The
+/// block message names only the version of the first line.
+#[test]
+fn gate_block_message_reads_only_the_first_version_line() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    std::fs::write(
+        repo.join(STUB_REPORT_FILE),
+        new_only_fail_report().to_string(),
+    )
+    .unwrap();
+
+    let run = run_gate_with_env(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &commit_payload(&repo),
+        &[
+            (
+                "FALLOW_STUB_VERSION_TAIL",
+                "verified: yes (sentinel /c/s); fallow 9.0.0 signed",
+            ),
+            ("FALLOW_GATE_MIN_VERSION", "2.85.0"),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert_eq!(run.output.status.code(), Some(2), "stderr={stderr}");
+    let (head, rest) = stderr.split_once('\n').unwrap();
+    assert!(
+        head.starts_with("fallow-gate: blocked by fallow 9.0.0 at "),
+        "stderr={stderr}"
+    );
+    assert!(
+        rest.starts_with("fallow-gate: verdict fail, 4 finding(s)"),
+        "stderr={stderr}"
+    );
+    assert!(!stderr.contains("verified:"), "stderr={stderr}");
 }
 
 /// FALLOW_GATE_REPORT moves the report. FALLOW_GATE_OUTPUT=json prints the

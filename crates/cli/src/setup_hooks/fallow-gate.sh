@@ -871,7 +871,10 @@ run_audit() {
     exit 0
   fi
 
-  VERSION="${VERSION_RAW#fallow }"
+  # The npm launcher prints a `verified:` line after the version line, so
+  # only the first line holds the version.
+  VERSION="$(printf '%s\n' "$VERSION_RAW" | head -n 1)"
+  VERSION="${VERSION#fallow }"
   VERSION="${VERSION%% *}"
 
   MIN_VERSION="${FALLOW_GATE_MIN_VERSION-2.85.0}"
