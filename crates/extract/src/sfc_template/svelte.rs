@@ -16,7 +16,9 @@ static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(r#"(?is)<script\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</script>"#)
+    crate::static_regex(
+        r#"(?is)<script\b(?:[^>"'{]|"[^"]*"|'[^']*'|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{[^{}]*\})*\})*\}|\{)*>(?P<body>[\s\S]*?)</script>"#,
+    )
 });
 
 static SVELTE_EACH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -265,11 +267,14 @@ fn strip_non_template_content(source: &str) -> String {
             .find_iter(source)
             .map(|m| (m.start(), m.end())),
     );
-    hidden_ranges.extend(
-        SCRIPT_BLOCK_RE
-            .find_iter(source)
-            .map(|m| (m.start(), m.end())),
-    );
+    // Only the script body is hidden. The opening tag stays visible, because a
+    // `<script>` element in markup can read component state in its attribute
+    // expressions, for example `onload={handleLoad}`.
+    hidden_ranges.extend(SCRIPT_BLOCK_RE.captures_iter(source).filter_map(|caps| {
+        let whole = caps.get(0)?;
+        let body = caps.name("body")?;
+        Some((body.start(), whole.end()))
+    }));
     hidden_ranges.extend(
         STYLE_BLOCK_RE
             .find_iter(source)
