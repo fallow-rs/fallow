@@ -3,14 +3,22 @@
  * Deep comparison of fallow vs knip results on real-world projects.
  * Outputs detailed diffs per issue category.
  */
-import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { inlineOption } from "../scripts/lib/options.mjs";
+import { runTool } from "../scripts/lib/tool-run.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
-const fallowBin = join(rootDir, "target", "release", "fallow");
+const args = process.argv.slice(2);
+const fixturesDir = resolve(
+  inlineOption(args, "--fixtures") ?? join(__dirname, "fixtures", "real-world"),
+);
+const fallowBin = resolve(
+  inlineOption(args, "--fallow-bin") ?? join(rootDir, "target", "release", "fallow"),
+);
 const knipBin = join(__dirname, "node_modules", ".bin", "knip");
 
 function normalizeProjectPath(projectDir, value) {
@@ -30,20 +38,27 @@ function parseJsonOutput(stdout) {
   return JSON.parse(stdout.trimStart().replace(/^\uFEFF/, ""));
 }
 
-function run(cmd, args, cwd) {
-  const result = spawnSync(cmd, args, {
+const run = (cmd, cmdArgs, cwd) =>
+  runTool(cmd, cmdArgs, {
     cwd,
-    stdio: "pipe",
     timeout: 300000,
     maxBuffer: 50 * 1024 * 1024,
     env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+    okStatuses: [0, 1],
   });
-  return {
-    stdout: result.stdout?.toString() ?? "",
-    stderr: result.stderr?.toString() ?? "",
-    status: result.status,
-  };
-}
+
+const failedProject = (reason) => {
+  console.log(`  FAILED: ${reason}`);
+  return { ok: false, reason };
+};
+
+const parseOutput = (tool, parse, result, dir) => {
+  try {
+    return { ok: true, value: parse(result.stdout, dir) };
+  } catch (error) {
+    return { ok: false, reason: `${tool} parse error: ${error.message}` };
+  }
+};
 
 function parseFallow(stdout, projectDir) {
   const data = parseJsonOutput(stdout);
@@ -151,34 +166,16 @@ function compareProject(name, dir) {
   console.log(`${"=".repeat(60)}`);
 
   const fr = run(fallowBin, ["dead-code", "--quiet", "--format", "json", "--no-cache"], dir);
+  if (!fr.ok) return failedProject(`fallow: ${fr.reason}`);
   const kr = run(knipBin, ["--reporter", "json"], dir);
+  if (!kr.ok) return failedProject(`knip: ${kr.reason}`);
 
-  if (fr.status === 2) {
-    console.log(`  fallow ERROR: ${fr.stderr.slice(0, 200)}`);
-    return null;
-  }
-  if (!kr.stdout) {
-    console.log(`  knip ERROR: ${kr.stderr.slice(0, 200)}`);
-    return null;
-  }
-
-  let fallow, knip;
-  try {
-    fallow = parseFallow(fr.stdout, dir);
-  } catch (e) {
-    console.log(`  fallow parse error: ${e.message}`);
-    return null;
-  }
-  try {
-    knip = parseKnip(kr.stdout, dir);
-  } catch (e) {
-    if (kr.status !== 0) {
-      console.log(`  knip ERROR: ${(kr.stderr || kr.stdout).slice(0, 200)}`);
-    } else {
-      console.log(`  knip parse error: ${e.message}`);
-    }
-    return null;
-  }
+  const fallowParsed = parseOutput("fallow", parseFallow, fr, dir);
+  if (!fallowParsed.ok) return failedProject(fallowParsed.reason);
+  const knipParsed = parseOutput("knip", parseKnip, kr, dir);
+  if (!knipParsed.ok) return failedProject(knipParsed.reason);
+  const fallow = fallowParsed.value;
+  const knip = knipParsed.value;
 
   const categories = [
     "unused_files",
@@ -198,28 +195,22 @@ function compareProject(name, dir) {
     summary[cat] = { both: both.length, onlyFallow: onlyFallow.length, onlyKnip: onlyKnip.length };
     printCategory(cat, fallow[cat], knip[cat]);
   }
-  return summary;
+  return { ok: true, summary };
 }
 
-const d = join(__dirname, "fixtures", "real-world");
-if (!existsSync(d)) {
+if (!existsSync(fixturesDir)) {
   console.error("No real-world fixtures. Run: npm run download-fixtures");
   process.exit(1);
 }
 
-const allSummaries = {};
-for (const p of readdirSync(d)
-  .filter((x) => existsSync(join(d, x, "package.json")))
+const results = {};
+for (const p of readdirSync(fixturesDir)
+  .filter((x) => existsSync(join(fixturesDir, x, "package.json")))
   .toSorted()) {
-  allSummaries[p] = compareProject(p, join(d, p));
+  results[p] = compareProject(p, join(fixturesDir, p));
 }
 
-// Final summary table
-console.log(`\n${"=".repeat(60)}`);
-console.log("OVERALL SUMMARY");
-console.log(`${"=".repeat(60)}\n`);
-for (const [project, summary] of Object.entries(allSummaries)) {
-  if (!summary) continue;
+const printSummary = (project, summary) => {
   console.log(`${project}:`);
   for (const [cat, counts] of Object.entries(summary)) {
     if (counts.both === 0 && counts.onlyFallow === 0 && counts.onlyKnip === 0) continue;
@@ -230,4 +221,22 @@ for (const [project, summary] of Object.entries(allSummaries)) {
       `  ${cat}: agree=${counts.both} fallow-only=${counts.onlyFallow} knip-only=${counts.onlyKnip} (${pct} knip coverage)`,
     );
   }
+};
+
+// Final summary table
+console.log(`\n${"=".repeat(60)}`);
+console.log("OVERALL SUMMARY");
+console.log(`${"=".repeat(60)}\n`);
+const entries = Object.entries(results);
+for (const [project, result] of entries) {
+  if (result.ok) printSummary(project, result.summary);
+}
+const failed = entries.filter(([, result]) => !result.ok);
+if (failed.length > 0) {
+  console.log("\nFailed projects:");
+  for (const [project, result] of failed) console.log(`  ${project}: ${result.reason}`);
+}
+if (failed.length === entries.length) {
+  console.error("compare: no project gave a usable report");
+  process.exit(1);
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -51,4 +52,26 @@ test("compare-dupes-rolling.mjs rejects a negative --samples before the build", 
     runBench("compare-dupes-rolling.mjs", ["--samples=-1"]),
     /--samples must be a non-negative integer/,
   );
+});
+
+const compareArgs = (dir) => [`--fixtures=${dir}`, `--fallow-bin=${join(dir, "missing-fallow")}`];
+
+test("compare.mjs fails when the fixture directory has no project", () => {
+  const dir = makeTempDir("fallow-bench-compare-");
+  const result = runBench("compare.mjs", compareArgs(dir));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /no project gave a usable report/);
+});
+
+test("compare.mjs reports a tool that does not start and fails", () => {
+  const dir = makeTempDir("fallow-bench-compare-");
+  mkdirSync(join(dir, "demo"));
+  writeFileSync(join(dir, "demo", "package.json"), "{}");
+  const result = runBench("compare.mjs", compareArgs(dir));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /demo/);
+  assert.match(result.stdout, /failed to start/);
+  assert.match(result.stderr, /no project gave a usable report/);
 });
