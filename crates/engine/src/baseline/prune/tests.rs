@@ -452,21 +452,66 @@ fn health_prune_keeps_the_saved_key_of_a_moved_identity_bucket() {
 }
 
 #[test]
+fn health_prune_keeps_a_placeholder_slot_that_covers_a_named_function() {
+    let root = Path::new(ROOT);
+    let saved = [finding("<anonymous>", FindingSeverity::High)];
+    let baseline =
+        HealthBaselineData::from_findings(&saved, &[], &[], root).with_identity(&saved, root);
+    let content = health_content(&baseline);
+    let current = vec![finding("fetchIssue", FindingSeverity::High)];
+
+    let pruned = prune_health_baseline(&content, &current, root, false).unwrap();
+    assert!(pruned.removed.is_empty(), "{:?}", pruned.removed);
+    assert!(pruned.content.is_none());
+    assert!(
+        filter_new_health_findings(current, &baseline, root, HealthBaselineMode::Identity)
+            .is_empty()
+    );
+}
+
+#[test]
+fn health_prune_removes_a_placeholder_slot_that_no_function_uses() {
+    let root = Path::new(ROOT);
+    let saved = [
+        finding("<anonymous>", FindingSeverity::High),
+        finding("<arrow>", FindingSeverity::High),
+    ];
+    let baseline =
+        HealthBaselineData::from_findings(&saved, &[], &[], root).with_identity(&saved, root);
+    let content = health_content(&baseline);
+    let current = vec![finding("fetchIssue", FindingSeverity::High)];
+
+    let pruned = prune_health_baseline(&content, &current, root, false).unwrap();
+    let identity_removed: usize = pruned
+        .removed
+        .iter()
+        .filter(|entry| entry.category.starts_with("identity_finding_counts"))
+        .map(|entry| entry.count)
+        .sum();
+    assert_eq!(identity_removed, 1, "{:?}", pruned.removed);
+
+    let rewritten = pruned.content.expect("a slot was removed");
+    let reloaded: HealthBaselineData = serde_json::from_str(&rewritten).unwrap();
+    assert!(
+        filter_new_health_findings(
+            current.clone(),
+            &reloaded,
+            root,
+            HealthBaselineMode::Identity
+        )
+        .is_empty()
+    );
+    let again = prune_health_baseline(&rewritten, &current, root, false).unwrap();
+    assert!(again.content.is_none(), "a second prune changes nothing");
+}
+
+#[test]
 fn health_prune_refuses_legacy_keys() {
     let content = r#"{"findings":["src/a.ts:f:1"]}"#;
     assert_eq!(
         prune_health_baseline(content, &[], Path::new(ROOT), false),
         Err(BaselinePruneRefusal::LegacyKeys)
     );
-}
-
-#[test]
-fn consumed_slots_follow_the_greedy_match() {
-    assert_eq!(consumed_severity_slots([0, 1, 0], [1, 1, 0]), [0, 1, 0]);
-    assert_eq!(consumed_severity_slots([1, 0, 0], [0, 0, 1]), [0, 0, 1]);
-    assert_eq!(consumed_severity_slots([0, 0, 1], [1, 0, 0]), [0, 0, 0]);
-    assert_eq!(consumed_severity_slots([2, 1, 0], [1, 1, 2]), [1, 1, 1]);
-    assert_eq!(consumed_severity_slots([5, 5, 5], [1, 1, 1]), [1, 1, 1]);
 }
 
 fn located(
