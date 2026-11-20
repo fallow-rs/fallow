@@ -186,3 +186,45 @@ fn glob_values_match_treats_brackets_and_braces_in_entry_as_literal() {
         Path::new("/repo/lib/a/x.ts")
     ));
 }
+
+/// tsc keeps `*` and `?` inside one path segment. Only `**/` crosses
+/// directories.
+#[test]
+fn glob_values_match_keeps_single_star_in_one_segment() {
+    let base = Path::new("/repo");
+    let single = [serde_json::json!("src/*.ts")];
+    assert!(super::glob_values_match(
+        base,
+        &single,
+        Path::new("/repo/src/a.ts")
+    ));
+    assert!(!super::glob_values_match(
+        base,
+        &single,
+        Path::new("/repo/src/nested/a.ts")
+    ));
+
+    let recursive = [serde_json::json!("src/**/*.ts")];
+    assert!(super::glob_values_match(
+        base,
+        &recursive,
+        Path::new("/repo/src/a.ts")
+    ));
+    assert!(super::glob_values_match(
+        base,
+        &recursive,
+        Path::new("/repo/src/nested/a.ts")
+    ));
+
+    let question = [serde_json::json!("src/?.ts")];
+    assert!(super::glob_values_match(
+        base,
+        &question,
+        Path::new("/repo/src/a.ts")
+    ));
+    assert!(!super::glob_values_match(
+        base,
+        &question,
+        Path::new("/repo/src/a/b.ts")
+    ));
+}

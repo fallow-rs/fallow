@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSetBuilder};
+use globset::GlobSetBuilder;
 use serde_json::Value;
 
 use super::fallbacks::normalize_path_lexically;
@@ -13,7 +13,8 @@ pub(super) fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) 
     let mut builder = GlobSetBuilder::new();
     let mut has_patterns = false;
     for value in values.iter().filter_map(Value::as_str) {
-        let Ok(glob) = Glob::new(&tsconfig_entry_glob(base_dir, value)) else {
+        let Ok(glob) = fallow_config::compile_path_glob(&tsconfig_entry_glob(base_dir, value))
+        else {
             continue;
         };
         builder.add(glob);
@@ -25,7 +26,8 @@ pub(super) fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) 
 /// Build the glob for one `include` or `exclude` entry. tsc reads only `*`
 /// and `?` as wildcards, so the tsconfig directory, the entry segments before
 /// the first wildcard and any bracket or brace are literal path text. A
-/// directory such as `app/[id]` then matches only itself.
+/// directory such as `app/[id]` then matches only itself. tsc keeps `*` and
+/// `?` inside one path segment, and only `**/` crosses directories.
 fn tsconfig_entry_glob(base_dir: &Path, value: &str) -> String {
     let glob_start = value
         .find(['*', '?'])
