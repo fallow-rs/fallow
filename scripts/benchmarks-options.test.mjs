@@ -85,3 +85,29 @@ test("compare.mjs looks up a bare --fallow-bin name on PATH", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /spawnSync no-such-fallow ENOENT/);
 });
+
+test("bench.mjs names the inline form for a separate --runs value", () => {
+  assertRejected(
+    runBench("bench.mjs", ["--runs", "3"]),
+    /Missing value for --runs: write --runs=VALUE/,
+  );
+});
+
+test("bench-circular.mjs rejects an unknown argument before the build", () => {
+  assertRejected(runBench("bench-circular.mjs", ["--bogus"]), /Unknown argument: --bogus/);
+});
+
+test("compare-dupes-rolling.mjs rejects an unknown argument before the build", () => {
+  assertRejected(
+    runBench("compare-dupes-rolling.mjs", ["--project=x"]),
+    /Unknown argument: --project=x/,
+  );
+});
+
+test("compare.mjs rejects a misspelled option", () => {
+  const dir = makeTempDir("fallow-bench-compare-");
+  const result = runBench("compare.mjs", [`--fixture=${dir}`]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unknown argument: --fixture=/);
+});

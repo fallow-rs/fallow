@@ -43,14 +43,49 @@ const BENCH_COUNT_PARSERS = {
   samples: parseNonNegativeInt,
 };
 
+const argName = (arg) => {
+  const separator = arg.indexOf("=");
+  return separator === -1 ? arg : arg.slice(0, separator);
+};
+
+/**
+ * Checks the arguments of a benchmark script. `flags` are the names that
+ * take no value; `values` are the names written as `--name=value`. Returns
+ * null when each argument is known, else one line that names the first
+ * problem.
+ */
+export const benchArgError = (argv, { flags = [], values = [] }) => {
+  for (const arg of argv) {
+    const name = argName(arg);
+    const known = name === arg ? flags.includes(arg) : values.includes(name);
+    if (known) continue;
+    if (values.includes(arg)) return `Missing value for ${arg}: write ${arg}=VALUE`;
+    return `Unknown argument: ${arg}`;
+  }
+  return null;
+};
+
+const exitWithError = (message) => {
+  console.error(message);
+  process.exit(1);
+};
+
 /**
  * Reads the repetition counts of a benchmark script from `--<key>=N`
  * arguments. `defaults` maps each key (`runs`, `warmup` or `samples`) to its
- * default. `runs` must be 1 or more; the other counts can be 0. On invalid
- * input the function prints the error and exits the process with status 1,
- * before the script starts a build.
+ * default. `runs` must be 1 or more; the other counts can be 0. `known`
+ * lists the other `flags` and `values` of the script, as `benchArgError`
+ * reads them. On an unknown argument or an invalid count the function prints
+ * the error and exits the process with status 1, before the script starts a
+ * build.
  */
-export const readBenchCounts = (argv, defaults) => {
+export const readBenchCounts = (argv, defaults, known = {}) => {
+  const countNames = Object.keys(defaults).map((key) => `--${key}`);
+  const argError = benchArgError(argv, {
+    flags: known.flags,
+    values: [...(known.values ?? []), ...countNames],
+  });
+  if (argError) exitWithError(argError);
   try {
     return Object.fromEntries(
       Object.entries(defaults).map(([key, fallback]) => {
@@ -59,8 +94,7 @@ export const readBenchCounts = (argv, defaults) => {
       }),
     );
   } catch (error) {
-    console.error(error.message);
-    process.exit(1);
+    exitWithError(error.message);
   }
 };
 
@@ -127,11 +161,15 @@ const projectSet = (raw) =>
  * when absent), and the counts of `readBenchCounts` for `counts`.
  */
 export const readBenchArgs = (argv, counts) => {
+  const counted = readBenchCounts(argv, counts, {
+    flags: ["--synthetic", "--real-world"],
+    values: ["--projects"],
+  });
   const hasFilter = argv.includes("--synthetic") || argv.includes("--real-world");
   return {
     runSynthetic: argv.includes("--synthetic") || !hasFilter,
     runRealWorld: argv.includes("--real-world") || !hasFilter,
     projectFilter: projectSet(inlineOption(argv, "--projects")),
-    ...readBenchCounts(argv, counts),
+    ...counted,
   };
 };

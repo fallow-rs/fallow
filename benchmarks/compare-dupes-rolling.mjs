@@ -18,7 +18,11 @@ import { readBenchCounts } from "../scripts/lib/options.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
-const { runs: RUNS, samples: SAMPLE_COUNT } = readBenchCounts(args, { runs: "1", samples: "0" });
+const { runs: RUNS, samples: SAMPLE_COUNT } = readBenchCounts(
+  args,
+  { runs: "1", samples: "0" },
+  { flags: ["--skip-build"], values: ["--write-repros", "--projects"] },
+);
 const SKIP_BUILD = args.includes("--skip-build");
 const writeReprosArg = args.find((arg) => arg.startsWith("--write-repros="))?.split("=")[1];
 const writeReprosDir = writeReprosArg ? resolve(writeReprosArg) : null;

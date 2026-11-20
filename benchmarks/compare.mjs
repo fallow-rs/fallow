@@ -7,12 +7,13 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, resolve, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { inlineOption } from "../scripts/lib/options.mjs";
+import { inlineOption, readBenchCounts } from "../scripts/lib/options.mjs";
 import { runTool } from "../scripts/lib/tool-run.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
+readBenchCounts(args, {}, { values: ["--fixtures", "--fallow-bin"] });
 const fixturesDir = resolve(
   inlineOption(args, "--fixtures") ?? join(__dirname, "fixtures", "real-world"),
 );
