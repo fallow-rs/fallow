@@ -35,6 +35,8 @@ pub(super) fn nearest_type_binding<'s>(
 struct ScopedStructuralUses {
     params: FxHashMap<usize, StructuralParameterUse>,
     typed_property_accesses: Vec<(String, String, String)>,
+    /// Parameter types that a computed key reads as a whole object.
+    whole_object_types: Vec<String>,
 }
 
 impl ModuleInfoExtractor {
@@ -99,6 +101,9 @@ impl ModuleInfoExtractor {
 
         let mut uses = ScopedStructuralUses::default();
         for (index, param_name, type_name) in typed_params {
+            if collector.whole_object.contains(param_name.as_str()) {
+                uses.whole_object_types.push(type_name.clone());
+            }
             if let Some(members) = collector.members.remove(param_name.as_str())
                 && !members.is_empty()
             {
@@ -130,37 +135,51 @@ impl ModuleInfoExtractor {
         uses
     }
 
+    /// The object that a use of a parameter typed as `type_name` credits.
+    /// `type CounterStore = ReturnType<typeof useCounterStore>` credits the
+    /// store factory, not the local alias. A nearer alias of the same name in
+    /// a function body or block wins over the module alias. A nearer
+    /// non-class binding of the name gives no object.
+    fn structural_credit_object<'s>(&'s self, type_name: &'s str) -> Option<&'s str> {
+        match nearest_type_binding(&self.function_type_alias_scopes, type_name) {
+            Some(FunctionTypeAliasBinding::Store(factory)) => Some(factory.as_str()),
+            Some(FunctionTypeAliasBinding::ClassSelf) | None => Some(
+                self.type_alias_store_factory
+                    .get(type_name)
+                    .map_or(type_name, String::as_str),
+            ),
+            Some(_) => None,
+        }
+    }
+
     fn record_scoped_parameter_member_accesses(&mut self, uses: &ScopedStructuralUses) {
-        let type_alias_scopes = &self.function_type_alias_scopes;
-        let store_aliases = &self.type_alias_store_factory;
-        self.member_accesses.extend(
-            uses.params
-                .values()
-                .filter_map(|param| {
-                    let type_name = param.type_name.as_deref()?;
-                    // `type CounterStore = ReturnType<typeof useCounterStore>`:
-                    // credit the store factory, not the local alias. A
-                    // nearer alias of the same name in a function body or
-                    // block wins over the module alias.
-                    let object = match nearest_type_binding(type_alias_scopes, type_name) {
-                        Some(FunctionTypeAliasBinding::Store(factory)) => factory.as_str(),
-                        Some(FunctionTypeAliasBinding::ClassSelf) | None => store_aliases
-                            .get(type_name)
-                            .map_or(type_name, String::as_str),
-                        Some(_) => return None,
-                    };
-                    Some((param, object))
-                })
-                .flat_map(|(param, type_name)| {
-                    param
-                        .members
-                        .iter()
-                        .map(move |member| fallow_types::extract::MemberAccess {
-                            object: type_name.to_string(),
-                            member: member.clone(),
-                        })
-                }),
-        );
+        let whole_objects: Vec<String> = uses
+            .whole_object_types
+            .iter()
+            .filter_map(|type_name| self.structural_credit_object(type_name))
+            .map(str::to_string)
+            .collect();
+        for object in whole_objects {
+            self.push_whole_object_use(object);
+        }
+        let accesses: Vec<fallow_types::extract::MemberAccess> = uses
+            .params
+            .values()
+            .filter_map(|param| {
+                let object = self.structural_credit_object(param.type_name.as_deref()?)?;
+                Some((param, object))
+            })
+            .flat_map(|(param, type_name)| {
+                param
+                    .members
+                    .iter()
+                    .map(move |member| fallow_types::extract::MemberAccess {
+                        object: type_name.to_string(),
+                        member: member.clone(),
+                    })
+            })
+            .collect();
+        self.member_accesses.extend(accesses);
         for (type_name, property_path, member) in &uses.typed_property_accesses {
             if type_is_shadowed(&self.function_type_alias_scopes, type_name) {
                 continue;
@@ -239,7 +258,10 @@ impl ModuleInfoExtractor {
             implicit_receivers,
         );
         self.scoped_typed_parameter_body_spans.insert(body.span());
-        if !uses.params.is_empty() || !uses.typed_property_accesses.is_empty() {
+        if !uses.params.is_empty()
+            || !uses.typed_property_accesses.is_empty()
+            || !uses.whole_object_types.is_empty()
+        {
             self.record_scoped_parameter_member_accesses(&uses);
         }
         for param in uses.params.values_mut() {

@@ -102,6 +102,9 @@ pub(super) struct StructuralParamMemberCollector {
     durable_objects: DurableObjectCalls,
     pub(super) members: FxHashMap<String, FxHashSet<String>>,
     pub(super) property_members: FxHashMap<String, FxHashSet<(String, String)>>,
+    /// Receivers that a computed key can read any member of:
+    /// `param[key as keyof T]()`.
+    pub(super) whole_object: FxHashSet<String>,
 }
 
 impl StructuralParamMemberCollector {
@@ -114,6 +117,7 @@ impl StructuralParamMemberCollector {
             durable_objects: DurableObjectCalls::default(),
             members: FxHashMap::default(),
             property_members: FxHashMap::default(),
+            whole_object: FxHashSet::default(),
         }
     }
 
@@ -212,9 +216,21 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
-        if let Expression::StringLiteral(property) = &expr.expression {
-            for receiver in self.resolve_member_receivers(&expr.object) {
-                self.record_member_access(receiver, property.value.text().into_owned());
+        match &expr.expression {
+            Expression::StringLiteral(property) => {
+                for receiver in self.resolve_member_receivers(&expr.object) {
+                    self.record_member_access(receiver, property.value.text().into_owned());
+                }
+            }
+            // An index such as `items[0]` names no class member.
+            Expression::NumericLiteral(_) => {}
+            // Any other key can name each member of the receiver.
+            _ => {
+                for receiver in self.resolve_member_receivers(&expr.object) {
+                    if receiver.path.is_empty() && !receiver.via_stub {
+                        self.whole_object.insert(receiver.param);
+                    }
+                }
             }
         }
         walk::walk_computed_member_expression(self, expr);
