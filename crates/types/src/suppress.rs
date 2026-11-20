@@ -95,7 +95,7 @@ pub enum IssueKind {
     /// A `"use client"` file that exports a Next.js server-only /
     /// route-segment config name (e.g. `metadata`, `revalidate`, `GET`).
     InvalidClientExport,
-    /// A barrel file that re-exports BOTH a `"use client"` origin module AND a
+    /// A barrel file that re-exports both a `"use client"` origin module and a
     /// server-only origin module (Next.js App Router footgun: one import drags
     /// the other's directive context across the boundary).
     MixedClientServerBarrel,

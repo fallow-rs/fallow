@@ -12,7 +12,7 @@ use crate::ScopeReason;
 
 /// One reason why a missing id does not prove that the finding is gone.
 ///
-/// Serialized as kebab-case inside `inconclusive_reasons`. The set is OPEN: a
+/// Serialized as kebab-case inside `inconclusive_reasons`. The set is open: a
 /// name this build does not emit means "some reason", not an error, and the
 /// query stays inconclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]

@@ -963,7 +963,7 @@ fn format_scope_line(result: &AuditResult) -> String {
         result.changed_files_count,
         &result.base_ref,
         result.base_description.as_deref(),
-        result.head_sha.as_deref(),
+        result.base_sha.as_deref(),
     )
 }
 
@@ -971,9 +971,9 @@ fn format_scope_line_parts(
     changed_files_count: usize,
     base_ref: &str,
     base_description: Option<&str>,
-    head_sha: Option<&str>,
+    base_sha: Option<&str>,
 ) -> String {
-    let sha_suffix = head_sha.map_or(String::new(), |sha| format!(" ({sha}..HEAD)"));
+    let sha_suffix = base_sha.map_or(String::new(), |sha| format!(" ({sha}..HEAD)"));
     let base_display = match base_description {
         Some(description) => format!("{} ({description})", short_base_ref(base_ref)),
         None => base_ref.to_string(),
@@ -1527,6 +1527,7 @@ mod tests {
             changed_files: Vec::new(),
             base_ref: "origin/main".to_string(),
             base_description: None,
+            base_sha: None,
             head_sha: None,
             output,
             performance: false,
@@ -1569,15 +1570,15 @@ mod tests {
     }
 
     #[test]
-    fn format_scope_line_parts_uses_plural_ref_provenance_and_head_sha() {
+    fn format_scope_line_parts_uses_plural_ref_provenance_and_base_sha() {
         assert_eq!(
             format_scope_line_parts(
                 1,
                 "611d151e8250146426ff3178e94207f8a8d3cc7b",
                 Some("merge-base with origin/main"),
-                Some("HEADSHA")
+                Some("BASESHA")
             ),
-            "Audit scope: 1 changed file vs 611d151e8250 (merge-base with origin/main) (HEADSHA..HEAD)"
+            "Audit scope: 1 changed file vs 611d151e8250 (merge-base with origin/main) (BASESHA..HEAD)"
         );
         assert_eq!(
             format_scope_line_parts(3, "origin/main", None, None),

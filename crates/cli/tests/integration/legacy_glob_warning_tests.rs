@@ -64,7 +64,7 @@ fn assert_warning(output: &CommandOutput, expected: &str) {
 }
 
 /// Text that every legacy glob warning holds.
-const WARNING_MARKER: &str = "than before fallow 3.34.0";
+const WARNING_MARKER: &str = "in a nested folder. A single";
 
 fn assert_no_legacy_warning(output: &CommandOutput) {
     assert!(
@@ -83,11 +83,10 @@ fn ignore_patterns_warns_with_the_globstar_rewrite() {
     );
     assert_warning(
         &output,
-        "fallow: ignorePatterns glob \"src/generated/*\" matches 1 fewer file than before fallow \
-         3.34.0. A single \"*\" or \"?\" now matches in one folder level only. This file no \
-         longer matches: src/generated/nested/one.ts. To keep the one-level match and stop this \
+        "fallow: ignorePatterns glob \"src/generated/*\" does not match 1 file in a nested folder. A single \"*\" or \"?\" matches in one folder level only. This file does \
+         not match: src/generated/nested/one.ts. To keep the one-level match and stop this \
          warning, write the names in place of \"*\" or \"?\", for example \"{name1,name2}\". To \
-         match nested folders again, use \"src/generated/**\".",
+         match nested folders, use \"src/generated/**\".",
     );
 }
 
@@ -100,14 +99,14 @@ fn ignore_exports_file_warns() {
     );
     assert_warning(
         &output,
-        "fallow: ignoreExports[].file glob \"*\" matches 4 fewer files",
+        "fallow: ignoreExports[].file glob \"*\" does not match 4 files in a nested folder",
     );
     assert_warning(
         &output,
-        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts, \
+        "These files do not match: src/deep/a.test.ts, src/deep/b.test.ts, \
          src/generated/nested/one.ts, and 1 more.",
     );
-    assert_warning(&output, "To match nested folders again, use \"**\".");
+    assert_warning(&output, "To match nested folders, use \"**\".");
 }
 
 #[test]
@@ -115,18 +114,14 @@ fn health_ignore_warns() {
     let output = run("health", r#"{"health":{"ignore":["*.test.ts"]}}"#, &[]);
     assert_warning(
         &output,
-        "fallow: health.ignore glob \"*.test.ts\" matches 2 fewer files than before fallow \
-         3.34.0.",
+        "fallow: health.ignore glob \"*.test.ts\" does not match 2 files in a nested folder.",
     );
     assert_warning(
         &output,
-        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts. To keep the \
+        "These files do not match: src/deep/a.test.ts, src/deep/b.test.ts. To keep the \
          one-level match and stop this warning",
     );
-    assert_warning(
-        &output,
-        "To match nested folders again, use \"**/*.test.ts\".",
-    );
+    assert_warning(&output, "To match nested folders, use \"**/*.test.ts\".");
 }
 
 #[test]
@@ -134,7 +129,7 @@ fn duplicates_ignore_warns() {
     let output = run("dupes", r#"{"duplicates":{"ignore":["src/*.ts"]}}"#, &[]);
     assert_warning(
         &output,
-        "fallow: duplicates.ignore glob \"src/*.ts\" matches 3 fewer files",
+        "fallow: duplicates.ignore glob \"src/*.ts\" does not match 3 files in a nested folder",
     );
     assert_warning(&output, "use \"src/**/*.ts\".");
 }
@@ -148,7 +143,7 @@ fn overrides_files_warns() {
     );
     assert_warning(
         &output,
-        "fallow: overrides[].files glob \"*.test.ts\" matches 2 fewer files",
+        "fallow: overrides[].files glob \"*.test.ts\" does not match 2 files in a nested folder",
     );
 }
 
@@ -157,7 +152,7 @@ fn ignore_findings_warns() {
     let output = run("dead-code", r#"{"ignoreFindings":["src/*.test.ts"]}"#, &[]);
     assert_warning(
         &output,
-        "fallow: ignoreFindings glob \"src/*.test.ts\" matches 2 fewer files",
+        "fallow: ignoreFindings glob \"src/*.test.ts\" does not match 2 files in a nested folder",
     );
     assert_warning(&output, "use \"src/**/*.test.ts\".");
 }
@@ -207,11 +202,11 @@ fn entry_warns_with_the_files_that_no_other_source_declares() {
     let output = run("dead-code", r#"{"entry":["src/*.test.ts"]}"#, &[]);
     assert_warning(
         &output,
-        "fallow: entry glob \"src/*.test.ts\" matches 2 fewer files than before fallow 3.34.0.",
+        "fallow: entry glob \"src/*.test.ts\" does not match 2 files in a nested folder.",
     );
     assert_warning(
         &output,
-        "These files no longer match: src/deep/a.test.ts, src/deep/b.test.ts.",
+        "These files do not match: src/deep/a.test.ts, src/deep/b.test.ts.",
     );
 }
 
@@ -224,9 +219,9 @@ fn entry_skips_files_that_dynamically_loaded_declares() {
     );
     assert_warning(
         &output,
-        "fallow: entry glob \"src/*.test.ts\" matches 1 fewer file",
+        "fallow: entry glob \"src/*.test.ts\" does not match 1 file in a nested folder",
     );
-    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+    assert_warning(&output, "This file does not match: src/deep/b.test.ts.");
 }
 
 #[test]
@@ -249,9 +244,9 @@ fn entry_skips_a_file_that_package_json_declares() {
     );
     assert_warning(
         &output,
-        "fallow: entry glob \"src/*.test.ts\" matches 1 fewer file",
+        "fallow: entry glob \"src/*.test.ts\" does not match 1 file in a nested folder",
     );
-    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+    assert_warning(&output, "This file does not match: src/deep/b.test.ts.");
 }
 
 #[test]
@@ -263,9 +258,9 @@ fn dynamically_loaded_warns_for_the_files_that_no_other_source_declares() {
     );
     assert_warning(
         &output,
-        "fallow: dynamicallyLoaded glob \"src/*.test.ts\" matches 1 fewer file",
+        "fallow: dynamicallyLoaded glob \"src/*.test.ts\" does not match 1 file in a nested folder",
     );
-    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+    assert_warning(&output, "This file does not match: src/deep/b.test.ts.");
 }
 
 #[test]
@@ -276,7 +271,7 @@ fn entry_skips_a_file_that_a_tooling_script_declares() {
         r#"{"name":"legacy-glob","version":"1.0.0","private":true,"main":"src/index.ts","scripts":{"lint":"node src/deep/a.test.ts"}}"#,
         &[],
     );
-    assert_warning(&output, "This file no longer matches: src/deep/b.test.ts.");
+    assert_warning(&output, "This file does not match: src/deep/b.test.ts.");
 }
 
 /// A workspace export resolves to a path with a `./` part, for example
@@ -310,6 +305,6 @@ fn entry_skips_a_file_that_a_workspace_export_declares() {
     );
     assert_warning(
         &output,
-        "This file no longer matches: packages/p/lib/deep/b.ts.",
+        "This file does not match: packages/p/lib/deep/b.ts.",
     );
 }

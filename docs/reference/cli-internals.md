@@ -1453,6 +1453,61 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   of each consumer site from the first member (`R.useSelector()` gives
   `useSelector`).
 
+## CLI reference contract
+
+`fallow schema` prints the capability manifest for agents. `fallow schema
+--cli-reference` prints the CLI reference: one JSON document from which a
+documentation generator writes a page per command, the option tables, the
+exit code table, the environment variable table and a page per issue type.
+`crates/cli/src/schema/cli_reference.rs` builds it. The generator commits the
+output as `docs/cli-reference.json`, and `npm run generate:contracts:check`
+fails when the file is stale.
+
+The document has these top-level fields:
+
+- `schema_version`: the version of the document shape. A change that removes
+  or renames a field raises it. A new field does not.
+- `version`, `name`, `about`, `usage`: the binary and its root usage line.
+- `root_command`: the positionals and the options of bare `fallow` that are
+  not global.
+- `global_options[]`: the options that every command accepts. A command does
+  not repeat them in its own `options[]`.
+- `commands[]`: the top-level commands in the order and with the
+  `help_group` heading of the root `--help`, then the hidden commands with a
+  null `help_group`. Each command has `name`, `path` (for example
+  `coverage upload-inventory`), `aliases[]`, `about`, `long_about`,
+  `hidden`, `usage`, `always_json`, `exit_codes[]`, `positionals[]`,
+  `options[]` and `subcommands[]` at each depth. The automatic `help`
+  subcommand is left out.
+- `exit_codes[]`: the codes that every command shares, each with `code`,
+  `name` and `description`. A command that gives other codes, or gives a
+  code another meaning, lists them in its own `exit_codes[]`.
+- `environment_variables[]`: the registry of `fallow schema`, as `name` and
+  `description` pairs.
+- `output_formats[]`: the values of `--format` with their aliases and help.
+- `issue_types[]`: the issue type rows of `fallow schema`, each with an
+  `explanation` object that holds the text of
+  `fallow explain <id> --format json`. `example` and `how_to_fix` are null
+  for an issue type that has no guide of its own.
+
+Each option has `id`, `long`, `short`, `aliases[]` (each with `visible`),
+`value_name`, `action`, `takes_value`, `multiple`, `possible_values[]` (each
+with `help`, `aliases` and `hidden`), `default`, `env`, `help`, `long_help`,
+`hidden`, `hidden_in_short_help`, `global`, `help_heading`, `required`,
+`conflicts_with[]`, `negates` and `negated_by`. `env` is null: clap binds no
+environment variable, and the code reads each variable itself.
+`negates` names the `--x` flag of a `--no-x` flag, and `negated_by` names the
+`--no-x` flag of a `--x` flag, when the command has both. `always_json` is
+true when the command writes JSON for each `--format`, false when it follows
+`--format`, and null when the command needs arguments to parse.
+
+The help groups come from `TOP_LEVEL_AFTER_LONG_HELP`. The exit codes of a
+command come from `COMMAND_EXIT_CODES`, which names the constants of the
+command module. A test walks the clap tree and the issue type registry, so a
+command, an option or an issue type that the document misses fails the build.
+Another test compares the tables of `docs/environment-variables.md` with the
+environment variable registry.
+
 ## Verification
 
 Start with focused CLI tests for the changed command. For output or schema

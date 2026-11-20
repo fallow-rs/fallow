@@ -49,7 +49,7 @@ const PROJECT_ID_PLACEHOLDER: &str = "OWNER/REPO";
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 const ACTIVATION_OPERATION: &str = "activation";
 /// Exit code when `--wait` times out before every step is done.
-const WAIT_TIMEOUT_EXIT_CODE: u8 = 1;
+pub const WAIT_TIMEOUT_EXIT_CODE: u8 = 1;
 
 /// Arguments for `fallow coverage setup --cloud`.
 #[derive(Debug, Clone, Default)]

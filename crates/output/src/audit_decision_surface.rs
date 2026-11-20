@@ -70,7 +70,7 @@ pub struct Decision {
     pub anchor_line: u32,
     /// The raw fallow-emitted candidate key the `signal_id` hashes.
     pub signal_key: String,
-    /// The `signal_id` this decision WOULD have had before any rename in this
+    /// The `signal_id` this decision would have had before any rename in this
     /// change (the anchor file's pre-rename path). Present only when the anchor was
     /// renamed. A review-memory layer carries a dismissal across a `git mv`: if
     /// `previous_signal_id` was dismissed in an earlier PR, treat this decision as
@@ -87,8 +87,8 @@ pub struct Decision {
     /// Whether the anchor file's only qualified owner is one person.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bus_factor_one: bool,
-    /// Honest per-decision count: in-repo modules OUTSIDE the diff that already
-    /// depend on this decision's anchor. This is the DISPLAY number (taste
+    /// Honest per-decision count: in-repo modules outside the diff that already
+    /// depend on this decision's anchor. This is the display number (taste
     /// ownership: the human reads reversibility from the count itself), distinct
     /// from `blast` (the project-wide proxy used only for ranking). Never a door
     /// label. Internal-only by construction, so it cannot see a published library's
@@ -121,7 +121,7 @@ pub struct DecisionSurface {
     /// Present when more than the cap were extracted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<TruncationNote>,
-    /// Every signal_id the deterministic layer emitted, INCLUDING those whose
+    /// Every signal_id the deterministic layer emitted, including those whose
     /// decision was collapsed below the cap or suppressed. The anti-hallucination
     /// allowlist: an agent decision whose id is absent is rejected.
     pub emitted_signal_ids: Vec<String>,
@@ -188,7 +188,7 @@ pub struct DecisionWithActions {
 }
 
 /// The separable `decision-surface` envelope: the single call that puts taste-
-/// decisions in front of a human, callable WITHOUT the full pipeline (the
+/// decisions in front of a human, callable without the full pipeline (the
 /// `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
 /// structured `actions[]` per decision.
 #[derive(Debug, Clone, Serialize)]

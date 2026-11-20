@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 /// ## `auto_fixable` is per-finding, not per action type
 ///
 /// Every action variant carries an `auto_fixable: bool` field. The value is
-/// evaluated PER FINDING, not per action type: the same action type may
+/// evaluated per finding, not per action type: the same action type may
 /// appear with `auto_fixable: true` on one finding and `auto_fixable: false`
 /// on another, depending on per-instance guards in the `fallow fix` applier.
 /// Agents that filter on `auto_fixable: true` must branch on the bool of
@@ -107,8 +107,8 @@ pub struct FixAction {
     /// Kebab-case identifier for the fix action.
     #[serde(rename = "type")]
     pub kind: FixActionType,
-    /// Whether `fallow fix` can apply this fix automatically. Evaluated PER
-    /// FINDING, not per action type: the same `type` may carry
+    /// Whether `fallow fix` can apply this fix automatically. Evaluated per
+    /// finding, not per action type: the same `type` may carry
     /// `auto_fixable: true` on one finding and `auto_fixable: false` on
     /// another when per-instance guards in the applier discriminate (e.g.
     /// `remove-catalog-entry` flips on `hardcoded_consumers` and catalog
@@ -353,9 +353,9 @@ pub struct AddToConfigAction {
     #[serde(rename = "type")]
     pub kind: AddToConfigKind,
     /// True when `fallow fix` can apply this config action automatically.
-    /// Evaluated PER FINDING, not per action type: `ignoreExports`
+    /// Evaluated per finding, not per action type: `ignoreExports`
     /// duplicate-export actions are auto-fixable when `fallow fix` can
-    /// safely write the rule, which today means EITHER a fallow config
+    /// safely write the rule, which today means either a fallow config
     /// file already exists OR no config exists and the working directory
     /// is NOT inside a monorepo subpackage (in which case the applier
     /// creates `.fallowrc.json` from `fallow init`'s framework-aware
@@ -443,7 +443,7 @@ pub struct IgnoreExportsRule {
 ///
 /// ## Two hard contracts
 ///
-/// 1. **Read-only.** A `next_step` NEVER suggests `fallow fix` or any mutating
+/// 1. **Read-only.** A `next_step` never suggests `fallow fix` or any mutating
 ///    command. Fallow surfaces evidence and verification paths; deciding and
 ///    applying the remediation is the agent's job.
 /// 2. **Runnable, placeholder-free.** `command` is always runnable as-is. It
@@ -455,7 +455,7 @@ pub struct IgnoreExportsRule {
 /// Both contracts are enforced by unit tests in
 /// `crates/cli/src/report/suggestions.rs`.
 ///
-/// Note: a SEPARATE, unrelated `next_steps` field exists on the
+/// Note: a separate, unrelated `next_steps` field exists on the
 /// `coverage setup` envelope (`CoverageSetupOutput.next_steps`) as a plain
 /// `Vec<String>` of human onboarding steps. Consumers that read multiple
 /// envelope kinds must route on the envelope's `kind` before interpreting a

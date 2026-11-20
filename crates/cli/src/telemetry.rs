@@ -1185,7 +1185,7 @@ fn print_status_json(status: &TelemetryStatus, json_style: JsonStyle) -> ExitCod
                 "inspect_example": "fallow telemetry inspect --example",
                 "inspect_command": "FALLOW_TELEMETRY=inspect fallow audit --format json --quiet"
             },
-            "docs": "docs/telemetry.md"
+            "docs": "https://github.com/fallow-rs/fallow/blob/main/docs/telemetry.md"
         }
     });
     crate::report::emit_report_json(&value, "telemetry status", json_style)
@@ -1216,7 +1216,7 @@ fn print_status_human(status: TelemetryStatus) -> ExitCode {
     println!("Disable: fallow telemetry disable");
     println!("Inspect an example: fallow telemetry inspect --example");
     println!("Inspect a real command: FALLOW_TELEMETRY=inspect fallow audit --format json --quiet");
-    println!("Docs: docs/telemetry.md");
+    println!("Docs: https://github.com/fallow-rs/fallow/blob/main/docs/telemetry.md");
     ExitCode::SUCCESS
 }
 

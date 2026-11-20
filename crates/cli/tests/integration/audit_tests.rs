@@ -508,9 +508,9 @@ fn audit_cache_prune_human_output_lists_rows_and_hints() {
         "live-owner rows should name the owner: {stdout}"
     );
     let lock_line = if cfg!(unix) {
-        "would remove 1 lock sidecar with no cache"
+        "would remove 1 lock file with no cache"
     } else {
-        "1 lock sidecar with no cache remain (harmless)"
+        "1 lock file with no cache remain (harmless)"
     };
     assert!(
         stdout.contains(lock_line),

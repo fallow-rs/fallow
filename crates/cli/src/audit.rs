@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use fallow_config::{AuditGate, AuditWorsened, OutputFormat, PlannedAnalysis};
 use fallow_engine::resolved_run::ResolvedRun;
 use rustc_hash::{FxHashMap, FxHashSet};
-use xxhash_rust::xxh3::xxh3_64;
 
 pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
 
@@ -48,6 +47,9 @@ pub struct AuditResult {
     /// the user typed is already self-describing). Not serialized; the JSON
     /// envelope carries the resolved `base_ref` directly.
     pub base_description: Option<String>,
+    /// Abbreviated merge base of `base_ref` and `HEAD`, where the compared range
+    /// starts. Not serialized; only the scope line prints it.
+    pub base_sha: Option<String>,
     pub head_sha: Option<String>,
     pub output: OutputFormat,
     pub performance: bool,
@@ -239,6 +241,8 @@ mod base_ref;
 mod cache;
 #[path = "audit_notes.rs"]
 mod notes;
+#[path = "audit_snapshot_hash.rs"]
+mod snapshot_hash;
 
 use base_ref::resolve_base_ref;
 pub use cache::sweep_base_snapshot_cache;
@@ -253,6 +257,7 @@ use cache::{
     load_cached_base_snapshot, save_cached_base_snapshot, sorted_keys,
 };
 use fallow_engine::repo_refs::short_head_sha;
+use snapshot_hash::compute_graph_snapshot_hash;
 
 /// If fallow's process inherited any ambient git repo-state env vars (typical
 /// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
@@ -722,6 +727,7 @@ struct AuditResultParts {
     changed_files: FxHashSet<PathBuf>,
     base_ref: String,
     base_description: Option<String>,
+    base_sha: Option<String>,
     head_sha: Option<String>,
     output: OutputFormat,
     performance: bool,
@@ -1378,9 +1384,12 @@ fn finish_audit_result(
     crate::telemetry::note_final_result_count(
         summary.dead_code_issues + summary.complexity_findings + summary.duplication_clone_groups,
     );
-    let head_sha = match input.head_sha {
-        AuditHeadSha::Production => short_head_sha(opts.root),
-        AuditHeadSha::Preloaded(head_sha) => head_sha,
+    let (base_sha, head_sha) = match input.head_sha {
+        AuditHeadSha::Production => (
+            crate::base_worktree::git_short_merge_base(opts.root, &input.base_ref),
+            short_head_sha(opts.root),
+        ),
+        AuditHeadSha::Preloaded(head_sha) => (None, head_sha),
     };
     let HeadAnalyses {
         check,
@@ -1414,6 +1423,7 @@ fn finish_audit_result(
         changed_files,
         base_ref: input.base_ref,
         base_description: input.base_description,
+        base_sha,
         head_sha,
         output: opts.output,
         performance: opts.performance,
@@ -1941,64 +1951,6 @@ fn compute_ownership(
     ))
 }
 
-/// Compute the deterministic graph-snapshot hash from the HEAD-side analysis
-/// results plus the resolved base ref + head sha. Reuses [`AuditKeySnapshot::from_view`]
-/// for the six key sets (dead_code / health / dupes / boundary_edges / cycles /
-/// public_api), each sorted, then folds in the base ref and head sha so the same
-/// tree compared against the same base always yields the same hash.
-///
-/// The verifier is the graph: any structural change (a new finding, a new edge,
-/// a new export) shifts a key set and changes this hash, so a stale agent
-/// walkthrough whose echoed hash no longer matches is REFUSED on reentry.
-fn compute_graph_snapshot_hash(
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    base_ref: &str,
-    head_sha: Option<&str>,
-    change_anchors: &[crate::audit_walkthrough::ChangeAnchor],
-) -> String {
-    // The HEAD public-export set was computed on the brief path and retained on
-    // the check result (`public_api_keys`); reuse it so the hash is exports-aware
-    // without re-walking the graph.
-    let snapshot = AuditKeySnapshot::from_view(&analyses_view(check, dupes, health));
-    let mut bytes: Vec<u8> = Vec::new();
-    // Sorted key sets, each length-prefixed, so the byte stream is unambiguous.
-    let health = keys::complexity_baseline_keys(&snapshot.health);
-    for set in [
-        &snapshot.dead_code,
-        &health,
-        &snapshot.dupes,
-        &snapshot.boundary_edges,
-        &snapshot.cycles,
-        &snapshot.public_api,
-    ] {
-        for key in sorted_keys(set) {
-            bytes.extend_from_slice(key.as_bytes());
-            bytes.push(0);
-        }
-        bytes.push(1);
-    }
-    // Seventh key set: the SORTED change-anchor id set, so a moved/added/removed
-    // changed region shifts this hash and a cited change_anchor that moved is
-    // refused as stale (the finding key sets are line-independent and would not
-    // otherwise cover the region-level anchors).
-    let mut anchor_ids: Vec<&str> = change_anchors
-        .iter()
-        .map(|a| a.change_anchor.as_str())
-        .collect();
-    anchor_ids.sort_unstable();
-    for id in anchor_ids {
-        bytes.extend_from_slice(id.as_bytes());
-        bytes.push(0);
-    }
-    bytes.push(1);
-    bytes.extend_from_slice(base_ref.as_bytes());
-    bytes.push(0);
-    bytes.extend_from_slice(head_sha.unwrap_or("").as_bytes());
-    format!("graph:{:016x}", xxh3_64(&bytes))
-}
-
 #[derive(Default)]
 struct BriefDiffEvidence {
     change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
@@ -2335,6 +2287,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         changed_files: parts.changed_files.into_iter().collect(),
         base_ref: parts.base_ref,
         base_description: parts.base_description,
+        base_sha: parts.base_sha,
         head_sha: parts.head_sha,
         output: parts.output,
         performance: parts.performance,
@@ -2363,6 +2316,7 @@ fn empty_audit_result(
 ) -> AuditResult {
     crate::telemetry::note_final_result_count(0);
 
+    let base_sha = crate::base_worktree::git_short_merge_base(opts.root, &base_ref);
     let head_sha = short_head_sha(opts.root);
     // An empty changeset is a valid graph state: pin a hash on the brief path so
     // the walkthrough guide still carries a stable snapshot pin (no findings, so
@@ -2406,6 +2360,7 @@ fn empty_audit_result(
         changed_files: Vec::new(),
         base_ref,
         base_description,
+        base_sha,
         head_sha,
         output: opts.output,
         performance: opts.performance,
@@ -2491,7 +2446,7 @@ fn build_audit_dupes_options<'a>(
         save_baseline_path: None,
         // See the dead-code sub-pass: audit answers the flag once itself.
         fail_on_stale_baseline: false,
-        // Audit rejects `--fail-on-issues`; its own verdict gates clone groups.
+        // Audit ignores `--fail-on-issues`; its own verdict gates clone groups.
         fail_on_issues: false,
         production: false,
         production_override: None,

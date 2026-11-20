@@ -377,10 +377,7 @@ fn build_reason(
             unresolved.len()
         ));
     }
-    format!(
-        "best-effort syntactic chain (ADR-001): {}",
-        parts.join(", ")
-    )
+    format!("best-effort syntactic chain: {}", parts.join(", "))
 }
 
 /// True when an [`ImportedName`] refers to `symbol`. A namespace import (`*`)

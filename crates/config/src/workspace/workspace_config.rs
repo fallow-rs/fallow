@@ -10,10 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct WorkspaceConfig {
     /// Additional workspace patterns (beyond what's in root package.json).
     ///
-    /// `packages` is accepted as a back-compat alias: an older `fallow init --toml`
-    /// wrote `[workspaces]` with a `packages` key, and reading it as `patterns`
-    /// keeps those existing configs scoping correctly. schemars omits serde
-    /// aliases, so `schema.json` documents only `patterns`.
+    /// `packages` is accepted as an older name of `patterns`, which an older
+    /// `fallow init --toml` wrote.
     #[serde(default, alias = "packages")]
     pub patterns: Vec<String>,
     /// Git baseline refs keyed by workspace roots, written relative to the project root as `fallow list --workspaces` prints them. Scopes `check`, `dead-code`, `dupes` and editor diagnostics; `health`, `security` and `audit` ignore it. A global changed-since request takes precedence. Unlisted workspaces and root files remain in full scope. A key that names no workspace, or a ref that Git cannot resolve, leaves every package in full scope with a warning.

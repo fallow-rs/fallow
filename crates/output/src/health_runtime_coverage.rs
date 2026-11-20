@@ -16,7 +16,7 @@ pub enum RuntimeCoverageSchemaVersion {
 }
 
 /// Top-level verdict for the whole runtime-coverage report. Mirrors
-/// `fallow_cov_protocol::ReportVerdict`. The verdict is the SINGLE most
+/// `fallow_cov_protocol::ReportVerdict`. The verdict is the single most
 /// actionable finding; for the full set of findings see
 /// [`RuntimeCoverageReport::signals`]. The verdict promotes `hot-path-touched`
 /// above `cold-code-detected` in PR-review context (when the CLI was
@@ -275,7 +275,7 @@ pub struct RuntimeCoverageSummary {
     /// Timestamp of the newest runtime payload included in the report. Null for
     /// local single-capture artifacts that do not carry cloud receipt metadata.
     pub last_received_at: Option<String>,
-    /// Number of functions the sidecar could observe in the V8 or Istanbul
+    /// Number of functions the runtime coverage add-on could observe in the V8 or Istanbul
     /// dump. Null for a positive-only capture, which cannot observe a
     /// function that did not run.
     pub functions_tracked: Option<usize>,
@@ -284,7 +284,7 @@ pub struct RuntimeCoverageSummary {
     /// Tracked functions that were never invoked. Null for a positive-only
     /// capture.
     pub functions_unhit: Option<usize>,
-    /// Functions the sidecar could not track (lazy-parsed, worker thread,
+    /// Functions the runtime coverage add-on could not track (lazy-parsed, worker thread,
     /// dynamic code, unresolved source map).
     pub functions_untracked: usize,
     /// Ratio of functions_hit / functions_tracked, expressed as a percent.
@@ -299,8 +299,8 @@ pub struct RuntimeCoverageSummary {
     /// Distinct deployments contributing to the supplied dump (Phase 2 local
     /// analysis emits 0).
     pub deployments_seen: u32,
-    /// Capture-quality telemetry. `None` for protocol-0.2 sidecars; protocol-0.3+
-    /// sidecars always populate it. Fuels the human-output short-window warning
+    /// Capture-quality telemetry. An add-on of protocol 0.2 omits it; protocol
+    /// 0.3 and later always fill it. Fuels the human-output short-window warning
     /// and the quantified trial CTA, and is passed through to JSON consumers so
     /// agent pipelines can surface the same signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -321,7 +321,7 @@ impl RuntimeCoverageSummary {
     }
 }
 
-/// Quality-of-capture signals emitted by the sidecar so the CLI can explain
+/// Quality-of-capture signals emitted by the runtime coverage add-on so the CLI can explain
 /// short-window captures honestly instead of letting users blame the tool.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -331,7 +331,7 @@ pub struct RuntimeCoverageCaptureQuality {
     pub window_seconds: u64,
     /// Number of distinct production instances that contributed to the dump.
     pub instances_observed: u32,
-    /// True when the untracked-function ratio exceeds the sidecar's lazy-parse
+    /// True when the untracked-function ratio exceeds the lazy-parse
     /// threshold (30%). Signals that many untracked functions likely reflect
     /// lazy-parsed code rather than unreachable code.
     pub lazy_parse_warning: bool,
@@ -380,8 +380,8 @@ pub struct RuntimeCoverageAction {
     /// Action identifier, normalized to `type` in JSON output. Known values
     /// emitted by `fallow coverage analyze`: `delete-cold-code`
     /// (verdict=safe_to_delete), `review-runtime` (verdict=review_required).
-    /// The sidecar may emit additional protocol-specific identifiers;
-    /// consumers should treat unknown values as forward-compat extensions.
+    /// The runtime coverage add-on can emit other protocol-specific
+    /// identifiers; consumers should accept unknown values.
     #[serde(rename = "type")]
     pub kind: String,
     /// Human-readable action description.
@@ -400,10 +400,10 @@ pub struct RuntimeCoverageMessage {
     pub message: String,
 }
 
-/// Discriminator inputs that PRODUCED a finding's verdict,
+/// Discriminator inputs that produced a finding's verdict,
 /// emitted alongside the verdict so an agent can reproduce it and see the
 /// minimum-observation confidence cap instead of re-deriving them from scratch.
-/// F4: these make the EXISTING Fallow-owned discriminators legible; they are not
+/// F4: these make the existing Fallow-owned discriminators legible; they are not
 /// a new or external signal and gate nothing. Pairs with `evidence.static_status`
 /// (the static half of the discriminator set).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -411,7 +411,7 @@ pub struct RuntimeCoverageMessage {
 pub struct RuntimeCoverageDiscriminators {
     /// Three-state runtime tracking: `called` (invocations > 0), `never_called`
     /// (V8 tracked it, invocations == 0), or `untracked` (V8 never saw it). The
-    /// ONLY signal that can issue a deletion verdict.
+    /// only signal that can issue a deletion verdict.
     pub tracking_state: String,
     /// `invocations / trace_count` for this function; `null` when untracked (no
     /// invocation count). The per-function value behind the low-traffic split.
@@ -528,8 +528,8 @@ pub struct RuntimeCoverageHotPath {
     pub line: u32,
     /// 1-indexed line the function ends on (inclusive). Mirrors
     /// `fallow_cov_protocol::HotPath::end_line` (added in protocol 0.5).
-    /// Older 0.4-shape sidecars omit the field on the wire; serde defaults
-    /// to `0`, which the line-overlap filter MUST treat as a single-line
+    /// An add-on of protocol 0.4 omits the field on the wire; serde defaults
+    /// to `0`, which the line-overlap filter must treat as a single-line
     /// range (`line..=line`) rather than a span.
     pub end_line: u32,
     /// Observed invocation count for the hot path.

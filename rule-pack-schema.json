@@ -261,7 +261,7 @@
           "const": "warn"
         },
         {
-          "description": "Don't detect or report.",
+          "description": "Do not detect or report.",
           "type": "string",
           "const": "off"
         }

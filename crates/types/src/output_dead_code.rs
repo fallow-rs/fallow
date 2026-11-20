@@ -104,7 +104,7 @@ pub(crate) fn suppress_line(comment: &str) -> IssueAction {
 ///
 /// Advisory provenance, in the same spirit as the fix path's
 /// `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
-/// reasons: a caveat NEVER withholds, reorders, downgrades, or re-severities
+/// reasons: a caveat never withholds, reorders, downgrades, or re-severities
 /// the finding, and never changes an exit code. It records that the verdict
 /// was computed over an import graph fallow already knows is incomplete, so a
 /// reader who sees the finding also sees the caveat instead of having to
@@ -155,7 +155,7 @@ pub enum ReachabilityCaveat {
     /// - `unused_files[]`, `unused_exports[]`, and `unused_types[]` rest on
     ///   reachability, so only a degraded module that is itself observed
     ///   reachable can change the verdict. When every degraded module is
-    ///   unreachable the caveat is absent, and soundly: the FIRST missing edge
+    ///   unreachable the caveat is absent, and soundly: the first missing edge
     ///   on any entry-point path leaves from a module whose every predecessor
     ///   edge was observed, so that module is observed reachable. A file the
     ///   run never read has no module and no graph node, so its reachability
@@ -2673,7 +2673,7 @@ impl UnusedComponentOutputFinding {
 }
 
 /// Wire-shape envelope for a [`RouteCollision`] finding. A route collision is a
-/// guaranteed `next build` failure, so the PRIMARY action is manual guidance
+/// guaranteed `next build` failure, so the primary action is manual guidance
 /// (move or merge one of the colliding files), NOT a suppress: suppressing a
 /// build error never makes the build pass. A file-level suppress is offered as
 /// an escape hatch only.

@@ -156,7 +156,7 @@
       "section": "commands",
       "row": "decision-surface",
       "column": "Purpose",
-      "seed": "Surface the consequential structural DECISIONS a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask"
+      "seed": "Surface the consequential structural decisions a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask"
     },
     {
       "section": "commands",
@@ -174,7 +174,7 @@
       "section": "commands",
       "row": "dupes",
       "column": "Key Flags",
-      "seed": "`--mode`, `--near`, `--min-tokens`, `--min-lines`, `--min-occurrences`, `--threshold`, `--skip-local`, `--cross-language`"
+      "seed": "`--mode`, `--near`, `--min-tokens`, `--min-lines`, `--min-occurrences`, `--skip-local`, `--cross-language`, `--ignore-imports`"
     },
     {
       "section": "commands",
@@ -222,7 +222,7 @@
       "section": "commands",
       "row": "flags",
       "column": "Key Flags",
-      "seed": "`--top`, `--retirement`, `--reason`, `--sort`, `--flag-age`, `--min-age`, `--flag-state`, `--max-flag-age`"
+      "seed": "`--retirement`, `--reason`, `--sort`, `--flag-age`, `--min-age`, `--flag-state`, `--top`, `--max-flag-age`"
     },
     {
       "section": "commands",
@@ -246,7 +246,7 @@
       "section": "commands",
       "row": "health",
       "column": "Key Flags",
-      "seed": "`--max-cyclomatic`, `--max-cognitive`, `--max-crap`, `--max-file-lines`, `--top`, `--sort`, `--complexity`, `--complexity-breakdown`"
+      "seed": "`--max-cyclomatic`, `--max-cognitive`, `--max-crap`, `--max-file-lines`, `--complexity`, `--complexity-breakdown`, `--top`, `--sort`"
     },
     {
       "section": "commands",
@@ -426,7 +426,7 @@
       "section": "commands",
       "row": "schema",
       "column": "Key Flags",
-      "seed": ""
+      "seed": "`--cli-reference`"
     },
     {
       "section": "commands",
@@ -504,7 +504,7 @@
       "section": "commands",
       "row": "trace",
       "column": "Purpose",
-      "seed": "Trace a symbol's call chain, or the shortest import path between two modules (best-effort, syntactic; OFF the ranked path)"
+      "seed": "Trace a symbol's call chain, or the shortest import path between two modules (best-effort, syntactic; not part of the ranked brief)"
     },
     {
       "section": "commands",
@@ -528,7 +528,7 @@
       "section": "commands",
       "row": "type-aware",
       "column": "Purpose",
-      "seed": "Inspect the optional TypeScript semantic companion"
+      "seed": "Inspect the optional type-aware companion for TypeScript semantic analysis"
     },
     {
       "section": "commands",
@@ -570,7 +570,7 @@
       "section": "flags:audit",
       "row": "--brief",
       "column": "Description",
-      "seed": "Render the deterministic review brief instead of the gating audit report. The brief answers \"where do I look?\" rather than \"will CI block this?\", runs the same analysis, and ALWAYS exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format`"
+      "seed": "Render the deterministic review brief instead of the gating audit report. The brief answers \"where do I look?\" rather than \"will CI block this?\", runs the same analysis, and always exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format`"
     },
     {
       "section": "flags:audit",
@@ -624,7 +624,7 @@
       "section": "flags:audit",
       "row": "--mark-viewed",
       "column": "Description",
-      "seed": "Record one or more changed files as VIEWED in the local walkthrough viewed-state ledger (`.fallow/walkthrough-state.json`), then render the tour. Files already viewed (and still current) collapse into the Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on render but never deleted. Only consulted on the `--walkthrough` path"
+      "seed": "Record one or more changed files as viewed in the local walkthrough viewed-state ledger (`.fallow/walkthrough-state.json`), then render the tour. Files already viewed (and still current) collapse into the Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on render but never deleted. Only consulted on the `--walkthrough` path"
     },
     {
       "section": "flags:audit",
@@ -636,13 +636,13 @@
       "section": "flags:audit",
       "row": "--max-decisions",
       "column": "Description",
-      "seed": "Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1). Only consulted on the brief path"
+      "seed": "Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the range 3 to 5. Only consulted on the brief path"
     },
     {
       "section": "flags:audit",
       "row": "--min-invocations-hot",
       "column": "Description",
-      "seed": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set"
+      "seed": "Threshold for hot-path classification, passed to the runtime coverage add-on when `--runtime-coverage` is set"
     },
     {
       "section": "flags:audit",
@@ -690,7 +690,7 @@
       "section": "flags:audit",
       "row": "--runtime-coverage",
       "column": "Description",
-      "seed": "Runtime coverage input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Runs the `fallow-cov` sidecar inside the audit, so the `hot-path-touched` verdict shows next to the dead-code and complexity findings without a second `fallow health` run in CI. The verdict is informational and does not change the exit code. A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`)"
+      "seed": "Runtime coverage input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Runs the runtime coverage add-on inside the audit, so the `hot-path-touched` verdict shows next to the dead-code and complexity findings without a second `fallow health` run in CI. The verdict is informational and does not change the exit code. A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`)"
     },
     {
       "section": "flags:audit",
@@ -702,7 +702,7 @@
       "section": "flags:audit",
       "row": "--show-deprioritized",
       "column": "Description",
-      "seed": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path"
+      "seed": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is always present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path"
     },
     {
       "section": "flags:audit",
@@ -720,19 +720,19 @@
       "section": "flags:audit",
       "row": "--walkthrough",
       "column": "Description",
-      "seed": "Render the existing walkthrough guide as a staged HUMAN terminal tour (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`"
+      "seed": "Render the existing walkthrough guide as a staged terminal tour for a person (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`"
     },
     {
       "section": "flags:audit",
       "row": "--walkthrough-file",
       "column": "Description",
-      "seed": "Ingest an agent's judgment JSON and POST-VALIDATE it against the LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit (anti-hallucination); refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved); rejects an `action` outside `block`, `address`, `consider`, `fyi` (`invalid-action`). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing and action label are fenced as non-deterministic and never gate or auto-post"
+      "seed": "Read the judgment JSON of an agent and check it against the current graph. Rejects any judgment whose `signal_id` fallow did not emit; refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved); rejects an `action` outside `block`, `address`, `consider`, `fyi` (`invalid-action`). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing and action label are fenced as non-deterministic and never gate or auto-post"
     },
     {
       "section": "flags:audit",
       "row": "--walkthrough-guide",
       "column": "Description",
-      "seed": "Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`"
+      "seed": "Emit the walkthrough guide for an agent: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`"
     },
     {
       "section": "flags:audit",
@@ -804,7 +804,7 @@
       "section": "flags:dead-code",
       "row": "--impact-closure",
       "column": "Description",
-      "seed": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains; powers the `inspect_target` MCP tool"
+      "seed": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains. `fallow inspect` reports the same closure"
     },
     {
       "section": "flags:dead-code",
@@ -954,7 +954,7 @@
       "section": "flags:dead-code-filters",
       "row": "--unrendered-components",
       "column": "Issue Type",
-      "seed": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+      "seed": "A component is reachable through a barrel but rendered nowhere"
     },
     {
       "section": "flags:dead-code-filters",
@@ -1092,7 +1092,7 @@
       "section": "flags:decision-surface",
       "row": "--max-decisions",
       "column": "Description",
-      "seed": "Cap on the number of surfaced decisions (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1)"
+      "seed": "Cap on the number of surfaced decisions (the working-memory limit). Default 4; clamped to the range 3 to 5"
     },
     {
       "section": "flags:dupes",
@@ -1116,25 +1116,25 @@
       "section": "flags:dupes",
       "row": "--min-lines",
       "column": "Description",
-      "seed": "Minimum line count for a clone (defaults to the value in `.fallowrc.jsonc`, or `5` if unset)"
+      "seed": "Minimum line count for a clone (defaults to the value in the config file, or `5` if unset)"
     },
     {
       "section": "flags:dupes",
       "row": "--min-occurrences",
       "column": "Description",
-      "seed": "Minimum number of occurrences before a clone group is reported. Raise to focus on widespread copy-paste worth refactoring and skip pair-only clones. (defaults to the value in `.fallowrc.jsonc`, or `2` if unset)"
+      "seed": "Minimum number of occurrences before a clone group is reported. Raise to focus on widespread copy-paste worth refactoring and skip pair-only clones. (defaults to the value in the config file, or `2` if unset)"
     },
     {
       "section": "flags:dupes",
       "row": "--min-tokens",
       "column": "Description",
-      "seed": "Minimum token count for a clone (defaults to the value in `.fallowrc.jsonc`, or `50` if unset)"
+      "seed": "Minimum token count for a clone (defaults to the value in the config file, or `50` if unset)"
     },
     {
       "section": "flags:dupes",
       "row": "--mode",
       "column": "Description",
-      "seed": "Detection mode: strict, mild, weak, or semantic (defaults to the value in `.fallowrc.jsonc`, or `mild` if unset)"
+      "seed": "Detection mode: strict, mild, weak, or semantic (defaults to the value in the config file, or `mild` if unset)"
     },
     {
       "section": "flags:dupes",
@@ -1170,7 +1170,7 @@
       "section": "flags:dupes",
       "row": "--threshold",
       "column": "Description",
-      "seed": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in `.fallowrc.jsonc`, or `0` if unset)"
+      "seed": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in the config file, or `0` if unset)"
     },
     {
       "section": "flags:dupes",
@@ -1548,7 +1548,7 @@
       "section": "flags:global",
       "row": "--fail-on-issues",
       "column": "Description",
-      "seed": "Exit 1 on issues, also where the default is 0: bare json, sarif, codeclimate and dupes"
+      "seed": "Exit 1 on issues, also where the default is 0: `dupes`, and bare `fallow` in the json, sarif, codeclimate, GitHub, comment and review formats"
     },
     {
       "section": "flags:global",
@@ -1878,7 +1878,7 @@
       "section": "flags:health",
       "row": "--low-traffic-threshold",
       "column": "Description",
-      "seed": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the sidecar's spec default (0.001)"
+      "seed": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the runtime coverage add-on default (0.001)"
     },
     {
       "section": "flags:health",
@@ -1920,7 +1920,7 @@
       "section": "flags:health",
       "row": "--min-observation-volume",
       "column": "Description",
-      "seed": "Minimum total trace volume before the sidecar allows high-confidence `safe_to_delete` / `review_required` verdicts. Below this the sidecar caps confidence at `medium` to protect against overconfident verdicts on new or low-traffic services. Omit to use the sidecar's spec default (5000)"
+      "seed": "Minimum total trace volume before the runtime coverage add-on gives high-confidence `safe_to_delete` / `review_required` verdicts. Below this, the add-on caps confidence at `medium` to protect against overconfident verdicts on new or low-traffic services. Omit to use the add-on default (5000)"
     },
     {
       "section": "flags:health",
@@ -2124,7 +2124,7 @@
       "section": "flags:security",
       "row": "--min-invocations-hot",
       "column": "Description",
-      "seed": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set"
+      "seed": "Threshold for hot-path classification, passed to the runtime coverage add-on when `--runtime-coverage` is set"
     },
     {
       "section": "flags:security",
@@ -2142,13 +2142,13 @@
       "section": "flags:trace",
       "row": "--callees",
       "column": "Description",
-      "seed": "Walk DOWN to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked"
+      "seed": "Walk down to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked"
     },
     {
       "section": "flags:trace",
       "row": "--callers",
       "column": "Description",
-      "seed": "Walk UP to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked"
+      "seed": "Walk up to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked"
     },
     {
       "section": "flags:trace",
@@ -2400,7 +2400,7 @@
       "section": "issue-types",
       "row": "misplaced-directive",
       "column": "Description",
-      "seed": "\"use client\" / \"use server\" directive is not in the leading position and is ignored; Requires the project to declare next"
+      "seed": "\"use client\" / \"use server\" directive is not in the leading position and is ignored; Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc"
     },
     {
       "section": "issue-types",
@@ -2412,7 +2412,7 @@
       "section": "issue-types",
       "row": "mixed-client-server-barrel",
       "column": "Description",
-      "seed": "Barrel re-exports both a \"use client\" module and a server-only module; Requires the project to declare next"
+      "seed": "Barrel re-exports both a \"use client\" module and a server-only module; Requires the project to declare a React Server Components bundler, such as next, waku or @vitejs/plugin-rsc"
     },
     {
       "section": "issue-types",
@@ -2442,7 +2442,7 @@
       "section": "issue-types",
       "row": "prop-drilling",
       "column": "Description",
-      "seed": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer; Opt-in: error gates CI; warn remains advisory even with --fail-on-issues. Defaults to off. Source-hop overrides decide severity."
+      "seed": "A React/Preact prop is forwarded unchanged through 2 or more components to a distant consumer; Opt-in: error gates CI; warn remains advisory even with --fail-on-issues. Defaults to off. Source-hop overrides decide severity."
     },
     {
       "section": "issue-types",
@@ -2526,7 +2526,7 @@
       "section": "issue-types",
       "row": "unrendered-component",
       "column": "Description",
-      "seed": "A Vue / Svelte component is reachable through a barrel but rendered nowhere"
+      "seed": "A component is reachable through a barrel but rendered nowhere"
     },
     {
       "section": "issue-types",
@@ -2880,7 +2880,7 @@
       "section": "mcp-tools",
       "row": "get_token_blast_radius",
       "column": "Description",
-      "seed": "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate"
+      "seed": "Design-token blast radius for Tailwind v4 @theme tokens and CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate"
     },
     {
       "section": "mcp-tools",

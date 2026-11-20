@@ -110,7 +110,7 @@ impl RequestName {
 /// reported as an unscoped run. A request name added later carries its own
 /// class, so a consumer written today keeps saying the right thing about it.
 ///
-/// The value set is OPEN, like the names and the statuses: read a class this
+/// The value set is open, like the names and the statuses: read a class this
 /// build does not recognise as "some request", not as an error, and do not read
 /// it as `scope`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -118,7 +118,7 @@ impl RequestName {
 #[serde(rename_all = "kebab-case")]
 pub enum RequestEffect {
     /// The request narrows what the report covers. Not applied means the
-    /// report that follows is complete, valid, and WIDER than what was asked
+    /// report that follows is complete, valid, and wider than what was asked
     /// for, which is a reviewing problem rather than a build failure.
     Scope,
     /// The request produces a secondary file beside the report. Not applied
@@ -130,7 +130,7 @@ pub enum RequestEffect {
 
 /// What became of one request on this run.
 ///
-/// Two-valued today. The value set is OPEN so a later `partial` needs no bump,
+/// Two-valued today. The value set is open so a later `partial` needs no bump,
 /// and it is deliberately not added now: nothing emits it, and a permanently
 /// unused value reads as a measurement nobody takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -185,12 +185,12 @@ pub struct RequestOutcome {
     /// Read the unit off the name the entry is keyed under, never across names,
     /// and read an absent member as "not measured" rather than as zero.
     ///
-    /// The count is what the run INDEXED rather than the true total:
+    /// The count is what the run indexed rather than the true total:
     /// `diff-filter` indexes at most one million added lines and reports that
     /// cap for a larger diff, so read any non-zero value as a lower bound.
     ///
     /// `0` is the case this member exists for: a request that applied over an
-    /// EMPTY scope. Every finding then filters out and the report reads clean,
+    /// empty scope. Every finding then filters out and the report reads clean,
     /// so a consumer that sees no findings beside `scope_size: 0` learns that
     /// nothing was analyzable rather than that the code is clean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -263,7 +263,7 @@ impl RequestOutcome {
     }
 }
 
-/// Every narrowing or shaping request a run RECEIVED, keyed by name.
+/// Every narrowing or shaping request a run received, keyed by name.
 ///
 /// Received, not failed: a request the run honoured is published with
 /// `status: "applied"`, so a consumer can say "scoped to the change"
@@ -282,10 +282,10 @@ impl RequestOutcome {
 /// for `package-baselines`, `oversize`,
 /// `unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for
 /// `diff-filter`, and `directory-create-failed`, `write-failed` and
-/// `serialize-failed` for `sarif-file`. Every set is OPEN: a name a consumer
+/// `serialize-failed` for `sarif-file`. Every set is open: a name a consumer
 /// does not recognise means "some request", not an error.
 ///
-/// `sarif-file` reports a SECONDARY artifact rather than the scope of the
+/// `sarif-file` reports a secondary artifact rather than the scope of the
 /// report it travels in, and it is in the same object for the same reason the
 /// others are: the run was asked to do something and did something else, and
 /// nothing in the primary report says so. Which of the two an entry is, every

@@ -120,6 +120,7 @@ jobs:
               - 'crates/**'
               - 'tests/**'
               - 'docs/output-schema.json'
+              - 'docs/cli-reference.json'
               - 'schema.json'
               - 'plugin-schema.json'
               - 'rule-pack-schema.json'

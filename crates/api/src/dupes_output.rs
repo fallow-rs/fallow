@@ -112,7 +112,7 @@ impl AttributedCloneGroupFinding {
 }
 
 /// A single grouped duplication bucket. Per-group `stats` are dedup-aware and
-/// computed over the FULL group BEFORE any `--top` truncation.
+/// computed over the full group before any `--top` truncation.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationGroup {

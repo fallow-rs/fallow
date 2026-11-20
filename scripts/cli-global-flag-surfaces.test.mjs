@@ -1,6 +1,6 @@
 /**
  * Guards the generated agent-facing contract surfaces against a new global clap
- * flag that lands in `crates/cli/src/cli_args.rs` without a contract regeneration
+ * flag that lands in `crates/cli/src/cli_args_root.rs` without a contract regeneration
  * (issue #2010). `fallow schema` reflects the clap command, so the committed
  * capability manifest and the generated CLI reference both go stale silently.
  */
@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CLI_SOURCE = join(REPO_ROOT, "crates/cli/src/cli_args.rs");
+const CLI_SOURCE = join(REPO_ROOT, "crates/cli/src/cli_args_root.rs");
 const CAPABILITIES = join(REPO_ROOT, "npm/fallow/capabilities.json");
 const CLI_REFERENCE = join(REPO_ROOT, "npm/fallow/skills/fallow/references/cli-reference.md");
 
@@ -35,7 +35,7 @@ const structBody = (source, name, file) => {
 const declaredGlobalFlags = () => {
   const source = readFileSync(CLI_SOURCE, "utf8");
   // A flattened field adds the flags of its struct at the same place.
-  const body = structBody(source, "Cli", "crates/cli/src/cli_args.rs").replace(
+  const body = structBody(source, "Cli", "crates/cli/src/cli_args_root.rs").replace(
     FLATTEN_FIELD,
     (_, module, name) => {
       const file = `crates/cli/src/${module}.rs`;

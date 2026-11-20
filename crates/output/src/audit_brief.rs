@@ -128,16 +128,16 @@ pub struct GraphFacts {
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImpactClosureFacts {
-    /// The FULL number of files transitively affected by the changeset
-    /// (reverse-deps + re-export chains) that are NOT in the diff. Computed
-    /// BEFORE [`affected_not_shown`](Self::affected_not_shown) is capped to a
+    /// The full number of files transitively affected by the changeset
+    /// (reverse-deps + re-export chains) that are not in the diff. Computed
+    /// before [`affected_not_shown`](Self::affected_not_shown) is capped to a
     /// sample, so it is always the true magnitude of the blast radius.
     pub affected_count: usize,
     /// A capped, path-sorted sample of the affected root-relative paths (at most
     /// [`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in
     /// [`affected_count`](Self::affected_count) and the distribution in
     /// [`affected_by_dir`](Self::affected_by_dir); use this list to jump to
-    /// representative files, NEVER to enumerate the blast radius or to infer its
+    /// representative files, never to enumerate the blast radius or to infer its
     /// shape. Because it is a prefix of the sorted set, it clusters in whichever
     /// directory sorts first. To reconstruct the full set, run
     /// `fallow dead-code --impact-closure <path>` once per changed file and union the
@@ -146,7 +146,7 @@ pub struct ImpactClosureFacts {
     pub affected_not_shown: Vec<String>,
     /// The blast radius rolled up by parent directory: how the affected files
     /// distribute, heaviest directory first, ties broken by directory path so the
-    /// order is deterministic. This is the SHAPE signal, and unlike
+    /// order is deterministic. This is the shape signal, and unlike
     /// [`affected_not_shown`](Self::affected_not_shown) its counts are exact for
     /// every directory it lists. At most [`AFFECTED_DIR_CAP`] entries.
     pub affected_by_dir: Vec<AffectedDirectory>,
@@ -350,9 +350,9 @@ pub struct CoordinationGapFact {
 
 /// Stage 2 of the brief: the partition + order. The changed files split into
 /// coherent BY-MODULE units (the only byte-identical-deterministic clustering
-/// definition straight from the graph), plus a dependency-sensible review ORDER
+/// definition straight from the graph), plus a dependency-sensible review order
 /// over those units (definitions before consumers, mechanical/leaf units last,
-/// ties broken by the path sort). Stage 2 sits UNDER the decision surface as a
+/// ties broken by the path sort). Stage 2 sits under the decision surface as a
 /// drill-down; it is the backbone the directed-review loop hands the agent.
 ///
 /// Feature-cluster and concern partitioning are deferred (they need scoring
@@ -403,7 +403,7 @@ pub struct ReviewUnitFact {
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewDeltas {
-    /// Cross-zone boundary EDGES introduced vs base (R2 first-edge-only: one per
+    /// Cross-zone boundary edges introduced vs base (R2 first-edge-only: one per
     /// `<from_zone>-><to_zone>` pair, never per import). New-vs-pre-existing.
     pub boundary_introduced: Vec<String>,
     /// Circular dependencies introduced vs base (canonical file-set keys).
@@ -453,9 +453,9 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     pub impact_closure: ImpactClosureFacts,
     /// Stage 4: the weighted focus map. A composite attention score per
     /// changed-file unit (fan-in/out + security taint + risk zone + change shape),
-    /// with `review-here` / `not-prioritized` labels (NEVER `skip` in free mode),
-    /// a per-unit confidence flag, and the FULL `deprioritized` escape-hatch list
-    /// so every de-prioritized piece is reachable. Stage 4 sits UNDER the decision
+    /// with `review-here` / `not-prioritized` labels (never `skip` in free mode),
+    /// a per-unit confidence flag, and the full `deprioritized` escape-hatch list
+    /// so every de-prioritized piece is reachable. Stage 4 sits under the decision
     /// surface as drill-down.
     pub focus: Focus,
     /// 6.A: diff-aware deterministic deltas (boundary/cycle introduced +
@@ -472,7 +472,7 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     /// found or the file cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<crate::OwnershipFacts>,
-    /// 6.G, the APEX: the decision surface. The ranked, capped,
+    /// 6.G, the apex: the decision surface. The ranked, capped,
     /// signal_id-anchored set of consequential structural decisions, each framed
     /// as a judgment question with its routed expert. This is the only thing the
     /// brief visibly leads with; the stages above are its drill-down derivation.

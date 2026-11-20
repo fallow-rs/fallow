@@ -53,6 +53,8 @@ pub mod doctor;
 pub mod dupes_output;
 pub mod editor;
 pub mod explain;
+mod explain_guides;
+mod explain_rationale;
 pub mod grouped_output;
 pub mod health_codeclimate;
 mod health_groups_markdown;
@@ -125,8 +127,9 @@ pub use editor::{
 pub use explain::{
     AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, MUTATION_RULES, RuleDef,
     RuleGuide, SECURITY_RULES, all_rules, bare_rule_id, coverage_analyze_meta, coverage_setup_meta,
-    explain_issue_type, rule_by_id, rule_by_token, rule_command, rule_docs_url, rule_guide,
-    rule_severity_key, security_meta, serialize_explain_programmatic_json, unknown_explain_error,
+    explain_issue_type, rule_by_id, rule_by_token, rule_command, rule_config_key, rule_docs_url,
+    rule_guide, rule_has_guide, rule_rationale, rule_severity_key, security_meta,
+    serialize_explain_programmatic_json, unknown_explain_error,
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{

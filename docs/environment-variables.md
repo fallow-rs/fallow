@@ -6,7 +6,8 @@ Environment variables take precedence over corresponding config-file fields
 unless noted otherwise.
 
 The same user-facing list is emitted as a machine-readable manifest by
-`fallow schema` (under `environment_variables`), so agents and tooling can
+`fallow schema` (under `environment_variables`) and by
+`fallow schema --cli-reference`, so agents and tooling can
 discover these without parsing this page. Variables set by the bundled CI
 integrations rather than by users (such as `FALLOW_MAX_COMMENTS`) are
 documented here for completeness but stay out of the manifest.
@@ -124,6 +125,7 @@ language server uses the `fallow.production` editor setting.
 | `FALLOW_API_RETRIES` | Maximum HTTP attempts for review-comment reconciliation API calls. | `3` | `FALLOW_API_RETRIES=5` |
 | `FALLOW_API_RETRY_DELAY` | Floor delay in seconds between HTTP retry attempts; a server-supplied `Retry-After` overrides it on 429 responses. | `2` | `FALLOW_API_RETRY_DELAY=5` |
 | `FALLOW_CA_BUNDLE` | Path to a PEM certificate bundle for Fallow Cloud and provider HTTP calls; replaces the default WebPKI roots. Relative paths resolve from the process cwd. | unset | `FALLOW_CA_BUNDLE=/etc/ssl/corp-bundle.pem` |
+| `FALLOW_CREDENTIAL_STORE` | Credential store for the key that `fallow cloud login` writes: `auto` (the OS keychain, else `~/.config/fallow/credentials`), `file` (the credentials file only) or `none` (fallow reads and writes no stored key). | `auto` | `FALLOW_CREDENTIAL_STORE=file` |
 | `FALLOW_REPO` | `owner/repo` fallback for `fallow coverage analyze --cloud` when `--repo` is not passed (otherwise parsed from the git origin remote). | git origin | `FALLOW_REPO=acme/widgets` |
 
 ## Change-scope & diff

@@ -388,7 +388,7 @@ pub fn build_walkthrough_guide(
 /// 2. Otherwise, each judgment is ACCEPTED iff its `signal_id` is on the
 ///    decision surface's emitted allowlist ([`DecisionSurface::accept_signal_id`]);
 ///    an unanchored id is REJECTED (`unanchored-signal-id`). Accepted judgments
-///    carry the agent's framing FENCED as non-deterministic.
+///    carry the agent's framing fenced as non-deterministic.
 #[must_use]
 pub fn validate_walkthrough(
     agent: &AgentWalkthrough,

@@ -41,7 +41,7 @@ impl JsonStyle {
 #[derive(clap::Args, Clone, Copy, Debug, Default)]
 pub struct JsonPresentationArgs {
     /// Indent JSON output for manual inspection. Requires the final output format to be JSON.
-    #[arg(hide_short_help = true, long, global = true)]
+    #[arg(hide_short_help = true, long, global = true, help_heading = "Output")]
     pub pretty: bool,
 
     /// Trim JSON for agent context: leave out empty arrays and zero dead-code summary counts,
@@ -49,11 +49,17 @@ pub struct JsonPresentationArgs {
     /// `_meta.actions`. Requires JSON output. Applies to dead-code, health and the combined
     /// report; other commands reject it. Run without `--lean` for the full diagnostic list
     /// and the complete tables.
-    #[arg(hide_short_help = true, long, global = true)]
+    #[arg(hide_short_help = true, long, global = true, help_heading = "Output")]
     pub lean: bool,
 
     /// With `--lean`, keep every row of the health tables (`hotspots`, `file_scores`,
     /// `large_functions`).
-    #[arg(hide_short_help = true, long, global = true, requires = "lean")]
+    #[arg(
+        hide_short_help = true,
+        long,
+        global = true,
+        requires = "lean",
+        help_heading = "Output"
+    )]
     pub full_tables: bool,
 }

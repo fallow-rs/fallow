@@ -173,7 +173,7 @@ pub struct ErrorTraceFrame {
     /// `ambiguous` frame never understates how ambiguous it is.
     pub candidates_omitted: usize,
     /// Set when this frame's own line disagrees with the definition its
-    /// identifier matched: some OTHER definition in the same file is declared
+    /// identifier matched: some other definition in the same file is declared
     /// closer above the line the runtime reported.
     ///
     /// The look-up matches on the identifier alone, so a `resolved` frame is

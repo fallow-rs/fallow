@@ -134,7 +134,7 @@ fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static 
             "https://fallow.tools/docs/explanations/dead-code/#unused-enum-members",
         )),
         "Unused class members" => Some((
-            "Class methods or properties never referenced outside their class",
+            "Class methods or properties that no code uses, also not through `this`",
             "https://fallow.tools/docs/explanations/dead-code/#unused-class-members",
         )),
         "Unused namespace members" => Some((

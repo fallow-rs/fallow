@@ -146,7 +146,7 @@ pub struct HealthScorePenalties {
     pub prop_drilling: Option<f64>,
 }
 
-/// Project-level styling-health score: a SECOND health axis computed purely from
+/// Project-level styling-health score: a second health axis computed purely from
 /// the structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS
 /// code-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so
 /// a plain `fallow health` run is byte-unchanged. The code score and grade stay
@@ -174,7 +174,7 @@ pub struct StylingHealth {
     /// project's CSS is predominantly flat compile-time-atomic CSS-in-JS
     /// (StyleX/Panda), whose structure is not assessable, so the grade reflects
     /// token hygiene only regardless of declaration count. This is descriptive
-    /// metadata that NEVER feeds the score: `score`/`grade`/`penalties` are
+    /// metadata that never feeds the score: `score`/`grade`/`penalties` are
     /// byte-identical whether confidence is high or low. Gate on this `confidence`
     /// flag, which is the complete signal; do NOT reconstruct it from
     /// `total_declarations`, since that summary count includes atomic declarations
@@ -191,8 +191,8 @@ pub struct StylingHealth {
 }
 
 /// Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
-/// `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
-/// PURPOSE: styling confidence is binary (the grade is either reliable for the
+/// `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) on
+/// purpose: styling confidence is binary (the grade is either reliable for the
 /// analyzed surface or it is not), not three distinct evidence tiers, so a
 /// never-emitted `Medium` would be dead surface. Serializes lowercase (`"high"` /
 /// `"low"`), matching the sibling confidence enums' vocabulary.
@@ -236,7 +236,7 @@ pub struct StylingHealthPenalties {
     pub broken_references: f64,
     /// Design-token erosion: mixed `font-size` units (`font_size_unit_mix`),
     /// Tailwind arbitrary-value bypasses (`tailwind_arbitrary_values`), and
-    /// distinct HARDCODED `box-shadow`/`border-radius`/`line-height` values above
+    /// distinct hardcoded `box-shadow`/`border-radius`/`line-height` values above
     /// per-axis baselines (the v3 value-sprawl drift sub-term; `var(--*)`-
     /// referenced values are not counted). Capped at 10pt.
     pub token_erosion: f64,
@@ -350,7 +350,7 @@ pub fn summarize_coverage_source_consistency(
 /// function, so non-React findings stay byte-identical on the wire. The
 /// per-kind counts cover hooks recorded by the React visitor (calls inside an
 /// identified component); a `use*` call inside a plain helper function is
-/// counted in `react_hook_count` but NOT here, so the breakdown can sum to LESS
+/// counted in `react_hook_count` but not here, so the breakdown can sum to less
 /// than `react_hook_count`. `react_hook_count` remains the headline total; this
 /// is an additive refinement.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -490,7 +490,7 @@ pub struct ComplexityViolation {
     /// Aggregate of the enclosing component's findings, when rolled up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component_rollup: Option<ComponentRollup>,
-    /// Per-decision-point complexity breakdown explaining WHICH constructs drove
+    /// Per-decision-point complexity breakdown explaining which constructs drove
     /// the cyclomatic and cognitive scores. Populated only when the caller opts
     /// in via `health --complexity-breakdown`; empty (and omitted from JSON)
     /// otherwise so default and CI output stay lean.

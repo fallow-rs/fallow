@@ -30,33 +30,33 @@ pub enum HooksCli {
     /// Install a fallow-managed hook.
     Install {
         /// Hook surface to install.
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, help_heading = "Scope")]
         target: HooksTargetArg,
 
         /// Has no effect. The Git pre-commit hook runs `fallow audit
         /// --staged`, which compares the staged changes with HEAD. Kept so
         /// that existing install scripts still run.
-        #[arg(long, hide = true)]
+        #[arg(long, hide = true, help_heading = "Scope")]
         branch: Option<String>,
 
         /// Target a specific agent surface when --target agent is used.
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, help_heading = "Scope")]
         agent: Option<setup_hooks::HookAgentArg>,
 
         /// Print what would be written without touching the filesystem.
-        #[arg(long)]
+        #[arg(long, help_heading = "Run")]
         dry_run: bool,
 
         /// Overwrite an existing managed or user-edited hook.
-        #[arg(long)]
+        #[arg(long, help_heading = "Run")]
         force: bool,
 
         /// Write agent hooks to the user's home directory instead of the project root.
-        #[arg(long)]
+        #[arg(long, help_heading = "Scope")]
         user: bool,
 
         /// Append `.claude/` to the project's `.gitignore` for Claude agent hooks.
-        #[arg(long)]
+        #[arg(long, help_heading = "Scope")]
         gitignore_claude: bool,
 
         /// For `--target git`: run `fallow baselines prune` before the audit
@@ -64,7 +64,7 @@ pub enum HooksCli {
         /// the working tree has unstaged or untracked changes and for a commit
         /// with paths. A failed prune never blocks the commit. The prune analyzes the whole project, so it adds
         /// the time of a full run to each commit.
-        #[arg(long)]
+        #[arg(long, help_heading = "Scope")]
         prune_baselines: bool,
     },
 

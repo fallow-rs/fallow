@@ -445,8 +445,8 @@ pub enum ConsumerKind {
 
 /// A location-aware reverse index of where one design token is consumed, so an
 /// agent editing the token can see its blast radius before changing or removing
-/// it. Covers TWO token origins. The always-available discriminator is the `token`
-/// SHAPE: a Tailwind token is the `--`-prefixed custom property (`--color-brand`),
+/// it. Covers two token origins. The always-available discriminator is the `token`
+/// shape: a Tailwind token is the `--`-prefixed custom property (`--color-brand`),
 /// a CSS-in-JS token is a dotted access path with no `--` prefix
 /// (`vars.color.primary`). The per-consumer `kind` also discriminates origin, but
 /// only when `consumer_count > 0` (a `consumer_count: 0` entry has an empty
@@ -460,29 +460,29 @@ pub enum ConsumerKind {
 /// - CSS-in-JS tokens (kind `js-member` / `js-call`) from StyleX `defineVars` /
 ///   `unstable_defineVarsNested`, vanilla-extract `createTheme` family definitions,
 ///   and PandaCSS `defineTokens`, consumed via same-file or cross-module member
-///   access, StyleX theme-group calls, or PandaCSS `token('...')` calls. NOTE:
+///   access, StyleX theme-group calls, or PandaCSS `token('...')` calls. Note:
 ///   CSS-in-JS has NO corroborating dead-token finding (there is no
 ///   `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a weaker
 ///   signal than the Tailwind case (and unresolved dynamic imports or computed
 ///   accesses are not counted).
 ///
-/// This is DESCRIPTIVE context (a blast-radius lookup), not a finding, so it
+/// This is descriptive context (a blast-radius lookup), not a finding, so it
 /// deliberately carries no `actions` array (unlike the cleanup-candidate types in
-/// this module). `consumer_count` is always a STATIC lower bound (a computed class
+/// this module). `consumer_count` is always a static lower bound (a computed class
 /// name like `bg-${color}`, or a CSS-in-JS access through an unresolved alias
 /// import, is not counted).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TokenConsumers {
     /// The token identity. For a Tailwind `@theme` token this is the full custom
-    /// property as authored, INCLUDING the `--` prefix (`--color-brand`). For a
+    /// property as authored, including the `--` prefix (`--color-brand`). For a
     /// CSS-in-JS token (kind `js-member` / `js-call`) this is the binding-qualified dotted
     /// access path, NO `--` prefix (`vars.color.primary`), matching how consumers
     /// read it. The presence of the `--` prefix distinguishes the two origins.
     pub token: String,
     /// For a Tailwind token, the v4 theme namespace (`color`, `radius`,
     /// `font-weight`, ...). For a CSS-in-JS token (kind `js-member` / `js-call`), the defining
-    /// export BINDING the token set is accessed through (`vars`), which identifies
+    /// export binding the token set is accessed through (`vars`), which identifies
     /// the token set, NOT a semantic group. (The field is thus overloaded by
     /// origin; branch on `consumers[].kind` or the `token` shape.)
     pub namespace: String,
@@ -493,10 +493,10 @@ pub struct TokenConsumers {
     /// Tailwind; the token key inside the `defineVars`/`createTheme` object for
     /// CSS-in-JS).
     pub definition_line: u32,
-    /// The FULL number of consumer locations found, a STATIC LOWER BOUND: a
+    /// The full number of consumer locations found, a static lower bound: a
     /// computed class name (`bg-${color}`), unresolved import, dynamic token
     /// structure, or computed CSS-in-JS access is not counted. This is the
-    /// aggregate over every consumer, computed BEFORE
+    /// aggregate over every consumer, computed before
     /// [`consumers`](Self::consumers) is capped to a sample.
     pub consumer_count: u32,
     /// A capped, deterministically-sorted sample of consumer locations (at most
@@ -584,7 +584,7 @@ pub struct ScopedUnusedClasses {
     pub actions: Vec<CssCandidateAction>,
 }
 
-/// One advisory STYLING FINDING: the graduation of a descriptive css candidate
+/// One advisory styling finding: the graduation of a descriptive css candidate
 /// into a first-class, severity-aware, suppressible finding surfaced in
 /// `fallow audit`. The styling domain's OWN finding type (not borrowed into the
 /// dead-code `AnalysisResults`, and not glued in the CLI). `code` is the kebab
@@ -1096,11 +1096,11 @@ pub struct CssAnalyticsSummary {
     pub custom_properties_defined: u32,
     /// Custom properties defined but never referenced via `var()` in any
     /// stylesheet (the defined-but-unused direction). These are cleanup
-    /// CANDIDATES, not confirmed dead: a property may still be read or set from
+    /// candidates, not confirmed dead: a property may still be read or set from
     /// JavaScript or inline HTML styles.
     pub custom_properties_unreferenced: u32,
     /// Distinct custom properties referenced via `var()` that are defined in no
-    /// stylesheet anywhere (the used-but-undefined direction). A COUNT only, not
+    /// stylesheet anywhere (the used-but-undefined direction). A count only, not
     /// a located list: a `var(--x)` with no CSS definition is extremely common
     /// in JavaScript-driven theming and design-token libraries, so locating
     /// these would be net-noise. The count is an architecture signal (how much
@@ -1110,7 +1110,7 @@ pub struct CssAnalyticsSummary {
     pub keyframes_defined: u32,
     /// `@keyframes` defined but never referenced via `animation` /
     /// `animation-name` in any stylesheet (the defined-but-unused direction;
-    /// cleanup CANDIDATES; an animation name can still be applied from
+    /// cleanup candidates; an animation name can still be applied from
     /// JavaScript).
     pub keyframes_unreferenced: u32,
     /// Distinct animation names referenced via `animation` / `animation-name`

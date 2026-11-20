@@ -15,10 +15,10 @@
 use std::sync::LazyLock;
 
 use fallow_api::{
-    RuleDef, all_rules, bare_rule_id, explain_issue_type, rule_command, rule_docs_url,
-    rule_severity_key, serialize_explain_programmatic_json,
+    RuleDef, all_rules, bare_rule_id, explain_issue_type, rule_command, rule_config_key,
+    rule_docs_url, rule_severity_key, serialize_explain_programmatic_json,
 };
-use fallow_types::issue_meta::{issue_is_fixable, issue_meta_by_code};
+use fallow_types::issue_meta::issue_is_fixable;
 use fallow_types::mcp_manifest::{
     MCP_EXPLAIN_RESOURCE_TEMPLATE, MCP_RESOURCES, MCP_TOOLS, MCP_TOOLS_KEY_PARAMS_NOTE,
     McpResourceInfo,
@@ -126,7 +126,7 @@ fn issue_types_payload() -> Value {
                 "category": rule.category,
                 "name": name,
                 "summary": summary,
-                "config_key": issue_meta_by_code(bare).and_then(|meta| meta.config_key),
+                "config_key": rule_config_key(rule),
                 "default_severity": default_severity,
                 "opt_in": default_severity.map(|severity| severity == "off"),
                 "fixable": issue_is_fixable(bare),

@@ -135,15 +135,15 @@ pub struct SecurityOutput<Config, Gate> {
     /// always emits it, with the command's default exit rule in it also when
     /// no flag armed a gate, so a CI integration reads the verdict instead of
     /// guessing from a process status it usually cannot see. A gate fails the
-    /// build when `status` is `fail` AND `enforced` is true. The typed
+    /// build when `status` is `fail` and `enforced` is true. The typed
     /// programmatic API runs no CLI gate and leaves it absent. See
     /// [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
-    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// Every narrowing or shaping request this run received, keyed by name,
     /// absent when it was asked for nothing. An entry whose `status` is not
     /// `applied` means the run could not do what it was asked and reported
-    /// something WIDER instead, so what follows is a valid report of a scope
+    /// something wider instead, so what follows is a valid report of a scope
     /// nobody requested. Honoured requests are published too, with
     /// `status: "applied"`, so an absent object means "nothing was asked for",
     /// never "nothing failed". See [`crate::RequestOutcomes`].
@@ -251,15 +251,15 @@ pub struct SecuritySummaryOutput<Config, Gate> {
     /// always emits it, with the command's default exit rule in it also when
     /// no flag armed a gate, so a CI integration reads the verdict instead of
     /// guessing from a process status it usually cannot see. A gate fails the
-    /// build when `status` is `fail` AND `enforced` is true. The typed
+    /// build when `status` is `fail` and `enforced` is true. The typed
     /// programmatic API runs no CLI gate and leaves it absent. See
     /// [`crate::GateOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<crate::GateOutcomes>,
-    /// Every narrowing or shaping request this run RECEIVED, keyed by name,
+    /// Every narrowing or shaping request this run received, keyed by name,
     /// absent when it was asked for nothing. An entry whose `status` is not
     /// `applied` means the run could not do what it was asked and reported
-    /// something WIDER instead, so what follows is a valid report of a scope
+    /// something wider instead, so what follows is a valid report of a scope
     /// nobody requested. Honoured requests are published too, with
     /// `status: "applied"`, so an absent object means "nothing was asked for",
     /// never "nothing failed". See [`crate::RequestOutcomes`].

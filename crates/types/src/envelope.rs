@@ -21,10 +21,10 @@ use crate::semantic::{
 };
 
 /// Schema version for this output format (independent of tool version). Bump
-/// policy: ADDITIVE changes (new optional top-level fields, new optional struct
+/// policy: Additive changes (new optional top-level fields, new optional struct
 /// fields, new array entries, new MCP tools, new CLI flags that map to new
 /// optional fields) do NOT bump the version; consumers receive new fields
-/// without breaking. BREAKING changes (renamed fields, removed fields, type
+/// without breaking. Breaking changes (renamed fields, removed fields, type
 /// changes, enum-variant removals, semantic changes to existing fields) DO
 /// bump. Additions to existing enum-valued required fields bump the affected
 /// envelope version so strict JSON Schema consumers can migrate.

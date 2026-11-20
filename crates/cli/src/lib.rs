@@ -1017,7 +1017,7 @@ fn run_schema_command_if_requested(
     json_style: json_style::JsonStyle,
 ) -> Option<ExitCode> {
     match cli.command {
-        Some(Command::Schema) => Some(schema::run_schema(json_style)),
+        Some(Command::Schema(args)) => Some(schema::run_schema(args, json_style)),
         Some(Command::ConfigSchema) => Some(init::run_config_schema(json_style)),
         Some(Command::PluginSchema) => Some(init::run_plugin_schema(json_style)),
         Some(Command::RulePackSchema) => Some(init::run_rule_pack_schema(json_style)),

@@ -86,8 +86,13 @@ fn severity_key_follows_the_gating_rule() {
     );
     assert_eq!(
         rule_severity_key(by_id("fallow/high-cyclomatic-complexity")),
-        None
+        Some("complexity-cyclomatic")
     );
+    assert_eq!(
+        rule_severity_key(by_id("fallow/long-file")),
+        Some("complexity-file-lines")
+    );
+    assert_eq!(rule_severity_key(by_id("fallow/high-complexity")), None);
     assert_eq!(
         rule_severity_key(by_id("fallow/code-duplication")),
         None,
@@ -963,5 +968,96 @@ fn code_duplication_explanation_describes_each_detection_mode() {
     assert!(
         !full.contains("abstracting identifiers and literals in non-strict modes"),
         "the explanation must not say that every non-strict mode ignores identifiers"
+    );
+}
+
+#[test]
+fn rule_has_guide_separates_own_guides_from_the_fallback() {
+    let unused_export = rule_by_id("fallow/unused-export").unwrap();
+    assert!(rule_has_guide(unused_export));
+    assert_ne!(
+        rule_guide(unused_export).example,
+        fallback_rule_guide().example
+    );
+
+    let unknown = RuleDef {
+        id: "fallow/not-a-rule",
+        category: "Dead code",
+        name: "Not a rule",
+        short: "",
+        full: "",
+        docs_path: "",
+    };
+    assert!(!rule_has_guide(&unknown));
+    assert_eq!(rule_guide(&unknown).example, fallback_rule_guide().example);
+}
+
+/// Each rule with a rationale of its own says what goes wrong, in at most 40
+/// words, and every security catalogue category has its own example line.
+#[test]
+fn rationales_are_short_and_security_categories_have_own_examples() {
+    for rule in all_rules() {
+        let rationale = rule_rationale(rule);
+        if rationale != rule.full {
+            let words = rationale.split_whitespace().count();
+            assert!(words <= 40, "{}: {words} words", rule.id);
+        }
+    }
+    let mut examples = Vec::new();
+    for rule in SECURITY_RULES {
+        if matches!(
+            rule.id,
+            "security/tainted-sink" | "security/client-server-leak" | "security/hardcoded-secret"
+        ) {
+            continue;
+        }
+        assert_ne!(rule_rationale(rule), rule.full, "{}", rule.id);
+        examples.push(rule_guide(rule).example);
+    }
+    let count = examples.len();
+    examples.sort_unstable();
+    examples.dedup();
+    assert_eq!(examples.len(), count, "two categories share an example");
+}
+
+#[test]
+fn structure_styling_and_coverage_rules_have_their_own_guides() {
+    let ids = [
+        "fallow/route-collision",
+        "fallow/dynamic-segment-name-conflict",
+        "fallow/invalid-client-export",
+        "fallow/mixed-client-server-barrel",
+        "fallow/misplaced-directive",
+        "fallow/re-export-cycle",
+        "fallow/package-cycle",
+        "fallow/css-token-drift",
+        "fallow/css-duplicate-block",
+        "fallow/css-selector-complexity",
+        "fallow/css-dead-surface",
+        "fallow/css-broken-reference",
+        "fallow/coverage-intelligence-risky-change",
+        "fallow/coverage-intelligence-delete",
+        "fallow/coverage-intelligence-review",
+        "fallow/coverage-intelligence-refactor",
+    ];
+    for id in ids {
+        let rule = rule_by_id(id).unwrap();
+        assert!(rule_has_guide(rule), "{id} has no guide of its own");
+    }
+    let runtime: Vec<&str> = [
+        "fallow/runtime-safe-to-delete",
+        "fallow/runtime-review-required",
+        "fallow/runtime-low-traffic",
+        "fallow/runtime-coverage-unavailable",
+        "fallow/runtime-coverage",
+    ]
+    .iter()
+    .map(|id| rule_guide(rule_by_id(id).unwrap()).example)
+    .collect();
+    let distinct: rustc_hash::FxHashSet<&str> = runtime.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        runtime.len(),
+        "the runtime rules share an example"
     );
 }

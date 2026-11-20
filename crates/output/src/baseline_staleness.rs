@@ -17,7 +17,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// One channel that narrows a run, or that differs between a run and a saved
 /// baseline.
 ///
-/// Serialized as kebab-case inside `scope_reasons` and published as an OPEN
+/// Serialized as kebab-case inside `scope_reasons` and published as an open
 /// set, the same tolerate-unknown contract `gate_outcomes` keys carry: a name
 /// this build does not emit means "some narrowing", not an error.
 ///
@@ -456,7 +456,7 @@ pub struct BaselineStaleness {
     /// Absent, never null, for this command's own baseline, for a file that
     /// names no writer (an empty file, or a baseline saved before `kind`
     /// existed) and for a `kind` token this version does not know. The value
-    /// set is OPEN: a later release can add a writer, so treat an unknown value
+    /// set is open: a later release can add a writer, so treat an unknown value
     /// as "another command". The CLI computes it once per loaded baseline and
     /// uses the same value for its stderr note.
     #[serde(
@@ -471,7 +471,7 @@ pub struct BaselineStaleness {
     /// some entries use the clone key that older versions shared between
     /// unrelated groups whose code did not parse on its own. The run still
     /// applies the file. `--save-baseline` rewrites it with current keys.
-    /// Absent for a current baseline and on `health`. The value set is OPEN.
+    /// Absent for a current baseline and on `health`. The value set is open.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -494,7 +494,7 @@ pub struct BaselineStaleness {
     /// caller's own choice about what to analyze and an unscoped repeat would
     /// contradict it.
     ///
-    /// The name set is OPEN and the names a command can emit differ per
+    /// The name set is open and the names a command can emit differ per
     /// command; see [`ScopeReason`].
     #[serde(default, skip_serializing_if = "BaselineScopeReasons::is_empty")]
     #[cfg_attr(

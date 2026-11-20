@@ -28,7 +28,7 @@ use crate::coverage::source_map_sources::{
 use crate::coverage::upload_common::{
     self, take_last_two_segments, to_posix_string, url_encode_path_segment,
 };
-use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
+use crate::exit_codes::exit_invalid_input;
 use crate::report::format_bytes;
 
 const LOG_PREFIX: &str = "fallow coverage upload-source-maps";
@@ -38,6 +38,10 @@ const TOTAL_TIMEOUT_SECS: u64 = 60;
 const MAX_ATTEMPTS: u8 = 3;
 const WARN_MAP_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_MAP_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Exit code when at least one source map was not uploaded. The CLI reference
+/// documents this meaning for `coverage upload-source-maps`.
+pub const UPLOAD_INCOMPLETE_EXIT_CODE: u8 = fallow_output::exit_code::EXIT_GATE_FAILED;
 
 #[derive(Debug, Clone)]
 pub struct UploadSourceMapsArgs {
@@ -81,7 +85,7 @@ impl UploadSourceMapsError {
             }
             Self::Partial(outcomes) => {
                 print_failure_summary(&outcomes);
-                exit_gate_failed()
+                ExitCode::from(UPLOAD_INCOMPLETE_EXIT_CODE)
             }
         }
     }
@@ -1251,6 +1255,7 @@ fn print_dry_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exit_codes::exit_gate_failed;
     use tempfile::tempdir;
 
     #[test]

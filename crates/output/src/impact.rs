@@ -183,14 +183,14 @@ pub struct ImpactReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_recorded: Option<String>,
     /// Git SHA of the most recent recorded run, so a consumer can tell which
-    /// commit the `surfacing` counts belong to. This is an ABBREVIATED SHA
+    /// commit the `surfacing` counts belong to. This is an abbreviated SHA
     /// (`git rev-parse --short`), so it is for display/correlation only and will
     /// not match a full 40-character SHA from `$GITHUB_SHA` or the git API
     /// without expansion. None when the latest run had no SHA (not a git repo)
     /// or there are no records yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_git_sha: Option<String>,
-    /// Counts from the most recent recorded run. These are CHANGED-FILE scoped
+    /// Counts from the most recent recorded run. These are changed-file scoped
     /// (each record comes from a `fallow audit` run, whose default `new-only`
     /// gate counts only findings in the changed files of that run), NOT a
     /// whole-project total.
@@ -201,7 +201,7 @@ pub struct ImpactReport {
     /// records exist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trend: Option<TrendSummary>,
-    /// Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+    /// Counts from the most recent whole-project `fallow` run. Whole-project
     /// scope (not changed-file), so this is the current issue total across the
     /// whole repo, context next to the actionable changed-file `surfacing`
     /// count. None until a full `fallow` run has been recorded. v1.6.
@@ -271,7 +271,7 @@ pub struct CrossRepoTotals {
     /// Lifetime commit-gate containment events across projects.
     pub containment_count: usize,
     /// Sum of whole-project issue totals across projects that have a full-run
-    /// baseline, as of EACH project's last full `fallow` run (not a simultaneous
+    /// baseline, as of each project's last full `fallow` run (not a simultaneous
     /// snapshot).
     pub project_wide_issues: usize,
     /// Projects that have recorded at least one full `fallow` run.
@@ -283,7 +283,7 @@ pub struct CrossRepoTotals {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CrossRepoProjectEntry {
     /// Stable, non-reversible project key (the store filename stem); the
-    /// cross-tool/cross-run JOIN key. NEVER a path.
+    /// cross-tool/cross-run join key. Never a path.
     pub project_key: String,
     /// Repo basename for display (never a full path). Absent on pre-v5 stores
     /// (the row falls back to the short key).

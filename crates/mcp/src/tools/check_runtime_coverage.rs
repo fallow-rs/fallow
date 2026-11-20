@@ -9,7 +9,7 @@ use super::{
 };
 
 /// Run the runtime coverage health merge. This stays CLI-backed while the
-/// paid sidecar/license integration remains command-owned.
+/// runtime coverage add-on and license integration remains command-owned.
 pub async fn run_check_runtime_coverage(
     binary: &str,
     params: CheckRuntimeCoverageParams,

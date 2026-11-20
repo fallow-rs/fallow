@@ -1337,7 +1337,7 @@ pub struct CssAnalytics {
     /// retains (compiled utility CSS can emit thousands of `!important` rules),
     /// so consumers can note that per-rule findings were capped.
     pub notable_truncated: bool,
-    /// Distinct color VALUES in the stylesheet, sorted (a palette-size /
+    /// Distinct color values in the stylesheet, sorted (a palette-size /
     /// design-token-sprawl signal). The parser canonicalizes notation, so the
     /// authored format is NOT preserved: `red`, `#f00`, `#ff0000`, and
     /// `rgb(255,0,0)` all collapse to one entry, and every legacy sRGB notation
@@ -1366,28 +1366,28 @@ pub struct CssAnalytics {
     #[serde(skip)]
     #[cfg_attr(feature = "schema", schemars(skip))]
     pub custom_property_definitions: Vec<CssCustomPropertyDefinition>,
-    /// Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
+    /// Distinct custom properties (`--x`) defined in the stylesheet, sorted.
     pub defined_custom_properties: Vec<String>,
-    /// Distinct custom properties REFERENCED via `var()` in the stylesheet.
+    /// Distinct custom properties referenced via `var()` in the stylesheet.
     pub referenced_custom_properties: Vec<String>,
-    /// Distinct `@keyframes` names DEFINED in the stylesheet, sorted.
+    /// Distinct `@keyframes` names defined in the stylesheet, sorted.
     pub defined_keyframes: Vec<String>,
-    /// Distinct `@keyframes` names REFERENCED via `animation` / `animation-name`.
+    /// Distinct `@keyframes` names referenced via `animation` / `animation-name`.
     pub referenced_keyframes: Vec<String>,
-    /// Distinct custom properties REGISTERED via an `@property` rule, sorted.
+    /// Distinct custom properties registered via an `@property` rule, sorted.
     pub registered_custom_properties: Vec<String>,
-    /// Distinct cascade layers DECLARED (via `@layer a, b;` statements or named
+    /// Distinct cascade layers declared (via `@layer a, b;` statements or named
     /// `@layer a { }` blocks), sorted.
     pub declared_layers: Vec<String>,
-    /// Distinct cascade layers POPULATED by a named `@layer a { }` block, sorted.
+    /// Distinct cascade layers populated by a named `@layer a { }` block, sorted.
     /// A layer declared but never populated (and not imported into) is a
     /// cleanup candidate.
     pub populated_layers: Vec<String>,
-    /// Distinct font families DECLARED by an `@font-face` rule in the stylesheet,
+    /// Distinct font families declared by an `@font-face` rule in the stylesheet,
     /// sorted. A declared family referenced by no `font-family` anywhere is a
     /// dead web-font payload (cleanup candidate).
     pub defined_font_faces: Vec<String>,
-    /// Distinct font families REFERENCED via `font-family` / `font` in the
+    /// Distinct font families referenced via `font-family` / `font` in the
     /// stylesheet, sorted (generic keywords like `serif` excluded).
     pub referenced_font_families: Vec<String>,
     /// Per-rule declaration-block fingerprints for rules at or above the minimum

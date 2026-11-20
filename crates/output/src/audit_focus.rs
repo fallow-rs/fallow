@@ -2,8 +2,8 @@
 
 use serde::Serialize;
 
-/// The focus label for a review unit. `Skip` is the SAFE explicit-skip label and
-/// is runtime-backed ONLY: it is producible solely on the paid runtime path
+/// The focus label for a review unit. `Skip` is the safe explicit-skip label and
+/// is runtime-backed only: it is producible solely on the paid runtime path
 /// and solely for a unit runtime-proves cold with zero risk signals. Free mode
 /// (no runtime evidence) emits only `ReviewHere` / `NotPrioritized`, never `Skip`
 /// (the build-focus-map labeller cannot reach the `Skip` arm without runtime
@@ -33,10 +33,10 @@ impl FocusLabel {
     }
 }
 
-/// A per-unit confidence flag. The EXACT panel-decided strings: a dynamically-
+/// A per-unit confidence flag. The exact panel-decided strings: a dynamically-
 /// wired or re-export-heavy unit carries one so its static-reachability signal is
 /// not trusted as complete (the anti-silent-de-prioritization guard). The flag
-/// NEVER lowers the score; it is advisory provenance.
+/// never lowers the score; it is advisory provenance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -147,7 +147,7 @@ pub struct FocusUnit {
     pub confidence: Vec<ConfidenceFlag>,
 }
 
-/// The weighted focus map: the ranked `review-here` units plus the FULL
+/// The weighted focus map: the ranked `review-here` units plus the full
 /// `deprioritized` escape-hatch list, so nothing is hidden.
 ///
 /// Completeness invariant (the escape-hatch done-condition): the two lists
@@ -159,7 +159,7 @@ pub struct FocusMap {
     /// Units labeled `review-here`, ranked by composite score (descending), ties
     /// broken by path for determinism.
     pub review_here: Vec<FocusUnit>,
-    /// EVERY de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`
+    /// Every de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`
     /// units on the paid path) -- the escape hatch. Always present and fully
     /// enumerated so a reviewer can always "show me what you de-prioritized"; the
     /// human brief collapses it by default and re-expands under

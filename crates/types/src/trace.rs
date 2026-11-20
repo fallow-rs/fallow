@@ -71,10 +71,10 @@ pub struct ExportTrace {
     pub semantic: Option<crate::semantic::SemanticSymbolTrace>,
 }
 
-/// Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
+/// Result of tracing a class / enum / store member: the `--trace FILE:NAME`
 /// fallback when `NAME` is not a top-level export but a member declared on one
 /// (issue #1744). The trace runs on the module graph only, so it reports the
-/// OWNING export's reachability and usage (the gating precondition for
+/// owning export's reachability and usage (the gating precondition for
 /// member-level crediting) plus a pointer to the right `--unused-*-members`
 /// command, rather than per-member crediting provenance.
 #[derive(Debug, Serialize)]

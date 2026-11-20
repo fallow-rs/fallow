@@ -193,7 +193,7 @@ fn unsupported_lean_use(cli: &Cli) -> Option<&'static str> {
 fn resolve_command_output(cli: &Cli, selected: OutputFormat) -> OutputFormat {
     match cli.command.as_ref() {
         Some(
-            Command::Schema
+            Command::Schema(_)
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::RulePackSchema
@@ -217,10 +217,10 @@ fn resolve_command_output(cli: &Cli, selected: OutputFormat) -> OutputFormat {
 
 /// Whether the selected command's successful payload is JSON. Human-only
 /// commands may still use `--format json` for structured errors.
-fn command_payload_is_json(cli: &Cli, selected: OutputFormat) -> bool {
+pub fn command_payload_is_json(cli: &Cli, selected: OutputFormat) -> bool {
     match cli.command.as_ref() {
         Some(
-            Command::Schema
+            Command::Schema(_)
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::RulePackSchema

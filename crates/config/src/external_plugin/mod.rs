@@ -199,7 +199,7 @@ pub struct ExternalPluginDef {
     #[schemars(with = "EntryPointRole", default = "schema_default_entry_point_role")]
     pub entry_point_role: Option<EntryPointRole>,
 
-    /// Entry points DERIVED from framework manifest files.
+    /// Entry points derived from framework manifest files.
     ///
     /// Unlike `entryPoints` (static globs), each rule finds manifest files by a
     /// recursive glob, parses them, and seeds sibling entries resolved relative
@@ -495,7 +495,7 @@ pub struct ManifestExistsPredicate {
     pub exists: bool,
 }
 
-/// A rule that seeds entry points DERIVED from framework manifest files.
+/// A rule that seeds entry points derived from framework manifest files.
 ///
 /// For every file matching `manifests` (a recursive glob) that passes the
 /// manifest-level `when` gate, each rule in `entries` is resolved relative to

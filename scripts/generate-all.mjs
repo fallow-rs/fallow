@@ -28,6 +28,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
 const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
+const CLI_REFERENCE_PATH = "docs/cli-reference.json";
 const SIMILAR_CODE_SNAPSHOT_SCHEMA_PATH = "crates/api/similar-code-snapshot-schema.json";
 /**
  * The maintainer copy in `.agents/skills/fallow` is not a target here. The
@@ -124,6 +125,7 @@ const generateSchemaFiles = (stagingRoot) => {
   const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema", "--pretty"));
   const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema", "--pretty"));
   const capabilitySchema = ensureTrailingNewline(cargoFallow("schema", "--pretty"));
+  const cliReference = ensureTrailingNewline(cargoFallow("schema", "--cli-reference", "--pretty"));
   const registry = issueRegistry(capabilitySchema);
   const output = ensureTrailingNewline(outputSchema());
   const similarCodeSnapshotSchema = ensureTrailingNewline(outputSchema("--similar-code-snapshot"));
@@ -133,6 +135,7 @@ const generateSchemaFiles = (stagingRoot) => {
   writeStaged(stagingRoot, "rule-pack-schema.json", rulePackSchema);
   writeStaged(stagingRoot, CAPABILITY_SCHEMA_PATH, capabilitySchema);
   writeStaged(stagingRoot, ISSUE_REGISTRY_PATH, registry);
+  writeStaged(stagingRoot, CLI_REFERENCE_PATH, cliReference);
   writeStaged(stagingRoot, OUTPUT_SCHEMA_PATH, output);
   writeStaged(stagingRoot, SIMILAR_CODE_SNAPSHOT_SCHEMA_PATH, similarCodeSnapshotSchema);
 };

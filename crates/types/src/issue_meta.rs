@@ -1375,7 +1375,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
         code: "unused-class-member",
         sarif_description: "Class member is never referenced",
-        meta_description: "Class methods and properties that are never referenced outside the class.",
+        meta_description: "Class methods and properties that no code uses, also not through `this` inside the class.",
         meta_docs_path: "explanations/dead-code#unused-class-members",
         meta_name: "Unused Class Members",
         summary_label: "Unused class members",
@@ -1858,7 +1858,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "prop-drilling",
-        sarif_description: "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
+        sarif_description: "A React/Preact prop is forwarded unchanged through 2 or more components to a distant consumer",
         meta_description: "A React or Preact prop is forwarded unchanged through multiple pass-through components to a distant consumer.",
         meta_docs_path: "explanations/dead-code#prop-drilling",
         meta_name: "Prop drilling",

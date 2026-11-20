@@ -39,7 +39,7 @@ pub enum GateStatus {
 /// gate makes the run exit non-zero. A run that was told never to fail reports
 /// a failed gate as `status: fail` with `enforced: false`.
 ///
-/// **A gate fails the build when `status` is `fail` AND `enforced` is true.**
+/// **A gate fails the build when `status` is `fail` and `enforced` is true.**
 /// One member alone does not decide it. `enforced` is true on every armed
 /// gate, also on a gate that passed. Thus a gate rule on `enforced` alone
 /// fails every run that armed a gate. Read `status` alone to decide what to
@@ -189,7 +189,7 @@ impl GateOutcome {
 /// name, and the members are in the order of the names. A tool never writes an
 /// empty object. When no gate ran, the member is absent.
 ///
-/// The key set is OPEN. A name that a consumer does not recognize means "some
+/// The key set is open. A name that a consumer does not recognize means "some
 /// gate", not an error.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

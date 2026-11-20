@@ -1835,6 +1835,19 @@ pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// The abbreviated merge base of `rev` and `HEAD`: the commit that the
+/// changed-file diff (`<rev>...HEAD`) starts from.
+pub fn git_short_merge_base(root: &Path, rev: &str) -> Option<String> {
+    let merge_base = git_stdout(root, &["merge-base", "--end-of-options", rev, "HEAD"])?;
+    git_stdout(root, &["rev-parse", "--short", &merge_base])
+}
+
+fn git_stdout(root: &Path, args: &[&str]) -> Option<String> {
+    let output = git_command_in(root).args(args).output().ok()?;
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (output.status.success() && !value.is_empty()).then_some(value)
+}
+
 pub fn git_toplevel(root: &Path) -> Option<PathBuf> {
     let mut command = git_command_in(root);
     command.args(["rev-parse", "--show-toplevel"]);

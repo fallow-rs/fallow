@@ -178,9 +178,12 @@ impl DuplicationHumanBuilder<'_> {
         self.lines.push(format!(
             "{} {}",
             "\u{25cf}".cyan(),
-            format!("Duplicates ({corpus_groups} clone groups)")
-                .cyan()
-                .bold()
+            format!(
+                "Duplicates ({corpus_groups} clone group{})",
+                plural(corpus_groups)
+            )
+            .cyan()
+            .bold()
         ));
         if self.explain
             && let Some(rule) = crate::explain::rule_by_id("fallow/code-duplication")
@@ -629,9 +632,11 @@ fn print_duplication_summary_scope_note(report: &DuplicationReport) {
     outln!(
         "  {}",
         format!(
-            "Corpus totals: {} clone groups, {} clone families; duplicated lines and rate cover all of it",
+            "Corpus totals: {} clone group{}, {} clone {}; duplicated lines and rate cover all of it",
             report.clone_groups_total(),
+            plural(report.clone_groups_total()),
             report.clone_families_total(),
+            if report.clone_families_total() == 1 { "family" } else { "families" },
         )
         .dimmed()
     );
@@ -793,8 +798,9 @@ fn print_grouped_duplication_bucket_overflow(total_groups: usize) {
         outln!(
             "  {}",
             format!(
-                "... and {} more clone groups",
-                total_groups - MAX_CLONE_GROUPS
+                "... and {} more clone group{}",
+                total_groups - MAX_CLONE_GROUPS,
+                plural(total_groups - MAX_CLONE_GROUPS)
             )
             .dimmed()
         );
@@ -1119,6 +1125,7 @@ mod tests {
         let text = plain(&lines);
         assert!(text.contains("1 instance"));
         assert!(!text.contains("1 instances"));
+        assert!(text.contains("Duplicates (1 clone group)"), "{text}");
     }
 
     #[test]

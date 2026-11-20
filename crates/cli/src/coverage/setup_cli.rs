@@ -8,49 +8,75 @@ use super::{CloudSetupArgs, CoverageSubcommand, SetupArgs};
 #[derive(Args, Debug, Clone, Default)]
 pub struct CoverageSetupCli {
     /// Accept all prompts automatically.
-    #[arg(short = 'y', long)]
+    #[arg(short = 'y', long, help_heading = "Run")]
     pub yes: bool,
 
     /// Print instructions instead of prompting.
-    #[arg(long)]
+    #[arg(long, help_heading = "Run")]
     pub non_interactive: bool,
 
     /// Emit deterministic setup instructions as JSON. Implies --non-interactive.
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     pub json: bool,
 
     /// Plan the Fallow Cloud setup: beacon snippets with the deployed
     /// commit SHA, and CI steps that upload the inventory and source maps
     /// and register the deployment for that SHA. Writes nothing.
-    #[arg(long, conflicts_with_all = ["yes", "non_interactive"])]
+    #[arg(long, conflicts_with_all = ["yes", "non_interactive"], help_heading = "Fallow Cloud")]
     pub cloud: bool,
 
     /// With --cloud: poll Fallow Cloud until every setup step is done.
     /// Reads `$FALLOW_API_KEY`. Exit 0 when done, 1 on timeout.
-    #[arg(long, requires = "cloud")]
+    #[arg(long, requires = "cloud", help_heading = "Fallow Cloud")]
     pub wait: bool,
 
     /// With --wait: the longest wait in seconds.
-    #[arg(long, value_name = "SECS", default_value_t = 600, requires = "wait")]
+    #[arg(
+        long,
+        value_name = "SECS",
+        default_value_t = 600,
+        requires = "wait",
+        help_heading = "Fallow Cloud"
+    )]
     pub wait_timeout: u64,
 
     /// With --cloud: project identifier (`owner/repo`). Default:
     /// $GITHUB_REPOSITORY, then $CI_PROJECT_PATH, then the git remote.
-    #[arg(long, value_name = "PROJECT_ID", requires = "cloud")]
+    #[arg(
+        long,
+        value_name = "PROJECT_ID",
+        requires = "cloud",
+        help_heading = "Fallow Cloud"
+    )]
     pub project_id: Option<String>,
 
     /// With --cloud: the deployed commit SHA that --wait checks.
     /// Default: `git rev-parse HEAD`.
-    #[arg(long, value_name = "SHA", requires = "cloud")]
+    #[arg(
+        long,
+        value_name = "SHA",
+        requires = "cloud",
+        help_heading = "Fallow Cloud"
+    )]
     pub git_sha: Option<String>,
 
     /// With --wait: Fallow Cloud API key. Precedence: this flag > $FALLOW_API_KEY.
-    #[arg(long, value_name = "KEY", requires = "wait")]
+    #[arg(
+        long,
+        value_name = "KEY",
+        requires = "wait",
+        help_heading = "Fallow Cloud"
+    )]
     pub api_key: Option<String>,
 
     /// With --cloud: Fallow Cloud API base URL. Precedence: this flag >
     /// $FALLOW_API_URL > the default Fallow Cloud URL.
-    #[arg(long, value_name = "URL", requires = "cloud")]
+    #[arg(
+        long,
+        value_name = "URL",
+        requires = "cloud",
+        help_heading = "Fallow Cloud"
+    )]
     pub api_endpoint: Option<String>,
 }
 

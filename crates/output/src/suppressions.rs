@@ -66,7 +66,7 @@ pub struct SuppressionInventorySummary {
     /// Markers without a human-authored `--` reason.
     pub without_reason: usize,
     /// Markers that also appear as stale-suppression findings this run. This
-    /// is a JOIN against the existing stale-suppression detector's output
+    /// is a join against the existing stale-suppression detector's output
     /// (matched by file and kind), not a new detection.
     pub stale: usize,
     /// Marker counts per suppressed kind, sorted by count (descending) then
