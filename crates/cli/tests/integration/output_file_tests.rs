@@ -162,6 +162,49 @@ fn coexists_with_sarif_file() {
 }
 
 #[test]
+fn sarif_file_on_a_command_that_writes_no_sarif_file_exits_2() {
+    // Only bare `fallow`, `dead-code`, `architecture` and `security` write the
+    // SARIF file. Any other command must reject the flag: an exit 0 with no
+    // file tells a CI job that the upload input exists when it does not.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sarif = dir.path().join("audit.sarif");
+    let result = run_fallow(
+        "audit",
+        FIXTURE,
+        &[
+            "--base",
+            "HEAD",
+            "--quiet",
+            "--sarif-file",
+            sarif.to_str().unwrap(),
+        ],
+    );
+
+    assert_eq!(
+        result.code, 2,
+        "audit must reject --sarif-file; stdout: {}; stderr: {}",
+        result.stdout, result.stderr
+    );
+    let error_lines: Vec<&str> = result
+        .stderr
+        .lines()
+        .filter(|line| line.contains("--sarif-file"))
+        .collect();
+    assert_eq!(
+        error_lines.len(),
+        1,
+        "one error line names the flag; stderr: {}",
+        result.stderr
+    );
+    assert!(
+        error_lines[0].contains("`fallow audit`"),
+        "the error names the command; stderr: {}",
+        result.stderr
+    );
+    assert!(!sarif.exists(), "no SARIF file is written");
+}
+
+#[test]
 fn confirmation_is_suppressed_when_a_command_errors_before_rendering() {
     // `--report-only` with `--min-score` is rejected inside dispatch (exit 2),
     // after the sink is opened: the error goes to stdout, the file stays empty,
