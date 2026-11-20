@@ -20,8 +20,8 @@
 //! For the unused-dependency-override and misconfigured-dependency-override
 //! detectors we need both the structured map of entries and the 1-based line
 //! number of each entry in the source so findings can point users to the exact
-//! line. The internal `yaml` module and `serde_json` give us the structural
-//! parse; a second targeted scan over the raw source recovers the line numbers.
+//! line. The `pnpm_workspace` module parses the YAML form and gives the line
+//! of each key. The `package.json` form uses a line scan.
 //!
 //! The detector treats the following key shapes as valid pnpm syntax:
 //! - `axios` (bare package)
@@ -37,7 +37,7 @@
 
 use std::path::Path;
 
-use super::pnpm_catalog::{parse_key, strip_inline_comment};
+use super::pnpm_workspace::{KeyLocation, PnpmWorkspaceDoc};
 
 /// Where an override entry was declared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -70,8 +70,12 @@ pub struct PnpmOverrideEntry {
     /// The right-hand side of the entry (the version pnpm should force).
     /// `None` when the value is missing or unparsable.
     pub raw_value: Option<String>,
-    /// 1-based line number of the entry within the source file.
+    /// 1-based line of the key, for reports. It is 1 when the position is
+    /// not known.
     pub line: u32,
+    /// Where the key of the entry is in the source. A fix can edit the
+    /// entry by line only when this is [`KeyLocation::Block`].
+    pub location: KeyLocation,
 }
 
 /// Parsed structure of an override key.
@@ -95,35 +99,9 @@ pub struct ParsedOverrideKey {
 /// so callers can surface a workspace diagnostic instead of silently dropping
 /// every entry.
 pub fn parse_pnpm_workspace_overrides(source: &str) -> Result<PnpmOverrideData, String> {
-    let document = crate::yaml::parse(source).map_err(|error| error.to_string())?;
-    let Some(mapping) = document.root().as_mapping() else {
-        return Ok(PnpmOverrideData::default());
-    };
-    let Some(overrides_value) = mapping.get("overrides") else {
-        return Ok(PnpmOverrideData::default());
-    };
-    let Some(overrides_map) = overrides_value.as_mapping() else {
-        return Ok(PnpmOverrideData::default());
-    };
-
-    let line_index = build_yaml_line_index(source);
-    let entries = overrides_map
-        .iter()
-        .filter_map(|(k, v)| {
-            let raw_key = k.as_str()?.to_string();
-            let raw_value = v.scalar_text().map(str::to_string);
-            let line = line_index.line_for(&raw_key)?;
-            let parsed_key = parse_override_key(&raw_key);
-            Some(PnpmOverrideEntry {
-                raw_key,
-                parsed_key,
-                raw_value,
-                line,
-            })
-        })
-        .collect();
-
-    Ok(PnpmOverrideData { entries })
+    PnpmWorkspaceDoc::parse(source)
+        .map(PnpmWorkspaceDoc::into_overrides)
+        .map_err(|error| error.to_string())
 }
 
 /// Parse the `pnpm.overrides` section of a root `package.json`. Returns an
@@ -158,6 +136,7 @@ pub fn parse_pnpm_package_json_overrides(source: &str) -> PnpmOverrideData {
                 parsed_key,
                 raw_value,
                 line,
+                location: KeyLocation::Unknown,
             })
         })
         .collect();
@@ -298,35 +277,6 @@ impl YamlLineIndex {
             .find(|(k, _)| k == key)
             .map(|(_, line)| *line)
     }
-}
-
-/// Walk the raw YAML source to map each `overrides:` entry key to its 1-based
-/// line number. Mirrors the catalog parser's section-aware scanner.
-fn build_yaml_line_index(source: &str) -> YamlLineIndex {
-    let mut entries = Vec::new();
-    let mut in_overrides = false;
-
-    for (idx, raw_line) in source.lines().enumerate() {
-        let line_no = u32::try_from(idx).unwrap_or(u32::MAX).saturating_add(1);
-        let trimmed = strip_inline_comment(raw_line);
-        let trimmed_left = trimmed.trim_start();
-        let indent = trimmed.len() - trimmed_left.len();
-
-        if trimmed_left.is_empty() {
-            continue;
-        }
-
-        if indent == 0 {
-            in_overrides = trimmed_left.starts_with("overrides:");
-            continue;
-        }
-
-        if in_overrides && let Some(key) = parse_key(trimmed_left) {
-            entries.push((key, line_no));
-        }
-    }
-
-    YamlLineIndex { entries }
 }
 
 /// Walk a raw `package.json` source string to map each `pnpm.overrides` entry

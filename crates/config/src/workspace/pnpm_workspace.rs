@@ -4,6 +4,7 @@
 //! overrides, with the source position of each key.
 
 use super::pnpm_catalog::{PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, PnpmCatalogGroup};
+use super::pnpm_overrides::{PnpmOverrideData, PnpmOverrideEntry, parse_override_key};
 use crate::yaml::{self, YamlError, YamlMapping, YamlNode};
 
 /// Where the key of a `pnpm-workspace.yaml` entry is in the source.
@@ -34,6 +35,7 @@ pub enum KeyLocation {
 pub struct PnpmWorkspaceDoc {
     packages: Vec<String>,
     catalogs: PnpmCatalogData,
+    overrides: PnpmOverrideData,
 }
 
 impl PnpmWorkspaceDoc {
@@ -50,6 +52,7 @@ impl PnpmWorkspaceDoc {
         Ok(Self {
             packages: packages_of(root),
             catalogs: catalogs_of(source, &lines, root),
+            overrides: overrides_of(source, &lines, root),
         })
     }
 
@@ -69,6 +72,18 @@ impl PnpmWorkspaceDoc {
     #[must_use]
     pub fn into_catalogs(self) -> PnpmCatalogData {
         self.catalogs
+    }
+
+    /// The entries of the top-level `overrides` mapping.
+    #[must_use]
+    pub fn overrides(&self) -> &PnpmOverrideData {
+        &self.overrides
+    }
+
+    /// The overrides, by value.
+    #[must_use]
+    pub fn into_overrides(self) -> PnpmOverrideData {
+        self.overrides
     }
 }
 
@@ -224,6 +239,35 @@ fn catalogs_of(source: &str, lines: &LineStarts, root: YamlNode<'_>) -> PnpmCata
         }
     }
     data
+}
+
+fn overrides_of(source: &str, lines: &LineStarts, root: YamlNode<'_>) -> PnpmOverrideData {
+    let Some((owner_key, node)) = top_level_entry(root, "overrides") else {
+        return PnpmOverrideData::default();
+    };
+    let Some(mapping) = node.as_mapping() else {
+        return PnpmOverrideData::default();
+    };
+    let aliased = is_alias(owner_key, node);
+    let entries = mapping
+        .iter()
+        .filter_map(|(key, value)| {
+            let raw_key = key.as_str()?.to_string();
+            let (line, location) = locate_key(source, lines, node, key, value);
+            Some(PnpmOverrideEntry {
+                parsed_key: parse_override_key(&raw_key),
+                raw_key,
+                raw_value: value.scalar_text().map(str::to_string),
+                line,
+                location: if aliased {
+                    KeyLocation::Unknown
+                } else {
+                    location
+                },
+            })
+        })
+        .collect();
+    PnpmOverrideData { entries }
 }
 
 fn packages_of(root: YamlNode<'_>) -> Vec<String> {
@@ -571,5 +615,47 @@ mod tests {
         for (index, entry) in entries.iter().enumerate() {
             assert_eq!(entry.line as usize, index + 2);
         }
+    }
+
+    #[test]
+    fn flow_style_overrides_are_kept() {
+        let doc = doc("overrides: {react: \"catalog:\"}\n");
+        let entries = &doc.overrides().entries;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_key, "react");
+        assert_eq!(entries[0].raw_value.as_deref(), Some("catalog:"));
+        assert_eq!(entries[0].line, 1);
+        assert_eq!(entries[0].location, KeyLocation::Flow { line: 1 });
+    }
+
+    #[test]
+    fn block_overrides_own_their_lines() {
+        let doc = doc(
+            "packages:\n  - 'packages/*'\n\noverrides:\n  axios: ^1.6.0\n  \"@types/react@<18\": '18.0.0'\n  \"react>react-dom\": ^17\n",
+        );
+        let locations: Vec<_> = doc
+            .overrides()
+            .entries
+            .iter()
+            .map(|entry| (entry.line, entry.location))
+            .collect();
+        assert_eq!(
+            locations,
+            [5, 6, 7].map(|line| (
+                line,
+                KeyLocation::Block {
+                    line,
+                    end_line: line
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn one_parse_gives_all_three_sections() {
+        let doc = doc("packages:\n  - 'a/*'\ncatalog:\n  react: ^18\noverrides:\n  axios: ^1\n");
+        assert_eq!(doc.packages(), ["a/*"]);
+        assert_eq!(catalog(&doc, "default").entries.len(), 1);
+        assert_eq!(doc.overrides().entries.len(), 1);
     }
 }

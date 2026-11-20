@@ -17,7 +17,7 @@ fn flow_style_catalog_group_is_not_empty() {
         .iter()
         .map(|group| (group.group.catalog_name.as_str(), group.group.line))
         .collect();
-    assert_eq!(empty, vec![("old", 7)]);
+    assert_eq!(empty, vec![("old", 8)]);
 
     let unresolved: Vec<_> = results
         .unresolved_catalog_references

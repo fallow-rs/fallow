@@ -450,98 +450,6 @@ enum Section {
     NamedCatalogs,
 }
 
-/// Strip an unquoted trailing `# ...` comment from a single line. Preserves
-/// `#` characters inside quoted strings so `"# in quotes": "value"` is left
-/// alone.
-pub(super) fn strip_inline_comment(line: &str) -> &str {
-    let bytes = line.as_bytes();
-    let mut in_single = false;
-    let mut in_double = false;
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'\'' if !in_double => in_single = !in_single,
-            b'"' if !in_single => in_double = !in_double,
-            b'#' if !in_single && !in_double => {
-                let head = &line[..i];
-                return head.trim_end();
-            }
-            _ => {}
-        }
-    }
-    line.trim_end()
-}
-
-/// Parse a key declaration of the form `key:` or `key: value`, returning just
-/// the (unquoted) key. Returns `None` when the line is not a key declaration
-/// (e.g., a list item `- foo`, a block scalar marker, or malformed).
-pub(super) fn parse_key(line: &str) -> Option<String> {
-    let bytes = line.as_bytes();
-    if bytes.is_empty() {
-        return None;
-    }
-    let first = bytes[0];
-    if first == b'-' || first == b'#' {
-        return None;
-    }
-
-    if first == b'"' || first == b'\'' {
-        let quote = first;
-        let mut i = 1;
-        while i < bytes.len() {
-            let b = bytes[i];
-            if b == b'\\' && i + 1 < bytes.len() {
-                i += 2;
-                continue;
-            }
-            if b == quote {
-                let key = &line[1..i];
-                let rest = &line[i + 1..];
-                let trimmed = rest.trim_start();
-                if trimmed.starts_with(':') {
-                    return Some(unescape_key(key));
-                }
-                return None;
-            }
-            i += 1;
-        }
-        return None;
-    }
-
-    let colon_pos = bytes.iter().position(|&b| b == b':')?;
-    let key = line[..colon_pos].trim();
-    if key.is_empty() {
-        return None;
-    }
-    if key.contains(['{', '[', '&', '*', '!']) {
-        return None;
-    }
-    Some(key.to_string())
-}
-
-fn unescape_key(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut chars = raw.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\'
-            && let Some(next) = chars.next()
-        {
-            match next {
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                other => {
-                    out.push('\\');
-                    out.push(other);
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,24 +690,5 @@ mod tests {
         let data = parse_pnpm_catalog_data(yaml).expect("valid yaml");
         assert_eq!(data.catalogs.len(), 1);
         assert_eq!(data.catalogs[0].entries[0].line, 5);
-    }
-
-    #[test]
-    fn strip_inline_comment_preserves_quoted_hash() {
-        assert_eq!(strip_inline_comment("foo: \"a#b\" # tail"), "foo: \"a#b\"");
-        assert_eq!(strip_inline_comment("# top-level"), "");
-        assert_eq!(strip_inline_comment("plain: value"), "plain: value");
-    }
-
-    #[test]
-    fn parse_key_handles_simple_and_quoted() {
-        assert_eq!(parse_key("react: ^18"), Some("react".to_string()));
-        assert_eq!(
-            parse_key("\"@scope/lib\": ^1"),
-            Some("@scope/lib".to_string())
-        );
-        assert_eq!(parse_key("'pkg': ^2"), Some("pkg".to_string()));
-        assert_eq!(parse_key("- item"), None);
-        assert_eq!(parse_key(""), None);
     }
 }
