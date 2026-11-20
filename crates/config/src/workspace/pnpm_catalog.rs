@@ -28,11 +28,11 @@
 //!
 //! For the unused-catalog-entry detector we need both the structured catalog
 //! map and the 1-based line number of each entry in the source so findings
-//! can point users to the exact line. The internal `yaml` module gives us the
-//! structural parse; a second targeted scan over the raw source recovers the
-//! line numbers.
+//! can point users to the exact line. The `pnpm_workspace` module parses the
+//! YAML form and gives the line of each key. The `package.json` form uses a
+//! line scan.
 
-use crate::yaml::{YamlMapping, YamlNode};
+use super::pnpm_workspace::KeyLocation;
 
 /// Structured catalog data extracted from a package manager catalog source.
 #[derive(Debug, Clone, Default)]
@@ -91,8 +91,12 @@ pub struct PnpmCatalogEntry {
     /// Version specifier of the entry (e.g. `"^18.2.0"` or
     /// `"npm:typescript@~7.0.2"`), or `None` when the value is not a scalar.
     pub specifier: Option<String>,
-    /// 1-based line number of the entry within the source file.
+    /// 1-based line of the key, for reports. It is 1 when the position is
+    /// not known.
     pub line: u32,
+    /// Where the key of the entry is in the source. A fix can edit the
+    /// entry by line only when this is [`KeyLocation::Block`].
+    pub location: KeyLocation,
 }
 
 /// A named catalog group under `catalogs:` with no package entries.
@@ -100,8 +104,12 @@ pub struct PnpmCatalogEntry {
 pub struct PnpmCatalogGroup {
     /// Catalog group name (e.g. `"react17"` for `catalogs.react17`).
     pub name: String,
-    /// 1-based line number of the group header within the source file.
+    /// 1-based line of the key, for reports. It is 1 when the position is
+    /// not known.
     pub line: u32,
+    /// Where the key of the group is in the source. A fix can edit the
+    /// group by line only when this is [`KeyLocation::Block`].
+    pub location: KeyLocation,
 }
 
 /// Parse the catalog sections of a `pnpm-workspace.yaml` file.
@@ -112,88 +120,9 @@ pub struct PnpmCatalogGroup {
 /// is an `Err` carrying the parse error text so callers can surface a
 /// workspace diagnostic instead of silently dropping every entry.
 pub fn parse_pnpm_catalog_data(source: &str) -> Result<PnpmCatalogData, String> {
-    let document = crate::yaml::parse(source).map_err(|error| error.to_string())?;
-    let Some(mapping) = document.root().as_mapping() else {
-        return Ok(PnpmCatalogData::default());
-    };
-
-    let line_index = build_line_index(source);
-    let mut catalogs = Vec::new();
-    let mut empty_named_catalog_groups = Vec::new();
-
-    collect_yaml_default_catalog(mapping.get("catalog"), &line_index, &mut catalogs);
-    collect_yaml_named_catalogs(
-        mapping.get("catalogs"),
-        &line_index,
-        &mut catalogs,
-        &mut empty_named_catalog_groups,
-    );
-
-    Ok(PnpmCatalogData {
-        catalogs,
-        empty_named_catalog_groups,
-    })
-}
-
-/// Push the default pnpm catalog when it contains package entries.
-fn collect_yaml_default_catalog(
-    default_value: Option<YamlNode<'_>>,
-    line_index: &CatalogLineIndex,
-    catalogs: &mut Vec<PnpmCatalog>,
-) {
-    let Some(default_map) = default_value.and_then(YamlNode::as_mapping) else {
-        return;
-    };
-    let entries = collect_entries(default_map, line_index, "default");
-    if !entries.is_empty() {
-        catalogs.push(PnpmCatalog {
-            name: "default".to_string(),
-            entries,
-        });
-    }
-}
-
-/// Split named pnpm `catalogs:` entries into populated catalogs and empty groups.
-fn collect_yaml_named_catalogs(
-    named_value: Option<YamlNode<'_>>,
-    line_index: &CatalogLineIndex,
-    catalogs: &mut Vec<PnpmCatalog>,
-    empty_named_catalog_groups: &mut Vec<PnpmCatalogGroup>,
-) {
-    let Some(named_map) = named_value.and_then(YamlNode::as_mapping) else {
-        return;
-    };
-    for (name_value, catalog_value) in named_map.iter() {
-        let Some(name) = name_value.as_str() else {
-            continue;
-        };
-        if let Some(catalog_map) = catalog_value.as_mapping() {
-            let entries = collect_entries(catalog_map, line_index, name);
-            if entries.is_empty() {
-                push_yaml_empty_catalog_group(name, line_index, empty_named_catalog_groups);
-            } else {
-                catalogs.push(PnpmCatalog {
-                    name: name.to_string(),
-                    entries,
-                });
-            }
-        } else if catalog_value.is_null() {
-            push_yaml_empty_catalog_group(name, line_index, empty_named_catalog_groups);
-        }
-    }
-}
-
-fn push_yaml_empty_catalog_group(
-    name: &str,
-    line_index: &CatalogLineIndex,
-    empty_named_catalog_groups: &mut Vec<PnpmCatalogGroup>,
-) {
-    if let Some(line) = line_index.group_line_for(name) {
-        empty_named_catalog_groups.push(PnpmCatalogGroup {
-            name: name.to_string(),
-            line,
-        });
-    }
+    super::pnpm_workspace::PnpmWorkspaceDoc::parse(source)
+        .map(super::pnpm_workspace::PnpmWorkspaceDoc::into_catalogs)
+        .map_err(|error| error.to_string())
 }
 
 /// Parse Bun catalog sections from a root `package.json` file.
@@ -285,6 +214,7 @@ fn collect_json_named_catalogs(
                 empty_named_catalog_groups.push(PnpmCatalogGroup {
                     name: name.clone(),
                     line: line_index.group_line_for(&line_key).unwrap_or(1),
+                    location: KeyLocation::Unknown,
                 });
             } else {
                 catalogs.push(PnpmCatalog {
@@ -296,28 +226,10 @@ fn collect_json_named_catalogs(
             empty_named_catalog_groups.push(PnpmCatalogGroup {
                 name: name.clone(),
                 line: line_index.group_line_for(&line_key).unwrap_or(1),
+                location: KeyLocation::Unknown,
             });
         }
     }
-}
-
-fn collect_entries(
-    mapping: YamlMapping<'_>,
-    line_index: &CatalogLineIndex,
-    catalog_name: &str,
-) -> Vec<PnpmCatalogEntry> {
-    mapping
-        .iter()
-        .filter_map(|(k, v)| {
-            let pkg = k.as_str()?;
-            let line = line_index.line_for(catalog_name, pkg)?;
-            Some(PnpmCatalogEntry {
-                package_name: pkg.to_string(),
-                specifier: v.scalar_text().map(str::to_string),
-                line,
-            })
-        })
-        .collect()
 }
 
 fn collect_json_entries(
@@ -331,6 +243,7 @@ fn collect_json_entries(
             package_name: pkg.clone(),
             specifier: value.as_str().map(str::to_string),
             line: line_index.line_for(catalog_name, pkg).unwrap_or(1),
+            location: KeyLocation::Unknown,
         })
         .collect()
 }
@@ -363,93 +276,6 @@ impl CatalogLineIndex {
             .iter()
             .find(|(name, _)| name == catalog_name)
             .map(|(_, line)| *line)
-    }
-}
-
-/// Walk the raw YAML source to map each catalog entry to its 1-based line
-/// number. This is a small section-aware scanner: it tracks whether the
-/// current line falls inside `catalog:` (the default catalog) or inside
-/// `catalogs.<name>:` (a named catalog), and records each key at the
-/// expected indentation level.
-fn build_line_index(source: &str) -> CatalogLineIndex {
-    let mut scan = YamlCatalogScan::default();
-
-    for (idx, raw_line) in source.lines().enumerate() {
-        let line_no = u32::try_from(idx).unwrap_or(u32::MAX).saturating_add(1);
-        scan.record_line(raw_line, line_no);
-    }
-
-    scan.finish()
-}
-
-#[derive(Default)]
-struct YamlCatalogScan {
-    entries: Vec<((String, String), u32)>,
-    groups: Vec<(String, u32)>,
-    section: Section,
-    named_catalog: Option<(String, usize)>,
-}
-
-impl YamlCatalogScan {
-    fn record_line(&mut self, raw_line: &str, line_no: u32) {
-        let trimmed = strip_inline_comment(raw_line);
-        let trimmed_left = trimmed.trim_start();
-        let indent = trimmed.len() - trimmed_left.len();
-
-        if trimmed_left.is_empty() {
-            return;
-        }
-
-        if indent == 0 {
-            self.enter_top_level_section(trimmed_left);
-            return;
-        }
-
-        self.record_catalog_key(trimmed_left, indent, line_no);
-    }
-
-    fn enter_top_level_section(&mut self, trimmed_left: &str) {
-        self.section = if trimmed_left.starts_with("catalogs:") {
-            Section::NamedCatalogs
-        } else if trimmed_left.starts_with("catalog:") {
-            Section::DefaultCatalog
-        } else {
-            Section::None
-        };
-        self.named_catalog = None;
-    }
-
-    fn record_catalog_key(&mut self, trimmed_left: &str, indent: usize, line_no: u32) {
-        let Some(name) = parse_key(trimmed_left) else {
-            return;
-        };
-
-        match self.section {
-            Section::None => {}
-            Section::DefaultCatalog => {
-                self.entries.push((("default".to_string(), name), line_no));
-            }
-            Section::NamedCatalogs => self.record_named_catalog_key(name, indent, line_no),
-        }
-    }
-
-    fn record_named_catalog_key(&mut self, name: String, indent: usize, line_no: u32) {
-        if let Some((catalog_name, existing_indent)) = &self.named_catalog
-            && indent > *existing_indent
-        {
-            self.entries.push(((catalog_name.clone(), name), line_no));
-            return;
-        }
-
-        self.groups.push((name.clone(), line_no));
-        self.named_catalog = Some((name, indent));
-    }
-
-    fn finish(self) -> CatalogLineIndex {
-        CatalogLineIndex {
-            entries: self.entries,
-            groups: self.groups,
-        }
     }
 }
 

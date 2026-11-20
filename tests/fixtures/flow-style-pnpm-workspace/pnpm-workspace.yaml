@@ -1,0 +1,7 @@
+packages: [packages/*]
+
+catalogs:
+  ui: { react: "18", unused-in-flow: "1" }
+  tools:
+    is-odd: 3.0.1
+  old: {}

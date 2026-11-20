@@ -3,12 +3,37 @@
 //! One YAML parse gives the `packages` patterns, the catalogs and the
 //! overrides, with the source position of each key.
 
-use crate::yaml::{self, YamlError, YamlNode};
+use super::pnpm_catalog::{PnpmCatalog, PnpmCatalogData, PnpmCatalogEntry, PnpmCatalogGroup};
+use crate::yaml::{self, YamlError, YamlMapping, YamlNode};
+
+/// Where the key of a `pnpm-workspace.yaml` entry is in the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyLocation {
+    /// The key is the first token of its line in a block mapping. The
+    /// entry owns the lines `line` to `end_line` (1-based, inclusive).
+    Block {
+        /// The 1-based line of the key.
+        line: u32,
+        /// The 1-based last line of the value.
+        end_line: u32,
+    },
+    /// The key is inside a flow mapping (`{ ... }`) and shares line
+    /// `line` (1-based) with other keys.
+    Flow {
+        /// The 1-based line of the key.
+        line: u32,
+    },
+    /// The source position is not known, or the entry comes from an
+    /// alias, a merge key or a `package.json` file.
+    #[default]
+    Unknown,
+}
 
 /// The facts that fallow reads from one `pnpm-workspace.yaml` source.
 #[derive(Debug, Clone, Default)]
 pub struct PnpmWorkspaceDoc {
     packages: Vec<String>,
+    catalogs: PnpmCatalogData,
 }
 
 impl PnpmWorkspaceDoc {
@@ -21,8 +46,10 @@ impl PnpmWorkspaceDoc {
     pub fn parse(source: &str) -> Result<Self, YamlError> {
         let document = yaml::parse_with_locations(source)?;
         let root = document.root();
+        let lines = LineStarts::of(source);
         Ok(Self {
             packages: packages_of(root),
+            catalogs: catalogs_of(source, &lines, root),
         })
     }
 
@@ -31,6 +58,172 @@ impl PnpmWorkspaceDoc {
     pub fn packages(&self) -> &[String] {
         &self.packages
     }
+
+    /// The default catalog and the named catalogs.
+    #[must_use]
+    pub fn catalogs(&self) -> &PnpmCatalogData {
+        &self.catalogs
+    }
+
+    /// The catalogs, by value.
+    #[must_use]
+    pub fn into_catalogs(self) -> PnpmCatalogData {
+        self.catalogs
+    }
+}
+
+/// The byte offset of the start of each line of one source text.
+struct LineStarts(Vec<usize>);
+
+impl LineStarts {
+    fn of(source: &str) -> Self {
+        Self(
+            std::iter::once(0)
+                .chain(source.match_indices('\n').map(|(index, _)| index + 1))
+                .collect(),
+        )
+    }
+
+    /// The 1-based line that holds the byte at `offset`.
+    fn line_of(&self, offset: usize) -> u32 {
+        let line = self.0.partition_point(|&start| start <= offset);
+        u32::try_from(line).unwrap_or(u32::MAX)
+    }
+
+    /// The byte offset of the start of the line that holds `offset`.
+    fn line_start(&self, offset: usize) -> usize {
+        let line = self.0.partition_point(|&start| start <= offset);
+        self.0[line.saturating_sub(1)]
+    }
+}
+
+/// The reported line and the location of `key` in the mapping `parent`.
+fn locate_key(
+    source: &str,
+    lines: &LineStarts,
+    parent: YamlNode<'_>,
+    key: YamlNode<'_>,
+    value: YamlNode<'_>,
+) -> (u32, KeyLocation) {
+    let Some(key_range) = key.byte_range() else {
+        return (1, KeyLocation::Unknown);
+    };
+    let line = lines.line_of(key_range.start);
+    let Some(parent_range) = parent.byte_range() else {
+        return (line, KeyLocation::Unknown);
+    };
+    if key_range.start < parent_range.start {
+        return (line, KeyLocation::Unknown);
+    }
+    if source.as_bytes().get(parent_range.start) == Some(&b'{') {
+        return (line, KeyLocation::Flow { line });
+    }
+    let before_key = source
+        .get(lines.line_start(key_range.start)..key_range.start)
+        .unwrap_or("x");
+    if !before_key.bytes().all(|byte| byte == b' ') {
+        return (line, KeyLocation::Unknown);
+    }
+    let end_line = if value.is_null() {
+        line
+    } else {
+        match value.byte_range() {
+            Some(range) if range.start >= key_range.end => lines
+                .line_of(range.end.saturating_sub(1).max(range.start))
+                .max(line),
+            _ => return (line, KeyLocation::Unknown),
+        }
+    };
+    (line, KeyLocation::Block { line, end_line })
+}
+
+/// The key node and the value node of the top-level key `name`.
+fn top_level_entry<'a>(root: YamlNode<'a>, name: &str) -> Option<(YamlNode<'a>, YamlNode<'a>)> {
+    root.as_mapping()?
+        .iter()
+        .find(|(key, _)| key.as_str() == Some(name))
+}
+
+/// Whether `value` is an alias. An alias has the position of the
+/// anchored node, which is before `key`.
+fn is_alias(key: YamlNode<'_>, value: YamlNode<'_>) -> bool {
+    match (key.byte_range(), value.byte_range()) {
+        (Some(key_range), Some(value_range)) => value_range.start < key_range.end,
+        _ => false,
+    }
+}
+
+/// The entries of one catalog mapping. `owner_key` is the key that holds
+/// the mapping (`catalog`, or the name of a group).
+fn catalog_entries(
+    source: &str,
+    lines: &LineStarts,
+    owner_key: YamlNode<'_>,
+    mapping_node: YamlNode<'_>,
+) -> Vec<PnpmCatalogEntry> {
+    let Some(mapping) = mapping_node.as_mapping() else {
+        return Vec::new();
+    };
+    // The lines of an aliased catalog belong to the anchored catalog.
+    let aliased = is_alias(owner_key, mapping_node);
+    mapping
+        .iter()
+        .filter_map(|(key, value)| {
+            let package_name = key.as_str()?.to_string();
+            let (line, location) = locate_key(source, lines, mapping_node, key, value);
+            Some(PnpmCatalogEntry {
+                package_name,
+                specifier: value.scalar_text().map(str::to_string),
+                line,
+                location: if aliased {
+                    KeyLocation::Unknown
+                } else {
+                    location
+                },
+            })
+        })
+        .collect()
+}
+
+fn catalogs_of(source: &str, lines: &LineStarts, root: YamlNode<'_>) -> PnpmCatalogData {
+    let mut data = PnpmCatalogData::default();
+    if let Some((key, value)) = top_level_entry(root, "catalog") {
+        let entries = catalog_entries(source, lines, key, value);
+        if !entries.is_empty() {
+            data.catalogs.push(PnpmCatalog {
+                name: "default".to_string(),
+                entries,
+            });
+        }
+    }
+    let Some((_, named)) = top_level_entry(root, "catalogs") else {
+        return data;
+    };
+    let Some(named_map) = named.as_mapping() else {
+        return data;
+    };
+    for (name_key, value) in named_map.iter() {
+        let Some(name) = name_key.as_str() else {
+            continue;
+        };
+        if value.is_null() || value.as_mapping().is_some_and(YamlMapping::is_empty) {
+            let (line, location) = locate_key(source, lines, named, name_key, value);
+            data.empty_named_catalog_groups.push(PnpmCatalogGroup {
+                name: name.to_string(),
+                line,
+                location,
+            });
+            continue;
+        }
+        let entries = catalog_entries(source, lines, name_key, value);
+        if !entries.is_empty() {
+            data.catalogs.push(PnpmCatalog {
+                name: name.to_string(),
+                entries,
+            });
+        }
+    }
+    data
 }
 
 fn packages_of(root: YamlNode<'_>) -> Vec<String> {
@@ -225,5 +418,158 @@ mod tests {
             patterns_of_workspace_file("packages:\n  - packages/* # the libraries\n"),
             ["packages/*"]
         );
+    }
+
+    fn doc(source: &str) -> PnpmWorkspaceDoc {
+        PnpmWorkspaceDoc::parse(source).expect("valid yaml")
+    }
+
+    fn catalog<'d>(doc: &'d PnpmWorkspaceDoc, name: &str) -> &'d PnpmCatalog {
+        doc.catalogs()
+            .catalogs
+            .iter()
+            .find(|catalog| catalog.name == name)
+            .unwrap_or_else(|| panic!("no catalog {name}"))
+    }
+
+    fn empty_groups(doc: &PnpmWorkspaceDoc) -> Vec<(&str, u32, KeyLocation)> {
+        doc.catalogs()
+            .empty_named_catalog_groups
+            .iter()
+            .map(|group| (group.name.as_str(), group.line, group.location))
+            .collect()
+    }
+
+    #[test]
+    fn flow_style_group_is_not_empty() {
+        let doc = doc("catalogs:\n  ui: { react: \"18\" }\n");
+        let ui = catalog(&doc, "ui");
+        assert_eq!(ui.entries.len(), 1);
+        let entry = &ui.entries[0];
+        assert_eq!(entry.package_name, "react");
+        assert_eq!(entry.specifier.as_deref(), Some("18"));
+        assert_eq!(entry.line, 2);
+        assert_eq!(entry.location, KeyLocation::Flow { line: 2 });
+        assert!(doc.catalogs().empty_named_catalog_groups.is_empty());
+    }
+
+    #[test]
+    fn empty_groups_come_from_the_mapping() {
+        let doc = doc(
+            "catalogs:\n  react17: {}\n  legacy:\n    # note\n  vue3:\n    vue: ^3.4.0\n  last:\n",
+        );
+        assert_eq!(
+            empty_groups(&doc),
+            [
+                (
+                    "react17",
+                    2,
+                    KeyLocation::Block {
+                        line: 2,
+                        end_line: 2
+                    }
+                ),
+                (
+                    "legacy",
+                    3,
+                    KeyLocation::Block {
+                        line: 3,
+                        end_line: 3
+                    }
+                ),
+                (
+                    "last",
+                    7,
+                    KeyLocation::Block {
+                        line: 7,
+                        end_line: 7
+                    }
+                ),
+            ]
+        );
+        assert_eq!(doc.catalogs().catalogs.len(), 1);
+        assert_eq!(catalog(&doc, "vue3").entries[0].package_name, "vue");
+    }
+
+    #[test]
+    fn flow_style_catalogs_mapping_keeps_groups() {
+        let doc = doc("catalogs: { old: {}, ui: { react: \"18\" } }\n");
+        assert_eq!(
+            empty_groups(&doc),
+            [("old", 1, KeyLocation::Flow { line: 1 })]
+        );
+        assert_eq!(catalog(&doc, "ui").entries[0].package_name, "react");
+    }
+
+    #[test]
+    fn block_entries_own_their_lines() {
+        let doc = doc("catalog:\n  react:\n    specifier: ^18.2.0\n  vue: ^3.4.0\n");
+        let entries = &catalog(&doc, "default").entries;
+        assert_eq!(
+            entries[0].location,
+            KeyLocation::Block {
+                line: 2,
+                end_line: 3
+            }
+        );
+        assert_eq!(
+            entries[1].location,
+            KeyLocation::Block {
+                line: 4,
+                end_line: 4
+            }
+        );
+    }
+
+    #[test]
+    fn quoted_top_level_key_is_read() {
+        let doc = doc("\"catalog\":\n  react: ^18\n");
+        let entries = &catalog(&doc, "default").entries;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].package_name, "react");
+        assert_eq!(entries[0].line, 2);
+        assert!(matches!(entries[0].location, KeyLocation::Block { .. }));
+    }
+
+    #[test]
+    fn default_flow_catalog_is_read() {
+        let doc = doc("catalog: { react: ^18 }\n");
+        let entries = &catalog(&doc, "default").entries;
+        assert_eq!(entries[0].package_name, "react");
+        assert_eq!(entries[0].location, KeyLocation::Flow { line: 1 });
+    }
+
+    #[test]
+    fn aliased_catalog_has_no_editable_location() {
+        let doc = doc("catalogs:\n  base: &base\n    react: ^18\n  copy: *base\n");
+        let copy = &catalog(&doc, "copy").entries;
+        assert_eq!(copy[0].package_name, "react");
+        assert_eq!(copy[0].location, KeyLocation::Unknown);
+        let base = &catalog(&doc, "base").entries;
+        assert_eq!(base[0].package_name, "react");
+        assert_eq!(
+            base[0].location,
+            KeyLocation::Block {
+                line: 3,
+                end_line: 3
+            }
+        );
+        assert!(doc.catalogs().empty_named_catalog_groups.is_empty());
+    }
+
+    #[test]
+    fn many_keys_get_their_own_lines() {
+        use std::fmt::Write as _;
+        const COUNT: usize = 5_000;
+        let mut source = String::from("catalog:\n");
+        for index in 0..COUNT {
+            writeln!(source, "  pkg-{index}: 1.0.0").expect("writing to a String cannot fail");
+        }
+        let doc = doc(&source);
+        let entries = &catalog(&doc, "default").entries;
+        assert_eq!(entries.len(), COUNT);
+        for (index, entry) in entries.iter().enumerate() {
+            assert_eq!(entry.line as usize, index + 2);
+        }
     }
 }

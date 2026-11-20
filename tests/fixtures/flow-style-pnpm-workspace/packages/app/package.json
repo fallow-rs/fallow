@@ -1,0 +1,10 @@
+{
+  "name": "app",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "catalog:ui",
+    "is-odd": "catalog:tools",
+    "missing-pkg": "catalog:ui"
+  }
+}

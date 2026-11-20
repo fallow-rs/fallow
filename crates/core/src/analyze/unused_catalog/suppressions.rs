@@ -113,6 +113,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn suppression_above_a_flow_line_covers_its_entries() {
+        let source = "catalogs:\n  # fallow-ignore-next-line unused-catalog-entry\n  ui: { react: \"18\", vue: \"3\" }\n";
+        let data = fallow_config::parse_pnpm_catalog_data(source).expect("valid YAML");
+        assert_eq!(
+            suppressed_yaml_catalog_entries(source, &data),
+            FxHashSet::from_iter([3])
+        );
+    }
+
+    #[test]
     fn comments_can_be_more_indented_than_the_catalog_entry() {
         let source =
             "catalog:\n    # fallow-ignore-next-line unused-catalog-entry\n  target: ^1.0.0\n";

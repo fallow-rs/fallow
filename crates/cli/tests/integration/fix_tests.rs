@@ -658,6 +658,34 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
 /// running `fallow fix` against this exact fixture and inspecting the
 /// resulting YAML; this test bakes that workflow into the suite.
 #[test]
+fn fix_keeps_a_flow_style_catalog_group_with_a_consumer() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().to_path_buf();
+    let fixture = fixture_path("flow-style-pnpm-workspace");
+    copy_dir_recursive(&fixture, &root).expect("copy fixture");
+
+    let output = run_fallow_in_root("fix", &root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "fix --yes should exit 0, stderr: {}",
+        output.stderr
+    );
+
+    let after =
+        std::fs::read_to_string(root.join("pnpm-workspace.yaml")).expect("read workspace file");
+    assert!(
+        after
+            .lines()
+            .any(|line| line == "  ui: { react: \"18\", unused-in-flow: \"1\" }"),
+        "the flow-style group must stay. File:\n{after}"
+    );
+    assert!(
+        !after.contains("old: {}"),
+        "the empty group must go. File:\n{after}"
+    );
+}
+
+#[test]
 fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().to_path_buf();
