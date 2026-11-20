@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use fallow_api::audit_run::{AuditBaseError, AuditBaseOrigin, parse_audit_base_override};
+use fallow_api::audit_run::{AuditBaseError, AuditBaseOrigin, audit_base_override};
 
 use rustc_hash::FxHashSet;
 
@@ -62,9 +62,7 @@ pub(super) fn audit_changed_files(
 /// has this shape: the only commit that the clone has is HEAD, so every
 /// detected base is HEAD.
 pub(super) fn shallow_clone_base_is_head(opts: &AuditOptions<'_>, base_ref: &str) -> bool {
-    if opts.changed_since.is_some()
-        || parse_audit_base_override(std::env::var("FALLOW_AUDIT_BASE").ok()).is_some()
-    {
+    if opts.changed_since.is_some() || audit_base_override().is_some() {
         return false;
     }
     if git_rev_parse(opts.root, "--is-shallow-repository").as_deref() != Some("true") {
