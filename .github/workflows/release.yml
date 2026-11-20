@@ -2296,8 +2296,10 @@ jobs:
           # The registry redirects tarball downloads to its CDN; that is why -L
           # is needed after the host check above. Nothing here carries a
           # credential, and the digest comparison below fails closed on any
-          # substituted content.
-          curl -fsSL "$tarball_url" -o fallow-public.tgz
+          # substituted content. Right after the approval, the registry lists
+          # the version while its CDN can still answer 404 for the tarball for
+          # some minutes, so retry every error for about five minutes.
+          curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors "$tarball_url" -o fallow-public.tgz
           actual_sha256=$(sha256sum fallow-public.tgz | cut -d' ' -f1)
           if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
             echo "::error::Public fallow@${VERSION} has sha256 ${actual_sha256}, but this run staged ${EXPECTED_SHA256}. Someone published other bytes under this version; do not tag this release."
@@ -2626,8 +2628,10 @@ jobs:
           # The registry redirects tarball downloads to its CDN; that is why -L
           # is needed after the host check above. Nothing here carries a
           # credential, and the digest comparison below fails closed on any
-          # substituted content.
-          curl -fsSL "$tarball_url" -o fallow-public.tgz
+          # substituted content. Right after the approval, the registry lists
+          # the version while its CDN can still answer 404 for the tarball for
+          # some minutes, so retry every error for about five minutes.
+          curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors "$tarball_url" -o fallow-public.tgz
           actual_sha256=$(sha256sum fallow-public.tgz | cut -d' ' -f1)
           if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
             echo "::error::Public fallow@${VERSION} has sha256 ${actual_sha256}, but this run staged ${EXPECTED_SHA256}. Someone published other bytes under this version; do not tag this release."
@@ -2864,8 +2868,10 @@ jobs:
           # The registry redirects tarball downloads to its CDN; that is why -L
           # is needed after the host check above. Nothing here carries a
           # credential, and the digest comparison below fails closed on any
-          # substituted content.
-          curl -fsSL "$tarball_url" -o fallow-public.tgz
+          # substituted content. Right after the approval, the registry lists
+          # the version while its CDN can still answer 404 for the tarball for
+          # some minutes, so retry every error for about five minutes.
+          curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors "$tarball_url" -o fallow-public.tgz
           actual_sha256=$(sha256sum fallow-public.tgz | cut -d' ' -f1)
           if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
             echo "::error::Public fallow@${VERSION} has sha256 ${actual_sha256}, but this run staged ${EXPECTED_SHA256}. Someone published other bytes under this version; do not tag this release."
