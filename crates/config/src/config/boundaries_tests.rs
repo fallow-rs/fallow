@@ -2092,3 +2092,47 @@ fn auto_discover_scopes_public_file_globs_to_each_child() {
         "the fallback zone of the parent patterns has no public files"
     );
 }
+
+#[test]
+fn auto_discover_escapes_child_directory_names() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("app/[id]")).unwrap();
+    std::fs::create_dir_all(temp.path().join("app/i")).unwrap();
+
+    let mut config = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "routes".to_string(),
+            auto_discover: vec!["app".to_string()],
+            public_files: vec!["index.{ts,tsx}".to_string()],
+            ..BoundaryZone::default()
+        }],
+        ..BoundaryConfig::default()
+    };
+
+    config.expand_auto_discover(temp.path());
+
+    let zone = |name: &str| {
+        config
+            .zones
+            .iter()
+            .find(|zone| zone.name == name)
+            .unwrap_or_else(|| panic!("zone {name} must exist"))
+    };
+    let matches = |patterns: &[String], path: &str| {
+        patterns.iter().any(|pattern| {
+            compile_path_glob(pattern)
+                .unwrap()
+                .compile_matcher()
+                .is_match(path)
+        })
+    };
+
+    let bracket = zone("routes/[id]");
+    assert!(matches(&bracket.patterns, "app/[id]/page.tsx"));
+    assert!(!matches(&bracket.patterns, "app/i/page.tsx"));
+    assert!(matches(&bracket.public_files, "app/[id]/index.ts"));
+
+    let plain = zone("routes/i");
+    assert!(matches(&plain.patterns, "app/i/page.tsx"));
+    assert!(!matches(&plain.patterns, "app/[id]/page.tsx"));
+}

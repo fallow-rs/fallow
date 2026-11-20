@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use super::glob_validation::compile_path_glob;
+use super::glob_validation::{compile_path_glob, literal_dir_glob};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -1292,7 +1292,7 @@ impl ChildZoneAccumulator {
     ) {
         let zone_name = format!("{}/{}", zone.name, child_name);
         let child_dir = join_relative_path(discover_dir, child_name);
-        let child_pattern = format!("{child_dir}/**");
+        let child_pattern = literal_dir_glob(&child_dir, "**");
         let entry = self
             .zones_by_name
             .entry(zone_name.clone())
@@ -1309,7 +1309,7 @@ impl ChildZoneAccumulator {
             entry.patterns.push(child_pattern);
         }
         for glob in &zone.public_files {
-            let child_glob = join_relative_path(&child_dir, glob.trim_start_matches("./"));
+            let child_glob = literal_dir_glob(&child_dir, glob.trim_start_matches("./"));
             if !entry.public_files.contains(&child_glob) {
                 entry.public_files.push(child_glob);
             }
