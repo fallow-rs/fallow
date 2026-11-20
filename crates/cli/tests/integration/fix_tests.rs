@@ -1516,3 +1516,61 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
     }
     Ok(())
 }
+
+fn run_catalog_fix_project(workspace_yaml: &str) -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("packages/app")).unwrap();
+    std::fs::write(root.join("pnpm-workspace.yaml"), workspace_yaml).unwrap();
+    std::fs::write(
+        root.join("packages/app/package.json"),
+        r#"{"name": "app", "version": "0.0.0", "dependencies": {"is-odd": "catalog:"}}"#,
+    )
+    .unwrap();
+    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "fix should exit 0, stdout: {}, stderr: {}",
+        output.stdout, output.stderr
+    );
+    let after = std::fs::read_to_string(root.join("pnpm-workspace.yaml")).unwrap();
+    (dir, after)
+}
+
+/// The entry fixer and the group fixer edit one `pnpm-workspace.yaml`.
+/// Both removals must come from one view of the file, so the line of the
+/// empty group does not point at the next top-level setting.
+#[test]
+fn fix_catalog_entry_and_empty_group_keep_unrelated_setting() {
+    let (_dir, after) = run_catalog_fix_project(
+        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\n  is-even: ^1.0.0\ncatalogs:\n  old:\nlinkWorkspacePackages: true\n",
+    );
+    assert_eq!(
+        after,
+        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\ncatalogs:\nlinkWorkspacePackages: true\n"
+    );
+}
+
+/// An emptied catalog whose header has an inline comment must become an
+/// empty mapping. A `{}` after the `#` is part of the comment, and pnpm
+/// rejects the null catalog that remains.
+#[test]
+fn fix_catalog_keeps_mapping_under_commented_header() {
+    let (_dir, after) = run_catalog_fix_project(
+        "packages:\n  - 'packages/*'\n\ncatalog:\n  is-odd: ^1.0.0\ncatalogs:\n  ui: # pinned versions\n    react: ^18\n",
+    );
+    assert!(
+        after.ends_with("  ui: {} # pinned versions\n"),
+        "unexpected file:\n{after}"
+    );
+    let parsed = fallow_config::yaml::parse(&after).unwrap();
+    assert!(
+        parsed
+            .root()
+            .get("catalogs")
+            .and_then(|catalogs| catalogs.get("ui"))
+            .and_then(fallow_config::yaml::YamlNode::as_mapping)
+            .is_some_and(fallow_config::yaml::YamlMapping::is_empty),
+        "catalogs.ui must be an empty mapping:\n{after}"
+    );
+}

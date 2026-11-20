@@ -741,33 +741,22 @@ fn count_withheld_export_fixes(fixes: &[serde_json::Value], reason: plan::SkipRe
 }
 
 fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals {
-    let catalog_summary = catalog::apply_catalog_entry_fixes(
-        request.root,
-        &request.results.unused_catalog_entries,
-        request.delete_preceding_comments,
-        catalog::CatalogFixContext {
-            hashes: request.file_hashes,
-            plan: &mut *request.plan,
-            output: request.output,
-            dry_run: request.dry_run,
-            fixes: &mut *request.fixes,
-        },
-    );
-    let empty_catalog_summary =
-        catalog::apply_empty_catalog_group_fixes(catalog::EmptyCatalogGroupFixInput {
-            root: request.root,
-            groups: &request.results.empty_catalog_groups,
-            hashes: request.file_hashes,
-            plan: request.plan,
-            output: request.output,
-            dry_run: request.dry_run,
-            fixes: request.fixes,
-        });
+    let summary = catalog::apply_catalog_fixes(catalog::CatalogFixInput {
+        root: request.root,
+        entries: &request.results.unused_catalog_entries,
+        groups: &request.results.empty_catalog_groups,
+        preceding_comment_policy: request.delete_preceding_comments,
+        hashes: request.file_hashes,
+        plan: &mut *request.plan,
+        output: request.output,
+        dry_run: request.dry_run,
+        fixes: &mut *request.fixes,
+    });
     CatalogFixTotals {
-        applied: catalog_summary.applied + empty_catalog_summary.applied,
-        skipped: catalog_summary.skipped + empty_catalog_summary.skipped,
-        comment_lines_removed: catalog_summary.comment_lines_removed,
-        write_error: catalog_summary.write_error || empty_catalog_summary.write_error,
+        applied: summary.applied,
+        skipped: summary.skipped,
+        comment_lines_removed: summary.comment_lines_removed,
+        write_error: summary.write_error,
     }
 }
 
