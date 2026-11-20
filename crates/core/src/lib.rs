@@ -33,6 +33,7 @@ mod production_scope;
 pub(crate) mod progress;
 mod resolution_inputs;
 pub mod results;
+mod script_entries;
 pub(crate) mod scripts;
 /// Public hook for the fuzz harness (fuzz/fuzz_targets/fuzz_scripts.rs) only;
 /// not a supported API. The module itself stays crate-private.
@@ -1957,7 +1958,7 @@ fn analyze_all_scripts(
         .or_insert(EntryPointRole::Support);
     plugin_result
         .entry_point_roles
-        .entry(SCRIPT_TEST_ENTRY_SOURCE.to_string())
+        .entry(script_entries::SCRIPT_TEST_ENTRY_SOURCE.to_string())
         .or_insert(EntryPointRole::Test);
 }
 
@@ -2057,11 +2058,12 @@ fn analyze_root_scripts(
                 .push((path, "scripts".to_string()));
         }
     }
-    push_script_entry_patterns(
+    script_entries::push_script_entry_patterns(
         &mut plugin_result.entry_patterns,
         "",
         &script_analysis.entry_files,
         &script_analysis.test_entry_files,
+        None,
     );
 }
 
@@ -2149,11 +2151,12 @@ fn analyze_one_workspace_scripts(
             discovered_always_used.push((path, "scripts".to_string()));
         }
     }
-    push_script_entry_patterns(
+    script_entries::push_script_entry_patterns(
         &mut entry_patterns,
         &ws_prefix,
         &ws_analysis.entry_files,
         &ws_analysis.test_entry_files,
+        None,
     );
     (
         used_packages,
@@ -2181,39 +2184,13 @@ fn analyze_ci_scripts(
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);
-    push_script_entry_patterns(
+    script_entries::push_script_entry_patterns(
         &mut plugin_result.entry_patterns,
         "",
         &ci_analysis.entry_files,
         &ci_analysis.test_entry_files,
+        Some(&ci_analysis.entry_file_sources),
     );
-}
-
-/// The entry-pattern source of the files that a built-in test runner runs
-/// from a script or CI command (`node --test`, `bun test`, `deno test`).
-/// Its entries have the test role.
-const SCRIPT_TEST_ENTRY_SOURCE: &str = "script-tests";
-
-/// Push the entry patterns of script file arguments. A file that a built-in
-/// test runner runs is also a test entry, so the code that it imports counts
-/// as reached by tests. The `scripts` rule comes first, so it stays the
-/// reported source of the entry.
-fn push_script_entry_patterns(
-    entry_patterns: &mut Vec<(plugins::PathRule, String)>,
-    prefix: &str,
-    entry_files: &[String],
-    test_entry_files: &[String],
-) {
-    let sources = entry_files.iter().map(|entry| (entry, "scripts")).chain(
-        test_entry_files
-            .iter()
-            .map(|entry| (entry, SCRIPT_TEST_ENTRY_SOURCE)),
-    );
-    for (entry, source) in sources {
-        if let Some(pat) = scripts::normalize_script_entry_pattern(prefix, entry) {
-            entry_patterns.push((plugins::PathRule::new(pat), source.to_string()));
-        }
-    }
 }
 
 /// Analyze git hook, staged-file and agent hook commands for binary

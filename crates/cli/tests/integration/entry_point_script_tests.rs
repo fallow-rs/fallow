@@ -3,6 +3,9 @@
 //!
 //! The `source` string of a script entry point stays `package.json script`.
 //! The script key is in the separate `script` field.
+//!
+//! An entry point from a CI file names that CI file as its source
+//! (`.github/workflows/ci.yml`, issue #4845).
 
 #![allow(
     clippy::unwrap_used,
@@ -146,5 +149,68 @@ fn trace_file_names_the_script() {
     assert!(
         text.contains("(entry point, package.json script `build`)"),
         "trace: {text}"
+    );
+}
+
+/// A project whose CI files run three files. Two workflows run
+/// `tools/release.ts`, and a composite action runs `tools/setup.ts`.
+fn ci_project() -> TempDir {
+    let dir = TempDir::new().expect("temp project");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{ "name": "ci-app", "private": true, "main": "src/index.js" }"#,
+    );
+    write(root, "src/index.js", "export const app = 1;\n");
+    write(root, "tools/release.ts", "export const release = 1;\n");
+    write(root, "tools/deploy.ts", "export const deploy = 1;\n");
+    write(root, "tools/setup.ts", "export const setup = 1;\n");
+    let workflow = "on: push\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node tools/release.ts\n";
+    write(root, ".github/workflows/release.yml", workflow);
+    write(root, ".github/workflows/ci.yml", workflow);
+    write(
+        root,
+        ".gitlab-ci.yml",
+        "deploy:\n  script:\n    - node tools/deploy.ts\n",
+    );
+    write(
+        root,
+        ".github/actions/setup/action.yml",
+        "runs:\n  using: composite\n  steps:\n    - run: node tools/setup.ts\n      shell: bash\n",
+    );
+    dir
+}
+
+#[test]
+fn list_entry_points_json_names_the_ci_file() {
+    let dir = ci_project();
+    let entries = entry_points_json(dir.path());
+    assert_eq!(
+        entries,
+        vec![
+            json!({ "path": "src/index.js", "source": "package.json main" }),
+            json!({ "path": "tools/deploy.ts", "source": ".gitlab-ci.yml" }),
+            json!({ "path": "tools/release.ts", "source": ".github/workflows/ci.yml" }),
+            json!({ "path": "tools/setup.ts", "source": ".github/actions/setup/action.yml" }),
+        ]
+    );
+}
+
+#[test]
+fn list_entry_points_human_names_the_ci_file() {
+    let dir = ci_project();
+    let output = run_fallow_in_root(
+        "list",
+        dir.path(),
+        &["--entry-points", "--quiet", "--no-cache"],
+    );
+    assert_eq!(output.code, 0, "list failed: {}", output.stderr);
+    assert!(
+        output
+            .stdout
+            .contains("tools/release.ts (.github/workflows/ci.yml)\n"),
+        "stdout: {}",
+        output.stdout
     );
 }

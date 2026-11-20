@@ -1,0 +1,4 @@
+### Changed
+
+- **An entry point from a CI file now names that CI file as its source.** `fallow list --entry-points` printed `tools/release.ts (scripts)` for a file that `.github/workflows/ci.yml` runs. It now prints `tools/release.ts (.github/workflows/ci.yml)`. The value of the `source` field in `list --entry-points --format json` changes from `scripts` to the CI file path for these entry points. A script that matches `source == "scripts"` must also accept a CI file path. The label is the project-root-relative path of the CI file: `.gitlab-ci.yml`, a `.github/workflows/` file, or the `action.yml` of a composite action. When more CI files run one file, the label is the first CI file in this order: `.gitlab-ci.yml`, then the workflow files by name, then the composite actions. Entry points from `package.json` scripts keep their label.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
