@@ -460,15 +460,6 @@ fn health_prune_refuses_legacy_keys() {
     );
 }
 
-#[test]
-fn consumed_slots_follow_the_greedy_match() {
-    assert_eq!(consumed_severity_slots([0, 1, 0], [1, 1, 0]), [0, 1, 0]);
-    assert_eq!(consumed_severity_slots([1, 0, 0], [0, 0, 1]), [0, 0, 1]);
-    assert_eq!(consumed_severity_slots([0, 0, 1], [1, 0, 0]), [0, 0, 0]);
-    assert_eq!(consumed_severity_slots([2, 1, 0], [1, 1, 2]), [1, 1, 1]);
-    assert_eq!(consumed_severity_slots([5, 5, 5], [1, 1, 1]), [1, 1, 1]);
-}
-
 fn located(
     root: &Path,
     path: &str,

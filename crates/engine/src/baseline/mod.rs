@@ -130,6 +130,8 @@ use health_categories::{
     FileLengthCounting, HEALTH_FINDING_DIMENSIONS, HealthFindingCategory, health_finding_counts,
     health_overlap_entry_count, severity_counts_for_dimension, severity_index,
 };
+mod health_match;
+use health_match::match_severity_slots;
 mod identity_counts;
 use identity_counts::identity_counts_with_placeholder_allowance;
 
@@ -2488,16 +2490,6 @@ fn moved_identity_bucket_remaps(
         .filter(|(_, candidate)| claims.get(candidate) == Some(&1))
         .map(|(old, new)| (old.to_string(), new.to_string()))
         .collect()
-}
-
-/// A current identity bucket with a function name: the key and its counts.
-type NamedBucket<'a> = (&'a String, &'a BTreeMap<String, HealthBaselineCount>);
-
-fn bucket_category_count(counts: &HealthFindingCountMap, key: &str, category: &str) -> usize {
-    counts
-        .get(key)
-        .and_then(|bucket| bucket.get(category))
-        .map_or(0, |entry| entry.count)
 }
 
 /// Baseline identity counts after file-move tolerance and the placeholder

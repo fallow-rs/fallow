@@ -154,28 +154,6 @@ pub(super) fn severity_counts_for_dimension(
     counts
 }
 
-pub(super) fn overflowing_severities(current: [usize; 3], baseline: [usize; 3]) -> [bool; 3] {
-    let mut available = baseline;
-    let mut overflow = [false; 3];
-
-    for severity_idx in 0..3 {
-        let compatible = available[severity_idx..].iter().sum::<usize>();
-        overflow[severity_idx] = compatible < current[severity_idx];
-
-        let mut matched = current[severity_idx].min(compatible);
-        for slot in available.iter_mut().skip(severity_idx) {
-            let taken = matched.min(*slot);
-            *slot -= taken;
-            matched -= taken;
-            if matched == 0 {
-                break;
-            }
-        }
-    }
-
-    overflow
-}
-
 fn health_overflow_categories(
     current_counts: &HealthFindingCountMap,
     baseline_counts: &HealthFindingCountMap,
@@ -189,7 +167,7 @@ fn health_overflow_categories(
         for dimension in HEALTH_FINDING_DIMENSIONS {
             let current = severity_counts_for_dimension(Some(current_file_counts), dimension);
             let baseline = severity_counts_for_dimension(baseline_file_counts, dimension);
-            let overflow = overflowing_severities(current, baseline);
+            let overflow = super::match_severity_slots(current, baseline).overflow;
 
             for severity in [
                 fallow_output::FindingSeverity::Moderate,

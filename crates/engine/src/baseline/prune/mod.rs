@@ -16,7 +16,7 @@ use super::{
     BASELINE_KEY_SCHEME, BaselineData, BaselineFileKind, BaselineKind, DuplicationBaselineData,
     HEALTH_FINDING_DIMENSIONS, HealthBaselineCount, HealthBaselineData, HealthBaselineMode,
     HealthFindingCategory, HealthFindingCountMap, canonical_keys, classify_baseline_value,
-    clone_group_fingerprint_key, consume_baseline_key, health_finding_counts,
+    clone_group_fingerprint_key, consume_baseline_key, health_finding_counts, match_severity_slots,
     moved_identity_bucket_remaps, severity_counts_for_dimension, severity_index,
 };
 use crate::duplicates::{CloneFingerprintSet, DuplicationReport};
@@ -534,10 +534,11 @@ fn prune_count_buckets(
         let current_counts = current.get(current_key);
         for dimension in HEALTH_FINDING_DIMENSIONS {
             let baseline = severity_counts_for_dimension(Some(saved_counts), dimension);
-            let used = consumed_severity_slots(
+            let used = match_severity_slots(
                 severity_counts_for_dimension(current_counts, dimension),
                 baseline,
-            );
+            )
+            .used;
             for severity in [
                 fallow_output::FindingSeverity::Moderate,
                 fallow_output::FindingSeverity::High,
@@ -568,33 +569,6 @@ fn prune_count_buckets(
             }
         }
     }
-}
-
-/// The saved slots per severity that the greedy match of
-/// [`super::health_categories::overflowing_severities`] uses for the current findings.
-///
-/// A saved slot covers a current finding of the same or a lower severity. The
-/// match takes the lowest compatible slot first, so keeping exactly the used
-/// slots leaves every match, and every overflow, as it was.
-fn consumed_severity_slots(current: [usize; 3], baseline: [usize; 3]) -> [usize; 3] {
-    let mut available = baseline;
-    for severity_idx in 0..3 {
-        let compatible = available[severity_idx..].iter().sum::<usize>();
-        let mut matched = current[severity_idx].min(compatible);
-        for slot in available.iter_mut().skip(severity_idx) {
-            let taken = matched.min(*slot);
-            *slot -= taken;
-            matched -= taken;
-            if matched == 0 {
-                break;
-            }
-        }
-    }
-    [
-        baseline[0] - available[0],
-        baseline[1] - available[1],
-        baseline[2] - available[2],
-    ]
 }
 
 #[cfg(test)]

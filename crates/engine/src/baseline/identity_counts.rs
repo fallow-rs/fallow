@@ -84,3 +84,13 @@ pub(super) fn identity_counts_with_placeholder_allowance(
     }
     Some(effective)
 }
+
+/// A current identity bucket with a function name: the key and its counts.
+type NamedBucket<'a> = (&'a String, &'a BTreeMap<String, HealthBaselineCount>);
+
+fn bucket_category_count(counts: &HealthFindingCountMap, key: &str, category: &str) -> usize {
+    counts
+        .get(key)
+        .and_then(|bucket| bucket.get(category))
+        .map_or(0, |entry| entry.count)
+}
