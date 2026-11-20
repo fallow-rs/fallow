@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { cargoFallowBin } from "./cargo-target.mjs";
+import { parseOptions, parsePositiveInt } from "./lib/options.mjs";
+import { parseJsonReport, resolveFallowBin, runTool } from "./lib/tool-run.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -48,53 +51,24 @@ const CANDIDATES = [
   { repo: "BlakePetersen/petersen-pack", evidence: "apps/luna/.husky/pre-push" },
 ];
 
-const VALUE_OPTION_SETTERS = {
-  "--out-dir": (opts, value) => {
-    opts.outDir = value;
-  },
-  "--cache-dir": (opts, value) => {
-    opts.cacheDir = value;
-  },
-  "--fallow-bin": (opts, value) => {
-    opts.fallowBin = value;
-  },
-  "--max-prs": (opts, value) => {
-    opts.maxPrs = Number(value);
-  },
-  "--prs-per-repo": (opts, value) => {
-    opts.prsPerRepo = Number(value);
-  },
-  "--pr-lookback": (opts, value) => {
-    opts.prLookback = Number(value);
-  },
-  "--clone-depth": (opts, value) => {
-    opts.cloneDepth = Number(value);
-  },
-  "--timeout-ms": (opts, value) => {
-    opts.timeoutMs = Number(value);
-  },
-};
-
-const FLAG_OPTION_SETTERS = {
-  "--run-only": (opts) => {
-    opts.runOnly = true;
-  },
-  "--select-only": (opts) => {
-    opts.selectOnly = true;
-  },
-  "--list": (opts) => {
-    opts.list = true;
-  },
-  "--help": (opts) => {
-    opts.help = true;
-  },
-  "-h": (opts) => {
-    opts.help = true;
-  },
+const OPTION_SPEC = {
+  "--out-dir": { key: "outDir", type: "string" },
+  "--cache-dir": { key: "cacheDir", type: "string" },
+  "--fallow-bin": { key: "fallowBin", type: "string" },
+  "--max-prs": { key: "maxPrs", type: "positiveInt" },
+  "--prs-per-repo": { key: "prsPerRepo", type: "positiveInt" },
+  "--pr-lookback": { key: "prLookback", type: "positiveInt" },
+  "--clone-depth": { key: "cloneDepth", type: "positiveInt" },
+  "--timeout-ms": { key: "timeoutMs", type: "positiveInt" },
+  "--run-only": { key: "runOnly", type: "flag" },
+  "--select-only": { key: "selectOnly", type: "flag" },
+  "--list": { key: "list", type: "flag" },
+  "--help": { key: "help", type: "flag" },
+  "-h": { key: "help", type: "flag" },
 };
 
 const parseArgs = (argv) => {
-  const opts = {
+  const defaults = {
     outDir: DEFAULT_OUT_DIR,
     cacheDir: "",
     fallowBin: process.env.FALLOW_BIN || "",
@@ -102,80 +76,23 @@ const parseArgs = (argv) => {
     prsPerRepo: DEFAULT_PRS_PER_REPO,
     prLookback: DEFAULT_PR_LOOKBACK,
     cloneDepth: DEFAULT_CLONE_DEPTH,
-    timeoutMs: Number(process.env.FALLOW_STYLING_PR_TIMEOUT_MS || 180_000),
+    timeoutMs: parsePositiveInt(
+      "FALLOW_STYLING_PR_TIMEOUT_MS",
+      process.env.FALLOW_STYLING_PR_TIMEOUT_MS || 180_000,
+    ),
     runOnly: false,
     selectOnly: false,
     list: false,
     help: false,
   };
 
-  for (let index = 0; index < argv.length; index += 1) {
-    index = applyArg(argv, index, opts);
-  }
-
+  const opts = parseOptions(argv, OPTION_SPEC, defaults);
   opts.outDir = resolve(opts.outDir);
   opts.cacheDir = resolve(opts.cacheDir || join(opts.outDir, "repos"));
-  opts.fallowBin = resolveFallowBin(opts.fallowBin);
-  for (const [name, value] of [
-    ["--max-prs", opts.maxPrs],
-    ["--prs-per-repo", opts.prsPerRepo],
-    ["--pr-lookback", opts.prLookback],
-    ["--clone-depth", opts.cloneDepth],
-    ["--timeout-ms", opts.timeoutMs],
-  ]) {
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new Error(`${name} must be a positive number`);
-    }
-  }
   if (opts.runOnly && opts.selectOnly) {
     throw new Error("--run-only and --select-only are mutually exclusive");
   }
   return opts;
-};
-
-const applyArg = (argv, index, opts) => {
-  const arg = argv[index];
-  const inline = parseInlineValue(arg);
-  if (inline) {
-    setValueOption(opts, inline.name, inline.value);
-    return index;
-  }
-  if (VALUE_OPTION_SETTERS[arg]) {
-    setValueOption(opts, arg, readNextValue(argv, index, arg));
-    return index + 1;
-  }
-  if (FLAG_OPTION_SETTERS[arg]) {
-    FLAG_OPTION_SETTERS[arg](opts);
-    return index;
-  }
-  throw new Error(`Unknown argument: ${arg}`);
-};
-
-const parseInlineValue = (arg) => {
-  const separator = arg.indexOf("=");
-  if (separator === -1) return null;
-  const name = arg.slice(0, separator);
-  if (!VALUE_OPTION_SETTERS[name]) return null;
-  return { name, value: arg.slice(separator + 1) };
-};
-
-const readNextValue = (argv, index, arg) => {
-  const nextIndex = index + 1;
-  if (nextIndex >= argv.length) throw new Error(`Missing value for ${arg}`);
-  return argv[nextIndex];
-};
-
-const setValueOption = (opts, name, value) => {
-  const setter = VALUE_OPTION_SETTERS[name];
-  if (!setter) throw new Error(`Unknown argument: ${name}`);
-  setter(opts, value);
-};
-
-const resolveFallowBin = (configured) => {
-  if (configured) return resolve(configured);
-  const local = join(REPO_ROOT, "target", "debug", "fallow");
-  if (existsSync(local)) return local;
-  return "fallow";
 };
 
 const usage = () => `Usage: node scripts/styling-pr-smoke.mjs [options]
@@ -195,23 +112,15 @@ Options:
 `;
 
 const run = (cmd, args, opts = {}) =>
-  spawnSync(cmd, args, {
-    encoding: "utf8",
-    timeout: opts.timeout ?? 120_000,
-    maxBuffer: 32 * 1024 * 1024,
-    ...opts,
-  });
+  runTool(cmd, args, { timeout: 120_000, maxBuffer: 32 * 1024 * 1024, ...opts });
+
+const failureText = (proc) => (proc.stderr || proc.stdout || proc.reason).trim();
 
 const runJson = (cmd, args, opts = {}) => {
   const proc = run(cmd, args, opts);
-  if (proc.status !== 0) {
-    return { ok: false, error: (proc.stderr || proc.stdout || `${cmd} failed`).trim() };
-  }
-  try {
-    return { ok: true, value: JSON.parse(proc.stdout || "[]") };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  if (!proc.ok) return { ok: false, error: failureText(proc) };
+  const parsed = parseJsonReport(proc.stdout);
+  return parsed.ok ? parsed : { ok: false, error: parsed.error };
 };
 
 const frontendFile = (path) =>
@@ -317,16 +226,16 @@ const ensureClone = (repo, baseRef, opts) => {
       ],
       { timeout: 180_000 },
     );
-    if (clone.status !== 0) {
-      return { ok: false, dir, error: (clone.stderr || clone.stdout || "clone failed").trim() };
+    if (!clone.ok) {
+      return { ok: false, dir, error: failureText(clone) };
     }
   }
   const fetchBase = fetchRemoteBranch(dir, baseRef, opts);
-  if (fetchBase.status !== 0) {
+  if (!fetchBase.ok) {
     return {
       ok: false,
       dir,
-      error: (fetchBase.stderr || fetchBase.stdout || "fetch base failed").trim(),
+      error: failureText(fetchBase),
     };
   }
   return { ok: true, dir };
@@ -337,10 +246,10 @@ const checkoutPr = (dir, pr, opts) => {
   const checkoutBase = run("git", ["-C", dir, "checkout", "--quiet", `origin/${pr.baseRefName}`], {
     timeout: 60_000,
   });
-  if (checkoutBase.status !== 0) {
+  if (!checkoutBase.ok) {
     return {
       ok: false,
-      error: (checkoutBase.stderr || checkoutBase.stdout || "checkout base failed").trim(),
+      error: failureText(checkoutBase),
     };
   }
   const fetch = run(
@@ -357,12 +266,12 @@ const checkoutPr = (dir, pr, opts) => {
     ],
     { timeout: 120_000 },
   );
-  if (fetch.status !== 0) {
-    return { ok: false, error: (fetch.stderr || fetch.stdout || "fetch PR failed").trim() };
+  if (!fetch.ok) {
+    return { ok: false, error: failureText(fetch) };
   }
   const checkout = run("git", ["-C", dir, "checkout", "--quiet", branch], { timeout: 60_000 });
-  if (checkout.status !== 0) {
-    return { ok: false, error: (checkout.stderr || checkout.stdout || "checkout failed").trim() };
+  if (!checkout.ok) {
+    return { ok: false, error: failureText(checkout) };
   }
   return { ok: true, branch };
 };
@@ -413,34 +322,55 @@ const groupFindings = (findings) => {
   return [...map.values()].toSorted((a, b) => b.count - a.count || a.code.localeCompare(b.code));
 };
 
-const runAudit = (dir, pr, opts) => {
-  const proc = run(
-    opts.fallowBin,
-    ["audit", "--root", dir, "--base", `origin/${pr.baseRefName}`, "--format", "json", "--quiet"],
-    { cwd: REPO_ROOT, timeout: opts.timeoutMs, env: { ...process.env, FALLOW_QUIET: "1" } },
-  );
-  let parsed = null;
-  let parseError = null;
-  try {
-    parsed = JSON.parse(proc.stdout || "{}");
-  } catch (error) {
-    parseError = error.message;
-  }
-  const findings = parsed ? collectStylingFindings(parsed) : [];
+const auditReason = (proc, parsed) => {
+  if (!proc.ok) return proc.reason;
+  if (!parsed.ok) return parsed.error;
+  if (parsed.value.error && parsed.value.message) return parsed.value.message;
+  if (parsed.value.kind !== "audit") return "no audit report in the output";
+  return null;
+};
+
+/**
+ * Summarizes one audit run. `proc` is a `classifyRun` result. `usable` is true
+ * only for a run that ended normally and printed a report with `kind: "audit"`.
+ * `reason` is null for a usable audit, else one short line.
+ */
+export const summarizeAudit = (proc) => {
+  const parsed = parseJsonReport(proc.stdout);
+  const report = parsed.ok ? parsed.value : null;
+  const reason = auditReason(proc, parsed);
+  const findings = report ? collectStylingFindings(report) : [];
   return {
+    usable: reason === null,
+    reason,
     status: proc.status,
-    signal: proc.signal || null,
-    timed_out: Boolean(proc.error && proc.error.code === "ETIMEDOUT"),
-    spawn_error: proc.error?.message || null,
-    parse_error: parseError,
-    stderr_sample: (proc.stderr || "").trim().slice(0, 2000),
-    stdout_error: parsed?.error ? parsed.message || "" : "",
-    verdict: parsed?.verdict || null,
-    summary: parsed?.summary || null,
+    signal: proc.signal,
+    timed_out: proc.timedOut,
+    spawn_error: proc.spawnError,
+    parse_error: parsed.ok ? null : parsed.error,
+    stderr_sample: proc.stderr.trim().slice(0, 2000),
+    stdout_error: report?.error ? report.message || "" : "",
+    verdict: report?.verdict || null,
+    summary: report?.summary || null,
     styling_findings: findings.length,
     groups: groupFindings(findings),
   };
 };
+
+const runAudit = (dir, pr, opts) =>
+  summarizeAudit(
+    runTool(
+      opts.fallowBin,
+      ["audit", "--root", dir, "--base", `origin/${pr.baseRefName}`, "--format", "json", "--quiet"],
+      {
+        cwd: REPO_ROOT,
+        timeout: opts.timeoutMs,
+        maxBuffer: 32 * 1024 * 1024,
+        env: { ...process.env, FALLOW_QUIET: "1" },
+        okStatuses: [0, 1],
+      },
+    ),
+  );
 
 const runSelectedPrs = (selected, opts) => {
   const results = [];
@@ -459,7 +389,7 @@ const runSelectedPrs = (selected, opts) => {
     const audit = runAudit(clone.dir, pr, opts);
     results.push({
       ...pr,
-      ok: audit.parse_error === null && !audit.stdout_error,
+      ok: audit.usable,
       stage: "audit",
       repo_dir: clone.dir,
       audit,
@@ -473,6 +403,7 @@ const writeReport = (results, opts) => {
     generated_at: new Date().toISOString(),
     fallow_bin: opts.fallowBin,
     count: results.length,
+    attempted_audits: results.filter((result) => result.stage === "audit").length,
     valid_audits: results.filter((result) => result.ok).length,
     repos_covered: new Set(results.map((result) => result.repo)).size,
     results,
@@ -505,7 +436,11 @@ const renderMarkdownReport = (report) => {
     const href = `[${result.repo}#${result.number}](${result.url})`;
     if (!result.ok) {
       const reason = String(
-        result.error || result.audit?.stdout_error || result.audit?.parse_error || "",
+        result.error ||
+          result.audit?.stdout_error ||
+          result.audit?.parse_error ||
+          result.audit?.reason ||
+          "",
       )
         .replace(/\n/g, " ")
         .slice(0, 180);
@@ -544,6 +479,11 @@ const main = () => {
     console.log(JSON.stringify(CANDIDATES, null, 2));
     return;
   }
+  if (!opts.selectOnly) {
+    opts.fallowBin = resolveFallowBin(
+      opts.fallowBin ? [opts.fallowBin] : [cargoFallowBin(REPO_ROOT, "debug"), "fallow"],
+    );
+  }
   mkdirSync(opts.outDir, { recursive: true });
   mkdirSync(opts.cacheDir, { recursive: true });
 
@@ -575,6 +515,10 @@ const main = () => {
   const results = runSelectedPrs(selection.selected, opts);
   const report = writeReport(results, opts);
   console.log(JSON.stringify({ count: report.count, valid_audits: report.valid_audits }, null, 2));
+  if (results.length > 0 && report.valid_audits === 0) {
+    console.error("styling PR smoke: no audit gave a usable report");
+    process.exitCode = 1;
+  }
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
