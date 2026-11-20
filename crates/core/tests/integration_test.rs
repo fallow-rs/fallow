@@ -803,6 +803,8 @@ mod issue_4734_ts_import_declaration_file;
 mod issue_4799_computed_literal_key;
 #[path = "integration_test/issue_4828_svelte_markup_script_attr_gt.rs"]
 mod issue_4828_svelte_markup_script_attr_gt;
+#[path = "integration_test/issue_4850_inferred_signature_backing.rs"]
+mod issue_4850_inferred_signature_backing;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
