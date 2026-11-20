@@ -5,14 +5,26 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
+import { parseNonNegativeInt, parsePositiveInt } from "../scripts/lib/options.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const hasFilter = args.includes("--synthetic") || args.includes("--real-world");
 const runSynthetic = args.includes("--synthetic") || !hasFilter;
 const runRealWorld = args.includes("--real-world") || !hasFilter;
-const RUNS = parseInt(args.find((a) => a.startsWith("--runs="))?.split("=")[1] ?? "5");
-const WARMUP = parseInt(args.find((a) => a.startsWith("--warmup="))?.split("=")[1] ?? "2");
+const inlineOption = (name) =>
+  args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
+const readCount = (parse, name, fallback) => {
+  try {
+    return parse(name, inlineOption(name) ?? fallback);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+};
+const RUNS = readCount(parsePositiveInt, "--runs", "5");
+const WARMUP = readCount(parseNonNegativeInt, "--warmup", "2");
 const projectsArg = args.find((a) => a.startsWith("--projects="))?.split("=")[1];
 const projectFilter = projectsArg
   ? new Set(
