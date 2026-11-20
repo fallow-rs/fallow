@@ -103,6 +103,7 @@ pub fn count_reported_fix_skips(fixes: &[Value]) -> usize {
                         | "low_confidence_incomplete_analysis"
                         | "kept_re_export"
                         | "shared_declaration_in_use"
+                        | "generated_source"
                 )
             );
             is_skipped && !is_plan_skip

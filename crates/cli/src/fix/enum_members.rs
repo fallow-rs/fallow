@@ -6,7 +6,10 @@ use fallow_config::OutputFormat;
 use super::enum_helpers::{
     EnumDeclarationRange, declares_exported_enum, removable_exported_enum_range,
 };
-use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check, stage_fixed_content};
+use super::plan::{
+    CapturedHashes, FixPlan, read_source_with_hash_check, skip_generated_source,
+    stage_fixed_content,
+};
 
 struct EnumMemberFix {
     line_idx: usize,
@@ -142,6 +145,9 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
             continue;
         };
+        if skip_generated_source(root, path, &content, plan) {
+            continue;
+        }
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
 
         let member_fixes = collect_enum_member_fixes(&lines, file_members);

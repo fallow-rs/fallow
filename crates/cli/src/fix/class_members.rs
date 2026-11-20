@@ -12,7 +12,9 @@ use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 
 use super::io::bytes_with_optional_bom;
-use super::plan::{CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check};
+use super::plan::{
+    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, skip_generated_source,
+};
 
 pub(super) struct ClassMemberFixInput<'a> {
     pub(super) root: &'a Path,
@@ -147,6 +149,9 @@ fn apply_file(input: ClassMemberFileInput<'_>) {
     let Some((content, metadata)) = read_source_with_hash_check(root, path, hashes, plan) else {
         return;
     };
+    if skip_generated_source(root, path, &content, plan) {
+        return;
+    }
     let bom_offset = usize::from(metadata.had_bom) * '\u{FEFF}'.len_utf8();
     let Some(mut planned) = plan_members(&content, findings, bom_offset) else {
         plan.skip(path.to_path_buf(), SkipReason::ContentChanged);

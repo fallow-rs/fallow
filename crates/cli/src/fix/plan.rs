@@ -55,6 +55,9 @@ pub(super) enum SkipReason {
     /// export of the kept name too. Recorded per export entry, never on the
     /// per-file skip list.
     SharedDeclarationInUse,
+    /// The file is generated code. Its generator writes the file again on its
+    /// next run, so an edit of the file does not last.
+    GeneratedSource,
 }
 
 impl SkipReason {
@@ -67,6 +70,7 @@ impl SkipReason {
             Self::LowConfidenceIncompleteAnalysis => "low_confidence_incomplete_analysis",
             Self::KeptReExport => "kept_re_export",
             Self::SharedDeclarationInUse => "shared_declaration_in_use",
+            Self::GeneratedSource => "generated_source",
         }
     }
 
@@ -94,6 +98,9 @@ impl SkipReason {
             Self::SharedDeclarationInUse => {
                 "Preserved because the same `export` keyword also exports a name that is in use. Move this name to a declaration without `export` by hand, then run `fallow fix --dry-run` and review the new preview."
             }
+            Self::GeneratedSource => {
+                "Preserved because this file is generated code, and its generator writes it again. Change the input of the generator, or add the file to `ignoreExports` in the fallow config."
+            }
         }
     }
 
@@ -106,6 +113,7 @@ impl SkipReason {
                 | Self::LowConfidenceIncompleteAnalysis
                 | Self::KeptReExport
                 | Self::SharedDeclarationInUse
+                | Self::GeneratedSource
         )
     }
 
@@ -132,6 +140,9 @@ impl SkipReason {
             ),
             Self::SharedDeclarationInUse => format!(
                 "Kept unused export(s) in {display}: the same `export` keyword also exports a name that is in use.",
+            ),
+            Self::GeneratedSource => format!(
+                "Kept {display} as it is: the file is generated code, and its generator writes it again.",
             ),
         }
     }
@@ -513,6 +524,23 @@ pub(super) fn read_source_with_hash_check(
         }
     }
     Some((content, meta))
+}
+
+/// Record a [`SkipReason::GeneratedSource`] skip when `content` is generated
+/// code, and return whether it is. The path rule reads the path below `root`,
+/// so a project that lives under a folder named `generated` is not a match.
+pub(super) fn skip_generated_source(
+    root: &Path,
+    path: &Path,
+    content: &str,
+    plan: &mut FixPlan,
+) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let generated = fallow_engine::source::is_generated_file(relative, content);
+    if generated {
+        plan.skip(path.to_path_buf(), SkipReason::GeneratedSource);
+    }
+    generated
 }
 
 /// Join modified lines, preserve the original trailing newline, re-prepend
