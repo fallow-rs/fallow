@@ -130,13 +130,23 @@ fn locate_key(
     if key_range.start < parent_range.start {
         return (line, KeyLocation::Unknown);
     }
-    if source.as_bytes().get(parent_range.start) == Some(&b'{') {
+    let Some(content) = source.get(parent_range.clone()).map(skip_node_properties) else {
+        return (line, KeyLocation::Unknown);
+    };
+    if content.starts_with('{') {
         return (line, KeyLocation::Flow { line });
     }
     let before_key = source
         .get(lines.line_start(key_range.start)..key_range.start)
         .unwrap_or("x");
     if !before_key.bytes().all(|byte| byte == b' ') {
+        return (line, KeyLocation::Unknown);
+    }
+    // Every key of a block mapping starts in the column of its first key. A
+    // merge key (`<<: *x`) adds keys of a deeper anchored mapping, which
+    // start in another column and do not own their lines in `parent`.
+    let first_key = parent_range.end - content.len();
+    if first_key - lines.line_start(first_key) != before_key.len() {
         return (line, KeyLocation::Unknown);
     }
     let end_line = if value.is_null() {
@@ -146,10 +156,45 @@ fn locate_key(
             Some(range) if range.start >= key_range.end => lines
                 .line_of(range.end.saturating_sub(1).max(range.start))
                 .max(line),
+            // An alias value has the position of the anchored node.
+            Some(_) if value_on_key_line(source, key_range.end) => line,
             _ => return (line, KeyLocation::Unknown),
         }
     };
     (line, KeyLocation::Block { line, end_line })
+}
+
+/// The text of a node after its anchor, its tag and the comments before its
+/// content. A flow mapping with an anchor (`&a { x: 1 }`) starts at `&`.
+fn skip_node_properties(node_text: &str) -> &str {
+    let mut rest = node_text;
+    loop {
+        rest = rest.trim_start();
+        if let Some(comment) = rest.strip_prefix('#') {
+            rest = comment.find('\n').map_or("", |end| &comment[end..]);
+        } else if rest.starts_with(['&', '!']) {
+            let end = rest
+                .find(|c: char| c.is_whitespace() || matches!(c, '{' | '}' | '[' | ']' | ','))
+                .unwrap_or(rest.len());
+            rest = &rest[end..];
+        } else {
+            return rest;
+        }
+    }
+}
+
+/// Whether the value of the key that ends at `key_end` starts on the line
+/// of the key.
+fn value_on_key_line(source: &str, key_end: usize) -> bool {
+    let rest_of_line = source
+        .get(key_end..)
+        .and_then(|rest| rest.split('\n').next())
+        .unwrap_or("");
+    rest_of_line
+        .trim_start()
+        .strip_prefix(':')
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty() && !value.starts_with('#'))
 }
 
 /// The key node and the value node of the top-level key `name`.
@@ -657,5 +702,86 @@ mod tests {
         assert_eq!(doc.packages(), ["a/*"]);
         assert_eq!(catalog(&doc, "default").entries.len(), 1);
         assert_eq!(doc.overrides().entries.len(), 1);
+    }
+
+    #[test]
+    fn anchored_or_tagged_flow_mapping_keys_are_flow() {
+        let doc = doc(
+            "catalogs:\n  ui: &ui {\n    react: \"18\", vue: \"3\"\n    }\n  web: !!map {\n    next: \"15\"\n    }\n",
+        );
+        let locations: Vec<_> = ["ui", "web"]
+            .iter()
+            .flat_map(|name| catalog(&doc, name).entries.iter())
+            .map(|entry| (entry.package_name.as_str(), entry.location))
+            .collect();
+        assert_eq!(
+            locations,
+            [
+                ("react", KeyLocation::Flow { line: 3 }),
+                ("vue", KeyLocation::Flow { line: 3 }),
+                ("next", KeyLocation::Flow { line: 6 }),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_flow_group_over_several_lines_has_its_extent() {
+        let doc = doc("catalogs:\n  old: !!map {\n    }\n");
+        assert_eq!(
+            empty_groups(&doc),
+            [(
+                "old",
+                2,
+                KeyLocation::Block {
+                    line: 2,
+                    end_line: 3
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn merged_keys_have_no_editable_location() {
+        let doc = doc("catalogs:\n  ui:\n    a: &x\n      b: 1\n    <<: *x\n");
+        let locations: Vec<_> = catalog(&doc, "ui")
+            .entries
+            .iter()
+            .map(|entry| (entry.package_name.as_str(), entry.location))
+            .collect();
+        assert!(
+            locations.contains(&(
+                "a",
+                KeyLocation::Block {
+                    line: 3,
+                    end_line: 4
+                }
+            )),
+            "{locations:?}"
+        );
+        assert!(
+            locations.contains(&("b", KeyLocation::Unknown)),
+            "{locations:?}"
+        );
+    }
+
+    #[test]
+    fn alias_value_on_the_key_line_owns_its_line() {
+        let doc = doc("catalog:\n  react: &v ^18\n  vue: *v\n");
+        let entries = &catalog(&doc, "default").entries;
+        assert_eq!(entries[1].package_name, "vue");
+        assert_eq!(entries[1].specifier.as_deref(), Some("^18"));
+        assert_eq!(
+            entries[1].location,
+            KeyLocation::Block {
+                line: 3,
+                end_line: 3
+            }
+        );
+    }
+
+    #[test]
+    fn packages_drops_an_unquoted_tag_item() {
+        let yaml = "packages:\n  - packages/*\n  - !packages/test-*\n";
+        assert_eq!(pnpm_workspace_packages(yaml), vec!["packages/*"]);
     }
 }

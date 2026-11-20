@@ -643,20 +643,6 @@ fn fix_catalog_fallow_keep_marker_preserves_block() {
     );
 }
 
-/// End-to-end regression for the issue #335 fix: running `fallow fix --yes`
-/// against the canonical `issue-329-pnpm-catalog` fixture must produce a
-/// `pnpm-workspace.yaml` whose emptied named catalog (`react17`, whose
-/// only entries `react` and `react-dom` are unused) parses as an EMPTY
-/// MAPPING, not as `null`. Bare `react17:` in YAML is null; pnpm rejects
-/// null-valued catalogs with `Cannot convert undefined or null to object`
-/// at install time.
-///
-/// This is the integration test the original implementation lacked. The
-/// unit tests asserted on synthetic strings, which is the right shape for
-/// helper coverage but does not exercise the end-to-end flow through the
-/// binary against a real fixture. A parallel reviewer caught the bug by
-/// running `fallow fix` against this exact fixture and inspecting the
-/// resulting YAML; this test bakes that workflow into the suite.
 #[test]
 fn fix_keeps_a_flow_style_catalog_group_with_a_consumer() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -685,6 +671,20 @@ fn fix_keeps_a_flow_style_catalog_group_with_a_consumer() {
     );
 }
 
+/// End-to-end regression for the issue #335 fix: running `fallow fix --yes`
+/// against the canonical `issue-329-pnpm-catalog` fixture must produce a
+/// `pnpm-workspace.yaml` whose emptied named catalog (`react17`, whose
+/// only entries `react` and `react-dom` are unused) parses as an EMPTY
+/// MAPPING, not as `null`. Bare `react17:` in YAML is null; pnpm rejects
+/// null-valued catalogs with `Cannot convert undefined or null to object`
+/// at install time.
+///
+/// This is the integration test the original implementation lacked. The
+/// unit tests asserted on synthetic strings, which is the right shape for
+/// helper coverage but does not exercise the end-to-end flow through the
+/// binary against a real fixture. A parallel reviewer caught the bug by
+/// running `fallow fix` against this exact fixture and inspecting the
+/// resulting YAML; this test bakes that workflow into the suite.
 #[test]
 fn fix_catalog_issue_335_empties_parent_to_empty_map_not_null() {
     let temp = tempfile::tempdir().expect("tempdir");

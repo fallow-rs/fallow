@@ -376,7 +376,15 @@ fn empty_catalog_groups_of(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
         .data
         .empty_named_catalog_groups
         .iter()
-        .filter(|group| owns_reported_line(state, group.location))
+        .filter(|group| {
+            // The fix deletes only the header line of an empty group, so a
+            // group whose value spans more lines (`old: {\n}`) gives no finding.
+            let one_line = match group.location {
+                KeyLocation::Block { line, end_line } => line == end_line,
+                _ => true,
+            };
+            one_line && owns_reported_line(state, group.location)
+        })
         .map(|group| EmptyCatalogGroup {
             catalog_name: group.name.clone(),
             path: state.source_path.clone(),
@@ -986,6 +994,30 @@ fn parse_json_key(trimmed: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_group_over_several_lines_gives_no_finding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "catalogs:\n  old: {\n    }\n  tagged: !!map {\n    }\n  gone: {}\n",
+        )
+        .expect("write pnpm-workspace.yaml");
+        let config = fallow_config::FallowConfig::default().resolve(
+            dir.path().to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        let state = gather_pnpm_catalog_state(&config, &[], true).expect("valid catalog");
+        let groups: Vec<_> = find_empty_catalog_groups(&[state])
+            .into_iter()
+            .map(|group| (group.catalog_name, group.line))
+            .collect();
+        assert_eq!(groups, [("gone".to_string(), 6)]);
+    }
 
     #[test]
     fn malformed_pnpm_workspace_yaml_records_a_diagnostic_and_skips_catalog_analysis() {
