@@ -510,7 +510,8 @@ error by suppressing a downstream detector.
   packages where the plugin is active
   (`AggregatedPluginResult::active_plugin_scopes`).
 - The load kind of an edge (`ImportLoadKind`) is the one model for when and
-  whether the edge runs its target. `PathReference` (`require.resolve`) and
+  whether the edge runs its target. `PathReference` (`require.resolve`, and a
+  path to a script file that code joins on the module directory) and
   `AssetReference` (a webpack asset loader request) keep the target in use,
   but `loads_target()` is false. Cycles, the entry load closure, the startup
   weight, the boundary detector and the security cone read that predicate,

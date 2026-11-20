@@ -42,6 +42,11 @@ const WORKER_CONSTRUCTORS: &[&str] = &["Worker", "SharedWorker"];
 pub(in crate::visitor) struct ConstSpecifierScopes {
     module: FxHashMap<String, String>,
     nested: Vec<FxHashMap<String, String>>,
+    /// The bindings that hold a path below the directory of the current
+    /// module, each with the number of nested scope frames at its
+    /// declaration. A binding leaves the map when its frame closes.
+    pub(in crate::visitor) module_paths:
+        FxHashMap<String, (usize, crate::visitor::declarations::ModuleRelativePath)>,
 }
 
 impl ConstSpecifierScopes {
@@ -51,6 +56,11 @@ impl ConstSpecifierScopes {
 
     pub(in crate::visitor) fn pop_frame(&mut self) {
         self.nested.pop();
+        if !self.module_paths.is_empty() {
+            let open_frames = self.nested.len();
+            self.module_paths
+                .retain(|_, (depth, _)| *depth <= open_frames);
+        }
     }
 }
 
@@ -895,6 +905,7 @@ impl<'a> ModuleInfoExtractor {
     /// `new URL('./x', import.meta.url)` source has its own edge, and a data
     /// file cannot hold a function.
     pub(super) fn record_dynamic_import_pattern(&mut self, source: &Expression<'a>, span: Span) {
+        self.record_import_of_module_path(source);
         match source.get_inner_expression() {
             Expression::NewExpression(new_expr) if new_url_import_source(new_expr).is_some() => {}
             Expression::StaticMemberExpression(member)

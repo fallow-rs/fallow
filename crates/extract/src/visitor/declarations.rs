@@ -39,6 +39,14 @@ pub(super) enum ModulePathBinding {
     Other,
 }
 
+/// A path relative to the directory of the current module, as normalized
+/// segments: `parents` steps up, then `parts` down.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct ModuleRelativePath {
+    pub(super) parents: usize,
+    pub(super) parts: Vec<String>,
+}
+
 impl ModuleInfoExtractor {
     pub(crate) fn record_string_enum_member_values(
         &mut self,
