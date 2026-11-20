@@ -112,7 +112,17 @@ fn run_resolution_block(
 
     let write_stub = |path: &std::path::Path, version: &str| {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, format!("#!/bin/sh\necho 'fallow {version}'\n")).unwrap();
+        // Each line of `fallow {version}` becomes one output line, so a stub
+        // can print the `verified:` line of the npm launcher after the version.
+        let lines: Vec<String> = format!("fallow {version}")
+            .lines()
+            .map(|line| format!("'{line}'"))
+            .collect();
+        std::fs::write(
+            path,
+            format!("#!/bin/sh\nprintf '%s\\n' {}\n", lines.join(" ")),
+        )
+        .unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     };
     let tmp = tempfile::tempdir().unwrap();
@@ -174,6 +184,27 @@ fn resolution_block_blocks_a_local_fallow_below_the_hook_floor() {
         stderr.contains("update the fallow devDependency"),
         "{stderr}"
     );
+}
+
+/// The npm launcher prints a `verified:` line after the version line. The
+/// block message names only the version.
+#[cfg(unix)]
+#[test]
+fn resolution_block_reads_only_the_first_version_line() {
+    let output = run_resolution_block(
+        None,
+        Some("3.40.0\nverified: at ./node_modules/.bin/fallow"),
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        stderr.contains(
+            "fallow-hook: blocked: ./node_modules/.bin/fallow is fallow 3.40.0, below the required 3.43.0.\n"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("verified:"), "{stderr}");
 }
 
 /// A fallow on `PATH` below the floor gets the hint to upgrade that install.
