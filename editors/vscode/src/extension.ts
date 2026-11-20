@@ -13,7 +13,7 @@ import { cancelReleaseRetry } from "./download.js";
 import { enableFeature } from "./enableFeature.js";
 import { openSettingsSearch } from "./openSettings.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
-import { createLazyView } from "./lazyView.js";
+import { createLazyView, type LazyRunOutcome } from "./lazyView.js";
 import {
   getHealthEnabled,
   getSecurityEnabled,
@@ -43,6 +43,7 @@ import {
   runInspectActiveSymbol,
   runSecurityAnalysis,
   runWorkspaces,
+  securityInputKey,
 } from "./commands.js";
 import {
   DIAGNOSTIC_RENDER_CONFIG_KEYS,
@@ -101,6 +102,7 @@ import type {
   FallowDupesResult,
   HealthOutput,
   RuntimeCoverageReport,
+  SecurityOutput,
 } from "./types.js";
 
 /** Languages whose saves trigger an opt-in audit re-run (`audit.runOnSave`). */
@@ -139,16 +141,6 @@ let lastAuditResult: AuditOutput | null = null;
 // synchronous and cannot await the persist queue). A module-level handle bridges
 // that gap so the last mute toggle is not dropped mid-write on reload/shutdown.
 let activeDiagnosticFilter: DiagnosticFilter | null = null;
-
-// The security run is a separate, view-gated process with disjoint config keys
-// from the dead-code analysis: toggling security never re-runs the main
-// analysis, and dead-code config changes never trigger a security re-run (#902).
-const SECURITY_CONFIG_KEYS = [
-  "fallow.security.enabled",
-  "fallow.configPath",
-  "fallow.changedSince",
-  "fallow.workspace",
-] as const;
 
 /** Settings that the status bar item reads on each render. */
 const STATUS_BAR_CONFIG_KEYS = [
@@ -286,10 +278,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // tree view is first shown, avoiding a double analysis on activation (the LSP
   // runs its own analysis for diagnostics).
   let cliAnalysisRan = false;
-  // The security run is decoupled from the dead-code run: it fires only on first
-  // visibility of the Security Candidates view, behind its own flag, so a user
-  // who never opens that view pays nothing even with the feature enabled (#902).
-  let securityAnalysisRan = false;
 
   // One-shot, lazy workspace-visibility probe. The status bar item offers the
   // picker by default; after the first sidebar analysis we list workspaces
@@ -470,48 +458,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     reset: () => applyHealth(null),
   });
 
-  // Run `fallow security` and update the Security Candidates view. Findings are
-  // UNVERIFIED candidates (#903), so the toast says so explicitly and never uses
-  // "vulnerability"/"confirmed".
-  //
-  // `fallow.hasAnalyzedSecurity` (which paints the "No security candidates
-  // found" all-clear) is set ONLY after a genuinely completed scan, never after
-  // a failed or older-CLI run: a false clean bill on a security surface is the
-  // worst failure mode here, so the actionable enable/scan welcome stays in
-  // place instead. Returns whether the run COMPLETED (a non-retryable failure
-  // still counts as completed so the latch holds and a re-reveal does not
-  // re-warn); only a transient failure returns false so the caller resets the
-  // latch and a later reveal retries.
-  const triggerSecurityAnalysis = async (): Promise<boolean> => {
-    return await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Fallow: Scanning for security candidates...",
-        cancellable: false,
-      },
-      async () => {
-        const result = await runSecurityAnalysis(context, outputChannel);
-        if (!result.ok) {
-          // Leave the existing view/welcome untouched on failure: do NOT flip
-          // `fallow.hasAnalyzedSecurity`, so a failed/unsupported scan never
-          // paints a false "No security candidates found" all-clear.
-          return !result.retryable;
-        }
-
-        securityProvider.update(result.data);
-        void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
-
-        const count = countSecurityFindings(result.data);
-        if (count > 0) {
-          void vscode.window.showInformationMessage(
-            `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
-          );
-        }
-        return true;
-      },
-    );
-  };
-
   const deadCodeView = vscode.window.createTreeView("fallow.deadCode", {
     treeDataProvider: deadCodeProvider,
   });
@@ -529,6 +475,53 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     treeDataProvider: coverageProvider,
   });
   context.subscriptions.push(deadCodeView, duplicatesView, healthView, securityView, coverageView);
+
+  // Run `fallow security` and update the Security Candidates view. Findings are
+  // UNVERIFIED candidates (#903), so the toast says so and never uses
+  // "vulnerability" or "confirmed". The scan starts only on a reveal of its own
+  // view or on the scan command, so a user who never opens the view pays
+  // nothing and the dead-code sidebar latency path stays untouched (#902).
+  //
+  // `fallow.hasAnalyzedSecurity` paints the "No security candidates found"
+  // all-clear. Only a completed scan sets it. A failed scan or an older CLI
+  // leaves the view and the welcome as they are: a false clean bill is the
+  // worst failure of a security surface. A non-retryable failure counts as a
+  // completed attempt, so a later reveal does not warn again.
+  const securityLoader = createLazyView<SecurityOutput | null>({
+    enabled: getSecurityEnabled,
+    inputKey: () => securityInputKey(context),
+    // The scan is opt-in and never runs for a hidden view (#902).
+    reloadStaleWhen: () => securityView.visible,
+    run: async () =>
+      await vscode.window.withProgress<LazyRunOutcome<SecurityOutput | null>>(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Fallow: Scanning for security candidates...",
+          cancellable: false,
+        },
+        async () => {
+          const result = await runSecurityAnalysis(context, outputChannel);
+          if (result.ok) {
+            return { kind: "loaded", value: result.data };
+          }
+          return result.retryable ? { kind: "failed" } : { kind: "skipped" };
+        },
+      ),
+    apply: (data) => {
+      securityProvider.update(data);
+      void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", true);
+      const count = countSecurityFindings(data);
+      if (count > 0) {
+        void vscode.window.showInformationMessage(
+          `Fallow: found ${count} security candidate${count === 1 ? "" : "s"}. These are NOT verified vulnerabilities; verify each before acting.`,
+        );
+      }
+    },
+    reset: () => {
+      securityProvider.update(null);
+      void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
+    },
+  });
 
   context.subscriptions.push(
     healthView.onDidChangeVisibility((e) => {
@@ -575,26 +568,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
-  // Lazily run the security scan on first visibility of its own view, behind a
-  // separate flag and gated on the opt-in setting. This is the #902 protection:
-  // the run never touches the dead-code / duplicates sidebar latency path.
-  const onSecurityViewVisible = (): void => {
-    if (securityAnalysisRan || !getSecurityEnabled()) {
-      return;
-    }
-    securityAnalysisRan = true;
-    void (async (): Promise<void> => {
-      const completed = await triggerSecurityAnalysis();
-      if (!completed) {
-        securityAnalysisRan = false;
-      }
-    })();
-  };
-
   context.subscriptions.push(
     securityView.onDidChangeVisibility((e) => {
       if (e.visible) {
-        onSecurityViewVisible();
+        void securityLoader.reveal();
       }
     }),
   );
@@ -659,7 +636,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       );
       return;
     }
-    securityAnalysisRan = await triggerSecurityAnalysis();
+    await securityLoader.reload();
   };
 
   // Runtime coverage is loaded ONLY on explicit command (or lazily on first
@@ -757,6 +734,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   const onWorkspaceScopeChange = (): void => {
     refreshWorkspacePicker(context);
     void healthLoader.invalidate();
+    void securityLoader.invalidate();
     void (async (): Promise<void> => {
       cliAnalysisRan = await triggerCliAnalysis({ force: true });
     })();
@@ -1034,7 +1012,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const needsReanalysis = affectsAnyConfiguration(e, REANALYSIS_CONFIG_KEYS);
       const needsHealthReanalysis = affectsAnyConfiguration(e, HEALTH_CONFIG_KEYS);
       const needsDiagnosticRefresh = affectsAnyConfiguration(e, DIAGNOSTIC_RENDER_CONFIG_KEYS);
-      const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
 
       if (e.affectsConfiguration("fallow.workspace")) {
         // Keep the workspace state of the status bar item in sync with a
@@ -1096,26 +1073,15 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         complexityDecorations.refresh();
       }
 
-      if (affectsSecurity) {
-        // Keep the enabled-context (welcome split + scan-button gate) in sync
-        // when the opt-in toggles.
-        if (e.affectsConfiguration("fallow.security.enabled")) {
-          syncSecurityEnabledContext();
-        }
-        // Security keys are disjoint from REANALYSIS_CONFIG_KEYS, so this never
-        // re-runs the dead-code analysis. When the feature is enabled and the
-        // view is open, re-scan; otherwise clear the provider so a disabled view
-        // shows nothing stale.
-        if (getSecurityEnabled()) {
-          if (securityView.visible) {
-            securityAnalysisRan = await triggerSecurityAnalysis();
-          }
-        } else {
-          securityAnalysisRan = false;
-          securityProvider.update(null);
-          void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzedSecurity", false);
-        }
+      // Keep the enabled-context (welcome split + scan-button gate) in sync when
+      // the opt-in toggles.
+      if (e.affectsConfiguration("fallow.security.enabled")) {
+        syncSecurityEnabledContext();
       }
+      // The loader scans again when the feature switch or an input of the scan
+      // changed and the view is visible. A disabled feature empties the view.
+      // This never runs the dead-code analysis.
+      void securityLoader.invalidate();
 
       // Scoped to the coverage view only, deliberately NOT in
       // REANALYSIS_CONFIG_KEYS (#902): re-run coverage when the capture path
