@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
-use crate::setup_hooks::read_optional_text;
+use crate::state_file::{Existing, load_existing, read_optional_text};
 
 const SERVER_KEY: &str = "fallow";
 const CLAUDE_PROJECT_FILE: &str = ".mcp.json";
@@ -1005,63 +1005,73 @@ pub fn mcp_json_has_servers(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Read the registered command for a harness, if any, for `agent status`.
-pub fn registered_command(path: &Path, harness: Harness) -> Option<McpCommand> {
-    let text = read_optional_text(path).ok().flatten()?;
-    match harness {
+/// Read the registered command for a harness, for `agent status`.
+/// `Loaded(None)` is a file that parses and has no fallow entry.
+pub fn registered_command(path: &Path, harness: Harness) -> Existing<Option<McpCommand>> {
+    load_existing(path, |text| match harness {
         Harness::Claude | Harness::Cursor => {
-            let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-            let entry = value.get("mcpServers")?.get(SERVER_KEY)?;
-            let command = entry.get("command")?.as_str()?.to_string();
-            let args = entry
-                .get("args")
-                .and_then(serde_json::Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(ToOwned::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let source = if entry_is_fallow_shape(entry, harness == Harness::Claude) {
-                McpSource::Registered
-            } else {
-                McpSource::Path
-            };
-            Some(McpCommand {
-                command,
-                args,
-                source,
-            })
+            let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+            Ok(json_entry_command(&value, harness))
         }
         Harness::Codex => {
-            let doc = text.parse::<toml_edit::DocumentMut>().ok()?;
-            let entry = doc.get("mcp_servers")?.get(SERVER_KEY)?;
-            let command = entry.get("command")?.as_str()?.to_string();
-            let args = entry
-                .get("args")
-                .and_then(toml_edit::Item::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(toml_edit::Value::as_str)
-                        .map(ToOwned::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let source = if codex_entry_is_fallow_shape(entry) {
-                McpSource::Registered
-            } else {
-                McpSource::Path
-            };
-            Some(McpCommand {
-                command,
-                args,
-                source,
-            })
+            let doc = text
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|e| e.to_string())?;
+            Ok(toml_entry_command(&doc))
         }
-    }
+    })
+}
+
+fn json_entry_command(value: &serde_json::Value, harness: Harness) -> Option<McpCommand> {
+    let entry = value.get("mcpServers")?.get(SERVER_KEY)?;
+    let command = entry.get("command")?.as_str()?.to_string();
+    let args = entry
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let source = if entry_is_fallow_shape(entry, harness == Harness::Claude) {
+        McpSource::Registered
+    } else {
+        McpSource::Path
+    };
+    Some(McpCommand {
+        command,
+        args,
+        source,
+    })
+}
+
+fn toml_entry_command(doc: &toml_edit::DocumentMut) -> Option<McpCommand> {
+    let entry = doc.get("mcp_servers")?.get(SERVER_KEY)?;
+    let command = entry.get("command")?.as_str()?.to_string();
+    let args = entry
+        .get("args")
+        .and_then(toml_edit::Item::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(toml_edit::Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let source = if codex_entry_is_fallow_shape(entry) {
+        McpSource::Registered
+    } else {
+        McpSource::Path
+    };
+    Some(McpCommand {
+        command,
+        args,
+        source,
+    })
 }
 
 /// Whether a registered entry read by [`registered_command`] has a shape

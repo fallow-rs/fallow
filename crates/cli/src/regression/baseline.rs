@@ -11,6 +11,7 @@ use super::outcome::RegressionOutcome;
 use super::tolerance::Tolerance;
 
 use crate::error::emit_input_error;
+use crate::state_file::{Existing, load_existing};
 
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
@@ -75,6 +76,11 @@ fn save_regression_baseline(
 }
 
 /// Save counts with the compatibility identity of the producing analysis.
+///
+/// # Errors
+///
+/// Returns exit code 2 when the file exists and the read fails, and when the
+/// write fails.
 pub fn save_regression_baseline_with_identity(
     path: &Path,
     root: &Path,
@@ -85,7 +91,7 @@ pub fn save_regression_baseline_with_identity(
 ) -> Result<(), ExitCode> {
     // `list --entry-weight` and `flags --retirement` write their blocks into
     // the same file, so a save of the issue counts keeps them.
-    let existing = read_existing_baseline(path);
+    let existing = existing_baseline_for_replace(path, output)?;
     let (entry_weight, flags) = existing
         .map(|existing| (existing.entry_weight, existing.flags))
         .unwrap_or_default();
@@ -105,13 +111,18 @@ pub fn save_regression_baseline_with_identity(
 
 /// Save the flag counts of `fallow flags --retirement` into a regression
 /// baseline file. The other blocks that the file already holds stay.
+///
+/// # Errors
+///
+/// Returns exit code 2 when the file exists and this build cannot read or
+/// parse it, and when the write fails.
 pub fn save_flags_regression_baseline(
     path: &Path,
     root: &Path,
     flags_counts: &FlagsCounts,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
-    let existing = read_existing_baseline(path);
+    let existing = existing_baseline_for_merge(path, output)?;
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -133,11 +144,80 @@ pub fn save_flags_regression_baseline(
     write_regression_baseline(path, root, &baseline, output)
 }
 
-/// Read the regression baseline file that a save replaces, when it exists.
-pub(super) fn read_existing_baseline(path: &Path) -> Option<RegressionBaseline> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<RegressionBaseline>(&content).ok())
+/// Parse a baseline with the version rule of the loader.
+fn parse_existing_baseline(content: &str) -> Result<RegressionBaseline, String> {
+    let baseline: RegressionBaseline = serde_json::from_str(content).map_err(|e| e.to_string())?;
+    if !is_supported_schema_version(baseline.schema_version) {
+        return Err(format!(
+            "schema_version {} is not supported by this fallow build (it reads 1 and {REGRESSION_SCHEMA_VERSION})",
+            baseline.schema_version
+        ));
+    }
+    Ok(baseline)
+}
+
+/// The baseline that a partial save merges into. `None` when no file
+/// exists.
+///
+/// # Errors
+///
+/// Returns exit code 2 when the file exists and this build cannot read or
+/// parse it. The file stays unchanged.
+pub(super) fn existing_baseline_for_merge(
+    path: &Path,
+    output: OutputFormat,
+) -> Result<Option<RegressionBaseline>, ExitCode> {
+    match load_existing(path, parse_existing_baseline) {
+        Existing::Absent => Ok(None),
+        Existing::Loaded(baseline) => Ok(Some(baseline)),
+        Existing::Unreadable(err) => Err(unreadable_baseline_error(path, &err, output)),
+        Existing::Invalid(reason) => Err(emit_input_error(
+            &format!(
+                "regression baseline '{0}' is not usable: {reason}.\n\
+                 The file is unchanged. Upgrade fallow, or regenerate the file by running: \
+                 fallow dead-code --save-regression-baseline {0}",
+                path.display()
+            ),
+            output,
+        )),
+    }
+}
+
+/// The baseline that a full save of the issue counts replaces. `None`
+/// when no file exists, and when the file does not parse. The second
+/// case prints a warning, because the save then drops the other blocks.
+///
+/// # Errors
+///
+/// Returns exit code 2 when the file exists and the read fails. The file
+/// stays unchanged.
+fn existing_baseline_for_replace(
+    path: &Path,
+    output: OutputFormat,
+) -> Result<Option<RegressionBaseline>, ExitCode> {
+    match load_existing(path, parse_existing_baseline) {
+        Existing::Absent => Ok(None),
+        Existing::Loaded(baseline) => Ok(Some(baseline)),
+        Existing::Unreadable(err) => Err(unreadable_baseline_error(path, &err, output)),
+        Existing::Invalid(reason) => {
+            eprintln!(
+                "Warning: replaced regression baseline '{}', which was not usable ({reason}). \
+                 Entry weights and flag counts of the old file were not kept.",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn unreadable_baseline_error(path: &Path, err: &std::io::Error, output: OutputFormat) -> ExitCode {
+    emit_input_error(
+        &format!(
+            "failed to read regression baseline '{}': {err}.\nThe file is unchanged.",
+            path.display()
+        ),
+        output,
+    )
 }
 
 /// Serialize and write a regression baseline file.
@@ -304,6 +384,11 @@ fn format_missing_schema_version_error(path: &Path, command: &str) -> String {
     )
 }
 
+/// The schema versions that this build reads.
+const fn is_supported_schema_version(version: u32) -> bool {
+    matches!(version, 1 | REGRESSION_SCHEMA_VERSION)
+}
+
 /// Load a regression baseline from disk.
 ///
 /// Validates that `schema_version` matches `REGRESSION_SCHEMA_VERSION`. Mismatches
@@ -365,7 +450,7 @@ pub fn load_regression_baseline_for(
         };
         emit_input_error(&message, output)
     })?;
-    if !matches!(baseline.schema_version, 1 | REGRESSION_SCHEMA_VERSION) {
+    if !is_supported_schema_version(baseline.schema_version) {
         let message = format_schema_mismatch_error(
             path,
             REGRESSION_SCHEMA_VERSION,
@@ -699,6 +784,114 @@ mod tests {
         let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
         assert_eq!(loaded.check.expect("issue counts kept").total_issues, 1);
         assert!(loaded.entry_weight.is_some(), "entry weights kept");
+    }
+
+    const CONFLICT_SEED: &str = "<<<<<<< HEAD\n{\"schema_version\":2,\"fallow_version\":\"0.0.0\",\"timestamp\":\"t\",\"check\":{\"total_issues\":1}}\n=======\n{\"schema_version\":2,\"fallow_version\":\"0.0.0\",\"timestamp\":\"t\",\"check\":{\"total_issues\":2}}\n>>>>>>> feature\n";
+    const NEWER_SCHEMA_SEED: &str = r#"{"schema_version":3,"fallow_version":"9.0.0","timestamp":"t","check":{"total_issues":4},"future_block":{"x":1}}"#;
+
+    fn sample_flags() -> FlagsCounts {
+        FlagsCounts {
+            total_flags: 3,
+            distinct_flags: 2,
+            by_reason: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn sample_check_counts() -> CheckCounts {
+        CheckCounts {
+            total_issues: 1,
+            unused_files: 1,
+            ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
+        }
+    }
+
+    fn seed_baseline(dir: &Path, bytes: &[u8]) -> PathBuf {
+        let path = dir.join("regression-baseline.json");
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_flags_save_keeps_a_baseline_with_conflict_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_baseline(dir.path(), CONFLICT_SEED.as_bytes());
+
+        let saved =
+            save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human);
+
+        assert!(
+            saved.is_err(),
+            "a partial save must stop on a file it cannot parse"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), CONFLICT_SEED.as_bytes());
+    }
+
+    #[test]
+    fn a_flags_save_keeps_a_baseline_of_a_newer_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_baseline(dir.path(), NEWER_SCHEMA_SEED.as_bytes());
+
+        let saved =
+            save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human);
+
+        assert!(saved.is_err(), "a partial save must stop on a newer schema");
+        assert_eq!(std::fs::read(&path).unwrap(), NEWER_SCHEMA_SEED.as_bytes());
+    }
+
+    #[test]
+    fn a_flags_save_merges_into_a_version_1_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_baseline(
+            dir.path(),
+            br#"{"schema_version":1,"fallow_version":"0.0.0","timestamp":"t","check":{"total_issues":7}}"#,
+        );
+
+        save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human)
+            .unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+
+        assert_eq!(loaded.schema_version, REGRESSION_SCHEMA_VERSION);
+        assert_eq!(loaded.check.expect("issue counts kept").total_issues, 7);
+        assert!(loaded.flags.is_some());
+    }
+
+    #[test]
+    fn a_flags_save_creates_a_missing_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("regression-baseline.json");
+
+        save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human)
+            .unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+
+        assert!(loaded.flags.is_some());
+        assert!(loaded.check.is_none());
+    }
+
+    #[test]
+    fn an_issue_count_save_replaces_a_baseline_that_does_not_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_baseline(dir.path(), CONFLICT_SEED.as_bytes());
+        let counts = sample_check_counts();
+
+        save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
+            .unwrap();
+        let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
+
+        assert_eq!(loaded.check.expect("new issue counts").total_issues, 1);
+    }
+
+    #[test]
+    fn an_issue_count_save_keeps_a_baseline_that_it_cannot_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_baseline(dir.path(), &[0xff, 0xfe, 0xfd]);
+        let counts = sample_check_counts();
+
+        let saved =
+            save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human);
+
+        assert!(saved.is_err(), "a save must stop on a file it cannot read");
+        assert_eq!(std::fs::read(&path).unwrap(), [0xff, 0xfe, 0xfd]);
     }
 
     #[test]

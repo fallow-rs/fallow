@@ -8,9 +8,8 @@ use serde::Serialize;
 use super::{
     Harness, NextAction, SCHEMA_VERSION, Step, display_path, hosts, mcp, resolve_root, skill,
 };
-use crate::setup_hooks::{
-    build_hooks_status, find_managed_block_bounds, home_dir, read_optional_text,
-};
+use crate::setup_hooks::{build_hooks_status, find_managed_block_bounds, home_dir};
+use crate::state_file::{Existing, read_optional_text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -348,7 +347,10 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     ));
     if let Some(home) = home {
         let user_codex = home.join(mcp::codex_file());
-        if mcp::registered_command(&user_codex, Harness::Codex).is_some() {
+        if matches!(
+            mcp::registered_command(&user_codex, Harness::Codex),
+            Existing::Loaded(Some(_))
+        ) {
             rows.push(mcp_row(root, Some(home), Harness::Codex, &user_codex));
         }
     }
@@ -481,15 +483,25 @@ fn skill_row(
 
 fn mcp_row(root: &Path, home: Option<&Path>, harness: Harness, path: &Path) -> SurfaceStatus {
     let (state, detail) = match mcp::registered_command(path, harness) {
-        Some(command) if mcp::registered_is_managed(&command) => {
+        Existing::Loaded(Some(command)) if mcp::registered_is_managed(&command) => {
             (SurfaceState::Installed, Some(command.shell_words()))
         }
-        Some(command) => (
+        Existing::Loaded(Some(command)) => (
             SurfaceState::Foreign,
             Some(format!("{} (not written by fallow)", command.shell_words())),
         ),
-        None if path.is_file() => (SurfaceState::Absent, Some("no fallow entry".to_string())),
-        None => (SurfaceState::Absent, None),
+        Existing::Loaded(None) => (SurfaceState::Absent, Some("no fallow entry".to_string())),
+        Existing::Absent => (SurfaceState::Absent, None),
+        Existing::Unreadable(err) => (
+            SurfaceState::Absent,
+            Some(format!("cannot read the file: {err}")),
+        ),
+        Existing::Invalid(reason) => (
+            SurfaceState::Absent,
+            Some(format!(
+                "the file does not parse ({reason}); agent install keeps it unchanged"
+            )),
+        ),
     };
     SurfaceStatus {
         harness: Some(harness),
@@ -986,5 +998,67 @@ mod tests {
             probe_installed_gate(&edited_version_line),
             NativeGateState::Modified
         );
+    }
+
+    fn mcp_row_for(dir: &Path, harness: Harness, file: &str, text: Option<&str>) -> SurfaceStatus {
+        let path = dir.join(file);
+        if let Some(text) = text {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+        }
+        mcp_row(dir, None, harness, &path)
+    }
+
+    #[test]
+    fn an_mcp_file_with_a_trailing_comma_is_not_reported_as_no_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = mcp_row_for(
+            dir.path(),
+            Harness::Claude,
+            mcp::claude_project_file(),
+            Some(r#"{"mcpServers": {},}"#),
+        );
+        assert_eq!(row.state, SurfaceState::Absent);
+        let detail = row.detail.unwrap_or_default();
+        assert!(detail.contains("does not parse"), "{detail}");
+    }
+
+    #[test]
+    fn an_mcp_file_without_a_fallow_entry_reports_no_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = mcp_row_for(
+            dir.path(),
+            Harness::Claude,
+            mcp::claude_project_file(),
+            Some(r#"{"mcpServers": {}}"#),
+        );
+        assert_eq!(row.detail.as_deref(), Some("no fallow entry"));
+    }
+
+    #[test]
+    fn a_missing_mcp_file_has_no_detail() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = mcp_row_for(
+            dir.path(),
+            Harness::Claude,
+            mcp::claude_project_file(),
+            None,
+        );
+        assert_eq!(row.state, SurfaceState::Absent);
+        assert_eq!(row.detail, None);
+    }
+
+    #[test]
+    fn a_codex_file_with_malformed_toml_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = mcp_row_for(
+            dir.path(),
+            Harness::Codex,
+            mcp::codex_file(),
+            Some("[mcp_servers"),
+        );
+        assert_eq!(row.state, SurfaceState::Absent);
+        let detail = row.detail.unwrap_or_default();
+        assert!(detail.contains("does not parse"), "{detail}");
     }
 }

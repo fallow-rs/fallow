@@ -471,7 +471,11 @@ fn mcp_foreign_entry_is_refused_unless_forced_and_never_removed_silently() {
         mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, true).unwrap(),
         mcp::FileOutcome::Changed
     );
-    let registered = mcp::registered_command(&path, Harness::Claude).unwrap();
+    let crate::state_file::Existing::Loaded(Some(registered)) =
+        mcp::registered_command(&path, Harness::Claude)
+    else {
+        panic!("the forced merge registers a command");
+    };
     assert!(mcp::registered_is_managed(&registered));
 }
 

@@ -13,9 +13,10 @@ use super::{
     Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Reason, Scope, Step, StepReport, StepStatus,
 };
 use crate::setup_hooks::{
-    AGENTS_BLOCK_START, AgentsOutcome, read_optional_text, remove_managed_block,
-    strip_managed_block, upsert_managed_block,
+    AGENTS_BLOCK_START, AgentsOutcome, remove_managed_block, strip_managed_block,
+    upsert_managed_block,
 };
+use crate::state_file::read_optional_text;
 
 const AGENTS_FILE: &str = "AGENTS.md";
 const CLAUDE_FILE: &str = "CLAUDE.md";

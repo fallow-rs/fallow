@@ -1957,7 +1957,7 @@ pub fn print_walkthrough_human_result(
 /// Record each `--mark-viewed` path as viewed against the current guide hash.
 ///
 /// Paths are normalized to the guide's root-relative VIEW key, as in
-/// `direction.order`. IO failures are swallowed: the state never sets the exit code.
+/// `direction.order`. A failed write prints a warning: the state never sets the exit code.
 fn record_walkthrough_marks(
     guide: &crate::audit_walkthrough::WalkthroughGuide,
     root: &std::path::Path,
@@ -1971,8 +1971,7 @@ fn record_walkthrough_marks(
         .iter()
         .map(|path| walkthrough_view_key(path, root))
         .collect();
-    let _ =
-        crate::walkthrough_state::mark_viewed(root, cache_dir, &keys, &guide.graph_snapshot_hash);
+    crate::walkthrough_state::record_marks(root, cache_dir, &keys, &guide.graph_snapshot_hash);
 }
 
 /// Normalize a `--mark-viewed` path to the guide's root-relative, forward-slashed

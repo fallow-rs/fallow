@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use super::{
     Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Reason, Scope, Step, StepReport, StepStatus,
 };
-use crate::setup_hooks::read_optional_text;
+use crate::state_file::read_optional_text;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_skill.rs"));
 

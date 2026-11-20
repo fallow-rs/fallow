@@ -213,14 +213,15 @@ fn to_usize(bytes: u64) -> usize {
 ///
 /// # Errors
 ///
-/// Returns exit code 2 when the file cannot be serialized or written.
+/// Returns exit code 2 when the file exists and this build cannot read or
+/// parse it, and when the file cannot be serialized or written.
 pub fn save_entry_weight_baseline(
     path: &Path,
     root: &Path,
     counts: EntryWeightCounts,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
-    let existing = super::baseline::read_existing_baseline(path);
+    let existing = super::baseline::existing_baseline_for_merge(path, output)?;
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -277,6 +278,39 @@ mod tests {
             entries,
             regression: None,
         }
+    }
+
+    const CONFLICT_SEED: &str = "<<<<<<< HEAD\n{\"schema_version\":2,\"fallow_version\":\"0.0.0\",\"timestamp\":\"t\",\"check\":{\"total_issues\":1}}\n=======\n{\"schema_version\":2,\"fallow_version\":\"0.0.0\",\"timestamp\":\"t\",\"check\":{\"total_issues\":2}}\n>>>>>>> feature\n";
+    const NEWER_SCHEMA_SEED: &str = r#"{"schema_version":3,"fallow_version":"9.0.0","timestamp":"t","check":{"total_issues":4},"future_block":{"x":1}}"#;
+
+    fn save_over(seed: &str) -> (Result<(), ExitCode>, Vec<u8>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("regression-baseline.json");
+        std::fs::write(&path, seed).unwrap();
+        let saved = save_entry_weight_baseline(
+            &path,
+            dir.path(),
+            EntryWeightCounts::from_listing(&listing(&[("src/main.ts", 10, &[])])),
+            fallow_config::OutputFormat::Human,
+        );
+        (saved, std::fs::read(&path).unwrap())
+    }
+
+    #[test]
+    fn an_entry_weight_save_keeps_a_baseline_of_a_newer_schema() {
+        let (saved, bytes) = save_over(NEWER_SCHEMA_SEED);
+        assert!(saved.is_err(), "a partial save must stop on a newer schema");
+        assert_eq!(bytes, NEWER_SCHEMA_SEED.as_bytes());
+    }
+
+    #[test]
+    fn an_entry_weight_save_keeps_a_baseline_with_conflict_markers() {
+        let (saved, bytes) = save_over(CONFLICT_SEED);
+        assert!(
+            saved.is_err(),
+            "a partial save must stop on a file it cannot parse"
+        );
+        assert_eq!(bytes, CONFLICT_SEED.as_bytes());
     }
 
     #[test]
