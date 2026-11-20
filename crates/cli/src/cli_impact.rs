@@ -97,6 +97,9 @@ pub fn dispatch_impact(
         Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
         Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
         Some(ImpactCli::Statusline) => render_impact_statusline(root),
+        Some(ImpactCli::Status) if matches!(output, fallow_config::OutputFormat::Human) => {
+            render_impact_status_human(root, quiet)
+        }
         Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output, json_style),
     }
 }
@@ -224,6 +227,42 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+/// Print the short human view of `fallow impact status`: the tracking state,
+/// the record count and the store file. Bare `fallow impact` prints the full
+/// report.
+fn render_impact_status_human(root: &Path, quiet: bool) -> ExitCode {
+    let report = impact::build_report(&impact::load(root));
+    let store = impact::resolved_store_path(root).map_or_else(
+        || "(no user config dir resolved; not persisted)".to_owned(),
+        |path| path.display().to_string(),
+    );
+    println!("{}", status_human(&report, &store, quiet));
+    ExitCode::SUCCESS
+}
+
+fn status_human(report: &fallow_output::ImpactReport, store: &str, quiet: bool) -> String {
+    use fallow_output::EnabledSource;
+    let tracking = match (report.enabled, report.enabled_source) {
+        (true, EnabledSource::Project) => "on (enabled for this project)",
+        (true, EnabledSource::User) => "on (user-global default)",
+        (true, EnabledSource::Default) => "on",
+        (false, EnabledSource::Project) => "off (disabled for this project)",
+        (false, EnabledSource::User | EnabledSource::Default) => "off",
+    };
+    let mut out = format!(
+        "FALLOW IMPACT STATUS\n\n  Tracking: {tracking}\n  Records: {}\n  Store file: {store}\n",
+        report.record_count
+    );
+    if !quiet {
+        out.push_str(if report.enabled {
+            "\nRun `fallow impact` for the full report."
+        } else {
+            "\nRun `fallow impact enable` to turn tracking on."
+        });
+    }
+    out.trim_end().to_owned()
 }
 
 fn render_impact_status(

@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/integration/impact_store_schema_tests.rs
+expression: store_line(&off.stdout)
+---
+FALLOW IMPACT STATUS
+
+  Tracking: off
+  Records: 0
+  Store file: <store>
+
+Run `fallow impact enable` to turn tracking on.

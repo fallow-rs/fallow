@@ -1,0 +1,17 @@
+---
+source: crates/cli/tests/integration/inspect_tests.rs
+expression: head(&symbol.stdout)
+---
+Inspect target
+
+  target:
+    type: symbol
+    file: src/api.ts
+    export_name: fetchUser
+  identity:
+    file: src/api.ts
+    export_name: fetchUser
+    file_reachable: true
+    is_entry_point: false
+    is_used: true
+    reason: Used by 1 file(s)
