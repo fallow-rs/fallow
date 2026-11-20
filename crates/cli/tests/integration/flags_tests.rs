@@ -201,14 +201,13 @@ fn flags_json_reports_the_diagnostics_the_run_recorded() {
     );
 }
 
-/// The unconfigured-detector diagnostics reach this envelope too.
-///
-/// They are recorded by the dead-code analyze pass, and the flag scan runs
-/// that pass to correlate flags with dead exports. They stopped printing on
-/// stderr in this release, so before the array existed they were unreachable
-/// from both channels on `fallow flags` specifically.
+/// The flag scan runs the dead-code pass to match flags with unused
+/// exports. That pass records `boundaries-not-configured` and
+/// `rule-packs-not-configured`, but `fallow flags` runs no boundary or
+/// policy check, so those two kinds do not belong on this envelope. The
+/// walk diagnostics, for example `node-modules-missing`, stay.
 #[test]
-fn flags_json_carries_the_analysis_stage_diagnostics_its_scan_records() {
+fn flags_json_omits_the_unconfigured_detector_diagnostics_of_the_dead_code_pass() {
     let json: serde_json::Value = serde_json::from_str(
         &run_fallow(
             "flags",
@@ -227,9 +226,13 @@ fn flags_json_carries_the_analysis_stage_diagnostics_its_scan_records() {
         .collect();
 
     assert!(
-        kinds.contains(&"boundaries-not-configured")
-            && kinds.contains(&"rule-packs-not-configured"),
-        "the flag scan runs the dead-code pass, so its diagnostics belong here, kinds were {kinds:?}"
+        kinds.contains(&"node-modules-missing"),
+        "the walk diagnostics stay on the flags envelope, kinds were {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"boundaries-not-configured")
+            && !kinds.contains(&"rule-packs-not-configured"),
+        "fallow flags runs no boundary or policy check, kinds were {kinds:?}"
     );
 }
 
