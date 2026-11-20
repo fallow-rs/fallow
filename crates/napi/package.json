@@ -7,12 +7,14 @@
   "exports": {
     ".": {
       "types": "./index.d.ts",
+      "import": "./loader.mjs",
       "default": "./loader.js"
     }
   },
   "files": [
     "index.js",
     "loader.js",
+    "loader.mjs",
     "type-aware-command.js",
     "index.d.ts",
     "types",
@@ -61,7 +63,7 @@
     "prepublishOnly": "npm run publish:prepare",
     "artifacts": "napi artifacts",
     "create-npm-dirs": "napi create-npm-dirs",
-    "test": "node test.mjs"
+    "test": "node test.mjs && node tests/package-imports.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.10.12"
