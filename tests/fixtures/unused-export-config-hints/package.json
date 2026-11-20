@@ -1,0 +1,6 @@
+{
+  "name": "unused-export-config-hints",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

@@ -1122,7 +1122,7 @@ fn push_unused_export_sections(input: &mut UnusedCodeSectionInput<'_>) {
         },
         has_fixable_export,
     );
-    insert_test_src_split(input.lines, exports, input.root, |e| &e.export.path);
+    config_quality::export_config_hints::finish_section(input.lines, exports, input.root);
 
     let has_fixable_type = types
         .iter()
