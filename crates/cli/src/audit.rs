@@ -1430,15 +1430,7 @@ fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
         .map(|check| check.config.root.clone())
         .unwrap_or_default();
     let head_source = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    compute_audit_brief_data_with_lookups(input, None, &head_source, &shared_rename_old_path)
-}
-
-/// Resolve a head root-relative path to its pre-rename path through the run's
-/// shared diff index; `None` when the file was not renamed.
-fn shared_rename_old_path(rel: &str) -> Option<String> {
-    crate::report::ci::diff_filter::shared_diff_index()
-        .and_then(|index| index.old_path_for_root_relative(rel))
-        .map(std::borrow::Cow::into_owned)
+    compute_audit_brief_data_with_lookups(input, None, &head_source)
 }
 
 struct AuditBriefExternalData {
@@ -1462,7 +1454,7 @@ fn prepare_audit_brief_external_data(
         base_ref,
         changed_files,
         check.and_then(|check| check.package_importers.as_ref()),
-        &shared_rename_old_path,
+        &|rel| diff_rename_old_path(diff_evidence.diff_index.as_ref(), rel),
     );
     AuditBriefExternalData {
         security_step_signals,
@@ -1710,7 +1702,6 @@ fn benchmark_audit_review_brief_started_at(
     let cache_dir = corpus.root.join(".fallow-cache-benchmark");
     let opts = audit_review_benchmark_options(&corpus.root, &config_path, &cache_dir, 1);
     let head_source = |relative: &str| corpus.head_sources.get(relative).cloned();
-    let rename_old_path = |_relative: &str| None;
     let changed_files_count = changed_files.len();
     let run = attribute_preloaded_run(&opts, head, base_snapshot, changed_files);
     let mut result = finish_audit_result(
@@ -1723,14 +1714,7 @@ fn benchmark_audit_review_brief_started_at(
             start,
         },
         run,
-        |input| {
-            compute_audit_brief_data_with_lookups(
-                input,
-                Some(external),
-                &head_source,
-                &rename_old_path,
-            )
-        },
+        |input| compute_audit_brief_data_with_lookups(input, Some(external), &head_source),
     );
     if result.verdict != AuditVerdict::Fail {
         return Err(exit_invalid_input());
@@ -1770,7 +1754,7 @@ fn benchmark_audit_review_brief_started_at(
             .check
             .as_ref()
             .and_then(|check| check.package_importers.as_ref()),
-        &shared_rename_old_path,
+        &|rel| diff_rename_old_path(result.diff_index.as_ref(), rel),
     );
     corpus.state = Some(AuditReviewBenchmarkState {
         head: HeadAnalyses {
@@ -1804,7 +1788,6 @@ fn compute_audit_brief_data_with_lookups(
     input: AuditBriefDataInput<'_>,
     preloaded: Option<AuditBriefExternalData>,
     head_source: &dyn Fn(&str) -> Option<String>,
-    rename_old_path: &dyn Fn(&str) -> Option<String>,
 ) -> AuditBriefData {
     if !input.opts.brief {
         return AuditBriefData::default();
@@ -1814,31 +1797,44 @@ fn compute_audit_brief_data_with_lookups(
     // Every git-backed pass (security steps, routing, diff evidence, manifest
     // diff) comes from the preloaded package when one exists, so the benchmark
     // path never re-spawns git per iteration.
-    let (security_step_signals, routing, preloaded_diff_evidence, dependency_anchors) =
-        match preloaded {
-            None => (
-                compute_security_step_signals(input.opts.root, input.base_ref, input.changed_files),
-                input.check.map(|check| {
-                    routing::brief_routing(input.opts.root, check, input.changed_files)
-                }),
-                None,
-                compute_dependency_anchors(
-                    input.opts.root,
-                    input.base_ref,
-                    input.changed_files,
-                    input
-                        .check
-                        .and_then(|check| check.package_importers.as_ref()),
-                    rename_old_path,
-                ),
-            ),
-            Some(external) => (
+    let (preloaded_diff_evidence, preloaded) = match preloaded {
+        Some(external) => (
+            Some(external.diff_evidence),
+            Some((
                 external.security_step_signals,
                 external.routing,
-                Some(external.diff_evidence),
                 external.dependency_anchors,
+            )),
+        ),
+        None => (None, None),
+    };
+    let diff_evidence = preloaded_diff_evidence
+        .or(input.diff_evidence)
+        .unwrap_or_else(|| {
+            compute_brief_diff_evidence(
+                input.opts.root,
+                input.base_ref,
+                input.opts.walkthrough_file,
+            )
+        });
+    let rename_old_path = |rel: &str| diff_rename_old_path(diff_evidence.diff_index.as_ref(), rel);
+    let (security_step_signals, routing, dependency_anchors) = preloaded.unwrap_or_else(|| {
+        (
+            compute_security_step_signals(input.opts.root, input.base_ref, input.changed_files),
+            input
+                .check
+                .map(|check| routing::brief_routing(input.opts.root, check, input.changed_files)),
+            compute_dependency_anchors(
+                input.opts.root,
+                input.base_ref,
+                input.changed_files,
+                input
+                    .check
+                    .and_then(|check| check.package_importers.as_ref()),
+                &rename_old_path,
             ),
-        };
+        )
+    });
     if let Some(deltas) = review_deltas.as_mut() {
         fallow_api::dependency_deltas::fill_dependency_delta_keys(deltas, &dependency_anchors);
     }
@@ -1853,19 +1849,10 @@ fn compute_audit_brief_data_with_lookups(
         &DecisionSurfaceLookups {
             dependency_anchors: &dependency_anchors,
             head_source,
-            rename_old_path,
+            rename_old_path: &rename_old_path,
         },
     ));
 
-    let diff_evidence = preloaded_diff_evidence
-        .or(input.diff_evidence)
-        .unwrap_or_else(|| {
-            compute_brief_diff_evidence(
-                input.opts.root,
-                input.base_ref,
-                input.opts.walkthrough_file,
-            )
-        });
     let change_anchors = diff_evidence.change_anchors;
 
     // Graph-snapshot hash pins key sets, resolved base, head sha, and anchors.
@@ -1943,31 +1930,34 @@ fn compute_brief_diff_evidence(
     walkthrough_file: Option<&std::path::Path>,
 ) -> BriefDiffEvidence {
     let excluded_file = walkthrough_file_relative_to_root(root, walkthrough_file);
-    if let (Some(raw), Some(index)) = (
-        crate::report::ci::diff_filter::shared_diff_raw(),
-        crate::report::ci::diff_filter::shared_diff_index(),
-    ) {
-        let mut change_anchors = crate::audit_walkthrough::parse_change_anchors(raw);
-        if let Some(excluded) = excluded_file.as_deref() {
-            change_anchors.retain(|anchor| anchor.file != excluded);
-        }
-        return BriefDiffEvidence {
-            change_anchors,
-            diff_index: Some(index.clone()),
+    let shared = crate::report::ci::diff_filter::shared_diff_raw()
+        .zip(crate::report::ci::diff_filter::shared_diff_index());
+    let worktree;
+    let (raw, diff_index) = if let Some((raw, index)) = shared {
+        (raw, index.clone())
+    } else {
+        let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) else {
+            return BriefDiffEvidence::default();
         };
-    }
-
-    let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) else {
-        return BriefDiffEvidence::default();
+        worktree = diff;
+        let index = fallow_output::DiffIndex::from_unified_diff(&worktree);
+        (worktree.as_str(), index)
     };
-    let mut change_anchors = crate::audit_walkthrough::parse_change_anchors(&diff);
+    let mut change_anchors = crate::audit_walkthrough::parse_change_anchors(raw);
     if let Some(excluded) = excluded_file.as_deref() {
         change_anchors.retain(|anchor| anchor.file != excluded);
     }
     BriefDiffEvidence {
         change_anchors,
-        diff_index: Some(fallow_output::DiffIndex::from_unified_diff(&diff)),
+        diff_index: Some(diff_index),
     }
+}
+
+/// The pre-rename path of a head root-relative path in the diff of the run.
+fn diff_rename_old_path(index: Option<&fallow_output::DiffIndex>, rel: &str) -> Option<String> {
+    index?
+        .old_path_for_root_relative(rel)
+        .map(std::borrow::Cow::into_owned)
 }
 
 fn walkthrough_file_relative_to_root(
