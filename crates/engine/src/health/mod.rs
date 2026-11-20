@@ -29,7 +29,7 @@ mod core_pipeline;
 mod coverage_gaps;
 mod coverage_intelligence;
 mod coverage_settings;
-mod coverage_v8;
+pub mod coverage_v8;
 mod css_analytics;
 mod cyclomatic_policy;
 mod derived_sections;

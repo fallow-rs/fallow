@@ -64,6 +64,7 @@ fallow-security = { workspace = true }
 fallow-types = { workspace = true }
 fallow-v8-coverage = { version = "3.45.0", path = "../v8-coverage" }
 fallow-cov-protocol = "0.9"
+url = "2"
 fallow-license = { version = "3.45.0", path = "../license" }
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 clap = { workspace = true }
@@ -91,7 +92,6 @@ oxc_coverage_instrument = { workspace = true }
 srcmap-sourcemap = "0.6.0"
 httpdate = { workspace = true }
 ureq = { workspace = true }
-url = "2"
 http = "1"
 xxhash-rust = { workspace = true }
 sha2 = { workspace = true }

@@ -28,6 +28,7 @@
 //! the source map that Node records in the dump; see [`mapped`].
 
 mod mapped;
+pub mod source_map_cache;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

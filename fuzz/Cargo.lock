@@ -734,6 +734,7 @@ dependencies = [
  "oxc_parser",
  "oxc_span",
  "oxc_syntax",
+ "percent-encoding",
  "rayon",
  "rustc-hash",
  "serde",

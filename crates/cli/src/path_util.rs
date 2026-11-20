@@ -3,9 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-pub use fallow_types::path_util::{
-    is_absolute_path_any_platform, looks_like_windows_absolute_path,
-};
+pub use fallow_types::path_util::is_absolute_path_any_platform;
 
 /// Resolves each `--file` input against `root`, in input order. An absolute
 /// input stays as it is. Unless `quiet` is set, the function writes one
