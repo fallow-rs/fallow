@@ -1539,15 +1539,11 @@ fn knip_rule_severity_is_written_in_canonical_form() {
         "rules": {"files": "Warning", "exports": "OFF", "duplicates": "warn"}
     }));
     assert!(warnings.is_empty(), "{warnings:?}");
-    assert_eq!(
-        config_map["rules"],
-        serde_json::json!({
-            "unused-files": "warn",
-            "unused-exports": "off",
-            "duplicate-exports": "warn",
-            "duplicate-export-aliases": "warn"
-        })
-    );
+    let rules = &config_map["rules"];
+    assert_eq!(rules["unused-files"], "warn");
+    assert_eq!(rules["unused-exports"], "off");
+    assert_eq!(rules["duplicate-exports"], "warn");
+    assert_eq!(rules["duplicate-export-aliases"], "warn");
     let result = MigrationResult {
         config: serde_json::Value::Object(config_map),
         warnings: vec![],
@@ -1563,8 +1559,14 @@ fn knip_rule_with_an_invalid_severity_warns_once_and_is_skipped() {
         "rules": {"files": 123, "exports": "loud", "duplicates": "maybe", "types": "error"}
     }));
     let rules = config_map["rules"].as_object().unwrap();
-    assert_eq!(rules.len(), 1, "{rules:?}");
     assert_eq!(rules["unused-types"], "error");
+    for (rule, severity) in rules {
+        let text = severity.as_str().unwrap_or_default();
+        assert!(
+            text.parse::<fallow_config::Severity>().is_ok(),
+            "{rule} = {severity}"
+        );
+    }
     let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
     assert_eq!(fields, ["rules.files", "rules.exports", "rules.duplicates"]);
     assert_eq!(

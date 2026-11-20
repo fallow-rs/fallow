@@ -265,7 +265,7 @@ pub(super) fn error_rules_with_warn_default(config: &Value) -> Vec<&'static str>
         .filter(|name| {
             rules
                 .and_then(|rules| rules.get(*name))
-                .and_then(Value::as_str)
+                .and_then(parse_severity)
                 == Some(DEFAULT_SEVERITY)
         })
         .collect()
