@@ -60,7 +60,6 @@ fn write(root: &Path, rel: &str, body: &str) {
     fs::write(path, body).expect("write file");
 }
 
-/// A project with one complex function, one clone group and a stylesheet.
 /// The absolute path of the health baseline file in `dir`.
 fn baseline_path(dir: &TempDir) -> String {
     dir.path()
@@ -70,6 +69,7 @@ fn baseline_path(dir: &TempDir) -> String {
         .to_owned()
 }
 
+/// A project with one complex function, one clone group and a stylesheet.
 fn project() -> TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
@@ -130,7 +130,7 @@ fn bare_failed_line_omits_clone_groups_that_do_not_fail_the_run() {
     ]);
     assert_eq!(output.code, 1, "{}", output.stderr);
     assert!(
-        output.stdout.contains("Duplicates (1 clone group"),
+        output.stdout.contains("Duplicates (1 clone group)"),
         "the fixture needs a clone group: {}{}",
         output.stdout,
         output.stderr
@@ -171,6 +171,39 @@ fn health_status_line_counts_only_findings_after_the_baseline() {
     insta::assert_snapshot!(
         "health_status_line_with_baseline",
         health_status_line(&output)
+    );
+}
+
+#[test]
+fn health_findings_header_counts_only_findings_after_the_baseline() {
+    let dir = project();
+    let baseline = baseline_path(&dir);
+    run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--no-cache", "--save-baseline", &baseline],
+    );
+    write(
+        dir.path(),
+        "src/c.js",
+        &COMPLEX.replace("function complex", "function newer"),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--no-cache", "--baseline", &baseline],
+    );
+    let all = format!("{}{}", output.stdout, output.stderr);
+    assert!(
+        all.contains("High complexity functions (1)"),
+        "the header counts the finding that the baseline does not accept: {all}"
+    );
+    assert!(!all.contains("--top 2"), "{all}");
+    assert!(
+        health_status_line(&output).contains("1 above threshold (1 in the baseline)"),
+        "{}",
+        output.stderr
     );
 }
 

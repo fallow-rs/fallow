@@ -12,7 +12,7 @@ use super::health_crap_notes::{
 };
 use super::health_hotspots::{render_change_coupling, render_hotspots};
 use super::health_runtime::render_runtime_coverage;
-use super::health_status::print_health_final_status;
+use super::health_status::{functions_above_after_baseline, print_health_final_status};
 use super::health_targets::render_refactoring_targets;
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, push_docs_footer,
@@ -1849,8 +1849,8 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
         &format!("{DOCS_HEALTH}#complexity-metrics"),
     );
     append_suppression_hints(lines, report);
-    if report.findings.len() < report.summary.functions_above_threshold {
-        let total = report.summary.functions_above_threshold;
+    let (total, _) = functions_above_after_baseline(&report.summary);
+    if report.findings.len() < total {
         lines.push(format!(
             "  {}",
             format!("use --top {total} to see all").dimmed()
@@ -1865,14 +1865,11 @@ fn push_findings_header(lines: &mut Vec<String>, report: &fallow_output::HealthR
     } else {
         "High complexity functions"
     };
-    let title = if report.findings.len() < report.summary.functions_above_threshold {
-        format!(
-            "{subject} ({} shown, {} total)",
-            report.findings.len(),
-            report.summary.functions_above_threshold
-        )
+    let (total, _) = functions_above_after_baseline(&report.summary);
+    let title = if report.findings.len() < total {
+        format!("{subject} ({} shown, {total} total)", report.findings.len())
     } else {
-        format!("{subject} ({})", report.summary.functions_above_threshold)
+        format!("{subject} ({total})")
     };
     lines.push(format!("{} {}", "\u{25cf}".red(), title.red().bold()));
 }

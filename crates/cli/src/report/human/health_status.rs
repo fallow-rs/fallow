@@ -75,7 +75,9 @@ fn above_threshold_part(summary: &fallow_output::HealthSummary) -> String {
 /// The functions above a threshold that a loaded baseline does not accept,
 /// and the functions that it accepts. Without a baseline, every function is
 /// in the first count.
-fn functions_above_after_baseline(summary: &fallow_output::HealthSummary) -> (usize, usize) {
+pub(super) fn functions_above_after_baseline(
+    summary: &fallow_output::HealthSummary,
+) -> (usize, usize) {
     let total = summary.functions_above_threshold;
     summary
         .baseline_staleness
