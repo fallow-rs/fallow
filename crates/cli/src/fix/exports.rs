@@ -6,6 +6,7 @@ use fallow_config::OutputFormat;
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
 use super::export_declarations::{SharedDeclarations, remove_export_keyword_at};
 use super::export_list::{ExportListIndex, ExportListStatement, ListRewrite, ListRewriteOutcome};
+use super::list_imports::{ImportRemoval, plan_import_removals};
 use fallow_engine::module_graph::NamedReExport;
 use fallow_types::output_dead_code::ReachabilityCaveat;
 
@@ -231,6 +232,12 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
         if file_plan.fixes.is_empty() {
             continue;
         }
+        let import_removals = plan_import_removals(
+            file_plan.path,
+            &file_plan.content,
+            file_plan.meta.line_ending,
+            &removed_list_references(&rewrites),
+        );
         file_plan.fixes.sort_by_key(|f| {
             (
                 std::cmp::Reverse(f.edit_line()),
@@ -246,6 +253,9 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
                 file_plan.path,
                 &file_plan.fixes,
             );
+            if !matches!(input.output, OutputFormat::Json) {
+                emit_dry_run_import_removals(file_plan.relative, &import_removals);
+            }
         } else {
             apply_grouped_export_fixes(GroupedExportFixInput {
                 plan: input.plan,
@@ -257,6 +267,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
                 lines: &lines,
                 line_fixes: &file_plan.fixes,
                 rewrites,
+                import_removals,
             });
         }
     }
@@ -443,6 +454,33 @@ fn rewrite_list_statements(
     rewrites
 }
 
+/// Count, for each local name, the removed export list specifiers that read
+/// it.
+fn removed_list_references(
+    rewrites: &FxHashMap<usize, ListRewriteOutcome>,
+) -> FxHashMap<String, usize> {
+    let mut counts: FxHashMap<String, usize> = FxHashMap::default();
+    for local in rewrites
+        .values()
+        .flat_map(|outcome| &outcome.removed_locals)
+    {
+        *counts.entry(local.clone()).or_default() += 1;
+    }
+    counts
+}
+
+fn emit_dry_run_import_removals(relative: &Path, removals: &[ImportRemoval]) {
+    let relative_display = relative.to_string_lossy().replace('\\', "/");
+    for removal in removals {
+        for name in &removal.names {
+            eprintln!(
+                "Would remove import from {relative_display}:{} `{name}`",
+                removal.start_line + 1,
+            );
+        }
+    }
+}
+
 /// Emit the entry of an export removal that the run withholds. Withholding
 /// is per export, not per file rewrite, so the entry never reaches the
 /// per-file skip list of the plan.
@@ -586,6 +624,9 @@ struct GroupedExportFixInput<'a> {
     line_fixes: &'a [ExportFix],
     /// The rewrite of each list statement, keyed by its first line.
     rewrites: FxHashMap<usize, ListRewriteOutcome>,
+    /// The imports that only the removed list specifiers use. Their lines
+    /// never hold an export edit.
+    import_removals: Vec<ImportRemoval>,
 }
 
 fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
@@ -599,6 +640,7 @@ fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
         lines,
         line_fixes,
         mut rewrites,
+        import_removals,
     } = input;
 
     let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
@@ -614,6 +656,17 @@ fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
             &mut rewrites,
             edit_line,
         );
+    }
+
+    for removal in import_removals {
+        let kept = removal.replacement.map_or(0, |replacement| {
+            let kept = replacement.len();
+            for (offset, line) in replacement.into_iter().enumerate() {
+                new_lines[removal.start_line + offset] = line;
+            }
+            kept
+        });
+        lines_to_delete.extend(removal.start_line + kept..=removal.end_line);
     }
 
     delete_export_lines(&mut new_lines, lines_to_delete);

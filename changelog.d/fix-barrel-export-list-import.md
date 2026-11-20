@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow fix` removes the import of a name that it removes from a local export list.** In `import { a } from './a'; export { a, used };`, the fix removed `a` from the list but kept the import. The next fix run did not count that import as a use, so it removed the `export` of `a` in `./a`, and the type check then failed with TS2306 or TS2459. The fix now also removes an import binding when the removed list specifiers are all of its references in the file, and the full import declaration when no binding is left. An import without bindings, such as `import './polyfill';`, does not change. The dry run lists each import removal. An import declaration that shares a line with other code, or a file that does not parse, keeps its imports.
+  (Closes [#4833](https://github.com/fallow-rs/fallow/issues/4833))
