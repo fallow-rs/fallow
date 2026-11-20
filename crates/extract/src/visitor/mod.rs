@@ -1077,14 +1077,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// on one of them records conditional fixture definitions.
     playwright_conditional_tests: FxHashSet<String>,
     source_returning_helpers: FxHashMap<String, SourceReturningHelper>,
-    /// File-level string directives (`"use client"`, `"use server"`) captured
-    /// from `Program::directives`. Consumed by the security `client-server-leak`
-    /// detector to identify React Server Component client boundaries.
+    /// The `Program::directives` (`"use client"`) for the `client-server-leak` rule.
     directives: Vec<String>,
-    /// Byte-offset starts of dynamic `import()` expressions wrapped in
-    /// `next/dynamic(() => import('./X'), { ssr: false })`. Consumed by the
-    /// security `client-server-leak` BFS to exclude the ssr:false client-only escape hatch.
+    /// The `import()` starts of `next/dynamic(..., { ssr: false })`, which the leak cone skips.
     client_only_dynamic_import_spans: Vec<u32>,
+    /// The non-public env reads, for the `client-server-leak` rule.
+    env_reads: Vec<fallow_types::extract::EnvRead>,
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector.
     security_sinks: Vec<SinkSite>,
@@ -3382,6 +3380,7 @@ impl ModuleInfoExtractor {
             auto_import_candidates: self.og_image_template_candidates,
             directives: self.directives,
             client_only_dynamic_import_spans: self.client_only_dynamic_import_spans,
+            env_reads: self.env_reads,
             security_sinks: self.security_sinks,
             security_sinks_skipped: self.security_sinks_skipped,
             security_unresolved_callee_sites: self.security_unresolved_callee_sites,
@@ -3542,6 +3541,7 @@ impl ModuleInfoExtractor {
         info.directives.append(&mut self.directives);
         info.client_only_dynamic_import_spans
             .append(&mut self.client_only_dynamic_import_spans);
+        info.env_reads.append(&mut self.env_reads);
         info.callee_uses.append(&mut self.callee_uses);
         info.command_invocations
             .append(&mut self.command_invocations);

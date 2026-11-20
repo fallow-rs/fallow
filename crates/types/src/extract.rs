@@ -160,6 +160,8 @@ pub struct ModuleInfo {
     /// against the edge's `import_span`). Empty for files with no ssr:false
     /// dynamic import. Captured only by JS/TS extraction.
     pub client_only_dynamic_import_spans: Vec<u32>,
+    /// The non-public env reads in source order, for the `client-server-leak` rule.
+    pub env_reads: Vec<EnvRead>,
     /// Captured security sink sites (category-blind). Consumed by the
     /// catalogue-driven `tainted_sink` detector. Captured only by JS/TS
     /// extraction; empty for CSS/MDX/etc. See `security_matchers.toml`.
@@ -490,6 +492,7 @@ impl ModuleInfo {
             auto_import_candidates: Vec::new(),
             directives: Vec::new(),
             client_only_dynamic_import_spans: Vec::new(),
+            env_reads: Vec::new(),
             security_sinks: Vec::new(),
             security_sinks_skipped: 0,
             security_unresolved_callee_sites: Vec::new(),
@@ -930,10 +933,7 @@ impl SinkSite {
 
 #[path = "extract_env.rs"]
 mod env;
-pub use env::{
-    PUBLIC_ENV_EXACT, PUBLIC_ENV_METADATA_TOKENS, PUBLIC_ENV_PREFIXES, SECRET_ENV_TOKENS,
-    is_public_env_path, is_public_env_var,
-};
+pub use env::*;
 
 /// One alias entry tying an exported object's dotted property path to a namespace import.
 #[derive(Debug, Clone)]
@@ -3487,7 +3487,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1552);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1576);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]

@@ -15517,7 +15517,7 @@
         },
         "line": {
           "type": "integer",
-          "description": "1-based line number. Import-chain hops point at the import site; the\nterminal secret-source hop points at the source module when extraction\ndoes not carry a more precise member-access span."
+          "description": "1-based line number. Import-chain hops point at the import site. A\n`secret-source` hop points at the first secret read of the module, and\na `client-server-leak` sink hop at its first server-only import."
         },
         "col": {
           "type": "integer",
@@ -15526,6 +15526,13 @@
         "role": {
           "description": "Role of this hop in the chain.",
           "$ref": "#/definitions/TraceHopRole"
+        },
+        "secret_reads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraceSecretRead"
+          },
+          "description": "Every non-public env read that makes this module a secret source, in\nsource order. Present only on a `secret-source` hop; the hop `line` and\n`col` equal the first entry."
         }
       },
       "required": [
@@ -39735,6 +39742,29 @@
         "scope"
       ],
       "description": "A value with the input that gave it and the scope of that input."
+    },
+    "TraceSecretRead": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The read path, for example `process.env.SESSION_SECRET`."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the read."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the read."
+        }
+      },
+      "required": [
+        "name",
+        "line",
+        "col"
+      ],
+      "description": "One non-public env read on a `secret-source` trace hop."
     }
   }
 }

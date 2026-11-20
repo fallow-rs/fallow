@@ -69,6 +69,9 @@ impl ModuleInfoExtractor {
         for start in &mut self.client_only_dynamic_import_spans {
             *start = remap_start(*start);
         }
+        for read in &mut self.env_reads {
+            read.span_start = remap_start(read.span_start);
+        }
         for binding in &mut self.tainted_bindings {
             // `0` means that the binding has no source read.
             if binding.source_span_start != 0 {

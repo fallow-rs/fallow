@@ -2247,24 +2247,24 @@ mod tests {
             source_read: None,
             severity: SecuritySeverity::High,
             trace: vec![
-                TraceHop {
-                    path: root.join("src/app.tsx"),
-                    line: 12,
-                    col: 3,
-                    role: TraceHopRole::ClientBoundary,
-                },
-                TraceHop {
-                    path: root.join("src/lib/util.ts"),
-                    line: 4,
-                    col: 0,
-                    role: TraceHopRole::Intermediate,
-                },
-                TraceHop {
-                    path: root.join("src/lib/secret.ts"),
-                    line: 8,
-                    col: 2,
-                    role: TraceHopRole::SecretSource,
-                },
+                TraceHop::new(
+                    root.join("src/app.tsx"),
+                    12,
+                    3,
+                    TraceHopRole::ClientBoundary,
+                ),
+                TraceHop::new(
+                    root.join("src/lib/util.ts"),
+                    4,
+                    0,
+                    TraceHopRole::Intermediate,
+                ),
+                TraceHop::new(
+                    root.join("src/lib/secret.ts"),
+                    8,
+                    2,
+                    TraceHopRole::SecretSource,
+                ),
             ],
             actions: vec![],
             category: None,
@@ -3109,18 +3109,13 @@ mod tests {
             taint_confidence: Some(TaintConfidence::ModuleLevel),
             untrusted_source_hop_count: Some(1),
             untrusted_source_trace: vec![
-                TraceHop {
-                    path: root.join("src/routes/api.ts"),
-                    line: 3,
-                    col: 0,
-                    role: TraceHopRole::ModuleSource,
-                },
-                TraceHop {
-                    path: root.join("src/lib/sink.ts"),
-                    line: 9,
-                    col: 2,
-                    role: TraceHopRole::Sink,
-                },
+                TraceHop::new(
+                    root.join("src/routes/api.ts"),
+                    3,
+                    0,
+                    TraceHopRole::ModuleSource,
+                ),
+                TraceHop::new(root.join("src/lib/sink.ts"), 9, 2, TraceHopRole::Sink),
             ],
             blast_radius: 2,
             crosses_boundary: false,
@@ -3734,12 +3729,12 @@ mod tests {
         finding.category = Some("command-injection".to_string());
         add_untrusted_source_reachability(&mut finding, root);
         add_taint_flow(&mut finding, root);
-        finding.trace.push(TraceHop {
-            path: root.join("src/lib/sink.ts"),
-            line: 9,
-            col: 2,
-            role: TraceHopRole::Sink,
-        });
+        finding.trace.push(TraceHop::new(
+            root.join("src/lib/sink.ts"),
+            9,
+            2,
+            TraceHopRole::Sink,
+        ));
         let rendered = render_sarif(
             &output_with(vec![relativize_finding(finding, root)], 0),
             root,

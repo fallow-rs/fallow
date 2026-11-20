@@ -200,6 +200,7 @@ fn create_hardcoded_secret_finding(
             line,
             col,
             role: TraceHopRole::Sink,
+            secret_reads: Vec::new(),
         }],
         actions: build_actions(),
         reachability: None,

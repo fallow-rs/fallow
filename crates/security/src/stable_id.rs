@@ -314,12 +314,8 @@ mod tests {
     #[test]
     fn a_client_server_leak_hashes_the_first_and_last_trace_hop() {
         let leak = |middle: &str| {
-            let hop = |path: &str| TraceHop {
-                path: PathBuf::from(path),
-                line: 1,
-                col: 0,
-                role: TraceHopRole::Intermediate,
-            };
+            let hop =
+                |path: &str| TraceHop::new(PathBuf::from(path), 1, 0, TraceHopRole::Intermediate);
             let mut finding = finding(1, None, "client-server-leak");
             finding.kind = SecurityFindingKind::ClientServerLeak;
             finding.trace = vec![
@@ -337,12 +333,8 @@ mod tests {
     #[test]
     fn a_client_server_leak_hashes_the_secret_names() {
         let leak = |reads: &[&str]| {
-            let hop = |path: &str| TraceHop {
-                path: PathBuf::from(path),
-                line: 1,
-                col: 0,
-                role: TraceHopRole::Intermediate,
-            };
+            let hop =
+                |path: &str| TraceHop::new(PathBuf::from(path), 1, 0, TraceHopRole::Intermediate);
             let input = SecurityStableIdInput::SecretReads(
                 reads.iter().map(|read| (*read).to_owned()).collect(),
             );

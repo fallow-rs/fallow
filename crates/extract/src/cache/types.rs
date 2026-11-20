@@ -56,7 +56,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1592);
+assert_cached_type_size!(CachedModule, 1616);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 // The call facts blob of `CachedModule` encodes these types. A blob that an
 // older shape wrote does not decode, and the entry then parses again on each
@@ -242,6 +242,10 @@ pub struct CachedModule {
     /// Content-local, round-trips so the security `client-server-leak` BFS sees
     /// the ssr:false client-only escape hatch on warm-cache loads.
     pub client_only_dynamic_import_spans: Vec<u32>,
+    /// The reads of non-public env vars with their offsets. Content-local,
+    /// round-trips so the `client-server-leak` rule reports the read line on
+    /// warm-cache loads.
+    pub env_reads: Vec<fallow_types::extract::EnvRead>,
     /// Captured security sink sites (category-blind). Round-trips through the
     /// cache so the catalogue-driven `tainted_sink` detector sees sinks on
     /// warm-cache loads.

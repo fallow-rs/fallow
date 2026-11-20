@@ -90,12 +90,7 @@ mod tests {
             source_backed: false,
             source_read: None,
             severity: SecuritySeverity::Low,
-            trace: vec![TraceHop {
-                path: path.clone(),
-                line: 1,
-                col: 0,
-                role: TraceHopRole::Sink,
-            }],
+            trace: vec![TraceHop::new(path.clone(), 1, 0, TraceHopRole::Sink)],
             actions: Vec::<IssueAction>::new(),
             dead_code: None,
             reachability: None,

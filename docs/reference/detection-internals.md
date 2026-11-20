@@ -490,12 +490,18 @@ error by suppressing a downstream detector.
   React Router removes the `loader`, `action`, `middleware` and `headers`
   exports from a route file wherever it is imported, and then runs dead-code
   elimination. So at each route module, the root included, the scan skips
-  the imports, the re-exports and the static env reads
-  (`process.env.X`, `import.meta.env.X`) that only those exports use.
-  Extraction does not keep statement-level references, so
-  `security/route_module_split.rs` parses the route modules again, and only
-  those. An env read in another form, such as a destructure of
-  `process.env`, stays counted for the whole module.
+  the imports and the re-exports that only those exports use, and the env
+  reads in the dead code. Extraction does not keep statement-level
+  references, so `security/route_module_split.rs` parses the route modules
+  again, and only those. The split gives the ranges of the dead top-level
+  statements. Extraction records each non-public env read with its offset
+  (`ModuleInfo::env_reads`) in three forms: `process.env.X` (also
+  `import.meta.env.X`), `process.env['X']` with a static key, and
+  `const { X } = process.env`. A read inside a dead range does not count.
+- A `client-server-leak` finding points at the first secret read of the
+  module, or at its first server-only import. The `secret-source` trace hop
+  lists every read in `secret_reads`, and `fallow security --gate new` keeps
+  the finding when one of these lines is added.
 - A route module is a file that the route config names, the root route, a
   file directly in a route directory, a `route.*` file, or a deeper file
   that exports a route module export and is not in a folder with a

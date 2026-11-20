@@ -99,6 +99,9 @@ pub mod path_util;
 pub mod pipeline_spans;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
+/// The `Next:` step of a `client-server-leak` candidate, shared by the CLI
+/// and the LSP hover.
+pub mod security_next_step;
 /// Security sink names shared by the extractor and the sink catalogue.
 pub mod security_sinks;
 /// The line-free input of the stable id of a security finding.

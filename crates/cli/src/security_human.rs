@@ -275,22 +275,11 @@ fn push_human_import_trace(out: &mut String, finding: &SecurityFinding) {
 }
 
 fn push_human_next_step(out: &mut String, finding: &SecurityFinding) {
-    if is_server_only_leak(finding) {
-        out.push_str(
-            "    Next: check whether this server-only code is meant to run on the client. \
-             If it is pulled in only through next/dynamic(..., { ssr: false }), type-only, \
-             or removed at build time, mark it as a false positive. fallow already \
-             excludes a \"use server\" module whose value exports are all async \
-             functions. If the sink is a \"use server\" module, move its non-action \
-             export (a top-level const, a re-export, or a default value) to a \
-             server-only file.\n",
-        );
-    } else if matches!(finding.kind, SecurityFindingKind::ClientServerLeak) {
-        out.push_str(
-            "    Next: check whether this import can ship a secret to the browser. If \
-             it is type-only, server-only, or removed at build time, mark it as a false \
-             positive.\n",
-        );
+    if matches!(finding.kind, SecurityFindingKind::ClientServerLeak) {
+        let step = fallow_types::security_next_step::client_server_leak_next_step(finding);
+        out.push_str("    ");
+        out.push_str(step);
+        out.push('\n');
     } else if finding.dead_code.is_some() {
         out.push_str(
             "    Next: first verify the dead-code finding. If the code is safe to \

@@ -3,6 +3,9 @@ use oxc_span::GetSpan;
 
 use fallow_types::extract::TaintedBinding;
 
+#[path = "visit_impl_env_reads.rs"]
+mod visit_env_reads;
+
 use super::super::{ModuleInfoExtractor, extract_destructured_names};
 use super::{
     DIRECT_TAINT_HOP, FRAMEWORK_REQUEST_SOURCE, GRAPHQL_ARGS_SOURCE, MAX_TAINT_BINDING_HOPS,

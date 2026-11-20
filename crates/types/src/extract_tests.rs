@@ -496,6 +496,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         auto_import_candidates: vec!["useState".to_string()],
         directives: vec!["use client".to_string()],
         client_only_dynamic_import_spans: Vec::new(),
+        env_reads: Vec::new(),
         security_sinks: Vec::new(),
         security_sinks_skipped: 1,
         security_unresolved_callee_sites: Vec::new(),
