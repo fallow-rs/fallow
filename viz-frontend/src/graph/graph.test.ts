@@ -10,6 +10,9 @@ import {
   middleTruncate,
   nodeHitTest,
   roadWidth,
+  selectedRoadIndex,
+  setStandaloneOpen,
+  standaloneVisible,
   tailTruncate,
   type ClusterInfo,
   type FileNode,
@@ -283,5 +286,79 @@ describe("coordinate assignment", () => {
         expect(rows[i].cy - rows[i - 1].cy).toBeGreaterThanOrEqual(rows[i].r + rows[i - 1].r);
       }
     }
+  });
+});
+
+describe("graph view state", () => {
+  const viewState = (): AppState => {
+    const state = {
+      view: "graph",
+      lens: "overview",
+      selected: null,
+      selectedRoad: null,
+      reducedMotion: true,
+      requestRender: () => {},
+      data: {
+        files: [
+          { path: "a/x.ts", status: "clean", unused_export_count: 0 },
+          { path: "b/y.ts", status: "clean", unused_export_count: 0 },
+          { path: "c/z.ts", status: "unused", unused_export_count: 0 },
+        ],
+        edges: [[0, 1]],
+      },
+      index: {},
+    } as unknown as AppState;
+    const gvs = getGVS(state);
+    gvs.clusters = [
+      cluster({ key: "a", indices: [0], cx: 0, cy: 0 }),
+      cluster({ key: "b", indices: [1], cx: 200, cy: 0 }),
+      cluster({ key: "c", indices: [2], cx: 0, cy: 400, isolated: true }),
+    ];
+    gvs.clusterOf = [0, 1, 2];
+    gvs.roads = [
+      { src: 0, dst: 1, count: 1, violations: 0, cycleEdges: 0, bidi: false, back: false },
+    ];
+    gvs.transform = { x: 0, y: 0, k: 1 };
+    gvs.initialized = true;
+    return state;
+  };
+
+  const roadAB = (): NonNullable<AppState["selectedRoad"]> => ({
+    srcKey: "a",
+    dstKey: "b",
+    count: 1,
+    violations: 0,
+    cycleEdges: 0,
+    pairs: [],
+  });
+
+  it("derives the selected road index from the app state", () => {
+    const state = viewState();
+    const gvs = getGVS(state);
+    expect(selectedRoadIndex(state, gvs)).toBeNull();
+    state.selectedRoad = roadAB();
+    expect(selectedRoadIndex(state, gvs)).toBe(0);
+    state.selectedRoad = { ...roadAB(), srcKey: "b", dstKey: "a" };
+    expect(selectedRoadIndex(state, gvs)).toBeNull();
+  });
+
+  it("standalone strip visibility", () => {
+    const state = viewState();
+    const gvs = getGVS(state);
+    expect(standaloneVisible(state, gvs)).toBe(false);
+    state.lens = "unused";
+    expect(standaloneVisible(state, gvs)).toBe(true);
+    setStandaloneOpen(state, gvs, false);
+    expect(standaloneVisible(state, gvs)).toBe(false);
+    expect(standaloneVisible(state, gvs)).toBe(false);
+    state.lens = "overview";
+    expect(standaloneVisible(state, gvs)).toBe(false);
+    state.lens = "unused";
+    expect(standaloneVisible(state, gvs)).toBe(true);
+
+    const allIsolated = viewState();
+    const isolatedGvs = getGVS(allIsolated);
+    isolatedGvs.clusters = isolatedGvs.clusters.map((entry) => ({ ...entry, isolated: true }));
+    expect(standaloneVisible(allIsolated, isolatedGvs)).toBe(true);
   });
 });
