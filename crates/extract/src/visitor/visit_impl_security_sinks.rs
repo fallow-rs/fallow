@@ -1306,7 +1306,7 @@ impl ModuleInfoExtractor {
 
     /// Resolve a callee to the dotted path the catalogue matches.
     ///
-    /// On top of [`Self::static_callee_path`], this maps a global-object prefix
+    /// On top of the static receiver path of [`Self::receiver_path`], this maps a global-object prefix
     /// on a code-executing global (`window.eval`) and a local alias of one
     /// (`const e = eval; e(code)`) to the bare global. A binding of a Node.js
     /// built-in module in
