@@ -4,13 +4,9 @@ use std::path::{Path, PathBuf};
 use fallow_config::OutputFormat;
 use fallow_engine::source_edits::SourceEditIndex;
 
-use super::enum_helpers::{
-    EnumDeclarationRange, declares_exported_enum, removable_exported_enum_range,
-};
+use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
 use super::plan::{CapturedHashes, FixPlan, skip_generated_source};
-use super::source_edits::{
-    QueueOutcome, SourceEdit, line_deletions, line_edit, read_source_snapshot,
-};
+use super::source_edits::{QueueOutcome, SourceEdit, line_deletions, read_source_snapshot};
 
 struct EnumMemberFix {
     line_idx: usize,
@@ -24,72 +20,15 @@ struct FoldedEnum {
     range: EnumDeclarationRange,
 }
 
-/// Locate `export enum <name>` (allowing `const` / `declare` modifiers) in
-/// the file's source lines. Returns the line index of the declaration.
-fn find_enum_declaration_line(lines: &[&str], enum_name: &str) -> Option<usize> {
-    lines
-        .iter()
-        .position(|line| declares_exported_enum(line, enum_name))
-}
-
-/// Returns true if removing every member name in `removed_members` from the
-/// enum body would leave the body entirely free of member declarations.
-/// Comments and blank lines do not count as remaining content.
-fn enum_body_drained_after_removal(
-    lines: &[&str],
-    range: EnumDeclarationRange,
-    removed_members: &[&str],
-) -> bool {
-    if range.start_line == range.end_line {
-        let line = lines[range.start_line];
-        let Some(open) = line.find('{') else {
-            return false;
-        };
-        let Some(close) = line.rfind('}') else {
-            return false;
-        };
-        if open >= close {
-            return false;
-        }
-        line[open + 1..close]
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .all(|spec| {
-                let ident = spec.split('=').next().unwrap_or(spec).trim();
-                removed_members.contains(&ident)
-            })
-    } else {
-        (range.start_line + 1..range.end_line).all(|i| {
-            let trimmed = lines[i].trim();
-            if trimmed.is_empty()
-                || trimmed.starts_with("//")
-                || trimmed.starts_with('*')
-                || trimmed.starts_with("/*")
-            {
-                return true;
-            }
-            let token = trimmed
-                .split(|c: char| c == ',' || c == '=' || c.is_whitespace())
-                .next()
-                .unwrap_or("");
-            !token.is_empty() && removed_members.contains(&token)
-        })
-    }
-}
-
 /// Determine which enums in the file should have their entire declaration
 /// removed because every member is in the fix list. Each entry corresponds to
 /// one folded enum; per-member edits for these enums are skipped in favour of
 /// a single whole-block delete.
 fn detect_folded_enums(
-    index: Option<&SourceEditIndex>,
+    index: &SourceEditIndex,
     lines: &[&str],
     member_fixes: &[EnumMemberFix],
 ) -> Vec<FoldedEnum> {
-    let Some(index) = index else {
-        return Vec::new();
-    };
     let mut by_parent: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
     for fix in member_fixes {
         by_parent
@@ -100,18 +39,29 @@ fn detect_folded_enums(
 
     let mut folded = Vec::new();
     for (parent_name, member_names) in &by_parent {
-        let Some(decl_line) = find_enum_declaration_line(lines, parent_name) else {
-            continue;
-        };
         let Some(range) = removable_exported_enum_range(index, lines, parent_name) else {
             continue;
         };
-        if !enum_body_drained_after_removal(lines, range, member_names) {
+        let in_range = |offset: u32| {
+            let line = index.line_range(offset, offset + 1).0;
+            (range.start_line..=range.end_line).contains(&line)
+        };
+        let drained = index
+            .enums_named(parent_name)
+            .find(|enumeration| in_range(enumeration.body_start))
+            .is_some_and(|enumeration| {
+                enumeration.complete
+                    && enumeration
+                        .members
+                        .iter()
+                        .all(|(member, _)| member_names.contains(&member.as_str()))
+            });
+        if !drained {
             continue;
         }
         folded.push(FoldedEnum {
             parent_name: (*parent_name).to_string(),
-            decl_line,
+            decl_line: range.start_line,
             range,
         });
     }
@@ -134,11 +84,12 @@ pub(super) struct EnumMemberFixInput<'a, 'member> {
 
 /// Apply enum member fixes to source files, returning JSON fix entries.
 ///
-/// Removes unused enum members from their declarations. Handles:
-/// - Multi-line enums: removes the entire line containing the member
-/// - Single-line enums: removes the member token from the line
-/// - Trailing commas: cleans up when the last member is removed
-/// - All members removed: leaves the enum body empty (`enum Foo {}`)
+/// The edits come from the syntax spans of the members
+/// (`SourceEditIndex::remove_enum_members`). A member that owns its lines is
+/// deleted with its lines, also an initializer over several lines. A member
+/// that shares a line is deleted with one separating comma, and each other
+/// byte of the enum stays as it is. An exported enum whose members are all
+/// unused is removed as a whole. A file that does not parse gets no edit.
 pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
     let EnumMemberFixInput {
         root,
@@ -157,6 +108,9 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
             continue;
         }
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
+        let Some(index) = SourceEditIndex::parse(path, &content) else {
+            continue;
+        };
 
         let member_fixes = collect_enum_member_fixes(&lines, file_members);
         if member_fixes.is_empty() {
@@ -164,8 +118,7 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         }
 
         let relative = path.strip_prefix(root).unwrap_or(path);
-        let index = SourceEditIndex::parse(path, &content);
-        let folded = detect_folded_enums(index.as_ref(), &lines, &member_fixes);
+        let folded = detect_folded_enums(&index, &lines, &member_fixes);
 
         let mut parents: Vec<&str> = member_fixes
             .iter()
@@ -175,14 +128,16 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         parents.dedup();
         let mut kept_parents: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         for parent in parents {
-            let group = enum_parent_edits(
+            let Some(group) = enum_parent_edits(
+                &index,
                 &content,
                 meta.line_ending,
-                &lines,
                 &member_fixes,
                 &folded,
                 parent,
-            );
+            ) else {
+                continue;
+            };
             if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
                 kept_parents.insert(parent);
             }
@@ -212,44 +167,43 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
 }
 
 /// The byte edits that remove the unused members of the enum `parent`, or
-/// the whole enum when it folds.
+/// the whole enum when it folds. `None` when the index refuses the edit.
 fn enum_parent_edits(
+    index: &SourceEditIndex,
     content: &str,
     line_ending: &str,
-    lines: &[&str],
     member_fixes: &[EnumMemberFix],
     folded: &[FoldedEnum],
     parent: &str,
-) -> Vec<SourceEdit> {
+) -> Option<Vec<SourceEdit>> {
     if let Some(fold) = folded.iter().find(|fold| fold.parent_name == parent) {
         let indexes: Vec<usize> = (fold.range.start_line..=fold.range.end_line).collect();
-        return line_deletions(content, line_ending, &indexes);
+        return Some(line_deletions(content, line_ending, &indexes));
     }
     let parent_fixes: Vec<&EnumMemberFix> = member_fixes
         .iter()
         .filter(|fix| fix.parent_name == parent)
         .collect();
-    let mut work: Vec<String> = lines.iter().map(ToString::to_string).collect();
-    let deleted = enum_member_lines_to_delete(&mut work, &parent_fixes);
-    let mut group = line_deletions(content, line_ending, &deleted);
-    for (index, line) in work.iter().enumerate() {
-        if !deleted.contains(&index) && line != lines[index] {
-            group.push(line_edit(
-                content,
-                line_ending,
-                index,
-                index,
-                Some(std::slice::from_ref(line)),
-            ));
-        }
-    }
-    group
+    let names: Vec<&str> = parent_fixes
+        .iter()
+        .map(|fix| fix.member_name.as_str())
+        .collect();
+    let line = u32::try_from(parent_fixes.first()?.line_idx + 1).ok()?;
+    let edits = index.remove_enum_members(parent, &names, line).ok()?;
+    Some(
+        edits
+            .into_iter()
+            .map(|edit| SourceEdit {
+                start: edit.start as usize,
+                end: edit.end as usize,
+                replacement: edit.replacement,
+            })
+            .collect(),
+    )
 }
 
-/// Build the sorted, deduped per-line enum-member fix list for one file from
-/// the unused-member findings whose reported line actually contains the
-/// member name. Sorted descending by line index so later in-place edits do
-/// not shift earlier indices.
+/// Build the sorted, deduped enum-member fix list for one file from the
+/// unused-member findings inside the file. Sorted descending by line index.
 fn collect_enum_member_fixes(
     lines: &[&str],
     file_members: &[&fallow_types::results::UnusedMember],
@@ -258,11 +212,6 @@ fn collect_enum_member_fixes(
     for member in file_members {
         let line_idx = member.line.saturating_sub(1) as usize;
         if line_idx >= lines.len() {
-            continue;
-        }
-
-        let line = lines[line_idx];
-        if !line.contains(&member.member_name) {
             continue;
         }
 
@@ -339,23 +288,6 @@ fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
     }
 }
 
-fn enum_member_lines_to_delete(
-    new_lines: &mut [String],
-    parent_fixes: &[&EnumMemberFix],
-) -> Vec<usize> {
-    let mut lines_to_delete = Vec::new();
-    for fix in parent_fixes {
-        let line = &new_lines[fix.line_idx];
-        if line.contains('{') && line.contains('}') {
-            new_lines[fix.line_idx] = remove_member_from_single_line(line, &fix.member_name);
-        } else {
-            new_lines[fix.line_idx] = String::new();
-            lines_to_delete.push(fix.line_idx);
-        }
-    }
-    lines_to_delete
-}
-
 struct AppliedEnumMemberRecordInput<'a> {
     member_fixes: &'a [EnumMemberFix],
     folded: &'a [FoldedEnum],
@@ -405,47 +337,6 @@ fn record_applied_enum_member_fixes(input: &mut AppliedEnumMemberRecordInput<'_>
     }
 }
 
-/// Remove a single member from a single-line enum like `enum Foo { A, B, C }`.
-///
-/// Returns the modified line with the member removed and commas cleaned up.
-fn remove_member_from_single_line(line: &str, member_name: &str) -> String {
-    let Some(open) = line.find('{') else {
-        return line.to_string();
-    };
-    let Some(close) = line.rfind('}') else {
-        return line.to_string();
-    };
-    if open >= close {
-        return line.to_string();
-    }
-
-    let prefix = &line[..=open];
-    let suffix = &line[close..];
-    let inner = &line[open + 1..close];
-
-    let parts: Vec<&str> = inner.split(',').collect();
-
-    let filtered: Vec<String> = parts
-        .iter()
-        .filter(|part| {
-            let trimmed = part.trim();
-            if trimmed.is_empty() {
-                return false;
-            }
-            let ident = trimmed.split('=').next().unwrap_or(trimmed).trim();
-            ident != member_name
-        })
-        .map(|part| part.trim().to_string())
-        .collect();
-
-    if filtered.is_empty() {
-        format!("{}{}", prefix.trim_end(), suffix.trim_start())
-    } else {
-        let members_str = filtered.join(", ");
-        format!("{prefix} {members_str} {suffix}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,7 +354,7 @@ mod tests {
         }
     }
 
-    fn fix_single_member(
+    pub(super) fn fix_single_member(
         root: &Path,
         file: &Path,
         enum_name: &str,
@@ -853,42 +744,6 @@ mod tests {
     }
 
     #[test]
-    fn single_line_remove_first_member() {
-        let result = remove_member_from_single_line("enum Foo { A, B, C }", "A");
-        assert_eq!(result, "enum Foo { B, C }");
-    }
-
-    #[test]
-    fn single_line_remove_middle_member() {
-        let result = remove_member_from_single_line("enum Foo { A, B, C }", "B");
-        assert_eq!(result, "enum Foo { A, C }");
-    }
-
-    #[test]
-    fn single_line_remove_last_member() {
-        let result = remove_member_from_single_line("enum Foo { A, B, C }", "C");
-        assert_eq!(result, "enum Foo { A, B }");
-    }
-
-    #[test]
-    fn single_line_remove_only_member() {
-        let result = remove_member_from_single_line("enum Foo { A }", "A");
-        assert_eq!(result, "enum Foo {}");
-    }
-
-    #[test]
-    fn single_line_remove_member_with_value() {
-        let result = remove_member_from_single_line("enum Foo { A = 1, B = 2, C = 3 }", "B");
-        assert_eq!(result, "enum Foo { A = 1, C = 3 }");
-    }
-
-    #[test]
-    fn single_line_remove_member_with_string_value() {
-        let result = remove_member_from_single_line("enum Foo { A = \"a\", B = \"b\" }", "A");
-        assert_eq!(result, "enum Foo { B = \"b\" }");
-    }
-
-    #[test]
     fn single_line_remove_two_members_sequentially() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -964,32 +819,6 @@ mod tests {
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "enum Bits {\n  A = 1 << 0,\n  C = 1 << 2,\n}\n");
-    }
-
-    #[test]
-    fn enum_fix_single_line_with_trailing_comma() {
-        let result = remove_member_from_single_line("enum Foo { A, B, C, }", "B");
-        assert_eq!(result, "enum Foo { A, C }");
-    }
-
-    #[test]
-    fn enum_fix_single_line_no_braces() {
-        let result = remove_member_from_single_line("enum Foo A, B, C", "B");
-        assert_eq!(result, "enum Foo A, B, C");
-    }
-
-    #[test]
-    fn enum_fix_single_line_close_before_open() {
-        let line = "} enum Foo {";
-        assert_eq!(remove_member_from_single_line(line, "A"), line);
-    }
-
-    #[test]
-    fn enum_fix_single_line_stray_close_before_enum() {
-        assert_eq!(
-            remove_member_from_single_line("} enum Foo { A }", "A"),
-            "} enum Foo {}"
-        );
     }
 
     #[test]
@@ -1116,13 +945,6 @@ mod tests {
             content,
             "const enum Direction {\n  Up,\n  Down,\n  Right,\n}\n"
         );
-    }
-
-    #[test]
-    fn single_line_remove_member_preserves_export_keyword() {
-        let result =
-            remove_member_from_single_line("export enum Status { Active, Inactive }", "Active");
-        assert_eq!(result, "export enum Status { Inactive }");
     }
 
     #[test]
@@ -1370,3 +1192,7 @@ mod tests {
         assert_eq!(fixes[0]["type"], "remove_enum_member");
     }
 }
+
+#[cfg(test)]
+#[path = "enum_members_syntax_tests.rs"]
+mod syntax_tests;

@@ -12,6 +12,7 @@ use std::path::Path;
 
 use oxc_ast::ast::{
     ClassBody, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumBody,
+    TSEnumDeclaration, TSEnumMemberName,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, SourceType};
@@ -97,10 +98,29 @@ pub struct MemberSpan {
     pub shares_its_key: bool,
 }
 
+/// One enum declaration with the spans of its members.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumSpans {
+    /// The name of the enum.
+    pub name: String,
+    /// The byte offset after the `{` of the body.
+    pub body_start: u32,
+    /// The byte offset of the `}` of the body.
+    pub body_end: u32,
+    /// The name and the span of each member, in source order. A member with
+    /// a computed template name has no entry, and `complete` is then false.
+    pub members: Vec<(String, MemberSpan)>,
+    /// True when `members` has an entry for each member of the enum.
+    pub complete: bool,
+    /// The bytes of the whole declaration.
+    declaration: (u32, u32),
+}
+
 /// The export statements and the class and enum members of one file text.
 pub struct SourceEditIndex {
     statements: Vec<ExportStatement>,
     members: Vec<MemberSpan>,
+    enums: Vec<EnumSpans>,
     source: String,
     line_starts: Vec<u32>,
 }
@@ -119,6 +139,7 @@ impl SourceEditIndex {
         let Parsed {
             statements,
             members,
+            enums,
         } = parse_file(path, source)?;
         let line_starts = std::iter::once(0)
             .chain(
@@ -130,6 +151,7 @@ impl SourceEditIndex {
         Some(Self {
             statements,
             members,
+            enums,
             source: source.to_owned(),
             line_starts,
         })
@@ -211,6 +233,134 @@ impl SourceEditIndex {
         &self.members
     }
 
+    /// The enum declarations named `name`, at each depth.
+    pub fn enums_named<'s>(&'s self, name: &'s str) -> impl Iterator<Item = &'s EnumSpans> {
+        self.enums
+            .iter()
+            .filter(move |enumeration| enumeration.name == name)
+    }
+
+    /// The edits that remove `members` from the enum `name`. The 1-based
+    /// `line` of one member selects the enum when more than one has the name.
+    ///
+    /// A member that owns its lines is deleted with its lines, also an
+    /// initializer over several lines. A member that shares a line with
+    /// another member is deleted with one separating comma, and each other
+    /// byte of the enum stays as it is.
+    ///
+    /// # Errors
+    ///
+    /// [`EditRefusal::NameNotFound`] when no complete enum of the name has
+    /// each member, and [`EditRefusal::Ambiguous`] when `line` does not
+    /// select one enum, or when two edits overlap.
+    pub fn remove_enum_members(
+        &self,
+        name: &str,
+        members: &[&str],
+        line: u32,
+    ) -> Result<Vec<SpanEdit>, EditRefusal> {
+        let enumeration = self.select_enum(name, members, line)?;
+        let removed: Vec<bool> = enumeration
+            .members
+            .iter()
+            .map(|(member, _)| members.contains(&member.as_str()))
+            .collect();
+        let mut edits = Vec::new();
+        let mut packed = Vec::new();
+        for (position, (_, span)) in enumeration.members.iter().enumerate() {
+            if !removed[position] {
+                continue;
+            }
+            match self.owned_lines(*span) {
+                Some((start, end)) => edits.push(deletion(start, end)),
+                None => packed.push(position),
+            }
+        }
+        for run in neighbour_runs(&packed) {
+            edits.push(packed_run_edit(enumeration, &removed, run));
+        }
+        edits.sort_by_key(|edit| edit.start);
+        if edits.windows(2).any(|pair| pair[1].start < pair[0].end) {
+            return Err(EditRefusal::Ambiguous);
+        }
+        Ok(edits)
+    }
+
+    fn select_enum(
+        &self,
+        name: &str,
+        members: &[&str],
+        line: u32,
+    ) -> Result<&EnumSpans, EditRefusal> {
+        let candidates: Vec<&EnumSpans> = self
+            .enums
+            .iter()
+            .filter(|enumeration| enumeration.name == name)
+            .filter(|enumeration| {
+                members
+                    .iter()
+                    .all(|member| enumeration.members.iter().any(|(known, _)| known == member))
+            })
+            .collect();
+        let enumeration = match candidates.as_slice() {
+            [] => return Err(EditRefusal::NameNotFound),
+            [only] => *only,
+            _ => {
+                let offset = self
+                    .line_starts
+                    .get(line.saturating_sub(1) as usize)
+                    .copied();
+                let mut containing = candidates.iter().filter(|enumeration| {
+                    offset.is_some_and(|offset| {
+                        let (start, end) = enumeration.declaration;
+                        start <= offset && offset < end
+                    })
+                });
+                match (containing.next(), containing.next()) {
+                    (Some(enumeration), None) => *enumeration,
+                    _ => return Err(EditRefusal::Ambiguous),
+                }
+            }
+        };
+        if enumeration.complete {
+            Ok(enumeration)
+        } else {
+            Err(EditRefusal::NameNotFound)
+        }
+    }
+
+    /// The bytes from the start of the first line of `span` to the start of
+    /// the line after its last line, when the member and one comma after it
+    /// are the only text of these lines, apart from a `//` comment.
+    fn owned_lines(&self, span: MemberSpan) -> Option<(u32, u32)> {
+        let after = self.source.get(span.end as usize..)?;
+        let end = if after.starts_with(',') {
+            span.end + 1
+        } else {
+            span.end
+        };
+        let (first, last) = self.line_range(span.start, end);
+        let before = self
+            .source
+            .get(self.line_starts[first] as usize..span.start as usize)?;
+        let rest_of_line = self.source[end as usize..]
+            .split('\n')
+            .next()
+            .unwrap_or("")
+            .trim();
+        if !before.trim().is_empty() || !(rest_of_line.is_empty() || rest_of_line.starts_with("//"))
+        {
+            return None;
+        }
+        let start = self.line_starts[first];
+        let end = self
+            .line_starts
+            .get(last + 1)
+            .copied()
+            .unwrap_or_else(|| u32::try_from(self.source.len()).unwrap_or(u32::MAX));
+        Some((start, end))
+    }
+
     /// The statement whose `export` keyword is at byte `start`.
     #[must_use]
     pub fn statement_at(&self, start: u32) -> Option<&ExportStatement> {
@@ -257,6 +407,7 @@ impl SourceEditIndex {
 struct Parsed {
     statements: Vec<ExportStatement>,
     members: Vec<MemberSpan>,
+    enums: Vec<EnumSpans>,
 }
 
 fn parse_file(path: &Path, source: &str) -> Option<Parsed> {
@@ -291,6 +442,7 @@ fn parse_blocks<'a>(
         let block = parse_block(file, &script.body, source_type, offset)?;
         parsed.statements.extend(block.statements);
         parsed.members.extend(block.members);
+        parsed.enums.extend(block.enums);
     }
     Some(parsed)
 }
@@ -306,11 +458,13 @@ fn parse_block(file: &str, source: &str, source_type: SourceType, offset: u32) -
         let mut members = MemberCollector {
             offset,
             members: Vec::new(),
+            enums: Vec::new(),
         };
         members.visit_program(&parsed.program);
         Some(Parsed {
             statements: collect(&parsed.program, file, offset),
             members: members.members,
+            enums: members.enums,
         })
     })
     .flatten()
@@ -320,6 +474,7 @@ fn parse_block(file: &str, source: &str, source_type: SourceType, offset: u32) -
 struct MemberCollector {
     offset: u32,
     members: Vec<MemberSpan>,
+    enums: Vec<EnumSpans>,
 }
 
 impl MemberCollector {
@@ -349,6 +504,44 @@ impl<'a> Visit<'a> for MemberCollector {
             self.push(element.span(), true, shares_its_key);
         }
         oxc_ast_visit::walk::walk_class_body(self, it);
+    }
+
+    fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
+        let offset = self.offset;
+        let mut members = Vec::with_capacity(it.body.members.len());
+        for (position, member) in it.body.members.iter().enumerate() {
+            let name = match &member.id {
+                TSEnumMemberName::Identifier(id) => id.name.to_string(),
+                TSEnumMemberName::String(name) | TSEnumMemberName::ComputedString(name) => name
+                    .value
+                    .as_str()
+                    .map_or_else(|| name.value.display().to_string(), str::to_owned),
+                TSEnumMemberName::ComputedTemplateString(_) => continue,
+            };
+            let deletion_keeps_values = it
+                .body
+                .members
+                .get(position + 1)
+                .is_none_or(|next| next.initializer.is_some());
+            members.push((
+                name,
+                MemberSpan {
+                    start: member.span.start + offset,
+                    end: member.span.end + offset,
+                    deletion_keeps_values,
+                    shares_its_key: false,
+                },
+            ));
+        }
+        self.enums.push(EnumSpans {
+            name: it.id.name.to_string(),
+            body_start: it.body.span.start + offset + 1,
+            body_end: it.body.span.end.saturating_sub(1) + offset,
+            complete: members.len() == it.body.members.len(),
+            members,
+            declaration: (it.span.start + offset, it.span.end + offset),
+        });
+        oxc_ast_visit::walk::walk_ts_enum_declaration(self, it);
     }
 
     fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
@@ -401,6 +594,58 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
             })
         })
         .collect()
+}
+
+/// The deletion of a run of neighbour members that share their lines.
+fn packed_run_edit(
+    enumeration: &EnumSpans,
+    removed: &[bool],
+    (first, last): (usize, usize),
+) -> SpanEdit {
+    let members = &enumeration.members;
+    let next = members.get(last + 1).map(|(_, span)| (last + 1, *span));
+    let previous = first
+        .checked_sub(1)
+        .map(|position| (position, members[position].1));
+    let kept = |neighbour: Option<(usize, MemberSpan)>| {
+        neighbour.filter(|(position, _)| !removed[*position])
+    };
+    let start = members[first].1.start;
+    let end = members[last].1.end;
+    if let Some((_, next)) = kept(next) {
+        return deletion(start, next.start);
+    }
+    if let Some((_, previous)) = kept(previous) {
+        return deletion(previous.end, end);
+    }
+    if let Some((_, next)) = next {
+        return deletion(start, next.start);
+    }
+    if let Some((_, previous)) = previous {
+        return deletion(previous.end, end);
+    }
+    deletion(enumeration.body_start, enumeration.body_end)
+}
+
+fn deletion(start: u32, end: u32) -> SpanEdit {
+    SpanEdit {
+        start,
+        end,
+        replacement: String::new(),
+    }
+}
+
+/// Each run of neighbour positions in the sorted `positions`, as the first
+/// and the last position of the run.
+fn neighbour_runs(positions: &[usize]) -> Vec<(usize, usize)> {
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for &position in positions {
+        match runs.last_mut() {
+            Some((_, last)) if *last + 1 == position => *last = position,
+            _ => runs.push((position, position)),
+        }
+    }
+    runs
 }
 
 /// The kind and the exported names of an `export <declaration>`, or `None`
@@ -750,6 +995,134 @@ mod tests {
         assert_eq!(index.export_statements_on_line(1).count(), 2);
         assert_eq!(index.export_statements_on_line(2).count(), 1);
         assert_eq!(index.export_statements_on_line(3).count(), 0);
+    }
+
+    /// `source` after the removal of `members` from the enum `name`.
+    fn remove(
+        source: &str,
+        name: &str,
+        members: &[&str],
+        line: u32,
+    ) -> Result<String, EditRefusal> {
+        let index = index("store.ts", source);
+        let edits = index.remove_enum_members(name, members, line)?;
+        let mut result = source.to_owned();
+        for edit in edits.iter().rev() {
+            assert!(edit.replacement.is_empty());
+            result.replace_range(edit.start as usize..edit.end as usize, "");
+        }
+        Ok(result)
+    }
+
+    #[test]
+    fn removes_a_member_on_its_own_line() {
+        let source = "enum E {\n  A,\n  B,\n  C,\n}\n";
+        assert_eq!(
+            remove(source, "E", &["A"], 2).unwrap(),
+            "enum E {\n  B,\n  C,\n}\n"
+        );
+        assert_eq!(
+            remove(source, "E", &["B"], 3).unwrap(),
+            "enum E {\n  A,\n  C,\n}\n"
+        );
+        assert_eq!(
+            remove(source, "E", &["C"], 4).unwrap(),
+            "enum E {\n  A,\n  B,\n}\n"
+        );
+        let no_comma = "enum E {\n  A,\n  B\n}\n";
+        assert_eq!(
+            remove(no_comma, "E", &["B"], 3).unwrap(),
+            "enum E {\n  A,\n}\n"
+        );
+    }
+
+    #[test]
+    fn removes_a_member_with_a_trailing_comment_or_a_long_initializer() {
+        let comment = "enum E {\n  A, // }\n  B,\n}\n";
+        assert_eq!(
+            remove(comment, "E", &["A"], 2).unwrap(),
+            "enum E {\n  B,\n}\n"
+        );
+        let long = "enum E {\n  A = 1 +\n    2,\n  B,\n}\n";
+        assert_eq!(remove(long, "E", &["A"], 2).unwrap(), "enum E {\n  B,\n}\n");
+    }
+
+    #[test]
+    fn removes_packed_members_and_keeps_each_other_byte() {
+        let source = "enum E { A, B, C }\n";
+        assert_eq!(remove(source, "E", &["A"], 1).unwrap(), "enum E { B, C }\n");
+        assert_eq!(remove(source, "E", &["B"], 1).unwrap(), "enum E { A, C }\n");
+        assert_eq!(remove(source, "E", &["C"], 1).unwrap(), "enum E { A, B }\n");
+        assert_eq!(
+            remove(source, "E", &["A", "B"], 1).unwrap(),
+            "enum E { C }\n"
+        );
+        assert_eq!(
+            remove(source, "E", &["B", "C"], 1).unwrap(),
+            "enum E { A }\n"
+        );
+        assert_eq!(
+            remove(source, "E", &["A", "B", "C"], 1).unwrap(),
+            "enum E {}\n"
+        );
+        let string_value = "enum E { A = \"x,y\", B }\n";
+        assert_eq!(
+            remove(string_value, "E", &["B"], 1).unwrap(),
+            "enum E { A = \"x,y\" }\n"
+        );
+        let trailing = "enum Foo { A, B, }\n";
+        assert_eq!(
+            remove(trailing, "Foo", &["B"], 1).unwrap(),
+            "enum Foo { A, }\n"
+        );
+    }
+
+    #[test]
+    fn removes_a_mix_of_own_line_and_packed_members() {
+        let source = "enum E {\n  A,\n  B, C,\n  D\n}\n";
+        assert_eq!(
+            remove(source, "E", &["A", "B"], 2).unwrap(),
+            "enum E {\n  C,\n  D\n}\n"
+        );
+        let packed_first = "enum E {\n  A, B,\n  C\n}\n";
+        assert_eq!(
+            remove(packed_first, "E", &["A"], 2).unwrap(),
+            "enum E {\n  B,\n  C\n}\n"
+        );
+    }
+
+    #[test]
+    fn reads_a_string_member_name() {
+        let source = "enum E {\n  'my-key' = 1,\n  B = 2,\n}\n";
+        assert_eq!(
+            remove(source, "E", &["my-key"], 2).unwrap(),
+            "enum E {\n  B = 2,\n}\n"
+        );
+    }
+
+    #[test]
+    fn selects_one_of_two_enums_with_the_same_name_by_line() {
+        let source = "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\nnamespace M {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        assert_eq!(
+            remove(source, "E", &["A"], 9).unwrap(),
+            "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\nnamespace M {\n  enum E {\n    B,\n  }\n}\n"
+        );
+        assert_eq!(remove(source, "E", &["A"], 1), Err(EditRefusal::Ambiguous));
+        assert_eq!(
+            remove(source, "E", &["Z"], 3),
+            Err(EditRefusal::NameNotFound)
+        );
+    }
+
+    #[test]
+    fn refuses_an_enum_with_a_computed_template_name() {
+        let source = "enum E {\n  A = 1,\n  [`b`] = 2,\n}\n";
+        if SourceEditIndex::parse(Path::new("store.ts"), source).is_some() {
+            assert_eq!(
+                remove(source, "E", &["A"], 2),
+                Err(EditRefusal::NameNotFound)
+            );
+        }
     }
 
     #[test]

@@ -11,40 +11,6 @@ pub(super) struct EnumDeclarationRange {
     pub(super) end_line: usize,
 }
 
-fn strip_enum_modifier<'a>(s: &'a str, modifier: &str) -> Option<&'a str> {
-    let rest = s.strip_prefix(modifier)?;
-    rest.chars()
-        .next()
-        .is_some_and(char::is_whitespace)
-        .then(|| rest.trim_start())
-}
-
-pub(super) fn declares_exported_enum(line: &str, enum_name: &str) -> bool {
-    let trimmed = line.trim_start();
-    let Some(mut rest) = trimmed.strip_prefix("export").map(str::trim_start) else {
-        return false;
-    };
-
-    for _ in 0..2 {
-        if let Some(next) = strip_enum_modifier(rest, "declare") {
-            rest = next;
-        } else if let Some(next) = strip_enum_modifier(rest, "const") {
-            rest = next;
-        }
-    }
-
-    let Some(after_enum) = rest.strip_prefix("enum").map(str::trim_start) else {
-        return false;
-    };
-    let Some(after_name) = after_enum.strip_prefix(enum_name) else {
-        return false;
-    };
-    after_name
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_whitespace() || ch == '{')
-}
-
 fn is_ident_char(ch: char) -> bool {
     ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()
 }
