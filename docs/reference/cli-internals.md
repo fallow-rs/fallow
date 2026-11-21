@@ -26,7 +26,9 @@ an exit code.
 A decision that more than one command or surface makes has one implementation.
 The scope filters are `fallow_engine::dead_code::apply_scope`,
 `fallow_engine::duplicates::apply_scope` and `fallow_engine::diff_scope`. The
-change scope of a run is `fallow_engine::change_scope::ChangeScope`. Every
+three dead-code scope filters share one visitor, `retain_in_scope` in
+`crates/engine/src/result_scope.rs`, and each scope is a `ResultScope` type.
+The change scope of a run is `fallow_engine::change_scope::ChangeScope`. Every
 surface describes its inputs with a `ChangeScopeRequest` (the owner, whether a
 global ref was requested, the changed files, and the run-wide
 `PackageBaselineCache`) and calls `ChangeScope::resolve`, which owns the

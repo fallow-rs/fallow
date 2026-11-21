@@ -474,7 +474,7 @@ pub fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<St
 /// explicitly whether the new finding type needs an audit key (add a loop)
 /// or has no key representation today (bind with underscore and document why).
 ///
-/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `retain_in_scope` in `crates/engine/src/result_scope.rs`,
 /// The six dependency-related finding slices, bundled so the dependency
 /// dispatcher takes one parameter instead of six.
 #[derive(Clone, Copy)]
@@ -1349,7 +1349,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// retain block) or has no key representation today (bind with underscore and
 /// document why).
 ///
-/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `retain_in_scope` in `crates/engine/src/result_scope.rs`,
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
