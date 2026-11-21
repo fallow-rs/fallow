@@ -276,14 +276,63 @@ impl SourceEditIndex {
                 None => packed.push(position),
             }
         }
+        if !packed.is_empty() && removed.iter().all(|&gone| gone) {
+            return Ok(vec![deletion(enumeration.body_start, enumeration.body_end)]);
+        }
         for run in neighbour_runs(&packed) {
-            edits.push(packed_run_edit(enumeration, &removed, run));
+            let edit = packed_run_edit(enumeration, &removed, run);
+            if self.deletes_a_comment(enumeration, &removed, &edit) {
+                return Err(EditRefusal::Ambiguous);
+            }
+            edits.push(edit);
         }
         edits.sort_by_key(|edit| edit.start);
         if edits.windows(2).any(|pair| pair[1].start < pair[0].end) {
             return Err(EditRefusal::Ambiguous);
         }
         Ok(edits)
+    }
+
+    /// True when `edit` deletes a comment that lies between members. The
+    /// text of a removed member, such as a string with `//` in it, does not
+    /// count.
+    fn deletes_a_comment(
+        &self,
+        enumeration: &EnumSpans,
+        removed: &[bool],
+        edit: &SpanEdit,
+    ) -> bool {
+        let mut cursor = edit.start;
+        let mut gaps = Vec::new();
+        for (position, (_, span)) in enumeration.members.iter().enumerate() {
+            if !removed[position] || span.end <= edit.start || span.start >= edit.end {
+                continue;
+            }
+            gaps.push((cursor, span.start.max(cursor)));
+            cursor = span.end;
+        }
+        gaps.push((cursor, edit.end));
+        gaps.iter().any(|&(start, end)| {
+            self.source
+                .get(start as usize..end.max(start) as usize)
+                .is_some_and(|gap| gap.contains("//") || gap.contains("/*"))
+        })
+    }
+
+    /// The enum named `name` whose declaration covers the 1-based `line`,
+    /// when exactly one does.
+    #[must_use]
+    pub fn enum_on_line(&self, name: &str, line: u32) -> Option<&EnumSpans> {
+        let line_idx = line.saturating_sub(1) as usize;
+        let mut covering = self.enums.iter().filter(|enumeration| {
+            let (start, end) = enumeration.declaration;
+            let (first, last) = self.line_range(start, end);
+            enumeration.name == name && (first..=last).contains(&line_idx)
+        });
+        match (covering.next(), covering.next()) {
+            (Some(enumeration), None) => Some(enumeration),
+            _ => None,
+        }
     }
 
     fn select_enum(
@@ -305,22 +354,14 @@ impl SourceEditIndex {
         let enumeration = match candidates.as_slice() {
             [] => return Err(EditRefusal::NameNotFound),
             [only] => *only,
-            _ => {
-                let offset = self
-                    .line_starts
-                    .get(line.saturating_sub(1) as usize)
-                    .copied();
-                let mut containing = candidates.iter().filter(|enumeration| {
-                    offset.is_some_and(|offset| {
-                        let (start, end) = enumeration.declaration;
-                        start <= offset && offset < end
-                    })
-                });
-                match (containing.next(), containing.next()) {
-                    (Some(enumeration), None) => *enumeration,
-                    _ => return Err(EditRefusal::Ambiguous),
-                }
-            }
+            _ => self
+                .enum_on_line(name, line)
+                .filter(|selected| {
+                    candidates
+                        .iter()
+                        .any(|candidate| std::ptr::eq(*candidate, *selected))
+                })
+                .ok_or(EditRefusal::Ambiguous)?,
         };
         if enumeration.complete {
             Ok(enumeration)
@@ -1111,6 +1152,43 @@ mod tests {
         assert_eq!(
             remove(source, "E", &["Z"], 3),
             Err(EditRefusal::NameNotFound)
+        );
+    }
+
+    #[test]
+    fn keeps_a_comment_between_members() {
+        let after_kept = "enum E {\n  A, // about A\n  B, C\n}\n";
+        assert_eq!(
+            remove(after_kept, "E", &["B", "C"], 3),
+            Err(EditRefusal::Ambiguous)
+        );
+        let before_kept = "enum E {\n  A, B,\n  // about C\n  C,\n}\n";
+        assert_eq!(
+            remove(before_kept, "E", &["A", "B"], 2),
+            Err(EditRefusal::Ambiguous)
+        );
+        let in_a_string = "enum E { A = \"http://x\", B }\n";
+        assert_eq!(
+            remove(in_a_string, "E", &["A"], 1).unwrap(),
+            "enum E { B }\n"
+        );
+    }
+
+    #[test]
+    fn removes_each_member_of_a_mixed_enum() {
+        let source = "enum E {\n  A, B,\n  C\n}\n";
+        assert_eq!(
+            remove(source, "E", &["A", "B", "C"], 2).unwrap(),
+            "enum E {}\n"
+        );
+    }
+
+    #[test]
+    fn selects_one_of_two_one_line_enums_by_line() {
+        let source = "namespace N {\n  export enum E { A, B }\n}\nnamespace M {\n  export enum E { A, B }\n}\n";
+        assert_eq!(
+            remove(source, "E", &["A"], 5).unwrap(),
+            "namespace N {\n  export enum E { A, B }\n}\nnamespace M {\n  export enum E { B }\n}\n"
         );
     }
 

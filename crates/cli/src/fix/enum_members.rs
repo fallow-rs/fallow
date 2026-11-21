@@ -126,20 +126,23 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
             .collect();
         parents.sort_unstable();
         parents.dedup();
-        let mut kept_parents: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        let mut kept: KeptEnumFixes<'_> = rustc_hash::FxHashSet::default();
         for parent in parents {
-            let Some(group) = enum_parent_edits(
-                &index,
-                &content,
-                meta.line_ending,
-                &member_fixes,
-                &folded,
-                parent,
-            ) else {
+            if let Some(fold) = folded.iter().find(|fold| fold.parent_name == parent) {
+                let lines: Vec<usize> = (fold.range.start_line..=fold.range.end_line).collect();
+                let group = line_deletions(&content, meta.line_ending, &lines);
+                if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
+                    kept.insert((parent, None));
+                }
                 continue;
-            };
-            if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
-                kept_parents.insert(parent);
+            }
+            for enum_fixes in fixes_by_enum(&index, &member_fixes, parent) {
+                let Some(group) = enum_member_edits(&index, parent, &enum_fixes) else {
+                    continue;
+                };
+                if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
+                    kept.extend(enum_fixes.iter().map(|fix| (parent, Some(fix.line_idx))));
+                }
             }
         }
 
@@ -147,7 +150,7 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
             record_enum_member_dry_run(EnumMemberDryRunInput {
                 member_fixes: &member_fixes,
                 folded: &folded,
-                kept_parents: &kept_parents,
+                kept: &kept,
                 relative,
                 output,
                 fixes,
@@ -156,7 +159,7 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
             record_applied_enum_member_fixes(&mut AppliedEnumMemberRecordInput {
                 member_fixes: &member_fixes,
                 folded: &folded,
-                kept_parents: &kept_parents,
+                kept: &kept,
                 path,
                 relative,
                 output,
@@ -166,29 +169,50 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
     }
 }
 
-/// The byte edits that remove the unused members of the enum `parent`, or
-/// the whole enum when it folds. `None` when the index refuses the edit.
-fn enum_parent_edits(
+/// The fixes whose queued edits went in: `(parent, None)` for the fold of an
+/// enum, `(parent, Some(line))` for one member fix.
+type KeptEnumFixes<'a> = rustc_hash::FxHashSet<(&'a str, Option<usize>)>;
+
+/// The member fixes of `parent`, grouped by the enum declaration that covers
+/// the line of each fix. Two enums can share a name, for example in two
+/// namespaces of one file. A fix on a line that no single enum covers gets
+/// no group.
+fn fixes_by_enum<'f>(
     index: &SourceEditIndex,
-    content: &str,
-    line_ending: &str,
-    member_fixes: &[EnumMemberFix],
-    folded: &[FoldedEnum],
+    member_fixes: &'f [EnumMemberFix],
     parent: &str,
-) -> Option<Vec<SourceEdit>> {
-    if let Some(fold) = folded.iter().find(|fold| fold.parent_name == parent) {
-        let indexes: Vec<usize> = (fold.range.start_line..=fold.range.end_line).collect();
-        return Some(line_deletions(content, line_ending, &indexes));
+) -> Vec<Vec<&'f EnumMemberFix>> {
+    let mut groups: Vec<(u32, Vec<&EnumMemberFix>)> = Vec::new();
+    for fix in member_fixes.iter().filter(|fix| fix.parent_name == parent) {
+        let Ok(line) = u32::try_from(fix.line_idx + 1) else {
+            continue;
+        };
+        let Some(enumeration) = index.enum_on_line(parent, line) else {
+            continue;
+        };
+        match groups
+            .iter_mut()
+            .find(|(body_start, _)| *body_start == enumeration.body_start)
+        {
+            Some((_, group)) => group.push(fix),
+            None => groups.push((enumeration.body_start, vec![fix])),
+        }
     }
-    let parent_fixes: Vec<&EnumMemberFix> = member_fixes
-        .iter()
-        .filter(|fix| fix.parent_name == parent)
-        .collect();
-    let names: Vec<&str> = parent_fixes
+    groups.into_iter().map(|(_, group)| group).collect()
+}
+
+/// The byte edits that remove the members of `enum_fixes` from their enum.
+/// `None` when the index refuses the edit.
+fn enum_member_edits(
+    index: &SourceEditIndex,
+    parent: &str,
+    enum_fixes: &[&EnumMemberFix],
+) -> Option<Vec<SourceEdit>> {
+    let names: Vec<&str> = enum_fixes
         .iter()
         .map(|fix| fix.member_name.as_str())
         .collect();
-    let line = u32::try_from(parent_fixes.first()?.line_idx + 1).ok()?;
+    let line = u32::try_from(enum_fixes.first()?.line_idx + 1).ok()?;
     let edits = index.remove_enum_members(parent, &names, line).ok()?;
     Some(
         edits
@@ -237,7 +261,7 @@ fn collect_enum_member_fixes(
 struct EnumMemberDryRunInput<'a, 'b> {
     member_fixes: &'a [EnumMemberFix],
     folded: &'a [FoldedEnum],
-    kept_parents: &'a rustc_hash::FxHashSet<&'a str>,
+    kept: &'a KeptEnumFixes<'a>,
     relative: &'a Path,
     output: OutputFormat,
     fixes: &'b mut Vec<serde_json::Value>,
@@ -248,7 +272,11 @@ fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
     let relative_display = input.relative.to_string_lossy().replace('\\', "/");
     let folded = |parent: &str| input.folded.iter().any(|fold| fold.parent_name == parent);
     for fix in input.member_fixes {
-        if folded(&fix.parent_name) || !input.kept_parents.contains(fix.parent_name.as_str()) {
+        if folded(&fix.parent_name)
+            || !input
+                .kept
+                .contains(&(fix.parent_name.as_str(), Some(fix.line_idx)))
+        {
             continue;
         }
         if !matches!(input.output, OutputFormat::Json) {
@@ -268,7 +296,7 @@ fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
         }));
     }
     for fold in input.folded {
-        if !input.kept_parents.contains(fold.parent_name.as_str()) {
+        if !input.kept.contains(&(fold.parent_name.as_str(), None)) {
             continue;
         }
         if !matches!(input.output, OutputFormat::Json) {
@@ -291,7 +319,7 @@ fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
 struct AppliedEnumMemberRecordInput<'a> {
     member_fixes: &'a [EnumMemberFix],
     folded: &'a [FoldedEnum],
-    kept_parents: &'a rustc_hash::FxHashSet<&'a str>,
+    kept: &'a KeptEnumFixes<'a>,
     path: &'a Path,
     relative: &'a Path,
     output: OutputFormat,
@@ -303,7 +331,11 @@ fn record_applied_enum_member_fixes(input: &mut AppliedEnumMemberRecordInput<'_>
     let relative_display = input.relative.to_string_lossy().replace('\\', "/");
     let folded = |parent: &str| input.folded.iter().any(|fold| fold.parent_name == parent);
     for fix in input.member_fixes {
-        if folded(&fix.parent_name) || !input.kept_parents.contains(fix.parent_name.as_str()) {
+        if folded(&fix.parent_name)
+            || !input
+                .kept
+                .contains(&(fix.parent_name.as_str(), Some(fix.line_idx)))
+        {
             continue;
         }
         input.fixes.push(serde_json::json!({
@@ -317,7 +349,7 @@ fn record_applied_enum_member_fixes(input: &mut AppliedEnumMemberRecordInput<'_>
         }));
     }
     for fold in input.folded {
-        if !input.kept_parents.contains(fold.parent_name.as_str()) {
+        if !input.kept.contains(&(fold.parent_name.as_str(), None)) {
             continue;
         }
         if !matches!(input.output, OutputFormat::Json) {
@@ -343,7 +375,12 @@ mod tests {
     use fallow_types::extract::MemberKind;
     use fallow_types::results::UnusedMember;
 
-    fn make_enum_member(path: &Path, parent: &str, name: &str, line: u32) -> UnusedMember {
+    pub(super) fn make_enum_member(
+        path: &Path,
+        parent: &str,
+        name: &str,
+        line: u32,
+    ) -> UnusedMember {
         UnusedMember {
             path: path.to_path_buf(),
             parent_name: parent.to_string(),
@@ -431,7 +468,7 @@ mod tests {
     /// Helper mirrored from `exports.rs`. The fix tests need the
     /// captured-hashes map to be populated for every file the test
     /// considers freshly analyzed.
-    fn capture_hashes(paths: &[&Path]) -> CapturedHashes {
+    pub(super) fn capture_hashes(paths: &[&Path]) -> CapturedHashes {
         let mut hashes = CapturedHashes::default();
         for path in paths {
             if let Ok(content) = std::fs::read_to_string(path) {

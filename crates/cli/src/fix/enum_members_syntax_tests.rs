@@ -49,3 +49,45 @@ fn enum_fix_skips_a_file_that_does_not_parse() {
     assert!(fixes.is_empty(), "{fixes:?}");
     assert_eq!(after, source);
 }
+
+#[test]
+fn enum_fix_reports_only_the_members_it_removes_from_two_enums_with_one_name() {
+    use super::tests::{capture_hashes, make_enum_member};
+    use super::{EnumMemberFixInput, apply_enum_member_fixes};
+    use crate::fix::plan::FixPlan;
+    use fallow_config::OutputFormat;
+    use fallow_types::results::UnusedMember;
+    use rustc_hash::FxHashMap;
+    use std::path::PathBuf;
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("e.ts");
+    let source = "namespace N {\n  enum E {\n    A,\n    B = 2,\n  }\n}\nnamespace M {\n  enum E {\n    A = 1,\n    C,\n  }\n}\n";
+    std::fs::write(&file, source).unwrap();
+    let in_n = make_enum_member(&file, "E", "A", 3);
+    let in_m = make_enum_member(&file, "E", "C", 10);
+    let mut map: FxHashMap<PathBuf, Vec<&UnusedMember>> = FxHashMap::default();
+    map.insert(file.clone(), vec![&in_n, &in_m]);
+    let mut fixes = Vec::new();
+    let mut plan = FixPlan::for_root(dir.path()).unwrap();
+    apply_enum_member_fixes(EnumMemberFixInput {
+        root: dir.path(),
+        members_by_file: &map,
+        hashes: &capture_hashes(&[&file]),
+        plan: &mut plan,
+        output: OutputFormat::Json,
+        dry_run: false,
+        fixes: &mut fixes,
+    });
+    assert!(plan.commit().failed.is_empty());
+    let mut lines: Vec<u64> = fixes
+        .iter()
+        .map(|fix| fix["line"].as_u64().unwrap())
+        .collect();
+    lines.sort_unstable();
+    assert_eq!(lines, vec![3, 10]);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "namespace N {\n  enum E {\n    B = 2,\n  }\n}\nnamespace M {\n  enum E {\n    A = 1,\n  }\n}\n"
+    );
+}
