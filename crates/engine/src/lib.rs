@@ -88,6 +88,7 @@ mod public_api;
 pub mod repo_refs;
 pub mod requested_rule_off;
 pub mod resolved_run;
+mod result_scope;
 mod results;
 pub mod search_visibility;
 mod security;
