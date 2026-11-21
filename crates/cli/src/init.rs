@@ -635,8 +635,8 @@ pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
 fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
     let newly = match crate::impact::decline_onboarding(root) {
         Ok(newly) => newly,
-        Err(newer) => {
-            eprintln!("{}", newer.message());
+        Err(err) => {
+            eprintln!("{}", err.message());
             return exit_invalid_input();
         }
     };

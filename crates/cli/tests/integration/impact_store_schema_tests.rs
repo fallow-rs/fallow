@@ -715,3 +715,42 @@ fn impact_status_human_output_is_a_short_view() {
         on.stdout
     );
 }
+
+/// The config folder bases that the store path can resolve to.
+fn config_bases(home: &Path) -> [PathBuf; 3] {
+    [
+        home.join("Library").join("Application Support"),
+        home.join(".config"),
+        home.join("AppData"),
+    ]
+}
+
+#[test]
+fn impact_changes_exit_2_when_the_store_folder_is_a_file() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    for base in config_bases(home.path()) {
+        std::fs::create_dir_all(base.join("fallow")).expect("config dir");
+        std::fs::write(base.join("fallow").join("impact"), b"").expect("blocker file");
+    }
+    for args in [
+        ["impact", "disable", "--root", root],
+        ["impact", "enable", "--root", root],
+        ["init", "--decline", "--root", root],
+    ] {
+        let output = run_isolated(home.path(), &args);
+        assert_eq!(
+            output.code, 2,
+            "{args:?} must fail when the store cannot be saved: {} {}",
+            output.stdout, output.stderr
+        );
+        for word in ["disabled", "enabled", "hints"] {
+            assert!(
+                !output.stdout.contains(word),
+                "{args:?} must not print success: {}",
+                output.stdout
+            );
+        }
+    }
+}

@@ -16,6 +16,13 @@ pub(super) fn store_path(root: &Path) -> Option<PathBuf> {
     )
 }
 
+/// The resolved per-project store-file path for `root`, for `status` display
+/// (so a wrong key is debuggable). `None` when no config dir is resolvable.
+#[must_use]
+pub fn resolved_store_path(root: &Path) -> Option<PathBuf> {
+    store_path(root)
+}
+
 /// Path to a project's legacy in-repo store (`<root>/.fallow/impact.json`),
 /// read ONCE for migration into the user store, never written.
 pub(super) fn legacy_store_path(root: &Path) -> PathBuf {
@@ -54,7 +61,7 @@ impl NewerStoreSchema {
 /// Read only the schema marker and the newest writer version of a raw store.
 /// This works when the typed parse fails, because a newer schema can change
 /// the shape of a known field. Returns `None` for a supported or corrupt store.
-pub(super) fn newer_schema_in(content: &str, path: &Path) -> Option<NewerStoreSchema> {
+fn newer_schema_in(content: &str, path: &Path) -> Option<NewerStoreSchema> {
     let raw: serde_json::Value = serde_json::from_str(content).ok()?;
     let schema_version = raw.get("schema_version")?.as_u64()?;
     if schema_version <= u64::from(STORE_SCHEMA_VERSION) {
@@ -432,6 +439,14 @@ pub(super) enum OnInvalid {
     Replace,
 }
 
+/// Give a store that never had a schema version the current one, so the
+/// next read knows its shape.
+pub(super) fn stamp_schema_version(store: &mut ImpactStore) {
+    if store.schema_version == 0 {
+        store.schema_version = STORE_SCHEMA_VERSION;
+    }
+}
+
 /// Write `store` to `path` with an atomic replace.
 pub(super) fn write_store(store: &ImpactStore, path: &Path) -> Result<(), StoreWriteError> {
     let io = |source| StoreWriteError::Io {
@@ -512,87 +527,4 @@ pub(super) fn finish_record(
             Err(message)
         }
     }
-}
-
-pub(super) fn parse_store(content: &str, path: &Path) -> ImpactStore {
-    match serde_json::from_str::<ImpactStore>(content) {
-        Ok(store) => {
-            if store.schema_version > STORE_SCHEMA_VERSION {
-                tracing::warn!(
-                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort. This build does not write to it, so the store stays unchanged. Upgrade fallow to read it fully.",
-                    path.display(),
-                    store.schema_version,
-                    STORE_SCHEMA_VERSION,
-                );
-            }
-            store
-        }
-        Err(err) => {
-            if let Some(newer) = newer_schema_in(content, path) {
-                tracing::warn!("{}", newer.message());
-            } else {
-                tracing::warn!(
-                    "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
-                    path.display()
-                );
-            }
-            ImpactStore::default()
-        }
-    }
-}
-
-/// Load the store for a load, mutate, and save cycle. Refuses a store that a
-/// newer Fallow wrote, so the caller leaves the file unchanged. Every write
-/// path must use this instead of `load`.
-pub(super) fn load_for_write(root: &Path) -> Result<ImpactStore, NewerStoreSchema> {
-    let Some(path) = store_path(root) else {
-        return Ok(ImpactStore::default());
-    };
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return Ok(migrate_legacy_store(root));
-    };
-    if let Some(newer) = newer_schema_in(&content, &path) {
-        return Err(newer);
-    }
-    Ok(parse_store(&content, &path))
-}
-
-/// Persist the store best-effort using atomic replace. No-op when no config dir
-/// is resolvable (e.g. stripped CI env). NEVER writes into the analyzed repo.
-pub(super) fn save(store: &ImpactStore, root: &Path) {
-    let Some(path) = store_path(root) else {
-        return;
-    };
-    if let Some(parent) = path.parent()
-        && std::fs::create_dir_all(parent).is_err()
-    {
-        return;
-    }
-    if let Ok(json) = serde_json::to_string_pretty(store) {
-        let _ = fallow_config::atomic_write(&path, json.as_bytes());
-    }
-}
-
-/// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
-/// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
-/// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
-/// worktree key. The legacy file is left byte-for-byte untouched (it is no
-/// longer read once the user store exists; re-running finds the user store and
-/// does not re-import). Monorepo note: N subdir stores share one repo key, so
-/// whichever subdir runs first wins (pick-first); the others are not merged.
-pub(super) fn migrate_legacy_store(root: &Path) -> ImpactStore {
-    let legacy_path = legacy_store_path(root);
-    let Ok(content) = std::fs::read_to_string(&legacy_path) else {
-        return ImpactStore::default();
-    };
-    let Ok(legacy) = serde_json::from_str::<LegacyFlatStore>(&content) else {
-        return ImpactStore::default();
-    };
-    let (_, worktree, display) = project_identity(root);
-    let mut store = legacy.into_store(&worktree);
-    // Backfill the cross-repo display label on migration so the imported repo
-    // is legible in `impact --all` without waiting for its next recorded run.
-    store.label = display;
-    save(&store, root);
-    store
 }

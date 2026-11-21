@@ -145,19 +145,6 @@ fn impact_enable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) 
     ExitCode::SUCCESS
 }
 
-/// Report a store that a newer Fallow wrote. The store stays unchanged.
-fn refuse_newer_store(
-    newer: &impact::NewerStoreSchema,
-    output: fallow_config::OutputFormat,
-) -> ExitCode {
-    crate::emit_known_failure(
-        &newer.message(),
-        INVALID_INPUT,
-        output,
-        telemetry::FailureReason::Validation,
-    )
-}
-
 /// Report a store change that was not saved. The store stays unchanged.
 fn refuse_store_change(
     err: &impact::StoreWriteError,
@@ -176,7 +163,7 @@ fn refuse_store_change(
 fn impact_disable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
     let was_enabled = match impact::disable(root) {
         Ok(was_enabled) => was_enabled,
-        Err(newer) => return refuse_newer_store(&newer, output),
+        Err(err) => return refuse_store_change(&err, output),
     };
     if !quiet {
         println!(

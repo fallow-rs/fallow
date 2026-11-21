@@ -39,6 +39,12 @@ fn seed_store_raw(root: &Path, bytes: &[u8]) {
     std::fs::write(&path, bytes).unwrap();
 }
 
+/// Write a store to the resolved store path, to seed a test.
+fn save(store: &ImpactStore, root: &Path) {
+    let path = store_path(root).expect("test config dir set");
+    write_store(store, &path).expect("seed store");
+}
+
 fn summary(dead: usize, complexity: usize, dupes: usize) -> AuditSummary {
     AuditSummary {
         dead_code_issues: dead,
@@ -2854,7 +2860,7 @@ fn render_cross_repo_markdown_includes_project_wide_totals_when_present() {
     );
 }
 
-// ----- migrate_legacy_store: corrupt legacy file falls back to default ---
+// ----- legacy_view: corrupt legacy file falls back to default ----------
 
 #[test]
 #[cfg_attr(miri, ignore)]
@@ -2864,7 +2870,7 @@ fn migrate_legacy_store_corrupt_file_returns_default() {
     // Write a corrupt legacy in-repo store.
     std::fs::create_dir_all(root.join(".fallow")).unwrap();
     std::fs::write(legacy_store_path(root), b"{ corrupted json ][").unwrap();
-    // load() tries the user store (missing) then migrate_legacy_store.
+    // load() finds no user store and reads the legacy store.
     let store = load(root);
     // A corrupt legacy file must return a default store without panicking.
     assert!(!store.enabled);
@@ -3414,7 +3420,99 @@ fn write_store_returns_the_io_error() {
     let blocker = dir.path().join("blocker");
     std::fs::write(&blocker, b"").unwrap();
     assert!(matches!(
-        store::write_store(&ImpactStore::default(), &blocker.join("x.json")),
+        write_store(&ImpactStore::default(), &blocker.join("x.json")),
         Err(StoreWriteError::Io { .. })
     ));
+}
+
+#[test]
+fn explicit_changes_fail_without_a_config_dir() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = None);
+    assert!(disable(root).is_err());
+    assert!(decline_onboarding(root).is_err());
+    assert_eq!(audit_record(root), Ok(()));
+    assert!(take_due_digest(root).is_none());
+    assert!(matches!(enable(root), Err(StoreWriteError::NoConfigDir)));
+    assert!(matches!(disable(root), Err(StoreWriteError::NoConfigDir)));
+    assert!(matches!(
+        decline_onboarding(root),
+        Err(StoreWriteError::NoConfigDir)
+    ));
+}
+
+#[test]
+fn unparsable_store_stops_disable_decline_and_digest() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, b"{not json");
+    assert!(disable(root).is_err());
+    assert!(decline_onboarding(root).is_err());
+    assert!(take_due_digest(root).is_none());
+    assert_eq!(raw_store(root), "{not json");
+    let err = disable(root).unwrap_err();
+    assert!(matches!(
+        err,
+        StoreWriteError::Read(StoreReadError::Invalid { .. })
+    ));
+    assert!(err.message().contains("fallow impact reset"));
+}
+
+#[test]
+fn disable_decline_and_digest_wait_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = disable(root);
+        },
+    );
+    assert!(!load(dir.path()).enabled);
+
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = decline_onboarding(root);
+        },
+    );
+    assert!(load(dir.path()).onboarding_declined);
+}
+
+#[test]
+fn digest_that_is_not_due_keeps_the_file() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    enable(root).unwrap();
+    let mut store = load(root);
+    store.resolved_total = 3;
+    store.containment.push(ContainmentEvent {
+        blocked_at: "2026-06-11T00:00:00Z".to_string(),
+        cleared_at: "2026-06-11T00:05:00Z".to_string(),
+        git_sha: None,
+        blocked_counts: ImpactCounts::default(),
+    });
+    save(&store, root);
+    assert!(take_due_digest(root).is_some());
+    let before = raw_store(root);
+    assert!(take_due_digest(root).is_none());
+    assert_eq!(raw_store(root), before);
+}
+
+#[test]
+fn enable_does_not_replace_a_store_that_is_not_utf8() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, &[0xff, 0xfe]);
+    assert!(matches!(
+        enable(root),
+        Err(StoreWriteError::Read(StoreReadError::Unreadable { .. }))
+    ));
+    assert_eq!(
+        std::fs::read(store_path(root).unwrap()).unwrap(),
+        [0xff, 0xfe]
+    );
 }

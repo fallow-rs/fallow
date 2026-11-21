@@ -384,13 +384,16 @@ use record_gate::record_gate_skips;
 #[path = "impact_store.rs"]
 mod store;
 use store::{
-    Change, OnInvalid, finish_record, load_all, load_for_write, load_global_default, save,
+    Change, OnInvalid, finish_record, load_all, load_global_default, stamp_schema_version,
     store_path,
 };
 #[cfg(test)]
-use store::{ImpactStoreLock, legacy_store_path, lock_path_for, migration_marker_path};
+use store::{
+    ImpactStoreLock, StoreReadError, legacy_store_path, lock_path_for, migration_marker_path,
+    write_store,
+};
 pub use store::{
-    NewerStoreSchema, StatuslineLoadError, StoreWriteError, load, load_statusline,
+    StatuslineLoadError, StoreWriteError, load, load_statusline, resolved_store_path,
     set_global_default, store_dir,
 };
 
@@ -468,9 +471,7 @@ pub fn enable(root: &Path) -> Result<bool, StoreWriteError> {
         let was_enabled = store.enabled;
         store.enabled = true;
         store.explicit_decision = true;
-        if store.schema_version == 0 {
-            store.schema_version = STORE_SCHEMA_VERSION;
-        }
+        stamp_schema_version(store);
         Change::Write(!was_enabled)
     })
 }
@@ -482,18 +483,16 @@ pub fn enable(root: &Path) -> Result<bool, StoreWriteError> {
 ///
 /// # Errors
 ///
-/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
-/// Fallow wrote it. This keeps the retained-history promise for that store.
-pub fn disable(root: &Path) -> Result<bool, NewerStoreSchema> {
-    let mut store = load_for_write(root)?;
-    let was_enabled = store.enabled;
-    store.enabled = false;
-    store.explicit_decision = true;
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-    save(&store, root);
-    Ok(was_enabled)
+/// Returns [`StoreWriteError`] and leaves the store unchanged when a newer
+/// Fallow wrote it, when it is not usable, or when the write fails.
+pub fn disable(root: &Path) -> Result<bool, StoreWriteError> {
+    store::transact(root, OnInvalid::Stop, |store| {
+        let was_enabled = store.enabled;
+        store.enabled = false;
+        store.explicit_decision = true;
+        stamp_schema_version(store);
+        Change::Write(was_enabled)
+    })
 }
 
 /// A due periodic value digest: the headline counters for "what has fallow
@@ -515,8 +514,18 @@ const DIGEST_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
 /// happened). Best-effort like the rest of the store: a clean run that drops
 /// the emitted step simply defers the digest to the next interval.
 pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
-    let mut store = load_for_write(root).ok()?;
-    if !resolve_enabled(&store).0 {
+    store::transact(root, OnInvalid::Stop, |store| {
+        match stamp_due_digest(store) {
+            Some(digest) => Change::Write(Some(digest)),
+            None => Change::Keep(None),
+        }
+    })
+    .ok()
+    .flatten()
+}
+
+fn stamp_due_digest(store: &mut ImpactStore) -> Option<ImpactDigest> {
+    if !resolve_enabled(store).0 {
         return None;
     }
     let containment_count = store.containment.len();
@@ -533,7 +542,6 @@ pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
         return None;
     }
     store.last_digest_epoch = Some(now);
-    save(&store, root);
     Some(ImpactDigest {
         containment_count,
         resolved_total: store.resolved_total,
@@ -545,17 +553,15 @@ pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
 ///
 /// # Errors
 ///
-/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
-/// Fallow wrote it.
-pub fn decline_onboarding(root: &Path) -> Result<bool, NewerStoreSchema> {
-    let mut store = load_for_write(root)?;
-    let was_declined = store.onboarding_declined;
-    store.onboarding_declined = true;
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-    save(&store, root);
-    Ok(!was_declined)
+/// Returns [`StoreWriteError`] and leaves the store unchanged when a newer
+/// Fallow wrote it, when it is not usable, or when the write fails.
+pub fn decline_onboarding(root: &Path) -> Result<bool, StoreWriteError> {
+    store::transact(root, OnInvalid::Stop, |store| {
+        let was_declined = store.onboarding_declined;
+        store.onboarding_declined = true;
+        stamp_schema_version(store);
+        Change::Write(!was_declined)
+    })
 }
 
 /// Resolve whether Impact is active for this project and WHY. Precedence:
@@ -579,13 +585,6 @@ fn resolve_enabled(store: &ImpactStore) -> (bool, EnabledSource) {
         return (true, EnabledSource::User);
     }
     (false, EnabledSource::Default)
-}
-
-/// The resolved per-project store-file path for `root`, for `status` display
-/// (so a wrong key is debuggable). `None` when no config dir is resolvable.
-#[must_use]
-pub fn resolved_store_path(root: &Path) -> Option<PathBuf> {
-    store_path(root)
 }
 
 /// The resolved (worktree-collapsed) project key for `root`, for display.
