@@ -13,7 +13,6 @@ import {
   treemapHitTest,
 } from "./treemap";
 import {
-  centerOnFile,
   clearGraphFocus,
   clearRoadHover,
   dismissIntro,
@@ -277,24 +276,21 @@ const init = (): void => {
     // Leaving the graph ego stage swaps back to the overview; soften that
     // return the same way as a view swap so it does not read as a reset.
     if (fileIndex === null && hadSelection && state.view === "graph") flashCanvas();
-    if (fileIndex !== null && reveal) {
-      if (state.view === "map") {
-        const dir = dirname(state.data.files[fileIndex].path);
-        // Drill to the nearest ancestor directory that exists as a node and
-        // contains the file, so the selection is visible.
-        if (
-          !state.data.files[fileIndex].path.startsWith(
-            state.drillPath === "" ? "" : `${state.drillPath}/`,
-          )
-        ) {
-          let target = dir;
-          while (target !== "" && !state.index.nodesByPath.has(target)) {
-            target = dirname(target);
-          }
-          state.drillPath = target;
+    // The graph ego view frames the selected file by itself.
+    if (fileIndex !== null && reveal && state.view === "map") {
+      const dir = dirname(state.data.files[fileIndex].path);
+      // Drill to the nearest ancestor directory that exists as a node and
+      // contains the file, so the selection is visible.
+      if (
+        !state.data.files[fileIndex].path.startsWith(
+          state.drillPath === "" ? "" : `${state.drillPath}/`,
+        )
+      ) {
+        let target = dir;
+        while (target !== "" && !state.index.nodesByPath.has(target)) {
+          target = dirname(target);
         }
-      } else {
-        centerOnFile(state, fileIndex);
+        state.drillPath = target;
       }
     }
     requestRender();
