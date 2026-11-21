@@ -134,6 +134,10 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
             group.introduced = Some(AuditIntroduced(introduced));
             group.demotion_reason = demoted.then_some(crate::CloneDemotionReason::NoAddedLines);
         }
+        outcome
+            .comparison
+            .dupe_regions
+            .annotate_payload(&mut duplication.output.report);
     }
     let next_steps = audit_next_steps(head.dead_code.as_ref(), head.complexity.as_ref());
     let base_snapshot = crate::audit_run::programmatic_base_snapshot(&outcome);
@@ -293,6 +297,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
                 own_config_unused_code: self.own_config_unused_code.as_ref(),
             }),
             duplication: duplication.as_ref().map(|duplication| DuplicationView {
+                ignored_groups: &duplication.ignored_clone_groups,
                 clone_groups: duplication
                     .output
                     .report
@@ -854,7 +859,10 @@ fn run_dead_code_and_duplication_with_project_artifacts(
         input.duplication_options,
         input.resolved,
         input.session,
-        project.duplication,
+        super::duplication::DuplicationRunReport {
+            report: project.duplication,
+            ignored_clone_groups: project.ignored_clone_groups,
+        },
         // Audit attributes clone groups against its own changed files.
         &ChangeScope::default(),
         section_start,

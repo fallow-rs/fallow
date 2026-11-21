@@ -340,7 +340,7 @@ pub mod routing;
 
 use fallow_api::audit_run::{
     AuditAnalyses, AuditAnalysesView, AuditBackend, AuditRun, AuditRunInput, BaseCheckout,
-    BaseFileReader, BaseRead, DeadCodeView, DuplicationView, HealthView, SharedDiff,
+    BaseFileReader, BaseRead, DeadCodeView, HealthView, SharedDiff,
 };
 
 struct HeadAnalyses {
@@ -401,13 +401,7 @@ fn analyses_view<'a>(
             public_api: check.public_api_keys.as_ref(),
             own_config_unused_code: None,
         }),
-        duplication: dupes.map(|dupes| DuplicationView {
-            clone_groups: dupes.report.clone_groups.iter().collect(),
-            root: &dupes.config.root,
-            duplication_percentage: dupes.report.stats.duplication_percentage,
-            threshold: dupes.threshold,
-            config: &dupes.config,
-        }),
+        duplication: dupes.map(DupesResult::audit_view),
         health: health.map(|health| HealthView {
             report: &health.report,
             root: &health.config.root,

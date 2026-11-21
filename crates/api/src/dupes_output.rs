@@ -186,6 +186,71 @@ impl CloneDemotionReason {
     }
 }
 
+/// The audit grade of a clone region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum CloneRegionGrade {
+    /// A member group has a copy that the base does not have, or the change
+    /// made two different pieces of old code equal. The region fails the
+    /// `introduced-clone-group` gate unless `accepted_by` names the
+    /// `ignoredClones` entries that accept each new copy.
+    Introduced,
+    /// Each member group is a base group, or the change wrote no line of it.
+    Inherited,
+    /// Each member group lies inside a base group, at the same place of each
+    /// base copy, and the change edited one or more of its copies. Each copy
+    /// grows by fewer lines than `duplicates.minLines`. A rewrite that keeps
+    /// the size of every copy counts as an edit. The region does not fail the
+    /// gate.
+    InheritedEdited,
+}
+
+/// One file span of a clone region.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CloneRegionSpan {
+    /// Project-root-relative path, with forward slashes.
+    pub file: String,
+    /// 1-based first line.
+    pub start_line: u32,
+    /// 1-based last line, inclusive.
+    pub end_line: u32,
+}
+
+/// A clone region of `fallow audit`: the clone groups whose instances
+/// overlap, graded as one finding. One paste can give a long group with
+/// fewer copies and a short group with more copies; both are members of one
+/// region (issue #4967).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CloneRegionFinding {
+    /// The grade of the region against the base.
+    pub grade: CloneRegionGrade,
+    /// Whether the region fails the new-only gate. Each member group in
+    /// `clone_groups[]` carries the same `introduced` value.
+    pub introduced: bool,
+    /// Indices of the member groups in `clone_groups[]`.
+    pub groups: Vec<usize>,
+    /// The union of the member instance lines in each file.
+    pub instances: Vec<CloneRegionSpan>,
+    /// The `duplicates.ignoredClones` entries that accept the region. An
+    /// entry accepts an `inherited-edited` region when it matched the base
+    /// clone, and an `introduced` region when it hid the head group of each
+    /// new copy.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accepted_by: Vec<String>,
+    /// The keys to put in `duplicates.ignoredClones` in place of
+    /// `accepted_by`, so that `fallow dupes` also hides the edited clone.
+    /// Present only for an accepted `inherited-edited` region.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_hint: Vec<String>,
+    /// Set when the region does not fail the gate because the change wrote
+    /// no line of a member group whose key is new (issue #2164).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demotion_reason: Option<CloneDemotionReason>,
+}
+
 /// Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
 /// group via `#[serde(flatten)]` and carries a typed `actions` array plus
 /// the optional audit-mode `introduced` flag. The typed envelope replaced
@@ -226,6 +291,10 @@ pub struct CloneGroupFinding {
     /// --format json` (issue #2220).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub demotion_reason: Option<CloneDemotionReason>,
+    /// Set only by `fallow audit` with a base: the index of the region of
+    /// this group in `clone_regions[]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<usize>,
 }
 
 impl CloneGroupFinding {
@@ -243,6 +312,7 @@ impl CloneGroupFinding {
             actions,
             introduced: None,
             demotion_reason: None,
+            region: None,
         }
     }
 }
@@ -353,6 +423,11 @@ pub struct DupesReportPayload {
     pub range_marker_problems: Vec<RangeMarkerFinding>,
     /// Aggregate duplication statistics.
     pub stats: DuplicationStats,
+    /// Set only by `fallow audit` with a base: the clone groups whose
+    /// instances overlap, graded as one finding each. The new-only gate
+    /// counts these regions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clone_regions: Vec<CloneRegionFinding>,
 }
 
 /// Wire shape of the `dupes` section inside the bare combined envelope.
@@ -398,6 +473,7 @@ impl DupesReportPayload {
             mirrored_directories: report.mirrored_directories.clone(),
             range_marker_problems: report.range_marker_problems.clone(),
             stats: report.stats.clone(),
+            clone_regions: Vec::new(),
         }
     }
 

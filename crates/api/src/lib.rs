@@ -111,9 +111,9 @@ pub use dead_code_sarif::build_sarif;
 pub use doctor::{DoctorOptions, run_doctor, run_doctor_with_cache_dir};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneDemotionReason,
-    CloneFamilyFinding, CloneGroupFinding, CombinedDupesSection, DupesReportPayload,
-    DuplicationGroup, DuplicationGrouping, build_duplication_codeclimate,
-    set_duplication_audit_attribution,
+    CloneFamilyFinding, CloneGroupFinding, CloneRegionFinding, CloneRegionGrade, CloneRegionSpan,
+    CombinedDupesSection, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
+    build_duplication_codeclimate, set_duplication_audit_attribution,
 };
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,

@@ -364,13 +364,39 @@ pub struct AuditComparison {
     /// Attribution class of each complexity finding, in report order. Empty
     /// without a base snapshot.
     pub health_classes: Vec<crate::audit_complexity::ComplexityClass>,
-    /// Duplication group membership.
+    /// Duplication group membership. The introduced flag of a group is the
+    /// gate result of its region.
     pub dupes: AuditDomainLedger,
+    /// The clone regions: the head groups whose instances overlap, with a
+    /// grade each. Empty until the audit grades them, or without a base.
+    pub dupe_regions: crate::audit_run::CloneRegions,
     /// Styling finding membership.
     pub styling: AuditDomainLedger,
 }
 
 impl AuditComparison {
+    /// Number of clone regions that fail the gate. Without graded regions,
+    /// the number of introduced clone groups.
+    #[must_use]
+    pub fn duplication_introduced_count(&self) -> usize {
+        if self.dupe_regions.regions().is_empty() {
+            self.dupes.introduced_count()
+        } else {
+            self.dupe_regions.introduced_count()
+        }
+    }
+
+    /// Number of clone regions that do not fail the gate. Without graded
+    /// regions, the number of inherited clone groups.
+    #[must_use]
+    pub fn duplication_inherited_count(&self) -> usize {
+        if self.dupe_regions.regions().is_empty() {
+            self.dupes.inherited_count()
+        } else {
+            self.dupe_regions.inherited_count()
+        }
+    }
+
     /// Number of complexity findings whose attribution is `worsened`.
     #[must_use]
     pub fn complexity_worsened_count(&self) -> usize {
@@ -1799,35 +1825,6 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
         group.line_count,
         hasher.finish()
     )
-}
-
-/// Keys of clone groups whose every instance lies entirely outside the diff's
-/// added lines: no instance range contains an added line, so the changeset did
-/// not write the duplicated text, and the group only became reportable (under
-/// a new attribution key) because the changeset removed code elsewhere;
-/// deduplicating one region can create or re-shape a clone group across files
-/// (issue #2164). New-only gating demotes these groups to inherited so a
-/// clone-removal refactor is not failed by the duplication it did not write.
-/// An instance whose path cannot be mapped into the diff's namespace is
-/// treated as touched, so its group keeps gating.
-pub fn preexisting_dupe_group_keys<'a>(
-    groups: impl IntoIterator<Item = &'a fallow_types::duplicates::CloneGroup>,
-    root: &Path,
-    diff: &fallow_output::DiffIndex,
-) -> FxHashSet<String> {
-    let instance_touched = |instance: &fallow_types::duplicates::CloneInstance| -> bool {
-        let Some(rel) = diff.key_for(&instance.file, root) else {
-            return true;
-        };
-        let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
-        let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
-        diff.range_overlaps_added(&rel, start, end)
-    };
-    groups
-        .into_iter()
-        .filter(|group| !group.instances.iter().any(instance_touched))
-        .map(|group| dupe_group_key(group, root))
-        .collect()
 }
 
 #[path = "audit_keys_introduced.rs"]

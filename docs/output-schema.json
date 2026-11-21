@@ -299,7 +299,7 @@
     },
     "AuditIntroduced": {
       "type": "boolean",
-      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Duplication findings carry one carve-out: a clone\ngroup whose structural key is new but whose instances contain no added line\nfrom the diff (a group re-shaped by removing duplication elsewhere) is\ndemoted to inherited and serializes `false` (issue #2164). Such demoted\ngroups additionally carry a `demotion_reason` field naming the rule, and\nare counted in `attribution.duplication_demoted` (issue #2220).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
+      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Clone groups compare by content, not by key alone:\n`true` means the group adds a copy that the base did not have, or makes\ntwo different pieces of old code equal, and no `duplicates.ignoredClones`\nentry accepts it. A group whose copies the change edited inside one base\nclone serializes `false`, and its region has the grade `inherited-edited`\n(issue #4968). A clone group whose key is new but whose instances contain\nno added line from the diff (a group re-shaped by removing duplication\nelsewhere) is demoted to inherited and serializes `false` (issue #2164).\nSuch demoted groups additionally carry a `demotion_reason` field naming the\nrule, and their regions are counted in `attribution.duplication_demoted`\n(issue #2220).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
     },
     "ExplainOutput": {
       "type": "object",
@@ -3411,6 +3411,13 @@
         "stats": {
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
+        },
+        "clone_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionFinding"
+          },
+          "description": "Set only by `fallow audit` with a base: the clone groups whose\ninstances overlap, graded as one finding each. The new-only gate\ncounts these regions."
         },
         "clone_groups_shown": {
           "type": "integer",
@@ -9096,11 +9103,11 @@
         },
         "duplication_introduced": {
           "type": "integer",
-          "description": "Clone groups absent from the base snapshot."
+          "description": "Clone regions that fail the new-only gate: a member clone group has a\ncopy that the base snapshot does not have. Overlapping clone groups\nare one region."
         },
         "duplication_inherited": {
           "type": "integer",
-          "description": "Clone groups already present in the base snapshot."
+          "description": "Clone regions that do not fail the new-only gate, also the regions\nwhose copies the change edited."
         },
         "styling_introduced": {
           "type": "integer"
@@ -13236,6 +13243,13 @@
             }
           ],
           "description": "Set only by `fallow audit` under `--gate new-only`, on groups whose\n`introduced` flag the gate demoted to `false`: why the demotion\nhappened. `None` everywhere else, including `fallow dupes\n--format json` (issue #2220)."
+        },
+        "region": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Set only by `fallow audit` with a base: the index of the region of\nthis group in `clone_regions[]`."
         }
       },
       "required": [
@@ -13282,6 +13296,13 @@
         "stats": {
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
+        },
+        "clone_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionFinding"
+          },
+          "description": "Set only by `fallow audit` with a base: the clone groups whose\ninstances overlap, graded as one finding each. The new-only gate\ncounts these regions."
         }
       },
       "required": [
@@ -29916,6 +29937,13 @@
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
         },
+        "clone_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionFinding"
+          },
+          "description": "Set only by `fallow audit` with a base: the clone groups whose\ninstances overlap, graded as one finding each. The new-only gate\ncounts these regions."
+        },
         "baseline_staleness": {
           "anyOf": [
             {
@@ -39998,6 +40026,108 @@
         }
       ],
       "description": "What is wrong with one inline threshold override comment. A comment with a\nproblem has no effect."
+    },
+    "CloneRegionFinding": {
+      "type": "object",
+      "properties": {
+        "grade": {
+          "description": "The grade of the region against the base.",
+          "$ref": "#/definitions/CloneRegionGrade"
+        },
+        "introduced": {
+          "type": "boolean",
+          "description": "Whether the region fails the new-only gate. Each member group in\n`clone_groups[]` carries the same `introduced` value."
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Indices of the member groups in `clone_groups[]`."
+        },
+        "instances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionSpan"
+          },
+          "description": "The union of the member instance lines in each file."
+        },
+        "accepted_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The `duplicates.ignoredClones` entries that accept the region. An\nentry accepts an `inherited-edited` region when it matched the base\nclone, and an `introduced` region when it hid the head group of each\nnew copy."
+        },
+        "ignore_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The keys to put in `duplicates.ignoredClones` in place of\n`accepted_by`, so that `fallow dupes` also hides the edited clone.\nPresent only for an accepted `inherited-edited` region."
+        },
+        "demotion_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CloneDemotionReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the region does not fail the gate because the change wrote\nno line of a member group whose key is new (issue #2164)."
+        }
+      },
+      "required": [
+        "grade",
+        "introduced",
+        "groups",
+        "instances"
+      ],
+      "description": "A clone region of `fallow audit`: the clone groups whose instances\noverlap, graded as one finding. One paste can give a long group with\nfewer copies and a short group with more copies; both are members of one\nregion (issue #4967)."
+    },
+    "CloneRegionGrade": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "introduced",
+          "description": "A member group has a copy that the base does not have, or the change\nmade two different pieces of old code equal. The region fails the\n`introduced-clone-group` gate unless `accepted_by` names the\n`ignoredClones` entries that accept each new copy."
+        },
+        {
+          "type": "string",
+          "const": "inherited",
+          "description": "Each member group is a base group, or the change wrote no line of it."
+        },
+        {
+          "type": "string",
+          "const": "inherited-edited",
+          "description": "Each member group lies inside a base group, at the same place of each\nbase copy, and the change edited one or more of its copies. Each copy\ngrows by fewer lines than `duplicates.minLines`. A rewrite that keeps\nthe size of every copy counts as an edit. The region does not fail the\ngate."
+        }
+      ],
+      "description": "The audit grade of a clone region."
+    },
+    "CloneRegionSpan": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Project-root-relative path, with forward slashes."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based first line."
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based last line, inclusive."
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "description": "One file span of a clone region."
     }
   }
 }

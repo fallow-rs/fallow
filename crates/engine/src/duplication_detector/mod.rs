@@ -225,7 +225,7 @@ fn detect_and_postprocess(
     mut file_data: Vec<TokenizedFile>,
     corpus_totals: crate::duplicates::CorpusTotals,
     focus_files: Option<&FxHashSet<PathBuf>>,
-) -> DuplicationReport {
+) -> (DuplicationReport, Vec<crate::duplicates::IgnoredCloneGroup>) {
     let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
         .iter()
         .filter(|file| !file.suppressions.is_empty())
@@ -301,7 +301,7 @@ fn detect_and_postprocess(
         report.stats = crate::duplicates::recompute_stats(&report);
     }
 
-    apply_ignored_clones_filter(&mut report, &config.ignored_clones);
+    let ignored = apply_ignored_clones_filter(&mut report, &config.ignored_clones);
     apply_min_occurrences_filter(&mut report, config.min_occurrences);
     // Families copy their groups, so mark the instances before the copy.
     mark_symlinked_instances(&mut report, root);
@@ -311,7 +311,7 @@ fn detect_and_postprocess(
         families::detect_mirrored_directories(&report.clone_families, root);
     report.stats.clone_families = report.clone_families.len();
     report.sort();
-    report
+    (report, ignored)
 }
 
 /// Whether `path` is a symlink, or lies under a symlinked directory, below
@@ -342,24 +342,37 @@ fn mark_symlinked_instances(report: &mut DuplicationReport, root: &Path) {
     }
 }
 
-fn apply_ignored_clones_filter(report: &mut DuplicationReport, ignored: &[String]) {
+/// Remove the groups that `ignored` names, and return them with the key that
+/// hid each one.
+fn apply_ignored_clones_filter(
+    report: &mut DuplicationReport,
+    ignored: &[String],
+) -> Vec<crate::duplicates::IgnoredCloneGroup> {
     if ignored.is_empty() || report.clone_groups.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let ignored = ignored.iter().map(String::as_str).collect::<FxHashSet<_>>();
     let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
-    let before = report.clone_groups.len();
-    report.clone_groups.retain(|group| {
-        !ignored.contains(fingerprints.ignored_clone_key_for_group(group).as_str())
-    });
-    let hidden = before.saturating_sub(report.clone_groups.len());
-    if hidden == 0 {
-        return;
+    let mut hidden = Vec::new();
+    for group in std::mem::take(&mut report.clone_groups) {
+        let key = fingerprints.ignored_clone_key_for_group(&group);
+        if ignored.contains(key.as_str()) {
+            hidden.push(crate::duplicates::IgnoredCloneGroup { key, group });
+        } else {
+            report.clone_groups.push(group);
+        }
+    }
+    if hidden.is_empty() {
+        return hidden;
     }
 
-    report.stats.clone_groups_ignored = report.stats.clone_groups_ignored.saturating_add(hidden);
+    report.stats.clone_groups_ignored = report
+        .stats
+        .clone_groups_ignored
+        .saturating_add(hidden.len());
     report.stats = crate::duplicates::recompute_stats(report);
+    hidden
 }
 
 /// Run duplication detection with optional focus files and token cache.
@@ -396,7 +409,8 @@ pub fn detect_duplicates(
         cache_root,
     });
 
-    let report = detect_and_postprocess(root, config, file_data, corpus_totals, focus_files);
+    let (report, ignored_clone_groups) =
+        detect_and_postprocess(root, config, file_data, corpus_totals, focus_files);
 
     let default_ignore_skips =
         build_default_ignore_skips(extra_ignores.as_ref(), &default_skip_counts);
@@ -404,6 +418,7 @@ pub fn detect_duplicates(
     DuplicationAnalysis {
         report,
         default_ignore_skips,
+        ignored_clone_groups,
     }
 }
 

@@ -9,16 +9,17 @@ use fallow_engine::module_graph::relative_key_path;
 use fallow_types::duplicates::CloneGroup;
 use rustc_hash::FxHashSet;
 
-use super::clone_containment::base_contained_dupe_group_keys;
+use super::clone_regions::{
+    CloneRegionBase, CloneRegionHead, grade_clone_regions, has_unmatched_group,
+};
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
     AuditComparison, AuditDomainLedger, ChangedPaths, DeadCodeAuditLedger,
     classify_complexity_attribution_against_all_with_moves, complexity_ledger_keys,
-    dead_code_audit_ledger, dupe_group_key, preexisting_dupe_group_keys, styling_ledger_keys,
-    styling_ledger_keys_with_diff,
+    dead_code_audit_ledger, dupe_group_key, styling_ledger_keys, styling_ledger_keys_with_diff,
 };
-use crate::audit_moved::{MovedDeadCode, moved_dead_code_keys, moved_dupe_group_keys};
-use crate::diff_risk::clones::BaseCloneGroup;
+use crate::audit_moved::{MovedDeadCode, moved_dead_code_keys};
+use crate::diff_risk::clones::{AcceptedCloneGroup, BaseCloneGroup};
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 
 /// Which diff decided the new-only duplication demotion, so output can name
@@ -143,8 +144,9 @@ fn added_line_names(
 /// diff. A complexity finding of a function that the change moved between
 /// two of those files compares with its base finding (see
 /// [`classify_complexity_attribution_against_all_with_moves`]). An unused
-/// symbol or a clone group that the change moved is inherited (see
-/// `audit_moved.rs`).
+/// symbol that the change moved is inherited (see `audit_moved.rs`). The
+/// clone groups compare by key here, and [`attribute_clone_regions`] grades
+/// them as regions.
 #[must_use]
 pub fn compare(
     view: &AuditAnalysesView<'_>,
@@ -221,7 +223,17 @@ pub fn compare(
             });
             AuditDomainLedger::from_classified(keys.into_iter().zip(introduced), base.is_some())
         });
-    let dupes = dupes_ledger(view, base, change.changed_files);
+    // The key compare is the attribution until `attribute_clone_regions`
+    // grades the regions with the diff.
+    let dupes = AuditDomainLedger::compare(
+        view.duplication.iter().flat_map(|duplication| {
+            duplication
+                .clone_groups
+                .iter()
+                .map(|group| dupe_group_key(group, duplication.root))
+        }),
+        base.map(|snapshot| &snapshot.dupes),
+    );
     let styling = AuditDomainLedger::compare(
         view.health
             .iter()
@@ -233,41 +245,9 @@ pub fn compare(
         health,
         health_classes,
         dupes,
+        dupe_regions: super::clone_regions::CloneRegions::default(),
         styling,
     }
-}
-
-/// Compare the clone groups of the head with the base keys. An introduced
-/// group that the change moved to other files is inherited (see
-/// [`moved_dupe_group_keys`]).
-fn dupes_ledger(
-    view: &AuditAnalysesView<'_>,
-    base: Option<&AuditKeySnapshot>,
-    changed_files: &FxHashSet<PathBuf>,
-) -> AuditDomainLedger {
-    let Some(duplication) = view.duplication.as_ref() else {
-        return AuditDomainLedger::compare(std::iter::empty(), base.map(|base| &base.dupes));
-    };
-    let keys: Vec<String> = duplication
-        .clone_groups
-        .iter()
-        .map(|group| dupe_group_key(group, duplication.root))
-        .collect();
-    let mut ledger = AuditDomainLedger::compare(keys.iter().cloned(), base.map(|base| &base.dupes));
-    if let Some(base) = base
-        && ledger.introduced_count() > 0
-    {
-        let moved = moved_dupe_group_keys(
-            keys.iter()
-                .map(String::as_str)
-                .filter(|key| ledger.is_introduced(key)),
-            &keys.iter().map(String::as_str).collect(),
-            &base.dupes,
-            &changed_paths_of(changed_files, duplication.root),
-        );
-        ledger.inherit_introductions(&moved);
-    }
-    ledger
 }
 
 /// The changed files as key paths, with the files that the head does not have.
@@ -283,72 +263,90 @@ fn changed_paths_of(changed_files: &FxHashSet<PathBuf>, root: &Path) -> ChangedP
     paths
 }
 
-/// The base data that the clone group reclassification compares with.
+/// The base data that the clone regions compare with.
 #[derive(Clone, Copy)]
 pub struct DupeBase<'a> {
+    /// Attribution keys of the base clone groups, at head paths.
+    pub keys: &'a FxHashSet<String>,
     /// Instance locations of the base clone groups, at base paths.
     pub groups: &'a [BaseCloneGroup],
+    /// Base clone groups that `duplicates.ignoredClones` hid, at base paths.
+    pub accepted: &'a [AcceptedCloneGroup],
     /// The renamed files of the change.
     pub renames: &'a [RenamedFile],
 }
 
-/// Reclassify introduced clone groups that the change did not write.
-///
-/// Two rules use the run's diff, in this order:
-///
-/// 1. A group that holds no added line is demoted. Only the attribution key
-///    of the group changed, because the changeset removed code in another
-///    place. Without this rule, a clone-removal refactor fails the new-only
-///    gate on duplication that it did not write (issue #2164).
-/// 2. A group where each instance lies inside a different instance of one
-///    base clone group, and one instance holds no added line, is inherited.
-///    An edit inside one copy of a base clone splits the base group into
-///    smaller groups with new keys, and the
-///    change did not write their duplication. This rule records no
-///    demotion, because the group matches a base group.
+/// Grade the head clone groups as regions, and set the introduced flag of
+/// each group from the grade of its region (see the `clone_regions` module
+/// of `audit_run`).
 ///
 /// The opt-in shared diff decides when it is present; the merge-base worktree
-/// diff decides in the other cases.
-pub fn demote_preexisting_dupe_introductions(
+/// diff decides in the other cases. The diff is read only when a head group
+/// has a key that the base does not hold. `base` is `None` when the run has
+/// no base snapshot.
+pub fn attribute_clone_regions(
     comparison: &mut AuditComparison,
     view: &AuditAnalysesView<'_>,
     change: &RunChange<'_>,
-    base: DupeBase<'_>,
+    base: Option<DupeBase<'_>>,
 ) -> Option<DupeDemotionDiffSource> {
-    if comparison.dupes.introduced_count() == 0 {
+    let (Some(duplication), Some(base)) = (view.duplication.as_ref(), base) else {
         return None;
-    }
-    let duplication = view.duplication.as_ref()?;
-    let Some(index) = change.diff_index() else {
-        return Some(DupeDemotionDiffSource::Skipped);
     };
-    let source = change
-        .shared
-        .map_or(DupeDemotionDiffSource::Worktree, |shared| {
-            DupeDemotionDiffSource::Shared(shared.label.to_owned())
-        });
-    let demote = preexisting_dupe_group_keys(
-        duplication.clone_groups.iter().copied(),
-        duplication.root,
-        index,
-    );
-    comparison.dupes.demote_introductions(&demote);
-    // Only an introduced group can become inherited. The filter keeps the
-    // containment check, which compares each group with every base group,
-    // away from the groups that already match a base key.
-    let inherit = base_contained_dupe_group_keys(
-        duplication.clone_groups.iter().copied().filter(|group| {
-            comparison
-                .dupes
-                .is_introduced(&dupe_group_key(group, duplication.root))
+    let head = CloneRegionHead {
+        groups: &duplication.clone_groups,
+        ignored: duplication.ignored_groups,
+        root: duplication.root,
+        min_lines: duplication.config.duplicates.min_lines,
+    };
+    let changed = changed_paths_of(change.changed_files, duplication.root);
+    let region_base = CloneRegionBase {
+        keys: base.keys,
+        groups: base.groups,
+        accepted: base.accepted,
+        renames: base.renames,
+        changed: &changed,
+    };
+    let (diff, source) = if has_unmatched_group(&head, base.keys) {
+        match change.diff_index() {
+            Some(index) => (
+                Some(index),
+                Some(
+                    change
+                        .shared
+                        .map_or(DupeDemotionDiffSource::Worktree, |shared| {
+                            DupeDemotionDiffSource::Shared(shared.label.to_owned())
+                        }),
+                ),
+            ),
+            None => (None, Some(DupeDemotionDiffSource::Skipped)),
+        }
+    } else {
+        (None, None)
+    };
+    let regions = grade_clone_regions(&head, &region_base, diff);
+    let keys: Vec<String> = duplication
+        .clone_groups
+        .iter()
+        .map(|group| dupe_group_key(group, duplication.root))
+        .collect();
+    let demoted: FxHashSet<String> = keys
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| regions.group_demoted(*index))
+        .map(|(_, key)| key.clone())
+        .collect();
+    let mut ledger = AuditDomainLedger::from_classified(
+        keys.into_iter().enumerate().map(|(index, key)| {
+            let flagged = regions.group_introduced(index) || regions.group_demoted(index);
+            (key, flagged)
         }),
-        duplication.root,
-        index,
-        base.groups,
-        base.renames,
+        true,
     );
-    comparison.dupes.inherit_introductions(&inherit);
-    Some(source)
+    ledger.demote_introductions(&demoted);
+    comparison.dupes = ledger;
+    comparison.dupe_regions = regions;
+    source
 }
 
 /// Compare the styling findings again with the run's diff, so the finding
@@ -486,7 +484,8 @@ fn complexity_verdict_flags(
 
 /// How the clone groups take part in the verdict: `(gates, warns)`.
 ///
-/// Under `new-only`, only an introduced group counts. Under `all`, every
+/// Under `new-only`, only an introduced group counts. The attribution counts
+/// regions, so the groups of one paste are one finding there. Under `all`, every
 /// group counts. The `introduced-clone-group` rule gives the severity of a
 /// group that counts.
 fn duplication_verdict_flags(
@@ -554,7 +553,7 @@ fn verdict(
     // The threshold reads every counted group, also a group that the
     // `introduced-clone-group` rule turns off: the two gates are independent.
     let duplication_findings = if new_only {
-        comparison.dupes.introduced_count()
+        comparison.duplication_introduced_count()
     } else {
         summary.duplication_clone_groups
     };
@@ -607,8 +606,8 @@ fn attribution(
         dead_code_inherited: comparison.dead_code.inherited_count(),
         complexity_introduced: comparison.health.introduced_count(),
         complexity_inherited: comparison.health.inherited_count(),
-        duplication_introduced: comparison.dupes.introduced_count(),
-        duplication_inherited: comparison.dupes.inherited_count(),
+        duplication_introduced: comparison.duplication_introduced_count(),
+        duplication_inherited: comparison.duplication_inherited_count(),
     }
 }
 

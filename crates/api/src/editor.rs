@@ -724,6 +724,7 @@ impl EditorAnalysisSession {
                     .inner
                     .analyze_dead_code_with_artifacts(retain_complexity_artifacts, false)?,
                 duplication: fallow_types::duplicates::DuplicationReport::default(),
+                ignored_clone_groups: Vec::new(),
                 changed_files: changed_files.cloned(),
                 source_fingerprints: None,
             }

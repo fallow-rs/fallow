@@ -104,7 +104,8 @@ def styling_rows:
 (.attribution // {}) as $attr |
 ($summary.dead_code_issues // 0) as $dead |
 ($summary.complexity_findings // 0) as $complex |
-($summary.duplication_clone_groups // 0) as $dupes |
+(if (.duplication.clone_regions // null) != null then (.duplication.clone_regions | length)
+ else ($summary.duplication_clone_groups // 0) end) as $dupes |
 ((.complexity.styling_findings // []) | length) as $styling |
 (.changed_files_count // 0) as $files |
 (.elapsed_ms // 0) as $elapsed |
@@ -125,7 +126,7 @@ styling_rows as $styling_rows |
 (if ($summary.complexity_skipped // false) then "| Styling | skipped | - | - |\n\n"
  else "| Styling | \($styling) | \($attr.styling_introduced // 0) | \($attr.styling_inherited // 0) |\n\n" end) +
 (if ($attr.duplication_demoted // 0) > 0 then
-  "> \(plural($attr.duplication_demoted; "introduced clone group")) demoted to inherited (not written by this changeset)\n\n"
+  "> \(plural($attr.duplication_demoted; "introduced clone region")) demoted to inherited (not written by this changeset)\n\n"
 else "" end) +
 (if ($dead_rows | length) > 0 then
   "### Dead Code\n\n" +

@@ -69,12 +69,17 @@ pub struct ElapsedMs(pub u64);
 /// Audit-mode marker emitted on each finding when `fallow audit --format json`
 /// runs with a base ref. `true` means the finding's structural key was not
 /// present at the base ref (introduced by the current changeset); `false`
-/// means it was inherited. Duplication findings carry one carve-out: a clone
-/// group whose structural key is new but whose instances contain no added line
-/// from the diff (a group re-shaped by removing duplication elsewhere) is
-/// demoted to inherited and serializes `false` (issue #2164). Such demoted
-/// groups additionally carry a `demotion_reason` field naming the rule, and
-/// are counted in `attribution.duplication_demoted` (issue #2220).
+/// means it was inherited. Clone groups compare by content, not by key alone:
+/// `true` means the group adds a copy that the base did not have, or makes
+/// two different pieces of old code equal, and no `duplicates.ignoredClones`
+/// entry accepts it. A group whose copies the change edited inside one base
+/// clone serializes `false`, and its region has the grade `inherited-edited`
+/// (issue #4968). A clone group whose key is new but whose instances contain
+/// no added line from the diff (a group re-shaped by removing duplication
+/// elsewhere) is demoted to inherited and serializes `false` (issue #2164).
+/// Such demoted groups additionally carry a `demotion_reason` field naming the
+/// rule, and their regions are counted in `attribution.duplication_demoted`
+/// (issue #2220).
 ///
 /// Outside of audit sub-results the field is omitted, so call sites typically
 /// hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.

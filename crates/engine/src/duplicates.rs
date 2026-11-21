@@ -6,7 +6,7 @@ use fallow_config::DuplicatesConfig;
 use fallow_types::discover::DiscoveredFile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::results::DuplicationAnalysis;
+pub use crate::results::DuplicationAnalysis;
 use crate::workspace_scope::WorkspaceScope;
 
 #[path = "duplication_detector/mod.rs"]
@@ -35,6 +35,18 @@ pub type DefaultIgnoreSkips = fallow_types::duplicates::DefaultIgnoreSkips;
 pub type DuplicationReport = fallow_types::duplicates::DuplicationReport;
 /// Engine alias for [`fallow_types::duplicates::DuplicationStats`].
 pub type DuplicationStats = fallow_types::duplicates::DuplicationStats;
+/// A clone group that a `duplicates.ignoredClones` entry hid from the report.
+///
+/// The audit reads these groups, so an accepted clone stays accepted when a
+/// change edits it or pastes it again.
+#[derive(Debug, Clone)]
+pub struct IgnoredCloneGroup {
+    /// The `ignoredClones` entry that matched the group.
+    pub key: String,
+    /// The hidden group.
+    pub group: CloneGroup,
+}
+
 /// Engine alias for [`fallow_types::duplicates::RefactoringSuggestion`].
 pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
 

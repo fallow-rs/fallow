@@ -129,10 +129,8 @@ impl AnalysisSession {
                 &changed_files,
                 cache_dir,
             )
-            .report
         } else {
             self.find_duplicates_with_defaults(duplicates_config, cache_dir)
-                .report
         };
         // Duplication detection is infallible, so a token set while it ran can
         // only be reported here, before its report is handed on as a complete
@@ -146,7 +144,8 @@ impl AnalysisSession {
                 options.retain_complexity_artifacts,
                 options.retain_graph,
             )?,
-            duplication,
+            duplication: duplication.report,
+            ignored_clone_groups: duplication.ignored_clone_groups,
             changed_files: options.changed_files,
             source_fingerprints,
         })
