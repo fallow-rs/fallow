@@ -123,7 +123,7 @@ pub fn render_impact_statusline(root: &Path) -> ExitCode {
 fn impact_enable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
     let newly = match impact::enable(root) {
         Ok(newly) => newly,
-        Err(newer) => return refuse_newer_store(&newer, output),
+        Err(err) => return refuse_store_change(&err, output),
     };
     if !quiet {
         if newly {
@@ -156,6 +156,20 @@ fn refuse_newer_store(
         output,
         telemetry::FailureReason::Validation,
     )
+}
+
+/// Report a store change that was not saved. The store stays unchanged.
+fn refuse_store_change(
+    err: &impact::StoreWriteError,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
+    let reason = match err {
+        impact::StoreWriteError::Read(_) => telemetry::FailureReason::Validation,
+        impact::StoreWriteError::NoConfigDir | impact::StoreWriteError::Io { .. } => {
+            telemetry::FailureReason::Unknown
+        }
+    };
+    crate::emit_known_failure(&err.message(), INVALID_INPUT, output, reason)
 }
 
 /// Disable Fallow Impact for this project; history is retained.

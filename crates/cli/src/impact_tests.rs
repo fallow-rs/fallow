@@ -548,15 +548,6 @@ fn corrupt_store_loads_as_default_no_panic() {
     let store = load(root);
     assert!(!store.enabled);
     assert!(store.records.is_empty());
-    record_v1(
-        root,
-        &summary(1, 0, 0),
-        AuditVerdict::Fail,
-        true,
-        None,
-        "2.0.0",
-        "t0",
-    );
 }
 
 #[test]
@@ -3339,4 +3330,91 @@ fn legacy_view_is_absent_when_the_marker_exists() {
     std::fs::write(migration_marker_path(&store), b"").unwrap();
     assert!(load(root).records.is_empty());
     assert!(load_statusline(root).unwrap().records.is_empty());
+}
+
+fn audit_record(root: &Path) -> Result<(), String> {
+    record_audit_run(
+        root,
+        &summary(1, 0, 0),
+        &AuditRunRecord {
+            verdict: AuditVerdict::Fail,
+            gate_source: Some(GateSource::Unknown),
+            git_sha: Some("abc1234"),
+            version: "2.0.0",
+            timestamp: "2026-10-02T00:00:00Z",
+            attribution: None,
+            analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        },
+    )
+}
+
+#[test]
+fn record_leaves_an_unparsable_store_unchanged() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    let _ = set_global_default(true);
+    seed_store_raw(root, b"{not json");
+    assert!(audit_record(root).is_err());
+    assert_eq!(raw_store(root), "{not json");
+}
+
+/// Hold the store lock of a fresh project, run `change` on another thread, and
+/// check that `change` waits for the lock. `prepare` runs before the lock.
+fn assert_waits_for_store_lock(
+    prepare: impl FnOnce(&Path),
+    change: impl FnOnce(&Path) + Send + 'static,
+) -> (tempfile::TempDir, tempfile::TempDir) {
+    let (config, dir) = test_env();
+    let root = dir.path().to_path_buf();
+    prepare(&root);
+    let lock = ImpactStoreLock::acquire(&root).expect("lock");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let config_dir = config.path().to_path_buf();
+    let worker = std::thread::spawn(move || {
+        TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = Some(config_dir));
+        change(&root);
+        tx.send(()).unwrap();
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(300))
+            .is_err(),
+        "the change must wait for the store lock"
+    );
+    drop(lock);
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the change runs after the lock");
+    worker.join().unwrap();
+    (config, dir)
+}
+
+#[test]
+fn enable_waits_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            disable(root).unwrap();
+        },
+        |root| {
+            let _ = enable(root);
+        },
+    );
+    assert!(load(dir.path()).enabled);
+}
+
+#[test]
+fn record_keeps_the_file_when_tracking_is_off() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    assert_eq!(audit_record(root), Ok(()));
+    assert!(!store_path(root).unwrap().exists());
+}
+
+#[test]
+fn write_store_returns_the_io_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"").unwrap();
+    assert!(matches!(
+        store::write_store(&ImpactStore::default(), &blocker.join("x.json")),
+        Err(StoreWriteError::Io { .. })
+    ));
 }

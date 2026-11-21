@@ -385,3 +385,214 @@ pub(super) fn load_all() -> (Vec<(String, ImpactStore)>, usize) {
     }
     (stores, unreadable)
 }
+
+/// Why a store change was not saved.
+#[derive(Debug)]
+pub enum StoreWriteError {
+    /// No user config folder resolves, so there is no place for the store.
+    NoConfigDir,
+    /// The store on disk is newer or not usable. The file is unchanged.
+    Read(StoreReadError),
+    /// The folder or the file could not be written.
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl StoreWriteError {
+    /// The user-facing explanation.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::NoConfigDir => "fallow impact: no user config folder resolves (HOME, XDG_CONFIG_HOME or APPDATA is not set). The change was not saved.".to_owned(),
+            Self::Read(err) => err.message(),
+            Self::Io { path, source } => format!(
+                "fallow impact: could not write {}: {source}. The change was not saved.",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// The result of the change closure of `transact`.
+pub(super) enum Change<T> {
+    /// Save the store, then return the value.
+    Write(T),
+    /// Leave the file as it is, then return the value.
+    Keep(T),
+}
+
+/// What `transact` does with a store that exists and does not parse.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum OnInvalid {
+    /// Stop with [`StoreWriteError::Read`]. Each routine write uses this.
+    Stop,
+    /// Start from an empty store. Only `fallow impact enable` uses this.
+    Replace,
+}
+
+/// Write `store` to `path` with an atomic replace.
+pub(super) fn write_store(store: &ImpactStore, path: &Path) -> Result<(), StoreWriteError> {
+    let io = |source| StoreWriteError::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(io)?;
+    }
+    let json = serde_json::to_string_pretty(store).map_err(|err| io(std::io::Error::other(err)))?;
+    fallow_config::atomic_write(path, json.as_bytes()).map_err(io)
+}
+
+/// The one way to change a project store: lock, strict read, change, atomic
+/// write. A store that a newer Fallow wrote, and a store that cannot be read,
+/// stop the transaction. When the user store is absent, the legacy in-repo
+/// store is imported once.
+///
+/// `change` must not call a function of this module. A second lock on the
+/// same store in one process never returns.
+pub(super) fn transact<T>(
+    root: &Path,
+    on_invalid: OnInvalid,
+    change: impl FnOnce(&mut ImpactStore) -> Change<T>,
+) -> Result<T, StoreWriteError> {
+    let path = store_path(root).ok_or(StoreWriteError::NoConfigDir)?;
+    let _lock = ImpactStoreLock::acquire(root);
+    let (mut store, imported) = match read_store_file(&path) {
+        Ok(Some(store)) => (store, false),
+        Ok(None) => match legacy_view(root, &path) {
+            Existing::Loaded(store) => (store, true),
+            Existing::Absent | Existing::Unreadable(_) | Existing::Invalid(_) => {
+                (ImpactStore::default(), false)
+            }
+        },
+        Err(StoreReadError::Invalid { .. }) if on_invalid == OnInvalid::Replace => {
+            (ImpactStore::default(), false)
+        }
+        Err(err) => return Err(StoreWriteError::Read(err)),
+    };
+    let value = match change(&mut store) {
+        Change::Write(value) => {
+            write_store(&store, &path)?;
+            value
+        }
+        Change::Keep(value) => {
+            if imported {
+                let _ = write_store(&store, &path);
+            }
+            value
+        }
+    };
+    Ok(value)
+}
+
+/// Map the result of a record transaction. Recording is ancillary to the
+/// analysis: a missing config folder or a failed write does not warn.
+pub(super) fn finish_record(
+    root: &Path,
+    outcome: Result<Result<bool, String>, StoreWriteError>,
+) -> Result<(), String> {
+    match outcome {
+        Ok(Ok(recorded)) => {
+            if recorded && let Some(max_age) = resolve_store_max_age() {
+                sweep_old_stores(&project_identity(root).0, max_age);
+            }
+            Ok(())
+        }
+        Ok(Err(message)) => Err(message),
+        Err(StoreWriteError::NoConfigDir) => Ok(()),
+        Err(StoreWriteError::Io { path, source }) => {
+            tracing::debug!(path = %path.display(), error = %source, "could not write the impact store");
+            Ok(())
+        }
+        Err(err @ StoreWriteError::Read(_)) => {
+            let message = err.message();
+            tracing::warn!("{message}");
+            Err(message)
+        }
+    }
+}
+
+pub(super) fn parse_store(content: &str, path: &Path) -> ImpactStore {
+    match serde_json::from_str::<ImpactStore>(content) {
+        Ok(store) => {
+            if store.schema_version > STORE_SCHEMA_VERSION {
+                tracing::warn!(
+                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort. This build does not write to it, so the store stays unchanged. Upgrade fallow to read it fully.",
+                    path.display(),
+                    store.schema_version,
+                    STORE_SCHEMA_VERSION,
+                );
+            }
+            store
+        }
+        Err(err) => {
+            if let Some(newer) = newer_schema_in(content, path) {
+                tracing::warn!("{}", newer.message());
+            } else {
+                tracing::warn!(
+                    "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
+                    path.display()
+                );
+            }
+            ImpactStore::default()
+        }
+    }
+}
+
+/// Load the store for a load, mutate, and save cycle. Refuses a store that a
+/// newer Fallow wrote, so the caller leaves the file unchanged. Every write
+/// path must use this instead of `load`.
+pub(super) fn load_for_write(root: &Path) -> Result<ImpactStore, NewerStoreSchema> {
+    let Some(path) = store_path(root) else {
+        return Ok(ImpactStore::default());
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Ok(migrate_legacy_store(root));
+    };
+    if let Some(newer) = newer_schema_in(&content, &path) {
+        return Err(newer);
+    }
+    Ok(parse_store(&content, &path))
+}
+
+/// Persist the store best-effort using atomic replace. No-op when no config dir
+/// is resolvable (e.g. stripped CI env). NEVER writes into the analyzed repo.
+pub(super) fn save(store: &ImpactStore, root: &Path) {
+    let Some(path) = store_path(root) else {
+        return;
+    };
+    if let Some(parent) = path.parent()
+        && std::fs::create_dir_all(parent).is_err()
+    {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string_pretty(store) {
+        let _ = fallow_config::atomic_write(&path, json.as_bytes());
+    }
+}
+
+/// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
+/// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
+/// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
+/// worktree key. The legacy file is left byte-for-byte untouched (it is no
+/// longer read once the user store exists; re-running finds the user store and
+/// does not re-import). Monorepo note: N subdir stores share one repo key, so
+/// whichever subdir runs first wins (pick-first); the others are not merged.
+pub(super) fn migrate_legacy_store(root: &Path) -> ImpactStore {
+    let legacy_path = legacy_store_path(root);
+    let Ok(content) = std::fs::read_to_string(&legacy_path) else {
+        return ImpactStore::default();
+    };
+    let Ok(legacy) = serde_json::from_str::<LegacyFlatStore>(&content) else {
+        return ImpactStore::default();
+    };
+    let (_, worktree, display) = project_identity(root);
+    let mut store = legacy.into_store(&worktree);
+    // Backfill the cross-repo display label on migration so the imported repo
+    // is legible in `impact --all` without waiting for its next recorded run.
+    store.label = display;
+    save(&store, root);
+    store
+}

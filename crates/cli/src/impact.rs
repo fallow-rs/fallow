@@ -384,72 +384,15 @@ use record_gate::record_gate_skips;
 #[path = "impact_store.rs"]
 mod store;
 use store::{
-    ImpactStoreLock, legacy_store_path, load_all, load_global_default, newer_schema_in, store_path,
-};
-pub use store::{
-    NewerStoreSchema, StatuslineLoadError, load, load_statusline, set_global_default, store_dir,
+    Change, OnInvalid, finish_record, load_all, load_for_write, load_global_default, save,
+    store_path,
 };
 #[cfg(test)]
-use store::{lock_path_for, migration_marker_path};
-
-fn parse_store(content: &str, path: &Path) -> ImpactStore {
-    match serde_json::from_str::<ImpactStore>(content) {
-        Ok(store) => {
-            if store.schema_version > STORE_SCHEMA_VERSION {
-                tracing::warn!(
-                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort. This build does not write to it, so the store stays unchanged. Upgrade fallow to read it fully.",
-                    path.display(),
-                    store.schema_version,
-                    STORE_SCHEMA_VERSION,
-                );
-            }
-            store
-        }
-        Err(err) => {
-            if let Some(newer) = newer_schema_in(content, path) {
-                tracing::warn!("{}", newer.message());
-            } else {
-                tracing::warn!(
-                    "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
-                    path.display()
-                );
-            }
-            ImpactStore::default()
-        }
-    }
-}
-
-/// Load the store for a load, mutate, and save cycle. Refuses a store that a
-/// newer Fallow wrote, so the caller leaves the file unchanged. Every write
-/// path must use this instead of `load`.
-fn load_for_write(root: &Path) -> Result<ImpactStore, NewerStoreSchema> {
-    let Some(path) = store_path(root) else {
-        return Ok(ImpactStore::default());
-    };
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return Ok(migrate_legacy_store(root));
-    };
-    if let Some(newer) = newer_schema_in(&content, &path) {
-        return Err(newer);
-    }
-    Ok(parse_store(&content, &path))
-}
-
-/// Persist the store best-effort using atomic replace. No-op when no config dir
-/// is resolvable (e.g. stripped CI env). NEVER writes into the analyzed repo.
-fn save(store: &ImpactStore, root: &Path) {
-    let Some(path) = store_path(root) else {
-        return;
-    };
-    if let Some(parent) = path.parent()
-        && std::fs::create_dir_all(parent).is_err()
-    {
-        return;
-    }
-    if let Ok(json) = serde_json::to_string_pretty(store) {
-        let _ = fallow_config::atomic_write(&path, json.as_bytes());
-    }
-}
+use store::{ImpactStoreLock, legacy_store_path, lock_path_for, migration_marker_path};
+pub use store::{
+    NewerStoreSchema, StatuslineLoadError, StoreWriteError, load, load_statusline,
+    set_global_default, store_dir,
+};
 
 /// Resolve the store-GC window from [`STORE_MAX_AGE_ENV`]. `None` (no sweep)
 /// when unset, `0`, or unparseable.
@@ -470,7 +413,7 @@ fn resolve_store_max_age() -> Option<std::time::Duration> {
 /// never reclaimed by a stale-mtime race in the same run.
 ///
 /// Cross-project GC race: this sweep does NOT take the per-store
-/// [`ImpactStoreLock`] of the OTHER projects it inspects, so in principle it
+/// `ImpactStoreLock` of the OTHER projects it inspects, so in principle it
 /// could delete a store another process is mid-writing. This is a bounded,
 /// best-effort limitation rather than a corruption bug. A store becomes a
 /// deletion candidate only when its file mtime is already older than
@@ -512,48 +455,24 @@ fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
     }
 }
 
-/// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
-/// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
-/// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
-/// worktree key. The legacy file is left byte-for-byte untouched (it is no
-/// longer read once the user store exists; re-running finds the user store and
-/// does not re-import). Monorepo note: N subdir stores share one repo key, so
-/// whichever subdir runs first wins (pick-first); the others are not merged.
-fn migrate_legacy_store(root: &Path) -> ImpactStore {
-    let legacy_path = legacy_store_path(root);
-    let Ok(content) = std::fs::read_to_string(&legacy_path) else {
-        return ImpactStore::default();
-    };
-    let Ok(legacy) = serde_json::from_str::<LegacyFlatStore>(&content) else {
-        return ImpactStore::default();
-    };
-    let (_, worktree, display) = project_identity(root);
-    let mut store = legacy.into_store(&worktree);
-    // Backfill the cross-repo display label on migration so the imported repo
-    // is legible in `impact --all` without waiting for its next recorded run.
-    store.label = display;
-    save(&store, root);
-    store
-}
-
 /// Enable Impact tracking for THIS project (an explicit per-repo decision that
 /// overrides the user-global default). Writes nothing into the repo: the store
-/// lives in the user config dir.
+/// lives in the user config dir. A store that does not parse is replaced.
 ///
 /// # Errors
 ///
-/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
-/// Fallow wrote it.
-pub fn enable(root: &Path) -> Result<bool, NewerStoreSchema> {
-    let mut store = load_for_write(root)?;
-    let was_enabled = store.enabled;
-    store.enabled = true;
-    store.explicit_decision = true;
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-    save(&store, root);
-    Ok(!was_enabled)
+/// Returns [`StoreWriteError`] and leaves the store unchanged when a newer
+/// Fallow wrote it, when it cannot be read, or when the write fails.
+pub fn enable(root: &Path) -> Result<bool, StoreWriteError> {
+    store::transact(root, OnInvalid::Replace, |store| {
+        let was_enabled = store.enabled;
+        store.enabled = true;
+        store.explicit_decision = true;
+        if store.schema_version == 0 {
+            store.schema_version = STORE_SCHEMA_VERSION;
+        }
+        Change::Write(!was_enabled)
+    })
 }
 
 /// Disable Impact tracking. Retains existing history. Returns whether it was
@@ -707,6 +626,26 @@ pub fn record_audit_run(
     summary: &AuditSummary,
     record: &AuditRunRecord<'_>,
 ) -> Result<(), String> {
+    // Impact is a LOCAL-DEV signal. Never record in CI: a user-global default
+    // baked into a devcontainer/dotfiles image would otherwise start writing
+    // per-project files on every CI run (pre-relocation this was emergent from
+    // a fresh CI checkout having no in-repo store file; now it is explicit).
+    // A root in a temp folder is skipped too, see `record_gate_skips`.
+    if record_gate_skips(root) {
+        return Ok(());
+    }
+    let outcome = store::transact(root, OnInvalid::Stop, |store| {
+        apply_audit_record(store, root, summary, record)
+    });
+    finish_record(root, outcome)
+}
+
+fn apply_audit_record(
+    store: &mut ImpactStore,
+    root: &Path,
+    summary: &AuditSummary,
+    record: &AuditRunRecord<'_>,
+) -> Change<Result<bool, String>> {
     let AuditRunRecord {
         verdict,
         gate_source,
@@ -716,26 +655,12 @@ pub fn record_audit_run(
         attribution,
         analysis_identity,
     } = record;
-    // Impact is a LOCAL-DEV signal. Never record in CI: a user-global default
-    // baked into a devcontainer/dotfiles image would otherwise start writing
-    // per-project files on every CI run (pre-relocation this was emergent from
-    // a fresh CI checkout having no in-repo store file; now it is explicit).
-    // A root in a temp folder is skipped too, see `record_gate_skips`.
-    if record_gate_skips(root) {
-        return Ok(());
+    if !resolve_enabled(store).0 {
+        return Change::Keep(Ok(false));
     }
-    // Serialise the load -> mutate -> save window so two worktrees of the same
-    // repo (same store key) cannot lost-update each other's record.
-    let _lock = ImpactStoreLock::acquire(root);
-    let mut store = load_for_write(root).map_err(|newer| {
-        let message = newer.message();
-        tracing::warn!("{message}");
-        message
-    })?;
-    if !resolve_enabled(&store).0 {
-        return Ok(());
+    if let Err(message) = validate_store_identity(store, analysis_identity) {
+        return Change::Keep(Err(message));
     }
-    validate_store_identity(&store, analysis_identity)?;
     store.schema_version = STORE_SCHEMA_VERSION;
     store.analysis_identity = (*analysis_identity).clone();
     // Capture the repo basename for the cross-repo view (memoized; no extra git
@@ -750,7 +675,7 @@ pub fn record_audit_run(
     }
 
     apply_containment(
-        &mut store,
+        store,
         *verdict,
         gate_source.is_some(),
         *git_sha,
@@ -766,18 +691,14 @@ pub fn record_audit_run(
         gate_source: *gate_source,
         counts,
     });
-    compact(&mut store);
+    compact(store);
 
     if let Some(attribution) = attribution {
         let (_, worktree, _) = project_identity(root);
-        apply_attribution(&mut store, attribution, &worktree, *git_sha, timestamp);
+        apply_attribution(store, attribution, &worktree, *git_sha, timestamp);
     }
 
-    save(&store, root);
-    if let Some(max_age) = resolve_store_max_age() {
-        sweep_old_stores(&project_identity(root).0, max_age);
-    }
-    Ok(())
+    Change::Write(Ok(true))
 }
 
 /// Record a whole-project combined run into the project track.
@@ -797,16 +718,41 @@ pub fn record_combined_run(
     if record_gate_skips(root) {
         return Ok(());
     }
-    let _lock = ImpactStoreLock::acquire(root);
-    let mut store = load_for_write(root).map_err(|newer| {
-        let message = newer.message();
-        tracing::warn!("{message}");
-        message
-    })?;
-    if !resolve_enabled(&store).0 {
-        return Ok(());
+    let outcome = store::transact(root, OnInvalid::Stop, |store| {
+        apply_combined_record(
+            store,
+            root,
+            counts,
+            git_sha,
+            version,
+            timestamp,
+            attribution,
+            analysis_identity,
+        )
+    });
+    finish_record(root, outcome)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "historical impact writes keep provenance and analysis identity explicit"
+)]
+fn apply_combined_record(
+    store: &mut ImpactStore,
+    root: &Path,
+    counts: ImpactCounts,
+    git_sha: Option<&str>,
+    version: &str,
+    timestamp: &str,
+    attribution: Option<&AttributionInput<'_>>,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+) -> Change<Result<bool, String>> {
+    if !resolve_enabled(store).0 {
+        return Change::Keep(Ok(false));
     }
-    validate_store_identity(&store, analysis_identity)?;
+    if let Err(message) = validate_store_identity(store, analysis_identity) {
+        return Change::Keep(Err(message));
+    }
     store.schema_version = STORE_SCHEMA_VERSION;
     store.analysis_identity = analysis_identity.clone();
     store.label = project_identity(root).2;
@@ -835,14 +781,10 @@ pub fn record_combined_run(
 
     if let Some(attribution) = attribution {
         let (_, worktree, _) = project_identity(root);
-        apply_attribution(&mut store, attribution, &worktree, git_sha, timestamp);
+        apply_attribution(store, attribution, &worktree, git_sha, timestamp);
     }
 
-    save(&store, root);
-    if let Some(max_age) = resolve_store_max_age() {
-        sweep_old_stores(&project_identity(root).0, max_age);
-    }
-    Ok(())
+    Change::Write(Ok(true))
 }
 
 fn validate_store_identity(
