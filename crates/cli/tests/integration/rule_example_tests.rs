@@ -109,11 +109,6 @@ const KNOWN_GAPS: &[(&str, Check, &str)] = &[
         "CodeClimate reports a component-health finding only at the `error` severity",
     ),
     (
-        "re-export-cycle",
-        Check::Output(Format::Compact),
-        "the compact line has no line",
-    ),
-    (
         "refactoring-target",
         Check::Output(Format::CodeClimate),
         "the CodeClimate output of `fallow health` has no refactoring targets",
