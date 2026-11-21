@@ -338,10 +338,16 @@ line states exit code 0.
     import site of a package that the base already reports stays inherited.
     A change to
     the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
-    `crates/cli/src/audit_cache.rs`. Each option that changes what the base
-    pass puts in the snapshot must be part of the cache key. For example,
-    only a `--brief` base pass computes the public-export set, so `brief`
-    is a key field.
+    `crates/cli/src/audit_cache.rs`. The cache key comes from the inputs of
+    the base pass. `BaseRunInputs` in `crates/cli/src/audit_base_run.rs`
+    holds the inputs that the base pass and the key share, and the key reads
+    the options that `BaseRunInputs::options` builds. An option that the
+    base pass reads from the head options must be a named key field. For
+    example, only a `--brief` base pass computes the public-export set, so
+    `brief` is a key field. The key also holds each coverage file that the
+    coverage reader selects
+    (`fallow_engine::health::coverage_input::selected_coverage_files`) and
+    the effective type-aware selection.
 - The unused-file cascade filter is
   `fallow_engine::dead_code::hide_cascade_findings`. It runs inside
   `apply_rule_severities`, so the CLI, the programmatic API, MCP, the Node
