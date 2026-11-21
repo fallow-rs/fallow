@@ -62,6 +62,9 @@ const DRIFT_MAX_ORIGINAL_SHARE: f64 = 0.10;
 /// Declared owner activity window in days.
 const DECLARED_OWNER_ACTIVE_DAYS: u64 = 90;
 
+/// A suggested reviewer has a commit to the file within this many days.
+const SUGGESTED_REVIEWER_MAX_STALE_DAYS: u64 = 90;
+
 /// Inputs needed to compute ownership for one file. Built once per analysis
 /// run and reused for every hotspot.
 pub struct OwnershipContext<'a> {
@@ -94,17 +97,30 @@ pub fn compile_bot_globs(patterns: &[String]) -> Result<GlobSet, globset::Error>
     builder.build()
 }
 
-/// Compute ownership signals for one file. Returns `None` when the file has
-/// no recorded authors or all authors are filtered out as bots.
+/// Ownership metrics of one file, with the identity of each contributor
+/// that reviewer routing can name. The identities are not part of the
+/// report, so the rendered identifiers keep the configured privacy mode.
+pub struct OwnershipWithIdentities<'a> {
+    /// The metrics that the report shows.
+    pub metrics: OwnershipMetrics,
+    /// Identity of `metrics.top_contributor`.
+    pub top_contributor: ContributorId<'a>,
+    /// Identities of `metrics.suggested_reviewers`, in the same order.
+    pub suggested_reviewers: Vec<ContributorId<'a>>,
+}
+
+/// Compute ownership signals for one file, with the contributor
+/// identities. Returns `None` when the file has no recorded authors or all
+/// authors are filtered out as bots.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "contributor counts and bus factor are bounded by author pool size"
 )]
-pub fn compute_ownership(
-    churn: &FileChurn,
+pub fn compute_ownership_with_identities<'a>(
+    churn: &'a FileChurn,
     relative_path: &Path,
-    ctx: &OwnershipContext<'_>,
-) -> Option<OwnershipMetrics> {
+    ctx: &OwnershipContext<'a>,
+) -> Option<OwnershipWithIdentities<'a>> {
     if churn.authors.is_empty() {
         return None;
     }
@@ -149,18 +165,44 @@ pub fn compute_ownership(
         (false, None)
     };
 
-    Some(OwnershipMetrics {
-        bus_factor,
-        contributor_count: filtered.len() as u32,
-        top_contributor,
-        recent_contributors,
-        suggested_reviewers,
-        declared_owner,
-        unowned,
-        ownership_state,
-        drift,
-        drift_reason,
+    let top_identity = filtered[0].id;
+    let reviewer_identities: Vec<ContributorId<'a>> = filtered
+        .iter()
+        .skip(1)
+        .take(3)
+        .filter(|author| {
+            stale_days(author.contribution.last_commit_ts, ctx.now_secs)
+                < SUGGESTED_REVIEWER_MAX_STALE_DAYS
+        })
+        .map(|author| author.id)
+        .collect();
+
+    Some(OwnershipWithIdentities {
+        metrics: OwnershipMetrics {
+            bus_factor,
+            contributor_count: filtered.len() as u32,
+            top_contributor,
+            recent_contributors,
+            suggested_reviewers,
+            declared_owner,
+            unowned,
+            ownership_state,
+            drift,
+            drift_reason,
+        },
+        top_contributor: top_identity,
+        suggested_reviewers: reviewer_identities,
     })
+}
+
+/// Compute ownership signals for one file. Returns `None` when the file has
+/// no recorded authors or all authors are filtered out as bots.
+pub fn compute_ownership(
+    churn: &FileChurn,
+    relative_path: &Path,
+    ctx: &OwnershipContext<'_>,
+) -> Option<OwnershipMetrics> {
+    compute_ownership_with_identities(churn, relative_path, ctx).map(|owned| owned.metrics)
 }
 
 /// Build the non-bot author ranking for one file: filtered, identifier-rendered,
@@ -243,7 +285,7 @@ fn build_ownership_contributors(
 
     let suggested_reviewers: Vec<ContributorEntry> = recent_contributors
         .iter()
-        .filter(|c| c.stale_days < 90)
+        .filter(|c| c.stale_days < SUGGESTED_REVIEWER_MAX_STALE_DAYS)
         .cloned()
         .collect();
 
@@ -507,6 +549,36 @@ mod tests {
         assert_eq!(
             m.top_contributor.format,
             ContributorIdentifierFormat::Anonymized
+        );
+    }
+
+    #[test]
+    fn identities_follow_the_metrics_in_anonymized_mode() {
+        let pool = vec![
+            "alice@example.com".to_string(),
+            "bob@example.com".to_string(),
+        ];
+        let churn = churn_with_authors(
+            "f.ts",
+            &[
+                (0, 9, 9.0, ts_days_ago(60), ts_days_ago(1)),
+                (1, 5, 5.0, ts_days_ago(50), ts_days_ago(2)),
+            ],
+        );
+        let globs = empty_globs();
+        let mut ctx = ctx_with(&pool, &globs, None);
+        ctx.email_mode = EmailMode::Anonymized;
+        let owned = compute_ownership_with_identities(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(owned.top_contributor.raw(), "alice@example.com");
+        assert_eq!(owned.suggested_reviewers.len(), 1);
+        assert_eq!(owned.suggested_reviewers[0].raw(), "bob@example.com");
+        assert_eq!(owned.metrics.suggested_reviewers.len(), 1);
+        assert!(
+            owned
+                .metrics
+                .top_contributor
+                .identifier
+                .starts_with("xxh3:")
         );
     }
 
