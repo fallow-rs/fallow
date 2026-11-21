@@ -151,3 +151,19 @@ fn commands_with_a_regression_baseline_still_save_it() {
         assert!(root.join(file).exists(), "{command:?}: {}", output.stderr);
     }
 }
+
+#[test]
+fn a_command_outside_the_analysis_commands_rejects_the_regression_flags() {
+    let (_dir, root) = write_project();
+    let output = run(&root, &["fix"], &["--dry-run", "--fail-on-regression"]);
+    assert_eq!(
+        output.code, 2,
+        "stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let message = error_message(&output);
+    assert!(
+        message.contains("This command") && message.contains("--fail-on-regression"),
+        "{message}"
+    );
+}
