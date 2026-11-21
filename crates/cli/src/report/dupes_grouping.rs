@@ -142,6 +142,40 @@ mod tests {
     }
 
     #[test]
+    fn build_grouping_stats_merge_overlapping_lines_per_bucket() {
+        let g1 = group(vec![
+            instance("/root/src/a.ts", 1, 10),
+            instance("/root/src/b.ts", 1, 10),
+        ]);
+        let g2 = group(vec![
+            instance("/root/src/a.ts", 5, 12),
+            instance("/root/src/b.ts", 30, 37),
+        ]);
+        let mut r = report(vec![g1, g2]);
+        r.stats.total_files = 2;
+        r.stats.total_lines = 100;
+        r.stats.total_tokens = 1000;
+        r.stats.clone_groups_ignored = 3;
+        let grouping =
+            build_duplication_grouping(&r, Path::new("/root"), &OwnershipResolver::Directory);
+        let src = grouping.groups.iter().find(|g| g.key == "src").unwrap();
+        let stats = &src.stats;
+        assert_eq!(stats.duplicated_lines, 30);
+        assert_eq!(stats.files_with_clones, 2);
+        assert_eq!(stats.clone_groups, 2);
+        assert_eq!(stats.clone_instances, 4);
+        assert_eq!(stats.duplicated_tokens, 100);
+        assert_eq!(stats.total_files, 2);
+        assert_eq!(stats.total_lines, 100);
+        assert_eq!(stats.total_tokens, 1000);
+        assert_eq!(stats.clone_families, 0);
+        assert_eq!(stats.clone_groups_ignored, 0);
+        assert_eq!(stats.clone_groups_below_min_occurrences, 0);
+        assert_eq!(stats.near_candidates_skipped, 0);
+        assert!((stats.duplication_percentage - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn build_grouping_unowned_pinned_last() {
         let co = CodeOwners::parse("/src/ @frontend\n").unwrap();
         let resolver = OwnershipResolver::Owner(co);

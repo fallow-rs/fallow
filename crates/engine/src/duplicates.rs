@@ -292,7 +292,7 @@ pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
 /// as `--top` must not call this at all: it truncates the arrays while `stats`
 /// keeps describing the corpus the run measured.
 #[must_use]
-pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
+pub(crate) fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
     duplication_stats(
         &report.clone_groups,
         CorpusTotals::of(&report.stats),
