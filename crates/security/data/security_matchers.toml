@@ -18,6 +18,27 @@
 # matches `el.innerHTML` and `this.node.innerHTML`. sink_shape is one of:
 # call | member-call | member-assign | tagged-template | jsx-attr |
 # new-expression.
+#
+# The extractor reads every call and `new` expression through one canonical
+# call (crates/extract/src/visitor/canonical_call.rs). A callee path keeps a
+# `this` root and a call-result segment with a `()` suffix, so `*.html`
+# matches `$("#p").html(x)` (path `$().html`) and `*.bypassSecurityTrustHtml`
+# matches `this.sanitizer.bypassSecurityTrustHtml(x)`.
+#
+# Optional `forms` says which call forms a call row accepts: `call`, `new`, or
+# both. Unset means the form of sink_shape (`new` for new-expression rows,
+# `call` for the others). The callee pattern alone tells a bare call from a
+# member call.
+#
+# Optional `arguments` says which argument positions the row reads: `index`
+# (only arg_index, the default), `variadic` (arg_index and every later
+# position), or `any-non-literal` (every non-literal argument, for log calls
+# with a leading label). A row that reads several positions reports at most
+# one candidate per call.
+#
+# crates/core/tests/integration_test/security_shape_matrix.rs generates each
+# equivalent form of every call row and checks that each accepted form gives
+# the same candidate.
 # Optional import_provenance narrows a matcher to bindings traceable to a
 # specific import source (trades one FN for fewer FPs on same-named locals).
 # When import_provenance is set and the module has no matching import, the
@@ -75,10 +96,6 @@
 # `true` or a non-empty string.
 # Optional context_keywords matches zero-arg sinks that were captured only
 # because the surrounding variable or property name is security sensitive.
-#
-# Optional variadic = true makes a row also match every argument after
-# arg_index (for example each `path.join` segment). A variadic row reports at
-# most one candidate per call.
 #
 # Multiple [[matcher]] rows may share an `id` (e.g. dangerous-html spans three
 # shapes). Uniqueness is keyed on the full row (id + sink_shape +
@@ -165,6 +182,7 @@ cwe = 79
 title = "Template escape bypass sink"
 effect = "dom"
 sink_shape = "member-call"
+forms = ["call", "new"]
 callee_patterns = ["*.SafeString"]
 arg_index = 0
 evidence_template = "Non-literal value wrapped by {callee}() (marks the string as pre-escaped). Candidate for verification: confirm the value is sanitized before bypassing the template engine's HTML escaping."
@@ -694,7 +712,7 @@ effect = "storage"
 sink_shape = "member-call"
 callee_patterns = ["path.join", "path.resolve"]
 arg_index = 0
-variadic = true
+arguments = "variadic"
 import_provenance = "node:path"
 requires_module_source = true
 ignored_source_kinds = ["process-argv"]
@@ -1945,6 +1963,7 @@ callee_patterns = [
   "*.log.debug",
 ]
 arg_index = 0
+arguments = "any-non-literal"
 requires_source = true
 secret_sources = true
 evidence_template = "Source-backed value passed to {callee}(). Candidate for verification: confirm no secret or PII reaches logs, observability pipelines, or telemetry."

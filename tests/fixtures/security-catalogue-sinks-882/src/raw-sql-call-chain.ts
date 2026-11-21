@@ -23,7 +23,8 @@ export const run = (db: Knex, trx: Knex, clause: string): Builder[] => [
   db("users").where("id", 1).orderByRaw(clause), // candidate
   trx("t").havingRaw(clause), // candidate
   db("t").whereRaw("id = 1"), // none
-  db("t").execute("select " + clause), // none
+  db("t").execute("select " + clause), // candidate
+  db("t").where("id", clause), // none
 ];
 
 export const runPrisma = (getPrisma: () => Prisma, clause: string): unknown[] => [

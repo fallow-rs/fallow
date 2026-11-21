@@ -38,7 +38,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::Cell;
 
 use super::super::super::ModuleInfoExtractor;
-use super::{SinkBinding, unwrap_static_expr};
+use super::{ReceiverPath, SinkBinding, unwrap_static_expr};
 use crate::js_text::JsText;
 use fallow_types::extract::ModuleInfo;
 
@@ -592,11 +592,14 @@ impl ModuleInfoExtractor {
     /// The root name of the callee when it is an inert local function, or an
     /// inert inline method of a local object literal (`controller` for
     /// `controller.merge` and `const controller = { merge() {} }`).
-    pub(super) fn inert_local_callee_root(&self, callee: &Expression<'_>) -> Option<String> {
-        let path = self.static_callee_path(callee)?;
+    pub(super) fn inert_local_callee_root(&self, receiver: &ReceiverPath) -> Option<String> {
+        if !receiver.is_static() {
+            return None;
+        }
+        let path = receiver.path.as_str();
         let (root, rest) = match path.split_once('.') {
             Some((root, rest)) => (root, Some(rest)),
-            None => (path.as_str(), None),
+            None => (path, None),
         };
         let inert = match (self.sink_binding(root), rest) {
             (Some(SinkBinding::InertFunction), None) => true,

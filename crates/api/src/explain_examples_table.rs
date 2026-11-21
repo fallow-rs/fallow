@@ -819,6 +819,15 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "template-escape-bypass",
+        args: &[],
+        base: &[],
+        files: &[
+            file!("template-escape-bypass", "files", "package.json", true),
+            file!("template-escape-bypass", "files", "src/profile.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "test-only-branch",
         args: &[],
         base: &[

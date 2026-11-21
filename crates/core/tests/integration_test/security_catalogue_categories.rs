@@ -1068,8 +1068,9 @@ fn issue_882_catalogue_sinks_fire() {
 
 /// A raw SQL method on a query-builder call chain (`db("t").whereRaw(x)`),
 /// on a call result (`getPrisma().$queryRawUnsafe(x)`) or on a `this` field
-/// (`this.prisma.$queryRawUnsafe(x)`) gives a candidate. A literal argument
-/// and a non-raw method on the same chain give none.
+/// (`this.prisma.$queryRawUnsafe(x)`) gives a candidate. A concatenated
+/// query on the same chain (`db("t").execute("select " + x)`) gives a
+/// candidate too. A literal argument and a method that is not a sink give none.
 #[test]
 fn issue_4225_raw_sql_on_call_chain_receiver_fires() {
     const FILE: &str = "src/raw-sql-call-chain.ts";
@@ -1098,7 +1099,7 @@ fn issue_4225_raw_sql_on_call_chain_receiver_fires() {
             .count();
         assert_eq!(candidates, expected, "unexpected candidate count: {line}");
     }
-    assert_eq!(anchored_count(&results, FILE), 6);
+    assert_eq!(anchored_count(&results, FILE), 7);
 }
 
 #[test]
