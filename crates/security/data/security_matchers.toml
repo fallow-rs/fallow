@@ -1479,6 +1479,39 @@ import_provenance = "next/navigation"
 enabler = "next"
 evidence_template = "Non-literal target passed to Next.js {callee}(). Candidate for verification: confirm the redirect target is a relative path or allowlisted host, not attacker-controlled."
 
+# ── React Router: redirect() / redirectDocument() / replace() (CWE-601) ─────
+# Each helper builds a redirect Response with a Location header and accepts an
+# absolute URL, so a non-literal target in a loader or an action is an
+# open-redirect candidate. The callee must be the binding of an import from
+# react-router (a binding-trace row), so a local `redirect` or `replace` stays
+# out even in a module that imports another react-router export. One row per
+# enabler: the `react-router` runtime package, or `@react-router/dev`, which
+# also enables the React Router plugin. Remix v2 (`@remix-run/*`) is a
+# separate plugin and has no row here.
+[[matcher]]
+id = "react-router-open-redirect"
+cwe = 601
+title = "React Router open redirect sink"
+effect = "network"
+sink_shape = "call"
+callee_patterns = ["redirect", "redirectDocument", "replace"]
+arg_index = 0
+import_provenance = "react-router"
+enabler = "react-router"
+evidence_template = "Non-literal target passed to React Router {callee}(). Candidate for verification: confirm the redirect target is a relative path or allowlisted host, not attacker-controlled."
+
+[[matcher]]
+id = "react-router-open-redirect"
+cwe = 601
+title = "React Router open redirect sink"
+effect = "network"
+sink_shape = "call"
+callee_patterns = ["redirect", "redirectDocument", "replace"]
+arg_index = 0
+import_provenance = "react-router"
+enabler = "@react-router/dev"
+evidence_template = "Non-literal target passed to React Router {callee}(). Candidate for verification: confirm the redirect target is a relative path or allowlisted host, not attacker-controlled."
+
 # ── DOM: document.write / document.writeln (CWE-79) ─────────────────────────
 # A global DOM sink (no framework enabler): document.write of a non-literal value
 # is an XSS candidate. Still non-literal-gated, so `document.write("<p>x</p>")`

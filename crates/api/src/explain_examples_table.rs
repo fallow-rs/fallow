@@ -715,6 +715,15 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "react-router-open-redirect",
+        args: &[],
+        base: &[],
+        files: &[
+            file!("react-router-open-redirect", "files", "app/routes/login.tsx", false),
+            file!("react-router-open-redirect", "files", "package.json", true),
+        ],
+    },
+    RuleExample {
         rule: "redos-regex",
         args: &[],
         base: &[],

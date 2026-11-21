@@ -7146,6 +7146,37 @@
       "docs_url": "https://fallow.tools/docs/rules/nextjs-open-redirect/"
     },
     {
+      "id": "react-router-open-redirect",
+      "rule_id": "security/react-router-open-redirect",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-601",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "deprecated_filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "default_severity": "off",
+      "opt_in": true,
+      "frameworks": [],
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/react-router-open-redirect/"
+    },
+    {
       "id": "dom-document-write",
       "rule_id": "security/dom-document-write",
       "command": "security",
@@ -8168,6 +8199,12 @@
         "id": "prototype-pollution",
         "title": "Prototype pollution sink",
         "cwe": 1321,
+        "include_required": false
+      },
+      {
+        "id": "react-router-open-redirect",
+        "title": "React Router open redirect sink",
+        "cwe": 601,
         "include_required": false
       },
       {

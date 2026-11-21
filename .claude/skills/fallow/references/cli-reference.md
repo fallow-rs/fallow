@@ -1384,6 +1384,7 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | `unsafe-deserialization` | 502 | `js-yaml` `load` / `node-serialize` |
 | `angular-trusted-html` | 79 | Angular `bypassSecurityTrust*` |
 | `nextjs-open-redirect` | 601 | Next.js `redirect` / `permanentRedirect` |
+| `react-router-open-redirect` | 601 | React Router `redirect` / `redirectDocument` / `replace` |
 | `dom-document-write` | 79 | `document.write` / `document.writeln` |
 | `jquery-html` | 79 | jQuery `.html(value)` |
 | `route-send-file` | 22 | Express / Fastify / Hono route `sendFile` |

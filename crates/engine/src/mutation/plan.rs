@@ -48,12 +48,13 @@ const PURE_CALLEE_PREFIXES: [&str; 1] = ["path."];
 /// response or a navigation in the process: a redirect, a header, a cookie,
 /// a CORS policy. A test runs them against a stub or a test server, so a
 /// mutant there writes nothing outside the process.
-pub(super) const RESPONSE_SHAPING_ROWS: [&str; 5] = [
+pub(super) const RESPONSE_SHAPING_ROWS: [&str; 6] = [
     "header-injection",
     "insecure-cookie",
     "nextjs-open-redirect",
     "open-redirect",
     "permissive-cors",
+    "react-router-open-redirect",
 ];
 
 /// Import sources of database clients, ORMs and query builders. A subpath

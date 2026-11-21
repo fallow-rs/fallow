@@ -1,0 +1,9 @@
+{
+  "name": "security-react-router-open-redirect-dev-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@react-router/dev": "7.6.0"
+  }
+}
