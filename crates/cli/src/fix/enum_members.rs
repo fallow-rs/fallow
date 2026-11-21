@@ -120,31 +120,15 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         let relative = path.strip_prefix(root).unwrap_or(path);
         let folded = detect_folded_enums(&index, &lines, &member_fixes);
 
-        let mut parents: Vec<&str> = member_fixes
-            .iter()
-            .map(|fix| fix.parent_name.as_str())
-            .collect();
-        parents.sort_unstable();
-        parents.dedup();
-        let mut kept: KeptEnumFixes<'_> = rustc_hash::FxHashSet::default();
-        for parent in parents {
-            if let Some(fold) = folded.iter().find(|fold| fold.parent_name == parent) {
-                let lines: Vec<usize> = (fold.range.start_line..=fold.range.end_line).collect();
-                let group = line_deletions(&content, meta.line_ending, &lines);
-                if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
-                    kept.insert((parent, None));
-                }
-                continue;
-            }
-            for enum_fixes in fixes_by_enum(&index, &member_fixes, parent) {
-                let Some(group) = enum_member_edits(&index, parent, &enum_fixes) else {
-                    continue;
-                };
-                if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
-                    kept.extend(enum_fixes.iter().map(|fix| (parent, Some(fix.line_idx))));
-                }
-            }
-        }
+        let kept = queue_enum_edits(EnumFileEdits {
+            path,
+            content: &content,
+            line_ending: meta.line_ending,
+            index: &index,
+            member_fixes: &member_fixes,
+            folded: &folded,
+            plan,
+        });
 
         if dry_run {
             record_enum_member_dry_run(EnumMemberDryRunInput {
@@ -167,6 +151,58 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
             });
         }
     }
+}
+
+/// The parsed text of one file and its planned enum fixes.
+struct EnumFileEdits<'a, 'p> {
+    path: &'a Path,
+    content: &'a str,
+    line_ending: &'a str,
+    index: &'a SourceEditIndex,
+    member_fixes: &'a [EnumMemberFix],
+    folded: &'a [FoldedEnum],
+    plan: &'p mut FixPlan,
+}
+
+/// Queue one group of edits for each folded enum and for each enum with
+/// member fixes, and return the fixes whose group went in.
+fn queue_enum_edits<'a>(input: EnumFileEdits<'a, '_>) -> KeptEnumFixes<'a> {
+    let EnumFileEdits {
+        path,
+        content,
+        line_ending,
+        index,
+        member_fixes,
+        folded,
+        plan,
+    } = input;
+    let mut parents: Vec<&str> = input
+        .member_fixes
+        .iter()
+        .map(|fix| fix.parent_name.as_str())
+        .collect();
+    parents.sort_unstable();
+    parents.dedup();
+    let mut kept: KeptEnumFixes<'a> = rustc_hash::FxHashSet::default();
+    for parent in parents {
+        if let Some(fold) = folded.iter().find(|fold| fold.parent_name == parent) {
+            let lines: Vec<usize> = (fold.range.start_line..=fold.range.end_line).collect();
+            let group = line_deletions(content, line_ending, &lines);
+            if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
+                kept.insert((parent, None));
+            }
+            continue;
+        }
+        for enum_fixes in fixes_by_enum(index, member_fixes, parent) {
+            let Some(group) = enum_member_edits(index, parent, &enum_fixes) else {
+                continue;
+            };
+            if plan.sources_mut().queue(path, group) == QueueOutcome::Queued {
+                kept.extend(enum_fixes.iter().map(|fix| (parent, Some(fix.line_idx))));
+            }
+        }
+    }
+    kept
 }
 
 /// The fixes whose queued edits went in: `(parent, None)` for the fold of an
