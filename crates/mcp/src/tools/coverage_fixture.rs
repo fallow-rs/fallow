@@ -6,8 +6,7 @@
 //! With a covered map `branchy` scores CRAP 7 (below a `max_crap` of 10);
 //! without any map the reachability estimate scores it 56.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
 /// Absolute prefix the Istanbul map records its files under.
 pub(super) const COVERAGE_ROOT: &str = "/ci/workspace";
@@ -138,30 +137,7 @@ impl CoverageFixture {
     }
 }
 
-/// Run git with its output captured, so fixture setup stays out of the test
-/// runner's stdout.
-fn git(root: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .output()
-        .expect("git command");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_api::git_fixture::fixture_git as git;
 
 /// The `branchy` complexity finding from a health or audit JSON payload.
 pub(super) fn branchy_finding(findings: &serde_json::Value) -> Option<&serde_json::Value> {
