@@ -20452,7 +20452,16 @@
         "summary": "CSS or CSS-in-JS reference resolves to no stylesheet definition",
         "rationale": "The class or animation name has no definition, so the element gets no style or no animation. The browser reports no error, so the defect shows only on screen.",
         "example": "src/app.css sets `animation: fade-in 1s`, but no stylesheet defines `@keyframes fade-in`. Or markup uses `class=\"nav-item\"` where only `.nav-items` exists.",
-        "example_files": [],
+        "example_files": [
+          {
+            "path": "src/app.css",
+            "code": ".toast {\n  animation: fade-in 1s;\n}\n"
+          },
+          {
+            "path": "src/index.ts",
+            "code": "import \"./app.css\";\n"
+          }
+        ],
         "example_base_files": [],
         "how_to_fix": "Correct the name or add the missing definition. Keep the reference when a CSS-in-JS library or an external stylesheet defines the name.",
         "docs": "https://fallow.tools/docs/rules/css-broken-reference/"
