@@ -1344,6 +1344,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// binding was used as a whole value (passed / returned). Forces the
     /// `unused-svelte-event` detector to abstain on the whole component.
     has_dynamic_dispatch: bool,
+    /// The script binding context and the emit calls of a markup snippet.
+    markup: visit_impl::MarkupContext,
 }
 
 /// Metadata for a named arrow / function-expression that may be a React
@@ -3470,9 +3472,7 @@ impl ModuleInfoExtractor {
         self.merge_import_binding_references(info);
         self.merge_function_contracts(info);
         info.imports.append(&mut self.imports);
-        let mut exports = std::mem::take(&mut info.exports).to_vec();
-        exports.append(&mut self.exports);
-        info.exports = exports.into();
+        record_extend::append_shared(&mut info.exports, &mut self.exports);
         info.re_exports.append(&mut self.re_exports);
         info.dynamic_imports.append(&mut self.dynamic_imports);
         info.dynamic_import_patterns
@@ -3494,21 +3494,19 @@ impl ModuleInfoExtractor {
             &mut self.package_resolve_sites,
         )));
         info.package_resolve_sites = package_resolve_sites.into_boxed_slice();
-        let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
-        member_accesses.append(&mut self.member_accesses);
-        info.member_accesses = member_accesses.into();
-        let mut whole_object_uses = std::mem::take(&mut info.whole_object_uses).to_vec();
-        whole_object_uses.append(&mut self.whole_object_uses);
-        info.whole_object_uses = whole_object_uses.into();
+        record_extend::append_shared(&mut info.member_accesses, &mut self.member_accesses);
+        record_extend::append_shared(&mut info.whole_object_uses, &mut self.whole_object_uses);
         // Carry typed semantic facts through the SFC merge path; without this
         // every fact kind (factory-fn, fluent-chain, typed-property-hop, ...)
         // was silently dropped for Vue/Svelte `<script>` blocks, so the
         // analyze-layer cross-module joins never saw SFC consumers. See issue
         // #1785 (review finding).
-        let mut semantic_facts = std::mem::take(&mut info.semantic_facts).to_vec();
-        semantic_facts.append(&mut self.semantic_facts);
-        crate::shared_state::bound_merged_facts(&mut semantic_facts);
-        info.semantic_facts = semantic_facts.into();
+        if !self.semantic_facts.is_empty() {
+            let mut semantic_facts = std::mem::take(&mut info.semantic_facts).to_vec();
+            semantic_facts.append(&mut self.semantic_facts);
+            crate::shared_state::bound_merged_facts(&mut semantic_facts);
+            info.semantic_facts = semantic_facts.into();
+        }
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.append(&mut self.class_heritage);
@@ -3572,6 +3570,7 @@ impl ModuleInfoExtractor {
         info.svelte_dispatched_events
             .append(&mut self.svelte_dispatched_events);
         info.has_dynamic_dispatch |= self.has_dynamic_dispatch;
+        self.merge_template_emits(info);
     }
 }
 

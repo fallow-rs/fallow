@@ -45,6 +45,7 @@ mod recovery;
 mod scanners;
 mod shared;
 mod svelte;
+mod svelte_listeners;
 mod vue;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -72,12 +73,19 @@ fn collect_template_usage(
     }
 }
 
+/// Whether the root `<template>` of a Vue SFC uses a language other than HTML
+/// (`lang="pug"`), whose expressions the template scan cannot read.
+#[must_use]
+pub fn vue_template_is_not_html(source: &str) -> bool {
+    vue::has_non_html_template(source)
+}
+
 /// Collect Svelte custom-event listener names from template `on:<name>`
 /// bindings on component tags (PascalCase). DOM-element `on:click` is excluded.
 /// Feeds the `unused-svelte-event` detector's liberal project-wide listened set.
 #[must_use]
 pub fn collect_svelte_listened_events(source: &str) -> Vec<String> {
-    svelte::collect_listened_events(source)
+    svelte_listeners::collect_listened_events(source)
 }
 
 /// Collect template-visible usage, including framework template references to
@@ -89,22 +97,45 @@ pub fn collect_template_usage_with_bound_targets(
     bound_targets: &FxHashMap<String, String>,
     iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
+    collect_template_usage_seeded(
+        kind,
+        source,
+        imported_bindings,
+        bound_targets,
+        iterable_types,
+        TemplateUsage::default(),
+    )
+}
+
+/// Collect template-visible usage into `seed`. A seed made with
+/// [`TemplateUsage::with_markup_sink`] merges the facts of every markup
+/// snippet into the component module of the seed.
+pub fn collect_template_usage_seeded(
+    kind: SfcKind,
+    source: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
+    seed: TemplateUsage,
+) -> TemplateUsage {
     match kind {
         // `iterable_types` maps a template-visible binding to its array element
         // class; both scanners consume it to type an iteration variable (Vue
         // `v-for`, Svelte `{#each}`) so member accesses on the item credit the
         // element class. See issue #1707 and its follow-up.
-        SfcKind::Vue => vue::collect_template_usage_with_bound_targets(
+        SfcKind::Vue => vue::collect_template_usage_seeded(
             source,
             imported_bindings,
             bound_targets,
             iterable_types,
+            seed,
         ),
-        SfcKind::Svelte => svelte::collect_template_usage_with_bound_targets(
+        SfcKind::Svelte => svelte::collect_template_usage_seeded(
             source,
             imported_bindings,
             bound_targets,
             iterable_types,
+            seed,
         ),
     }
 }

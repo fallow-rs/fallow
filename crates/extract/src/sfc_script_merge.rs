@@ -13,6 +13,8 @@ pub(super) struct SfcScriptMergeInput<'a> {
     pub(super) template_visible_iterable_types: &'a mut FxHashMap<String, String>,
     pub(super) props_return_binding: &'a mut Option<String>,
     pub(super) emit_return_binding: &'a mut Option<String>,
+    /// The script bindings that the markup of the component can call.
+    pub(super) script_binding_context: &'a mut crate::template_usage::ScriptBindingContext,
     pub(super) need_complexity: bool,
     pub(super) mode: fallow_types::shared_state::ExtractionMode,
 }
@@ -104,6 +106,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
 
     if shares_template_scope(input.kind, input.script, input.has_setup_script) {
         harvest_template_visible_bindings(input, &extractor);
+        extractor.extend_script_binding_context(input.script_binding_context);
     }
 
     // Dispatched events recorded by the visitor carry body-relative spans, like

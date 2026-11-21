@@ -6,6 +6,8 @@ mod effect;
 mod graphql;
 mod js_ts;
 mod linear_cost;
+mod markup_events;
+mod markup_parity;
 mod mdx;
 mod nesting;
 mod object_pattern_defaults;

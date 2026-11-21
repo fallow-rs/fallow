@@ -549,6 +549,8 @@ mod issue_4716_vite_workspace_rollup_input;
 mod issue_4724_cross_file_holder_prototype_reads;
 #[path = "integration_test/issue_4771_vite_alias_interface_members.rs"]
 mod issue_4771_vite_alias_interface_members;
+#[path = "integration_test/issue_4942_svelte_markup_dispatch.rs"]
+mod issue_4942_svelte_markup_dispatch;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]
