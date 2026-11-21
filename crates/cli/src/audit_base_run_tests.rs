@@ -118,6 +118,15 @@ fn key_hash_with(
     head: &ResolvedRun,
     type_aware: AuditTypeAwareOptions<'_>,
 ) -> u64 {
+    optional_key_hash(opts, head, type_aware).expect("key should exist")
+}
+
+/// The hash of the base key, or `None` when the run uses no base cache.
+fn optional_key_hash(
+    opts: &AuditOptions<'_>,
+    head: &ResolvedRun,
+    type_aware: AuditTypeAwareOptions<'_>,
+) -> Option<u64> {
     let base_run = BaseRunInputs::resolve(opts);
     audit_base_snapshot_cache_key(&BaseKeyRequest {
         opts,
@@ -129,8 +138,7 @@ fn key_hash_with(
         type_aware,
     })
     .expect("key should compute")
-    .expect("key should exist")
-    .hash
+    .map(|key| key.hash)
 }
 
 #[test]
@@ -304,5 +312,41 @@ fn the_type_aware_environment_changes_the_base_key() {
     assert_ne!(
         with_project, type_aware,
         "FALLOW_TYPE_AWARE_PROJECTS must change the base key"
+    );
+}
+
+#[test]
+fn the_audit_type_aware_key_changes_the_base_key() {
+    let tmp = repo(&[]);
+    let root = tmp.path();
+    let config_path = None;
+    let cache_dir = root.join(".fallow/cache");
+    let opts = options(root, &config_path, &cache_dir);
+    let head = head_run(root, &[]);
+    let audit_key = AuditTypeAwareOptions {
+        config_default: Some(true),
+        ..AuditTypeAwareOptions::default()
+    };
+
+    assert_ne!(
+        key_hash_with(&opts, &head, AuditTypeAwareOptions::default()),
+        key_hash_with(&opts, &head, audit_key),
+        "audit.typeAware must change the base key"
+    );
+}
+
+#[test]
+fn an_unusable_type_aware_variable_turns_off_the_base_cache() {
+    let tmp = repo(&[]);
+    let root = tmp.path();
+    let config_path = None;
+    let cache_dir = root.join(".fallow/cache");
+    let opts = options(root, &config_path, &cache_dir);
+    let head = head_run(root, &[("FALLOW_TYPE_AWARE", "maybe")]);
+
+    assert_eq!(
+        optional_key_hash(&opts, &head, AuditTypeAwareOptions::default()),
+        None,
+        "a run with an unusable FALLOW_TYPE_AWARE value must not read a base snapshot"
     );
 }
