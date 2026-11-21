@@ -120,7 +120,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     quality::push_duplicate_export_alias_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
     structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
-    structural::push_re_export_cycle_diagnostics(&mut map, results);
+    structural::push_re_export_cycle_diagnostics(&mut map, results, &mut mapper);
     structural::push_package_cycle_diagnostics(&mut map, results, &mut mapper);
     structural::push_boundary_violation_diagnostics(&mut map, results, &mut mapper);
     structural::push_policy_violation_diagnostics(&mut map, results, &mut mapper);
@@ -1119,6 +1119,8 @@ mod severity_gate {
                             fallow_api::editor_results::ReExportCycle {
                                 files: vec![root.join("barrel.ts")],
                                 kind: fallow_api::editor_results::ReExportCycleKind::SelfLoop,
+                                line: 0,
+                                col: 0,
                             },
                         ),
                     );

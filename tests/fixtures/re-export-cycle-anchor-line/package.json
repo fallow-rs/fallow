@@ -1,0 +1,4 @@
+{
+  "name": "re-export-cycle-anchor-line",
+  "main": "src/index.ts"
+}

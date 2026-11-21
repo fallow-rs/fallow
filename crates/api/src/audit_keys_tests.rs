@@ -379,6 +379,8 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![source.clone()],
             kind: ReExportCycleKind::SelfLoop,
+            line: 0,
+            col: 0,
         }));
     results.package_cycles.push(
         fallow_types::output_dead_code::PackageCycleFinding::with_actions(
@@ -835,6 +837,8 @@ fn dead_code_keys_cover_re_export_cycle_multi_node_variant() {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![b, a],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
 
     let keys = dead_code_keys(&results, &root);
@@ -1594,6 +1598,8 @@ fn retain_introduced_dead_code_filters_graph_findings() {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![a],
             kind: ReExportCycleKind::SelfLoop,
+            line: 0,
+            col: 0,
         }));
 
     // The circular dep is in the base; the re-export cycle is new.

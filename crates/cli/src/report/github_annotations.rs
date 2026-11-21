@@ -823,7 +823,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
             out,
             gate_level(cycle, AnnotationLevel::Warning),
             files.first().copied().unwrap_or_default(),
-            no_anchor(cycle),
+            Anchor::gated_line_col(cycle),
             "Re-export cycle".to_owned(),
             format!(
                 "{headline}\n\nAn import through a member of the loop can resolve to nothing.\n{remedy}",

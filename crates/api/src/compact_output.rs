@@ -1444,7 +1444,12 @@ mod tests {
             let mut results = AnalysisResults::default();
             results.re_export_cycles.push(ReExportCycleFinding {
                 finding_id: None,
-                cycle: ReExportCycle { files, kind },
+                cycle: ReExportCycle {
+                    files,
+                    kind,
+                    line: 0,
+                    col: 0,
+                },
                 actions: vec![],
                 introduced: None,
                 effective_severity: None,

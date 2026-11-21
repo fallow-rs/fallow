@@ -879,6 +879,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             super::editor_results::ReExportCycle {
                 files: vec!["/barrel.ts".into()],
                 kind: super::editor_results::ReExportCycleKind::SelfLoop,
+                line: 0,
+                col: 0,
             },
         )],
         package_cycles: vec![super::editor_results::PackageCycleFinding::with_actions(

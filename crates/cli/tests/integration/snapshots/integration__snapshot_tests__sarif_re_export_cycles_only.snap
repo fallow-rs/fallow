@@ -769,13 +769,17 @@ expression: redact_sarif_version(&json_str)
               "physicalLocation": {
                 "artifactLocation": {
                   "uri": "src/api/index.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1
                 }
               }
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "3521b0160c2c9d9f",
-            "primaryLocationLineHash/v1": "3521b0160c2c9d9f"
+            "tools.fallow.fingerprint/v1": "5319d0f7c1357dc1",
+            "primaryLocationLineHash/v1": "5319d0f7c1357dc1"
           }
         },
         {
@@ -789,13 +793,17 @@ expression: redact_sarif_version(&json_str)
               "physicalLocation": {
                 "artifactLocation": {
                   "uri": "src/utils/index.ts"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1
                 }
               }
             }
           ],
           "partialFingerprints": {
-            "tools.fallow.fingerprint/v1": "176f2977374d538a",
-            "primaryLocationLineHash/v1": "176f2977374d538a"
+            "tools.fallow.fingerprint/v1": "64a9cde0c093b416",
+            "primaryLocationLineHash/v1": "64a9cde0c093b416"
           }
         }
       ]

@@ -114,7 +114,7 @@ pub(super) fn push_re_export_cycle_issues(
                 severity: level,
                 category: "Bug Risk",
                 path: &path,
-                begin_line: None,
+                begin_line: (cycle.line > 0).then_some(cycle.line),
                 fingerprint: &fp,
             },
         );
