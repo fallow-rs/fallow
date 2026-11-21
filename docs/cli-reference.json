@@ -3343,9 +3343,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-mode`. Set `duplicates.mode` in the config, or pass `--dupes-mode` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-mode`. Use `fallow dupes --mode`, or set `duplicates.mode` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3390,9 +3400,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-near`. Set `duplicates.near` in the config, or pass `--dupes-near` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-near`. Use `fallow dupes --near`, or set `duplicates.near` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3439,9 +3459,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-threshold`. Set `duplicates.threshold` in the config, or pass `--dupes-threshold` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-threshold`. Use `fallow dupes --threshold`, or set `duplicates.threshold` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3488,9 +3518,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-min-tokens`. Set `duplicates.minTokens` in the config, or pass `--dupes-min-tokens` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-min-tokens`. Use `fallow dupes --min-tokens`, or set `duplicates.minTokens` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3537,9 +3577,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-min-lines`. Set `duplicates.minLines` in the config, or pass `--dupes-min-lines` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-min-lines`. Use `fallow dupes --min-lines`, or set `duplicates.minLines` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3586,9 +3636,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-min-occurrences`. Set `duplicates.minOccurrences` in the config, or pass `--dupes-min-occurrences` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-min-occurrences`. Use `fallow dupes --min-occurrences`, or set `duplicates.minOccurrences` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3633,9 +3693,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-skip-local`. Set `duplicates.skipLocal` in the config, or pass `--dupes-skip-local` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-skip-local`. Use `fallow dupes --skip-local`, or set `duplicates.skipLocal` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3680,9 +3750,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-cross-language`. Set `duplicates.crossLanguage` in the config, or pass `--dupes-cross-language` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-cross-language`. Use `fallow dupes --cross-language`, or set `duplicates.crossLanguage` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3727,9 +3807,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-ignore-imports`. Set `duplicates.ignoreImports` in the config, or pass `--dupes-ignore-imports` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-ignore-imports`. Use `fallow dupes --ignore-imports`, or set `duplicates.ignoreImports` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3776,9 +3866,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-no-ignore-imports`. Set `duplicates.ignoreImports` in the config, or pass `--dupes-no-ignore-imports` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-no-ignore-imports`. Use `fallow dupes --no-ignore-imports`, or set `duplicates.ignoreImports` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3823,9 +3923,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-ignore-symlinks`. Set `duplicates.ignoreSymlinks` in the config, or pass `--dupes-ignore-symlinks` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-ignore-symlinks`. Use `fallow dupes --ignore-symlinks`, or set `duplicates.ignoreSymlinks` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",
@@ -3872,9 +3982,19 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-no-ignore-symlinks`. Set `duplicates.ignoreSymlinks` in the config, or pass `--dupes-no-ignore-symlinks` to bare `fallow`."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-no-ignore-symlinks`. Use `fallow dupes --no-ignore-symlinks`, or set `duplicates.ignoreSymlinks` in the config.",
+            "command": "dupes"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow security`.",

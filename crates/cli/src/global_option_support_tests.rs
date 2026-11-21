@@ -568,3 +568,25 @@ fn a_command_that_does_not_read_a_file_option_rejects_it() {
         None
     );
 }
+
+#[test]
+fn only_the_bare_run_reads_the_global_duplication_overrides() {
+    assert_eq!(rejection(&["--dupes-min-lines", "40"]), None);
+    assert_eq!(
+        rejection(&["audit", "--dupes-min-lines", "40"]).as_deref(),
+        Some(
+            "`fallow audit` does not read `--dupes-min-lines`. Set `duplicates.minLines` in the config, or pass `--dupes-min-lines` to bare `fallow`."
+        )
+    );
+    assert_eq!(
+        rejection(&["dupes", "--dupes-no-ignore-imports"]).as_deref(),
+        Some(
+            "`fallow dupes` does not read `--dupes-no-ignore-imports`. Use `fallow dupes --no-ignore-imports`, or set `duplicates.ignoreImports` in the config."
+        )
+    );
+    for command in ["health", "dead-code", "fix", "watch"] {
+        let message = rejection(&[command, "--dupes-mode", "semantic"])
+            .unwrap_or_else(|| panic!("{command} rejects --dupes-mode"));
+        assert!(message.contains("`duplicates.mode`"), "{message}");
+    }
+}

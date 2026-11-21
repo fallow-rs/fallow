@@ -2560,12 +2560,6 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
         "--quiet",
         "--no-cache",
         "--performance",
-        "--dupes-mode",
-        "strict",
-        "--dupes-min-tokens",
-        "10",
-        "--dupes-min-lines",
-        "3",
     ]);
 
     assert_eq!(
@@ -7229,12 +7223,6 @@ fn run_rename_audit(dir: &Path) -> crate::common::CommandOutput {
         "json",
         "--quiet",
         "--no-cache",
-        "--dupes-mode",
-        "strict",
-        "--dupes-min-tokens",
-        "10",
-        "--dupes-min-lines",
-        "3",
     ])
 }
 

@@ -411,6 +411,49 @@ const fn regression_row(
     }
 }
 
+/// A row of a global duplication override. Only the bare run reads the
+/// global overrides. `fallow dupes` takes the same setting as its own option
+/// `$local`, and the other commands read the setting from the config key
+/// `$key`.
+macro_rules! dupes_row {
+    ($option:literal, $key:literal, $local:literal) => {
+        GlobalOptionSupport {
+            option: $option,
+            default: Support::Rejected {
+                message: concat!(
+                    "`fallow <command>` does not read `",
+                    $option,
+                    "`. Set `",
+                    $key,
+                    "` in the config, or pass `",
+                    $option,
+                    "` to bare `fallow`."
+                ),
+            },
+            commands: &[
+                &[
+                    supported(BARE_RUN),
+                    rejected(
+                        "dupes",
+                        concat!(
+                            "`fallow dupes` does not read `",
+                            $option,
+                            "`. Use `fallow dupes ",
+                            $local,
+                            "`, or set `",
+                            $key,
+                            "` in the config."
+                        ),
+                    ),
+                ],
+                SECURITY,
+                DOCTOR,
+                SIMILAR_CODE,
+            ],
+        }
+    };
+}
+
 /// The support of each global option. The startup check reads the rows in
 /// this order and reports the first rejected option. The order is the clap
 /// definition order, except that `--tolerance` follows the other regression
@@ -589,23 +632,41 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
             SIMILAR_CODE,
         ],
     ),
-    row("--dupes-mode", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-near", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-threshold", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-min-tokens", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-min-lines", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-min-occurrences", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-skip-local", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-cross-language", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--dupes-ignore-imports", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row(
-        "--dupes-no-ignore-imports",
-        &[SECURITY, DOCTOR, SIMILAR_CODE],
+    dupes_row!("--dupes-mode", "duplicates.mode", "--mode"),
+    dupes_row!("--dupes-near", "duplicates.near", "--near"),
+    dupes_row!("--dupes-threshold", "duplicates.threshold", "--threshold"),
+    dupes_row!("--dupes-min-tokens", "duplicates.minTokens", "--min-tokens"),
+    dupes_row!("--dupes-min-lines", "duplicates.minLines", "--min-lines"),
+    dupes_row!(
+        "--dupes-min-occurrences",
+        "duplicates.minOccurrences",
+        "--min-occurrences"
     ),
-    row("--dupes-ignore-symlinks", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row(
+    dupes_row!("--dupes-skip-local", "duplicates.skipLocal", "--skip-local"),
+    dupes_row!(
+        "--dupes-cross-language",
+        "duplicates.crossLanguage",
+        "--cross-language"
+    ),
+    dupes_row!(
+        "--dupes-ignore-imports",
+        "duplicates.ignoreImports",
+        "--ignore-imports"
+    ),
+    dupes_row!(
+        "--dupes-no-ignore-imports",
+        "duplicates.ignoreImports",
+        "--no-ignore-imports"
+    ),
+    dupes_row!(
+        "--dupes-ignore-symlinks",
+        "duplicates.ignoreSymlinks",
+        "--ignore-symlinks"
+    ),
+    dupes_row!(
         "--dupes-no-ignore-symlinks",
-        &[SECURITY, DOCTOR, SIMILAR_CODE],
+        "duplicates.ignoreSymlinks",
+        "--no-ignore-symlinks"
     ),
     row("--include-entry-exports", &[SECURITY, DOCTOR, SIMILAR_CODE]),
     row("--show-cascade", &[SECURITY, DOCTOR, SIMILAR_CODE]),

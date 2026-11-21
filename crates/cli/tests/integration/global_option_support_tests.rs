@@ -7,6 +7,7 @@
     reason = "tests use unwrap and expect to keep fixture setup concise"
 )]
 
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -373,10 +374,16 @@ fn stop_with_sigterm(_pid: u32) {
 
 fn committed_fixture() -> tempfile::TempDir {
     let project = copy_fixture("basic-project");
-    git(project.path(), &["init", "-q"]);
-    git(project.path(), &["add", "-A"]);
+    commit_project(project.path());
+    project
+}
+
+/// Make `dir` a git repository with one commit of each file.
+fn commit_project(dir: &Path) {
+    git(dir, &["init", "-q"]);
+    git(dir, &["add", "-A"]);
     git(
-        project.path(),
+        dir,
         &[
             "-c",
             "user.email=test@example.com",
@@ -387,7 +394,6 @@ fn committed_fixture() -> tempfile::TempDir {
             "init",
         ],
     );
-    project
 }
 
 /// Run the command with a format that it rejects for the option, and
@@ -593,6 +599,190 @@ fn each_supported_read_option_reads_its_path() {
             check_missing_path(&args, option, extra, project.path(), &home)
         {
             failures.push(format!("{command} {option}: {problem}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The project, the option arguments and the config of one duplication
+/// override case. The override must change the clone groups of the project.
+struct DupesCase {
+    generated: bool,
+    args: &'static [&'static str],
+    config: Option<&'static str>,
+}
+
+fn dupes_case(option: &str) -> Option<DupesCase> {
+    let fixture = |args| {
+        Some(DupesCase {
+            generated: false,
+            args,
+            config: None,
+        })
+    };
+    let generated = |args, config| {
+        Some(DupesCase {
+            generated: true,
+            args,
+            config,
+        })
+    };
+    match option {
+        "--dupes-mode" => fixture(&["semantic"]),
+        "--dupes-threshold" => fixture(&["0.5"]),
+        "--dupes-min-tokens" => fixture(&["500"]),
+        "--dupes-min-lines" => fixture(&["40"]),
+        "--dupes-min-occurrences" => fixture(&["3"]),
+        "--dupes-near" | "--dupes-skip-local" | "--dupes-cross-language" => fixture(&[]),
+        "--dupes-no-ignore-imports" | "--dupes-ignore-symlinks" => generated(&[], None),
+        "--dupes-ignore-imports" => {
+            generated(&[], Some(r#"{"duplicates":{"ignoreImports":false}}"#))
+        }
+        "--dupes-no-ignore-symlinks" => {
+            generated(&[], Some(r#"{"duplicates":{"ignoreSymlinks":true}}"#))
+        }
+        _ => None,
+    }
+}
+
+/// A project with a block of imports in two files and a file with its
+/// symlink, so the import and symlink overrides change the clone groups.
+fn generated_dupes_project(dir: &Path) {
+    let src = dir.join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(
+        dir.join("package.json"),
+        r#"{"name":"dupes-case","main":"src/a.ts"}"#,
+    )
+    .expect("package.json");
+    let mut imports = String::new();
+    for i in 1..=14 {
+        let _ = writeln!(imports, "import {{ value{i} }} from \"./dep{i}\";");
+    }
+    for name in ["a", "b"] {
+        std::fs::write(
+            src.join(format!("{name}.ts")),
+            format!("{imports}\nexport const {name} = [value1, value2, value3];\n"),
+        )
+        .expect("import file");
+    }
+    for i in 1..=14 {
+        std::fs::write(
+            src.join(format!("dep{i}.ts")),
+            format!("export const value{i} = {i};\n"),
+        )
+        .expect("dep file");
+    }
+    let mut body = String::new();
+    for i in 1..=15 {
+        let _ = writeln!(
+            body,
+            "  const v{i} = input.map((x) => x * {i} + {}).filter((y) => y > {i});",
+            i * 3
+        );
+    }
+    std::fs::write(
+        src.join("long.ts"),
+        format!("export function compute(input: number[]): number {{\n{body}  return v1.length + v15.length;\n}}\n"),
+    )
+    .expect("long file");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("long.ts", src.join("linked.ts")).expect("symlink");
+}
+
+/// The clone groups, the statistics and the gate outcomes of a run, or the
+/// problem. `--dupes-threshold` changes the gate outcomes only.
+fn dupes_section(project: &Path, args: &[String]) -> Result<serde_json::Value, String> {
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_analysis_env(&mut cmd);
+    let output = cmd
+        .current_dir(project)
+        .args(args)
+        .args(["--format", "json", "--quiet"])
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !matches!(output.status.code(), Some(0 | 1)) {
+        return Err(format!(
+            "exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let doc: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|err| err.to_string())?;
+    Ok(serde_json::json!({
+        "clone_groups": doc["dupes"]["clone_groups"],
+        "stats": doc["dupes"]["stats"],
+        "gate_outcomes": doc["gate_outcomes"],
+    }))
+}
+
+/// Each supported pair of a global duplication override and a command
+/// changes the clone groups. A command that accepts the override and keeps
+/// its result, as `fallow audit --dupes-min-lines` did, fails.
+#[test]
+fn each_supported_dupes_override_changes_the_result() {
+    let reference = run_fallow_raw(&["schema", "--cli-reference"]);
+    let doc: serde_json::Value = serde_json::from_str(&reference.stdout).expect("reference JSON");
+    let options: Vec<String> = doc["global_options"]
+        .as_array()
+        .expect("global_options")
+        .iter()
+        .filter_map(|option| option["long"].as_str())
+        .filter(|long| long.starts_with("--dupes-"))
+        .map(str::to_owned)
+        .collect();
+    assert!(options.len() > 1, "{options:?}");
+    let option_refs: Vec<&str> = options.iter().map(String::as_str).collect();
+    let pairs = supported_pairs_for(&option_refs);
+    let mut failures = Vec::new();
+    for pair in &pairs {
+        let (option, command) = (&pair.option, &pair.command);
+        let Some(case) = dupes_case(option) else {
+            failures.push(format!(
+                "{command} {option}: the test has no case for {option}"
+            ));
+            continue;
+        };
+        if case.generated && cfg!(not(unix)) && option.contains("symlinks") {
+            continue;
+        }
+        let project = if case.generated {
+            let dir = tempfile::tempdir().expect("project dir");
+            generated_dupes_project(dir.path());
+            dir
+        } else {
+            copy_fixture("duplicate-code")
+        };
+        if let Some(config) = case.config {
+            std::fs::write(project.path().join(".fallowrc.json"), config).expect("config");
+        }
+        commit_project(project.path());
+        let scratch = tempfile::tempdir().expect("scratch dir");
+        let Some(mut args) = command_args(command, project.path(), scratch.path()) else {
+            failures.push(format!(
+                "{command} {option}: the test has no command line for {command}"
+            ));
+            continue;
+        };
+        if command == BARE_RUN {
+            args.extend(["--only".to_owned(), "dupes".to_owned()]);
+        }
+        let mut with_option = args.clone();
+        with_option.push(option.clone());
+        with_option.extend(case.args.iter().map(|arg| (*arg).to_owned()));
+        match (
+            dupes_section(project.path(), &args),
+            dupes_section(project.path(), &with_option),
+        ) {
+            (Ok(base), Ok(changed)) if base == changed => {
+                failures.push(format!("{command} {option}: the result did not change"));
+            }
+            (Err(problem), _) | (_, Err(problem)) => {
+                failures.push(format!("{command} {option}: {problem}"));
+            }
+            _ => {}
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
