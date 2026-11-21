@@ -41,11 +41,7 @@ fn run_trace_error_stdin(root: &Path, trace: &str, args: &[&str]) -> CommandOutp
         .write_all(trace.as_bytes())
         .expect("failed to write the trace to stdin");
     let output = child.wait_with_output().expect("failed to run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 /// A project with one unambiguous export, one name that two definitions in the

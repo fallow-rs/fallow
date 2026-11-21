@@ -255,19 +255,10 @@ pub fn snapshot(
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
-    use fallow_engine::changed_files::clear_ambient_git_env;
 
     use super::*;
 
-    fn git(root: &Path, args: &[&str]) {
-        let mut command = Command::new("git");
-        command.args(args).current_dir(root);
-        clear_ambient_git_env(&mut command);
-        let output = command.output().expect("git runs");
-        assert!(output.status.success(), "git {args:?}: {output:?}");
-    }
+    use fallow_engine::git_fixture::fixture_git as git;
 
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("dir");

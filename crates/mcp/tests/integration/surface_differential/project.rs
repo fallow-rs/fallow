@@ -1,7 +1,6 @@
 //! A generated project on disk, and the seeded choices that build it.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// A small SplitMix64 generator, so a seed always gives the same project.
 pub struct Rng(u64);
@@ -80,15 +79,8 @@ pub struct Checkout {
 }
 
 pub fn git(root: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = fallow_api::git_fixture::fixture_git_command(root)
         .args(args)
-        .current_dir(root)
-        .env("GIT_AUTHOR_NAME", "oracle")
-        .env("GIT_AUTHOR_EMAIL", "oracle@example.com")
-        .env("GIT_COMMITTER_NAME", "oracle")
-        .env("GIT_COMMITTER_EMAIL", "oracle@example.com")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .expect("run git");
     assert!(

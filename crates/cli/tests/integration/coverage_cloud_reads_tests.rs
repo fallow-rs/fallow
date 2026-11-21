@@ -19,8 +19,8 @@ use std::thread;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::common::{CommandOutput, fallow_bin, fixture_path, parse_json};
-use crate::http_stub::read_request;
+use crate::common::{CommandOutput, fallow_bin, fixture_path, git, parse_json};
+use crate::http_stub::{accept_expected, read_request};
 
 /// One scripted mock response.
 struct MockResponse {
@@ -65,8 +65,8 @@ fn serve(responses: Vec<MockResponse>) -> (String, Captured, thread::JoinHandle<
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&captured);
     let handle = thread::spawn(move || {
-        for response in responses {
-            let (mut stream, _) = listener.accept().expect("accept request");
+        for (index, response) in responses.into_iter().enumerate() {
+            let mut stream = accept_expected(&listener, index + 1);
             let request = read_request(&mut stream);
             sink.lock().expect("capture lock").push(request);
             write_response(&mut stream, &response);
@@ -113,11 +113,7 @@ fn run(args: &[&str], root: &Path, agent_source: Option<&str>) -> CommandOutput 
         None => command.env("FALLOW_AGENT_SOURCE", "none"),
     };
     let output = command.output().expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn runtime_context_body(file_path: &str, repo_path: Option<&str>) -> String {
@@ -365,22 +361,6 @@ fn review_packet_posts_explicit_files_and_functions() {
     assert_eq!(sent["periodDays"], 7);
     assert_eq!(sent["projectId"], "web");
     assert_eq!(sent["gitSha"], "abc1234");
-}
-
-fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .env("GIT_AUTHOR_NAME", "Test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "Test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} failed");
 }
 
 #[test]

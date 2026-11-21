@@ -71,7 +71,7 @@ fn security(root: &Path, args: &[&str]) -> (i32, serde_json::Value) {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let json = serde_json::from_str(&stdout)
         .unwrap_or_else(|err| panic!("invalid JSON ({err}): {stdout}"));
-    (out.status.code().unwrap_or(-1), json)
+    (crate::common::exit_code(&out), json)
 }
 
 fn gate_new(root: &Path) -> (i32, serde_json::Value) {

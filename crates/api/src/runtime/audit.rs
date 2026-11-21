@@ -986,7 +986,6 @@ mod orphaned_tests;
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
 
     use fallow_config::{AuditGate, FallowConfig, HealthConfig};
     use fallow_types::output_format::OutputFormat;
@@ -1667,14 +1666,7 @@ mod tests {
         project
     }
 
-    fn git(root: &Path, args: &[&str]) {
-        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("git command");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    use fallow_engine::git_fixture::fixture_git as git;
 
     /// #2699: the auto-detect fallthrough gets the same ref validation as the
     /// explicit and environment paths, so a malformed detection surfaces as a
@@ -1731,9 +1723,8 @@ mod tests {
     }
 
     fn registered_worktree_count(root: &Path) -> usize {
-        let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+        let output = fallow_engine::git_fixture::fixture_git_command(root)
             .args(["worktree", "list", "--porcelain"])
-            .current_dir(root)
             .output()
             .expect("git worktree list");
         assert!(output.status.success(), "git worktree list failed");

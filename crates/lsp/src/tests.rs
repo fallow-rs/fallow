@@ -2210,17 +2210,7 @@ fn attach_changed_since_data_noop_when_filter_absent() {
     );
 }
 
-fn git(root: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .status()
-        .expect("git command starts");
-    assert!(status.success(), "git command failed: {args:?}");
-}
+use fallow_api::git_fixture::fixture_git as git;
 
 fn changed_since_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("temp project");

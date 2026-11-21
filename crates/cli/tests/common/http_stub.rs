@@ -1,4 +1,9 @@
-//! Request reading for the stub HTTP servers in the CLI integration tests.
+//! Connection accepting and request reading for the stub HTTP servers in the
+//! CLI integration tests.
+//!
+//! A stub accepts each connection with a time limit ([`accept_expected`]), so
+//! a client that sends one request less than the script fails the test and
+//! does not make it hang.
 //!
 //! A client can send a request in more than one write, for example the head
 //! first and the body later. A stub that reads once can miss the body. It then
@@ -6,11 +11,62 @@
 //! (`os error 10053`). Every stub reads the request with [`read_request`].
 
 use std::io::Read;
-use std::net::TcpStream;
-use std::time::Duration;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// The longest time a stub waits for the next part of a request.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// The longest time a stub waits for a client to connect.
+const ACCEPT_TIMEOUT: Duration = Duration::from_secs(30);
+/// The pause between two accept attempts.
+const ACCEPT_POLL: Duration = Duration::from_millis(10);
+
+/// Accept one connection, or return `None` after `timeout`.
+///
+/// The listener becomes non-blocking. The accepted stream is blocking.
+pub fn accept_within(listener: &TcpListener, timeout: Duration) -> Option<TcpStream> {
+    let deadline = Instant::now() + timeout;
+    listener
+        .set_nonblocking(true)
+        .expect("non-blocking listener");
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).expect("blocking stream");
+                return Some(stream);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                thread::sleep(ACCEPT_POLL);
+            }
+            Err(err) => panic!("accept request: {err}"),
+        }
+    }
+}
+
+/// Accept one connection within [`ACCEPT_TIMEOUT`], or return `None`.
+///
+/// A client that sends one request less than the script then gives a failed
+/// assertion on the captured requests, not a test that hangs.
+pub fn accept_before_deadline(listener: &TcpListener) -> Option<TcpStream> {
+    accept_within(listener, ACCEPT_TIMEOUT)
+}
+
+/// Accept the connection for scripted response number `position` (from 1).
+///
+/// Panics when no client connects within [`ACCEPT_TIMEOUT`], and names the
+/// missing request.
+pub fn accept_expected(listener: &TcpListener, position: usize) -> TcpStream {
+    accept_before_deadline(listener).unwrap_or_else(|| {
+        panic!(
+            "no client connected for scripted response {position} within {} seconds",
+            ACCEPT_TIMEOUT.as_secs()
+        )
+    })
+}
 
 /// Read one full HTTP request from `stream`: the head, then the body that the
 /// `content-length` header names.
@@ -77,12 +133,11 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use super::{READ_TIMEOUT, read_message, read_request};
+    use super::{ACCEPT_POLL, READ_TIMEOUT, accept_within, read_message, read_request};
 
     const HEAD: &str = "POST /v1/review HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n";
     const BODY: &str = "{\"ok\":true}";
     const FRAGMENT_DELAY: Duration = Duration::from_millis(100);
-    const ACCEPT_POLL: Duration = Duration::from_millis(10);
 
     /// A reader that gives back one chunk for each `read` call.
     struct Chunks(VecDeque<Vec<u8>>);
@@ -200,5 +255,23 @@ mod tests {
         let request = read_request(&mut stream);
         drop(client.join().expect("client thread"));
         assert_eq!(request, format!("{HEAD}{BODY}"));
+    }
+
+    #[test]
+    fn accept_within_gives_up_when_no_client_connects() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        assert!(accept_within(&listener, Duration::from_millis(50)).is_none());
+    }
+
+    #[test]
+    fn accept_within_returns_a_blocking_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        let mut client =
+            TcpStream::connect(listener.local_addr().expect("stub addr")).expect("connect");
+        let mut stream = accept_within(&listener, READ_TIMEOUT).expect("client accepted");
+        client
+            .write_all(format!("{HEAD}{BODY}").as_bytes())
+            .expect("write request");
+        assert_eq!(read_request(&mut stream), format!("{HEAD}{BODY}"));
     }
 }

@@ -14,7 +14,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::common::{commit_all, fallow_bin, git, scrub_analysis_env};
+use crate::common::{commit_all, exit_code, fallow_bin, git, scrub_analysis_env};
 
 fn fallow(dir: &Path, cache_dir: &Path, args: &[&str]) -> (i32, String) {
     let mut command = Command::new(fallow_bin());
@@ -29,7 +29,7 @@ fn fallow(dir: &Path, cache_dir: &Path, args: &[&str]) -> (i32, String) {
         .args(["--format", "json", "--quiet"]);
     let output = command.output().expect("failed to run fallow binary");
     (
-        output.status.code().unwrap_or(-1),
+        exit_code(&output),
         String::from_utf8_lossy(&output.stderr).to_string(),
     )
 }
@@ -61,7 +61,8 @@ fn a_branch_audit_keeps_the_shared_caches_of_the_checkout() {
     let (code, stderr) = fallow(dir, cache.path(), &["audit", "--base", "HEAD~1"]);
     assert!(code <= 1, "stderr: {stderr}");
 
-    let (_, stderr) = fallow(dir, cache.path(), &["dead-code", "--performance"]);
+    let (code, stderr) = fallow(dir, cache.path(), &["dead-code", "--performance"]);
+    assert!(code <= 1, "stderr: {stderr}");
     let perf = stderr
         .lines()
         .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())

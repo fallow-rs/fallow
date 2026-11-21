@@ -350,11 +350,7 @@ fn run_in_root_without_sidecar(
         .arg(root)
         .args(args);
     let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn class_member_severities(json: &serde_json::Value) -> Vec<String> {

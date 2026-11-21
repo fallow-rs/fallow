@@ -144,6 +144,10 @@ pub use fallow_engine::change_scope::{
     ChangeScope, ChangeScopeOwner, ChangeScopeRequest, first_package_baselines,
     package_baseline_statuses,
 };
+/// Git commands for test fixtures. The LSP and MCP crates do not depend on
+/// the engine, so their tests take the commands from here.
+#[cfg(any(test, feature = "testing"))]
+pub use fallow_engine::git_fixture;
 /// Engine-owned per-workspace Git baseline state used by analysis surfaces.
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
 /// Byte spans of the export statements of a file, for a surface that edits

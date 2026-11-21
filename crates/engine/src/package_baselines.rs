@@ -310,25 +310,11 @@ fn workspace_key(workspace_root: &Path, authored_root: &Path, root: &Path) -> Op
 mod tests {
     use super::*;
     use std::fs;
-    use std::process::Command;
 
     use fallow_types::output_dead_code::{UnresolvedCatalogReferenceFinding, UnusedFileFinding};
     use fallow_types::results::{AnalysisResults, UnresolvedCatalogReference, UnusedFile};
 
-    fn git(root: &Path, args: &[&str]) {
-        let mut command = Command::new("git");
-        crate::changed_files::clear_ambient_git_env(&mut command);
-        let output = command
-            .args(args)
-            .current_dir(root)
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    use crate::git_fixture::fixture_git as git;
 
     fn commit(root: &Path, message: &str) {
         git(

@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use rustc_hash::FxHashSet;
 
@@ -12,26 +11,7 @@ use fallow_types::sourced::{Given, Origin};
 
 const EMPTY_V8_DUMP: &str = r#"{"result":[]}"#;
 
-fn git(dir: &Path, args: &[&str]) {
-    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_engine::git_fixture::fixture_git as git;
 
 fn write(root: &Path, relative: &str, contents: &str) {
     let path = root.join(relative);

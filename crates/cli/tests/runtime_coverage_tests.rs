@@ -175,7 +175,7 @@ mod gated {
         (
             String::from_utf8_lossy(&output.stdout).into_owned(),
             String::from_utf8_lossy(&output.stderr).into_owned(),
-            output.status.code().unwrap_or(-1),
+            crate::common::exit_code(&output),
         )
     }
 

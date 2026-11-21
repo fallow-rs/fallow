@@ -451,9 +451,8 @@ fn inspect_reads_the_report_of_the_last_run_when_no_report_is_named() {
     assert_eq!(fresh.code, 0, "{}", fresh.stderr);
     assert_eq!(packet["status"], "fresh", "{packet}");
     assert_eq!(packet["code"]["mutated_lines"], "  return a - b;");
-    let status = std::process::Command::new("git")
+    let status = crate::common::git_command(project.path())
         .args(["status", "--porcelain", "--untracked-files=all"])
-        .current_dir(project.path())
         .output()
         .expect("git status");
     assert_eq!(

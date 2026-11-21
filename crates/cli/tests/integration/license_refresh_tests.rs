@@ -16,11 +16,10 @@
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::common::fallow_bin;
-use crate::http_stub::read_request;
+use crate::http_stub::{accept_before_deadline, read_request};
 
 struct MockResponse {
     status: u16,
@@ -32,52 +31,18 @@ struct MockResponse {
 fn serve(responses: Vec<MockResponse>) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let url = format!("http://{}", listener.local_addr().expect("local addr"));
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let handle = {
-        let requests = Arc::clone(&requests);
-        thread::spawn(move || {
-            for response in responses {
-                let Some(mut stream) = accept_before_deadline(&listener) else {
-                    break;
-                };
-                let request = read_request(&mut stream);
-                requests.lock().expect("request lock").push(request);
-                write_response(&mut stream, response.status, response.body);
-            }
-            Arc::try_unwrap(requests)
-                .expect("request refs released")
-                .into_inner()
-                .expect("request lock")
-        })
-    };
-    (url, handle)
-}
-
-/// Accept one connection, giving up after ten seconds.
-///
-/// A regression that stops retrying leaves the second request unmade, and the
-/// deadline turns that into a failed assertion on the captured requests
-/// instead of a hung test.
-fn accept_before_deadline(listener: &TcpListener) -> Option<TcpStream> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    listener
-        .set_nonblocking(true)
-        .expect("non-blocking listener");
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream.set_nonblocking(false).expect("blocking stream");
-                return Some(stream);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    return None;
-                }
-                thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(err) => panic!("accept request: {err}"),
+    let handle = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for response in responses {
+            let Some(mut stream) = accept_before_deadline(&listener) else {
+                break;
+            };
+            requests.push(read_request(&mut stream));
+            write_response(&mut stream, response.status, response.body);
         }
-    }
+        requests
+    });
+    (url, handle)
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, body: &str) {

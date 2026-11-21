@@ -1478,11 +1478,7 @@ fn run_fallow_from_env(
         cmd.env(key, value);
     }
     let output = cmd.args(args).output().expect("run fallow");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 /// The three save flags, each with the subcommand that writes it.

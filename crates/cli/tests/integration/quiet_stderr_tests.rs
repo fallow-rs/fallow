@@ -52,11 +52,7 @@ fn run(dir: &TempDir, extra: &[&str], env: &[(&str, &str)]) -> CommandOutput {
         .args(["--format", "json", "--no-cache"])
         .args(extra);
     let output = cmd.output().expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn diagnostic_kinds(output: &CommandOutput) -> Vec<String> {

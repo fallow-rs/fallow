@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fallow_types::output_dead_code::{UnusedDependencyFinding, UnusedExportFinding};
 use fallow_types::results::{DependencyLocation, UnusedDependency, UnusedExport};
@@ -9,27 +8,7 @@ use rustc_hash::FxHashSet;
 use super::base_files::{is_analysis_input, is_non_behavioral_doc, js_ts_tokens_equivalent};
 use super::*;
 
-fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstderr:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_engine::git_fixture::fixture_git as git;
 
 /// A git repository with one commit that holds `README.md` = `seed\n`.
 fn seeded_repo(parent: &Path) -> PathBuf {

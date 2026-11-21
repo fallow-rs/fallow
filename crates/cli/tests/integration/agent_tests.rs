@@ -6,7 +6,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::common::run_fallow_raw_with_env;
 
@@ -40,9 +39,8 @@ fn agent_temp_dir(suffix: &str) -> PathBuf {
         "---\nname: fallow\ndescription: Test skill.\nlicense: MIT\n---\n\n# Shipped\n",
     )
     .unwrap();
-    let status = Command::new("git")
+    let status = crate::common::git_command(&dir)
         .args(["init", "-q"])
-        .current_dir(&dir)
         .status()
         .unwrap();
     assert!(status.success());

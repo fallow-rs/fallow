@@ -205,9 +205,8 @@ fn analyze_typed_route_reports_the_ambient_changed_since_ref() {
             "init",
         ],
     ] {
-        let status = Command::new("git")
+        let status = fallow_api::git_fixture::fixture_git_command(project.path())
             .args(&args)
-            .current_dir(project.path())
             .status()
             .expect("git");
         assert!(status.success(), "git {args:?}");
@@ -289,9 +288,8 @@ fn init_git(root: &Path) {
             "init",
         ],
     ] {
-        let status = Command::new("git")
+        let status = fallow_api::git_fixture::fixture_git_command(root)
             .args(&args)
-            .current_dir(root)
             .status()
             .expect("git");
         assert!(status.success(), "git {args:?}");

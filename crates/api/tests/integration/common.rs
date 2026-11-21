@@ -10,32 +10,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// Run `git` in `root` with a fixed identity and no signing, and fail the test
-/// when the command fails.
-pub fn git(root: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "user.name=fallow",
-            "-c",
-            "user.email=fallow@example.invalid",
-        ])
-        .args(args)
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+pub use fallow_engine::git_fixture::fixture_git as git;
 
 /// Write `content` to `path` below `root`, and create the parent directories.
 pub fn write(root: &Path, path: &str, content: &str) {

@@ -59,11 +59,7 @@ fn run_fallow_combined_in_root(root: &std::path::Path, args: &[&str]) -> Command
         .output()
         .expect("failed to run fallow binary");
 
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 #[test]

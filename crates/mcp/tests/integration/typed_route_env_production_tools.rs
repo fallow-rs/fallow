@@ -372,25 +372,7 @@ fn feature_flags_typed_route_reads_fallow_production() {
     assert_eq!(typed["total_flags"], cli["total_flags"], "{typed}");
 }
 
-fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .args([
-            "-c",
-            "user.name=fallow",
-            "-c",
-            "user.email=fallow@example.com",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} failed");
-}
+use fallow_api::git_fixture::fixture_git as git;
 
 fn unused_file_paths(section: &serde_json::Value) -> Vec<String> {
     section["unused_files"]

@@ -72,6 +72,10 @@ mod base_worktree_orphans;
 mod base_worktree_registration;
 #[path = "git_env.rs"]
 mod git_env;
+/// Git commands for the test fixtures of this crate and of the crates that
+/// use it.
+#[cfg(any(test, feature = "testing"))]
+pub mod git_fixture;
 mod git_identity;
 pub mod guard;
 pub mod health;

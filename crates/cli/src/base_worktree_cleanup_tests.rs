@@ -1,9 +1,8 @@
 use super::*;
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let mut command = Command::new("git");
-    command.args(args).current_dir(repo);
-    clear_ambient_git_env(&mut command);
+    let mut command = fallow_engine::git_fixture::fixture_git_command(repo);
+    command.args(args);
     let output = command.output().expect("git should run");
     assert!(
         output.status.success(),
