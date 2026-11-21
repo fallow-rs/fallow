@@ -148,7 +148,7 @@ pub fn find_duplicates(
 /// returns the per-file token data alongside the corpus totals.
 fn tokenize_corpus_for_duplicates(
     input: TokenizeCorpusInput<'_>,
-) -> (Vec<TokenizedFile>, detect::CorpusTotals) {
+) -> (Vec<TokenizedFile>, crate::duplicates::CorpusTotals) {
     let (files, config) = (input.files, input.config);
     let normalization =
         fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
@@ -205,7 +205,7 @@ fn tokenize_corpus_for_duplicates(
         "tokenized files for duplication analysis"
     );
 
-    let corpus_totals = detect::CorpusTotals {
+    let corpus_totals = crate::duplicates::CorpusTotals {
         files: file_data.len(),
         lines: file_data
             .iter()
@@ -223,7 +223,7 @@ fn detect_and_postprocess(
     root: &Path,
     config: &DuplicatesConfig,
     mut file_data: Vec<TokenizedFile>,
-    corpus_totals: detect::CorpusTotals,
+    corpus_totals: crate::duplicates::CorpusTotals,
     focus_files: Option<&FxHashSet<PathBuf>>,
 ) -> DuplicationReport {
     let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data

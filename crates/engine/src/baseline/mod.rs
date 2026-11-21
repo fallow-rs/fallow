@@ -2149,8 +2149,8 @@ pub fn filter_new_clone_groups(
 
 /// Recompute duplication statistics after filtering (baseline or `--changed-since`).
 ///
-/// Uses per-file line deduplication (matching `compute_stats` in `detect.rs`)
-/// so overlapping clone instances don't inflate the duplicated line count.
+/// Covered lines are the union of the line ranges of each file, so
+/// overlapping clone instances do not count a line two times.
 pub fn recompute_stats(report: &DuplicationReport) -> crate::duplicates::DuplicationStats {
     crate::duplicates::recompute_stats(report)
 }

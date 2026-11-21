@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 use super::boundary::{build_boundary_prefixes, range_contains_boundary};
 use super::extraction::RawGroup;
-use super::{CorpusTotals, FileData, consistency, filtering, ranking, statistics};
+use super::{CorpusTotals, FileData, consistency, filtering, ranking};
 use crate::duplicates::types::DuplicationReport;
 
 const HASH_BASE: u64 = 0x0000_0100_0000_01b3;
@@ -174,7 +174,11 @@ pub(super) fn detect(input: RollingDetectInput<'_>) -> DuplicationReport {
     let build_time = t0.elapsed();
 
     let t0 = std::time::Instant::now();
-    let stats = statistics::compute_stats(&clone_groups, totals.files, totals.lines, totals.tokens);
+    let stats = crate::duplicates::duplication_stats(
+        &clone_groups,
+        totals,
+        crate::duplicates::CarriedCounters::default(),
+    );
     let stats_time = t0.elapsed();
 
     tracing::info!(

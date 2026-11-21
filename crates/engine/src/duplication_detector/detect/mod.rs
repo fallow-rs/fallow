@@ -12,7 +12,6 @@ mod filtering;
 mod lcp;
 mod ranking;
 mod rolling;
-mod statistics;
 mod suffix_array;
 mod trim;
 mod utils;
@@ -28,6 +27,7 @@ use rustc_hash::FxHashSet;
 use super::normalize::HashedToken;
 use super::tokenize::{FileTokens, TokenKind};
 use super::types::{DuplicationReport, DuplicationStats};
+use crate::duplicates::CorpusTotals;
 
 const ROLLING_DETECTOR_ENV: &str = "FALLOW_DUPES_ROLLING";
 const ROLLING_BOUNDARY_FALLBACK_FILE_RATIO: f64 = 0.20;
@@ -38,13 +38,6 @@ struct FileData {
     hashed_tokens: Vec<HashedToken>,
     file_tokens: FileTokens,
     atomic_invocation_spans: Vec<Span>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct CorpusTotals {
-    pub(super) files: usize,
-    pub(super) lines: usize,
-    pub(super) tokens: usize,
 }
 
 /// Suffix Array + LCP based clone detection engine.
@@ -186,8 +179,12 @@ impl CloneDetector {
         );
 
         let t0 = std::time::Instant::now();
-        let stats =
-            statistics::compute_stats(&clone_groups, totals.files, totals.lines, totals.tokens);
+        // The pipeline sets the family count after it groups the families.
+        let stats = crate::duplicates::duplication_stats(
+            &clone_groups,
+            totals,
+            crate::duplicates::CarriedCounters::default(),
+        );
         let stats_time = t0.elapsed();
         tracing::debug!(elapsed_us = stats_time.as_micros(), "step7_compute_stats");
 
