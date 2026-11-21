@@ -970,7 +970,7 @@ jobs:
           status=0
           node scripts/vendor-skills.mjs --check || status=$?
           if [ "$status" -eq 1 ]; then
-            echo "::warning title=Public skills contract::This pull request changes the public skill contract. The merge needs the companion sync. After the merge, run node scripts/sync-skills-companion.mjs --pin <merge commit> and publish its commit with the commands that it prints."
+            echo "::warning title=Public skills contract::This pull request changes the public skill contract. The merge needs the companion sync. After the merge, the Skills companion sync workflow opens the fallow-skills pull request. Without its credential, run node scripts/sync-skills-companion.mjs --pin <merge commit> and publish its commit with the commands that it prints."
           elif [ "$status" -ne 0 ]; then
             echo "::warning title=Public skills contract::The drift check of the pull request head could not run (exit $status)."
           fi
