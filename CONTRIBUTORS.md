@@ -205,6 +205,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [Tinoooo-envelio](https://github.com/Tinoooo-envelio)
 - [tkimia](https://github.com/tkimia)
 - [tmak](https://github.com/tmak)
+- [transistorized-cmd](https://github.com/transistorized-cmd)
 - [tris203](https://github.com/tris203)
 - [Tsuyoshi84](https://github.com/Tsuyoshi84)
 - [UK-Jimbo](https://github.com/UK-Jimbo)
