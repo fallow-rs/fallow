@@ -983,3 +983,119 @@ fn workspace_scope_keeps_the_expected_arrays() {
         ])
     );
 }
+
+/// Findings whose sites, locations or hops are split across the inside and the
+/// outside workspace, so each scope rule gives a different result.
+fn split_findings() -> AnalysisResults {
+    let inside = source(&inside());
+    let outside = source(&outside());
+    let mut results = AnalysisResults::default();
+    results
+        .duplicate_exports
+        .push(DuplicateExportFinding::with_actions(DuplicateExport {
+            export_name: "value".to_owned(),
+            locations: [&inside, &outside]
+                .into_iter()
+                .map(|path| DuplicateLocation {
+                    path: path.clone(),
+                    line: REAL_LINE,
+                    col: 0,
+                })
+                .collect(),
+        }));
+    results
+        .unlisted_dependencies
+        .push(UnlistedDependencyFinding::with_actions(
+            UnlistedDependency {
+                package_name: "lodash".to_owned(),
+                imported_from: [&inside, &outside]
+                    .into_iter()
+                    .map(|path| ImportSite {
+                        path: path.clone(),
+                        line: REAL_LINE,
+                        col: 0,
+                    })
+                    .collect(),
+            },
+        ));
+    for (severity, hops) in [
+        (EffectiveSeverity::Warn, vec![&outside, &inside]),
+        (EffectiveSeverity::Error, Vec::new()),
+    ] {
+        let mut chain = PropDrillingChainFinding::with_actions(PropDrillingChain {
+            prop: "user".to_owned(),
+            depth: 2,
+            hops: hops
+                .into_iter()
+                .map(|path| PropDrillHop {
+                    file: path.clone(),
+                    line: REAL_LINE,
+                    component: "Hop".to_owned(),
+                })
+                .collect(),
+        });
+        chain.effective_severity = Some(severity);
+        results.prop_drilling_chains.push(chain);
+    }
+    results
+}
+
+/// The duplicate export locations, the unlisted dependency sites and the
+/// severities of the prop-drilling chains that stay.
+fn split_outcome(
+    results: &AnalysisResults,
+) -> (Vec<usize>, Vec<usize>, Vec<Option<EffectiveSeverity>>) {
+    (
+        results
+            .duplicate_exports
+            .iter()
+            .map(|f| f.export.locations.len())
+            .collect(),
+        results
+            .unlisted_dependencies
+            .iter()
+            .map(|f| f.dep.imported_from.len())
+            .collect(),
+        results
+            .prop_drilling_chains
+            .iter()
+            .map(|f| f.effective_severity)
+            .collect(),
+    )
+}
+
+#[test]
+fn each_scope_applies_its_site_owner_and_component_rules() {
+    let path_scope_outcome = (Vec::new(), vec![2], vec![Some(EffectiveSeverity::Error)]);
+
+    let mut changed = split_findings();
+    let files: FxHashSet<PathBuf> = std::iter::once(source(&inside())).collect();
+    crate::changed_files::filter_results_by_changed_files(&mut changed, &files);
+    assert_eq!(split_outcome(&changed), path_scope_outcome);
+
+    let mut workspace = split_findings();
+    crate::dead_code::filter_to_workspaces(&mut workspace, &vec![inside()].into());
+    assert_eq!(split_outcome(&workspace), path_scope_outcome);
+
+    let mut diff = split_findings();
+    let index = DiffIndex::from_unified_diff(
+        "diff --git a/packages/a/src/x.ts b/packages/a/src/x.ts\n\
+         --- a/packages/a/src/x.ts\n\
+         +++ b/packages/a/src/x.ts\n\
+         @@ -4,1 +4,2 @@\n\
+         \x20ctx\n\
+         +added five\n",
+    );
+    crate::diff_scope::filter_dead_code_by_diff(&mut diff, &index, Path::new("/repo"));
+    assert_eq!(
+        split_outcome(&diff),
+        (
+            vec![2],
+            vec![1],
+            vec![
+                Some(EffectiveSeverity::Warn),
+                Some(EffectiveSeverity::Error)
+            ],
+        )
+    );
+}

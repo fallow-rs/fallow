@@ -231,3 +231,33 @@ fn diff_and_changed_file_scopes_agree_on_route_findings() {
 
     assert_eq!(route_paths(&by_diff), route_paths(&by_changed_files));
 }
+
+/// An alias finding with no locations falls back to the line of the alias, so
+/// the diff keeps it only when that line is added.
+#[test]
+fn diff_scope_judges_an_alias_without_locations_by_its_own_line() {
+    let mut results = AnalysisResults::default();
+    for line in [11, 30] {
+        results
+            .duplicate_export_aliases
+            .push(DuplicateExportAliasFinding::with_actions(
+                DuplicateExportAlias {
+                    path: PathBuf::from("/project/src/a.ts"),
+                    local_name: "value".to_owned(),
+                    export_names: vec!["a".to_owned(), "b".to_owned()],
+                    line,
+                    col: 0,
+                    locations: Vec::new(),
+                },
+            ));
+    }
+
+    filter_dead_code_by_diff(&mut results, &diff_of_a(), Path::new(ROOT));
+
+    let kept: Vec<u32> = results
+        .duplicate_export_aliases
+        .iter()
+        .map(|f| f.alias.line)
+        .collect();
+    assert_eq!(kept, vec![11]);
+}

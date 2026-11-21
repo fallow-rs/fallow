@@ -368,6 +368,35 @@ fn architecture_diff_scope_drops_policy_findings_outside_the_diff() {
     );
     let json = parse_json(&output);
     assert_eq!(array_len(&json, "policy_violations"), 0, "{json}");
+
+    write(
+        dir.path(),
+        "app.diff",
+        "diff --git a/src/ui/App.ts b/src/ui/App.ts\n\
+         --- a/src/ui/App.ts\n\
+         +++ b/src/ui/App.ts\n\
+         @@ -2,1 +2,2 @@\n\
+         \x20import { query } from '../db/query';\n\
+         +import moment from 'moment';\n",
+    );
+    let diff = dir.path().join("app.diff");
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--diff-file",
+            diff.to_str().expect("utf-8 path"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        array_len(&json, "policy_violations"),
+        1,
+        "a diff that adds the banned import keeps its violation: {json}"
+    );
 }
 
 #[test]
