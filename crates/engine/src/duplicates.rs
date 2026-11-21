@@ -63,6 +63,156 @@ pub(crate) fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path)
     report.sort();
 }
 
+/// Size of the corpus that a duplication run measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CorpusTotals {
+    /// Number of files in the corpus.
+    pub files: usize,
+    /// Number of source lines in the corpus.
+    pub lines: usize,
+    /// Number of tokens in the corpus.
+    pub tokens: usize,
+}
+
+impl CorpusTotals {
+    /// The totals that `stats` records.
+    #[must_use]
+    pub const fn of(stats: &DuplicationStats) -> Self {
+        Self {
+            files: stats.total_files,
+            lines: stats.total_lines,
+            tokens: stats.total_tokens,
+        }
+    }
+}
+
+/// Counters that a statistics computation copies and does not derive from
+/// the clone groups.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CarriedCounters {
+    /// Number of clone families of the report.
+    pub clone_families: usize,
+    /// Number of clone groups that the `minOccurrences` filter hid.
+    pub clone_groups_below_min_occurrences: usize,
+    /// Number of clone groups that `ignoredClones` hid.
+    pub clone_groups_ignored: usize,
+    /// Number of near-clone candidates that the work bound skipped.
+    pub near_candidates_skipped: usize,
+}
+
+/// Accumulates the clone groups of one scope into duplication statistics.
+///
+/// Covered lines are the union of the line ranges of each file, so
+/// overlapping clone instances do not count a line two times.
+#[derive(Debug, Default)]
+pub struct CloneCoverage<'a> {
+    ranges_by_file: FxHashMap<&'a Path, Vec<(usize, usize)>>,
+    duplicated_tokens: usize,
+    clone_groups: usize,
+    clone_instances: usize,
+}
+
+impl<'a> CloneCoverage<'a> {
+    /// Add one clone group.
+    ///
+    /// `instances` are the instances that this scope counts. Each instance
+    /// after the first adds `token_count` redundant tokens.
+    pub fn add_group(
+        &mut self,
+        instances: impl IntoIterator<Item = &'a CloneInstance>,
+        token_count: usize,
+    ) {
+        self.clone_groups += 1;
+        let mut count = 0usize;
+        for instance in instances {
+            count += 1;
+            let ranges = self
+                .ranges_by_file
+                .entry(instance.file.as_path())
+                .or_default();
+            if instance.start_line <= instance.end_line {
+                ranges.push((instance.start_line, instance.end_line));
+            }
+        }
+        self.clone_instances += count;
+        self.duplicated_tokens = self
+            .duplicated_tokens
+            .saturating_add(token_count.saturating_mul(count.saturating_sub(1)));
+    }
+
+    /// Build the statistics against `totals`.
+    ///
+    /// `duplication_percentage` divides by `totals.lines`, and
+    /// `duplicated_tokens` does not exceed `totals.tokens`.
+    #[must_use]
+    pub fn into_stats(
+        mut self,
+        totals: CorpusTotals,
+        carried: CarriedCounters,
+    ) -> DuplicationStats {
+        let duplicated_lines: usize = self
+            .ranges_by_file
+            .values_mut()
+            .map(|ranges| count_covered_lines(ranges))
+            .sum();
+        DuplicationStats {
+            total_files: totals.files,
+            files_with_clones: self.ranges_by_file.len(),
+            total_lines: totals.lines,
+            duplicated_lines,
+            total_tokens: totals.tokens,
+            duplicated_tokens: self.duplicated_tokens.min(totals.tokens),
+            clone_groups: self.clone_groups,
+            clone_families: carried.clone_families,
+            clone_instances: self.clone_instances,
+            duplication_percentage: if totals.lines > 0 {
+                (duplicated_lines as f64 / totals.lines as f64) * 100.0
+            } else {
+                0.0
+            },
+            clone_groups_below_min_occurrences: carried.clone_groups_below_min_occurrences,
+            clone_groups_ignored: carried.clone_groups_ignored,
+            near_candidates_skipped: carried.near_candidates_skipped,
+        }
+    }
+}
+
+/// Statistics of `groups`, with every instance of each group, against
+/// `totals`.
+#[must_use]
+pub(crate) fn duplication_stats(
+    groups: &[CloneGroup],
+    totals: CorpusTotals,
+    carried: CarriedCounters,
+) -> DuplicationStats {
+    let mut coverage = CloneCoverage::default();
+    for group in groups {
+        coverage.add_group(&group.instances, group.token_count);
+    }
+    coverage.into_stats(totals, carried)
+}
+
+/// Number of lines that the inclusive ranges cover. Sorts `ranges`.
+fn count_covered_lines(ranges: &mut [(usize, usize)]) -> usize {
+    ranges.sort_unstable();
+    let Some(&(mut current_start, mut current_end)) = ranges.first() else {
+        return 0;
+    };
+
+    let mut covered = 0usize;
+    for &(start, end) in &ranges[1..] {
+        if start <= current_end.saturating_add(1) {
+            current_end = current_end.max(end);
+            continue;
+        }
+
+        covered += current_end - current_start + 1;
+        (current_start, current_end) = (start, end);
+    }
+
+    covered + current_end - current_start + 1
+}
+
 /// The scope of one duplication run, as the surface resolved it.
 ///
 /// Every field is optional. A field that is `None` does not narrow the run.
@@ -134,8 +284,8 @@ pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
 
 /// Recompute duplication statistics after clone groups have been filtered.
 ///
-/// Uses per-file line deduplication, matching the detector's stats model, so
-/// overlapping clone instances do not inflate the duplicated line count.
+/// Uses [`CloneCoverage`], as the detector does, so overlapping clone
+/// instances do not inflate the duplicated line count.
 ///
 /// `clone_families` is read from `report.clone_families`, so a scope filter
 /// must call [`refresh_clone_families`] before this. A presentation cap such
@@ -143,44 +293,16 @@ pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
 /// keeps describing the corpus the run measured.
 #[must_use]
 pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
-    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
-    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
-    let mut duplicated_tokens = 0usize;
-    let mut clone_instances = 0usize;
-
-    for group in &report.clone_groups {
-        for instance in &group.instances {
-            files_with_clones.insert(&instance.file);
-            clone_instances += 1;
-            let lines = file_dup_lines.entry(&instance.file).or_default();
-            for line in instance.start_line..=instance.end_line {
-                lines.insert(line);
-            }
-        }
-        duplicated_tokens += group.token_count * group.instances.len().saturating_sub(1);
-    }
-
-    let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
-
-    DuplicationStats {
-        total_files: report.stats.total_files,
-        files_with_clones: files_with_clones.len(),
-        total_lines: report.stats.total_lines,
-        duplicated_lines,
-        total_tokens: report.stats.total_tokens,
-        duplicated_tokens: duplicated_tokens.min(report.stats.total_tokens),
-        clone_groups: report.clone_groups.len(),
-        clone_families: report.clone_families.len(),
-        clone_instances,
-        duplication_percentage: if report.stats.total_lines > 0 {
-            (duplicated_lines as f64 / report.stats.total_lines as f64) * 100.0
-        } else {
-            0.0
+    duplication_stats(
+        &report.clone_groups,
+        CorpusTotals::of(&report.stats),
+        CarriedCounters {
+            clone_families: report.clone_families.len(),
+            clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
+            clone_groups_ignored: report.stats.clone_groups_ignored,
+            near_candidates_skipped: report.stats.near_candidates_skipped,
         },
-        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
-        clone_groups_ignored: report.stats.clone_groups_ignored,
-        near_candidates_skipped: report.stats.near_candidates_skipped,
-    }
+    )
 }
 
 /// Compare JS/TS sources for audit-safe reuse of the current analysis at base.
@@ -365,5 +487,126 @@ mod tests {
 
         assert!(fingerprint.starts_with(FINGERPRINT_PREFIX));
         assert!(fingerprints.find_group(&groups, &fingerprint).is_some());
+    }
+
+    fn group(instances: Vec<CloneInstance>, token_count: usize) -> CloneGroup {
+        CloneGroup {
+            instances,
+            token_count,
+            line_count: 0,
+            similarity: None,
+        }
+    }
+
+    const fn totals(files: usize, lines: usize, tokens: usize) -> CorpusTotals {
+        CorpusTotals {
+            files,
+            lines,
+            tokens,
+        }
+    }
+
+    #[test]
+    fn duplication_stats_matches_a_line_set_reference() {
+        let groups = vec![
+            group(
+                vec![instance("src/a.ts", 1, 10), instance("src/a.ts", 5, 12)],
+                10,
+            ),
+            group(
+                vec![instance("src/a.ts", 20, 24), instance("src/a.ts", 25, 30)],
+                10,
+            ),
+            group(
+                vec![instance("src/a.ts", 40, 60), instance("src/a.ts", 45, 50)],
+                10,
+            ),
+            group(
+                vec![instance("src/a.ts", 9, 3), instance("src/d.ts", 9, 3)],
+                10,
+            ),
+            group(
+                vec![instance("src/a.ts", 70, 75), instance("src/a.ts", 70, 75)],
+                10,
+            ),
+            group(
+                vec![instance("src/b.ts", 1, 4), instance("src/c.ts", 3, 9)],
+                10,
+            ),
+        ];
+
+        let mut covered: FxHashSet<(&Path, usize)> = FxHashSet::default();
+        let mut files: FxHashSet<&Path> = FxHashSet::default();
+        for group in &groups {
+            for instance in &group.instances {
+                files.insert(&instance.file);
+                for line in instance.start_line..=instance.end_line {
+                    covered.insert((&instance.file, line));
+                }
+            }
+        }
+
+        let stats = duplication_stats(
+            &groups,
+            totals(4, 1_000, 10_000),
+            CarriedCounters::default(),
+        );
+
+        assert_eq!(stats.duplicated_lines, covered.len());
+        assert_eq!(stats.files_with_clones, files.len());
+    }
+
+    #[test]
+    fn duplication_stats_clamps_tokens_and_guards_zero_lines() {
+        let groups = vec![group(
+            vec![
+                instance("src/a.ts", 1, 5),
+                instance("src/b.ts", 1, 5),
+                instance("src/c.ts", 1, 5),
+            ],
+            1_000,
+        )];
+
+        let stats = duplication_stats(&groups, totals(3, 0, 500), CarriedCounters::default());
+
+        assert!(stats.duplication_percentage.abs() < f64::EPSILON);
+        assert_eq!(stats.duplicated_tokens, 500);
+    }
+
+    #[test]
+    fn duplication_stats_copies_carried_counters() {
+        let carried = CarriedCounters {
+            clone_families: 1,
+            clone_groups_below_min_occurrences: 2,
+            clone_groups_ignored: 3,
+            near_candidates_skipped: 4,
+        };
+
+        let stats = duplication_stats(&[], totals(1, 10, 100), carried);
+
+        assert_eq!(stats.clone_families, 1);
+        assert_eq!(stats.clone_groups_below_min_occurrences, 2);
+        assert_eq!(stats.clone_groups_ignored, 3);
+        assert_eq!(stats.near_candidates_skipped, 4);
+    }
+
+    #[test]
+    fn clone_coverage_counts_only_the_instances_it_receives() {
+        let clone_group = group(
+            vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 20, 40)],
+            50,
+        );
+        let mut coverage = CloneCoverage::default();
+        coverage.add_group(
+            clone_group.instances.iter().take(1),
+            clone_group.token_count,
+        );
+
+        let stats = coverage.into_stats(totals(2, 100, 1_000), CarriedCounters::default());
+
+        assert_eq!(stats.clone_groups, 1);
+        assert_eq!(stats.clone_instances, 1);
+        assert_eq!(stats.duplicated_tokens, 0);
+        assert_eq!(stats.duplicated_lines, 10);
     }
 }
