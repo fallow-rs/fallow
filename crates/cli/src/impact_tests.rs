@@ -1563,7 +1563,7 @@ fn resolve_enabled_precedence_table() {
     assert_eq!(resolve_enabled(&never), (false, EnabledSource::Default));
 
     // never-asked + global default on => on (User).
-    assert!(set_global_default(true));
+    assert!(set_global_default(true).unwrap());
     assert_eq!(resolve_enabled(&never), (true, EnabledSource::User));
     // a per-repo disable still wins over the global default.
     assert_eq!(
@@ -1575,7 +1575,7 @@ fn resolve_enabled_precedence_table() {
 #[test]
 fn human_report_explains_user_global_default() {
     let (_config, _dir) = test_env();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     // A never-asked store resolved on a project: enabled via the global default.
     let report = build_report(&ImpactStore::default());
     assert_eq!(report.enabled_source, EnabledSource::User);
@@ -1598,10 +1598,10 @@ fn human_report_explains_user_global_default() {
 fn global_default_round_trips() {
     let (_config, _dir) = test_env();
     assert!(!load_global_default());
-    assert!(set_global_default(true));
+    assert!(set_global_default(true).unwrap());
     assert!(load_global_default());
-    assert!(!set_global_default(true)); // unchanged
-    assert!(set_global_default(false));
+    assert!(!set_global_default(true).unwrap()); // unchanged
+    assert!(set_global_default(false).unwrap());
     assert!(!load_global_default());
 }
 
@@ -1609,7 +1609,7 @@ fn global_default_round_trips() {
 fn global_default_records_without_per_repo_enable() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     // No `enable(root)` call: the global default alone should activate.
     record_v1(
         root,
@@ -1678,7 +1678,7 @@ fn reset_removes_only_this_project() {
 fn reset_all_clears_dir_but_keeps_global_default() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     enable(root).unwrap();
     assert!(load(root).enabled);
     assert!(reset_all());
@@ -2959,7 +2959,7 @@ fn statusline_loader_reports_corrupt_legacy_store() {
 #[test]
 fn resolve_enabled_user_source_appears_in_report() {
     let (_config, _dir) = test_env();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     let never_asked = ImpactStore::default();
     let (enabled, source) = resolve_enabled(&never_asked);
     assert!(enabled);
@@ -3358,7 +3358,7 @@ fn audit_record(root: &Path) -> Result<(), String> {
 fn record_leaves_an_unparsable_store_unchanged() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    let _ = set_global_default(true);
+    set_global_default(true).unwrap();
     seed_store_raw(root, b"{not json");
     assert!(audit_record(root).is_err());
     assert_eq!(raw_store(root), "{not json");
@@ -3515,4 +3515,14 @@ fn enable_does_not_replace_a_store_that_is_not_utf8() {
         std::fs::read(store_path(root).unwrap()).unwrap(),
         [0xff, 0xfe]
     );
+}
+
+#[test]
+fn global_default_fails_without_a_config_dir() {
+    let _cfg = aggregate_env();
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = None);
+    assert!(matches!(
+        set_global_default(true),
+        Err(StoreWriteError::NoConfigDir)
+    ));
 }

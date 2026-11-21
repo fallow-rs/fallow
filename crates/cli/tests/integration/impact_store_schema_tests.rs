@@ -754,3 +754,23 @@ fn impact_changes_exit_2_when_the_store_folder_is_a_file() {
         }
     }
 }
+
+#[test]
+fn impact_default_exits_2_when_the_config_folder_is_a_file() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    for base in config_bases(home.path()) {
+        std::fs::create_dir_all(&base).expect("config base");
+        std::fs::write(base.join("fallow"), b"").expect("blocker file");
+    }
+    let output = run_isolated(home.path(), &["impact", "default", "on"]);
+    assert_eq!(
+        output.code, 2,
+        "impact default must fail when the setting cannot be saved: {} {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        !output.stdout.contains("default"),
+        "impact default must not print success: {}",
+        output.stdout
+    );
+}

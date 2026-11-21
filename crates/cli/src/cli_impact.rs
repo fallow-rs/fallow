@@ -94,7 +94,7 @@ pub fn dispatch_impact(
     match subcommand {
         Some(ImpactCli::Enable) => impact_enable(root, quiet, output),
         Some(ImpactCli::Disable) => impact_disable(root, quiet, output),
-        Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
+        Some(ImpactCli::Default { state }) => impact_set_default(state, quiet, output),
         Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
         Some(ImpactCli::Statusline) => render_impact_statusline(root),
         Some(ImpactCli::Status) if matches!(output, fallow_config::OutputFormat::Human) => {
@@ -179,9 +179,16 @@ fn impact_disable(root: &Path, quiet: bool, output: fallow_config::OutputFormat)
 }
 
 /// Set the user-global Impact default for new projects.
-fn impact_set_default(state: ToggleState, quiet: bool) -> ExitCode {
+fn impact_set_default(
+    state: ToggleState,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
     let on = matches!(state, ToggleState::On);
-    let changed = impact::set_global_default(on);
+    let changed = match impact::set_global_default(on) {
+        Ok(changed) => changed,
+        Err(err) => return refuse_store_change(&err, output),
+    };
     if !quiet {
         let verb = if on { "on" } else { "off" };
         let body = if on {

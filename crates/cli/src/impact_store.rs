@@ -163,22 +163,28 @@ pub(super) fn load_global_default() -> bool {
 }
 
 /// Set the user-global default. Returns whether the value changed.
-pub fn set_global_default(on: bool) -> bool {
+///
+/// # Errors
+///
+/// Returns [`StoreWriteError`] when no config folder resolves or the write
+/// fails.
+pub fn set_global_default(on: bool) -> Result<bool, StoreWriteError> {
     let was = load_global_default();
-    if let Some(path) = global_config_path() {
-        if let Some(parent) = path.parent()
-            && std::fs::create_dir_all(parent).is_err()
-        {
-            return false;
-        }
-        let config = GlobalImpactConfig {
-            default_enabled: on,
-        };
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            let _ = fallow_config::atomic_write(&path, json.as_bytes());
-        }
+    let path = global_config_path().ok_or(StoreWriteError::NoConfigDir)?;
+    let io = |source| StoreWriteError::Io {
+        path: path.clone(),
+        source,
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(io)?;
     }
-    was != on
+    let config = GlobalImpactConfig {
+        default_enabled: on,
+    };
+    let json =
+        serde_json::to_string_pretty(&config).map_err(|err| io(std::io::Error::other(err)))?;
+    fallow_config::atomic_write(&path, json.as_bytes()).map_err(io)?;
+    Ok(was != on)
 }
 
 /// The per-project store directory (`<config-dir>/fallow/impact/`), for the
