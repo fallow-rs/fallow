@@ -100,9 +100,9 @@ pub enum EmailMode {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnershipConfig {
-    /// Glob patterns (matched against the author email local-part) that
-    /// identify bot or service-account commits to exclude from ownership
-    /// signals. Overrides the defaults entirely when set.
+    /// Glob patterns that identify bot or service-account commits to exclude
+    /// from ownership signals. A pattern matches the local part of the author
+    /// email or the full author value. Overrides the defaults entirely when set.
     #[serde(default = "default_bot_patterns")]
     pub bot_patterns: Vec<String>,
 
