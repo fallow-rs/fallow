@@ -142,16 +142,20 @@ src/admin/
     assert!(co.has_sections(), "parser should detect section headers");
 
     let billing = co
-        .section_and_owners_of(Path::new("src/billing/invoice.ts"))
+        .match_path(Path::new("src/billing/invoice.ts"))
+        .map(|m| (m.section, m.section_owners))
         .expect("billing match");
     let notifications = co
-        .section_and_owners_of(Path::new("src/notifications/email.ts"))
+        .match_path(Path::new("src/notifications/email.ts"))
+        .map(|m| (m.section, m.section_owners))
         .expect("notifications match");
     let search = co
-        .section_and_owners_of(Path::new("src/search/indexer.ts"))
+        .match_path(Path::new("src/search/indexer.ts"))
+        .map(|m| (m.section, m.section_owners))
         .expect("search match");
     let admin = co
-        .section_and_owners_of(Path::new("src/admin/dashboard.ts"))
+        .match_path(Path::new("src/admin/dashboard.ts"))
+        .map(|m| (m.section, m.section_owners))
         .expect("admin match");
 
     assert_eq!(billing.0, Some("billing"));

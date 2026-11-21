@@ -241,52 +241,6 @@ impl CodeOwners {
         self.match_path(relative_path).map(|m| m.owner_count)
     }
 
-    /// Look up the primary owner and the original CODEOWNERS pattern for a path.
-    ///
-    /// Returns `(owner, pattern)` from the last matching rule, or `None` if
-    /// no rule matches or the last matching rule is a GitLab-style exclusion.
-    /// The pattern is the raw string from the CODEOWNERS file (e.g. `/src/`
-    /// or `*.ts`).
-    pub fn owner_and_rule_of(&self, relative_path: &Path) -> Option<(&str, &str)> {
-        let m = self.match_path(relative_path)?;
-        Some((m.owner?, m.pattern))
-    }
-
-    /// Look up the GitLab CODEOWNERS section that owns a file.
-    ///
-    /// Returns `Some(Some(name))` when the last matching rule is inside a
-    /// named section, `Some(None)` when the rule appears before any section
-    /// header, or `None` when no rule matches or the last match is a
-    /// GitLab-style exclusion.
-    pub fn section_of(&self, relative_path: &Path) -> Option<Option<&str>> {
-        let m = self.match_path(relative_path)?;
-        m.owner.map(|_| m.section)
-    }
-
-    /// Look up the section name plus the section's default owners for a file.
-    ///
-    /// Used by `--group-by section` to attach owner metadata to each group.
-    /// Returns `None` when no rule matches or the last match is a negation.
-    /// The returned owner slice is empty for rules declared outside any
-    /// section or for sections that declare no default owners.
-    pub fn section_and_owners_of(&self, relative_path: &Path) -> Option<(Option<&str>, &[String])> {
-        let m = self.match_path(relative_path)?;
-        m.owner.map(|_| (m.section, m.section_owners))
-    }
-
-    /// Look up section, section owners, and the raw CODEOWNERS pattern in one
-    /// glob pass.
-    ///
-    /// Used by `--group-by section` display paths that need both the section
-    /// key and the matching rule text without walking the `GlobSet` twice.
-    pub fn section_owners_and_rule_of(
-        &self,
-        relative_path: &Path,
-    ) -> Option<(Option<&str>, &[String], &str)> {
-        let m = self.match_path(relative_path)?;
-        m.owner.map(|_| (m.section, m.section_owners, m.pattern))
-    }
-
     /// Whether the parsed file contains at least one GitLab section header.
     ///
     /// `--group-by section` errors out when this is false, since every file
@@ -769,7 +723,7 @@ mod tests {
                 Some("@escaped")
             );
             assert_eq!(
-                owners.section_of(Path::new("file1x")),
+                owners.match_path(Path::new("file1x")).map(|m| m.section),
                 Some(Some("Overrides"))
             );
         }
@@ -891,28 +845,31 @@ mod tests {
     }
 
     #[test]
-    fn owner_and_rule_of_returns_owner_and_pattern() {
+    fn match_path_returns_owner_and_pattern() {
         let content = "* @default\n/src/ @frontend\n*.rs @rust-team\n";
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(
-            co.owner_and_rule_of(Path::new("src/app.ts")),
-            Some(("@frontend", "/src/"))
+            co.match_path(Path::new("src/app.ts"))
+                .map(|m| (m.owner, m.pattern)),
+            Some((Some("@frontend"), "/src/"))
         );
         assert_eq!(
-            co.owner_and_rule_of(Path::new("src/lib.rs")),
-            Some(("@rust-team", "*.rs"))
+            co.match_path(Path::new("src/lib.rs"))
+                .map(|m| (m.owner, m.pattern)),
+            Some((Some("@rust-team"), "*.rs"))
         );
         assert_eq!(
-            co.owner_and_rule_of(Path::new("README.md")),
-            Some(("@default", "*"))
+            co.match_path(Path::new("README.md"))
+                .map(|m| (m.owner, m.pattern)),
+            Some((Some("@default"), "*"))
         );
     }
 
     #[test]
-    fn owner_and_rule_of_no_match() {
+    fn match_path_no_match() {
         let content = "/src/ @frontend\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owner_and_rule_of(Path::new("README.md")), None);
+        assert_eq!(co.match_path(Path::new("README.md")), None);
     }
 
     #[test]
@@ -1138,10 +1095,13 @@ src/components/
         let content = "* @default\n!src/vendor/\n";
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(
-            co.owner_and_rule_of(Path::new("README.md")),
-            Some(("@default", "*"))
+            co.match_path(Path::new("README.md"))
+                .map(|m| (m.owner, m.pattern)),
+            Some((Some("@default"), "*"))
         );
-        assert_eq!(co.owner_and_rule_of(Path::new("src/vendor/lib.js")), None);
+        let excluded = co.match_path(Path::new("src/vendor/lib.js"));
+        assert!(excluded.is_some());
+        assert_eq!(excluded.and_then(|m| m.owner), None);
     }
 
     #[test]
@@ -1149,8 +1109,9 @@ src/components/
         let content = "* @default\n/docs/Security\\ Release.md @security @release\n";
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(
-            co.owner_and_rule_of(Path::new("docs/Security Release.md")),
-            Some(("@security", "/docs/Security\\ Release.md"))
+            co.match_path(Path::new("docs/Security Release.md"))
+                .map(|m| (m.owner, m.pattern)),
+            Some((Some("@security"), "/docs/Security\\ Release.md"))
         );
         assert_eq!(
             co.owner_count_of(Path::new("docs/Security Release.md")),
@@ -1238,7 +1199,7 @@ src/components/
     }
 
     #[test]
-    fn section_of_returns_named_section() {
+    fn match_path_returns_named_section() {
         let content = "\
             [Billing] @billing-team\n\
             src/billing/\n\
@@ -1247,39 +1208,45 @@ src/components/
         ";
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(
-            co.section_of(Path::new("src/billing/invoice.ts")),
+            co.match_path(Path::new("src/billing/invoice.ts"))
+                .map(|m| m.section),
             Some(Some("Billing"))
         );
         assert_eq!(
-            co.section_of(Path::new("src/search/indexer.ts")),
+            co.match_path(Path::new("src/search/indexer.ts"))
+                .map(|m| m.section),
             Some(Some("Search"))
         );
     }
 
     #[test]
-    fn section_of_returns_some_none_for_pre_section_rule() {
+    fn match_path_returns_no_section_for_pre_section_rule() {
         let content = "\
             * @default\n\
             [Billing] @billing-team\n\
             src/billing/\n\
         ";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.section_of(Path::new("README.md")), Some(None));
         assert_eq!(
-            co.section_of(Path::new("src/billing/invoice.ts")),
+            co.match_path(Path::new("README.md")).map(|m| m.section),
+            Some(None)
+        );
+        assert_eq!(
+            co.match_path(Path::new("src/billing/invoice.ts"))
+                .map(|m| m.section),
             Some(Some("Billing"))
         );
     }
 
     #[test]
-    fn section_of_returns_none_for_unmatched_path() {
+    fn match_path_returns_none_for_unmatched_path() {
         let content = "[Billing] @billing-team\nsrc/billing/\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.section_of(Path::new("src/other/x.ts")), None);
+        assert_eq!(co.match_path(Path::new("src/other/x.ts")), None);
     }
 
     #[test]
-    fn section_of_returns_none_for_negation_last_match() {
+    fn match_path_returns_no_owner_for_negation_last_match() {
         let content = "\
             [Billing] @billing-team\n\
             src/billing/\n\
@@ -1287,21 +1254,25 @@ src/components/
         ";
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(
-            co.section_of(Path::new("src/billing/invoice.ts")),
+            co.match_path(Path::new("src/billing/invoice.ts"))
+                .map(|m| m.section),
             Some(Some("Billing"))
         );
-        assert_eq!(co.section_of(Path::new("src/billing/vendor/lib.js")), None);
+        let excluded = co.match_path(Path::new("src/billing/vendor/lib.js"));
+        assert!(excluded.is_some());
+        assert_eq!(excluded.and_then(|m| m.owner), None);
     }
 
     #[test]
-    fn section_and_owners_of_returns_section_defaults() {
+    fn match_path_returns_section_defaults() {
         let content = "\
             [Billing] @core-reviewers @alice\n\
             src/billing/\n\
         ";
         let co = CodeOwners::parse(content).unwrap();
         let (section, owners) = co
-            .section_and_owners_of(Path::new("src/billing/invoice.ts"))
+            .match_path(Path::new("src/billing/invoice.ts"))
+            .map(|m| (m.section, m.section_owners))
             .unwrap();
         assert_eq!(section, Some("Billing"));
         assert_eq!(
@@ -1311,7 +1282,7 @@ src/components/
     }
 
     #[test]
-    fn section_and_owners_of_same_owners_distinct_sections() {
+    fn match_path_same_owners_distinct_sections() {
         let content = "\
             [billing] @core-reviewers @alice @bob\n\
             src/billing/\n\
@@ -1320,20 +1291,25 @@ src/components/
         ";
         let co = CodeOwners::parse(content).unwrap();
         let (billing_sec, _) = co
-            .section_and_owners_of(Path::new("src/billing/invoice.ts"))
+            .match_path(Path::new("src/billing/invoice.ts"))
+            .map(|m| (m.section, m.section_owners))
             .unwrap();
         let (notifications_sec, _) = co
-            .section_and_owners_of(Path::new("src/notifications/email.ts"))
+            .match_path(Path::new("src/notifications/email.ts"))
+            .map(|m| (m.section, m.section_owners))
             .unwrap();
         assert_eq!(billing_sec, Some("billing"));
         assert_eq!(notifications_sec, Some("notifications"));
     }
 
     #[test]
-    fn section_and_owners_of_empty_owners_for_pre_section_rule() {
+    fn match_path_empty_owners_for_pre_section_rule() {
         let content = "* @default\n[Billing]\nsrc/billing/ @billing\n";
         let co = CodeOwners::parse(content).unwrap();
-        let (section, owners) = co.section_and_owners_of(Path::new("README.md")).unwrap();
+        let (section, owners) = co
+            .match_path(Path::new("README.md"))
+            .map(|m| (m.section, m.section_owners))
+            .unwrap();
         assert_eq!(section, None);
         assert!(owners.is_empty());
     }
@@ -1393,8 +1369,9 @@ src/components/
             Some("@docs-team")
         );
         assert_eq!(
-            co.owner_and_rule_of(Path::new("docs/guide/intro.md")),
-            Some(("@docs-team", "/docs"))
+            co.match_path(Path::new("docs/guide/intro.md"))
+                .map(|m| (m.owner, m.pattern)),
+            Some((Some("@docs-team"), "/docs"))
         );
         assert_eq!(co.owner_count_of(Path::new("docs/a.md")), Some(1));
     }
@@ -1516,11 +1493,16 @@ src/components/
         ";
         let co = CodeOwners::parse(content).unwrap();
         assert_eq!(
-            co.section_owners_and_rule_of(Path::new("src/ui/button/a.tsx")),
+            co.match_path(Path::new("src/ui/button/a.tsx")).map(|m| (
+                m.section,
+                m.section_owners,
+                m.pattern
+            )),
             Some((Some("Frontend"), ["@ui".to_string()].as_slice(), "/src/ui"))
         );
         assert_eq!(
-            co.section_of(Path::new("src/api/users.ts")),
+            co.match_path(Path::new("src/api/users.ts"))
+                .map(|m| m.section),
             Some(Some("Backend"))
         );
         assert_eq!(
