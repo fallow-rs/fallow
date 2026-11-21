@@ -11,9 +11,7 @@ use std::process::Command;
 
 use serde_json::json;
 
-use crate::common::{
-    CommandOutput, exit_code, fallow_command, required_array, type_aware_sidecar_command,
-};
+use crate::common::{CommandOutput, fallow_command, required_array, type_aware_sidecar_command};
 
 /// How a command sets one environment variable.
 #[derive(Debug, PartialEq, Eq)]
@@ -65,7 +63,7 @@ fn exit_code_rejects_a_signal_exit() {
         .args(["-c", "kill -ABRT $$"])
         .output()
         .expect("run sh");
-    let _ = exit_code(&output);
+    let _ = crate::common::exit_code(&output);
 }
 
 #[cfg(unix)]
@@ -75,7 +73,7 @@ fn exit_code_returns_the_code_of_a_normal_exit() {
         .args(["-c", "exit 1"])
         .output()
         .expect("run sh");
-    assert_eq!(exit_code(&output), 1);
+    assert_eq!(crate::common::exit_code(&output), 1);
 }
 
 #[test]
