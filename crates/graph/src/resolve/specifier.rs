@@ -467,10 +467,7 @@ pub(super) fn merged_tsconfig_cached(
         .merged(path, &|config| read_tsconfig_json_cached(ctx, config))
 }
 
-pub(super) fn read_tsconfig_json_cached(
-    ctx: &ResolveContext<'_>,
-    path: &Path,
-) -> Option<Arc<Value>> {
+fn read_tsconfig_json_cached(ctx: &ResolveContext<'_>, path: &Path) -> Option<Arc<Value>> {
     ctx.tsconfig_cache.json(path, read_tsconfig_json)
 }
 

@@ -55,6 +55,6 @@ fn tsconfig_entry_glob(base_dir: &Path, value: &str) -> String {
 
 /// Join a tsconfig `files`, `include` or `exclude` entry to its directory
 /// without `./` and `..`, as the globs match path text (issue #3946).
-pub(super) fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
+fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
     normalize_path_lexically(&base_dir.join(path))
 }
