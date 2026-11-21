@@ -314,3 +314,35 @@ fn stable_id_of_a_client_server_leak_follows_the_secret_names() {
         leak_id("export const v = process.env.DATABASE_PASSWORD;\n")
     );
 }
+
+/// The stable id of a direct client-server leak, where the client file reads
+/// the env secret itself, also hashes the secret names. A stored verdict for
+/// one secret then does not cover a secret that a later edit adds.
+#[test]
+fn stable_id_of_a_direct_client_server_leak_follows_the_secret_names() {
+    let leak_id = |reads: &str| {
+        let source = format!("\"use client\";\n{reads}export const C = () => null;\n");
+        let findings = findings_for("src/client.tsx", &source);
+        assert_eq!(findings.len(), 1, "findings: {findings:?}");
+        findings[0]["stable_finding_id"]
+            .as_str()
+            .expect("stable id")
+            .to_owned()
+    };
+    let api = leak_id("const a = process.env.API_SECRET_KEY;\n");
+    assert_eq!(
+        api,
+        leak_id("// a comment\nconst a = process.env.API_SECRET_KEY;\n")
+    );
+    let both = leak_id(
+        "const a = process.env.API_SECRET_KEY;\nconst b = process.env.DATABASE_PASSWORD;\n",
+    );
+    assert_ne!(api, both);
+    assert_eq!(
+        both,
+        leak_id(
+            "const b = process.env.DATABASE_PASSWORD;\nconst a = process.env.API_SECRET_KEY;\nconst c = process.env.API_SECRET_KEY;\n"
+        )
+    );
+    assert_ne!(api, leak_id("const b = process.env.DATABASE_PASSWORD;\n"));
+}

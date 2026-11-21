@@ -888,7 +888,9 @@ fn build_direct_finding(
         hop.col,
         Some(SECRET_LEAK_CATEGORY.to_owned()),
     );
-    build_client_server_leak_finding(evidence, vec![hop], candidate)
+    let mut finding = build_client_server_leak_finding(evidence, vec![hop], candidate);
+    finding.stable_id_input = Some(SecurityStableIdInput::SecretReads(var_list));
+    finding
 }
 
 /// Build a finding for the direct SERVER-ONLY case: a `"use client"` file that is
