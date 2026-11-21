@@ -212,15 +212,18 @@ fn load_diff_index_from_reader(
 
 fn loaded_from_text(text: String, label: &str, quiet: bool) -> LoadedDiff {
     let index = DiffIndex::from_unified_diff(&text);
-    // Not a stand-down: the filter IS applied and its scope is empty, so every
-    // source-anchored finding filters out and the report reads clean. A
-    // different fact from the ones above, and deliberately still only advice.
+    // Not a stand-down: the filter is applied with no added line, so the
+    // findings on source lines of the diff filter out. Dependency findings
+    // bypass the filter, and a finding anchored to a whole file (an unused file,
+    // a cycle) still passes when the diff touches that file, for example
+    // through a rename. This warning is only advice.
     if !quiet && index.added_line_count() == 0 {
         eprintln!(
-            "fallow: warning [diff-file]: {label} parsed 0 added lines; \
-             no findings will pass the diff filter. Verify the input is a unified diff \
-             (look for `+++ b/<path>` headers). Pure-rename, binary-only, and \
-             deletion-only diffs also produce empty indices."
+            "fallow: warning [diff-file]: {label} parsed 0 added lines, so every finding \
+             on a source line filters out. Dependency findings and findings on a whole \
+             touched file (an unused file, a cycle) still pass. Verify that the input is \
+             a unified diff (look for `+++ b/<path>` headers). Pure-rename, binary-only, \
+             and deletion-only diffs also add no lines."
         );
     }
     LoadedDiff {
