@@ -19215,6 +19215,10 @@
           "type": "string",
           "description": "Project-root-relative, forward-slash path to the SFC."
         },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the first definition of one of the classes. A report\nsaved before the field existed reads as `0`."
+        },
         "classes": {
           "type": "array",
           "items": {

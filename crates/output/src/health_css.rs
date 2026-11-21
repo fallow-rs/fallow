@@ -576,6 +576,10 @@ pub struct UnresolvedClassReference {
 pub struct ScopedUnusedClasses {
     /// Project-root-relative, forward-slash path to the SFC.
     pub path: String,
+    /// 1-based line of the first definition of one of the classes. A report
+    /// saved before the field existed reads as `0`.
+    #[serde(default)]
+    pub line: u32,
     /// The scoped class names with no use elsewhere in the component, sorted.
     pub classes: Vec<String>,
     /// Read-only verification step(s) an agent can run before removing the

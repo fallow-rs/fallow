@@ -84,11 +84,6 @@ const KNOWN_GAPS: &[(&str, Check, &str)] = &[
         "the undefined-keyframes finding has no line, so it reports line 1",
     ),
     (
-        "css-dead-surface",
-        Check::Anchor,
-        "the scoped-unused-class finding has no line, so it reports line 1",
-    ),
-    (
         "dev-dependency-in-production",
         Check::Output(Format::Compact),
         "the compact line names the package only, with no file and no line",

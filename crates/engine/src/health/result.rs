@@ -666,9 +666,10 @@ fn append_scoped_unused_findings(
     ctx: &StylingFindingContext<'_, '_>,
 ) {
     for candidate in &ctx.css.scoped_unused {
+        let line = candidate.line.max(1);
         if ctx.is_suppressed(
             &candidate.path,
-            1,
+            line,
             fallow_types::suppress::IssueKind::CssDeadSurface,
         ) {
             continue;
@@ -678,7 +679,7 @@ fn append_scoped_unused_findings(
             code: "css-dead-surface".to_string(),
             sub_kind: "scoped-unused-class".to_string(),
             path: candidate.path.clone(),
-            line: 1,
+            line,
             value: format!(
                 "{} scoped {} unused: {}",
                 candidate.classes.len(),

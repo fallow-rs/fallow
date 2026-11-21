@@ -12496,6 +12496,11 @@ export interface ScopedUnusedClasses {
  */
 path: string
 /**
+ * 1-based line of the first definition of one of the classes. A report
+ * saved before the field existed reads as `0`.
+ */
+line?: number
+/**
  * The scoped class names with no use elsewhere in the component, sorted.
  */
 classes: string[]
