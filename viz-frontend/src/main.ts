@@ -569,9 +569,20 @@ const init = (): void => {
     keyActions.set(String(index + 1), () => setLens(lens));
   });
 
+  const searchEnter = (): void => {
+    const match = graphFocusSearch(state);
+    if (match === null) return;
+    selectRoad(state, null);
+    selectFile(match);
+    // selectFile moves focus to the panel in a frame callback. Take it back
+    // in the next callback, so the next keys refine the query instead of
+    // running shortcuts.
+    requestAnimationFrame(() => refs?.search.focus());
+  };
+
   const handleInputKey = (event: KeyboardEvent): void => {
     if (event.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
-      graphFocusSearch(state);
+      searchEnter();
     }
   };
 

@@ -19,7 +19,7 @@ import {
 } from "./shared";
 import type { AppState } from "../state";
 import { assignCoordinates, assignLayers, partitionEdges, tarjanSCC, type MetaEdge } from "./build";
-import { centerOnFile, graphHandleClick, reconcileGraphView } from "./interact";
+import { centerOnFile, graphFocusSearch, graphHandleClick, reconcileGraphView } from "./interact";
 
 /** Canvas text metrics stub: every glyph is 7px wide. */
 const ctx = {
@@ -434,5 +434,22 @@ describe("graph view state", () => {
     const connected = centerState();
     centerOnFile(connected, 0);
     expect(standaloneVisible(connected, getGVS(connected))).toBe(false);
+  });
+
+  it("selects the shortest other search match while a file is selected", () => {
+    const state = viewState();
+    state.selected = 0;
+    state.data.files[1].path = "y.ts";
+    state.searchMatches = new Set([2, 1]);
+    expect(graphFocusSearch(state)).toBe(1);
+
+    state.data.files[0].path = "x.ts";
+    state.searchMatches = new Set([0, 2]);
+    expect(graphFocusSearch(state)).toBe(2);
+
+    state.searchMatches = new Set([0]);
+    expect(graphFocusSearch(state)).toBeNull();
+    state.searchMatches = new Set();
+    expect(graphFocusSearch(state)).toBeNull();
   });
 });
