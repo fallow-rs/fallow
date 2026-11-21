@@ -605,6 +605,23 @@ then skips the credit rule for TypeScript files below the directory of that
 tsconfig. The check uses the directory only, not the `include` of the
 tsconfig.
 
+The same analysis pass (`analyze/jsx_runtime_credits.rs`) also credits `react`
+for a flagged module in two more cases, without a bundler config:
+
+- The module is below a tsconfig with `jsx` set to `react-jsx` or
+  `react-jsxdev` and no `jsxImportSource`. The TypeScript plugin records
+  each tsconfig directory with a JSX setting in `tsconfig_jsx_dirs`, with
+  `automatic_react` set for this case. For a TypeScript file,
+  the nearest tsconfig with a JSX setting decides, so a deeper tsconfig with
+  `jsxImportSource` or a `preserve` mode removes the credit.
+- The module is in a package where a framework with the automatic runtime is
+  active (`AUTOMATIC_JSX_FRAMEWORK_PLUGINS`, today Next.js).
+
+A tsconfig `jsxImportSource` credits its package in the TypeScript plugin,
+also without a JSX file. The Vitest credit rules stay in the plugin, because
+only the plugin knows the files that each Vite or Vitest config transforms
+and the JSX settings of that config.
+
 The resolver adds the edge to each flagged module that an include glob
 matches and no exclude glob matches, relative to the config directory. A
 relative source resolves from the module first and then from the config

@@ -194,7 +194,10 @@ fn plugin_result_is_empty_only_when_every_field_is_empty() {
             });
         }),
         ("tsconfig_jsx_dirs", |r| {
-            r.tsconfig_jsx_dirs.push(PathBuf::from("/project"));
+            r.tsconfig_jsx_dirs.push(super::registry::TsconfigJsxDir {
+                dir: PathBuf::from("/project"),
+                automatic_react: false,
+            });
         }),
     ];
 

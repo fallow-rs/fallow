@@ -547,9 +547,21 @@ pub struct AggregatedPluginResult {
     /// edge.
     pub jsx_package_credits: Vec<JsxImportSourceRule>,
     /// The directories of the tsconfig files that set the JSX runtime of
-    /// TypeScript files, so Vite does not use the default `react` runtime for
-    /// the TypeScript files below them.
-    pub tsconfig_jsx_dirs: Vec<PathBuf>,
+    /// TypeScript files, each with the runtime that the tsconfig selects.
+    pub tsconfig_jsx_dirs: Vec<TsconfigJsxDir>,
+}
+
+/// The directory of a tsconfig that sets the JSX runtime of the TypeScript
+/// files below it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TsconfigJsxDir {
+    /// The directory of the tsconfig file.
+    pub dir: PathBuf,
+    /// `true` when the tsconfig sets `jsx` to `react-jsx` or `react-jsxdev`
+    /// and no `jsxImportSource`, so a file with JSX imports the `react`
+    /// runtime. `false` when the tsconfig sets `jsxImportSource`, or a `jsx`
+    /// mode that adds no automatic runtime import.
+    pub automatic_react: bool,
 }
 
 /// Append `incoming` string items to `target`, skipping values already present

@@ -197,6 +197,8 @@ mod issue_954_pino_transport_target;
 mod jsdoc_import_tag;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
+#[path = "integration_test/jsx_automatic_runtime.rs"]
+mod jsx_automatic_runtime;
 #[path = "integration_test/jsx_import_source_pragma.rs"]
 mod jsx_import_source_pragma;
 #[path = "integration_test/kibana_framework_plugin.rs"]
