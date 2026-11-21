@@ -959,6 +959,20 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
+      # The base check below decides the job. Drift on the head does not fail
+      # the job, but main fails after the merge until the companion sync lands.
+      - name: Warn when the pull request head needs the companion sync
+        if: github.event_name == 'pull_request'
+        env:
+          FALLOW_SKILLS_DIR: ${{ github.workspace }}/.fallow-skills-src
+        run: |
+          status=0
+          node scripts/vendor-skills.mjs --check || status=$?
+          if [ "$status" -eq 1 ]; then
+            echo "::warning title=Public skills contract::This pull request changes the public skill contract. The merge needs the companion sync. After the merge, run node scripts/sync-skills-companion.mjs --pin <merge commit> and publish its commit with the commands that it prints."
+          elif [ "$status" -ne 0 ]; then
+            echo "::warning title=Public skills contract::The drift check of the pull request head could not run (exit $status)."
+          fi
       - name: Check public skill matches the Fallow source contract
         working-directory: ${{ github.event_name == 'pull_request' && '.fallow-skills-base' || '.' }}
         env:
