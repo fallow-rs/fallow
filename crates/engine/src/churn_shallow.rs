@@ -43,7 +43,9 @@ impl ShallowState {
 }
 
 /// Hash of the `.mailmap` file at the repository top level, or 0 when the
-/// file does not exist or the top level is unknown.
+/// file does not exist, is not a regular file, or the top level is unknown.
+/// Git does not follow a symlinked in-tree `.mailmap`, and a symlink to a
+/// FIFO or a device would block the read.
 #[must_use]
 pub fn mailmap_fingerprint(root: &Path) -> u64 {
     let mut command = crate::git_env::git_command(root);
@@ -57,8 +59,12 @@ pub fn mailmap_fingerprint(root: &Path) -> u64 {
         return 0;
     }
     let toplevel = String::from_utf8_lossy(&output.stdout);
-    std::fs::read(Path::new(toplevel.trim()).join(".mailmap"))
-        .map_or(0, |bytes| xxhash_rust::xxh3::xxh3_64(&bytes))
+    let path = Path::new(toplevel.trim()).join(".mailmap");
+    let is_regular_file = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file());
+    if !is_regular_file {
+        return 0;
+    }
+    std::fs::read(path).map_or(0, |bytes| xxhash_rust::xxh3::xxh3_64(&bytes))
 }
 
 /// Get the full HEAD SHA for cache keying.
@@ -146,6 +152,29 @@ mod tests {
             mailmap: 0,
             earliest_cutoff_secs: cutoff,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mailmap_fingerprint_reads_only_a_regular_file() {
+        let dir = tempfile::tempdir().expect("repo tempdir");
+        let root = dir.path();
+        let status = crate::git_env::git_command(root)
+            .args(["init", "--quiet"])
+            .current_dir(root)
+            .status()
+            .expect("run git init");
+        assert!(status.success());
+        assert_eq!(mailmap_fingerprint(root), 0);
+
+        std::fs::write(root.join("aliases"), "A <a@x.test> <b@x.test>\n").expect("write aliases");
+        std::os::unix::fs::symlink(root.join("aliases"), root.join(".mailmap"))
+            .expect("symlink mailmap");
+        assert_eq!(mailmap_fingerprint(root), 0);
+
+        std::fs::remove_file(root.join(".mailmap")).expect("remove symlink");
+        std::fs::copy(root.join("aliases"), root.join(".mailmap")).expect("copy mailmap");
+        assert_ne!(mailmap_fingerprint(root), 0);
     }
 
     #[test]
