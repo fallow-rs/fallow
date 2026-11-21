@@ -28,7 +28,10 @@ const TEST_NAME: &str =
 
 fn fixture() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    // The session reports paths below the dunce spelling of the root. On
+    // Windows, `Path::canonicalize` gives the `\\?\` spelling, which is not a
+    // prefix of those paths.
+    let root = dunce::canonicalize(dir.path()).unwrap();
     write(
         &root,
         "package.json",
