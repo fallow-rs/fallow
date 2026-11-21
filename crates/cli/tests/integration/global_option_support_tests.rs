@@ -459,7 +459,7 @@ fn check_file(
 /// that window leaves a truncated `.profraw` file, and `cargo llvm-cov` then
 /// fails the merge with "file header is corrupt". So the child first gets
 /// `grace` to end on its own, then SIGTERM, which the signal handler of
-/// `fallow` turns into an `exit`. SIGKILL is only the last resort for a
+/// `fallow` (`crates/cli/src/signal`) turns into an `exit`. SIGKILL is only the last resort for a
 /// child that ignores both.
 fn stop(child: &mut std::process::Child, grace: Duration) -> Option<std::process::ExitStatus> {
     if let Some(status) = wait_for(child, grace) {
@@ -651,7 +651,7 @@ fn each_skipped_command_is_a_supported_pair() {
 /// that does not exist when `with_option` holds. The base run has the extra
 /// arguments too when [`ReadCase::extra_in_base`] holds. The run ends, or it
 /// is stopped after [`READ_TIMEOUT`]. A run whose output names the path gets
-/// [`STOP_GRACE`] to end on its own before it is stopped.
+/// [`STOP_GRACE`] to end on its own before it is stopped, except `watch`.
 fn run_read_case(
     args: &[String],
     case: &ReadCase,
@@ -697,7 +697,10 @@ fn run_read_case(
             break Some(status);
         }
         if with_option && names_path() {
-            break stop(&mut child, STOP_GRACE);
+            // `watch` runs on after it names the path and ends cleanly on
+            // SIGTERM, so only the other commands get the grace time.
+            let watch = args.first().is_some_and(|arg| arg == "watch");
+            break stop(&mut child, if watch { Duration::ZERO } else { STOP_GRACE });
         }
         if start.elapsed() > READ_TIMEOUT {
             break stop(&mut child, Duration::ZERO);
@@ -722,6 +725,8 @@ fn check_missing_path(args: &[String], case: &ReadCase, project: &Path, home: &P
         ));
     }
     let (status, named, stderr) = run_read_case(args, case, true, project, home);
+    // A run that names the path passes with any exit status, also when it
+    // ended on its own within the grace time of `stop`.
     if named || (!case.require_named && status.is_some_and(|status| status.code() == Some(2))) {
         return FileCheck::Pass;
     }
