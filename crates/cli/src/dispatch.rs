@@ -2269,7 +2269,7 @@ fn run_health_dispatch(
             ownership_emails: run.ownership_emails,
             targets: sections.targets,
             css: sections.css,
-            css_deep: false,
+            css_deep: sections.css,
             force_full: sections.force_full,
             score_only_output: sections.score_only_output,
             enforce_coverage_gap_gate: true,

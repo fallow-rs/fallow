@@ -166,6 +166,16 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "css-broken-reference",
+        args: &["--css"],
+        base: &[],
+        files: &[
+            file!("css-broken-reference", "files", "package.json", true),
+            file!("css-broken-reference", "files", "src/app.css", false),
+            file!("css-broken-reference", "files", "src/index.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "css-dead-surface",
         args: &["--css"],
         base: &[],
