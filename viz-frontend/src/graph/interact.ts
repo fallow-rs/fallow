@@ -236,12 +236,11 @@ export const resetGraphView = (state: AppState, animate = true): void => {
   tweenCamera(state, zoomIdentity.translate(fit.x, fit.y).scale(fit.k), animate ? CAMERA_MS : 0);
 };
 
-/** Zoom to the first search match and pulse it (Enter in the search box). */
-export const graphFocusSearch = (state: AppState): void => {
-  const gvs = getGVS(state);
-  if (!gvs.initialized || state.searchMatches.size === 0) return;
+/** The shortest match path, without `skip` when another match exists. */
+const shortestMatch = (state: AppState, skip: number | null): number | null => {
   let best: number | null = null;
   for (const fileIndex of state.searchMatches) {
+    if (fileIndex === skip && state.searchMatches.size > 1) continue;
     if (
       best === null ||
       state.data.files[fileIndex].path.length < state.data.files[best].path.length
@@ -249,7 +248,21 @@ export const graphFocusSearch = (state: AppState): void => {
       best = fileIndex;
     }
   }
-  if (best === null) return;
+  return best;
+};
+
+/**
+ * Enter in the search box. The overview zooms to the shortest match and
+ * pulses it. In the ego view, the camera cannot leave the selected file, so
+ * the function returns the shortest other match for the caller to select.
+ * Otherwise it returns `null`.
+ */
+export const graphFocusSearch = (state: AppState): number | null => {
+  const gvs = getGVS(state);
+  if (!gvs.initialized || state.searchMatches.size === 0) return null;
+  const best = shortestMatch(state, state.selected);
+  if (best === null) return null;
+  if (state.selected !== null) return best === state.selected ? null : best;
   centerOnFile(state, best);
   // The camera glide is the reduced-motion feedback; skip the pulse rings.
   if (!state.reducedMotion) {
@@ -257,6 +270,7 @@ export const graphFocusSearch = (state: AppState): void => {
     gvs.pulseAt = performance.now();
   }
   renderGraph(state);
+  return null;
 };
 
 /** What the cursor is over (drives hover state, cursor, and tooltip). */
