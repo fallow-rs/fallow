@@ -13,7 +13,7 @@ use fallow_types::path_guard::CacheTarget;
 use serde::Deserialize;
 
 use crate::changed_files::git_path_from_bytes;
-use crate::churn_shallow::{ChurnCoverage, ShallowState};
+use crate::churn_shallow::{ChurnCoverage, ShallowState, get_head_sha, is_ancestor};
 
 pub use fallow_types::churn::ChurnTrend;
 
@@ -586,7 +586,8 @@ const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 /// Version 10 stores a hash of the project root and the oldest committer time
 /// that the entry covers, so an entry of another root or of a later cutoff is
 /// rejected.
-const CHURN_CACHE_VERSION: u8 = 10;
+/// Version 11 stores mailmap-resolved author emails and a hash of the mailmap file.
+const CHURN_CACHE_VERSION: u8 = 11;
 
 /// Serializable per-commit event for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
@@ -627,6 +628,8 @@ struct ChurnCache {
     root_key: u64,
     /// [`ChurnCoverage::earliest_cutoff_secs`] of this entry.
     earliest_cutoff_secs: Option<u64>,
+    /// [`ChurnCoverage::mailmap`] of this entry.
+    mailmap: u64,
     /// Author email pool referenced by [`CachedCommitEvent::author_idx`].
     author_pool: Vec<String>,
     /// Commit id pool referenced by [`CachedCommitEvent::commit_idx`].
@@ -648,20 +651,6 @@ struct ChurnEventState {
     /// Bytes of `git log` output that built this state in this run. Zero for
     /// state restored from the churn cache or read from a churn file.
     git_log_bytes: u64,
-}
-
-/// Get the full HEAD SHA for cache keying.
-fn get_head_sha(root: &Path) -> Option<String> {
-    crate::repo_refs::head_sha(root).ok().flatten()
-}
-
-/// Check whether `ancestor` is still reachable from `descendant`.
-fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
-    let mut command = git_command(root);
-    command
-        .args(["merge-base", "--is-ancestor", ancestor, descendant])
-        .current_dir(root);
-    command.status().is_ok_and(|s| s.success())
 }
 
 /// Read the churn cache file. Returns `None` when the file is missing, too
@@ -722,6 +711,7 @@ fn save_churn_cache(
         shallow_boundary: coverage.shallow.boundary,
         root_key: coverage.root_key,
         earliest_cutoff_secs: coverage.earliest_cutoff_secs,
+        mailmap: coverage.mailmap,
         author_pool: state.author_pool.clone(),
         commit_pool: state.commit_pool.clone(),
     };
@@ -771,6 +761,7 @@ pub fn analyze_churn_cached_with_history(
         root_key: xxhash_rust::xxh3::xxh3_64(&path_to_cache_bytes(root)),
         head_sha,
         shallow: ShallowState::read(root),
+        mailmap: crate::churn_shallow::mailmap_fingerprint(root),
         earliest_cutoff_secs: history.window.cutoff_secs(&clock),
     };
     let shallow_clone = wanted.shallow.shallow;
@@ -879,6 +870,7 @@ impl ChurnCache {
                 shallow: self.shallow_clone,
                 boundary: self.shallow_boundary,
             },
+            mailmap: self.mailmap,
             earliest_cutoff_secs: self.earliest_cutoff_secs,
         }
     }
@@ -1030,8 +1022,8 @@ impl<'a> GitLogEventParser<'a> {
         self.record_legacy_timestamp(line);
     }
 
-    /// Parse a `%at|%ct|%H|%ae` commit header. The older `%at|%ct|%ae` and
-    /// `%at|%ae` headers are still accepted so a fixture or an embedder pinned
+    /// Parse a `%at|%ct|%H|%aE` commit header. The older `%at|%ct|%aE` and
+    /// `%at|%aE` headers are still accepted so a fixture or an embedder pinned
     /// to an older format keeps parsing. A header without `%H` gives events
     /// without a commit id, and a missing committer timestamp falls back to the
     /// author one.
@@ -1843,6 +1835,7 @@ mod tests {
             shallow_boundary: 0,
             root_key: 0,
             earliest_cutoff_secs: None,
+            mailmap: 0,
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
         };
@@ -1864,6 +1857,7 @@ mod tests {
             shallow_boundary: 0,
             root_key: 0,
             earliest_cutoff_secs: None,
+            mailmap: 0,
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
         };
@@ -2282,7 +2276,7 @@ mod tests {
     const NOW: u64 = 1_750_000_000;
     const HEADER: &str = "1700000000|1700000000|dev@example.com";
 
-    /// Build the bytes that `git log --numstat -z --format=format:%at|%ct|%H|%ae%x00`
+    /// Build the bytes that `git log --numstat -z --format=format:%at|%ct|%H|%aE%x00`
     /// prints: each commit is `header NUL LF`, then one NUL-terminated numstat
     /// record per file, and consecutive commits are split by one more NUL.
     fn git_log_z(commits: &[(&str, &[&str])]) -> Vec<u8> {
