@@ -10,6 +10,43 @@ pub struct CommandOutput {
     pub code: i32,
 }
 
+/// The exit code of a finished process.
+///
+/// # Panics
+///
+/// Panics when a signal ended the process, so an abort cannot pass an
+/// assertion such as `code <= 1`.
+pub fn exit_code(output: &std::process::Output) -> i32 {
+    output.status.code().unwrap_or_else(|| {
+        panic!(
+            "the process was ended by a signal: {}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+impl CommandOutput {
+    /// Convert the output of a finished process. Panics on a signal exit,
+    /// see [`exit_code`].
+    pub fn from_process(output: std::process::Output) -> Self {
+        let code = exit_code(&output);
+        let std::process::Output { stdout, stderr, .. } = output;
+        Self {
+            code,
+            stdout: lossy_string(stdout),
+            stderr: lossy_string(stderr),
+        }
+    }
+}
+
+/// Convert process output to a string, and replace each invalid UTF-8
+/// sequence with U+FFFD.
+fn lossy_string(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+}
+
 /// How long one sweep of [`remove_orphaned_audit_caches`] holds for the later
 /// test processes. The scan reads the whole temp directory, so each test
 /// process must not repeat it.
@@ -156,12 +193,16 @@ pub fn copy_fixture_tree(from: &Path, to: &Path) {
 
 /// Drop the variables a developer shell may export that change what a run
 /// analyzes: the Istanbul coverage inputs (`FALLOW_COVERAGE`,
-/// `FALLOW_COVERAGE_ROOT`) and `FALLOW_PACKAGE_BASELINES`, which turns the
-/// package map off. Call before applying a test's own env.
+/// `FALLOW_COVERAGE_ROOT`), `FALLOW_PACKAGE_BASELINES`, which turns the
+/// package map off, and the diff inputs that a CI shell exports
+/// (`FALLOW_DIFF_FILE`, `FALLOW_DIFF_FILTER`). Call before applying a test's
+/// own env.
 pub fn scrub_analysis_env(cmd: &mut Command) {
     cmd.env_remove("FALLOW_COVERAGE")
         .env_remove("FALLOW_COVERAGE_ROOT")
         .env_remove("FALLOW_PACKAGE_BASELINES")
+        .env_remove("FALLOW_DIFF_FILE")
+        .env_remove("FALLOW_DIFF_FILTER")
         // A key that `fallow cloud login` stored on the developer machine must
         // not reach a test.
         .env("FALLOW_CREDENTIAL_STORE", "none")
@@ -178,7 +219,7 @@ pub fn scrub_analysis_env(cmd: &mut Command) {
 ///
 /// Sets `NO_COLOR=1` and `RUST_LOG=""` and removes the ambient coverage
 /// variables. A test applies its own env after this setup.
-fn fallow_command() -> Command {
+pub fn fallow_command() -> Command {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     scrub_analysis_env(&mut cmd);
@@ -187,12 +228,7 @@ fn fallow_command() -> Command {
 
 /// Run a prepared command and convert its output to [`CommandOutput`].
 fn execute(mut cmd: Command) -> CommandOutput {
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(cmd.output().expect("failed to run fallow binary"))
 }
 
 /// Run an arbitrary fallow command against a fixture, returning structured output.
@@ -225,8 +261,18 @@ pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
 /// Run fallow with raw args (no --root injection) in the working directory
 /// `dir`, so that a relative path argument resolves against `dir`.
 pub fn run_fallow_raw_in_dir(dir: &Path, args: &[&str]) -> CommandOutput {
+    run_fallow_raw_in_dir_with_env(dir, args, &[])
+}
+
+/// Run fallow with raw args in the working directory `dir` and with string
+/// environment variables.
+pub fn run_fallow_raw_in_dir_with_env(
+    dir: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> CommandOutput {
     let mut cmd = fallow_command();
-    cmd.current_dir(dir).args(args);
+    cmd.current_dir(dir).envs(env.iter().copied()).args(args);
     execute(cmd)
 }
 
@@ -265,21 +311,18 @@ pub fn configure_type_aware_sidecar(cmd: &mut Command) {
     cmd.env("FALLOW_TYPE_AWARE_SCRIPT", sidecar);
 }
 
+/// A fallow command with the repository's real type-aware sidecar and the
+/// scrubbed analysis environment.
+pub fn type_aware_sidecar_command(args: &[&str]) -> Command {
+    let mut cmd = fallow_command();
+    configure_type_aware_sidecar(&mut cmd);
+    cmd.args(args);
+    cmd
+}
+
 /// Run fallow with the repository's real type-aware sidecar.
 pub fn run_fallow_raw_with_type_aware_sidecar(args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
-    let mut cmd = Command::new(&bin);
-    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    configure_type_aware_sidecar(&mut cmd);
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    execute(type_aware_sidecar_command(args))
 }
 
 /// Parse stdout as JSON, panicking with the raw output on failure.
@@ -290,6 +333,19 @@ pub fn parse_json(output: &CommandOutput) -> serde_json::Value {
             output.stdout, output.stderr
         )
     })
+}
+
+/// The array at the JSON pointer `pointer` (RFC 6901, for example
+/// `/dead_code/unused_files`).
+///
+/// # Panics
+///
+/// Panics when the value is absent or is not an array, so a report that lost
+/// a section cannot pass as an empty list.
+pub fn required_array<'a>(json: &'a serde_json::Value, pointer: &str) -> &'a [serde_json::Value] {
+    json.pointer(pointer)
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("no array at `{pointer}` in:\n{json:#}"))
 }
 
 /// Fields a report is allowed to change between two runs over the same commit.
