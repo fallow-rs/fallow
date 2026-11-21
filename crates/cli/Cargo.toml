@@ -26,6 +26,19 @@ name = "fallow-schema-emit"
 path = "src/bin/schema_emit.rs"
 required-features = ["schema-emit"]
 
+# These targets sign a stub sidecar with the test keys and hold no test
+# without the feature. A named `--test` run without the feature fails, and a
+# workspace run skips them.
+[[test]]
+name = "runtime_coverage_tests"
+path = "tests/runtime_coverage_tests.rs"
+required-features = ["test-sidecar-key"]
+
+[[test]]
+name = "audit_brief_runtime_focus_tests"
+path = "tests/audit_brief_runtime_focus_tests.rs"
+required-features = ["test-sidecar-key"]
+
 [features]
 default = []
 # Test-only feature that swaps the sidecar binary-signing verify key and the
