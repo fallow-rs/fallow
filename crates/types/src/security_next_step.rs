@@ -43,6 +43,7 @@ const IMPORT_STEP: &str = "Next: check whether this import can ship a secret to 
 ///
 /// A `server-only-import` candidate gets React Router advice when its sink is a
 /// React Router `.server` module, and Next.js advice otherwise.
+///
 /// A candidate whose trace is one `secret-source` hop reads the secret in the
 /// client file itself, so the step talks about the env read. A longer trace
 /// reaches the secret through an import, so the step talks about the import.
