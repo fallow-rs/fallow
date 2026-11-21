@@ -1143,6 +1143,11 @@ export type ThresholdOverrideStatus = ("active" | "stale" | "insufficient" | "no
  */
 export type ThresholdOverrideDimension = ("complexity" | "crap")
 /**
+ * What is wrong with one inline threshold override comment. A comment with a
+ * problem has no effect.
+ */
+export type InlineThresholdProblemKind = ("missing_reason" | "missing_threshold" | "invalid_key" | "invalid_value" | "disabled")
+/**
  * Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
  * emitted by `build_untested_file_actions`.
  */
@@ -8799,6 +8804,17 @@ sections?: (HealthSection[] | null)
  */
 threshold_overrides?: ThresholdOverrideState[]
 /**
+ * `fallow-override-threshold-next-line` comment states, one row per
+ * comment and threshold dimension. The status values are the values of
+ * `threshold_overrides`. Absent when the project has no such comment.
+ */
+inline_threshold_overrides?: InlineThresholdOverrideState[]
+/**
+ * `fallow-override-threshold-next-line` comments with a problem. Such a
+ * comment has no effect.
+ */
+inline_threshold_override_problems?: InlineThresholdOverrideProblem[]
+/**
  * Project-wide vital signs (always computed from available data).
  */
 vital_signs?: (VitalSigns | null)
@@ -9061,6 +9077,12 @@ effective_thresholds?: (HealthEffectiveThresholds | null)
  * Source of the effective thresholds. Omitted when thresholds are global.
  */
 threshold_source?: (ThresholdSource | null)
+/**
+ * 1-based line of the `fallow-override-threshold-next-line` comment that
+ * set a cyclomatic, cognitive or CRAP ceiling of this finding. Absent
+ * when only config entries or the global thresholds apply.
+ */
+override_comment_line?: (number | null)
 /**
  * File-length ceiling in physical lines that the file exceeded. Present
  * only on a file-level finding (`exceeded: "file_lines"`), where
@@ -9611,6 +9633,68 @@ crap?: (number | null)
  * and `<component>` rollup rows, which are never scored on unit size.
  */
 line_count?: (number | null)
+}
+/**
+ * Report entry for one `fallow-override-threshold-next-line` comment and one
+ * threshold dimension. The status values are the values of a
+ * `thresholdOverrides` row: `active`, `stale`, `insufficient` and `no_match`.
+ */
+export interface InlineThresholdOverrideState {
+status: ThresholdOverrideStatus
+dimension: ThresholdOverrideDimension
+/**
+ * Dimensions the function still breaches despite this comment.
+ */
+outstanding?: ThresholdOverrideDimension[]
+/**
+ * File that holds the comment.
+ */
+path: string
+/**
+ * 1-based line of the comment.
+ */
+comment_line: number
+/**
+ * Name of the function on the next line. Absent on `no_match` rows.
+ */
+function?: (string | null)
+/**
+ * 1-based line of the function. Absent on `no_match` rows.
+ */
+line?: (number | null)
+/**
+ * 0-based byte column of the function. Absent on `no_match` rows.
+ */
+col?: (number | null)
+configured_thresholds: HealthConfiguredThresholds
+effective_thresholds: HealthEffectiveThresholds
+/**
+ * Current metrics of the function, when the comment matched one.
+ */
+metrics?: (ThresholdOverrideMetrics | null)
+/**
+ * The reason after ` -- ` in the comment.
+ */
+reason: string
+}
+/**
+ * One `fallow-override-threshold-next-line` comment with a problem. The
+ * comment has no effect.
+ */
+export interface InlineThresholdOverrideProblem {
+/**
+ * File that holds the comment.
+ */
+path: string
+/**
+ * 1-based line of the comment.
+ */
+line: number
+problem: InlineThresholdProblemKind
+/**
+ * The token with the problem, when one token has it.
+ */
+token?: (string | null)
 }
 /**
  * Project-wide vital signs: a fixed set of metrics for trend tracking.
@@ -15442,6 +15526,17 @@ sections?: (HealthSection[] | null)
  * exceptions, stale exceptions, and full-run no-match cleanup hints.
  */
 threshold_overrides?: ThresholdOverrideState[]
+/**
+ * `fallow-override-threshold-next-line` comment states, one row per
+ * comment and threshold dimension. The status values are the values of
+ * `threshold_overrides`. Absent when the project has no such comment.
+ */
+inline_threshold_overrides?: InlineThresholdOverrideState[]
+/**
+ * `fallow-override-threshold-next-line` comments with a problem. Such a
+ * comment has no effect.
+ */
+inline_threshold_override_problems?: InlineThresholdOverrideProblem[]
 /**
  * Project-wide vital signs (always computed from available data).
  */

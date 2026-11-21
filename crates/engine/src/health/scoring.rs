@@ -338,9 +338,9 @@ impl<'a> CrapCeilingLookup<'a> {
         crap_rounded: f64,
         signals: &mut CrapThresholdSignals,
     ) {
-        let ceiling = self
-            .resolver
-            .effective_max_crap(self.relative, &function.name);
+        let ceiling =
+            self.resolver
+                .effective_max_crap(self.relative, &function.name, function.line);
         signals.min_ceiling = Some(signals.min_ceiling.map_or(ceiling, |m| m.min(ceiling)));
         if (!self.enforce_crap || crap_rounded < ceiling) && crap_rounded >= CRAP_THRESHOLD {
             signals.exempted += 1;

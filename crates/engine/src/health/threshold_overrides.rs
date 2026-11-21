@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_output::ThresholdOverrideDimension;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GlobalHealthThresholds {
@@ -17,6 +17,25 @@ pub(super) struct GlobalHealthThresholds {
 pub(super) struct AppliedHealthThresholds {
     pub(super) effective: fallow_output::HealthEffectiveThresholds,
     pub(super) override_index: Option<usize>,
+    /// Line of the `fallow-override-threshold-next-line` comment that set a
+    /// cyclomatic, cognitive or CRAP ceiling of the unit.
+    pub(super) comment_line: Option<u32>,
+}
+
+impl AppliedHealthThresholds {
+    /// True when a config entry or a comment moved a ceiling that a finding
+    /// reads.
+    #[must_use]
+    pub(super) const fn is_overridden(&self) -> bool {
+        self.override_index.is_some() || self.comment_line.is_some()
+    }
+}
+
+/// One `fallow-override-threshold-next-line` comment, ready for lookup.
+pub(super) struct CompiledInlineOverride {
+    pub(super) comment_line: u32,
+    pub(super) configured: fallow_output::HealthConfiguredThresholds,
+    pub(super) reason: String,
 }
 
 struct CompiledThresholdOverride {
@@ -36,6 +55,9 @@ pub(super) struct ThresholdOverrideResolver {
     pub(super) global: GlobalHealthThresholds,
     cyclomatic_policy: fallow_config::CyclomaticPolicy,
     max_file_lines: u32,
+    /// Comments by project-root-relative path, then by the line of the unit.
+    inline: FxHashMap<PathBuf, FxHashMap<u32, CompiledInlineOverride>>,
+    inline_enabled: bool,
 }
 
 impl ThresholdOverrideResolver {
@@ -76,7 +98,106 @@ impl ThresholdOverrideResolver {
             global,
             cyclomatic_policy: fallow_config::CyclomaticPolicy::Standard,
             max_file_lines: 0,
+            inline: FxHashMap::default(),
+            inline_enabled: true,
         }
+    }
+
+    /// Add the `fallow-override-threshold-next-line` comments of `modules`.
+    /// With `enabled` set to `false` (`health.inlineThresholdOverrides`), no
+    /// comment applies.
+    #[must_use]
+    pub(super) fn with_inline_overrides(
+        mut self,
+        enabled: bool,
+        modules: &[crate::source::ModuleInfo],
+        file_paths: &FxHashMap<crate::discover::FileId, &PathBuf>,
+        root: &Path,
+    ) -> Self {
+        self.inline_enabled = enabled;
+        if !enabled {
+            return self;
+        }
+        for module in modules {
+            if module.inline_threshold_overrides.entries.is_empty() {
+                continue;
+            }
+            let Some(path) = file_paths.get(&module.file_id) else {
+                continue;
+            };
+            let relative = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+            let by_line = self.inline.entry(relative).or_default();
+            for entry in &module.inline_threshold_overrides.entries {
+                by_line.insert(
+                    entry.line,
+                    CompiledInlineOverride {
+                        comment_line: entry.comment_line,
+                        configured: fallow_output::HealthConfiguredThresholds {
+                            max_cyclomatic: entry.max_cyclomatic,
+                            max_cognitive: entry.max_cognitive,
+                            max_crap: entry.max_crap,
+                            max_unit_size: entry.max_unit_size,
+                            max_file_lines: None,
+                        },
+                        reason: entry.reason.clone(),
+                    },
+                );
+            }
+        }
+        self
+    }
+
+    /// Whether `fallow-override-threshold-next-line` comments apply.
+    #[must_use]
+    const fn inline_enabled(&self) -> bool {
+        self.inline_enabled
+    }
+
+    /// The comment that applies to the unit on `line` of `relative`.
+    #[must_use]
+    fn inline_at(&self, relative: &Path, line: u32) -> Option<&CompiledInlineOverride> {
+        if self.inline.is_empty() {
+            return None;
+        }
+        self.inline.get(relative)?.get(&line)
+    }
+
+    /// Resolve the ceilings of the unit on `line`: the config entries first,
+    /// then the comment on the line before the unit. The comment wins for each
+    /// ceiling that it sets.
+    #[must_use]
+    pub(super) fn resolve_unit(
+        &self,
+        relative: &Path,
+        function: &str,
+        line: u32,
+    ) -> (
+        AppliedHealthThresholds,
+        Vec<ThresholdOverrideMatch<'_>>,
+        Option<&CompiledInlineOverride>,
+    ) {
+        let (mut applied, matches) = self.resolve(relative, function);
+        let inline = self.inline_at(relative, line);
+        if let Some(comment) = inline {
+            let configured = comment.configured;
+            let effective = &mut applied.effective;
+            if let Some(value) = configured.max_cyclomatic {
+                effective.max_cyclomatic = value;
+                applied.comment_line = Some(comment.comment_line);
+            }
+            if let Some(value) = configured.max_cognitive {
+                effective.max_cognitive = value;
+                applied.comment_line = Some(comment.comment_line);
+            }
+            if let Some(value) = configured.max_crap {
+                effective.max_crap = value;
+                applied.comment_line = Some(comment.comment_line);
+            }
+            if let Some(value) = configured.max_unit_size {
+                effective.max_unit_size = value;
+            }
+        }
+        (applied, matches, inline)
     }
 
     /// Set the global file-length ceiling (`health.maxFileLines` or
@@ -196,6 +317,7 @@ impl ThresholdOverrideResolver {
             AppliedHealthThresholds {
                 effective,
                 override_index,
+                comment_line: None,
             },
             matches,
         )
@@ -206,7 +328,18 @@ impl ThresholdOverrideResolver {
     /// `health.maxUnitSize` default. Cheaper than [`resolve`](Self::resolve): it
     /// allocates nothing, so it is safe to call in the large-function hot loop.
     #[must_use]
-    pub(super) fn effective_max_unit_size(&self, relative: &Path, function: &str) -> u32 {
+    pub(super) fn effective_max_unit_size(
+        &self,
+        relative: &Path,
+        function: &str,
+        line: u32,
+    ) -> u32 {
+        if let Some(value) = self
+            .inline_at(relative, line)
+            .and_then(|comment| comment.configured.max_unit_size)
+        {
+            return value;
+        }
         let mut effective = self.global.unit_size;
         for entry in &self.entries {
             if !entry.matchers.is_match(relative) {
@@ -227,7 +360,13 @@ impl ThresholdOverrideResolver {
     /// value. Cheaper than [`resolve`](Self::resolve): it allocates nothing, so
     /// it is safe to call in the per-file scoring hot loop.
     #[must_use]
-    pub(super) fn effective_max_crap(&self, relative: &Path, function: &str) -> f64 {
+    pub(super) fn effective_max_crap(&self, relative: &Path, function: &str, line: u32) -> f64 {
+        if let Some(value) = self
+            .inline_at(relative, line)
+            .and_then(|comment| comment.configured.max_crap)
+        {
+            return value;
+        }
         let mut effective = self.global.crap;
         for entry in &self.entries {
             if !entry.matchers.is_match(relative) {
@@ -252,7 +391,7 @@ impl ThresholdOverrideResolver {
     /// common no-override run does zero extra work per suppressed unit.
     #[must_use]
     pub(super) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.inline.is_empty()
     }
 }
 
@@ -279,6 +418,17 @@ pub(super) struct ThresholdOverrideStateTracker {
     matched_indexes: FxHashSet<usize>,
     seen: FxHashSet<ThresholdOverrideStateKey>,
     states: Vec<fallow_output::ThresholdOverrideState>,
+    inline_seen: FxHashSet<(PathBuf, u32, ThresholdOverrideDimension)>,
+    inline_states: Vec<fallow_output::InlineThresholdOverrideState>,
+    inline_problems: Vec<fallow_output::InlineThresholdOverrideProblem>,
+}
+
+/// The rows of the config entries and of the comments.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ThresholdOverrideRows {
+    pub(super) config: Vec<fallow_output::ThresholdOverrideState>,
+    pub(super) inline: Vec<fallow_output::InlineThresholdOverrideState>,
+    pub(super) inline_problems: Vec<fallow_output::InlineThresholdOverrideProblem>,
 }
 
 /// Dimensions a configured entry participates in, in serialization order.
@@ -693,6 +843,238 @@ impl ThresholdOverrideStateTracker {
     /// it cannot know which dimension ultimately kept a finding alive.
     pub(super) fn states_mut(&mut self) -> &mut [fallow_output::ThresholdOverrideState] {
         &mut self.states
+    }
+
+    /// Record the comments of one module that the run analyzes: the comments
+    /// with a problem, every comment when the comment form is off, and a
+    /// `no_match` row for each comment with no unit on the next line.
+    pub(super) fn record_inline_module(
+        &mut self,
+        path: &Path,
+        module: &crate::source::ModuleInfo,
+        resolver: &ThresholdOverrideResolver,
+    ) {
+        let comments = &module.inline_threshold_overrides;
+        if comments.is_empty() {
+            return;
+        }
+        for problem in &comments.problems {
+            self.inline_problems
+                .push(fallow_output::InlineThresholdOverrideProblem {
+                    path: path.to_path_buf(),
+                    line: problem.line,
+                    problem: problem.kind,
+                    token: problem.token.clone(),
+                });
+        }
+        if !resolver.inline_enabled() {
+            for entry in &comments.entries {
+                self.inline_problems
+                    .push(fallow_output::InlineThresholdOverrideProblem {
+                        path: path.to_path_buf(),
+                        line: entry.comment_line,
+                        problem: fallow_output::InlineThresholdProblemKind::Disabled,
+                        token: None,
+                    });
+            }
+            return;
+        }
+        for entry in &comments.entries {
+            let matched = module.complexity.iter().any(|fc| {
+                fc.line == entry.line && !fallow_types::extract::is_synthetic_module_unit(&fc.name)
+            });
+            if matched {
+                continue;
+            }
+            let configured = fallow_output::HealthConfiguredThresholds {
+                max_cyclomatic: entry.max_cyclomatic,
+                max_cognitive: entry.max_cognitive,
+                max_crap: entry.max_crap,
+                max_unit_size: entry.max_unit_size,
+                max_file_lines: None,
+            };
+            let global = resolver.global;
+            let effective = fallow_output::HealthEffectiveThresholds {
+                max_cyclomatic: entry.max_cyclomatic.unwrap_or(global.cyclomatic),
+                max_cognitive: entry.max_cognitive.unwrap_or(global.cognitive),
+                max_crap: entry.max_crap.unwrap_or(global.crap),
+                max_unit_size: entry.max_unit_size.unwrap_or(global.unit_size),
+            };
+            for dimension in configured_dimensions(configured) {
+                self.push_inline_state(fallow_output::InlineThresholdOverrideState {
+                    status: fallow_output::ThresholdOverrideStatus::NoMatch,
+                    dimension,
+                    outstanding: Vec::new(),
+                    path: path.to_path_buf(),
+                    comment_line: entry.comment_line,
+                    function: None,
+                    line: None,
+                    col: None,
+                    configured_thresholds: configured,
+                    effective_thresholds: effective,
+                    metrics: None,
+                    reason: entry.reason.clone(),
+                });
+            }
+        }
+    }
+
+    /// Record the complexity row of the comment that applies to one unit.
+    /// The comment owns each ceiling that it sets, so a breach of a ceiling
+    /// that the comment set below the global one reads `active`.
+    pub(super) fn record_inline_complexity(
+        &mut self,
+        function: ComplexityFunctionContext<'_>,
+        comment: &CompiledInlineOverride,
+        global: GlobalHealthThresholds,
+        effective: fallow_output::HealthEffectiveThresholds,
+    ) {
+        let ComplexityFunctionContext {
+            path,
+            function,
+            line,
+            col,
+            cyclomatic,
+            cognitive,
+            line_count,
+            suppressed,
+        } = function;
+        let configured = comment.configured;
+        let touches_unit_size = configured.max_unit_size.is_some();
+        if configured.max_cyclomatic.is_none()
+            && configured.max_cognitive.is_none()
+            && !touches_unit_size
+        {
+            return;
+        }
+        let breaches = |max_cyclomatic: u16, max_cognitive: u16, max_unit_size: u32| {
+            (!suppressed && (cyclomatic > max_cyclomatic || cognitive > max_cognitive))
+                || (touches_unit_size && line_count.is_some_and(|lc| lc > max_unit_size))
+        };
+        let global_exceeded = breaches(global.cyclomatic, global.cognitive, global.unit_size);
+        let local_exceeded = breaches(
+            effective.max_cyclomatic,
+            effective.max_cognitive,
+            effective.max_unit_size,
+        );
+        let breaches_lowered = (!suppressed
+            && ((configured.max_cyclomatic.is_some()
+                && effective.max_cyclomatic < global.cyclomatic
+                && cyclomatic > effective.max_cyclomatic)
+                || (configured.max_cognitive.is_some()
+                    && effective.max_cognitive < global.cognitive
+                    && cognitive > effective.max_cognitive)))
+            || (touches_unit_size
+                && effective.max_unit_size < global.unit_size
+                && line_count.is_some_and(|lc| lc > effective.max_unit_size));
+        let outstanding =
+            if touches_unit_size && line_count.is_some_and(|lc| lc > effective.max_unit_size) {
+                vec![ThresholdOverrideDimension::Complexity]
+            } else {
+                Vec::new()
+            };
+        self.push_inline_state(fallow_output::InlineThresholdOverrideState {
+            status: override_status(global_exceeded, local_exceeded, breaches_lowered),
+            dimension: ThresholdOverrideDimension::Complexity,
+            outstanding,
+            path: path.to_path_buf(),
+            comment_line: comment.comment_line,
+            function: Some(function.to_string()),
+            line: Some(line),
+            col: Some(col),
+            configured_thresholds: configured,
+            effective_thresholds: effective,
+            metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                cyclomatic,
+                cognitive,
+                crap: None,
+                line_count,
+            }),
+            reason: comment.reason.clone(),
+        });
+    }
+
+    /// Record the CRAP row of the comment that applies to one unit. `crap` is
+    /// `None` for a unit that is not scored on CRAP: the row then reads
+    /// `stale`, as a config row for a template unit does.
+    pub(super) fn record_inline_crap(
+        &mut self,
+        function: CrapFunctionContext<'_>,
+        measured: (u16, u16, Option<f64>),
+        comment: &CompiledInlineOverride,
+        global: GlobalHealthThresholds,
+        effective: fallow_output::HealthEffectiveThresholds,
+    ) {
+        let CrapFunctionContext {
+            path,
+            function,
+            line,
+            col,
+            suppressed,
+        } = function;
+        if comment.configured.max_crap.is_none() {
+            return;
+        }
+        let (cyclomatic, cognitive, crap) = measured;
+        let status = crap.map_or(fallow_output::ThresholdOverrideStatus::Stale, |crap| {
+            let breaches = |limit: f64| !suppressed && crap >= limit;
+            let local_exceeded = breaches(effective.max_crap);
+            let lowered = effective.max_crap < global.crap && local_exceeded;
+            override_status(breaches(global.crap), local_exceeded, lowered)
+        });
+        self.push_inline_state(fallow_output::InlineThresholdOverrideState {
+            status,
+            dimension: ThresholdOverrideDimension::Crap,
+            outstanding: Vec::new(),
+            path: path.to_path_buf(),
+            comment_line: comment.comment_line,
+            function: Some(function.to_string()),
+            line: Some(line),
+            col: Some(col),
+            configured_thresholds: comment.configured,
+            effective_thresholds: effective,
+            metrics: Some(fallow_output::ThresholdOverrideMetrics {
+                cyclomatic,
+                cognitive,
+                crap,
+                line_count: None,
+            }),
+            reason: comment.reason.clone(),
+        });
+    }
+
+    fn push_inline_state(&mut self, state: fallow_output::InlineThresholdOverrideState) {
+        if self
+            .inline_seen
+            .insert((state.path.clone(), state.comment_line, state.dimension))
+        {
+            self.inline_states.push(state);
+        }
+    }
+
+    /// Mutable access to the comment rows, for the `outstanding` annotation.
+    pub(super) fn inline_states_mut(
+        &mut self,
+    ) -> &mut [fallow_output::InlineThresholdOverrideState] {
+        &mut self.inline_states
+    }
+
+    /// The config rows and the comment rows, each in a stable order.
+    pub(super) fn into_rows(mut self) -> ThresholdOverrideRows {
+        let mut inline = std::mem::take(&mut self.inline_states);
+        inline.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.comment_line.cmp(&b.comment_line))
+                .then(a.dimension.cmp(&b.dimension))
+        });
+        let mut inline_problems = std::mem::take(&mut self.inline_problems);
+        inline_problems.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+        ThresholdOverrideRows {
+            config: self.into_states(),
+            inline,
+            inline_problems,
+        }
     }
 
     pub(super) fn into_states(mut self) -> Vec<fallow_output::ThresholdOverrideState> {

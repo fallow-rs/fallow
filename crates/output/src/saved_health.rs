@@ -278,6 +278,7 @@ impl From<SavedHealthFinding> for HealthFinding {
                 contributions: Vec::new(),
                 effective_thresholds: saved.effective_thresholds,
                 threshold_source: saved.threshold_source,
+                override_comment_line: None,
                 max_file_lines: saved.max_file_lines,
             },
             Vec::new(),

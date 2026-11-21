@@ -228,7 +228,8 @@
           "minSharedRevisions": 5,
           "minDegree": 0.3
         },
-        "suggestInlineSuppression": true
+        "suggestInlineSuppression": true,
+        "inlineThresholdOverrides": true
       }
     },
     "typeAware": {
@@ -1538,6 +1539,11 @@
         },
         "suggestInlineSuppression": {
           "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
+          "type": "boolean",
+          "default": true
+        },
+        "inlineThresholdOverrides": {
+          "description": "Whether `fallow-override-threshold-next-line` comments apply (default:\n`true`). Such a comment sets the health ceilings of the function on\nthe next line, as in\n`// fallow-override-threshold-next-line maxCognitive=40 -- reason`.\nSet to `false` to keep every exception in `thresholdOverrides`: each\ncomment then has no effect and the report lists it as `disabled`.",
           "type": "boolean",
           "default": true
         }

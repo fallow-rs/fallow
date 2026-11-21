@@ -51,7 +51,7 @@ pub(super) struct HealthOutputBuildInput<'a, R> {
     needs_file_scores: bool,
     report_coverage_gaps: bool,
     has_istanbul_coverage: bool,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    threshold_overrides: super::threshold_overrides::ThresholdOverrideRows,
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
@@ -321,7 +321,7 @@ fn build_health_output_grouping<R: super::HealthGroupResolver>(
 struct HealthReportPipelineInput {
     report_coverage_gaps: bool,
     findings: Vec<ComplexityViolation>,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    threshold_overrides: super::threshold_overrides::ThresholdOverrideRows,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,

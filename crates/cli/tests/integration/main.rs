@@ -133,6 +133,7 @@ mod human_summary_line_tests;
 mod impact_store_schema_tests;
 mod inert_plugin_warning_tests;
 mod init_tests;
+mod inline_threshold_override_tests;
 mod inspect_cloud_tests;
 mod inspect_tests;
 mod json_format_tests;

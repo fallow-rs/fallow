@@ -45,10 +45,11 @@ const fn quiet_filters_format(output: OutputFormat) -> bool {
 pub(super) fn complexity_section_has_rows(result: &AuditResult, quiet: bool) -> bool {
     result.summary.complexity_findings > 0
         || (quiet
-            && result
-                .health
-                .as_ref()
-                .is_some_and(|health| !health.report.threshold_overrides.is_empty()))
+            && result.health.as_ref().is_some_and(|health| {
+                !health.report.threshold_overrides.is_empty()
+                    || !health.report.inline_threshold_overrides.is_empty()
+                    || !health.report.inline_threshold_override_problems.is_empty()
+            }))
 }
 
 /// Print one line when the quiet human or markdown report has no row. The
@@ -103,6 +104,12 @@ fn retain_actionable_health(report: &mut HealthReport, attributed: bool) {
             .retain(|finding| finding.internal.introduced != Some(false));
     }
     report.threshold_overrides.retain(|entry| {
+        !matches!(
+            entry.status,
+            ThresholdOverrideStatus::Stale | ThresholdOverrideStatus::Active
+        )
+    });
+    report.inline_threshold_overrides.retain(|entry| {
         !matches!(
             entry.status,
             ThresholdOverrideStatus::Stale | ThresholdOverrideStatus::Active

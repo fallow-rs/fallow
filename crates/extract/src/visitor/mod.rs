@@ -3317,10 +3317,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "flat field projection preserves the complete extracted module contract"
-    )]
+    #[expect(clippy::too_many_lines, reason = "one field per module fact")]
     pub(crate) fn into_module_info(
         mut self,
         file_id: fallow_types::discover::FileId,
@@ -3360,6 +3357,7 @@ impl ModuleInfoExtractor {
             suppressions: parsed.suppressions,
             unknown_suppression_kinds: parsed.unknown_kinds,
             range_marker_problems: parsed.range_problems,
+            inline_threshold_overrides: parsed.inline_thresholds,
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),

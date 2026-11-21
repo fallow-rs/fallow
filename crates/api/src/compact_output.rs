@@ -765,6 +765,9 @@ pub fn build_health_compact_lines(
     push_health_findings_compact(&mut lines, &report.findings, root);
     push_styling_findings_compact(&mut lines, &report.styling_findings, root);
     push_threshold_overrides_compact(&mut lines, &report.threshold_overrides, root);
+    crate::threshold_override_output::push_inline_threshold_compact(&mut lines, report, |path| {
+        compact_path(path, root)
+    });
     push_file_scores_compact(&mut lines, &report.file_scores, root);
     push_coverage_gaps_compact(&mut lines, report, root);
     push_runtime_sections_compact(&mut lines, report, root);

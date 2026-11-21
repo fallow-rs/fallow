@@ -7,7 +7,7 @@ use fallow_output::{
 pub(super) struct HealthReportAssembly {
     pub(super) report_coverage_gaps: bool,
     pub(super) findings: Vec<ComplexityViolation>,
-    pub(super) threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    pub(super) threshold_overrides: super::threshold_overrides::ThresholdOverrideRows,
     pub(super) files_analyzed: usize,
     pub(super) total_functions: usize,
     pub(super) total_above_threshold: usize,
@@ -227,7 +227,7 @@ fn compute_report_prelude(
 /// Pieces consumed by the `HealthReport` struct literal builder.
 struct HealthReportStructParts {
     summary: HealthSummary,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    threshold_overrides: super::threshold_overrides::ThresholdOverrideRows,
     vital_signs: fallow_output::VitalSigns,
     health_score: Option<fallow_output::HealthScore>,
     findings: Vec<ComplexityViolation>,
@@ -257,7 +257,18 @@ fn build_health_report_struct(
     let mut report = HealthReport {
         summary: parts.summary,
         sections,
-        threshold_overrides: build_report_threshold_overrides(opts, parts.threshold_overrides),
+        threshold_overrides: build_report_threshold_overrides(
+            opts,
+            parts.threshold_overrides.config,
+        ),
+        inline_threshold_overrides: build_report_threshold_overrides(
+            opts,
+            parts.threshold_overrides.inline,
+        ),
+        inline_threshold_override_problems: build_report_threshold_overrides(
+            opts,
+            parts.threshold_overrides.inline_problems,
+        ),
         vital_signs: if opts.score_only_output {
             None
         } else {
@@ -544,10 +555,10 @@ fn summary_istanbul_counts(
     }
 }
 
-fn build_report_threshold_overrides(
+fn build_report_threshold_overrides<T>(
     opts: &HealthOptions<'_>,
-    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
-) -> Vec<fallow_output::ThresholdOverrideState> {
+    threshold_overrides: Vec<T>,
+) -> Vec<T> {
     if opts.score_only_output {
         Vec::new()
     } else {

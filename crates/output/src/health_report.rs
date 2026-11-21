@@ -81,6 +81,15 @@ pub struct HealthReport {
     /// exceptions, stale exceptions, and full-run no-match cleanup hints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threshold_overrides: Vec<ThresholdOverrideState>,
+    /// `fallow-override-threshold-next-line` comment states, one row per
+    /// comment and threshold dimension. The status values are the values of
+    /// `threshold_overrides`. Absent when the project has no such comment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline_threshold_overrides: Vec<crate::InlineThresholdOverrideState>,
+    /// `fallow-override-threshold-next-line` comments with a problem. Such a
+    /// comment has no effect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inline_threshold_override_problems: Vec<crate::InlineThresholdOverrideProblem>,
     /// Project-wide vital signs (always computed from available data).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
