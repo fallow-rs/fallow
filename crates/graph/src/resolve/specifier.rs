@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fallow_config::{MergedTsconfig, TsconfigFileSet, TsconfigPaths, TsconfigPattern};
+use fallow_config::{MergedTsconfig, TsconfigPaths};
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions};
 use serde_json::Value;
 
@@ -34,7 +34,7 @@ use super::path_info::{
 use super::project_root::{is_inside_project_root, try_project_package_outside_root};
 use super::react_native::{build_condition_names, build_extensions};
 use super::root_relative::try_root_relative_specifier;
-use super::tsconfig_scope::glob_values_match;
+use super::tsconfig_scope::tsconfig_applies_to_file;
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
 use super::url_suffix::{resolve_failed_bare_query_specifier, strip_bare_query, strip_url_suffix};
 use super::workspace_alias::{
@@ -195,6 +195,16 @@ pub(super) fn local_tsconfig_chain(ctx: &ResolveContext<'_>, from_file: &Path) -
     chain
 }
 
+/// The tsconfig files whose `paths`, `baseUrl` and `rootDirs` count for
+/// `from_file`, in lookup order.
+///
+/// A config counts only when it contains the file, as in TypeScript. The
+/// nearest config comes first when it contains the file. A solution-style
+/// nearest config (`files: []`) does not contain it, so the referenced
+/// configs that contain the file come first, and the nearest config is left
+/// out. The `paths` that it inherits through `extends` then do not hide the
+/// `paths` of the config that owns the file. When no config of the chain
+/// contains the file, the nearest config is the fallback.
 fn local_tsconfig_chain_uncached(ctx: &ResolveContext<'_>, from_file: &Path) -> Vec<PathBuf> {
     let root = ctx.root;
     let Some(first) = nearest_tsconfig_path(root, from_file) else {
@@ -203,7 +213,13 @@ fn local_tsconfig_chain_uncached(ctx: &ResolveContext<'_>, from_file: &Path) -> 
     let mut chain = Vec::new();
     let mut seen = rustc_hash::FxHashSet::default();
     collect_local_tsconfig_chain(ctx, from_file, &first, &mut chain, &mut seen);
-    chain
+    let Some((nearest, references)) = chain.split_first() else {
+        return chain;
+    };
+    if references.is_empty() || tsconfig_applies_to_file(ctx, nearest, from_file) {
+        return chain;
+    }
+    references.to_vec()
 }
 
 fn collect_local_tsconfig_chain(
@@ -265,47 +281,6 @@ fn resolve_tsconfig_reference_path(base_dir: &Path, reference: &str) -> PathBuf 
     } else {
         path.join("tsconfig.json")
     }
-}
-
-fn tsconfig_applies_to_file(
-    ctx: &ResolveContext<'_>,
-    tsconfig_path: &Path,
-    from_file: &Path,
-) -> bool {
-    let root = ctx.root;
-    let Some(merged) = merged_tsconfig_cached(ctx, tsconfig_path) else {
-        return false;
-    };
-    // `references` paths are joined verbatim, so a folder can carry `./`
-    // and `..` segments that a normalized file path never has.
-    let tsconfig_dir = normalize_path_lexically(tsconfig_path.parent().unwrap_or(root));
-    if let Some(files) = merged.file_set(TsconfigFileSet::Files) {
-        let base_dir = normalize_path_lexically(files.origin());
-        return files
-            .strings()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|file| merged.resolve_path(file, &base_dir))
-            .any(|file| same_path(&file, from_file));
-    }
-
-    let patterns_match = |patterns: &[TsconfigPattern]| {
-        patterns.iter().any(|pattern| {
-            let value = [Value::String(pattern.pattern.clone())];
-            glob_values_match(&normalize_path_lexically(&pattern.base), &value, from_file)
-        })
-    };
-    let include_matches = match merged.file_set_patterns(TsconfigFileSet::Include) {
-        Some(include) => patterns_match(&include),
-        None => from_file.starts_with(&tsconfig_dir),
-    };
-    if !include_matches {
-        return false;
-    }
-
-    !merged
-        .file_set_patterns(TsconfigFileSet::Exclude)
-        .is_some_and(|exclude| patterns_match(&exclude))
 }
 
 pub(super) fn same_path(left: &Path, right: &Path) -> bool {
@@ -587,11 +562,13 @@ fn try_tsconfig_paths_from_config(
             } else {
                 target.to_string()
             };
-            let Some(absolute) = merged.resolve_path(&target, &paths.base_dir) else {
-                continue;
-            };
-            if let Some(result) = try_tsconfig_alias_target(ctx, &absolute, style_context) {
-                return Some(result);
+            for base in paths.base_dirs() {
+                let Some(absolute) = merged.resolve_path(&target, base) else {
+                    continue;
+                };
+                if let Some(result) = try_tsconfig_alias_target(ctx, &absolute, style_context) {
+                    return Some(result);
+                }
             }
         }
     }
@@ -1773,9 +1750,10 @@ mod tests {
 
     use super::super::file_attempt::is_tsconfig_error;
     use super::super::package_credit::package_usage_name_for_resolved_package;
+    use super::super::tsconfig_scope::glob_values_match;
     use super::{
-        SpecifierNormalization, glob_values_match, is_bare_style_package_reference,
-        is_bare_style_subpath, is_js_ts_extension, is_node_modules_path, is_plain_css_file,
+        SpecifierNormalization, is_bare_style_package_reference, is_bare_style_subpath,
+        is_js_ts_extension, is_node_modules_path, is_plain_css_file,
         is_safe_static_dir_relative_path, is_style_file, matches_nearest_tsconfig_path_alias,
         normalize_resolve_specifier, package_usage_name_for_external_bare_specifier,
         path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
@@ -3129,12 +3107,12 @@ mod tests {
         });
     }
 
-    /// A cycle that ends through an absolute `references` path: the root
-    /// config `A` references `b/tsconfig.json` by absolute path and extends
-    /// `c.json`, and `b/tsconfig.json` extends `["../tsconfig.json",
-    /// "../d.json"]`. The chain holds the root and the referenced config.
-    /// The merged root config inherits `paths` from `c.json`, and the first
-    /// config in the chain with merged `paths` decides the alias target.
+    /// A cycle that ends through an absolute `references` path: the
+    /// solution config `A` (`files: []`) references `b/tsconfig.json` by
+    /// absolute path and extends `c.json`, and `b/tsconfig.json` extends
+    /// `["../tsconfig.json", "../d.json"]`. `A` does not contain the file,
+    /// so only `b`, which owns it, counts. The `paths` that `A` inherits from
+    /// `c.json` do not hide those of `b`, which takes them from `d.json`.
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn references_walk_skips_a_repeat_reached_through_an_absolute_reference() {
@@ -3152,7 +3130,9 @@ mod tests {
         let b_reference = serde_json::to_string(&root.join("b").to_string_lossy()).unwrap();
         fs::write(
             root.join("tsconfig.json"),
-            format!(r#"{{"references":[{{"path":{b_reference}}}],"extends":"./c.json"}}"#),
+            format!(
+                r#"{{"files":[],"references":[{{"path":{b_reference}}}],"extends":"./c.json"}}"#
+            ),
         )
         .unwrap();
         fs::write(
@@ -3181,13 +3161,13 @@ mod tests {
                 .iter()
                 .map(|path| super::normalize_path_lexically(path))
                 .collect();
-            assert_eq!(
-                chain,
-                vec![root.join("tsconfig.json"), root.join("b/tsconfig.json")],
-            );
+            assert_eq!(chain, vec![root.join("b/tsconfig.json")]);
             assert!(matches!(
                 super::try_nearest_tsconfig_path_alias(ctx, &x, "@shared", false),
-                Some(super::ResolveResult::InternalModule(FileId(1)))
+                Some(super::ResolveResult::InternalModule(FileId(2)))
+            ));
+            assert!(super::matches_nearest_tsconfig_path_alias(
+                ctx, &x, "@shared"
             ));
         });
     }

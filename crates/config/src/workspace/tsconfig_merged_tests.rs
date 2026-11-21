@@ -387,3 +387,34 @@ fn read_with_loader_parses_through_the_loader() {
     assert_eq!(merged.compiler_option_str("jsx"), Some("react-jsx"));
     assert_eq!(loads.borrow().len(), 2);
 }
+
+#[test]
+fn paths_give_the_base_url_and_then_the_folder_of_their_config() {
+    let directory = tempfile::tempdir().expect("temporary folder");
+    let project = directory.path();
+    write(
+        &project.join("base.json"),
+        r#"{"compilerOptions":{"baseUrl":"."}}"#,
+    );
+    write(
+        &project.join("app/tsconfig.json"),
+        r#"{"extends":"../base.json","compilerOptions":{"paths":{"~/*":["./src/*"]}}}"#,
+    );
+    let merged = MergedTsconfig::read(&project.join("app/tsconfig.json")).expect("leaf parses");
+    let paths = merged.paths().expect("paths");
+    assert_eq!(
+        paths.base_dirs().collect::<Vec<_>>(),
+        vec![project, project.join("app").as_path()]
+    );
+
+    write(
+        &project.join("app/tsconfig.json"),
+        r#"{"compilerOptions":{"paths":{"~/*":["./src/*"]}}}"#,
+    );
+    let merged = MergedTsconfig::read(&project.join("app/tsconfig.json")).expect("leaf parses");
+    let paths = merged.paths().expect("paths");
+    assert_eq!(
+        paths.base_dirs().collect::<Vec<_>>(),
+        vec![project.join("app").as_path()]
+    );
+}

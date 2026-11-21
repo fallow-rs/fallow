@@ -27,6 +27,7 @@
 //! A reachable import of an orphan still makes it reachable through the graph.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use globset::{GlobBuilder, GlobMatcher};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -147,6 +148,31 @@ fn has_same_stem_sibling(path: &Path) -> bool {
 struct DirectoryChainLookups {
     package_type_targets: FxHashMap<PathBuf, Vec<PathTarget>>,
     tsconfig_scopes: FxHashMap<PathBuf, Vec<TsconfigScope>>,
+    /// The parsed tsconfig files of the run. The configs of many folders
+    /// often extend one base config, which is then parsed once.
+    tsconfig_sources: TsconfigSources,
+}
+
+/// A parse cache of tsconfig files for [`fallow_config::MergedTsconfig`].
+#[derive(Default)]
+struct TsconfigSources(std::cell::RefCell<FxHashMap<PathBuf, Option<Arc<serde_json::Value>>>>);
+
+impl TsconfigSources {
+    fn load(&self, path: &Path) -> Option<Arc<serde_json::Value>> {
+        if let Some(source) = self.0.borrow().get(path) {
+            return source.clone();
+        }
+        let source = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| {
+                fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
+            })
+            .map(Arc::new);
+        self.0
+            .borrow_mut()
+            .insert(path.to_path_buf(), source.clone());
+        source
+    }
 }
 
 impl DirectoryChainLookups {
@@ -161,10 +187,11 @@ impl DirectoryChainLookups {
     }
 
     fn covered_by_tsconfig(&mut self, root: &Path, path: &Path) -> bool {
+        let sources = &self.tsconfig_sources;
         directory_chain(root, path).any(|dir| {
             self.tsconfig_scopes
                 .entry(dir.to_path_buf())
-                .or_insert_with(|| directory_tsconfig_scopes(dir))
+                .or_insert_with(|| directory_tsconfig_scopes(dir, sources))
                 .iter()
                 .any(|scope| scope.covers(path))
         })
@@ -310,7 +337,7 @@ impl TsconfigScope {
 
 /// The scopes of every `tsconfig.json`, `tsconfig.*.json` and `jsconfig.json`
 /// in `dir`.
-fn directory_tsconfig_scopes(dir: &Path) -> Vec<TsconfigScope> {
+fn directory_tsconfig_scopes(dir: &Path, sources: &TsconfigSources) -> Vec<TsconfigScope> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -327,7 +354,7 @@ fn directory_tsconfig_scopes(dir: &Path) -> Vec<TsconfigScope> {
     configs.sort_unstable();
     configs
         .iter()
-        .map(|config| load_tsconfig_scope(config))
+        .map(|config| load_tsconfig_scope(config, sources))
         .collect()
 }
 
@@ -352,9 +379,9 @@ struct RawScope {
     type_roots: Option<Vec<PathBuf>>,
 }
 
-fn load_tsconfig_scope(config: &Path) -> TsconfigScope {
+fn load_tsconfig_scope(config: &Path, sources: &TsconfigSources) -> TsconfigScope {
     let dir = config.parent().unwrap_or(config);
-    let Some(raw) = load_raw_scope(config) else {
+    let Some(raw) = load_raw_scope(config, sources) else {
         return TsconfigScope::everything(dir);
     };
 
@@ -387,8 +414,9 @@ fn load_tsconfig_scope(config: &Path) -> TsconfigScope {
 /// Read the merged file set of one config. `None` when the config or a
 /// config that it extends exists but does not parse, so the caller can keep
 /// every file.
-fn load_raw_scope(config: &Path) -> Option<RawScope> {
-    let merged = fallow_config::MergedTsconfig::read(config)?;
+fn load_raw_scope(config: &Path, sources: &TsconfigSources) -> Option<RawScope> {
+    let merged =
+        fallow_config::MergedTsconfig::read_with_loader(config, &|path| sources.load(path))?;
     if merged.has_malformed_parent() {
         return None;
     }

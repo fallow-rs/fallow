@@ -6,7 +6,11 @@ use std::path::{Path, PathBuf};
 use globset::GlobSetBuilder;
 use serde_json::Value;
 
+use fallow_config::{TsconfigFileSet, TsconfigPattern};
+
 use super::fallbacks::normalize_path_lexically;
+use super::specifier::{merged_tsconfig_cached, same_path};
+use super::types::ResolveContext;
 use crate::read_trace::TracedPath;
 
 pub(super) fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
@@ -57,4 +61,53 @@ fn tsconfig_entry_glob(base_dir: &Path, value: &str) -> String {
 /// without `./` and `..`, as the globs match path text (issue #3946).
 fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
     normalize_path_lexically(&base_dir.join(path))
+}
+
+/// True when the tsconfig at `tsconfig_path`, after its `extends` chain,
+/// contains `from_file` through `files`, `include` and `exclude`.
+pub(super) fn tsconfig_applies_to_file(
+    ctx: &ResolveContext<'_>,
+    tsconfig_path: &Path,
+    from_file: &Path,
+) -> bool {
+    let root = ctx.root;
+    let Some(merged) = merged_tsconfig_cached(ctx, tsconfig_path) else {
+        return false;
+    };
+    // `references` paths are joined verbatim, so a folder can carry `./`
+    // and `..` segments that a normalized file path never has.
+    let tsconfig_dir = normalize_path_lexically(tsconfig_path.parent().unwrap_or(root));
+    // `files` and `include` add up, as in TypeScript. A config with `files`
+    // and no `include` contains only the listed files. An `exclude` does not
+    // remove a listed file.
+    let files = merged.file_set(TsconfigFileSet::Files);
+    if files.is_some_and(|files| {
+        let base_dir = normalize_path_lexically(files.origin());
+        files
+            .strings()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|file| merged.resolve_path(file, &base_dir))
+            .any(|file| same_path(&file, from_file))
+    }) {
+        return true;
+    }
+
+    let patterns_match = |patterns: &[TsconfigPattern]| {
+        patterns.iter().any(|pattern| {
+            let value = [Value::String(pattern.pattern.clone())];
+            glob_values_match(&normalize_path_lexically(&pattern.base), &value, from_file)
+        })
+    };
+    let include_matches = match merged.file_set_patterns(TsconfigFileSet::Include) {
+        Some(include) => patterns_match(&include),
+        None => files.is_none() && from_file.starts_with(&tsconfig_dir),
+    };
+    if !include_matches {
+        return false;
+    }
+
+    !merged
+        .file_set_patterns(TsconfigFileSet::Exclude)
+        .is_some_and(|exclude| patterns_match(&exclude))
 }

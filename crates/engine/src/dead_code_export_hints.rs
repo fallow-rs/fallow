@@ -226,11 +226,14 @@ fn alias_folder(dir: &Path, alias: &str) -> Option<PathBuf> {
             .filter_map(|(pattern, targets)| {
                 let prefix = pattern.strip_suffix('*')?;
                 let rest = alias.strip_prefix(prefix)?;
-                let target = targets.as_array()?.first()?.as_str()?;
-                Some((
-                    prefix.len(),
-                    normalize(&paths.base_dir.join(target.replace('*', rest))),
-                ))
+                let target = targets.as_array()?.first()?.as_str()?.replace('*', rest);
+                Some((prefix.len(), target))
+            })
+            .flat_map(|(prefix_len, target)| {
+                paths
+                    .base_dirs()
+                    .map(move |base| (prefix_len, normalize(&base.join(&target))))
+                    .collect::<Vec<_>>()
             })
             .collect();
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));

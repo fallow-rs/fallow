@@ -140,14 +140,28 @@ pub struct MergedTsconfig {
     merged: Arc<Merged>,
 }
 
-/// The `paths` option and the folder that its targets resolve against.
+/// The `paths` option and the folders that its targets resolve against.
 #[derive(Debug, Clone)]
 pub struct TsconfigPaths<'a> {
     /// The `paths` object: pattern to target list.
     pub patterns: &'a serde_json::Map<String, serde_json::Value>,
     /// `baseUrl` when a config of the chain sets it, else the folder of the
-    /// config that sets `paths`.
+    /// config that sets `paths`. TypeScript 5 resolves targets against it.
     pub base_dir: PathBuf,
+    /// The folder of the config that sets `paths`. TypeScript 7 has no
+    /// `baseUrl` and resolves targets against this folder.
+    pub origin_dir: PathBuf,
+}
+
+impl TsconfigPaths<'_> {
+    /// The folders to resolve a target against, in lookup order:
+    /// [`Self::base_dir`], then [`Self::origin_dir`] when it differs. A
+    /// reader that checks that the target exists tries both, so a project
+    /// on either TypeScript version keeps its aliases.
+    pub fn base_dirs(&self) -> impl Iterator<Item = &Path> {
+        let origin = (self.origin_dir != self.base_dir).then_some(self.origin_dir.as_path());
+        std::iter::once(self.base_dir.as_path()).chain(origin)
+    }
 }
 
 impl MergedTsconfig {
@@ -287,10 +301,15 @@ impl MergedTsconfig {
     pub fn paths(&self) -> Option<TsconfigPaths<'_>> {
         let paths = self.compiler_option("paths")?;
         let patterns = paths.value().as_object()?;
+        let origin_dir = paths.origin().to_path_buf();
         let base_dir = self
             .path_option("baseUrl")
-            .unwrap_or_else(|| paths.origin().to_path_buf());
-        Some(TsconfigPaths { patterns, base_dir })
+            .unwrap_or_else(|| origin_dir.clone());
+        Some(TsconfigPaths {
+            patterns,
+            base_dir,
+            origin_dir,
+        })
     }
 
     /// The problems of the `extends` chain, in walk order.

@@ -97,9 +97,9 @@ const MAX_TSCONFIG_WALK_DEPTH: usize = 12;
 /// The tsconfig options that decide where a non-relative specifier resolves.
 #[derive(Default)]
 struct TsconfigModuleOptions {
-    /// The `compilerOptions.paths` object and the folder that its targets
-    /// resolve against.
-    paths: Option<(serde_json::Map<String, serde_json::Value>, PathBuf)>,
+    /// The `compilerOptions.paths` object and the folders that its targets
+    /// resolve against, in lookup order.
+    paths: Option<(serde_json::Map<String, serde_json::Value>, Vec<PathBuf>)>,
     /// The `compilerOptions.baseUrl` value, resolved against its tsconfig.
     base_url: Option<PathBuf>,
 }
@@ -169,9 +169,10 @@ fn read_tsconfig_module_options(tsconfig: &Path) -> TsconfigModuleOptions {
         return TsconfigModuleOptions::default();
     };
     TsconfigModuleOptions {
-        paths: merged
-            .paths()
-            .map(|paths| (paths.patterns.clone(), paths.base_dir)),
+        paths: merged.paths().map(|paths| {
+            let bases = paths.base_dirs().map(Path::to_path_buf).collect();
+            (paths.patterns.clone(), bases)
+        }),
         base_url: merged.path_option("baseUrl"),
     }
 }
@@ -185,12 +186,17 @@ fn read_jsonc(path: &Path) -> Option<serde_json::Value> {
 /// The existing file that tsconfig `paths` or `baseUrl` maps `specifier` to.
 /// When no `paths` target exists, tsc tries `baseUrl` next.
 fn tsconfig_target(specifier: &str, options: &TsconfigModuleOptions) -> Option<PathBuf> {
-    let from_paths = options.paths.as_ref().and_then(|(paths, base)| {
+    let from_paths = options.paths.as_ref().and_then(|(paths, bases)| {
         let (targets, capture) = best_paths_match(paths, specifier)?;
         targets
             .iter()
             .filter_map(serde_json::Value::as_str)
-            .find_map(|target| probe_source_file(&base.join(target.replacen('*', capture, 1))))
+            .find_map(|target| {
+                let target = target.replacen('*', capture, 1);
+                bases
+                    .iter()
+                    .find_map(|base| probe_source_file(&base.join(&target)))
+            })
     });
     from_paths.or_else(|| {
         options

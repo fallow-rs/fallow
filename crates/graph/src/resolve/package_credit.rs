@@ -2,7 +2,6 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use fallow_config::TsconfigPaths;
 use serde_json::Value;
 
 use super::fallbacks::{
@@ -195,13 +194,10 @@ pub(super) fn nearest_tsconfig_alias_targets(
     else {
         return Vec::new();
     };
-    let Some(TsconfigPaths {
-        patterns: paths,
-        base_dir,
-    }) = merged.paths()
-    else {
+    let Some(tsconfig_paths) = merged.paths() else {
         return Vec::new();
     };
+    let paths = tsconfig_paths.patterns;
     let mut matches: Vec<_> = paths
         .iter()
         .filter(|(pattern, _)| pattern.as_str() != "*")
@@ -222,7 +218,12 @@ pub(super) fn nearest_tsconfig_alias_targets(
                 .filter_map(Value::as_str)
                 .map(move |target| target.replacen('*', capture, 1))
         })
-        .filter_map(|target| merged.resolve_path(&target, &base_dir))
+        .flat_map(|target| {
+            tsconfig_paths
+                .base_dirs()
+                .filter_map(|base| merged.resolve_path(&target, base))
+                .collect::<Vec<_>>()
+        })
         .collect()
 }
 

@@ -1217,9 +1217,17 @@ the reader, so a shared base config is parsed once per run. The TypeScript plugi
 `jsxImportSource`, `types`, `paths`), the alias replacement check, the orphan
 declaration check (`files`, `include`, `exclude`, `typeRoots`), the
 `rootDir` reader of boundary presets, the tsconfig output map and the resolver
-fallbacks read through it. The resolver chain of a file holds the nearest
-tsconfig and the referenced configs that apply to the file; each reads its own
-`extends` chain. The orphan check keeps every file when a parent does not
+fallbacks read through it. The resolver chain of a file holds the configs
+that contain the file, as TypeScript decides ownership: `files` and `include`
+add up, and `exclude` removes only `include` matches. The nearest tsconfig
+comes first when it contains the file. A solution-style nearest config
+(`files: []`) does not, so the referenced configs that contain the file count,
+and the `paths` that the solution config inherits do not hide theirs. When no
+config contains the file, the nearest config is the fallback. Each config of
+the chain reads its own `extends` chain. A `paths` target resolves against
+`baseUrl` (TypeScript 5), then against the config that sets `paths`
+(TypeScript 7, which has no `baseUrl`), in each reader that checks that the
+target exists. Plugin path aliases use only the first folder. The orphan check keeps every file when a parent does not
 parse, and the output map maps nothing when the chain is not complete.
 `scripts/check-tsconfig-reads.mjs` fails on a `"compilerOptions"` key read
 outside the reader and test code. A read that needs the syntax tree of one
