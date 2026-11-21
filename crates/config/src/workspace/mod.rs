@@ -55,7 +55,7 @@ pub use pnpm_overrides::{
     parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
 };
 pub use pnpm_workspace::{KeyLocation, PnpmWorkspaceDoc, pnpm_workspace_packages};
-pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution, tsconfig_linked_files};
+pub use tsconfig::*;
 pub use undeclared::{find_undeclared_workspaces, find_undeclared_workspaces_with_ignores};
 pub use workspace_config::{WorkspaceConfig, WorkspaceSettings};
 

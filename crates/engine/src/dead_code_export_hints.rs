@@ -15,7 +15,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{MergedTsconfig, ResolvedConfig};
 use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, GENERATED_FILE_EXPORTS_HINT,
     IgnoreExportsRule, IssueAction, UI_FOLDER_EXPORTS_HINT,
@@ -218,14 +218,10 @@ fn ui_alias(components: &Value) -> Option<String> {
 /// folder gives way to the next pattern.
 fn alias_folder(dir: &Path, alias: &str) -> Option<PathBuf> {
     TSCONFIG_FILES.iter().find_map(|name| {
-        let tsconfig = read_jsonc(&dir.join(name))?;
-        let options = tsconfig.get("compilerOptions")?;
-        let base = options
-            .get("baseUrl")
-            .and_then(Value::as_str)
-            .map_or_else(|| dir.to_path_buf(), |base| dir.join(base));
-        let paths = options.get("paths")?.as_object()?;
+        let tsconfig = MergedTsconfig::read(&dir.join(name))?;
+        let paths = tsconfig.paths()?;
         let mut candidates: Vec<(usize, PathBuf)> = paths
+            .patterns
             .iter()
             .filter_map(|(pattern, targets)| {
                 let prefix = pattern.strip_suffix('*')?;
@@ -233,7 +229,7 @@ fn alias_folder(dir: &Path, alias: &str) -> Option<PathBuf> {
                 let target = targets.as_array()?.first()?.as_str()?;
                 Some((
                     prefix.len(),
-                    normalize(&base.join(target.replace('*', rest))),
+                    normalize(&paths.base_dir.join(target.replace('*', rest))),
                 ))
             })
             .collect();
@@ -316,6 +312,28 @@ mod tests {
         );
         assert_eq!(alias_folder(dir, "@workspace/ui/components"), None);
         assert_eq!(alias_folder(dir, "@/missing"), None);
+    }
+
+    #[test]
+    fn an_alias_resolves_through_paths_that_the_tsconfig_extends() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let dir = project.path();
+        std::fs::create_dir_all(dir.join("src/components/ui")).expect("ui folder");
+        std::fs::write(
+            dir.join("tsconfig.base.json"),
+            r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}"#,
+        )
+        .expect("base tsconfig");
+        std::fs::write(
+            dir.join("tsconfig.json"),
+            r#"{"extends":"./tsconfig.base.json"}"#,
+        )
+        .expect("tsconfig");
+
+        assert_eq!(
+            alias_folder(dir, "@/components/ui"),
+            Some(dir.join("src/components/ui"))
+        );
     }
 
     fn remove_export_actions() -> Vec<IssueAction> {

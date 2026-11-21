@@ -2,6 +2,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use fallow_config::TsconfigPaths;
 use serde_json::Value;
 
 use super::fallbacks::{
@@ -12,8 +13,7 @@ use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
 use super::specifier::{
-    local_tsconfig_chain, path_alias_capture, path_alias_specificity, read_tsconfig_json_cached,
-    tsconfig_paths_base_dir,
+    local_tsconfig_chain, merged_tsconfig_cached, path_alias_capture, path_alias_specificity,
 };
 use super::types::ResolveContext;
 use crate::read_trace::TracedPath;
@@ -188,17 +188,18 @@ pub(super) fn nearest_tsconfig_alias_targets(
     specifier: &str,
 ) -> Vec<PathBuf> {
     let chain = local_tsconfig_chain(ctx, from_file);
-    let Some((tsconfig_path, json)) = chain.iter().find_map(|tsconfig_path| {
-        let json = read_tsconfig_json_cached(ctx, tsconfig_path)?;
-        json.get("compilerOptions")?.get("paths")?;
-        Some((tsconfig_path, json))
-    }) else {
+    let Some(merged) = chain
+        .iter()
+        .filter_map(|tsconfig_path| merged_tsconfig_cached(ctx, tsconfig_path))
+        .find(|merged| merged.paths().is_some())
+    else {
         return Vec::new();
     };
-    let Some(compiler_options) = json.get("compilerOptions") else {
-        return Vec::new();
-    };
-    let Some(paths) = compiler_options.get("paths").and_then(Value::as_object) else {
+    let Some(TsconfigPaths {
+        patterns: paths,
+        base_dir,
+    }) = merged.paths()
+    else {
         return Vec::new();
     };
     let mut matches: Vec<_> = paths
@@ -212,7 +213,6 @@ pub(super) fn nearest_tsconfig_alias_targets(
         return Vec::new();
     }
     matches.sort_by_key(|(pattern, _, _)| std::cmp::Reverse(path_alias_specificity(pattern)));
-    let base_dir = tsconfig_paths_base_dir(ctx, tsconfig_path, compiler_options);
     matches
         .into_iter()
         .filter_map(|(_, capture, targets)| Some((capture, targets.as_array()?)))
@@ -222,7 +222,7 @@ pub(super) fn nearest_tsconfig_alias_targets(
                 .filter_map(Value::as_str)
                 .map(move |target| target.replacen('*', capture, 1))
         })
-        .map(|target| base_dir.join(target))
+        .filter_map(|target| merged.resolve_path(&target, &base_dir))
         .collect()
 }
 

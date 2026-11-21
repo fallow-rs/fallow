@@ -94,13 +94,11 @@ fn is_installed_package(specifier: &str, config_path: &Path) -> bool {
 /// `tsconfig.json`.
 const MAX_TSCONFIG_WALK_DEPTH: usize = 12;
 
-/// Maximum number of tsconfig files to read for one `extends` tree.
-const MAX_TSCONFIG_CHAIN_LENGTH: usize = 8;
-
 /// The tsconfig options that decide where a non-relative specifier resolves.
 #[derive(Default)]
 struct TsconfigModuleOptions {
-    /// The `compilerOptions.paths` object and the directory of its tsconfig.
+    /// The `compilerOptions.paths` object and the folder that its targets
+    /// resolve against.
     paths: Option<(serde_json::Map<String, serde_json::Value>, PathBuf)>,
     /// The `compilerOptions.baseUrl` value, resolved against its tsconfig.
     base_url: Option<PathBuf>,
@@ -164,56 +162,18 @@ fn referenced_tsconfigs(tsconfig: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Read `paths` and `baseUrl` from a tsconfig and its relative `extends`
-/// entries. The value in the nearest tsconfig wins, as in tsc. In an
-/// `extends` array, a later entry overrides an earlier entry.
+/// Read the merged `paths` and `baseUrl` of a tsconfig and its `extends`
+/// chain.
 fn read_tsconfig_module_options(tsconfig: &Path) -> TsconfigModuleOptions {
-    let mut options = TsconfigModuleOptions::default();
-    // The stack gives the tsc precedence order: the tsconfig itself, then the
-    // last `extends` entry and its bases, then the earlier entries.
-    let mut stack = vec![tsconfig.to_path_buf()];
-    for _ in 0..MAX_TSCONFIG_CHAIN_LENGTH {
-        let Some(path) = stack.pop() else {
-            break;
-        };
-        let Some(json) = read_jsonc(&path) else {
-            continue;
-        };
-        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let compiler_options = json.get("compilerOptions");
-        if options.paths.is_none()
-            && let Some(paths) = compiler_options
-                .and_then(|opts| opts.get("paths"))
-                .and_then(serde_json::Value::as_object)
-        {
-            options.paths = Some((paths.clone(), dir.clone()));
-        }
-        if options.base_url.is_none()
-            && let Some(base_url) = compiler_options
-                .and_then(|opts| opts.get("baseUrl"))
-                .and_then(serde_json::Value::as_str)
-        {
-            options.base_url = Some(dir.join(base_url));
-        }
-        stack.extend(
-            extends_values(&json)
-                .filter(|extends| extends.starts_with('.'))
-                .map(|extends| relative_extends_path(&dir, extends)),
-        );
+    let Some(merged) = fallow_config::MergedTsconfig::read(tsconfig) else {
+        return TsconfigModuleOptions::default();
+    };
+    TsconfigModuleOptions {
+        paths: merged
+            .paths()
+            .map(|paths| (paths.patterns.clone(), paths.base_dir)),
+        base_url: merged.path_option("baseUrl"),
     }
-    options
-}
-
-/// The `extends` values of a tsconfig: one string, or an array of strings.
-fn extends_values(json: &serde_json::Value) -> impl Iterator<Item = &str> {
-    let extends = json.get("extends");
-    let single = extends.and_then(serde_json::Value::as_str);
-    let array = extends
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str);
-    single.into_iter().chain(array)
 }
 
 /// Read a JSONC file, such as a tsconfig.
@@ -222,24 +182,10 @@ fn read_jsonc(path: &Path) -> Option<serde_json::Value> {
     fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
 }
 
-/// The tsconfig file of a relative `extends` value. tsc adds `.json` when the
-/// value has no `.json` extension.
-fn relative_extends_path(dir: &Path, extends: &str) -> PathBuf {
-    let path = dir.join(extends);
-    if path.extension().is_some_and(|ext| ext == "json") {
-        path
-    } else {
-        let mut with_json = path.into_os_string();
-        with_json.push(".json");
-        PathBuf::from(with_json)
-    }
-}
-
 /// The existing file that tsconfig `paths` or `baseUrl` maps `specifier` to.
 /// When no `paths` target exists, tsc tries `baseUrl` next.
 fn tsconfig_target(specifier: &str, options: &TsconfigModuleOptions) -> Option<PathBuf> {
-    let from_paths = options.paths.as_ref().and_then(|(paths, paths_dir)| {
-        let base = options.base_url.as_deref().unwrap_or(paths_dir);
+    let from_paths = options.paths.as_ref().and_then(|(paths, base)| {
         let (targets, capture) = best_paths_match(paths, specifier)?;
         targets
             .iter()
@@ -380,6 +326,31 @@ mod tests {
             r#"{ "compilerOptions": { "paths": { "~/*": ["./test/stubs/*"] } } }"#,
         );
         assert!(credits("~/clock", dir.path()).is_empty());
+    }
+
+    #[test]
+    fn every_extends_shape_gives_paths_and_base_url() {
+        for shape in fallow_config::TsconfigExtendsShape::ALL {
+            let dir = tempfile::tempdir().expect("temp dir");
+            shape.write(dir.path());
+            write(&dir.path().join("src/clock.ts"), "export const now = 1;\n");
+            write(
+                &dir.path().join("test/stubs/clock.ts"),
+                "export const now = 0;\n",
+            );
+            assert_eq!(
+                credits("@app/clock", dir.path()).len(),
+                1,
+                "{}: paths",
+                shape.name()
+            );
+            assert_eq!(
+                credits("src/clock", dir.path()).len(),
+                1,
+                "{}: baseUrl",
+                shape.name()
+            );
+        }
     }
 
     #[test]

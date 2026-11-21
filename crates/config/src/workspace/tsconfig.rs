@@ -1,7 +1,20 @@
 use std::path::{Component, Path, PathBuf};
-use std::rc::Rc;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
+
+#[path = "tsconfig_merged.rs"]
+mod merged;
+
+use merged::ExtendsWalk;
+pub use merged::{
+    MergedTsconfig, SourceLoader, TsconfigExtendsIssue, TsconfigFileSet, TsconfigPaths,
+    TsconfigPattern, TsconfigValue,
+};
+#[cfg(any(test, feature = "testing"))]
+#[path = "tsconfig_shapes.rs"]
+mod shapes;
+#[cfg(any(test, feature = "testing"))]
+pub use shapes::TsconfigExtendsShape;
 
 const MAX_EXTENDS_DEPTH: usize = 16;
 /// The most distinct config files that the `extends` walk of one root config
@@ -75,17 +88,12 @@ impl TsconfigOutputMap {
         let Some(config_paths) = tsconfig_paths(&canonical_root) else {
             return Self::default();
         };
-        // Every root config lives in `canonical_root`, so the walk can share
-        // its memo across them.
-        let mut walk = ExtendsWalk::new(&canonical_root);
+        // The root configs share one walk, so they share its memo and the
+        // budget of the project.
+        let mut walk = ExtendsWalk::with_real_package_paths();
         let configs = config_paths
             .iter()
-            .filter_map(|path| {
-                let config_dir = path.parent()?;
-                let mut options = walk.read(path)?;
-                options.config_dir = Some(config_dir.to_path_buf());
-                Some(options)
-            })
+            .filter_map(|path| CompilerOptions::from_merged(&walk.read(path, None)?))
             .collect();
         Self {
             root: Some(canonical_root),
@@ -311,340 +319,49 @@ fn tsconfig_paths(root: &Path) -> Option<Vec<PathBuf>> {
     Some(configs)
 }
 
-/// The `extends` walk over the root configs of one project.
-///
-/// All root configs share one memo, because they share one
-/// `substitution_base`. The walk reads and parses each config once, resolves
-/// each `extends` specifier of a config folder once, and stops at
-/// [`MAX_EXTENDS_READS`] new configs and [`MAX_EXTENDS_ENTRIES`] `extends`
-/// entries for each root config. Over a limit, only the current root config
-/// fails closed. The walk does not keep a failure that comes from a limit, so
-/// a later root config can still resolve the configs that it shares. All root
-/// configs together stop at [`PROJECT_BUDGET_ROOTS`] budgets, and the root
-/// configs after that fail closed. Each config file is read and parsed at
-/// most once, also when a limit stopped an earlier root config.
-struct ExtendsWalk<'a> {
-    substitution_base: &'a Path,
-    /// The configs on the current `extends` path, to detect a cycle.
-    in_progress: FxHashSet<PathBuf>,
-    /// The merged options of each finished config, with the height of its
-    /// `extends` tree.
-    resolved: FxHashMap<PathBuf, (CompilerOptions, usize)>,
-    /// The lowest depth at which each failed config failed. A failure is the
-    /// same or worse at a greater depth.
-    failed: FxHashMap<PathBuf, usize>,
-    /// The canonical target of each `extends` specifier, by config folder.
-    targets: FxHashMap<PathBuf, FxHashMap<String, Option<PathBuf>>>,
-    /// The parsed content of each config file, or `None` when the file does
-    /// not read or parse.
-    sources: FxHashMap<PathBuf, Option<Rc<serde_json::Value>>>,
-    /// The config expansions of the current root config and of the project.
-    reads: WorkBudget,
-    /// The `extends` entries of the current root config and of the project.
-    entries: WorkBudget,
-    /// The current root config went over a limit.
-    over_limit: bool,
-}
-
-/// A work count with a limit for one root config and a limit for the project.
-struct WorkBudget {
-    root_limit: usize,
-    root: usize,
-    project: usize,
-}
-
-impl WorkBudget {
-    const fn new(root_limit: usize) -> Self {
-        Self {
-            root_limit,
-            root: 0,
-            project: 0,
-        }
-    }
-
-    fn start_root(&mut self) {
-        self.root = 0;
-    }
-
-    fn project_spent(&self) -> bool {
-        self.project >= self.root_limit * PROJECT_BUDGET_ROOTS
-    }
-
-    /// Count one unit of work. `false` when a limit is spent.
-    fn take(&mut self) -> bool {
-        if self.root >= self.root_limit || self.project_spent() {
-            return false;
-        }
-        self.root += 1;
-        self.project += 1;
-        true
-    }
-}
-
-impl<'a> ExtendsWalk<'a> {
-    fn new(substitution_base: &'a Path) -> Self {
-        Self {
-            substitution_base,
-            in_progress: FxHashSet::default(),
-            resolved: FxHashMap::default(),
-            failed: FxHashMap::default(),
-            targets: FxHashMap::default(),
-            sources: FxHashMap::default(),
-            reads: WorkBudget::new(MAX_EXTENDS_READS),
-            entries: WorkBudget::new(MAX_EXTENDS_ENTRIES),
-            over_limit: false,
-        }
-    }
-
-    /// Read the merged compiler options of a root config and its `extends`
-    /// chain. `None` when a config in the chain is missing, invalid, or part
-    /// of a cycle, when the chain is deeper than [`MAX_EXTENDS_DEPTH`], or
-    /// when the walk is over one of its limits.
-    fn read(&mut self, config_path: &Path) -> Option<CompilerOptions> {
-        self.in_progress.clear();
-        self.reads.start_root();
-        self.entries.start_root();
-        self.over_limit = false;
-        if self.reads.project_spent() || self.entries.project_spent() {
-            tracing::debug!(
-                config = %config_path.display(),
-                "tsconfig extends walk spent the budget of the project; ignoring the output mapping"
-            );
-            return None;
-        }
-        let config_path = dunce::canonicalize(config_path).ok()?;
-        self.read_with_height(&config_path, 0)
-            .map(|(options, _)| options)
-    }
-
-    /// The merged options of the canonical `config_path` and the height of
-    /// its `extends` tree. A config without `extends` has height 1.
-    fn read_with_height(
-        &mut self,
-        config_path: &Path,
-        depth: usize,
-    ) -> Option<(CompilerOptions, usize)> {
-        if depth >= MAX_EXTENDS_DEPTH {
-            return None;
-        }
-        if let Some((options, height)) = self.resolved.get(config_path) {
-            // A deeper path to a finished config can still exceed the depth limit.
-            return (depth + height <= MAX_EXTENDS_DEPTH).then(|| (options.clone(), *height));
-        }
-        if self
-            .failed
-            .get(config_path)
-            .is_some_and(|&failed_depth| failed_depth <= depth)
-        {
-            return None;
-        }
-        if !self.in_progress.insert(config_path.to_path_buf()) {
-            return None;
-        }
-        let result = if self.reads.take() {
-            self.parse(config_path, depth)
-        } else {
-            tracing::debug!(
-                config = %config_path.display(),
-                limit = MAX_EXTENDS_READS,
-                "tsconfig extends walk reads too many configs; ignoring the output mapping"
-            );
-            self.over_limit = true;
-            None
-        };
-        self.in_progress.remove(config_path);
-        match &result {
-            Some((options, height)) => {
-                self.resolved
-                    .insert(config_path.to_path_buf(), (options.clone(), *height));
-            }
-            // A failure after a limit can come from the limit and not from
-            // the config, so a later root config must walk it again.
-            None if self.over_limit => {}
-            None => {
-                let failed_depth = self
-                    .failed
-                    .entry(config_path.to_path_buf())
-                    .or_insert(depth);
-                *failed_depth = (*failed_depth).min(depth);
-            }
-        }
-        result
-    }
-
-    /// The canonical parent configs of one `extends` value, in apply order.
-    /// A repeated parent keeps only its last place, because the last place
-    /// decides which options it overrides.
-    fn resolve_parents(&mut self, config_path: &Path, extends: &[&str]) -> Option<Vec<PathBuf>> {
-        let config_dir = config_path.parent()?;
-        let mut seen_specifiers = FxHashSet::default();
-        let mut seen_parents = FxHashSet::default();
-        let mut parents = Vec::new();
-        for &specifier in extends.iter().rev() {
-            if !seen_specifiers.insert(specifier) {
-                continue;
-            }
-            if !self.entries.take() {
-                tracing::debug!(
-                    config = %config_path.display(),
-                    limit = MAX_EXTENDS_ENTRIES,
-                    "tsconfig extends walk follows too many entries; ignoring the output mapping"
-                );
-                self.over_limit = true;
-                return None;
-            }
-            let parent = self.resolve_target(config_path, config_dir, specifier)?;
-            if seen_parents.insert(parent.clone()) {
-                parents.push(parent);
-            }
-        }
-        parents.reverse();
-        Some(parents)
-    }
-
-    fn resolve_target(
-        &mut self,
-        config_path: &Path,
-        config_dir: &Path,
-        specifier: &str,
-    ) -> Option<PathBuf> {
-        if let Some(target) = self
-            .targets
-            .get(config_dir)
-            .and_then(|targets| targets.get(specifier))
-        {
-            return target.clone();
-        }
-        let target = resolve_extends_path(config_path, specifier)
-            .and_then(|path| dunce::canonicalize(path).ok());
-        self.targets
-            .entry(config_dir.to_path_buf())
-            .or_default()
-            .insert(specifier.to_owned(), target.clone());
-        target
-    }
-
-    /// The parsed content of the canonical `config_path`, read once per walk.
-    fn source(&mut self, config_path: &Path) -> Option<Rc<serde_json::Value>> {
-        if let Some(source) = self.sources.get(config_path) {
-            return source.clone();
-        }
-        let source = std::fs::read_to_string(config_path)
-            .ok()
-            .and_then(|content| {
-                crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
-            })
-            .map(Rc::new);
-        self.sources
-            .insert(config_path.to_path_buf(), source.clone());
-        source
-    }
-
-    fn parse(&mut self, config_path: &Path, depth: usize) -> Option<(CompilerOptions, usize)> {
-        let substitution_base = self.substitution_base;
-        let value = self.source(config_path)?;
-        let extends: Vec<&str> = match value.get("extends") {
-            Some(serde_json::Value::String(extends)) => vec![extends.as_str()],
-            Some(serde_json::Value::Array(items)) => items
-                .iter()
-                .map(serde_json::Value::as_str)
-                .collect::<Option<_>>()?,
-            Some(_) => return None,
-            None => Vec::new(),
-        };
-        let parents = self.resolve_parents(config_path, &extends)?;
-        // A later entry of an array `extends` overrides an earlier one.
-        let mut options = CompilerOptions::default();
-        let mut parent_height = 0;
-        for parent in parents {
-            let (parent_options, height) = self.read_with_height(&parent, depth + 1)?;
-            parent_height = parent_height.max(height);
-            options.inherit(parent_options);
-        }
-        let height = parent_height + 1;
-        let Some(compiler_options) = value.get("compilerOptions") else {
-            return Some((options, height));
-        };
-        let compiler_options = compiler_options.as_object()?;
-        let config_dir = config_path.parent()?;
-
-        replace_path_option(
-            compiler_options,
-            "rootDir",
-            config_dir,
-            substitution_base,
-            &mut options.root_dir,
-        )?;
-        replace_path_option(
-            compiler_options,
-            "outDir",
-            config_dir,
-            substitution_base,
-            &mut options.out_dir,
-        )?;
-        replace_path_option(
-            compiler_options,
-            "declarationDir",
-            config_dir,
-            substitution_base,
-            &mut options.declaration_dir,
-        )?;
-        replace_bool_option(compiler_options, "noEmit", &mut options.no_emit)?;
-        replace_bool_option(
-            compiler_options,
-            "emitDeclarationOnly",
-            &mut options.emit_declaration_only,
-        )?;
-        Some((options, height))
-    }
-}
-
 impl CompilerOptions {
-    /// Apply the options that `parent` sets over the current options.
-    fn inherit(&mut self, parent: Self) {
-        self.root_dir = parent.root_dir.or_else(|| self.root_dir.take());
-        self.out_dir = parent.out_dir.or_else(|| self.out_dir.take());
-        self.declaration_dir = parent
-            .declaration_dir
-            .or_else(|| self.declaration_dir.take());
-        self.no_emit = parent.no_emit.or(self.no_emit);
-        self.emit_declaration_only = parent.emit_declaration_only.or(self.emit_declaration_only);
-    }
-}
-
-fn replace_path_option(
-    compiler_options: &serde_json::Map<String, serde_json::Value>,
-    name: &str,
-    config_dir: &Path,
-    substitution_base: &Path,
-    option: &mut Option<PathBuf>,
-) -> Option<()> {
-    if let Some(value) = compiler_options.get(name) {
-        let value = value.as_str()?;
-        if value.is_empty() {
+    /// The output options of a merged config. `None` when the chain is not
+    /// complete, or when an output option does not have the type that
+    /// TypeScript needs, so an unclear config maps no output.
+    fn from_merged(merged: &MergedTsconfig) -> Option<Self> {
+        if !merged.is_complete() {
             return None;
         }
-        let value = value.replace("${configDir}", &substitution_base.to_string_lossy());
-        let path = Path::new(&value);
-        let path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            config_dir.join(path)
-        };
-        *option = Some(normalize_path(&path)?);
+        Some(Self {
+            root_dir: strict_path_option(merged, "rootDir").ok()?,
+            out_dir: strict_path_option(merged, "outDir").ok()?,
+            declaration_dir: strict_path_option(merged, "declarationDir").ok()?,
+            no_emit: strict_bool_option(merged, "noEmit").ok()?,
+            emit_declaration_only: strict_bool_option(merged, "emitDeclarationOnly").ok()?,
+            config_dir: Some(merged.config_dir().to_path_buf()),
+        })
     }
-    Some(())
 }
 
-fn replace_bool_option(
-    compiler_options: &serde_json::Map<String, serde_json::Value>,
+/// An output option whose value TypeScript does not accept.
+struct InvalidOption;
+
+/// `Ok(None)` when no config sets the option.
+fn strict_path_option(
+    merged: &MergedTsconfig,
     name: &str,
-    option: &mut Option<bool>,
-) -> Option<()> {
-    if let Some(value) = compiler_options.get(name) {
-        *option = Some(value.as_bool()?);
-    }
-    Some(())
+) -> Result<Option<PathBuf>, InvalidOption> {
+    let Some(option) = merged.compiler_option(name) else {
+        return Ok(None);
+    };
+    option
+        .as_str()
+        .and_then(|value| merged.resolve_path(value, option.origin()))
+        .map(Some)
+        .ok_or(InvalidOption)
+}
+
+/// `Ok(None)` when no config sets the option.
+fn strict_bool_option(merged: &MergedTsconfig, name: &str) -> Result<Option<bool>, InvalidOption> {
+    let Some(option) = merged.compiler_option(name) else {
+        return Ok(None);
+    };
+    option.value().as_bool().map(Some).ok_or(InvalidOption)
 }
 
 /// Find the configs in the `extends` chain of `config_path` that exist but fail
@@ -765,12 +482,15 @@ fn extends_parents(config_path: &Path, value: &serde_json::Value) -> Vec<PathBuf
         .collect()
 }
 
+/// True when an `extends` specifier names a file path and not a package.
+fn is_local_extends(extends: &str) -> bool {
+    Path::new(extends).is_absolute() || extends.starts_with("./") || extends.starts_with("../")
+}
+
 fn resolve_extends_path(config_path: &Path, extends: &str) -> Option<PathBuf> {
     let path = Path::new(extends);
     let config_dir = config_path.parent()?;
-    let explicitly_local =
-        path.is_absolute() || extends.starts_with("./") || extends.starts_with("../");
-    if !explicitly_local {
+    if !is_local_extends(extends) {
         return resolve_package_extends(config_dir, extends);
     }
     let path = normalize_path(&config_dir.join(path))?;

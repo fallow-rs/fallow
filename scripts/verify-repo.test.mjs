@@ -52,6 +52,7 @@ const FAST_COMMANDS = [
   ["node", ["--test", "scripts/workflow-policy.test.mjs"]],
   ["npm", ["run", "check:miri-fs-tests"]],
   ["npm", ["run", "check:host-reads"]],
+  ["npm", ["run", "check:tsconfig-reads"]],
 ];
 
 const FULL_ONLY_COMMANDS = [

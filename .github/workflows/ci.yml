@@ -1071,6 +1071,8 @@ jobs:
         run: node scripts/check-comment-quality.mjs --all
       - name: Host path reads
         run: node scripts/check-host-reads.mjs
+      - name: Tsconfig option reads
+        run: node scripts/check-tsconfig-reads.mjs
       # check-temp-leaks.mjs fails a test step that leaves a `fallow-*`
       # folder in the system temp directory. A reused runner and a developer
       # machine keep such folders.

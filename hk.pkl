@@ -66,6 +66,11 @@ hooks {
         glob = List("**/*.rs")
         check = "if command -v node >/dev/null 2>&1; then node scripts/check-host-reads.mjs; else sh scripts/hook-tool-hint.sh node; fi"
       }
+      // MergedTsconfig is the one reader of tsconfig compiler options.
+      ["tsconfig-reads"] {
+        glob = List("**/*.rs")
+        check = "if command -v node >/dev/null 2>&1; then node scripts/check-tsconfig-reads.mjs; else sh scripts/hook-tool-hint.sh node; fi"
+      }
       // A Rust file over 2000 lines must not grow. The step measures the
       // staged blob. See docs/development/quality-gates.md#file-size.
       ["file-size"] {

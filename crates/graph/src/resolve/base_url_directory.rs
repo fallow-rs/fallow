@@ -8,11 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
 use super::fallbacks::nearest_package_manifest;
 use super::path_info::extract_package_name;
-use super::specifier::{local_tsconfig_chain, read_tsconfig_json_cached};
+use super::specifier::{local_tsconfig_chain, merged_tsconfig_cached};
 use super::types::ResolveContext;
 use crate::read_trace::TracedPath;
 
@@ -41,18 +39,12 @@ pub(super) fn names_undeclared_base_url_directory(
 
 /// The `baseUrl` directory of the first tsconfig in the local chain that sets
 /// one, the same lookup order that the `baseUrl` fallback uses.
-fn nearest_base_url_dir(ctx: &ResolveContext<'_>, from_file: &Path) -> Option<PathBuf> {
+pub(super) fn nearest_base_url_dir(ctx: &ResolveContext<'_>, from_file: &Path) -> Option<PathBuf> {
     local_tsconfig_chain(ctx, from_file)
         .iter()
-        .find_map(|tsconfig_path| {
-            let json = read_tsconfig_json_cached(ctx, tsconfig_path)?;
-            let base_url = json
-                .get("compilerOptions")
-                .and_then(|compiler_options| compiler_options.get("baseUrl"))
-                .and_then(Value::as_str)?;
-            let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
-            Some(tsconfig_dir.join(base_url))
-        })
+        .filter_map(|tsconfig_path| merged_tsconfig_cached(ctx, tsconfig_path))
+        .find(|merged| merged.compiler_option("baseUrl").is_some())?
+        .path_option("baseUrl")
 }
 
 fn declares_package(ctx: &ResolveContext<'_>, from_file: &Path, package_name: &str) -> bool {

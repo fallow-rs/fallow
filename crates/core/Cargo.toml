@@ -61,6 +61,7 @@ codspeed = []
 schema = ["fallow-types/schema"]
 
 [dev-dependencies]
+fallow-config = { workspace = true, features = ["testing"] }
 criterion = { workspace = true }
 proptest = { workspace = true }
 postcard = { workspace = true }
