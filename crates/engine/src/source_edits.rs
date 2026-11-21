@@ -277,7 +277,11 @@ impl SourceEditIndex {
             }
         }
         if !packed.is_empty() && removed.iter().all(|&gone| gone) {
-            return Ok(vec![deletion(enumeration.body_start, enumeration.body_end)]);
+            let body = deletion(enumeration.body_start, enumeration.body_end);
+            if self.deletes_a_comment(enumeration, &removed, &body) {
+                return Err(EditRefusal::Ambiguous);
+            }
+            return Ok(vec![body]);
         }
         for run in neighbour_runs(&packed) {
             let edit = packed_run_edit(enumeration, &removed, run);
@@ -1180,6 +1184,20 @@ mod tests {
         assert_eq!(
             remove(source, "E", &["A", "B", "C"], 2).unwrap(),
             "enum E {}\n"
+        );
+    }
+
+    #[test]
+    fn keeps_a_comment_of_an_enum_whose_members_are_all_removed() {
+        let source = "enum E {\n  // keep this\n  A, B,\n}\n";
+        assert_eq!(
+            remove(source, "E", &["A", "B"], 3),
+            Err(EditRefusal::Ambiguous)
+        );
+        let tail = "enum E { A, B /* tail */ }\n";
+        assert_eq!(
+            remove(tail, "E", &["A", "B"], 1),
+            Err(EditRefusal::Ambiguous)
         );
     }
 
