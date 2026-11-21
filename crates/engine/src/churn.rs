@@ -592,8 +592,8 @@ const CHURN_CACHE_VERSION: u8 = 10;
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
 struct CachedCommitEvent {
     timestamp: u64,
-    /// Committer timestamp. `git log --after` filters on this, while recency
-    /// weighting stays on the author timestamp, so a rebased commit lands in
+    /// Committer timestamp. The cutoff filter of the walk reads this, while
+    /// recency weighting stays on the author timestamp, so a rebased commit lands in
     /// the same window warm and cold without its age changing.
     committed_at: u64,
     lines_added: u32,
@@ -887,8 +887,8 @@ impl ChurnCache {
     /// longer covers.
     ///
     /// The cache only ever appends, so an entry minted months ago still holds
-    /// commits a cold `git log --after` would exclude today. Without this prune
-    /// a warm run reports more history than a cold run over the same commit,
+    /// commits that the cutoff filter of the walk excludes today. Without this
+    /// prune a warm run reports more history than a cold run over the same commit,
     /// which is exactly the cache-transparency invariant fallow asserts
     /// elsewhere.
     fn into_event_state(self, cutoff_secs: Option<u64>) -> ChurnEventState {

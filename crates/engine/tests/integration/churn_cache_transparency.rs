@@ -677,3 +677,26 @@ fn an_older_head_date_does_not_reuse_a_cache_with_a_later_cutoff() {
     assert_eq!(churn_rows(&warm, root), churn_rows(&cold, root));
     assert!(changed_files(&warm, root).contains(&"src/old.ts".to_string()));
 }
+
+#[test]
+fn an_old_dated_commit_does_not_hide_an_in_window_ancestor() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    let head = BASE_EPOCH + 400 * SECS_PER_DAY;
+    commit_file(root, "src/x.ts", "x", head - 10 * SECS_PER_DAY);
+    commit_file(root, "src/o.ts", "o", head - 200 * SECS_PER_DAY);
+    commit_file(root, "src/h.ts", "h", head);
+
+    let (cold, _) = churn(root, &root.join(".fallow-cold-cache"), true);
+    assert_eq!(
+        changed_files(&cold, root),
+        vec!["src/h.ts".to_string(), "src/x.ts".to_string()]
+    );
+
+    let wide = SinceDuration::relative(1, ChurnWindowUnit::Years, "1 year");
+    analyze_churn_cached(root, &wide, &fixture.cache, false).expect("wide churn");
+    let (narrow, narrow_hit) =
+        analyze_churn_cached(root, &window(), &fixture.cache, false).expect("narrow churn");
+    assert!(narrow_hit, "the 1y entry covers the 90 day request");
+    assert_eq!(churn_rows(&narrow, root), churn_rows(&cold, root));
+}
