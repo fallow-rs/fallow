@@ -12,7 +12,8 @@ use std::path::Path;
 
 use oxc_ast::ast::{
     ClassBody, Declaration, ExportDefaultDeclarationKind, Expression, Program, Statement,
-    TSEnumBody, TSEnumDeclaration, TSEnumMemberName, UnaryOperator,
+    TSEnumBody, TSEnumDeclaration, TSEnumMemberName, TSExternalModuleDeclaration,
+    TSGlobalDeclaration, TSNamespaceDeclaration, UnaryOperator,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, SourceType};
@@ -164,10 +165,16 @@ fn literal_integer(initializer: &Expression<'_>) -> Option<i64> {
 
 /// The value of each member of `declaration`, in source order. A member
 /// without an initializer counts on from the member before it, and the first
-/// member is 0. The members of a `declare enum` without `const` have no known
+/// member is 0. The members of an ambient enum without `const` have no known
 /// value without an initializer, because TypeScript treats them as computed.
-fn member_values(declaration: &TSEnumDeclaration<'_>) -> Vec<MemberValue> {
-    let ambient = declaration.declare && !declaration.r#const;
+/// An enum is ambient when it has `declare`, when it is inside a `declare`
+/// module, namespace or global block, or when it is in a declaration file
+/// (`in_ambient_context`).
+fn member_values(
+    declaration: &TSEnumDeclaration<'_>,
+    in_ambient_context: bool,
+) -> Vec<MemberValue> {
+    let ambient = (declaration.declare || in_ambient_context) && !declaration.r#const;
     let mut previous: Option<Option<i64>> = None;
     let mut values = Vec::with_capacity(declaration.body.members.len());
     for member in &declaration.body.members {
@@ -618,6 +625,7 @@ fn parse_block(file: &str, source: &str, source_type: SourceType, offset: u32) -
             offset,
             members: Vec::new(),
             enums: Vec::new(),
+            ambient_depth: usize::from(source_type.is_typescript_definition()),
         };
         members.visit_program(&parsed.program);
         Some(Parsed {
@@ -634,9 +642,20 @@ struct MemberCollector {
     offset: u32,
     members: Vec<MemberSpan>,
     enums: Vec<EnumSpans>,
+    /// The number of enclosing ambient contexts: a declaration file, and each
+    /// `declare` module, namespace or global block around the visit position.
+    ambient_depth: usize,
 }
 
 impl MemberCollector {
+    /// Visit `walk` inside one more ambient context when `declare` is true.
+    fn within(&mut self, declare: bool, walk: impl FnOnce(&mut Self)) {
+        let depth = usize::from(declare);
+        self.ambient_depth += depth;
+        walk(self);
+        self.ambient_depth -= depth;
+    }
+
     fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool, shares_its_key: bool) {
         self.members.push(MemberSpan {
             start: span.start + self.offset,
@@ -667,7 +686,7 @@ impl<'a> Visit<'a> for MemberCollector {
 
     fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
         let offset = self.offset;
-        let all_values = member_values(it);
+        let all_values = member_values(it, self.ambient_depth > 0);
         let mut values = Vec::with_capacity(it.body.members.len());
         let mut members = Vec::with_capacity(it.body.members.len());
         for (position, member) in it.body.members.iter().enumerate() {
@@ -705,6 +724,24 @@ impl<'a> Visit<'a> for MemberCollector {
             values,
         });
         oxc_ast_visit::walk::walk_ts_enum_declaration(self, it);
+    }
+
+    fn visit_ts_external_module_declaration(&mut self, it: &TSExternalModuleDeclaration<'a>) {
+        self.within(it.declare, |collector| {
+            oxc_ast_visit::walk::walk_ts_external_module_declaration(collector, it);
+        });
+    }
+
+    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
+        self.within(it.declare, |collector| {
+            oxc_ast_visit::walk::walk_ts_namespace_declaration(collector, it);
+        });
+    }
+
+    fn visit_ts_global_declaration(&mut self, it: &TSGlobalDeclaration<'a>) {
+        self.within(it.declare, |collector| {
+            oxc_ast_visit::walk::walk_ts_global_declaration(collector, it);
+        });
     }
 
     fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
@@ -1234,6 +1271,40 @@ mod tests {
             remove(ambient_last, "E", &["B"], 3).unwrap(),
             "declare enum E {\n  A,\n}\n",
             "the removal of the last member shifts no value"
+        );
+    }
+
+    #[test]
+    fn refuses_a_shift_in_an_ambient_context() {
+        let namespace = "declare namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        let module = "declare module 'm' {\n  export enum E {\n    A,\n    B,\n  }\n}\n";
+        let nested = "declare namespace N {\n  namespace M {\n    enum E {\n      A,\n      B,\n    }\n  }\n}\n";
+        let global = "export {};\ndeclare global {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        for (source, line) in [(namespace, 3), (module, 3), (nested, 4), (global, 4)] {
+            let index = index("store.ts", source);
+            assert_eq!(
+                index.remove_enum_members("E", &["A"], line),
+                Err(EditRefusal::UnknownValue),
+                "{source}"
+            );
+        }
+        let definition = index("a.d.ts", "export enum E {\n  A,\n  B,\n}\n");
+        assert_eq!(
+            definition.remove_enum_members("E", &["A"], 2),
+            Err(EditRefusal::UnknownValue),
+            "a member of a declaration file is ambient"
+        );
+        let constant = "declare namespace N {\n  const enum E {\n    A,\n    B,\n  }\n}\n";
+        assert_eq!(
+            remove(constant, "E", &["A"], 3).unwrap(),
+            "declare namespace N {\n  const enum E {\n    B = 1,\n  }\n}\n",
+            "a const enum keeps known values in an ambient context"
+        );
+        let plain = "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        assert_eq!(
+            remove(plain, "E", &["A"], 3).unwrap(),
+            "namespace N {\n  enum E {\n    B = 1,\n  }\n}\n",
+            "a namespace without declare is not ambient"
         );
     }
 
