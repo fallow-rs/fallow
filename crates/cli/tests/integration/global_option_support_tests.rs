@@ -74,7 +74,9 @@ const READ_OPTIONS: &[ReadCase] = &[
     },
     // Type-aware analysis on from each source, and off. The base run has
     // `--type-aware` too, so a command that fails with `--type-aware` alone
-    // cannot pass.
+    // cannot pass. With the flag, the startup check rejects the missing path
+    // for every command, so only the env and config cases show that a
+    // command reads the project.
     ReadCase {
         extra: &["--type-aware"],
         extra_in_base: true,
@@ -605,12 +607,11 @@ fn each_skipped_command_is_a_supported_pair() {
     }
 }
 
-/// Run the command with a path that does not exist, and return the problem
 /// Run `fallow` in `project` with the arguments, the environment and the
 /// config of `case`, and with the extra arguments, the option and a path
 /// that does not exist when `with_option` holds. The base run has the extra
-/// arguments too when [`ReadCase::extra_in_base`] holds. The run ends, or it is stopped after
-/// [`FILE_TIMEOUT`] or when its output names the path.
+/// arguments too when [`ReadCase::extra_in_base`] holds. The run ends, or it
+/// is stopped after [`FILE_TIMEOUT`] or when its output names the path.
 fn run_read_case(
     args: &[String],
     case: &ReadCase,
