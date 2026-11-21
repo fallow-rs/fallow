@@ -1,0 +1,3 @@
+### Fixed
+
+- **GitHub and GitLab review comments no longer offer an unsafe `suggestion` block.** The block that removes an unused export or deletes an unused member used a line rule. It turned `export { a } from './x'` into `{ a } from './x'` and `export default thing;` into `thing;`, deleted only the first line of a method over several lines, and deleted two enum members when one was unused. The block is now offered only when the parser confirms that the one-line edit changes exactly the export or the member of the finding. In each other case the comment keeps its text and its fix intent, without a `suggestion` block.
