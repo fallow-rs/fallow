@@ -254,8 +254,6 @@ fn is_fallow_admin_dir(admin_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use super::*;
     use crate::repo_refs::{TemporaryBaseWorktree, create_detached_base_worktree};
 
@@ -374,7 +372,7 @@ mod tests {
 
     #[cfg(unix)]
     fn raw_git_status(cwd: &Path, confine: bool) -> bool {
-        let mut command = Command::new("git");
+        let mut command = std::process::Command::new("git");
         crate::changed_files::clear_ambient_git_env(&mut command);
         if confine {
             confine_git_to_host(&mut command, cwd);
