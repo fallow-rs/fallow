@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use fallow_config::ResolvedConfig;
 use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary, RefactoringTarget};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use crate::baseline::{HealthBaselineData, filter_new_health_targets};
 use crate::duplicates::{DuplicationReport, DuplicationStats};
@@ -499,48 +499,21 @@ fn subset_precomputed_duplication_stats(
     candidate_paths: &FxHashSet<std::path::PathBuf>,
     clone_groups: &[fallow_types::duplicates::CloneGroup],
 ) -> DuplicationStats {
-    let mut files_with_clones: FxHashSet<&std::path::Path> = FxHashSet::default();
-    let mut file_dup_lines: FxHashMap<&std::path::Path, FxHashSet<usize>> = FxHashMap::default();
-    let mut duplicated_tokens = 0usize;
-    let mut clone_instances = 0usize;
-
-    for group in clone_groups {
-        for instance in &group.instances {
-            files_with_clones.insert(&instance.file);
-            clone_instances += 1;
-            let lines = file_dup_lines.entry(&instance.file).or_default();
-            for line in instance.start_line..=instance.end_line {
-                lines.insert(line);
-            }
-        }
-        duplicated_tokens += group.token_count * group.instances.len().saturating_sub(1);
-    }
-
-    let total_files = candidate_paths.len();
-    let total_lines = total_lines_for_candidate_paths(modules, file_paths, candidate_paths);
-    let duplicated_lines = file_dup_lines.values().map(FxHashSet::len).sum::<usize>();
-
-    DuplicationStats {
-        total_files,
-        files_with_clones: files_with_clones.len(),
-        total_lines,
-        duplicated_lines,
-        total_tokens: original.total_tokens,
-        duplicated_tokens: duplicated_tokens.min(original.total_tokens),
-        clone_groups: clone_groups.len(),
-        // The scoped report carries no families, so nothing is withheld from an
-        // empty array.
-        clone_families: 0,
-        clone_instances,
-        duplication_percentage: if total_lines > 0 {
-            (duplicated_lines as f64 / total_lines as f64) * 100.0
-        } else {
-            0.0
+    crate::duplicates::duplication_stats(
+        clone_groups,
+        crate::duplicates::CorpusTotals {
+            files: candidate_paths.len(),
+            lines: total_lines_for_candidate_paths(modules, file_paths, candidate_paths),
+            tokens: original.total_tokens,
         },
-        clone_groups_below_min_occurrences: original.clone_groups_below_min_occurrences,
-        clone_groups_ignored: original.clone_groups_ignored,
-        near_candidates_skipped: original.near_candidates_skipped,
-    }
+        crate::duplicates::CarriedCounters {
+            // The scoped report carries no families.
+            clone_families: 0,
+            clone_groups_below_min_occurrences: original.clone_groups_below_min_occurrences,
+            clone_groups_ignored: original.clone_groups_ignored,
+            near_candidates_skipped: original.near_candidates_skipped,
+        },
+    )
 }
 
 fn total_lines_for_candidate_paths(
@@ -599,6 +572,7 @@ mod tests {
     use std::path::PathBuf;
 
     use fallow_types::duplicates::{CloneGroup, CloneInstance};
+    use rustc_hash::FxHashMap;
 
     use super::*;
 
