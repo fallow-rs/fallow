@@ -498,6 +498,14 @@ error by suppressing a downstream detector.
   (`ModuleInfo::env_reads`) in three forms: `process.env.X` (also
   `import.meta.env.X`), `process.env['X']` with a static key, and
   `const { X } = process.env`. A read inside a dead range does not count.
+- The text of a `server-only-import` finding follows the origin of its sink.
+  A React Router `.server` sink gets React Router advice: move the call into
+  `loader`, `action`, `middleware` or `headers`. Every other sink gets the
+  Next.js advice about `next/dynamic` with `ssr: false` and Server Action
+  modules. `fallow_types::security_next_step::REACT_ROUTER_SERVER_SINK` is
+  the phrase that the evidence contains for a `.server` sink. The `Next:` step
+  of the human output and of the LSP hover reads that phrase, so the two
+  texts agree.
 - A `client-server-leak` finding points at the first secret read of the
   module, or at its first server-only import. The `secret-source` trace hop
   lists every read in `secret_reads`, and `fallow security --gate new` keeps
