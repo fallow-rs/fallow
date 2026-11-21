@@ -470,3 +470,5 @@ For the full list with examples, see [references/gotchas.md](references/gotchas.
 6. **For false positives,** suggest inline suppression comments or config rule adjustments
 
 If `$ARGUMENTS` is provided, use it as the `--root` path or pass it as the target for the appropriate fallow command.
+
+Test line for a drift check.
