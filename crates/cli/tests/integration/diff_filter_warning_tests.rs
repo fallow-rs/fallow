@@ -62,9 +62,8 @@ fn a_pure_rename_warns_that_file_and_dependency_findings_still_pass() {
     );
     assert!(
         output.stderr.contains("parsed 0 added lines")
-            && output
-                .stderr
-                .contains("Dependency findings and findings on a whole touched file"),
+            && output.stderr.contains("Dependency findings")
+            && output.stderr.contains("findings on a whole touched file"),
         "stderr: {}",
         output.stderr
     );
