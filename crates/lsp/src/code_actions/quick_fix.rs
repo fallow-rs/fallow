@@ -17,103 +17,7 @@ use fallow_types::output_dead_code::MutationEvidence;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 use crate::position::PositionMapper;
-
-/// Return true if `c` can continue a JS / TS identifier.
-///
-/// This follows the ECMAScript `IdentifierPart` rule (`ID_Continue`, `$`,
-/// ZWNJ and ZWJ), the same rule that the parser uses. Thus a name that
-/// contains a combining mark, for example `cafe\u{301}`, stays one name
-/// and is not cut at the mark.
-fn is_ident_char(c: char) -> bool {
-    oxc_syntax::identifier::is_identifier_part(c)
-}
-
-/// Extract the leading identifier from `s`. Returns the prefix of `s`
-/// containing identifier characters (empty if `s` does not start with an
-/// identifier character).
-fn leading_identifier(s: &str) -> &str {
-    let end = s
-        .char_indices()
-        .find(|(_, c)| !is_ident_char(*c))
-        .map_or(s.len(), |(i, _)| i);
-    &s[..end]
-}
-
-/// Iteratively strip leading declaration and modifier keywords (each
-/// followed by whitespace) from `s`. After this returns, `s` should begin
-/// with the declared identifier in well-formed source.
-///
-/// The set of keywords stripped covers the prefix shape of every named
-/// `export <decl>` form fallow's analyzer reports as an unused export:
-/// `const`, `let`, `var`, `function`, `function*`, `class`, `type`,
-/// `interface`, `enum`, `namespace`, plus the modifier keywords `async`,
-/// `abstract`, and `declare`. Anything beyond this prefix is the identifier
-/// (or its parse-truncated leading bytes).
-fn strip_declaration_keywords(s: &str) -> &str {
-    const KEYWORDS: &[&str] = &[
-        "async ",
-        "abstract ",
-        "declare ",
-        "const ",
-        "let ",
-        "var ",
-        "function* ",
-        "function ",
-        "class ",
-        "type ",
-        "interface ",
-        "enum ",
-        "namespace ",
-    ];
-    let mut cur = s.trim_start();
-    loop {
-        let mut changed = false;
-        for keyword in KEYWORDS {
-            if let Some(rest) = cur.strip_prefix(keyword) {
-                cur = rest.trim_start();
-                changed = true;
-                break;
-            }
-        }
-        if !changed {
-            return cur;
-        }
-    }
-}
-
-/// Verify the live document line at `line_content` actually declares
-/// `expected_name` as a top-level export after the `prefix` is stripped.
-///
-/// This is the load-bearing re-validation for `build_remove_export_actions`.
-/// A weaker "identifier appears anywhere on the line" check would still
-/// accept lines like `export const bar = foo;` for a cached finding on
-/// `foo`, silently producing an edit that strips `export ` from `bar`.
-/// The declaration-shape check rejects that: after stripping `export `
-/// and the `const ` keyword, the leading identifier is `bar`, not `foo`.
-///
-/// Returns `false` for re-export forms (`export { ... }` / `export { ... }
-/// from ...;`). The existing `remove unused export` action does not
-/// produce a valid edit for those shapes (removing `export ` from
-/// `export { foo };` leaves a `{ foo };` block-expression statement), so
-/// the conservative outcome is to suppress the action entirely until the
-/// re-export path gets its own dedicated handler.
-fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -> bool {
-    if expected_name.is_empty() {
-        return false;
-    }
-    let trimmed = line_content.trim_start();
-    let Some(after_prefix) = trimmed.strip_prefix(prefix) else {
-        return false;
-    };
-    let after_prefix = after_prefix.trim_start();
-
-    if after_prefix.starts_with('{') {
-        return false;
-    }
-
-    let after_keywords = strip_declaration_keywords(after_prefix);
-    leading_identifier(after_keywords) == expected_name
-}
+use fallow_api::source_edits::SourceEditIndex;
 
 /// Typed input for unused export quick-fix code actions.
 #[derive(Clone, Copy)]
@@ -122,7 +26,8 @@ pub struct RemoveExportActionInput<'a> {
     pub file_path: &'a Path,
     pub uri: &'a Uri,
     pub cursor_range: &'a Range,
-    pub file_lines: &'a [&'a str],
+    /// The live text of the document.
+    pub source: &'a str,
 }
 
 impl<'a> RemoveExportActionInput<'a> {
@@ -132,14 +37,14 @@ impl<'a> RemoveExportActionInput<'a> {
         file_path: &'a Path,
         uri: &'a Uri,
         cursor_range: &'a Range,
-        file_lines: &'a [&'a str],
+        source: &'a str,
     ) -> Self {
         Self {
             results,
             file_path,
             uri,
             cursor_range,
-            file_lines,
+            source,
         }
     }
 }
@@ -154,48 +59,53 @@ impl<'a> RemoveExportActionInput<'a> {
 /// reason. The finding is still reported, and its diagnostic names the caveat
 /// so the absent quick fix reads as a stated limit rather than a missing
 /// feature.
+///
+/// The edit comes from the syntax spans of the live document text. The
+/// action is offered only for a statement that the parser finds, and only
+/// when each name that its `export` keyword exports is an unused finding. A
+/// document that does not parse gets no action.
 pub fn build_remove_export_actions(input: RemoveExportActionInput<'_>) -> Vec<CodeActionOrCommand> {
     let RemoveExportActionInput {
         results,
         file_path,
         uri,
         cursor_range,
-        file_lines,
+        source,
     } = input;
-    let mut actions = Vec::new();
-
-    let exports_iter = results
+    let in_file = |export: &&fallow_api::editor_results::UnusedExport| export.path == file_path;
+    let unused: Vec<(&fallow_api::editor_results::UnusedExport, &str)> = results
         .unused_exports
         .iter()
         .filter(|f| f.may_auto_apply_mutation())
-        .map(|f| &f.export);
-    let types_iter = results
-        .unused_types
+        .map(|f| (&f.export, "Export"))
+        .chain(
+            results
+                .unused_types
+                .iter()
+                .filter(|f| f.may_auto_apply_mutation())
+                .map(|f| (&f.export, "Type export")),
+        )
+        .filter(|(export, _)| in_file(export))
+        .collect();
+    let candidates: Vec<&(&fallow_api::editor_results::UnusedExport, &str)> = unused
         .iter()
-        .filter(|f| f.may_auto_apply_mutation())
-        .map(|f| &f.export);
-    for (exports, msg_prefix) in [
-        (
-            Box::new(exports_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
-            "Export",
-        ),
-        (
-            Box::new(types_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
-            "Type export",
-        ),
-    ] {
-        for export in exports {
-            if let Some(action) =
-                remove_export_action(export, msg_prefix, file_path, uri, cursor_range, file_lines)
-            {
-                actions.push(action);
-            }
-        }
+        .filter(|(export, _)| {
+            let line = export.line.saturating_sub(1);
+            cursor_range.start.line <= line && line <= cursor_range.end.line
+        })
+        .collect();
+    if candidates.is_empty() {
+        return Vec::new();
     }
-
-    actions
+    let Some(index) = SourceEditIndex::parse(file_path, source) else {
+        return Vec::new();
+    };
+    candidates
+        .into_iter()
+        .filter_map(|(export, msg_prefix)| {
+            remove_export_action(&index, &unused, export, msg_prefix, uri, source)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -206,12 +116,13 @@ fn build_remove_export_actions_for_test(
     cursor_range: &Range,
     file_lines: &[&str],
 ) -> Vec<CodeActionOrCommand> {
+    let source = file_lines.join("\n");
     build_remove_export_actions(RemoveExportActionInput::new(
         results,
         file_path,
         uri,
         cursor_range,
-        file_lines,
+        &source,
     ))
 }
 
@@ -219,40 +130,41 @@ fn build_remove_export_actions_for_test(
     clippy::disallowed_types,
     reason = "serde JSON deserialization produces std HashMap"
 )]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier/indent lengths are bounded by source size"
-)]
 fn remove_export_action(
+    index: &SourceEditIndex,
+    unused: &[(&fallow_api::editor_results::UnusedExport, &str)],
     export: &fallow_api::editor_results::UnusedExport,
     msg_prefix: &str,
-    file_path: &Path,
     uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
+    source: &str,
 ) -> Option<CodeActionOrCommand> {
-    let (export_line, indent_utf16, prefix) =
-        remove_export_span(export, file_path, cursor_range, file_lines)?;
+    let statement = index
+        .export_statement(&export.export_name, export.line, export.col)
+        .ok()?;
+    let (first, last) = index.line_range(statement.start, statement.end);
+    let every_name_unused = statement.names.iter().all(|name| {
+        unused.iter().any(|(finding, _)| {
+            finding.export_name == *name
+                && (first..=last).contains(&(finding.line.saturating_sub(1) as usize))
+        })
+    });
+    if !every_name_unused {
+        return None;
+    }
+    let edit = statement.keyword_edit()?;
     let mut changes = HashMap::new();
     changes.insert(
         uri.clone(),
         vec![TextEdit {
             range: Range {
-                start: Position {
-                    line: export_line,
-                    character: indent_utf16 as u32,
-                },
-                end: Position {
-                    line: export_line,
-                    // `prefix` is static ASCII, so its byte length equals
-                    // its UTF-16 width.
-                    character: (indent_utf16 + prefix.len()) as u32,
-                },
+                start: lsp_position(source, edit.start)?,
+                end: lsp_position(source, edit.end)?,
             },
             new_text: String::new(),
         }],
     );
 
+    let export_line = export.line.saturating_sub(1);
     let mut position_mapper = PositionMapper::default();
     Some(CodeActionOrCommand::CodeAction(CodeAction {
         title: format!("Remove unused export `{}`", export.export_name),
@@ -271,47 +183,15 @@ fn remove_export_action(
     }))
 }
 
-/// Locate the removable `export ` / `export default ` prefix for a cached
-/// unused-export finding. Returns `(line, indent_utf16, prefix)` where
-/// `indent_utf16` is the leading-whitespace width in UTF-16 code units
-/// (the unit LSP `character` positions use).
-fn remove_export_span(
-    export: &fallow_api::editor_results::UnusedExport,
-    file_path: &Path,
-    cursor_range: &Range,
-    file_lines: &[&str],
-) -> Option<(u32, usize, &'static str)> {
-    if export.path != file_path {
-        return None;
-    }
-    let export_line = export.line.saturating_sub(1);
-    if export_line < cursor_range.start.line || export_line > cursor_range.end.line {
-        return None;
-    }
-
-    let line_content = file_lines.get(export_line as usize).copied().unwrap_or("");
-    let trimmed = line_content.trim_start();
-    let indent_bytes = line_content.len() - trimmed.len();
-    // Byte length diverges from UTF-16 width for non-ASCII whitespace
-    // (U+00A0, U+3000), which would desync the destructive edit range.
-    let indent_utf16 = line_content[..indent_bytes].encode_utf16().count();
-    let prefix = export_prefix_to_remove(trimmed)?;
-    if prefix != "export default "
-        && !declares_export_name(line_content, prefix, &export.export_name)
-    {
-        return None;
-    }
-    Some((export_line, indent_utf16, prefix))
-}
-
-fn export_prefix_to_remove(trimmed: &str) -> Option<&'static str> {
-    if trimmed.starts_with("export default ") {
-        Some("export default ")
-    } else if trimmed.starts_with("export ") {
-        Some("export ")
-    } else {
-        None
-    }
+/// The LSP position of byte `offset` of `source`: the line counts `\n`, and
+/// the character counts UTF-16 units from the start of the line.
+fn lsp_position(source: &str, offset: u32) -> Option<Position> {
+    let before = source.get(..offset as usize)?;
+    let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+    Some(Position {
+        line: u32::try_from(before.matches('\n').count()).ok()?,
+        character: u32::try_from(before[line_start..].encode_utf16().count()).ok()?,
+    })
 }
 
 fn remove_export_diagnostic(
@@ -1066,12 +946,12 @@ mod tests {
         let mut results = AnalysisResults::default();
         results
             .unused_exports
-            .push(make_unused_export(&file, "helper", 2, 11));
+            .push(make_unused_export(&file, "helper", 2, 20));
 
         let lines = vec![
-            "namespace Ns {",
+            "const before = 1;",
             "    export function helper() {}", // 4 spaces indent
-            "}",
+            "const after = 2;",
         ];
         let actions =
             build_remove_export_actions_for_test(&results, &file, &uri, &make_range(1, 1), &lines);
@@ -2470,154 +2350,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn declares_export_name_accepts_simple_declarations() {
-        assert!(declares_export_name(
-            "export const foo = 1;",
-            "export ",
-            "foo"
-        ));
-        assert!(declares_export_name(
-            "export let foo = 1;",
-            "export ",
-            "foo"
-        ));
-        assert!(declares_export_name(
-            "export var foo = 1;",
-            "export ",
-            "foo"
-        ));
-        assert!(declares_export_name(
-            "export function foo() {}",
-            "export ",
-            "foo"
-        ));
-        assert!(declares_export_name(
-            "export function* foo() {}",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name(
-            "export async function foo() {}",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name(
-            "export class foo {}",
-            "export ",
-            "foo"
-        ));
-        assert!(declares_export_name(
-            "export abstract class foo {}",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name(
-            "export type foo = string;",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name(
-            "export interface foo {}",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name("export enum foo {}", "export ", "foo"));
-        assert!(declares_export_name(
-            "export namespace foo {}",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name(
-            "export declare const foo: number;",
-            "export ",
-            "foo",
-        ));
-        assert!(declares_export_name(
-            "    export const foo = 1;",
-            "export ",
-            "foo"
-        ));
-    }
-
-    #[test]
-    fn declares_export_name_rejects_value_reference_collision() {
-        assert!(!declares_export_name(
-            "export const bar = foo;",
-            "export ",
-            "foo",
-        ));
-        assert!(!declares_export_name(
-            "export function bar() { return foo; }",
-            "export ",
-            "foo",
-        ));
-        assert!(!declares_export_name(
-            "export const foobar = 1;",
-            "export ",
-            "foo",
-        ));
-        assert!(!declares_export_name(
-            "export class Foo {}",
-            "export ",
-            "foo"
-        ));
-        assert!(!declares_export_name("const foo = 1;", "export ", "foo"));
-        assert!(!declares_export_name(
-            "export const foo = 1;",
-            "export ",
-            ""
-        ));
-    }
-
-    #[test]
-    fn declares_export_name_rejects_reexport_blocks() {
-        assert!(!declares_export_name("export { foo };", "export ", "foo",));
-        assert!(!declares_export_name(
-            "export { foo } from './bar';",
-            "export ",
-            "foo",
-        ));
-        assert!(!declares_export_name(
-            "export { type foo } from './bar';",
-            "export ",
-            "foo",
-        ));
-        assert!(!declares_export_name(
-            "export { foo as bar };",
-            "export ",
-            "foo",
-        ));
-    }
-
-    #[test]
-    fn declares_export_name_handles_multibyte_identifiers() {
-        assert!(declares_export_name(
-            "export const 日本 = 1;",
-            "export ",
-            "日本",
-        ));
-        assert!(!declares_export_name(
-            "export const 日本語 = 1;",
-            "export ",
-            "日本",
-        ));
-    }
-
-    #[test]
-    fn leading_identifier_handles_basic_shapes() {
-        assert_eq!(leading_identifier("foo"), "foo");
-        assert_eq!(leading_identifier("foo bar"), "foo");
-        assert_eq!(leading_identifier("foo()"), "foo");
-        assert_eq!(leading_identifier("foo = 1"), "foo");
-        assert_eq!(leading_identifier(""), "");
-        assert_eq!(leading_identifier("123foo"), "123foo");
-        assert_eq!(leading_identifier("_foo"), "_foo");
-        assert_eq!(leading_identifier("$foo"), "$foo");
-        assert_eq!(leading_identifier(" foo"), "");
-        assert_eq!(leading_identifier("{foo}"), "");
-    }
-
     /// BLOCKER: the quick fix builds its own `WorkspaceEdit` in process, so
     /// the CLI-side withholding protected nothing here. The editor is the
     /// surface where the user is one keystroke from applying it.
@@ -2718,20 +2450,5 @@ mod tests {
                 .is_empty(),
             "an unreachability verdict resting on an unread file must not offer a file deletion"
         );
-    }
-
-    #[test]
-    fn strip_declaration_keywords_handles_modifier_stacks() {
-        assert_eq!(strip_declaration_keywords("const foo = 1"), "foo = 1");
-        assert_eq!(strip_declaration_keywords("function foo()"), "foo()");
-        assert_eq!(strip_declaration_keywords("function* foo()"), "foo()");
-        assert_eq!(strip_declaration_keywords("async function foo()"), "foo()",);
-        assert_eq!(strip_declaration_keywords("abstract class Foo"), "Foo",);
-        assert_eq!(
-            strip_declaration_keywords("declare const foo: number"),
-            "foo: number",
-        );
-        assert_eq!(strip_declaration_keywords("foo bar"), "foo bar");
-        assert_eq!(strip_declaration_keywords("    foo"), "foo");
     }
 }
