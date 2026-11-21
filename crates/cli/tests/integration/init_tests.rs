@@ -386,10 +386,9 @@ fn init_created_config_is_valid_json() {
 #[test]
 fn hooks_namespace_installs_and_uninstalls_git_hook() {
     let dir = init_temp_dir("hooks-namespace-git");
-    let git = Command::new("git")
+    let git = crate::common::git_command(&dir)
         .arg("init")
         .arg("-q")
-        .current_dir(&dir)
         .status()
         .expect("git init should run");
     assert!(git.success());

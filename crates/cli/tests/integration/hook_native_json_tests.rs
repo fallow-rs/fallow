@@ -53,9 +53,8 @@ fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     let root = temp.path().join("project with spaces");
     std::fs::create_dir_all(&root).unwrap();
     assert!(
-        Command::new("git")
+        crate::common::git_command(&root)
             .args(["init", "-q"])
-            .current_dir(&root)
             .status()
             .unwrap()
             .success()
@@ -465,9 +464,8 @@ fn native_json_status_does_not_certify_a_reader_outside_the_audit_root() {
     let app = root.join("packages/app");
     std::fs::create_dir_all(&app).unwrap();
     assert!(
-        Command::new("git")
+        crate::common::git_command(&app)
             .args(["init", "-q"])
-            .current_dir(&app)
             .status()
             .unwrap()
             .success()

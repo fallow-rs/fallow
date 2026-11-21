@@ -19,7 +19,7 @@ use std::thread;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::common::{CommandOutput, fallow_bin, fixture_path, parse_json};
+use crate::common::{CommandOutput, fallow_bin, fixture_path, git, parse_json};
 use crate::http_stub::read_request;
 
 /// One scripted mock response.
@@ -365,22 +365,6 @@ fn review_packet_posts_explicit_files_and_functions() {
     assert_eq!(sent["periodDays"], 7);
     assert_eq!(sent["projectId"], "web");
     assert_eq!(sent["gitSha"], "abc1234");
-}
-
-fn git(root: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .env("GIT_AUTHOR_NAME", "Test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "Test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} failed");
 }
 
 #[test]

@@ -4898,9 +4898,8 @@ fn a_workspace_that_the_source_walk_skips_gives_no_ignore_dependencies_entry_an_
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).expect("create src");
     std::fs::create_dir_all(root.join("clone/lib")).expect("create workspace");
-    let status = std::process::Command::new("git")
+    let status = crate::common::git_command(root)
         .args(["init", "-q"])
-        .current_dir(root)
         .status()
         .expect("run git");
     assert!(status.success());
