@@ -163,6 +163,7 @@ mod production_support_entries_tests;
 mod production_workspace_tests;
 mod quiet_stderr_tests;
 mod reconcile_review_tests;
+mod regression_flag_scope_tests;
 mod release_publish_list;
 mod report_from_levels_tests;
 mod report_mutation_tests;
