@@ -1832,7 +1832,7 @@ assert_contains "$OUT_AUDIT" "Matched 8/10" "audit: shows istanbul match rate"
 assert_contains "$OUT_AUDIT" "### Styling" "audit: has styling details"
 assert_contains "$OUT_AUDIT" "css-selector-complexity" "audit: lists styling rule"
 assert_contains "$OUT_AUDIT" "src/styles.css:4" "audit: lists styling location"
-assert_contains "$OUT_AUDIT" "1 introduced clone group demoted to inherited" "audit: shows demotion footnote"
+assert_contains "$OUT_AUDIT" "1 introduced clone region demoted to inherited" "audit: shows demotion footnote"
 
 OUT_AUDIT_STYLE_NEW=$(jq -n '{
   command: "audit", verdict: "fail", changed_files_count: 1, elapsed_ms: 4,
