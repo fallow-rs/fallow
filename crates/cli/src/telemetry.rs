@@ -2205,7 +2205,7 @@ fn classify_agent_source() -> AgentSource {
     if let Ok(value) = std::env::var(AGENT_SOURCE_ENV) {
         return parse_agent_source_value(&value).unwrap_or(AgentSource::None);
     }
-    classify_agent_source_from_env(std::env::vars_os().map(|(key, _)| key))
+    classify_agent_source_from_env(std::env::vars_os().map(|e| e.0)) // host-reads: allow: names
 }
 
 fn parse_agent_source_value(value: &str) -> Option<AgentSource> {

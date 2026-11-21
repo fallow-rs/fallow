@@ -21,9 +21,10 @@ bash "$HOSTILE" --unknown -- true >/dev/null 2>&1
 check "unknown argument" 2 $?
 
 real_home="$HOME"
-out="$(bash "$HOSTILE" -- sh -c '
+out="$(env -u CARGO_HOME -u RUSTUP_HOME bash "$HOSTILE" -- sh -c '
   echo "home=$HOME"
   echo "cargo_home=$CARGO_HOME"
+  echo "rustup_home=$RUSTUP_HOME"
   echo "xdg_config=$XDG_CONFIG_HOME"
   echo "xdg_data=$XDG_DATA_HOME"
   test -x "$HOME/.fallow/bin/fallow-cov" && echo "fake-cov=yes"
@@ -39,7 +40,8 @@ line() { printf '%s\n' "$out" | grep "^$1=" | head -1 | cut -d= -f2-; }
 home="$(line home)"
 check "home is replaced" 1 "$([ -n "$home" ] && [ "$home" != "$real_home" ] && echo 1 || echo 0)"
 check "home is outside the temp folder" 1 "$(case "$home" in "$real_home"/.cache/*) echo 1 ;; *) echo 0 ;; esac)"
-check "cargo home stays" "${CARGO_HOME:-$real_home/.cargo}" "$(line cargo_home)"
+check "unset cargo home is the real default" "$real_home/.cargo" "$(line cargo_home)"
+check "unset rustup home is the real default" "$real_home/.rustup" "$(line rustup_home)"
 check "xdg config is in the home" "$home/.config" "$(line xdg_config)"
 check "xdg data is in the home" "$home/.local/share" "$(line xdg_data)"
 check "fake add-on" yes "$(line fake-cov)"
@@ -49,6 +51,14 @@ check "global hook fails" 97 "$(line hook-status)"
 check "git shim fails" 97 "$(line git-shim-status)"
 check "add-on shim fails" 97 "$(line cov-shim-status)"
 check "folder is removed" 1 "$([ -n "$home" ] && [ ! -e "$home" ] && echo 1 || echo 0)"
+
+given_cargo="$(CARGO_HOME=/opt/given-cargo RUSTUP_HOME=/opt/given-rustup bash "$HOSTILE" -- sh -c 'echo "$CARGO_HOME $RUSTUP_HOME"')"
+check "a set cargo and rustup home stay" "/opt/given-cargo /opt/given-rustup" "$given_cargo"
+
+if command -v cargo >/dev/null 2>&1 && [ -x "${CARGO_HOME:-$real_home/.cargo}/bin/cargo" ]; then
+  bash "$HOSTILE" -- "${CARGO_HOME:-$real_home/.cargo}/bin/cargo" --version >/dev/null 2>&1
+  check "cargo runs under the wrapper" 0 $?
+fi
 
 bash "$HOSTILE" -- sh -c 'exit 7'
 check "exit status of the command" 7 $?

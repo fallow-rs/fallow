@@ -336,8 +336,14 @@ Production code reads these values through `fallow_process::HostPaths`, and
 a test passes its own value. The [host path read check](#hook-parity) keeps
 the reads in one place.
 
-The CI `Check` jobs run the suite through `scripts/hostile-host.sh`. The
-script makes a home folder that holds:
+The CI `Check` jobs run the suite through `scripts/hostile-host.sh`. These
+are Linux jobs. The script is a Bash script with POSIX shims and a POSIX home
+layout, and it sets only the Unix variables (`HOME` and the `XDG_` folders).
+On Windows, the per-user folders come from `APPDATA` and `LOCALAPPDATA`, which
+the script does not set, so the Windows job would get no hostile folders. The
+macOS suite runs only in release validation, and this script does not run
+there. The script makes a home folder
+that holds:
 
 - a `~/.fallow/bin/fallow-cov` binary that fails, with a `.sig` file;
 - a `~/.gitconfig` with a `core.hooksPath` whose `pre-commit` hook fails;
@@ -907,17 +913,38 @@ function that a test calls needs a Miri run, as the `Miri` CI item describes.
 The check runs in `verify:fast` and in the pre-commit hook.
 
 The host path read check (`npm run check:host-reads`) reads every Rust file
-under `crates/`. It fails on `std::env::var` or `std::env::var_os` with
-`HOME`, `PATH`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` or an `XDG_`
-variable, and on a `home_dir(` call. `fallow_process::HostPaths` in
-`crates/process/src/host_paths.rs` is the one reader of these values. Read
+under `crates/` and `fuzz/fuzz_targets/`. `fallow_process::HostPaths` in
+`crates/process/src/host_paths.rs` is the one reader of the host paths. Read
 them at a boundary with `HostPaths::from_env()` and pass the value to the
 code that needs it. A unit test then builds its own `HostPaths` and does not
-read the home folder or the tools of the machine. The check skips the owner,
-test files, `tests/` folders, and `#[cfg(test)]` modules, functions and impl
-blocks. It cannot see a read with a variable name, such as
-`std::env::var_os(key)`. The check runs in `verify:fast`, in the pre-commit
-hook, and in the CI `JS Lint and Format` job.
+read the home folder or the tools of the machine.
+
+The check fails on these forms when the key is `HOME`, `PATH`, `USERPROFILE`,
+`APPDATA`, `LOCALAPPDATA` or an `XDG_` variable:
+
+- `std::env::var` or `std::env::var_os`, also with a turbofish, or through a
+  `use std::env::var_os as <name>` alias;
+- `env!` and `option_env!`;
+- a plain string key or a raw string key such as `r"HOME"`.
+
+It also fails on `vars_os()`, `env::vars()` and a `home_dir(` call.
+
+The check skips the owner, files in a `tests/` folder, and test-only code:
+`#[cfg(test)]` modules, functions and impl blocks, and each file that a
+parent declares with `mod <name>;` under a test `cfg`. A file name does not
+make a file test-only. For example, `crates/cli/src/rule_pack/test.rs` is the
+`fallow rule-pack test` command, and the check reads it.
+
+A reviewed production read can carry a `// host-reads: allow: <reason>`
+comment on the same line, or on a comment line directly above it. These forms
+stay out of scope, because a text check cannot follow them:
+
+- a key in a variable or a constant, such as `std::env::var_os(key)`;
+- a key in an array that a loop reads;
+- a key that `format!` or `concat!` builds.
+
+The check runs in `verify:fast`, in the pre-commit hook, and in the CI
+`JS Lint and Format` job.
 
 Pre-push parity:
 
