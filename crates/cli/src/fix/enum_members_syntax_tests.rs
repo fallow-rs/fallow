@@ -14,7 +14,7 @@ fn fix(source: &str, name: &str, line: u32) -> (Vec<serde_json::Value>, String) 
 fn enum_fix_keeps_a_packed_sibling() {
     let (fixes, after) = fix("export enum E {\n  A, B,\n  C\n}\n", "A", 2);
     assert_eq!(fixes.len(), 1);
-    assert_eq!(after, "export enum E {\n  B,\n  C\n}\n");
+    assert_eq!(after, "export enum E {\n  B = 1,\n  C\n}\n");
 }
 
 #[test]
@@ -26,9 +26,17 @@ fn enum_fix_keeps_a_comma_in_a_string_value() {
 
 #[test]
 fn enum_fix_removes_an_initializer_over_several_lines() {
-    let (fixes, after) = fix("export enum E {\n  A = 1 +\n    2,\n  B,\n}\n", "A", 2);
+    let (fixes, after) = fix("export enum E {\n  A = 1 +\n    2,\n  B = 4,\n}\n", "A", 2);
     assert_eq!(fixes.len(), 1);
-    assert_eq!(after, "export enum E {\n  B,\n}\n");
+    assert_eq!(after, "export enum E {\n  B = 4,\n}\n");
+}
+
+#[test]
+fn enum_fix_keeps_an_enum_whose_kept_value_is_unknown() {
+    let source = "export enum E {\n  A = 1 +\n    2,\n  B,\n}\n";
+    let (fixes, after) = fix(source, "A", 2);
+    assert!(fixes.is_empty(), "{fixes:?}");
+    assert_eq!(after, source, "B counts on from a computed value");
 }
 
 #[test]

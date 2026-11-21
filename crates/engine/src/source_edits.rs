@@ -11,8 +11,9 @@
 use std::path::Path;
 
 use oxc_ast::ast::{
-    ClassBody, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumBody,
-    TSEnumDeclaration, TSEnumMemberName,
+    ClassBody, Declaration, ExportDefaultDeclarationKind, Expression, Program, Statement,
+    TSEnumBody, TSEnumDeclaration, TSEnumMemberName, TSExternalModuleDeclaration,
+    TSGlobalDeclaration, TSNamespaceDeclaration, UnaryOperator,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, SourceType};
@@ -35,6 +36,9 @@ pub enum EditRefusal {
     NameNotFound,
     /// More than one export statement matches, and the column selects none.
     Ambiguous,
+    /// The removal of an enum member changes the value of a kept member, and
+    /// the index does not know the old value, so it cannot keep it.
+    UnknownValue,
 }
 
 /// The form of one export statement.
@@ -114,6 +118,81 @@ pub struct EnumSpans {
     pub complete: bool,
     /// The bytes of the whole declaration.
     declaration: (u32, u32),
+    /// The value of each entry of `members`, in the same order.
+    values: Vec<MemberValue>,
+}
+
+/// The value of one enum member, as far as the syntax tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemberValue {
+    /// True when the member has an initializer.
+    initialized: bool,
+    /// The integer value of the member, or `None` when the syntax does not
+    /// give it: a computed or string initializer, a member that counts on
+    /// from such a member, or a member of a `declare enum`.
+    number: Option<i64>,
+}
+
+/// The largest integer that a JavaScript number holds exactly.
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// The integer value of an enum initializer that is a number literal, with an
+/// optional sign.
+fn literal_integer(initializer: &Expression<'_>) -> Option<i64> {
+    let value = match initializer {
+        Expression::NumericLiteral(literal) => literal.value,
+        Expression::UnaryExpression(unary) => {
+            let Expression::NumericLiteral(literal) = &unary.argument else {
+                return None;
+            };
+            match unary.operator {
+                UnaryOperator::UnaryNegation => -literal.value,
+                UnaryOperator::UnaryPlus => literal.value,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    if value.fract() != 0.0 || value.abs() > MAX_SAFE_INTEGER {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the value is an integer inside the safe integer range"
+    )]
+    Some(value as i64)
+}
+
+/// The value of each member of `declaration`, in source order. A member
+/// without an initializer counts on from the member before it, and the first
+/// member is 0. The members of an ambient enum without `const` have no known
+/// value without an initializer, because TypeScript treats them as computed.
+/// An enum is ambient when it has `declare`, when it is inside a `declare`
+/// module, namespace or global block, or when it is in a declaration file
+/// (`in_ambient_context`).
+fn member_values(
+    declaration: &TSEnumDeclaration<'_>,
+    in_ambient_context: bool,
+) -> Vec<MemberValue> {
+    let ambient = (declaration.declare || in_ambient_context) && !declaration.r#const;
+    let mut previous: Option<Option<i64>> = None;
+    let mut values = Vec::with_capacity(declaration.body.members.len());
+    for member in &declaration.body.members {
+        let number = match &member.initializer {
+            Some(initializer) => literal_integer(initializer),
+            None if ambient => None,
+            None => match previous {
+                None => Some(0),
+                Some(before) => before.and_then(|value| value.checked_add(1)),
+            },
+        };
+        previous = Some(number);
+        values.push(MemberValue {
+            initialized: member.initializer.is_some(),
+            number,
+        });
+    }
+    values
 }
 
 /// The export statements and the class and enum members of one file text.
@@ -246,13 +325,17 @@ impl SourceEditIndex {
     /// A member that owns its lines is deleted with its lines, also an
     /// initializer over several lines. A member that shares a line with
     /// another member is deleted with one separating comma, and each other
-    /// byte of the enum stays as it is.
+    /// byte of the enum stays as it is. A kept member without an initializer
+    /// that follows a removed member gets an initializer with its old value,
+    /// as in `Medium = 1`, so each kept member keeps its value.
     ///
     /// # Errors
     ///
     /// [`EditRefusal::NameNotFound`] when no complete enum of the name has
-    /// each member, and [`EditRefusal::Ambiguous`] when `line` does not
-    /// select one enum, or when two edits overlap.
+    /// each member, [`EditRefusal::Ambiguous`] when `line` does not select
+    /// one enum, or when two edits overlap, and [`EditRefusal::UnknownValue`]
+    /// when a kept member needs an initializer and its old value is not a
+    /// known integer.
     pub fn remove_enum_members(
         &self,
         name: &str,
@@ -290,11 +373,49 @@ impl SourceEditIndex {
             }
             edits.push(edit);
         }
+        edits.extend(self.value_pins(enumeration, &removed)?);
         edits.sort_by_key(|edit| edit.start);
         if edits.windows(2).any(|pair| pair[1].start < pair[0].end) {
             return Err(EditRefusal::Ambiguous);
         }
         Ok(edits)
+    }
+
+    /// The edits that give each kept member, whose value counts on from a
+    /// removed member, an initializer with its old value. The member keeps
+    /// its value after the removal, and each member after it too.
+    ///
+    /// # Errors
+    ///
+    /// [`EditRefusal::UnknownValue`] when such a member has no known value.
+    fn value_pins(
+        &self,
+        enumeration: &EnumSpans,
+        removed: &[bool],
+    ) -> Result<Vec<SpanEdit>, EditRefusal> {
+        let mut pins = Vec::new();
+        for (position, (_, span)) in enumeration.members.iter().enumerate() {
+            let shifts = position > 0
+                && removed[position - 1]
+                && !removed[position]
+                && !enumeration.values[position].initialized;
+            if !shifts {
+                continue;
+            }
+            let value = enumeration.values[position]
+                .number
+                .ok_or(EditRefusal::UnknownValue)?;
+            let key = self
+                .source
+                .get(span.start as usize..span.end as usize)
+                .ok_or(EditRefusal::UnknownValue)?;
+            pins.push(SpanEdit {
+                start: span.start,
+                end: span.end,
+                replacement: format!("{key} = {value}"),
+            });
+        }
+        Ok(pins)
     }
 
     /// True when `edit` deletes a comment that lies between members. The
@@ -504,6 +625,7 @@ fn parse_block(file: &str, source: &str, source_type: SourceType, offset: u32) -
             offset,
             members: Vec::new(),
             enums: Vec::new(),
+            ambient_depth: usize::from(source_type.is_typescript_definition()),
         };
         members.visit_program(&parsed.program);
         Some(Parsed {
@@ -520,9 +642,20 @@ struct MemberCollector {
     offset: u32,
     members: Vec<MemberSpan>,
     enums: Vec<EnumSpans>,
+    /// The number of enclosing ambient contexts: a declaration file, and each
+    /// `declare` module, namespace or global block around the visit position.
+    ambient_depth: usize,
 }
 
 impl MemberCollector {
+    /// Visit `walk` inside one more ambient context when `declare` is true.
+    fn within(&mut self, declare: bool, walk: impl FnOnce(&mut Self)) {
+        let depth = usize::from(declare);
+        self.ambient_depth += depth;
+        walk(self);
+        self.ambient_depth -= depth;
+    }
+
     fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool, shares_its_key: bool) {
         self.members.push(MemberSpan {
             start: span.start + self.offset,
@@ -553,6 +686,8 @@ impl<'a> Visit<'a> for MemberCollector {
 
     fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
         let offset = self.offset;
+        let all_values = member_values(it, self.ambient_depth > 0);
+        let mut values = Vec::with_capacity(it.body.members.len());
         let mut members = Vec::with_capacity(it.body.members.len());
         for (position, member) in it.body.members.iter().enumerate() {
             let name = match &member.id {
@@ -563,6 +698,7 @@ impl<'a> Visit<'a> for MemberCollector {
                     .map_or_else(|| name.value.display().to_string(), str::to_owned),
                 TSEnumMemberName::ComputedTemplateString(_) => continue,
             };
+            values.push(all_values[position]);
             let deletion_keeps_values = it
                 .body
                 .members
@@ -585,8 +721,27 @@ impl<'a> Visit<'a> for MemberCollector {
             complete: members.len() == it.body.members.len(),
             members,
             declaration: (it.span.start + offset, it.span.end + offset),
+            values,
         });
         oxc_ast_visit::walk::walk_ts_enum_declaration(self, it);
+    }
+
+    fn visit_ts_external_module_declaration(&mut self, it: &TSExternalModuleDeclaration<'a>) {
+        self.within(it.declare, |collector| {
+            oxc_ast_visit::walk::walk_ts_external_module_declaration(collector, it);
+        });
+    }
+
+    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
+        self.within(it.declare, |collector| {
+            oxc_ast_visit::walk::walk_ts_namespace_declaration(collector, it);
+        });
+    }
+
+    fn visit_ts_global_declaration(&mut self, it: &TSGlobalDeclaration<'a>) {
+        self.within(it.declare, |collector| {
+            oxc_ast_visit::walk::walk_ts_global_declaration(collector, it);
+        });
     }
 
     fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
@@ -1053,10 +1208,104 @@ mod tests {
         let edits = index.remove_enum_members(name, members, line)?;
         let mut result = source.to_owned();
         for edit in edits.iter().rev() {
-            assert!(edit.replacement.is_empty());
-            result.replace_range(edit.start as usize..edit.end as usize, "");
+            result.replace_range(edit.start as usize..edit.end as usize, &edit.replacement);
         }
         Ok(result)
+    }
+
+    #[test]
+    fn keeps_the_value_of_a_kept_member_that_counts_on() {
+        let source = "export enum Level {\n  Low,\n  Medium,\n  High,\n}\n";
+        assert_eq!(
+            remove(source, "Level", &["Low"], 2).unwrap(),
+            "export enum Level {\n  Medium = 1,\n  High,\n}\n"
+        );
+        let run = "enum E {\n  A,\n  B,\n  C,\n  D,\n}\n";
+        assert_eq!(
+            remove(run, "E", &["A", "B"], 2).unwrap(),
+            "enum E {\n  C = 2,\n  D,\n}\n",
+            "a run of removed members pins only the next kept member"
+        );
+        assert_eq!(
+            remove(run, "E", &["B", "D"], 3).unwrap(),
+            "enum E {\n  A,\n  C = 2,\n}\n"
+        );
+        let chained = "enum E { A = -3, B, C = 0x10, D, 'e-f' }\n";
+        assert_eq!(
+            remove(chained, "E", &["A"], 1).unwrap(),
+            "enum E { B = -2, C = 0x10, D, 'e-f' }\n"
+        );
+        assert_eq!(
+            remove(chained, "E", &["C", "D"], 1).unwrap(),
+            "enum E { A = -3, B, 'e-f' = 18 }\n"
+        );
+        let initialized = "enum E {\n  A = 1,\n  B = 2,\n}\n";
+        assert_eq!(
+            remove(initialized, "E", &["A"], 2).unwrap(),
+            "enum E {\n  B = 2,\n}\n",
+            "a member with an initializer needs no pin"
+        );
+        let declared = "export declare const enum E {\n  A,\n  B,\n}\n";
+        assert_eq!(
+            remove(declared, "E", &["A"], 2).unwrap(),
+            "export declare const enum E {\n  B = 1,\n}\n"
+        );
+    }
+
+    #[test]
+    fn refuses_a_removal_that_shifts_an_unknown_value() {
+        for source in [
+            "enum E {\n  A = x,\n  B,\n}\n",
+            "enum E {\n  A = 1.5,\n  B,\n}\n",
+            "enum E {\n  A = \"a\".length,\n  B,\n}\n",
+            "declare enum E {\n  A,\n  B,\n}\n",
+        ] {
+            assert_eq!(
+                remove(source, "E", &["A"], 2),
+                Err(EditRefusal::UnknownValue),
+                "{source}"
+            );
+        }
+        let ambient_last = "declare enum E {\n  A,\n  B,\n}\n";
+        assert_eq!(
+            remove(ambient_last, "E", &["B"], 3).unwrap(),
+            "declare enum E {\n  A,\n}\n",
+            "the removal of the last member shifts no value"
+        );
+    }
+
+    #[test]
+    fn refuses_a_shift_in_an_ambient_context() {
+        let namespace = "declare namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        let module = "declare module 'm' {\n  export enum E {\n    A,\n    B,\n  }\n}\n";
+        let nested = "declare namespace N {\n  namespace M {\n    enum E {\n      A,\n      B,\n    }\n  }\n}\n";
+        let global = "export {};\ndeclare global {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        for (source, line) in [(namespace, 3), (module, 3), (nested, 4), (global, 4)] {
+            let index = index("store.ts", source);
+            assert_eq!(
+                index.remove_enum_members("E", &["A"], line),
+                Err(EditRefusal::UnknownValue),
+                "{source}"
+            );
+        }
+        let definition = index("a.d.ts", "export enum E {\n  A,\n  B,\n}\n");
+        assert_eq!(
+            definition.remove_enum_members("E", &["A"], 2),
+            Err(EditRefusal::UnknownValue),
+            "a member of a declaration file is ambient"
+        );
+        let constant = "declare namespace N {\n  const enum E {\n    A,\n    B,\n  }\n}\n";
+        assert_eq!(
+            remove(constant, "E", &["A"], 3).unwrap(),
+            "declare namespace N {\n  const enum E {\n    B = 1,\n  }\n}\n",
+            "a const enum keeps known values in an ambient context"
+        );
+        let plain = "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\n";
+        assert_eq!(
+            remove(plain, "E", &["A"], 3).unwrap(),
+            "namespace N {\n  enum E {\n    B = 1,\n  }\n}\n",
+            "a namespace without declare is not ambient"
+        );
     }
 
     #[test]
@@ -1064,11 +1313,11 @@ mod tests {
         let source = "enum E {\n  A,\n  B,\n  C,\n}\n";
         assert_eq!(
             remove(source, "E", &["A"], 2).unwrap(),
-            "enum E {\n  B,\n  C,\n}\n"
+            "enum E {\n  B = 1,\n  C,\n}\n"
         );
         assert_eq!(
             remove(source, "E", &["B"], 3).unwrap(),
-            "enum E {\n  A,\n  C,\n}\n"
+            "enum E {\n  A,\n  C = 2,\n}\n"
         );
         assert_eq!(
             remove(source, "E", &["C"], 4).unwrap(),
@@ -1086,21 +1335,36 @@ mod tests {
         let comment = "enum E {\n  A, // }\n  B,\n}\n";
         assert_eq!(
             remove(comment, "E", &["A"], 2).unwrap(),
-            "enum E {\n  B,\n}\n"
+            "enum E {\n  B = 1,\n}\n"
         );
         let long = "enum E {\n  A = 1 +\n    2,\n  B,\n}\n";
-        assert_eq!(remove(long, "E", &["A"], 2).unwrap(), "enum E {\n  B,\n}\n");
+        assert_eq!(
+            remove(long, "E", &["A"], 2),
+            Err(EditRefusal::UnknownValue),
+            "B counts on from a computed value"
+        );
+        let long_kept = "enum E {\n  A = 1 +\n    2,\n  B = 5,\n}\n";
+        assert_eq!(
+            remove(long_kept, "E", &["A"], 2).unwrap(),
+            "enum E {\n  B = 5,\n}\n"
+        );
     }
 
     #[test]
     fn removes_packed_members_and_keeps_each_other_byte() {
         let source = "enum E { A, B, C }\n";
-        assert_eq!(remove(source, "E", &["A"], 1).unwrap(), "enum E { B, C }\n");
-        assert_eq!(remove(source, "E", &["B"], 1).unwrap(), "enum E { A, C }\n");
+        assert_eq!(
+            remove(source, "E", &["A"], 1).unwrap(),
+            "enum E { B = 1, C }\n"
+        );
+        assert_eq!(
+            remove(source, "E", &["B"], 1).unwrap(),
+            "enum E { A, C = 2 }\n"
+        );
         assert_eq!(remove(source, "E", &["C"], 1).unwrap(), "enum E { A, B }\n");
         assert_eq!(
             remove(source, "E", &["A", "B"], 1).unwrap(),
-            "enum E { C }\n"
+            "enum E { C = 2 }\n"
         );
         assert_eq!(
             remove(source, "E", &["B", "C"], 1).unwrap(),
@@ -1127,12 +1391,12 @@ mod tests {
         let source = "enum E {\n  A,\n  B, C,\n  D\n}\n";
         assert_eq!(
             remove(source, "E", &["A", "B"], 2).unwrap(),
-            "enum E {\n  C,\n  D\n}\n"
+            "enum E {\n  C = 2,\n  D\n}\n"
         );
         let packed_first = "enum E {\n  A, B,\n  C\n}\n";
         assert_eq!(
             remove(packed_first, "E", &["A"], 2).unwrap(),
-            "enum E {\n  B,\n  C\n}\n"
+            "enum E {\n  B = 1,\n  C\n}\n"
         );
     }
 
@@ -1150,7 +1414,7 @@ mod tests {
         let source = "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\nnamespace M {\n  enum E {\n    A,\n    B,\n  }\n}\n";
         assert_eq!(
             remove(source, "E", &["A"], 9).unwrap(),
-            "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\nnamespace M {\n  enum E {\n    B,\n  }\n}\n"
+            "namespace N {\n  enum E {\n    A,\n    B,\n  }\n}\nnamespace M {\n  enum E {\n    B = 1,\n  }\n}\n"
         );
         assert_eq!(remove(source, "E", &["A"], 1), Err(EditRefusal::Ambiguous));
         assert_eq!(
@@ -1171,10 +1435,10 @@ mod tests {
             remove(before_kept, "E", &["A", "B"], 2),
             Err(EditRefusal::Ambiguous)
         );
-        let in_a_string = "enum E { A = \"http://x\", B }\n";
+        let in_a_string = "enum E { A = \"http://x\", B = \"y\" }\n";
         assert_eq!(
             remove(in_a_string, "E", &["A"], 1).unwrap(),
-            "enum E { B }\n"
+            "enum E { B = \"y\" }\n"
         );
     }
 
@@ -1206,7 +1470,7 @@ mod tests {
         let source = "namespace N {\n  export enum E { A, B }\n}\nnamespace M {\n  export enum E { A, B }\n}\n";
         assert_eq!(
             remove(source, "E", &["A"], 5).unwrap(),
-            "namespace N {\n  export enum E { A, B }\n}\nnamespace M {\n  export enum E { B }\n}\n"
+            "namespace N {\n  export enum E { A, B }\n}\nnamespace M {\n  export enum E { B = 1 }\n}\n"
         );
     }
 
