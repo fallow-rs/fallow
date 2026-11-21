@@ -61,33 +61,51 @@ const MAX_RULE_BYTES: usize = 512;
 /// A larger single glob remains valid and compiles in its own batch.
 const MAX_MATCHER_COST: usize = 8 * 1024 * 1024;
 
+/// One CODEOWNERS rule line.
+#[derive(Debug)]
+struct Rule {
+    /// Pattern text from the file. An exclusion keeps its `!` prefix.
+    pattern: String,
+    /// Primary owner. `None` for a GitLab exclusion (`!path`).
+    owner: Option<String>,
+    /// Number of owners on the rule. Zero for an exclusion.
+    owner_count: u32,
+    /// Index into `CodeOwners::sections`. `None` before the first header.
+    section: Option<usize>,
+}
+
+/// One GitLab section.
+#[derive(Debug)]
+struct Section {
+    name: String,
+    default_owners: Vec<String>,
+}
+
+/// The last CODEOWNERS rule that matches a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleMatch<'a> {
+    /// Primary owner. `None` when the rule is a GitLab exclusion (`!path`).
+    pub owner: Option<&'a str>,
+    /// Number of owners on the rule. Zero for an exclusion.
+    pub owner_count: u32,
+    /// Pattern text from the file. An exclusion keeps its `!` prefix.
+    pub pattern: &'a str,
+    /// Section of the rule. `None` for a rule before the first header.
+    pub section: Option<&'a str>,
+    /// Default owners of the section. Empty outside a section.
+    pub section_owners: &'a [String],
+}
+
 /// Parsed CODEOWNERS file for ownership lookup.
 #[derive(Debug)]
 pub struct CodeOwners {
-    /// Primary owner per rule, indexed through `glob_rules`.
-    /// Empty string for negation rules (see `is_negation`).
-    owners: Vec<String>,
-    /// Number of owners matched by each rule, indexed through `glob_rules`.
-    /// Zero for negation rules.
-    owner_counts: Vec<u32>,
-    /// Original CODEOWNERS pattern per rule (e.g. `/src/` or `*.ts`).
-    /// For negations, the raw pattern is prefixed with `!`.
-    patterns: Vec<String>,
-    /// Whether each rule is a GitLab-style negation (`!path`). A matching
-    /// negation as the last-matching rule clears ownership for that file.
-    is_negation: Vec<bool>,
-    /// GitLab section name per rule, or `None` for rules that appear before
-    /// the first section header. Used by `--group-by section`.
-    sections: Vec<Option<String>>,
-    /// Section default owners per rule (cloned from the active section
-    /// header). Empty for rules outside any section, used as metadata in
-    /// JSON output for `--group-by section`.
-    section_owners: Vec<Vec<String>>,
-    /// Whether the file contains at least one GitLab section header.
-    has_sections: bool,
+    /// Rules in file order.
+    rules: Vec<Rule>,
+    /// GitLab sections in the order of their first header.
+    sections: Vec<Section>,
     /// Ordered batches keep regex fallback caches independent of other batches.
     globs: Vec<CodeOwnersMatcher>,
-    /// Rule index per translated glob, across all matcher batches.
+    /// Index into `rules` per translated glob, across all matcher batches.
     glob_rules: Vec<usize>,
 }
 
@@ -181,19 +199,32 @@ impl CodeOwners {
         })
     }
 
+    /// Look up the last CODEOWNERS rule that matches a path (relative to the
+    /// project root).
+    ///
+    /// Returns `None` when no rule matches. For a GitLab exclusion (`!path`)
+    /// the result has `owner: None` and `owner_count: 0`. For a rule before the
+    /// first section header the result has `section: None` and no section
+    /// owners.
+    pub fn match_path(&self, relative_path: &Path) -> Option<RuleMatch<'_>> {
+        let rule = &self.rules[self.last_matching_rule(relative_path)?];
+        let section = rule.section.map(|idx| &self.sections[idx]);
+        Some(RuleMatch {
+            owner: rule.owner.as_deref(),
+            owner_count: rule.owner_count,
+            pattern: &rule.pattern,
+            section: section.map(|s| s.name.as_str()),
+            section_owners: section.map_or(&[][..], |s| s.default_owners.as_slice()),
+        })
+    }
+
     /// Look up the primary owner of a file path (relative to project root).
     ///
     /// Returns the first owner from the last matching CODEOWNERS rule,
     /// or `None` if no rule matches or the last matching rule is a
     /// GitLab-style exclusion (`!path`).
     pub fn owner_of(&self, relative_path: &Path) -> Option<&str> {
-        self.last_matching_rule(relative_path).and_then(|idx| {
-            if self.is_negation[idx] {
-                None
-            } else {
-                Some(self.owners[idx].as_str())
-            }
-        })
+        self.match_path(relative_path)?.owner
     }
 
     /// Look up the number of owners matched by the last matching CODEOWNERS rule.
@@ -201,13 +232,7 @@ impl CodeOwners {
     /// Returns `Some(0)` when the path is explicitly unowned by a GitLab
     /// negation, and `None` when no CODEOWNERS rule matches.
     pub fn owner_count_of(&self, relative_path: &Path) -> Option<u32> {
-        self.last_matching_rule(relative_path).map(|idx| {
-            if self.is_negation[idx] {
-                0
-            } else {
-                self.owner_counts[idx]
-            }
-        })
+        self.match_path(relative_path).map(|m| m.owner_count)
     }
 
     /// Look up the primary owner and the original CODEOWNERS pattern for a path.
@@ -217,13 +242,8 @@ impl CodeOwners {
     /// The pattern is the raw string from the CODEOWNERS file (e.g. `/src/`
     /// or `*.ts`).
     pub fn owner_and_rule_of(&self, relative_path: &Path) -> Option<(&str, &str)> {
-        self.last_matching_rule(relative_path).and_then(|idx| {
-            if self.is_negation[idx] {
-                None
-            } else {
-                Some((self.owners[idx].as_str(), self.patterns[idx].as_str()))
-            }
-        })
+        let m = self.match_path(relative_path)?;
+        Some((m.owner?, m.pattern))
     }
 
     /// Look up the GitLab CODEOWNERS section that owns a file.
@@ -233,13 +253,8 @@ impl CodeOwners {
     /// header, or `None` when no rule matches or the last match is a
     /// GitLab-style exclusion.
     pub fn section_of(&self, relative_path: &Path) -> Option<Option<&str>> {
-        self.last_matching_rule(relative_path).and_then(|idx| {
-            if self.is_negation[idx] {
-                None
-            } else {
-                Some(self.sections[idx].as_deref())
-            }
-        })
+        let m = self.match_path(relative_path)?;
+        m.owner.map(|_| m.section)
     }
 
     /// Look up the section name plus the section's default owners for a file.
@@ -249,16 +264,8 @@ impl CodeOwners {
     /// The returned owner slice is empty for rules declared outside any
     /// section or for sections that declare no default owners.
     pub fn section_and_owners_of(&self, relative_path: &Path) -> Option<(Option<&str>, &[String])> {
-        self.last_matching_rule(relative_path).and_then(|idx| {
-            if self.is_negation[idx] {
-                None
-            } else {
-                Some((
-                    self.sections[idx].as_deref(),
-                    self.section_owners[idx].as_slice(),
-                ))
-            }
-        })
+        let m = self.match_path(relative_path)?;
+        m.owner.map(|_| (m.section, m.section_owners))
     }
 
     /// Look up section, section owners, and the raw CODEOWNERS pattern in one
@@ -270,17 +277,8 @@ impl CodeOwners {
         &self,
         relative_path: &Path,
     ) -> Option<(Option<&str>, &[String], &str)> {
-        self.last_matching_rule(relative_path).and_then(|idx| {
-            if self.is_negation[idx] {
-                None
-            } else {
-                Some((
-                    self.sections[idx].as_deref(),
-                    self.section_owners[idx].as_slice(),
-                    self.patterns[idx].as_str(),
-                ))
-            }
-        })
+        let m = self.match_path(relative_path)?;
+        m.owner.map(|_| (m.section, m.section_owners, m.pattern))
     }
 
     /// Whether the parsed file contains at least one GitLab section header.
@@ -288,22 +286,18 @@ impl CodeOwners {
     /// `--group-by section` errors out when this is false, since every file
     /// would collapse into the `(no section)` bucket.
     pub fn has_sections(&self) -> bool {
-        self.has_sections
+        !self.sections.is_empty()
     }
 }
 
 struct CodeOwnersParser {
     globs: Vec<Glob>,
     glob_rules: Vec<usize>,
-    owners: Vec<String>,
-    owner_counts: Vec<u32>,
-    patterns: Vec<String>,
-    is_negation: Vec<bool>,
-    sections: Vec<Option<String>>,
-    section_owners: Vec<Vec<String>>,
-    current_section: Option<String>,
+    rules: Vec<Rule>,
+    sections: Vec<Section>,
+    current_section: Option<usize>,
+    /// Default owners of the header directly above the current line.
     current_section_owners: Vec<String>,
-    has_sections: bool,
     wildcards: usize,
 }
 
@@ -312,15 +306,10 @@ impl CodeOwnersParser {
         Self {
             globs: Vec::new(),
             glob_rules: Vec::new(),
-            owners: Vec::new(),
-            owner_counts: Vec::new(),
-            patterns: Vec::new(),
-            is_negation: Vec::new(),
+            rules: Vec::new(),
             sections: Vec::new(),
-            section_owners: Vec::new(),
             current_section: None,
             current_section_owners: Vec::new(),
-            has_sections: false,
             wildcards: 0,
         }
     }
@@ -329,9 +318,12 @@ impl CodeOwnersParser {
         match parse_codeowners_line(line, &self.current_section_owners) {
             ParsedCodeOwnersLine::Skip => Ok(()),
             ParsedCodeOwnersLine::Section { name, defaults } => {
-                self.current_section = Some(name);
+                self.sections.push(Section {
+                    name,
+                    default_owners: defaults.clone(),
+                });
+                self.current_section = Some(self.sections.len() - 1);
                 self.current_section_owners = defaults;
-                self.has_sections = true;
                 Ok(())
             }
             ParsedCodeOwnersLine::Rule {
@@ -372,7 +364,7 @@ impl CodeOwnersParser {
             ));
         }
 
-        let rule_idx = self.owners.len();
+        let rule_idx = self.rules.len();
         for glob_pattern in translate_pattern(&pattern) {
             // A backslash escapes the next character on every platform, as in
             // gitignore. The globset default turns escapes off on Windows.
@@ -385,17 +377,16 @@ impl CodeOwnersParser {
             self.glob_rules.push(rule_idx);
         }
 
-        self.owners.push(owner);
-        self.owner_counts.push(owner_count);
-        self.patterns.push(if negate {
-            format!("!{pattern}")
-        } else {
-            pattern
+        self.rules.push(Rule {
+            pattern: if negate {
+                format!("!{pattern}")
+            } else {
+                pattern
+            },
+            owner: (!negate).then_some(owner),
+            owner_count,
+            section: self.current_section,
         });
-        self.is_negation.push(negate);
-        self.sections.push(self.current_section.clone());
-        self.section_owners
-            .push(self.current_section_owners.clone());
         Ok(())
     }
 
@@ -428,13 +419,8 @@ impl CodeOwnersParser {
         }
 
         Ok(CodeOwners {
-            owners: self.owners,
-            owner_counts: self.owner_counts,
-            patterns: self.patterns,
-            is_negation: self.is_negation,
+            rules: self.rules,
             sections: self.sections,
-            section_owners: self.section_owners,
-            has_sections: self.has_sections,
             globs,
             glob_rules: self.glob_rules,
         })
@@ -688,29 +674,29 @@ mod tests {
     fn parse_simple_codeowners() {
         let content = "* @global-owner\n/src/ @frontend\n*.rs @rust-team\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 3);
+        assert_eq!(co.rules.len(), 3);
     }
 
     #[test]
     fn parse_skips_comments_and_blanks() {
         let content = "# Comment\n\n* @owner\n  # Indented comment\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
     }
 
     #[test]
     fn parse_multi_owner_takes_first() {
         let content = "*.ts @team-a @team-b @team-c\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners[0], "@team-a");
+        assert_eq!(co.rules[0].owner.as_deref(), Some("@team-a"));
     }
 
     #[test]
     fn parse_skips_pattern_without_owner() {
         let content = "*.ts\n*.js @owner\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
-        assert_eq!(co.owners[0], "@owner");
+        assert_eq!(co.rules.len(), 1);
+        assert_eq!(co.rules[0].owner.as_deref(), Some("@owner"));
     }
 
     #[test]
@@ -798,7 +784,7 @@ mod tests {
     fn parse_accepts_wildcards_at_the_limits() {
         let rule = format!("{} @owner\n", "*a".repeat(32));
         let co = CodeOwners::parse(&rule.repeat(128)).unwrap();
-        assert_eq!(co.owners.len(), 128);
+        assert_eq!(co.rules.len(), 128);
     }
 
     #[test]
@@ -964,7 +950,7 @@ mod tests {
     fn gitlab_section_header_skipped_as_rule() {
         let content = "[Section Name]\n*.ts @owner\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
         assert_eq!(co.owner_of(Path::new("app.ts")), Some("@owner"));
     }
 
@@ -972,21 +958,21 @@ mod tests {
     fn gitlab_optional_section_header_skipped() {
         let content = "^[Optional Section]\n*.ts @owner\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
     }
 
     #[test]
     fn gitlab_section_header_with_approval_count_skipped() {
         let content = "[Section Name][2]\n*.ts @owner\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
     }
 
     #[test]
     fn gitlab_optional_section_with_approval_count_skipped() {
         let content = "^[Section Name][3] @fallback-team\nfoo/\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
         assert_eq!(co.owner_of(Path::new("foo/bar.ts")), Some("@fallback-team"));
     }
 
@@ -999,7 +985,7 @@ mod tests {
             src/components/\n\
         ";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 2);
+        assert_eq!(co.rules.len(), 2);
         assert_eq!(
             co.owner_of(Path::new("src/utils/greet.ts")),
             Some("@utils-team")
@@ -1037,7 +1023,7 @@ mod tests {
             bar/\n\
         ";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
         assert_eq!(co.owner_of(Path::new("foo/x.ts")), Some("@team-a"));
         assert_eq!(co.owner_of(Path::new("bar/x.ts")), None);
     }
@@ -1343,7 +1329,7 @@ src/components/
     fn non_section_bracket_pattern_parses_as_rule() {
         let content = "[abc]def @owner\n";
         let co = CodeOwners::parse(content).unwrap();
-        assert_eq!(co.owners.len(), 1);
+        assert_eq!(co.rules.len(), 1);
         assert_eq!(co.owner_of(Path::new("adef")), Some("@owner"));
     }
 
