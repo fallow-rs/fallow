@@ -38,7 +38,7 @@
 use std::path::Path;
 
 use globset::{Candidate, Glob, GlobBuilder, GlobSet, GlobSetBuilder};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Wildcards (`*`, `?`, `[`, `{`) allowed in one CODEOWNERS pattern.
 ///
@@ -303,6 +303,9 @@ struct CodeOwnersParser {
     sections: Vec<Section>,
     /// Index into `sections` by lowercase section name.
     section_index: FxHashMap<String, usize>,
+    /// `(section index, owner)` pairs in the default owners of a section.
+    /// A hash set keeps the merge of a header linear in its owner count.
+    section_owners_seen: FxHashSet<(usize, String)>,
     current_section: Option<usize>,
     /// Default owners of the header directly above the current line.
     current_section_owners: Vec<String>,
@@ -317,6 +320,7 @@ impl CodeOwnersParser {
             rules: Vec::new(),
             sections: Vec::new(),
             section_index: FxHashMap::default(),
+            section_owners_seen: FxHashSet::default(),
             current_section: None,
             current_section_owners: Vec::new(),
             wildcards: 0,
@@ -346,20 +350,22 @@ impl CodeOwnersParser {
     fn enter_section(&mut self, name: String, defaults: Vec<String>) {
         let key = name.to_lowercase();
         let idx = if let Some(&idx) = self.section_index.get(&key) {
-            let merged = &mut self.sections[idx].default_owners;
             for owner in &defaults {
-                if !merged.contains(owner) {
-                    merged.push(owner.clone());
+                if self.section_owners_seen.insert((idx, owner.clone())) {
+                    self.sections[idx].default_owners.push(owner.clone());
                 }
             }
             idx
         } else {
+            let idx = self.sections.len();
+            self.section_owners_seen
+                .extend(defaults.iter().map(|owner| (idx, owner.clone())));
             self.sections.push(Section {
                 name,
                 default_owners: defaults.clone(),
             });
-            self.section_index.insert(key, self.sections.len() - 1);
-            self.sections.len() - 1
+            self.section_index.insert(key, idx);
+            idx
         };
         self.current_section = Some(idx);
         self.current_section_owners = defaults;
