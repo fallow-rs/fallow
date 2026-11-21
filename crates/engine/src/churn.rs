@@ -17,6 +17,10 @@ use crate::churn_shallow::{RepoSnapshot, ShallowState};
 
 pub use fallow_types::churn::ChurnTrend;
 
+#[path = "churn_walk.rs"]
+mod walk;
+use walk::analyze_churn_events;
+
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
 /// log calls through its `ScopedChild` registry so SIGINT / SIGTERM
@@ -955,60 +959,6 @@ fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
         .map(|&pair| u16::from_le_bytes(pair))
         .collect();
     Some(PathBuf::from(OsString::from_wide(&wide)))
-}
-
-/// Run `git log --numstat` and return event-level churn state.
-///
-/// The window is passed as an absolute `--after=@<epoch>` resolved against the
-/// run clock rather than as a phrase git re-resolves against the wall clock, so
-/// two runs over one commit see the same window boundary.
-fn analyze_churn_events(
-    root: &Path,
-    since: &SinceDuration,
-    revision_range: Option<&str>,
-    clock: &crate::clock::AnalysisClock,
-) -> Option<ChurnEventState> {
-    let mut command = git_command(root);
-    command.arg("log");
-    if let Some(range) = revision_range {
-        command.arg(range);
-    }
-    command
-        .args([
-            "--numstat",
-            "--no-merges",
-            "--no-renames",
-            "--use-mailmap",
-            "-z",
-            "--format=format:%at|%ct|%H|%ae%x00",
-        ])
-        .current_dir(root);
-    if let Some(cutoff) = since.window.cutoff_secs(clock) {
-        command.arg(format!("--after=@{cutoff}"));
-    }
-    // numstat paths are relative to the git toplevel. When the project root
-    // is a subdirectory, `--relative` rewrites them relative to the root, and
-    // the `.` pathspec skips commits and files outside it. Both are no-ops at
-    // the toplevel.
-    command.args(["--relative", "--", "."]);
-
-    let output = match spawn_output(&mut command) {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::warn!("hotspot analysis skipped: failed to run git: {e}");
-            return None;
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!("hotspot analysis skipped: git log failed: {stderr}");
-        return None;
-    }
-
-    let mut state = parse_git_log_events_z(&output.stdout, root, clock.epoch_secs());
-    state.git_log_bytes = output.stdout.len() as u64;
-    Some(state)
 }
 
 /// Intern every value of `delta` into `base` and map each old `delta` index to
