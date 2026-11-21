@@ -7,6 +7,492 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.46.0] - 2026-11-21
+
+### Added
+
+- **A `deprecated` field for deprecated commands and options.** `fallow schema` and `fallow schema --cli-reference` give each deprecated command and option a `deprecated` object with the `replacement`. The field is absent on a current command or option.
+
+- **A CodeRabbit plugin and a GNOME Shell extension plugin.** The `coderabbit` plugin keeps `.coderabbit.config.ts` in use when the project depends on `@coderabbitai/config`. The `gnome-shell-extension` plugin makes `extension.js` and `prefs.js` entry points in each folder whose `metadata.json` has the `uuid` and `shell-version` keys that GNOME Shell requires. A `metadata.json` of another tool seeds nothing.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **Unused exports in generated files and in shadcn/ui folders now name the config entry that hides them.** Fallow keeps these findings in the report. In the human report, the "Unused exports" section prints one hint for each group of 3 findings or more, with the `ignoreExports` entry to add: one pattern for the generated files, and one for each shadcn/ui folder that a `components.json` names. In JSON, each such finding has an `add-to-config` action with the `ignoreExports` rule. An unused export or unused type in a generated file has `auto_fixable: false` on its `remove-export` action and no `suppress-line` action, because the generator writes the file again and removes the edit or the comment.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **`fallow schema` tells source edits apart from report writes.** Each `mcp_tools` row and each `fallow://tools` row has a new `modifies_source` field. It is `true` only for `fix_apply`, which edits source files. `analyze`, `check_changed`, `find_dupes` and `check_health` keep `read_only: false`, because they write a report or baseline file on request, and they have `modifies_source: false`. The `read_only` field and the MCP `readOnlyHint` annotation do not change.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **`fallow explain` shows a tested code example for each rule.** Next to the sentence that describes the example, `fallow explain <id>` now prints the files of a small project that makes the rule report a finding. A rule of `fallow audit` shows the files before the change and after it. `--format json` has the files in two new arrays, `example_files` and `example_base_files`, each with a `path` and the `code` of the file; `fallow schema --cli-reference` has the same arrays for each issue type. A test runs fallow on each example and checks that the rule reports it. A rule has no example when it needs data that a small project does not have, such as production runtime data or a test run.
+  (Closes [#4932](https://github.com/fallow-rs/fallow/issues/4932))
+
+- **A `fallow-override-threshold-next-line` comment sets the health ceilings of one function.** Write `// fallow-override-threshold-next-line maxCognitive=40 maxCrap=45 -- <reason>` on the line before the function. The keys are the keys of `health.thresholdOverrides` (`maxCyclomatic`, `maxCognitive`, `maxCrap`, `maxUnitSize`), and the reason is required. For each ceiling that it sets, the comment wins over a config entry. The comment keeps the function visible with a numeric ceiling, so the exception lives next to the code and the root config stays small in a monorepo. The health report lists each comment in the new optional `inline_threshold_overrides` array with the states of `threshold_overrides`: `active`, `stale`, `insufficient` and `no_match`. A comment with a problem, for example a missing reason, has no effect and goes to the new optional `inline_threshold_override_problems` array. A finding that a comment ceiling applies to carries `override_comment_line`, and the human report shows `override (comment, line N)` or `override (config)`. The new config key `health.inlineThresholdOverrides` (default `true`) turns the comment form off. `fallow audit` reports a new comment through the `added-suppression` diff-risk rule. The extraction cache version moves, so the first run after the upgrade parses every file again. Thanks to @DiefBell for the request.
+  (Closes [#4898](https://github.com/fallow-rs/fallow/issues/4898))
+  Thanks [@DiefBell](https://github.com/DiefBell) for the request.
+
+### Changed
+
+- **Rust crates: `ConfigLoadOptions` and `ConfigFileOptions` carry the time limit of a remote `extends` fetch.** Both types are `#[non_exhaustive]`. Build them with `fallow_config::ConfigLoadOptions::new(allow_remote_extends)` (with `with_extends_timeout`) and `fallow_engine::project_config::ConfigFileOptions::new(allow_remote_extends, &env)`, which reads `FALLOW_EXTENDS_TIMEOUT_SECS` from an `EnvSnapshot`. The fetcher reads the option, not the process environment. New: `fallow_config::extends_timeout_from_env_value` and `EnvSnapshot::extends_timeout`. The value of `FALLOW_EXTENDS_TIMEOUT_SECS` has the same effect on each command as before. The error for a refused remote `extends` entry now names `ConfigLoadOptions::new(true)` for library callers.
+- **Rust crates: the `ResolvedConfig` mutators that the resolver applies are hidden from the docs.** `force_include_entry_exports`, `apply_package_baselines_env`, `override_cache_dir` and `scope_shared_cache_dir_to_root` stay callable and are `#[doc(hidden)]`.
+
+- **A config with `minimumVersion` 3.34.0 or higher no longer gets the single-segment glob warning.** Since 3.34.0, a single `*` or `?` in a config path glob matches in one folder level only. For a glob that matches fewer files than before, fallow prints a warning on stderr on each run. A config that is written for the new rule had no way to stop this warning. Now `"minimumVersion": "3.34.0"` or higher tells fallow that the config is written for the new rule, and fallow prints no warning for the globs of that config. The globs of plugins and rule packs keep the warning. The warning text now names this setting. (Closes [#4851](https://github.com/fallow-rs/fallow/issues/4851))
+
+- **The built-in ignore list now has the root `fallow-viz.html`.** `fallow viz` writes its map to `fallow-viz.html` in the project root. Discovery parsed that file as an HTML source file on the next run, and the next map showed the map itself. A file of this name in the project root is now not analyzed. Add `"!fallow-viz.html"` to `ignorePatterns` to analyze it again. The rule does not apply to a file of this name in a subfolder.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **A dead-code report with findings that are all warnings says why the exit code stays 0.** The human report prints one line under the status line of the dead-code findings: "Warnings do not change the exit code. Set a rule to `error` to fail on it." The line shows in the default, `--summary` and `--group-by` reports, and in the dead-code part of `fallow audit` and of a bare `fallow` run. The machine formats and `--quiet` runs do not change.
+  (Refs [#4905](https://github.com/fallow-rs/fallow/issues/4905))
+
+- **An entry point from a CI file now names that CI file as its source.** `fallow list --entry-points` printed `tools/release.ts (scripts)` for a file that `.github/workflows/ci.yml` runs. It now prints `tools/release.ts (.github/workflows/ci.yml)`. The value of the `source` field in `list --entry-points --format json` changes from `scripts` to the CI file path for these entry points. A script that matches `source == "scripts"` must also accept a CI file path. The label is the project-root-relative path of the CI file: `.gitlab-ci.yml`, a `.github/workflows/` file, or the `action.yml` of a composite action. When more CI files run one file, the label is the first CI file in this order: `.gitlab-ci.yml`, then the workflow files by name, then the composite actions. Entry points from `package.json` scripts keep their label.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **`fallow fix --format json` has new skip reasons for catalog records.** It
+  no longer emits `skip_reason: "line_out_of_range"`. It emits `not_found`,
+  `not_empty`, `unsupported_yaml_style` and `unsafe_edit`. An edit that would
+  change other parts of `pnpm-workspace.yaml` is now a skip with
+  `unsafe_edit`, not a write error with exit code 2.
+
+- **The docs link of each issue type opens its rule page.** `fallow explain`,
+  the `_meta.rules` docs of `--explain`, the SARIF `helpUri`, the LSP code
+  description, the MCP `fallow://issue-types` resource, `fallow schema`, the
+  section footers of the human report and the rows of the GitHub summary now
+  link to `https://fallow.tools/docs/rules/<id>/`. The rule page has the
+  facts of the rule, an example, the fix and the suppression comment. The
+  old headings on the explanation pages stay, so the links of older versions
+  still work.
+  (Closes [#4894](https://github.com/fallow-rs/fallow/issues/4894))
+
+- **`fallow fix --dry-run` reports an unused exported enum with only unused members one time.** Before, the preview listed two `remove_export` records for such an enum: one for the unused export and one for its members. The apply run removes the enum one time, so the preview now shows one record.
+
+- **`fallow fix` removes the `export` keyword of a declaration only in a file that parses without an error.** A file with a syntax error, an MDX file and a Glimmer file keep the keyword, and the finding stays in the report. Export lists such as `export { a, b }` are not affected.
+
+- **The editor quick fix "Remove unused export" is not offered in a document with a syntax error.** The quick fix reads the declarations from the parsed document text. The finding stays in the report.
+- **The editor quick fix "Remove unused export" is offered for the second declaration on a line.** For `export function live() {} export function dead() {}` with `dead` unused, the quick fix removes the `export` of `dead`. Before, it offered no quick fix.
+
+- **`fallow fix` removes an enum member only in a file that parses without an error.** The fix reads the members from the syntax tree. In a file with a syntax error the finding stays in the report.
+
+### Deprecated
+
+- **The `fallow dead-code` options for the architecture issue types print a warning.** `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` print one stderr warning each, with the `fallow architecture` option to use. `--quiet` removes the warning. The next major version removes these options.
+
+### Removed
+
+- **Rust crates: a session without a resolved run is for tests only.** These items exist only with the `testing` feature of their crate: `fallow_engine::session::AnalysisSession::{load, load_with_config, load_with_config_options, load_default, load_default_with_config, from_config}`, `fallow_engine::project_config::{config_for_project, config_for_project_with_load_options, config_for_project_with_production, ProjectConfig}` and `fallow_api::EditorAnalysisSession::{load, load_with_config, load_with_config_options, load_with_production, load_default, load_default_with_config}`. `fallow_engine::project_config::{config_for_project_analysis, config_for_project_readiness, ProjectConfigOptions, ProjectConfigReadiness}` are removed: they had no caller outside the tests of the engine. Open a session from a resolved run: `fallow_api::run::resolve_run`, then `Runnable::open_session` or `EditorAnalysisSession::open`.
+- **Rust crates: `fallow_config::cache_dir_env_override` and `ProductionEnv::from_process` are removed.** Read `FALLOW_CACHE_DIR` with `EnvSnapshot::cache_dir` and the production variables with `ProductionEnv::from_lookup`.
+
+### Fixed
+
+- **A `>` in a brace attribute of a Svelte markup `<script>` element no longer breaks the parse.** Svelte markup can hold a `<script>` element with an attribute expression such as `onload={() => {}}` or `data-big={2 > 1}`. Fallow ended the opening tag at the first `>`, read the rest of the expression as a script body, and reported the file as `source-parse-degraded`. That diagnostic then gave every finding of the run the `incomplete-import-graph` caveat. The script tag scan now skips brace expressions, also when they nest or hold quoted strings.
+  (Closes [#4828](https://github.com/fallow-rs/fallow/issues/4828))
+
+- **`fallow audit` no longer reports an old unused export behind a SvelteKit path alias as introduced.** The base snapshot of `fallow audit` did not have the gitignored `.svelte-kit/tsconfig.json`, which holds the path aliases of a SvelteKit app. On the base, a file that the app imports only through such an alias was an unused file, so its unused exports looked introduced in the head. The base snapshot now gets a copy of `.svelte-kit/tsconfig.json` for the root and for each workspace package. It also links the `node_modules` of each workspace package that the base has, because pnpm installs the dependencies of a workspace package there and not in the root `node_modules`.
+  (Closes [#4790](https://github.com/fallow-rs/fallow/issues/4790))
+
+- **The GitLab template now works with a fallow version range or `latest` when `FALLOW_COMMENT`, `FALLOW_REVIEW` or `FALLOW_MUTATION` is on.** `npm install -D fallow` writes a `^` range to `package.json`, and the job stopped with exit code 2. The template now reads the exact version of the installed fallow and downloads the merge request scripts of that release. When the template cannot read the installed version, the error names the three fixes: an exact version in `package.json`, an exact `FALLOW_VERSION`, or a vendored template.
+  (Closes [#4841](https://github.com/fallow-rs/fallow/issues/4841))
+
+- **An expired or invalid license no longer blocks a single local runtime coverage capture.** A single local capture needs no license, but `--runtime-coverage` stopped with exit code 3 when the license file was expired or invalid. Fallow now prints the license problem as a warning and runs the analysis without the license. A run with more than one capture still needs a valid license and still exits 3.
+  (Closes [#4843](https://github.com/fallow-rs/fallow/issues/4843))
+- **A function without V8 tracking no longer gets the `safe_to_delete` verdict.** The verdict needs V8 tracking. When `evidence.v8_tracking` is `untracked`, the local runtime coverage report now gives `review_required` with the `review-runtime` action.
+  (Closes [#4843](https://github.com/fallow-rs/fallow/issues/4843))
+
+- **`publicPackages` no longer hides dead code that the public surface of a package cannot reach.** Fallow keeps the entry points of a public package and each declaration that they export or re-export as used. A class or an enum on that surface keeps all of its members. Fallow now reports the other unused exports, types, class members and enum members in the package. Before, fallow removed every such finding in a public package. Unused-file findings do not change.
+  (Closes [#4849](https://github.com/fallow-rs/fallow/issues/4849))
+
+- **A bare `fallow --format badge` run prints one error and exits with code 2.** The run stops before the analysis when it includes the dead-code or the duplication analysis, because only the health analysis renders a badge. A health-only badge run without `--score` also stops with one error and exit code 2. Before, each analysis printed the same error and the run exited with code 1. `fallow --only health --score --format badge` still renders the badge.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **Small CLI output defects.** `fallow trace --path` with no route prints "No import path." once. `fallow config-schema`, `plugin-schema` and `rule-pack-schema` exit cleanly when the reader closes the pipe, for example `| head`. The `--file` warning of `fallow dead-code` names the path that is missing. `--quiet` hides the "boundary zone matched 0 files" and "Cache was built under different extraction config" warnings. `fallow fix` walks the files of each fix type in path order, so `--dry-run` lines and JSON fix entries have a stable order. The human section of test-only production dependencies has a description and a docs link.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **The output schema and the issue registry describe the JSON that the
+  commands print.** `docs/output-schema.json` changes:
+  - Each root envelope definition, such as `CheckOutput`, `DupesOutput`,
+    `HealthOutput`, `AuditOutput` and `FeatureFlagsOutput`, has an optional
+    `kind` property with the value of its command. An envelope nested in
+    another envelope has no `kind`.
+  - The `feature-flags` branch text names `feature_flags` and `total_flags`.
+  - `HealthOutput.health_score` and `file_scores` say that a plain
+    `fallow health` run prints them.
+  - `Meta` and the `_meta` field texts say that a `--format json` run
+    always sets `telemetry.analysis_run_id`.
+  - `BoundaryViolation.import_specifier` says that the field holds the
+    resolved project-root-relative path.
+
+  `fallow schema` changes:
+  - `unused-catalog-entry` is suppressible, with the YAML comment
+    `# fallow-ignore-next-line unused-catalog-entry`.
+  - The notes of the import-cycle, boundary and policy rows say that
+    `fallow architecture` also reports them.
+
+  The `fallow explain constant-parameter` text says that the rule reports
+  each option key of an object-pattern parameter. The JSON output of the
+  commands does not change.
+  (Closes [#4846](https://github.com/fallow-rs/fallow/issues/4846))
+
+- **The Git pre-commit hook that `fallow init --hooks` and `fallow hooks install --target git` write, and the Lefthook and existing-hook hints, print the version floor message on one line.** The npm launcher of fallow prints a `verified:` line after the version line. The resolver of the hook read both lines as the version, so the message that blocks a fallow below 3.43.0 broke over two lines. The resolver now reads the version from the first line only, as the commit gate script does.
+
+- **`fallow dead-code --performance` now puts the config load and the workspace discovery in the `config` span.** The config load ran before the `config` span started, so `config_ms` showed almost no time and the load counted as unmeasured time. The span tree also put `workspaces` under `analysis`, but the config load discovers the workspaces before the analysis starts. `workspaces` is now a child of `config`, and the other stages always fit inside the `analysis` span.
+
+- **`fallow audit` no longer passes silently in a shallow clone without a base.**
+  A CI checkout with `fetch-depth: 1` has only the HEAD commit, so the
+  auto-detected base is HEAD and the audit compares HEAD with itself. The
+  audit now prints a warning on stderr, also under `--quiet`. The warning
+  names the two fixes: `fetch-depth: 0` or `--base <ref>`. The JSON output
+  reports `gate_outcomes["audit-verdict"].status` as `skipped`, so a CI
+  integration shows that the run checked nothing. The exit code stays 0. An
+  explicit `--base` or `FALLOW_AUDIT_BASE` keeps the old behavior.
+  (Closes [#4839](https://github.com/fallow-rs/fallow/issues/4839))
+
+- **The summary lines of the human output now agree with the result of the run.**
+  The `Failed:` line of a bare `fallow` run names only the analyses whose gate
+  fails the run. Clone groups below the duplication threshold and health
+  findings that a baseline accepts no longer appear on it. The health status
+  line counts only the functions that the baseline does not accept, and names
+  the accepted functions, for example `✓ 0 above threshold (3 in the baseline)`.
+  `fallow health --css` adds the count of styling findings to the status line.
+  `fallow audit` ends with `No introduced issues` when the gate leaves out
+  inherited findings. The health score tip names `duplicates.ignore`, the key
+  that removes files from the duplication analysis.
+  (Closes [#4837](https://github.com/fallow-rs/fallow/issues/4837))
+
+- **`fallow dead-code` no longer reports a CSS Modules file as unused when another CSS Modules file composes from it.** A `composes: base rounded from "./shared.module.css"` declaration now adds an import edge to `shared.module.css`, and `base` and `rounded` count as used classes of that file. `composes: name from global` and `composes` without `from` add no edge. The extraction cache version changes, so the first run after the update parses CSS files again.
+  (Closes [#4844](https://github.com/fallow-rs/fallow/issues/4844))
+
+- **`fallow dead-code` no longer reports a type that a held binding gives to the inferred type of a used export.** In `const entryBox: Box<Entry> = ...; export const status = { latency: entryBox };`, the inferred type of `status` contains `Box<Entry>`. A declaration file of a module that holds `status.latency` must import `Box` and `Entry`, so the two types are not unused while `status` has a use. Fallow follows object property values, array elements, conditional and logical branches, `satisfies` and `as const`. It does not follow a member read, a call, or a spread. The extraction cache version changes.
+  (Refs [#4850](https://github.com/fallow-rs/fallow/issues/4850))
+
+- **The description of `ignoreDependencies` states how `*` matches.** The
+  text said that a glob uses the `ignorePatterns` syntax, where `*` stops at
+  `/`. In a dependency glob, `*` also matches `/`, so `@acme*` covers each
+  package in the `@acme` scope.
+- **The description of `codeowners` names `--group-by`.** The key also sets
+  the CODEOWNERS file for `--group-by owner` and `--group-by section`, not
+  only for `fallow health --hotspots --ownership`.
+- **The description of `effect.schemaExportsAsTypes` names `HttpApiSchema`.**
+  A `pipe` argument can also be a call of an `HttpApiSchema` transform, such
+  as `HttpApiSchema.status(201)`.
+
+- **The VS Code extension no longer fills a view with a result that the user no longer wants.** A Health, Security Candidates or Runtime Coverage run that ended after the user disabled the feature, ran Clear Coverage or started a newer run filled the view again. The extension now drops such a result.
+- **The VS Code Health and Security Candidates views load again when an input of their run changes.** A loaded Health view kept the data of the old settings after a change of `fallow.production`, `fallow.configPath`, `fallow.changedSince`, `fallow.workspace` or `fallow.allowRemoteExtends`, and after a change in the workspace picker. The Health view now runs again. A visible Security Candidates view scans again, and a hidden one scans again when the user opens it.
+
+- **`--sarif-file` now exits 2 on a command that writes no SARIF file.** Only bare `fallow`, `fallow dead-code`, `fallow architecture` and `fallow security` write the file. Before, `fallow audit --sarif-file out.sarif` and other commands accepted the flag, exited 0 and wrote nothing. Now the command prints one error line and exits 2. To get SARIF from `fallow audit`, use `--format sarif` with `--output-file`.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **The GitHub Action and the GitLab template now add the workspace name to the sticky comment marker.** With `workspace: app` and no `comment-id` (or `FALLOW_COMMENT_ID`), the marker is now `fallow-results-app`, as the input descriptions state. Before, the scripts always passed `fallow-results`, so parallel jobs for different workspaces edited the same comment. Upgrade note: a job that sets a workspace and no comment id gets a new marker. The first run after the upgrade posts a new comment and leaves the old comment in place. Delete the old comment, or set `comment-id: fallow-results` to keep it.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **`fallow dead-code` no longer reports the class members of a local that a computed key reads when a sibling function has a local of the same name.** Two functions in one file can each declare a local with the same name that holds another class, for example `const view = new A()` and `const view = new B()`. A computed call such as `view[key as keyof A]()` is a use of the whole object, so each member of the class is used. Fallow now credits the class that the local holds at the read, and no longer reports each member of both classes as unused.
+  (Closes [#4824](https://github.com/fallow-rs/fallow/issues/4824))
+
+- **`fallow dead-code` no longer reports a manual mock and its module as duplicate exports.** A manual mock at `<dir>/__mocks__/<file>` repeats the exports of the module at `<dir>/<file>` on purpose. Fallow now removes the mock from a `duplicate-exports` group when the group also holds that module. The rule applies to Jest, Vitest and Rstest mocks. A mock that repeats an export of a different file is still reported, and unused exports and unused files in mock files are still reported.
+  (Closes [#4855](https://github.com/fallow-rs/fallow/issues/4855))
+
+- **`fallow security --gate new` now fails when a change adds a secret read or a server-only import below line 1 of an existing client module.** A `client-server-leak` candidate now points at the env read or at the server-only import, not at line 1, column 0. The JSON `line`, `col`, `candidate.sink` and trace hops move to that location, and SARIF and the editor follow. A `secret-source` trace hop has a new `secret_reads` array that lists each read with its `name`, `line` and `col`, and the gate checks each of these lines. So a read that a change adds to a module with an older read also fails the gate. The `stable_finding_id` does not change. The `finding_id` of a `client-server-leak` candidate does change, because it holds the line and column, so a verdict file saved before the upgrade does not match these candidates again. A suppression comment for such a candidate must be at the new line. The first run after the upgrade rebuilds the extraction cache.
+  (Closes [#4881](https://github.com/fallow-rs/fallow/issues/4881))
+- **A secret read in a React Router `loader` no longer gives a `client-server-leak` candidate in the computed or the destructured form.** The route split now checks `process.env['X']` and `const { X } = process.env` the same as `process.env.X`, so the documented limit for these forms is gone. The `Next:` step of a direct secret read now talks about the env read, not about an import, in the CLI and in the editor hover.
+  (Closes [#4882](https://github.com/fallow-rs/fallow/issues/4882))
+
+- **A leading `./` on a path glob matches the same files as the pattern without it.** This covers `entry`, `supportEntry`, `dynamicallyLoaded`, `overrides[].files`, `ignoreExports[].file`, boundary zone patterns and the other path glob fields. Before, such a pattern passed validation and then matched no file. Lists that reject `./` still reject it.
+- **`boundaries` `autoDiscover` zones match a directory whose name has glob characters.** A Next.js folder such as `app/[id]` gets a zone that matches only `app/[id]`, not `app/i` or `app/d`. The zone name stays `app/[id]`. The zone patterns in `fallow list --boundaries` show the escaped glob, for example `app/[[]id[]]/**`.
+- **A negated workspace pattern keeps `*` inside one folder level.** `!packages/*` excludes `packages/a` and no longer excludes `packages/a/b`. Write `!packages/**` to exclude each level. `!./packages/skip` excludes `packages/skip`.
+- **A recursive workspace pattern works in a checkout whose path has `[`, `*` or `?`, and with a wildcard before `**`, such as `pkg-*/**`.** A single `*` in such a pattern stays inside one folder level. The member patterns of a nested pnpm project in a folder such as `tool[1]` match only that folder.
+- **A tsconfig `include` or `exclude` entry keeps `*` and `?` inside one folder level, as tsc does.** `src/*.ts` no longer claims `src/nested/a.ts`.
+- **The Convex `functions` folder, the Wrangler `main` file and the Mintlify docs folder are literal paths.** A `[` in the name matches only itself.
+
+- **`--save-regression-baseline` keeps the other settings of a JSON config.** The save edits the `regression.baseline` property through the parsed document. Before, a string value `"regression"`, for example in `ignorePatterns`, made the save replace the object after it. A config that does not parse now stops the save with an error and exit code 2.
+- **The regression baseline in `fallow.toml` holds the analysis identity and all counts.** The save writes `analysisIdentity` and the counts of boundary, policy, re-export cycle and package cycle findings. Before, a type-aware run rejected its own saved baseline, and these counts reloaded as zero. The save also keeps a commented `# [regression.baseline]` line and the tables after the section.
+- **`fallow migrate --toml` writes each migrated setting.** The TOML output now holds `includeEntryExports`, `supportEntry`, `ignoreBinaries`, `ignoreExports`, `overrides`, `workspaces.settings` and `duplicates.normalization`, the same as the JSONC output. Before, the TOML output skipped them with no warning.
+- **`fallow init --toml` escapes workspace globs.** A workspace pattern with a `"` or a `\` character now gives a valid `fallow.toml`.
+
+- **`fallow dead-code` no longer reports the class members of a typed parameter that a computed key reads.** A function can call a member of a typed parameter through a computed key, for example `view[action]()`. When `action` has a type that is a union of string literals, such as `"zoomIn" | "zoomOut"`, fallow credits only the members that the union names. A key of another type, for example `view[action as keyof View]()`, can name any member, so fallow counts the call as a use of the whole object. A string-literal key such as `view["zoomIn"]()` still credits only the member that it names.
+  (Closes [#4812](https://github.com/fallow-rs/fallow/issues/4812))
+
+- **Four option texts no longer mislead.** The first sentence of the `--lean` help now names the commands that accept the flag: dead-code, health and the combined report. The help also says that other commands and other output formats exit with code 2. The `about` text of `fallow setup-hooks` now starts with "Deprecated", so `fallow schema --cli-reference` and short command lists show the deprecation. The `duplicates.ignoreDefaults` config text now lists every built-in pattern, including the test and mock files (`**/*.test.*`, `**/*.spec.*`, `**/__tests__/**`, `**/__mocks__/**`). The GitHub Action inputs `production`, `production-dead-code`, `production-health`, `production-dupes`, `skip-local`, `cross-language` and `ignore-imports` now say that `true` passes the flag and that `false` keeps the config value. For `ignore-imports`, the config value excludes imports by default.
+  (Refs [#4856](https://github.com/fallow-rs/fallow/issues/4856))
+
+- **`fallow report` no longer erases the saved report when `--output-file` names the `--from` file.** The command opened the output file, which truncates it, before it read `--from`. With the same file for both, the saved report was lost and the run failed on an empty file. The command now refuses an `--output-file` that names the `--from` or `--mutation-report` file, through the same path, another spelling, a symlink or a hard link, and exits 2 before it opens anything.
+- **`fallow coverage setup` no longer overwrites a coverage recipe that it did not write.** Setup wrote `docs/collect-coverage.md` over any existing file when its setup state was missing or the framework changed. It now replaces the file only while its bytes match the recipe that setup recorded, and keeps any other file. The final step says whether setup wrote the recipe, found it already in place, or kept a different file.
+- **`fallow agent install` keeps the other MCP servers in an inline `mcp_servers` table.** A Codex `config.toml` with `mcp_servers = { other = { ... } }` lost its other servers on install, and uninstall did not find the fallow entry in that form. Both commands now change only the fallow entry. A server section that is not a table or object is refused unless `--force` is given.
+
+- **`fallow dead-code` no longer reports a type that the inferred type of a used export needs through a return, a class field, a call, a default export or a property read.** Fallow now follows a held module binding in these shapes: an arrow or a function that returns it (`export const getBox = () => entryBox`), a class field without a type annotation (`readonly latency = entryBox`), a call of a module function with a return type (`{ latency: makeBox() }`), `export default { latency: entryBox }`, and a static property read of a module object (`holder.box`). Declaration emit fails with TS4029 when such a type loses its export. Fallow also reads the method and arrow signatures inside an exported object literal. A call argument does not count, because only the type checker knows the result type of a generic call or a library call such as `z.object(...)`. With `private-type-leaks` on, a type that is not exported and that is in one of these positions is now a private type leak. The extraction cache version changes.
+  (Refs [#4850](https://github.com/fallow-rs/fallow/issues/4850))
+
+- **`fallow list --boundaries` shows the `root` of a zone.** The human output prints `(root <folder>)` after the patterns of a zone that has a `root`. The JSON zone object has a new optional `root` field, which is omitted when the zone has no `root`.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **`fallow migrate` keeps the gate of the source config.** A source config for unused code reports each issue type as an error unless its `rules` say otherwise. Some fallow rules default to `warn`, so a migrated project could pass a run that failed before, for example on an unused `devDependencies` entry. The migrated config now sets `unused-dev-dependencies`, `unused-namespace-members`, `unlisted-binaries` and `duplicate-export-aliases` to `error`, unless the source config sets another severity or turns the issue type off. The migration prints one note that names these rules. `dependencies` in an `include` or `exclude` list of the source config now also covers `devDependencies`. Before, `include: ["files", "dependencies"]` wrote `"unused-dev-dependencies": "off"`. The fallow default severities do not change. A config that an earlier version migrated stays as it is: set these rules to `error` by hand to get the same gate.
+  (Closes [#4905](https://github.com/fallow-rs/fallow/issues/4905))
+
+- **A flow-style catalog group is no longer reported as empty.** A group such
+  as `ui: { react: "18" }` in `pnpm-workspace.yaml` gave an
+  `empty-catalog-group` finding, and `fallow fix` deleted the line. Its
+  entries now resolve `catalog:ui` references. A catalog group that is a YAML
+  alias of another group is also no longer reported as empty.
+- **A flow-style `packages` list in `pnpm-workspace.yaml` declares
+  workspaces.** `packages: [packages/*, apps/*]` gave no workspace. A trailing
+  comment on a `packages` entry is no longer part of the pattern. `fallow
+  init` reads the same list.
+- **Flow-style `overrides` in `pnpm-workspace.yaml` are read.** Their
+  `catalog:` values now count as catalog consumers, and the override checks
+  see them.
+
+- **`fallow flags` no longer reports `boundaries-not-configured` and `rule-packs-not-configured`.** The flag scan runs the dead-code pass to match flags with unused exports, and that pass recorded the two kinds. `fallow flags` runs no boundary or policy check, so its JSON `workspace_diagnostics` now omits them. Other diagnostics, for example `node-modules-missing`, stay.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **A report or baseline path in `/tmp` now works on macOS.** On macOS `TMPDIR` names a per-user folder, so `--save-baseline /tmp/x.json` exited 2. Each Unix now allows `/tmp` for baselines, snapshots and report files, as Linux already did.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **The human output of `fallow inspect` prints the target and identity as fields.** Each field is on its own `key: value` line, not in raw JSON. A field with no value prints as `unknown`.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **`fallow impact status` prints a short human view.** It shows the tracking state, the record count, the store file and the store key. Bare `fallow impact` still prints the full report. The JSON and Markdown output do not change.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+- **The GitHub Action names the input that stops the "SARIF upload skipped" warning.** The warning now says `To stop this warning, set sarif: false.` The old advice, `format: json`, did not stop it.
+  (Refs [#4845](https://github.com/fallow-rs/fallow/issues/4845))
+
+- **A file that code names with a path below the module directory is no longer an unused file.** `fallow dead-code` now reads `path.join(__dirname, "../scripts/agent.mjs")`, the same call with `import.meta.dirname` or `path.resolve`, and a join on a `const` that holds such a directory. It also reads the script files in the argument array of a process call whose `cwd` option is such a directory, as in `spawn(process.execPath, ["scripts/run.ts"], { cwd: REPO_ROOT })`. The reference keeps the file in use and credits no export, because a process or a file read uses none. An `import()` of the path, as in `import(pathToFileURL(path.join(__dirname, "gen.mjs")).href)`, credits the exports too. The path must end in a script extension, so a path to a directory does not credit the index file of that directory. A base that the code gets at run time, such as a function parameter or `process.cwd()`, is not read.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **`fallow migrate` writes each rule severity in the form that fallow reads.** A severity such as `"Warning"` or `"OFF"` becomes `warn` or `off`. A value that is not `error`, `warn` or `off`, or that is not a string, now gives one warning for its source rule, and the rule is not migrated. Before, the config kept the value and did not load, or the rule disappeared with no warning.
+- **A line break in a source path stays inside the `Migrated from` comment.** `fallow migrate` writes a `\n` or `\r` in the path as an escape, in TOML and in JSONC output. Before, the rest of the path became a config line, and the written config did not load.
+
+- **`fallow security --runtime-coverage` uses the settings of its own run for the runtime coverage step.** The step loaded the config a second time and did not read the environment of the run, so a value such as `FALLOW_CACHE_DIR` did not reach it. The step now uses the config of the dead-code analysis of the run, with the same production mode as the files that it reuses.
+  (Refs [#4875](https://github.com/fallow-rs/fallow/issues/4875))
+
+- **An entry list that a config picks with a conditional expression now gives its entry points.** A config can pick its entries from the environment, as in `entry: isBootstrap ? ["src/bin.ts"] : ["src/bin.ts", "src/worker.ts"]`. Fallow read no entry from such a value, so it reported the files as unused. It now reads the files of both branches, for each plugin that reads a path or a list of paths from a config, such as the `pack.entry` of a Vite+ config and the `build.lib.entry` of a Vite config.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **A changed file with a non-ASCII character or a space in its name is in the diff scope.** Git writes a quoted path, or a tab after the path, in the header of such a file. Diff-scoped results (`--diff-file`, `--diff-stdin`, `fallow audit`, `fallow security --gate new`, the review comments) did not find the file, so its findings dropped. The change anchors of `fallow audit --brief` for a file with a space in its name get new ids one time.
+- **An added line that starts with `++` no longer stops the base-line mapping of a diff.** `fallow audit --gate new-only` then kept clone groups as introduced that the change did not write. The walkthrough anchors now also contain such a line.
+- **`fallow audit --brief` compares a moved `package.json` with its old path.** Without `--diff-file`, each dependency of a moved package showed as added, and its review decisions lost their previous id.
+
+- **`fallow fix` no longer deletes an unrelated setting of
+  `pnpm-workspace.yaml`.** When one run removed an unused catalog entry and an
+  empty catalog group, the group removal used a line number from before the
+  entry removal. It then deleted the next top-level setting, for example
+  `linkWorkspacePackages: true`.
+- **An emptied catalog with an inline comment on its header stays a
+  mapping.** `fallow fix` and the editor quick fix wrote `ui: # note {}`, so
+  the catalog was null and `pnpm install` failed. They now write
+  `ui: {} # note`.
+- **The editor quick fix checks the unsaved buffer before it removes a catalog
+  group or entry.** It no longer offers to delete a catalog group that has
+  entries in the buffer, or an entry that belongs to another catalog.
+- **A catalog entry with a blank line after its key is removed in full.**
+  `fallow fix` and the editor quick fix left the value lines of the entry in
+  the file.
+
+- **The SARIF results of the bare `fallow` run and of `fallow audit` now have a location per clone.** Before, the duplication run of these documents gave one result per clone group with no file location and no rule definition, so a code scanning service could not show the result at a file. The duplication run now has the shape of `fallow dupes --format sarif`: one result per clone instance, with a file location and a source snippet, and a declared `fallow/code-duplication` rule. The message text is `Code clone group N (...)`, as in `fallow dupes`. `fallow report --from` of a saved bare run or audit gives the same run. The rule id and the run categories (`fallow/dupes/`, `fallow/audit/dupes/`) do not change. A code scanning service that matched the old results by fingerprint sees new alerts once.
+  (Closes [#4873](https://github.com/fallow-rs/fallow/issues/4873))
+
+- **The CLI reference names `fallow architecture` for the architecture issue types.** `fallow schema --cli-reference`, `fallow schema` and the issue registry gave the cycle, boundary and policy issue types the command `dead-code` and a deprecated option, for example `--circular-deps`. Now these seven rows give `command: "architecture"` and `--cycles`, `--boundaries` or `--policy`. The new `deprecated_filter_flag` field keeps the old option. `fallow dead-code --circular-deps` and the other old options work as before, and MCP `issue_types` still selects these findings. (Closes [#4883](https://github.com/fallow-rs/fallow/issues/4883))
+
+- **Commands in a development container file and in a `t3.json` project file now count as uses.** `fallow dead-code` reads the lifecycle commands of `.devcontainer/devcontainer.json`, `.devcontainer.json` and `.devcontainer/<name>/devcontainer.json` (`initializeCommand`, `onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`, `postAttachCommand`), and the `scripts[].command` values of a `t3.json` file. It reads each command as it reads a package.json script: a script file that the command runs is an entry point, a binary that it runs credits the package, and a project shell file that it runs is read too.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+- **A CI step that puts a `node_modules/.bin` path in a shell variable now credits the package.** A step such as `bundler=scripts/node_modules/.bin/esbuild` followed by `"$bundler" src/a.ts` runs the binary through the variable, so fallow reported the package as an unused dependency. The assignment now counts as the use of the binary.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **An Expo app no longer needs a config entry for its fingerprint config, its font packages and its native-only modules.** The Expo plugins keep `fingerprint.config.js` in use. A font file path in the app config, such as `"@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"`, credits the package that holds the file. A dependency with an `expo-module.config.json` file and no JavaScript entry is a native module that Expo autolinking adds to the build, so fallow no longer reports it as unused. Both credits apply only to a dependency that the `package.json` of the app declares and that is installed.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **`fallow fix` no longer edits a generated file.** The fixer removed an unused export, enum member or class member in a file that a code generator writes, and the next run of the generator put it back. `fallow fix` now keeps such a file and reports it as a `skipped` entry with `skip_reason: "generated_source"`. A file is generated when its path has a `generated` or `__generated__` folder or a `.generated.` or `.gen.` name part, or when its leading comment has `@generated`, or names the generator together with "do not edit", as in `// Generated by <tool>. Do not edit.`. The skip is intentional and does not change the exit code. `fallow dead-code` still reports the unused exports of the file.
+  (Refs [#4912](https://github.com/fallow-rs/fallow/issues/4912))
+
+- **The CLI gate line and the MCP `warnings` sentence now show the same gate numbers, gates, empty-scope advice and baseline facts.** Both surfaces now read the facts of the verdict from one reader in `fallow-output` (Closes [#4874](https://github.com/fallow-rs/fallow/issues/4874)). These differences are gone:
+
+  - The CLI gate line (job summary, pull-request comment, merge-request note, GitHub annotation, the `observed` text of the decision-surface rows and the exit-reason line) now rounds a fractional gate number to two decimals, as the MCP sentence did. A duplication of `66.66666666666666` percent now reads `66.67`. The `gate_outcomes` member keeps every digit.
+  - An observed number that differs from its threshold never reads as equal to it on either surface. A duplication of `5.004` percent against a threshold of `5` reads `5.004 against 5`, not `5 against 5`.
+  - The MCP sentence now shows the mutation score with one decimal, rounded down, as the CLI line did. A score of `79.98` against a minimum of `80` now reads `79.9`.
+  - The CLI now reports a `gate_outcomes` entry without `enforced` as not enforced, as the MCP server did. Before, the CLI dropped the entry.
+  - The MCP sentence for a request that applied over an empty scope gives the advice to check the diff or the ref only for a change scope (`changed-since`, `diff-filter`). For another request, such as `group-filter`, it tells the caller to check the value of the request, as the CLI line names that request.
+  - The MCP server no longer lists a `request_outcomes` entry without a string `status` as an unapplied request. The schema requires `status`, so both surfaces now skip such an entry, as they do for a gate entry.
+
+- **`fallow init` keeps a `.gitignore` that is not UTF-8.** It appends
+  `.fallow/` to the bytes of the file. Before, it replaced such a file with
+  the one line `.fallow/`.
+- **A partial save of a regression baseline keeps a file that it cannot use.**
+  `fallow flags --retirement --save-regression-baseline <PATH>` and
+  `fallow list --entry-weight --save-regression-baseline <PATH>` stop with exit
+  code 2 when the file exists and does not parse, or has a `schema_version`
+  that this build does not read. The file stays unchanged. Before, the save
+  wrote a new file without the other blocks.
+- **`fallow dead-code --save-regression-baseline <PATH>` warns when it replaces
+  a file that was not usable.** The warning names the entry weights and flag
+  counts that the new file does not keep.
+- **`fallow audit --walkthrough --mark-viewed <PATH>` keeps a ledger that it
+  cannot use.** It prints a warning and does not change a ledger that it
+  cannot read, that does not parse, or that a newer fallow wrote.
+- **`fallow agent status` names an MCP settings file that does not parse.**
+  The MCP row says that the file does not parse, and no longer says
+  "no fallow entry".
+- **`fallow cloud login` and `fallow cloud logout` keep a credentials file of a
+  newer version.** They stop with an error that names the file, so the change
+  cannot drop the fields that a newer fallow wrote.
+
+- **`fallow health --coverage` and runtime coverage find a `webpack://` or `vite://` source with an escaped character in its path.** Node writes a space in such a source as `%20`. Fallow now decodes the path before it looks for the file, so the source gets its coverage.
+- **A V8 dump with one malformed `source-map-cache` entry keeps its other evidence.** Fallow reads each entry on its own and skips only the bad one. Before, the bad entry removed every source map of the dump, and `fallow health --coverage` skipped the full dump.
+- **A script URL that one V8 dump records two times adds the counts of both records to its original sources.** Before, only the first record used the source map.
+- **`fallow health --coverage` resolves a relative source against the directory of an external source map.** Before, it used the directory of the script, so a map in another directory gave no coverage.
+
+- **Four `fallow explain` examples describe code that fallow reports.** The example of `duplicate-prop-shape` had too few significant props to give a finding. The example of `nextjs-open-redirect` called `.get` on the `searchParams` page prop, which is a plain object. The example of `unsafe-buffer-alloc` showed a call that fallow reports as `resource-amplification`. The example of `circular-dependency` now uses the file names of its code example.
+
+- **`--workspace '!<nested>'` now excludes a workspace below a selected workspace.** `dead-code`, `dupes`, `health`, `security`, `flags`, `suppressions` and `audit` reported the files of the excluded workspace, because it is below a selected root.
+- **A nested workspace that no `workspaces.settings` key selects uses the global settings.** It used the `ignoreDependencies` and `includeEntryExports` values of its parent workspace.
+
+- **`fallow health --baseline-mode identity` no longer lets one saved slot hide two findings.** A slot of an `<anonymous>` or `<arrow>` function that hides a finding of a lower severity in that function stays in use. A new named function in the same file does not get it.
+- **`fallow baselines prune` keeps the health slot of an unnamed function that covers a named function of the same file.** Before, the prune removed that slot, and the next identity run reported the function.
+- **The `baseline_staleness` counts of `fallow health --baseline` agree with the findings that the baseline hides.** A saved slot of a lower severity than the current finding no longer counts as matched. `--fail-on-stale-baseline` can therefore fail on a baseline that passed before.
+
+- **`fallow health --hotspots` gives the same churn from the cache as from a `--no-cache` run.** Two project roots that share one `FALLOW_CACHE_DIR` no longer read the churn of each other, and a run with an earlier HEAD date no longer reuses an entry that lacks the older days. The window cutoff applies to each commit, so a commit in the window behind an older-dated commit counts in a cold run too. The churn cache moves to version 10 and is rebuilt once.
+
+- **`fallow fix` no longer puts an enum member or export edit on the wrong line.** When an earlier edit of the same run removed lines above it, the fixer looked up the line of the finding in the changed text. The edit then landed on the wrong line or was lost. Each source fixer now plans its edits against the text that the analysis read, and `fallow fix` applies all edits of a file one time.
+
+- **A diff scope no longer keeps old boundary, policy and component findings.**
+  `--diff-file`, `--diff-stdin` and the CI diff now narrow boundary call
+  violations, rule-pack policy violations, enforced thin wrappers and
+  enforced duplicate prop shapes to added lines, and boundary coverage
+  violations to touched files.
+- **A pure rename that creates a route conflict is reported in a diff scope.**
+  Route collisions and dynamic segment name conflicts use the touched file,
+  not line 1.
+- **`--workspace` narrows prop-drilling chains, thin wrappers and duplicate
+  prop shapes to the selected workspaces.**
+
+- **`fallow impact` commands report a failed save.** `fallow impact enable`,
+  `disable`, `default on|off`, `reset` and `fallow init --decline` printed
+  success when the change could not be saved, for example in a read-only
+  config folder. They now print the error and exit with code 2.
+- **`fallow impact reset` stays reset.** After a reset, the next run imported
+  the history of an old in-repo `.fallow/impact.json` again. A marker file next
+  to the store now stops a second import. `reset --all` keeps the lock files
+  and the markers.
+- **A damaged Impact store is not overwritten.** A store that could not be
+  parsed was replaced by an empty store on the next routine run. A run, the
+  digest, `fallow impact disable` and `fallow init --decline` now leave the file
+  unchanged and name the next step. `fallow impact enable` still replaces a
+  store that does not parse.
+- **`fallow impact --all` skips a store from a newer fallow.** The cross-project
+  view read a store that a newer fallow wrote as a current store. It now counts
+  that store as unreadable.
+
+- **`fallow fix` removes the `export` keyword of the right declaration when two declarations share a line.** For `export function live() {} export function dead() {}` with `dead` unused, the fix removed the `export` of `live`. It now removes the `export` of `dead`.
+- **`fallow fix` no longer breaks an anonymous default export.** `export default function () {}` and `export default class {}` became `function () {}` and `class {}`, which do not parse. The fix now keeps these exports, and the finding stays in the report.
+- **`fallow fix` keeps a shared variable export when a comment follows `export`.** For `export /* values */ const live = 1, dead = 2;` with `dead` unused, the fix removed the `export` of both names. It now keeps the declaration and reports `dead` with `skip_reason: "shared_declaration_in_use"`.
+- **`fallow fix` removes the whole unused enum when a member line has a `}` in a comment or a string.** The fix counted each brace character and deleted only the first lines of the enum.
+- **`fallow fix` no longer breaks a namespace re-export.** `export * as ns from './x'` became `* as ns from './x'`, which does not parse. The fix now keeps the statement.
+
+- **Ownership counts one person once when `.mailmap` joins two emails.**
+  Churn history now reads the mailmap-resolved author email. The churn
+  cache is rebuilt once, and again after an edit of `.mailmap`.
+- **`health.ownership.botPatterns` matches the local part of the author
+  email.** A pattern such as `release-bot` now excludes
+  `release-bot@corp.com`. A pattern that matches the full address keeps
+  its result.
+- **Two contributors no longer get one identifier in handle mode.** A plus
+  tag stays in the handle (`john+github`), and only a GitHub noreply
+  address `12345+name@users.noreply.github.com` gives `name`. Identifiers
+  in health JSON change for plus-addressed emails.
+- **Reviewer routing no longer names the reviewer.** The audit brief
+  compares the git identity of the reviewer with the contributor itself,
+  so the `anonymized` mode and disambiguated handles do not hide a match.
+
+- **A focused duplication run reports its totals against the full project.** On a project with 1024 or more files, a run that analyzes only changed files (for example `fallow dupes --changed-since`) reported `total_files`, `total_lines`, `total_tokens` and `duplication_percentage` against a part of the files. The run now reports them against all files, as a full run does. The percentage of such a run can thus be lower than before.
+
+- **The editor quick fix "Remove unused export" no longer breaks an anonymous default export.** For `export default function () {}`, `export default class {}` and `export default { ... }`, the quick fix removed `export default `, and the code did not parse or changed its meaning. The quick fix is no longer offered for these exports.
+- **The editor quick fix "Remove unused export" keeps the export of a name that is in use.** For `export const dead = 1, live = 2;` with only `dead` unused, the quick fix removed the `export` of both names. It is now offered only when each name of the declaration is unused.
+
+- **GitHub and GitLab review comments no longer offer an unsafe `suggestion` block.** The block that removes an unused export or deletes an unused member used a line rule. It turned `export { a } from './x'` into `{ a } from './x'` and `export default thing;` into `thing;`, deleted only the first line of a method over several lines, and deleted two enum members when one was unused. A delete block for an enum member could also change the value of the next member, and a delete block for a class member could join the members around it when a semicolon was missing. The block is now offered only when the parser confirms that the one-line edit changes exactly the export or the member of the finding. In each other case the comment keeps its text and its fix intent, without a `suggestion` block.
+
+- **`fallow viz`: the road panel and the road highlight change together.** A click on blank canvas closes the road panel in one click. A change of the grouping drops a selected road that the new grouping does not have.
+- **`fallow viz`: the strip of unconnected folders follows the lens.** A lens that flags files in the strip opens it, also when the lens changed in the map view, through the More menu, or through the URL. Enter in the graph search opens the strip when the match is in it.
+- **`fallow viz`: a URL hash edit closes an open clone or road detail.**
+
+- **`fallow fix` keeps the other enum members of a line.** For `enum E {\n  A, B,\n  C\n}` with `A` unused, the fix deleted the whole line and lost `B`. It now removes only `A` and its comma.
+- **`fallow fix` keeps a comma inside a string value of an enum.** For `enum E { A = "x,y", B }` with `B` unused, the fix split the line on commas and wrote `"x, y"`. It now removes only `, B`, and each other byte stays.
+- **`fallow fix` removes an enum member initializer over several lines.** The fix deleted only the first line of the member and left the rest of the initializer.
+
+- **`--group-by section` merges repeated GitLab CODEOWNERS section headers.** Headers with the same name, compared without case, now form one group with the name of the first header. The `owners` of the group are the default owners of all its headers, in file order. Before, headers that differ only in case gave two groups, and the `owners` of a repeated header came from one header only. A `--group` filter or a saved health group baseline that names a later spelling of a header no longer matches.
+- **A CODEOWNERS file that starts with a UTF-8 byte order mark keeps its first line.** Before, the first pattern or section header included the mark and matched no file.
+
+- **`fallow viz`: a switch to the map view during a graph camera move keeps the map.** Before, a search glide or a minimap pan that was still in progress painted the graph over the map.
+
+- **`fallow dupes` rejects the regression flags instead of a silent run.**
+  Before, `fallow dupes --save-regression-baseline` exited 0 and wrote no
+  file, and `--fail-on-regression`, `--regression-baseline` and `--tolerance`
+  compared nothing. Only bare `fallow`, `fallow dead-code`, `fallow
+  architecture`, `fallow flags --retirement` and `fallow list --entry-weight`
+  save or compare a regression baseline. The other commands, for example
+  `fallow dupes`, `fallow health`, `fallow audit` and a bare run without the
+  dead-code analysis, now exit 2 and name the commands that support the
+  flags. For `fallow dupes` and `fallow health`, the message also names
+  `--baseline`, which gates on new findings.
+  (Closes [#4931](https://github.com/fallow-rs/fallow/issues/4931))
+
+- **`fallow dead-code` no longer reports `react` as unused when the automatic JSX runtime uses it.** The automatic runtime adds an import of `react/jsx-runtime` to each file with JSX, and no import statement shows it. Fallow now credits `react` when a file with JSX and no runtime pragma is below a tsconfig with `jsx` set to `react-jsx` or `react-jsxdev` and no `jsxImportSource`, or is in a package where Next.js is active. A project without JSX files still gets the finding, and the credit goes only to the workspace of the file with JSX.
+  (Closes [#4943](https://github.com/fallow-rs/fallow/issues/4943))
+
+- **The coverage unit tests no longer fail on a machine that has the runtime coverage add-on.** Sidecar discovery now takes its home folder, `PATH` and environment overrides as one input value. The `fallow coverage setup` flow and the tests give that value to the discovery, so an add-on in `~/.fallow/bin` or on `PATH` of the host does not change a test result.
+  (Closes [#4935](https://github.com/fallow-rs/fallow/issues/4935), closes [#4933](https://github.com/fallow-rs/fallow/issues/4933))
+
+- **The `--diff-file` warning for a diff with no added lines no longer says
+  that no finding passes.** A pure rename still touches the renamed file, so
+  an unused file or a cycle in that file stays in the report, and dependency
+  findings never go through the line filter. The warning now names both.
+
+- **`fallow fix` no longer changes the value of a kept enum member.** A member without an initializer counts on from the member before it. When `fix` removes an unused member, the next kept member now gets an initializer with its old value, so `Low, Medium, High` with `Low` unused becomes `Medium = 1, High`. Each later member keeps its value too. When the old value is not a known integer, for example after a computed initializer or in an ambient enum (a `declare enum`, an enum in a `declare` block, or an enum in a `.d.ts` file), `fix` keeps the whole enum as it is. Each unused member of that enum stays too. The fix JSON does not change.
+  (Closes [#4963](https://github.com/fallow-rs/fallow/issues/4963))
+
+- **The `stable_finding_id` of a direct `client-server-leak` candidate now holds the names of the env secrets.** A direct candidate is a client file, such as a `"use client"` file or a route component, that reads a non-public env secret itself. Its id hashed only the file path, so a verdict for one secret also covered a secret that a later edit added. The id now also hashes the sorted names of the env secrets that the file reads, as the docs say. A transitive candidate already did this. The id of each direct candidate changes once after the upgrade. A stored verdict for an old id then makes `fallow security survivors` exit with code 2. Save the candidates and the verdicts again, and review each direct candidate again. Other categories and `finding_id` do not change. Thanks to @cr101 for the report.
+  (Closes [#4953](https://github.com/fallow-rs/fallow/issues/4953))
+  Thanks [@cr101](https://github.com/cr101) for the report.
+
+- **A `re-export-cycle` finding now has the line of the re-export that closes the cycle.** The finding points at the first `export ... from` statement in `files[0]` that re-exports from another member of the cycle. For a self-loop, it is the statement that re-exports from the file itself. JSON adds `line` (1-based) and `col` (0-based) to each `re_export_cycles[]` entry. The value is `0` when the statement has no source position. SARIF adds a `region`, CodeClimate sets `lines.begin` to that line instead of `1`, and `github-annotations` adds `line=` and `col=`. The GitLab Code Quality report, the review formats and the PR comments read the CodeClimate issue, so they also get the line. The SARIF fingerprint of a re-export cycle includes the new region, so GitHub code scanning can show the alert as new one time. The `finding_id` does not change. The compact record keeps its shape. No `schema_version` moves.
+  (Closes [#4941](https://github.com/fallow-rs/fallow/issues/4941))
+
+- **`fallow health --css` reports `css-broken-reference`.** The `--css` section now runs the project-wide stylesheet pass. Health then reports an `animation` that names a `@keyframes` rule that no stylesheet defines, and a markup class that is one edit away from a defined class (a likely typo). The pass also adds the other cross-file styling findings, for example unused theme tokens. With `--changed-since`, `health --css` scans every stylesheet and reports only the findings in the changed files, as `fallow audit` does. The `check_health` tool of the MCP server does the same when `css` is true. `fallow explain css-broken-reference` now shows an example project.
+  (Closes [#4944](https://github.com/fallow-rs/fallow/issues/4944))
+
+- **A React Router `.server` sink gets React Router advice.** The `evidence` and the `Next:` step of a `server-only-import` candidate whose sink is a React Router `.server` module no longer talk about `next/dynamic`, Server Actions or `"use server"` modules. The text now says that React Router fails the client build for this import, and that the fix is to move the call into `loader`, `action`, `middleware` or `headers`, or to move the code that the client needs out of the `.server` module. Sinks that import `server-only`, `next/headers`, `node:fs` or other server-only code keep the Next.js text. Thanks to the reporter for the clear reproduction.
+  (Closes [#4954](https://github.com/fallow-rs/fallow/issues/4954))
+  Thanks [@cr101](https://github.com/cr101) for the report.
+
+- **`includeEntryExports` now checks the names that an entry file re-exports with `export *`.** With `includeEntryExports` on, fallow reported an unused name that an entry file re-exports by name (`export { a } from './a'`), but not a name that comes through `export * from './a'`. Each `export *` line of an entry file counted as a use of every export of its source. Now such a line counts only for the names that an importer uses. Fallow reports each other name as an unused export or an unused type at its declaration in the source file. This also applies to a chain of `export *` lines and to a file that a subpath of the package `exports` map names. `export * as ns`, a star re-export of an external package, and a name that two star sources both export keep their behavior. Without `includeEntryExports`, nothing changes. A project that sets the option can get new findings and exit with code 1, and a saved baseline does not hold the new findings. To keep a name, add an importer, list the package in `publicPackages`, put `/** @public */` on the declaration, or add an `ignoreExports` rule for the source file (for example for generated files). An `ignoreExports` rule for the entry file with `"exports": ["*"]` credits every export of that file and each name behind its `export *` lines. `fallow fix` removes the `export` keyword of a reported name, as for each other unused export, so check that no code outside the project imports the name. The graph cache version changes, so the first run after the upgrade builds the graph again.
+  (Closes [#4986](https://github.com/fallow-rs/fallow/issues/4986))
+
+- **`includeEntryExports` now checks the members of an export that an entry file declares.** With `includeEntryExports` on, fallow reported an unused export of an entry file, but it did not report an unused enum member, class member or namespace member of an export that the entry file declares. The same member in another file was reported. Fallow now checks these members in an entry file that the option covers. A project that sets the option can get new unused-member findings and exit with code 1, and a saved baseline does not hold the new findings. The option applies to each entry file that it covers, also in a package that is not private. `publicPackages` now also removes the unused-namespace-member findings on the public surface of a package, as it does for enum and class members. To keep a member, add a use, list the package in `publicPackages`, or suppress the line with `// fallow-ignore-next-line` and the rule name. Without `includeEntryExports`, only the `publicPackages` change applies.
+  (Closes [#4990](https://github.com/fallow-rs/fallow/issues/4990))
+
+- **`effect.schemaExportsAsTypes` now accepts a schema that a function call builds.** With the option on, `export const User = makeUser()` was an `unused-export` finding, where `const makeUser = () => Schema.Struct({...})`. fallow now reads the `return` expressions of the function. The export is a schema when each one is a schema. The check reads syntax only.
+
+  - The function can be in the same module or in an imported module.
+  - It must be a function declaration, or a `const` with an arrow function or a function expression.
+  - Each path of a block body must end in a `return` or a `throw`.
+  - A `return` can use a `const` schema from the top of the function body, and can go through `.pipe(...)`.
+  - A `return` can call a second such function, to a depth of 4 functions.
+  - An `async` function, a generator, and a function that returns one of its parameters do not count.
+
+  The export of the function itself stays an `unused-export` finding when no module uses it. A `let` or `var` binding that the module assigns again is no longer a schema, because its value is unknown. A run without the option keeps its output. The extraction cache version moves, so the first run after the update parses each file again.
+  (Closes [#4988](https://github.com/fallow-rs/fallow/issues/4988))
+
+- **`fallow audit` no longer reuses a cached base result of another
+  type-aware selection.** The base snapshot cache key now holds the
+  effective selection from `--type-aware`, `--no-type-aware`,
+  `FALLOW_TYPE_AWARE`, `audit.typeAware` and `typeAware`.
+- **`fallow audit --coverage <dir>` no longer reuses a base score from
+  old V8 coverage dumps.** The cache key now holds each coverage file
+  that the base pass reads.
+
+- **`fallow security` reports the usual forms of a sink call.** These calls now give a candidate: `new Handlebars.SafeString(x)` (`template-escape-bypass`), `this.sanitizer.bypassSecurityTrustHtml(x)` (`angular-trusted-html`), `$("#p").html(x)` (`jquery-html`) and `console.log("login", secret)` (`secret-pii-log`). The extractor now reads each call and `new` expression in one way, so a sink behind `this.`, a call result or a local alias gets the same candidate as the plain form. A matcher row now says which call forms it accepts (`forms`) and which arguments it reads (`arguments`). Log rows read every non-literal argument. A call of a member of `this` itself (`this.query(x)`) matches only the rows that set the new `this_receiver` field: the raw SQL methods (`this.$queryRawUnsafe(x)`, `this.whereRaw(x)`) and the markup parsers (`this.insertAdjacentHTML(x)`), as before. A member of a field (`this.db.query(x)`) matches every row. A long fluent chain keeps the candidate of a sink at its end. A member that a destructuring takes from a `require()` binding of a Node.js module (`const { exec } = cp`) now resolves to the module path. Security controls and framework request sources also read callees behind `this.` and call results, so `this.router.get("/", handler)` now marks `req` as request input. Projects can get new candidates, and fewer calls show as unresolved callees. The cache version changes, so the first run after the update parses each file again.
+  (Closes [#4940](https://github.com/fallow-rs/fallow/issues/4940))
+
+- **`fallow viz`: Enter in the graph search works while a file is selected.** Enter selects the shortest match other than the selected file and opens its file view. Focus stays in the search box. Before, Enter did nothing in the file view.
+
+- **A pure-rename diff no longer gets an empty-scope warning beside a finding.** `request_outcomes.diff-filter.scope_size` counted only added lines. A diff that renames a file and adds no line gave `0`, so the GitHub Action, the GitLab template, the MCP tools and the request-outcome text said that no finding could survive. The diff filter keeps a finding on a whole touched file, so the report still held, for example, the renamed unused file. `scope_size` now also counts each touched file that adds no line. It is `0` only when the diff touches no file and adds no line.
+  (Closes [#4974](https://github.com/fallow-rs/fallow/issues/4974))
+
+### Performance
+
+- **One `fallow audit` run reads its git diff one time for attribution.** The moved dead-code check, the duplication demotion and the styling comparison each started `git diff` again.
+
+- **A change of a saved-baseline path keeps the cached base result of
+  `fallow audit`.** The base pass reads no saved baseline, so the paths
+  are not part of the cache key.
+
 ## [3.45.0] - 2026-11-20
 
 ### Added
@@ -17907,6 +18393,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
 [unreleased]: https://github.com/fallow-rs/fallow/compare/v3.45.0...HEAD
+[3.46.0]: https://github.com/fallow-rs/fallow/compare/v3.45.0...v3.46.0
 [3.45.0]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.45.0
 [3.44.0]: https://github.com/fallow-rs/fallow/compare/v3.43.2...v3.44.0
 [3.43.2]: https://github.com/fallow-rs/fallow/compare/v3.43.1...v3.43.2

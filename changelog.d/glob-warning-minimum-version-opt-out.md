@@ -1,3 +1,0 @@
-### Changed
-
-- **A config with `minimumVersion` 3.34.0 or higher no longer gets the single-segment glob warning.** Since 3.34.0, a single `*` or `?` in a config path glob matches in one folder level only. For a glob that matches fewer files than before, fallow prints a warning on stderr on each run. A config that is written for the new rule had no way to stop this warning. Now `"minimumVersion": "3.34.0"` or higher tells fallow that the config is written for the new rule, and fallow prints no warning for the globs of that config. The globs of plugins and rule packs keep the warning. The warning text now names this setting. (Closes [#4851](https://github.com/fallow-rs/fallow/issues/4851))

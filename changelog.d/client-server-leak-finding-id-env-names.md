@@ -1,4 +1,0 @@
-### Fixed
-
-- **The `stable_finding_id` of a direct `client-server-leak` candidate now holds the names of the env secrets.** A direct candidate is a client file, such as a `"use client"` file or a route component, that reads a non-public env secret itself. Its id hashed only the file path, so a verdict for one secret also covered a secret that a later edit added. The id now also hashes the sorted names of the env secrets that the file reads, as the docs say. A transitive candidate already did this. The id of each direct candidate changes once after the upgrade. A stored verdict for an old id then makes `fallow security survivors` exit with code 2. Save the candidates and the verdicts again, and review each direct candidate again. Other categories and `finding_id` do not change. Thanks to @cr101 for the report.
-  (Closes [#4953](https://github.com/fallow-rs/fallow/issues/4953))
