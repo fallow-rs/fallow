@@ -319,6 +319,11 @@ const SECURITY_CATEGORY_TEXTS: &[SecurityCategoryText] = &[
         example: "`redirect(request.nextUrl.searchParams.get('next'));`",
     },
     SecurityCategoryText {
+        id: "security/react-router-open-redirect",
+        rationale: "The loader or action sends users to a URL that the input chooses. An attacker can use a trusted link of your domain to send users to a phishing page.",
+        example: "`return redirect(new URL(request.url).searchParams.get('next') ?? '/');`",
+    },
+    SecurityCategoryText {
         id: "security/dom-document-write",
         rationale: "The browser parses the written string as HTML. If an attacker controls it, their script runs in the page. Check the trace before you fix.",
         example: "`document.write(location.hash.slice(1));`",

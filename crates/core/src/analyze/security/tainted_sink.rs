@@ -187,7 +187,10 @@ fn is_html_sanitizable_category(id: &str) -> bool {
 }
 
 fn is_url_sanitizable_category(id: &str) -> bool {
-    matches!(id, "open-redirect" | "nextjs-open-redirect" | "ssrf")
+    matches!(
+        id,
+        "open-redirect" | "nextjs-open-redirect" | "react-router-open-redirect" | "ssrf"
+    )
 }
 
 fn candidate_url_shape(category: &str, sink: &SinkSite) -> Option<SecurityUrlShape> {

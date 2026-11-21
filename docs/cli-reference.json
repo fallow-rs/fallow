@@ -22859,6 +22859,54 @@
       "display_label": "Next.js open redirect sink"
     },
     {
+      "id": "react-router-open-redirect",
+      "rule_id": "security/react-router-open-redirect",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-601",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "deprecated_filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "default_severity": "off",
+      "opt_in": true,
+      "frameworks": [],
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/react-router-open-redirect/",
+      "explanation": {
+        "id": "security/react-router-open-redirect",
+        "name": "React Router open redirect sink",
+        "summary": "Catalogue security candidate for CWE-601",
+        "rationale": "The loader or action sends users to a URL that the input chooses. An attacker can use a trusted link of your domain to send users to a phishing page.",
+        "example": "`return redirect(new URL(request.url).searchParams.get('next') ?? '/');`",
+        "example_files": [
+          {
+            "path": "app/routes/login.tsx",
+            "code": "import { redirect } from \"react-router\";\n\nexport const loader = ({ request }: { request: Request }): Response => {\n  const next = new URL(request.url).searchParams.get(\"next\") ?? \"/\";\n  return redirect(next);\n};\n"
+          }
+        ],
+        "example_base_files": [],
+        "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
+        "docs": "https://fallow.tools/docs/rules/react-router-open-redirect/"
+      },
+      "display_label": "React router open redirect sink"
+    },
+    {
       "id": "dom-document-write",
       "rule_id": "security/dom-document-write",
       "command": "security",

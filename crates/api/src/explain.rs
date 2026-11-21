@@ -1651,6 +1651,11 @@ pub const SECURITY_RULES: &[RuleDef] = &[
         "79"
     ),
     security_catalogue_rule!("nextjs-open-redirect", "Next.js open redirect sink", "601"),
+    security_catalogue_rule!(
+        "react-router-open-redirect",
+        "React Router open redirect sink",
+        "601"
+    ),
     security_catalogue_rule!("dom-document-write", "DOM document.write sink", "79"),
     security_catalogue_rule!("jquery-html", "jQuery .html() sink", "79"),
     security_catalogue_rule!(

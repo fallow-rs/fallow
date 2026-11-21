@@ -378,6 +378,8 @@ mod security_imported_callees;
 mod security_multihop_taint;
 #[path = "integration_test/security_react_router_client_roots.rs"]
 mod security_react_router_client_roots;
+#[path = "integration_test/security_react_router_open_redirect.rs"]
+mod security_react_router_open_redirect;
 #[path = "integration_test/security_request_receivers.rs"]
 mod security_request_receivers;
 #[path = "integration_test/security_secret_to_network.rs"]
