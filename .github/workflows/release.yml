@@ -1510,10 +1510,11 @@ jobs:
           retention-days: 30
           include-hidden-files: false
 
-  # One CycloneDX SBOM per target. `cargo cyclonedx` reads Cargo.lock and
-  # resolves the dependency graph for that target, so each SBOM lists the
-  # crates that the matching release binary links. The `fallow-*` artifact
-  # name makes `release-assets` stage it with the binaries.
+  # One CycloneDX SBOM per target. `sbom-attest generate` takes the graph from
+  # `cargo tree --target`, so each SBOM lists the crates that the matching
+  # release binary links, and `sbom-attest audit` fails the job if it does not.
+  # The `fallow-*` artifact name makes `release-assets` stage it with the
+  # binaries.
   sbom:
     name: SBOM (${{ matrix.target }})
     if: ${{ !inputs.auth_check }}
@@ -1539,8 +1540,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx --version 0.5.9 --locked
+      - name: Install sbom-attest
+        run: cargo install sbom-attest --version 0.3.0 --locked
 
       - name: Generate SBOM
         shell: bash
@@ -1548,11 +1549,11 @@ jobs:
           FALLOW_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          cargo cyclonedx --manifest-path crates/cli/Cargo.toml \
-            --format json --spec-version 1.5 --target "$FALLOW_TARGET" \
-            --override-filename "fallow-${FALLOW_TARGET}.cdx"
           mkdir sbom
-          cp "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" sbom/
+          sbom-attest generate --package fallow-cli --target "$FALLOW_TARGET" \
+            --locked --cdx "sbom/fallow-${FALLOW_TARGET}.cdx.json"
+          sbom-attest audit "sbom/fallow-${FALLOW_TARGET}.cdx.json" \
+            --package fallow-cli --target "$FALLOW_TARGET" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
