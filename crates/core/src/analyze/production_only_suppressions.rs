@@ -239,6 +239,7 @@ fn find_production_unused_members(input: &PostDetectionInput<'_, '_>) -> UnusedM
         semantic_framework_candidates: &input.class_member_rules.semantic_framework_candidates,
         ignore_decorators: &input.config.ignore_decorators,
         public_api_entry_points: input.public_api_entry_points,
+        entry_exports_config: Some(input.config),
         lit_active: lit_is_declared(input.declared_deps),
         report_unmatched_patterns: false,
     })

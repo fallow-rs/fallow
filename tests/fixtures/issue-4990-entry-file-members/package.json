@@ -1,0 +1,1 @@
+{ "name": "issue-4990-entry-file-members", "private": true, "workspaces": ["packages/*"] }

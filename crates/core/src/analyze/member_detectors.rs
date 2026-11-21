@@ -19,6 +19,7 @@ pub(super) fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisRe
         semantic_framework_candidates: input.semantic_framework_candidates,
         ignore_decorators: &input.config.ignore_decorators,
         public_api_entry_points: input.public_api_entry_points,
+        entry_exports_config: Some(input.config),
         lit_active: lit_is_declared(input.declared_deps),
         report_unmatched_patterns: true,
     });

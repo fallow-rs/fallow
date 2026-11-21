@@ -880,6 +880,9 @@ pub(super) struct UnusedMemberScanInput<'a> {
     pub(super) semantic_framework_candidates: &'a [UsedClassMemberRule],
     pub(super) ignore_decorators: &'a [String],
     pub(super) public_api_entry_points: &'a FxHashSet<FileId>,
+    /// The config that gives `includeEntryExports` for each path. `None`
+    /// means that the option is off everywhere.
+    pub(super) entry_exports_config: Option<&'a fallow_config::ResolvedConfig>,
     /// Whether a Lit dependency is declared. When true, a `@state()`-decorated
     /// member on a direct `LitElement` / `ReactiveElement` subclass is made
     /// CHECKABLE (a never-read `@state` is dead internal reactive state). Other
@@ -985,7 +988,14 @@ impl MemberReportContext<'_, '_> {
             return buckets;
         }
 
-        let store_only_scan = module.is_entry_point();
+        // The consumers of an entry file are outside the project, so only its
+        // store members are checked, unless `includeEntryExports` says that
+        // each export of the file needs a consumer in the project.
+        let store_only_scan = module.is_entry_point()
+            && !self
+                .input
+                .entry_exports_config
+                .is_some_and(|config| config.include_entry_exports_for(&module.path));
         for export in &module.exports {
             self.collect_export(module, export, store_only_scan, &mut buckets);
         }

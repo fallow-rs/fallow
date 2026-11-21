@@ -41,6 +41,7 @@ fn find_unused_members(
         semantic_framework_candidates: &[],
         ignore_decorators,
         public_api_entry_points: &FxHashSet::default(),
+        entry_exports_config: None,
         lit_active: false,
         report_unmatched_patterns: true,
     });
