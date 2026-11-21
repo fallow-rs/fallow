@@ -40,7 +40,16 @@ fn star_re_exports_of_an_entry_file_stay_credited_by_default() {
     let config = create_config(fixture_path(FIXTURE));
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    assert_eq!(sorted_names(&results.unused_exports), Vec::<String>::new());
+    // A local export of the entry file hides the `shadowed` of `a.ts`, so
+    // that declaration does not reach the entry file with or without the
+    // option.
+    assert_eq!(sorted_names(&results.unused_exports), ["shadowed"]);
+    assert!(
+        results.unused_exports[0]
+            .export
+            .path
+            .ends_with("packages/lib/src/a.ts")
+    );
     assert_eq!(
         sorted_type_names(&results.unused_types),
         Vec::<String>::new()
@@ -53,6 +62,9 @@ fn workspace_setting_reports_unused_names_behind_an_entry_star() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     // `subUnused` is behind the `export *` of a subpath entry (`@p/lib/sub`).
+    // `shadowed` is a local export of the entry file and an export of
+    // `a.ts`. The local export hides the name of the star source, so each of
+    // the two has no importer.
     // `pubUnused` is in `@p/pub`, which `publicPackages` names.
     // `plainUnused` is in a workspace that the `packages/*` key does not
     // select. `shared` comes from two star sources, so the entry file exports
@@ -64,6 +76,8 @@ fn workspace_setting_reports_unused_names_behind_an_entry_star() {
             "chainUnused",
             "deepUnused",
             "oneUnused",
+            "shadowed",
+            "shadowed",
             "subUnused",
             "unusedStar"
         ]
@@ -101,6 +115,8 @@ fn root_option_reports_unused_names_behind_every_entry_star() {
             "oneUnused",
             "plainUnused",
             "pubUnused",
+            "shadowed",
+            "shadowed",
             "subUnused",
             "unusedStar"
         ]
@@ -119,7 +135,11 @@ fn ignore_exports_rule_on_the_entry_file_covers_names_behind_its_star() {
         .expect("fixture has .fallowrc.json");
     loaded.ignore_exports.push(fallow_config::IgnoreExportRule {
         file: "packages/lib/src/index.ts".to_owned(),
-        exports: vec!["unusedStar".to_owned(), "deepUnused".to_owned()],
+        exports: vec![
+            "unusedStar".to_owned(),
+            "deepUnused".to_owned(),
+            "shadowed".to_owned(),
+        ],
     });
     let config = loaded.resolve(
         root,
@@ -131,8 +151,16 @@ fn ignore_exports_rule_on_the_entry_file_covers_names_behind_its_star() {
     );
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
+    // The rule names the local `shadowed` of the entry file. The `shadowed`
+    // of `a.ts` does not reach the entry file, so it stays reported.
     assert_eq!(
         sorted_names(&results.unused_exports),
-        ["chainUnused", "oneUnused", "subUnused"]
+        ["chainUnused", "oneUnused", "shadowed", "subUnused"]
     );
+    let shadowed = results
+        .unused_exports
+        .iter()
+        .find(|finding| finding.export.export_name == "shadowed")
+        .expect("shadowed is reported");
+    assert!(shadowed.export.path.ends_with("packages/lib/src/a.ts"));
 }

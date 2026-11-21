@@ -12,12 +12,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig};
 
 use crate::discover::FileId;
-use crate::graph::{ModuleGraph, ModuleNode};
+use crate::graph::{ExportNamespace, ModuleGraph, ModuleNode};
 use crate::plugins::{ConfigExportCredit, is_export_ignored};
 
 use super::{PluginMatchers, config_credited_exports, matchers_for_module};
 
 struct EntryRules<'a> {
+    entry: FileId,
     ignore: Vec<&'a [String]>,
     plugin: Vec<&'a [&'a str]>,
     config: Vec<&'a [String]>,
@@ -34,6 +35,7 @@ impl EntryRules<'_> {
 /// `export *` chains reach.
 #[derive(Default)]
 pub(super) struct EntryStarCredit<'a> {
+    graph: Option<&'a ModuleGraph>,
     rules: Vec<EntryRules<'a>>,
     rules_by_source: FxHashMap<FileId, Vec<usize>>,
 }
@@ -48,7 +50,10 @@ pub(super) struct EntryStarCreditInput<'a> {
 
 impl<'a> EntryStarCredit<'a> {
     pub(super) fn build(input: &EntryStarCreditInput<'a>) -> Self {
-        let mut credit = Self::default();
+        let mut credit = Self {
+            graph: Some(input.graph),
+            ..Self::default()
+        };
         let no_rules = input.ignore_matchers.is_empty()
             && input.plugin_matchers.is_empty()
             && input.config_export_credit.is_empty();
@@ -74,6 +79,7 @@ impl<'a> EntryStarCredit<'a> {
             }
             let index = credit.rules.len();
             credit.rules.push(EntryRules {
+                entry: module.file_id,
                 ignore,
                 plugin,
                 config,
@@ -89,16 +95,31 @@ impl<'a> EntryStarCredit<'a> {
         credit
     }
 
-    /// Whether a rule of an entry file that re-exports `file` with `export *`
-    /// covers `export_name`. `export *` never forwards `default`.
+    /// Whether a rule of an entry file covers `export_name` of `file`.
+    ///
+    /// The entry file must forward that declaration under the same name. A
+    /// local export of the entry file with the same name hides the name of the
+    /// star source, and then the rule names the local export only.
     pub(super) fn credits(&self, file: FileId, export_name: &str) -> bool {
-        export_name != "default"
-            && self.rules_by_source.get(&file).is_some_and(|indexes| {
-                indexes
-                    .iter()
-                    .any(|&index| self.rules[index].credits(export_name))
-            })
+        let (Some(graph), Some(indexes)) = (self.graph, self.rules_by_source.get(&file)) else {
+            return false;
+        };
+        indexes.iter().any(|&index| {
+            let rules = &self.rules[index];
+            rules.credits(export_name) && forwards(graph, rules.entry, export_name, file)
+        })
     }
+}
+
+/// Whether `entry` exports under `export_name` the declaration of `file`.
+fn forwards(graph: &ModuleGraph, entry: FileId, export_name: &str, file: FileId) -> bool {
+    [ExportNamespace::Value, ExportNamespace::Type]
+        .into_iter()
+        .any(|namespace| {
+            graph
+                .resolve_export_origin(entry, export_name, namespace)
+                .is_some_and(|origin| origin.file_id() == file)
+        })
 }
 
 fn is_plain_star(re_export: &crate::graph::ReExportEdge) -> bool {
