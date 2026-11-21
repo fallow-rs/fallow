@@ -277,8 +277,8 @@ pub struct DupeBase<'a> {
 }
 
 /// Grade the head clone groups as regions, and set the introduced flag of
-/// each group from the grade of its region (see
-/// [`super::clone_regions`]).
+/// each group from the grade of its region (see the `clone_regions` module
+/// of `audit_run`).
 ///
 /// The opt-in shared diff decides when it is present; the merge-base worktree
 /// diff decides in the other cases. The diff is read only when a head group
