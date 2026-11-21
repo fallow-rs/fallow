@@ -3326,12 +3326,20 @@ FASTPATH_SCRIPTS="$DIR/../scripts"
 FASTPATH_ENVELOPE="$FIXTURES/dead-code-envelope.json"
 
 # Resolve a report-capable binary the same way issuekind-drift-guard.sh does:
-# explicit $FALLOW_BIN, else a locally built target/{release,debug}/fallow, else
-# a PATH lookup. Absolute so the check survives the cwd changes above.
+# explicit $FALLOW_BIN, else a locally built {debug,release}/fallow in
+# $CARGO_TARGET_DIR or in target/ of the repository, else a PATH lookup. A
+# relative $CARGO_TARGET_DIR is relative to the repository root. Absolute so
+# the check survives the cwd changes above.
 FASTPATH_REPO_ROOT="$(cd "$DIR/../.." && pwd)"
 FASTPATH_BIN="${FALLOW_BIN:-}"
 if [ -z "$FASTPATH_BIN" ]; then
-  for FASTPATH_CAND in "$FASTPATH_REPO_ROOT/target/release/fallow" "$FASTPATH_REPO_ROOT/target/debug/fallow"; do
+  FASTPATH_TARGET_DIR="${CARGO_TARGET_DIR:-}"
+  case "$FASTPATH_TARGET_DIR" in
+    "" | /*) ;;
+    *) FASTPATH_TARGET_DIR="$FASTPATH_REPO_ROOT/$FASTPATH_TARGET_DIR" ;;
+  esac
+  for FASTPATH_CAND in ${FASTPATH_TARGET_DIR:+"$FASTPATH_TARGET_DIR/debug/fallow" "$FASTPATH_TARGET_DIR/release/fallow"} \
+    "$FASTPATH_REPO_ROOT/target/debug/fallow" "$FASTPATH_REPO_ROOT/target/release/fallow"; do
     if [ -x "$FASTPATH_CAND" ]; then FASTPATH_BIN="$FASTPATH_CAND"; break; fi
   done
 fi
