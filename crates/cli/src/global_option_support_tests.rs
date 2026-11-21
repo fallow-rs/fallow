@@ -1,0 +1,363 @@
+use clap::CommandFactory;
+
+use super::*;
+use crate::Cli;
+
+fn rejection(args: &[&str]) -> Option<String> {
+    let root = Cli::command();
+    let argv = std::iter::once("fallow").chain(args.iter().copied());
+    let matches = root
+        .clone()
+        .try_get_matches_from(argv)
+        .expect("the command line parses");
+    rejected_option(&root, &matches)
+}
+
+fn global_longs() -> Vec<String> {
+    let mut root = Cli::command();
+    root.build();
+    root.get_arguments()
+        .filter(|arg| arg.is_global_set())
+        .map(|arg| {
+            let long = arg
+                .get_long()
+                .unwrap_or_else(|| panic!("global argument {} has no long", arg.get_id()));
+            format!("--{long}")
+        })
+        .collect()
+}
+
+#[test]
+fn every_global_argument_has_one_row() {
+    let longs = global_longs();
+    for long in &longs {
+        let rows = GLOBAL_OPTION_SUPPORT
+            .iter()
+            .filter(|row| row.option == long)
+            .count();
+        assert_eq!(
+            rows, 1,
+            "{long} needs exactly one row in GLOBAL_OPTION_SUPPORT"
+        );
+    }
+    for row in GLOBAL_OPTION_SUPPORT {
+        assert!(
+            longs.iter().any(|long| long == row.option),
+            "{} has a row but is no global argument",
+            row.option
+        );
+    }
+}
+
+#[test]
+fn every_row_names_existing_commands_once() {
+    let root = Cli::command();
+    for row in GLOBAL_OPTION_SUPPORT {
+        let mut seen: Vec<&str> = Vec::new();
+        for entry in row.commands.iter().flat_map(|group| group.iter()) {
+            assert!(
+                entry.command == BARE_RUN || root.find_subcommand(entry.command).is_some(),
+                "{} names the unknown command {}",
+                row.option,
+                entry.command
+            );
+            assert!(
+                !seen.contains(&entry.command),
+                "{} names {} more than once",
+                row.option,
+                entry.command
+            );
+            seen.push(entry.command);
+        }
+    }
+}
+
+#[test]
+fn every_rejected_message_uses_known_placeholders() {
+    let placeholder = |text: &str| -> Vec<String> {
+        text.split('<')
+            .skip(1)
+            .filter_map(|rest| rest.split_once('>').map(|(name, _)| name.to_owned()))
+            .collect()
+    };
+    for row in GLOBAL_OPTION_SUPPORT {
+        let supports = std::iter::once(row.default).chain(
+            row.commands
+                .iter()
+                .flat_map(|group| group.iter())
+                .map(|entry| entry.support),
+        );
+        for support in supports {
+            if let Support::Rejected { message } = support {
+                for name in placeholder(message) {
+                    assert!(
+                        matches!(name.as_str(), "option" | "command" | "file"),
+                        "{} has the unknown placeholder <{name}>: {message}",
+                        row.option
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn accepted_command_lines_have_no_rejection() {
+    for args in [
+        &["--save-baseline", "b.json"][..],
+        &["dead-code", "--save-baseline", "b.json"],
+        &["dupes", "--ci"],
+        &["health", "--group-by", "owner", "--group", "src"],
+        &["security", "--sarif-file", "s.sarif"],
+        &["doctor", "--format", "json", "--quiet"],
+        &["init", "--root", "."],
+        &["dead-code", "--tolerance", "0"],
+    ] {
+        assert_eq!(rejection(args), None, "{args:?}");
+    }
+}
+
+#[test]
+fn a_command_without_a_baseline_rejects_the_baseline_options() {
+    assert_eq!(
+        rejection(&["fix", "--save-baseline", "b.json"]).as_deref(),
+        Some(
+            "`fallow fix` does not load or save a baseline, so `--save-baseline` has no effect. Use `--save-baseline` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+        )
+    );
+    for (args, option) in [
+        (&["watch", "--baseline", "b.json"][..], "--baseline"),
+        (
+            &["init", "--fail-on-baseline-growth"],
+            "--fail-on-baseline-growth",
+        ),
+        (&["flags", "--baseline-base", "main"], "--baseline-base"),
+    ] {
+        let message = rejection(args).unwrap_or_else(|| panic!("{args:?} is rejected"));
+        assert!(
+            message.contains(&format!("so `{option}` has no effect")),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn security_rejects_the_analysis_options() {
+    for (args, option) in [
+        (&["--baseline", "b.json"][..], "--baseline"),
+        (&["--fail-on-stale-baseline"], "--fail-on-stale-baseline"),
+        (&["--fail-on-parse-error"], "--fail-on-parse-error"),
+        (&["--production"], "--production"),
+        (&["--group-by", "owner"], "--group-by"),
+        (
+            &["--save-regression-baseline"],
+            "--save-regression-baseline",
+        ),
+        (&["--dupes-mode", "semantic"], "--dupes-mode"),
+        (&["--include-entry-exports"], "--include-entry-exports"),
+        (&["--show-cascade"], "--show-cascade"),
+        (&["--performance"], "--performance"),
+    ] {
+        let mut argv = vec!["security"];
+        argv.extend_from_slice(args);
+        assert_eq!(
+            rejection(&argv),
+            Some(format!("{option} is not valid with `fallow security`.")),
+            "{argv:?}"
+        );
+    }
+    assert_eq!(rejection(&["security", "--tolerance", "2"]), None);
+}
+
+#[test]
+fn doctor_rejects_every_option_except_project_and_presentation() {
+    for row in GLOBAL_OPTION_SUPPORT {
+        let accepted = matches!(
+            row.option,
+            "--root" | "--config" | "--format" | "--pretty" | "--quiet"
+        );
+        assert_eq!(
+            row.support_for("doctor") == Support::Supported,
+            accepted,
+            "doctor and {}",
+            row.option
+        );
+    }
+    assert_eq!(
+        rejection(&["doctor", "--threads", "2"]).as_deref(),
+        Some("--threads is not valid with `fallow doctor`.")
+    );
+    assert_eq!(
+        rejection(&["doctor", "--output-file", "r.json"]).as_deref(),
+        Some(
+            "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout"
+        )
+    );
+}
+
+#[test]
+fn commands_without_a_report_reject_the_output_and_gate_options() {
+    let message = "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation";
+    for args in [
+        &["init", "--ci"][..],
+        &["schema", "--output-file", "x.json"],
+        &["config-schema", "--fail-on-issues"],
+        &["explain", "unused-files", "--sarif-file", "x.sarif"],
+    ] {
+        assert_eq!(rejection(args).as_deref(), Some(message), "{args:?}");
+    }
+}
+
+#[test]
+fn only_sarif_writers_accept_sarif_file() {
+    assert_eq!(
+        rejection(&["dupes", "--sarif-file", "x.sarif"]).as_deref(),
+        Some(
+            "`fallow dupes` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
+        )
+    );
+    let other = rejection(&["fix", "--sarif-file", "x.sarif"]).expect("fix rejects it");
+    assert!(
+        other.starts_with("This command does not write a SARIF file"),
+        "{other}"
+    );
+    for args in [
+        &["--sarif-file", "x.sarif"][..],
+        &["dead-code", "--sarif-file", "x.sarif"],
+        &["architecture", "--sarif-file", "x.sarif"],
+    ] {
+        assert_eq!(rejection(args), None, "{args:?}");
+    }
+}
+
+#[test]
+fn the_remaining_command_checks_come_from_the_table() {
+    assert_eq!(
+        rejection(&["fix", "--fail-on-parse-error"]).as_deref(),
+        Some(
+            "--fail-on-parse-error is not valid with `fallow fix`. Use it with dead-code, architecture, health, audit or the bare run."
+        )
+    );
+    assert_eq!(
+        rejection(&["check", "--group-by", "owner", "--group", "src"]).as_deref(),
+        Some("--group is valid with `fallow health --group-by` only.")
+    );
+    assert_eq!(
+        rejection(&["audit", "--baseline", "b.json"]).as_deref(),
+        Some(
+            "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)"
+        )
+    );
+    assert_eq!(
+        rejection(&["similar-code", "--ci"]).as_deref(),
+        Some("--ci is not valid with this `fallow similar-code` command.")
+    );
+}
+
+#[test]
+fn an_option_before_the_subcommand_counts() {
+    assert_eq!(
+        rejection(&["--threads", "2", "doctor"]).as_deref(),
+        Some("--threads is not valid with `fallow doctor`.")
+    );
+}
+
+#[test]
+fn analysis_commands_without_a_regression_baseline_reject_the_regression_options() {
+    let message = rejection(&["dupes", "--save-regression-baseline"]).expect("dupes rejects it");
+    assert!(
+        message.starts_with("`fallow dupes` has no regression baseline, so `--save-regression-baseline` has no effect."),
+        "{message}"
+    );
+    assert!(
+        message.contains("fallow dupes --baseline <file>"),
+        "{message}"
+    );
+    let message = rejection(&["health", "--fail-on-regression"]).expect("health rejects it");
+    assert!(
+        message.contains("fallow health --baseline <file>"),
+        "{message}"
+    );
+    let message = rejection(&["fix", "--tolerance", "2"]).expect("fix rejects it");
+    assert!(
+        message.starts_with("This command has no regression baseline, so `--tolerance`"),
+        "{message}"
+    );
+    assert_eq!(
+        rejection(&["list", "--entry-weight", "--fail-on-regression"]),
+        None
+    );
+    assert_eq!(rejection(&["security", "--tolerance", "2"]), None);
+}
+
+/// A command that ignores an option that names a file accepts the command
+/// line, exits 0, and reads or writes no file (issue #4931). Such a pair is
+/// supported, so the file test runs it, or it is rejected.
+#[test]
+fn no_command_ignores_an_option_that_names_a_file() {
+    let globals = global_longs();
+    for option in [
+        "--save-regression-baseline",
+        "--regression-baseline",
+        "--save-baseline",
+        "--baseline",
+        "--sarif-file",
+        "--output-file",
+        "--save-snapshot",
+    ] {
+        let Some(row) = option_support(option) else {
+            assert!(
+                !globals.iter().any(|long| long == option),
+                "{option} is global and needs a row"
+            );
+            continue;
+        };
+        assert!(
+            !matches!(row.default, Support::Ignored { .. }),
+            "{option} has an ignored default"
+        );
+        for entry in row.commands.iter().flat_map(|group| group.iter()) {
+            assert!(
+                !matches!(entry.support, Support::Ignored { .. }),
+                "{} ignores {option}",
+                entry.command
+            );
+        }
+    }
+}
+
+#[test]
+fn the_baseline_hint_names_each_baseline_command() {
+    let row = option_support("--baseline").expect("row");
+    let Support::Rejected { message } = row.default else {
+        panic!("--baseline rejects a command without a baseline");
+    };
+    for command in ["dead-code", "architecture", "dupes", "health"] {
+        assert_eq!(row.support_for(command), Support::Supported, "{command}");
+        assert!(
+            message.contains(&format!("`fallow {command}`")),
+            "{command}: {message}"
+        );
+    }
+}
+
+#[test]
+fn lean_applies_to_the_commands_with_a_lean_envelope() {
+    for accepted in [
+        &["--lean"][..],
+        &["dead-code", "--lean"],
+        &["check", "--lean"],
+        &["health", "--lean"],
+    ] {
+        assert_eq!(rejection(accepted), None, "{accepted:?}");
+    }
+    for command in ["dupes", "audit", "architecture", "list", "doctor"] {
+        assert_eq!(
+            rejection(&[command, "--lean"]).as_deref(),
+            Some(
+                "--lean applies to `fallow dead-code`, `fallow health` and bare `fallow`. Remove --lean."
+            ),
+            "{command}"
+        );
+    }
+}

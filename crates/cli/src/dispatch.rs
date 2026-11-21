@@ -20,7 +20,6 @@ use crate::cli_args::{
 use crate::cli_hooks::run_hooks_command;
 use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
 use crate::cli_production::{DeadCodeRun, ProductionModes};
-use crate::cli_startup::cli_global_baseline_flag;
 use crate::dupes::{DupesOptions, DupesOverrides};
 use crate::health::HealthOptions;
 use crate::list::ListOptions;
@@ -1731,14 +1730,6 @@ struct AuditDispatchArgs {
 
 fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let output = dispatch.output;
-
-    if cli.baseline.is_some() || cli.save_baseline.is_some() {
-        return emit_input_error(
-            "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
-            output,
-        );
-    }
 
     let mut inputs = match resolve_audit_inputs(dispatch, args) {
         Ok(inputs) => inputs,

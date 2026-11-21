@@ -63,6 +63,7 @@ mod fix;
 mod flags;
 mod flags_retirement_formats;
 mod gates;
+mod global_option_support;
 mod guard;
 mod health;
 mod impact;
@@ -127,7 +128,7 @@ use cli_impact::ImpactCli;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
     cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
-    reject_global_baseline_flags, run_pre_dispatch_checks, setup_tracing, validate_inputs,
+    run_pre_dispatch_checks, setup_tracing, validate_inputs,
 };
 #[cfg(test)]
 use cli_telemetry::{TelemetryRun, fallback_failure_reason_for, telemetry_workflow_for_command};
@@ -138,7 +139,7 @@ pub(crate) use runtime_support::{
     ConfigLoadOptions, build_ownership_resolver, load_config_for_analysis,
 };
 #[cfg(test)]
-use security_help::{SECURITY_UNSUPPORTED_GLOBAL_LONGS, SecurityHelpTarget};
+use security_help::SecurityHelpTarget;
 use security_help::{render_security_help, security_help_target};
 use similar_code_help::{render_similar_code_help, similar_code_help_target};
 
@@ -192,48 +193,6 @@ fn emit_known_failure_with_style(
 ) -> ExitCode {
     telemetry::note_failure_reason(reason);
     error::emit_error_with_style(message, exit_code, output, json_style)
-}
-
-fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
-    if cli.baseline.is_some() {
-        Some("--baseline")
-    } else if cli.save_baseline.is_some() {
-        Some("--save-baseline")
-    } else if cli.fail_on_stale_baseline {
-        Some("--fail-on-stale-baseline")
-    } else if cli.fail_on_baseline_growth {
-        Some("--fail-on-baseline-growth")
-    } else if cli.baseline_base.is_some() {
-        Some("--baseline-base")
-    } else if cli.fail_on_parse_error {
-        Some("--fail-on-parse-error")
-    } else if cli.production {
-        Some("--production")
-    } else if cli.no_production {
-        Some("--no-production")
-    } else if cli.no_package_baselines {
-        Some("--no-package-baselines")
-    } else if cli.group_by.is_some() {
-        Some("--group-by")
-    } else if cli.performance {
-        Some("--performance")
-    } else if cli.explain_skipped {
-        Some("--explain-skipped")
-    } else if cli.fail_on_regression {
-        Some("--fail-on-regression")
-    } else if cli.regression_baseline.is_some() {
-        Some("--regression-baseline")
-    } else if cli.save_regression_baseline.is_some() {
-        Some("--save-regression-baseline")
-    } else if let Some(flag) = cli.dupes_overrides().first_global_flag() {
-        Some(flag)
-    } else if cli.include_entry_exports {
-        Some("--include-entry-exports")
-    } else if cli.show_cascade {
-        Some("--show-cascade")
-    } else {
-        None
-    }
 }
 
 struct DispatchContext<'a> {
@@ -439,16 +398,15 @@ fn run_command() -> ExitCode {
         return signal_test_helper();
     }
 
-    let (mut cli, fmt) = match parse_cli_args() {
+    let (mut cli, fmt, rejected_option) = match parse_cli_args() {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
     if let Some(message) = cli_format::json_presentation_error(&cli, &fmt) {
         return error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
     }
-
-    if let Some(code) = reject_global_baseline_flags(&cli, &fmt) {
-        return code;
+    if let Some(message) = rejected_option {
+        return reject_global_option(&cli, &fmt, &message);
     }
 
     if let Some(code) = run_schema_command_if_requested(&cli, fmt.json_style) {
@@ -909,13 +867,8 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
     }
 
     if let Some(flag) = unsupported_doctor_option(cli) {
-        let message = if flag == "--output-file" {
-            "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout".to_string()
-        } else {
-            format!("{flag} is not valid with `fallow doctor`.")
-        };
         return Some(crate::error::emit_input_error_with_style(
-            &message,
+            &format!("{flag} is not valid with `fallow doctor`."),
             format.output,
             format.json_style,
         ));
@@ -944,71 +897,47 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
 
 /// Doctor accepts only project selection and presentation options. Rejecting
 /// analysis flags avoids implying that a readiness check ran an analysis or
-/// applied a gate that it deliberately bypasses.
+/// applied a gate that it deliberately bypasses. This check covers the options
+/// of the bare run; [`global_option_support`] covers the global options.
 fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
-    let dupes_flag = cli.dupes_overrides().first_global_flag();
-    [
-        (cli.allow_remote_extends, "--allow-remote-extends"),
-        (cli.no_cache, "--no-cache"),
-        (cli.threads.is_some(), "--threads"),
-        (cli.changed_since.is_some(), "--changed-since"),
-        (cli.diff_file.is_some(), "--diff-file"),
-        (cli.diff_stdin, "--diff-stdin"),
-        (cli.churn_file.is_some(), "--churn-file"),
-        (cli.max_file_size.is_some(), "--max-file-size"),
-        (cli.baseline.is_some(), "--baseline"),
-        (cli.baseline_mode.is_some(), "--baseline-mode"),
-        (cli.parent_run.is_some(), "--parent-run"),
-        (cli.save_baseline.is_some(), "--save-baseline"),
-        (cli.production, "--production"),
-        (cli.no_production, "--no-production"),
-        (cli.no_package_baselines, "--no-package-baselines"),
-        (cli.production_dead_code, "--production-dead-code"),
-        (cli.production_health, "--production-health"),
-        (cli.production_dupes, "--production-dupes"),
-        (cli.workspace.is_some(), "--workspace"),
-        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
-        (cli.group_by.is_some(), "--group-by"),
-        (cli.performance, "--performance"),
-        (cli.explain, "--explain"),
-        (cli.explain_skipped, "--explain-skipped"),
-        (cli.summary, "--summary"),
-        (cli.ci, "--ci"),
-        (cli.fail_on_issues, "--fail-on-issues"),
-        (cli.sarif_file.is_some(), "--sarif-file"),
-        (cli.output_file.is_some(), "--output-file"),
-        (cli.report_path_prefix.is_some(), "--report-path-prefix"),
-        (cli.fail_on_regression, "--fail-on-regression"),
-        (cli.fail_on_stale_baseline, "--fail-on-stale-baseline"),
-        (cli.fail_on_baseline_growth, "--fail-on-baseline-growth"),
-        (cli.baseline_base.is_some(), "--baseline-base"),
-        (cli.fail_on_parse_error, "--fail-on-parse-error"),
-        (cli.tolerance != "0", "--tolerance"),
-        (cli.regression_baseline.is_some(), "--regression-baseline"),
-        (
-            cli.save_regression_baseline.is_some(),
-            "--save-regression-baseline",
-        ),
-        (!cli.only.is_empty(), "--only"),
-        (!cli.skip.is_empty(), "--skip"),
-        (dupes_flag.is_some(), dupes_flag.unwrap_or_default()),
-        (cli.score, "--score"),
-        (cli.trend, "--trend"),
-        (cli.trend_from.is_some(), "--trend-from"),
-        (cli.save_snapshot.is_some(), "--save-snapshot"),
-        (cli.coverage.is_some(), "--coverage"),
-        (cli.coverage_root.is_some(), "--coverage-root"),
-        (cli.dupes_baseline.is_some(), "--dupes-baseline"),
-        (cli.health_baseline.is_some(), "--health-baseline"),
-        (cli.include_entry_exports, "--include-entry-exports"),
-        (cli.show_cascade, "--show-cascade"),
-        (cli.type_aware, "--type-aware"),
-        (cli.no_type_aware, "--no-type-aware"),
-        (!cli.type_aware_project.is_empty(), "--type-aware-project"),
-        (cli.type_aware_require.is_some(), "--type-aware-require"),
-    ]
-    .into_iter()
-    .find_map(|(used, flag)| used.then_some(flag))
+    similar_code_help::first_bare_run_option(cli)
+}
+
+/// Emit the error of a global option that the command rejects. The commands
+/// that run before the telemetry run starts (the schema commands, `telemetry`,
+/// `doctor` and the Impact statusline) record no run, as for their other
+/// errors.
+fn reject_global_option(cli: &Cli, fmt: &FormatConfig, message: &str) -> ExitCode {
+    let records_no_run = is_impact_statusline(cli)
+        || matches!(
+            cli.command,
+            Some(
+                Command::Schema(_)
+                    | Command::ConfigSchema
+                    | Command::PluginSchema
+                    | Command::RulePackSchema
+                    | Command::Telemetry { .. }
+                    | Command::Doctor
+            )
+        );
+    if records_no_run {
+        return error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
+    }
+    let telemetry_run = start_telemetry_run(cli, fmt);
+    let code = emit_known_failure_with_style(
+        message,
+        exit_codes::INVALID_INPUT,
+        fmt.output,
+        fmt.json_style,
+        telemetry::FailureReason::Validation,
+    );
+    record_run_epilogue(
+        telemetry_run,
+        code,
+        Some(telemetry::FailureReason::Validation),
+        cli.parent_run.as_deref(),
+        None,
+    )
 }
 
 fn run_schema_command_if_requested(
@@ -1614,17 +1543,27 @@ mod tests {
                 if takes_value {
                     argv.push(value);
                 }
-                Cli::try_parse_from(argv).expect("global dupes flag parses")
+                let root = <Cli as clap::CommandFactory>::command();
+                let matches = root
+                    .clone()
+                    .try_get_matches_from(argv)
+                    .expect("global dupes flag parses");
+                global_option_support::rejected_option(&root, &matches)
             };
 
-            let security = argv_for(&["security"]);
-            assert_eq!(unsupported_security_global(&security), Some(flag.as_str()));
-            let doctor = argv_for(&["doctor"]);
-            assert_eq!(unsupported_doctor_option(&doctor), Some(flag.as_str()));
-            let similar_code = argv_for(&["similar-code", "status"]);
             assert_eq!(
-                similar_code_help::unsupported_similar_code_option(&similar_code),
-                Some(flag.as_str())
+                argv_for(&["security"]),
+                Some(format!("{flag} is not valid with `fallow security`."))
+            );
+            assert_eq!(
+                argv_for(&["doctor"]),
+                Some(format!("{flag} is not valid with `fallow doctor`."))
+            );
+            assert_eq!(
+                argv_for(&["similar-code", "status"]),
+                Some(format!(
+                    "{flag} is not valid with this `fallow similar-code` command."
+                ))
             );
             assert!(
                 !help_contains_long_flag(&security_help, long),
@@ -1637,7 +1576,20 @@ mod tests {
     fn security_help_hides_globals_rejected_by_security_validator() {
         let help = render_security_help(SecurityHelpTarget::Parent);
 
-        for long in SECURITY_UNSUPPORTED_GLOBAL_LONGS {
+        for long in [
+            "baseline",
+            "save-baseline",
+            "fail-on-stale-baseline",
+            "production",
+            "group-by",
+            "performance",
+            "save-regression-baseline",
+            "dupes-mode",
+            "include-entry-exports",
+            "show-cascade",
+            "lean",
+            "full-tables",
+        ] {
             assert!(
                 !help_contains_long_flag(&help, long),
                 "security help must hide unsupported --{long}:\n{help}"
@@ -1712,37 +1664,6 @@ mod tests {
         );
         assert_eq!(security_help_target(["health", "--help"]), None);
         assert_eq!(security_help_target(["help", "health"]), None);
-    }
-
-    #[test]
-    fn security_unsupported_global_validator_matches_hidden_help_contract() {
-        for (argv, expected) in [
-            (vec!["fallow", "security", "--performance"], "--performance"),
-            (
-                vec!["fallow", "security", "--no-package-baselines"],
-                "--no-package-baselines",
-            ),
-            (
-                vec!["fallow", "security", "--baseline", "base.json"],
-                "--baseline",
-            ),
-            (
-                vec!["fallow", "security", "--fail-on-stale-baseline"],
-                "--fail-on-stale-baseline",
-            ),
-            (
-                vec!["fallow", "security", "--dupes-mode", "weak"],
-                "--dupes-mode",
-            ),
-            (vec!["fallow", "security", "--dupes-near"], "--dupes-near"),
-        ] {
-            let cli = Cli::try_parse_from(argv).expect("security global parses before validation");
-            assert_eq!(unsupported_security_global(&cli), Some(expected));
-        }
-
-        let explain = Cli::try_parse_from(["fallow", "security", "--explain"])
-            .expect("security --explain parses");
-        assert_eq!(unsupported_security_global(&explain), None);
     }
 
     #[test]

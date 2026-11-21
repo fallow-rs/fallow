@@ -271,6 +271,20 @@ fn option_json(cmd: &Command, arg: &Arg) -> Value {
     })
 }
 
+/// A global option with its `command_support` value: the support of the
+/// option per top-level command, from [`GLOBAL_OPTION_SUPPORT`]. The value
+/// is `null` for an option without a row.
+///
+/// [`GLOBAL_OPTION_SUPPORT`]: crate::global_option_support::GLOBAL_OPTION_SUPPORT
+fn global_option_json(cmd: &Command, arg: &Arg) -> Value {
+    let mut option = option_json(cmd, arg);
+    option["command_support"] = arg
+        .get_long()
+        .and_then(|long| crate::global_option_support::option_support(&format!("--{long}")))
+        .map_or(Value::Null, |row| row.to_json());
+    option
+}
+
 fn positional_json(arg: &Arg) -> Value {
     json!({
         "id": arg.get_id().as_str(),
@@ -452,7 +466,7 @@ pub fn build_cli_reference(cmd: &Command) -> Value {
     let global_options: Vec<Value> = root
         .get_arguments()
         .filter(|arg| arg.is_global_set())
-        .map(|arg| option_json(&root, arg))
+        .map(|arg| global_option_json(&root, arg))
         .collect();
     json!({
         "schema_version": CLI_REFERENCE_SCHEMA_VERSION,
