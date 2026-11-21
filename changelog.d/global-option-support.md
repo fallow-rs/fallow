@@ -6,9 +6,11 @@
   - `fallow telemetry` and `fallow impact statusline` with `--sarif-file`, `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `fallow schema`, `config-schema`, `plugin-schema` and `rule-pack-schema` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `fallow telemetry --output-file`.
+  - `fallow agent`, `fix`, `impact`, `recommend`, `rule-pack`, `suppressions`, `viz` and `workspaces` with `--output-file`. These commands print their output to stdout and left an empty file. In JSON format, `agent status` and `rule-pack list` wrote the file; they now also exit with code 2.
+  - `fallow impact statusline` with `--ci` or `--fail-on-issues`.
   - `fallow workspaces` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `--tolerance 0` on `fallow doctor` and on each command without a regression baseline. The earlier checks compared the value with `0` and so missed an explicit `0`.
 
   A test now fails when a command ignores an option that names a file, such as `--save-regression-baseline` on `fallow dupes` (issue #4931).
 
-  The check runs before the root, git ref and diff validation, and it reads the options in the order of their definition. When a command line has more than one problem, the first error can be a different one. The help of `fallow security` now also hides `--tolerance`, which `security` ignores.
+  The check runs before the root, git ref and diff validation, and it reads the options in the order of their definition, with `--tolerance` after the other regression options. When a command line has more than one problem, the first error can be a different one. A rejected option now records a `Validation` failure in the telemetry of the run. The help of `fallow security` now also hides `--tolerance`, which `security` ignores.

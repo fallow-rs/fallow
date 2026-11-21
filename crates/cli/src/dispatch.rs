@@ -457,17 +457,10 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
     };
 
     let gate = gate.map(security::SecurityGateArg::into_mode);
-    let cli = dispatch.cli;
-    let (output, _quiet, fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
+    let output = dispatch.output;
     let derived_flags = SecurityDerivedFlagState {
         output,
         json_style: dispatch.json_style,
-        ci: cli.ci,
-        fail_on_issues,
-        sarif_file: cli.sarif_file.as_deref(),
-        summary: cli.summary,
-        explain: cli.explain,
         runtime_coverage: runtime_coverage.as_deref(),
         min_invocations_hot,
         file: file.as_slice(),
@@ -607,11 +600,6 @@ fn scoped_security_files(
 struct SecurityDerivedFlagState<'a> {
     output: fallow_config::OutputFormat,
     json_style: json_style::JsonStyle,
-    ci: bool,
-    fail_on_issues: bool,
-    sarif_file: Option<&'a Path>,
-    summary: bool,
-    explain: bool,
     runtime_coverage: Option<&'a Path>,
     min_invocations_hot: u64,
     file: &'a [PathBuf],
@@ -620,17 +608,7 @@ struct SecurityDerivedFlagState<'a> {
 }
 
 fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
-    let flag = if flags.ci {
-        Some("--ci")
-    } else if flags.fail_on_issues {
-        Some("--fail-on-issues")
-    } else if flags.sarif_file.is_some() {
-        Some("--sarif-file")
-    } else if flags.summary {
-        Some("--summary")
-    } else if flags.explain {
-        Some("--explain")
-    } else if flags.runtime_coverage.is_some() {
+    let flag = if flags.runtime_coverage.is_some() {
         Some("--runtime-coverage")
     } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
         Some("--min-invocations-hot")
@@ -650,17 +628,7 @@ fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Op
 }
 
 fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
-    let flag = if flags.ci {
-        Some("--ci")
-    } else if flags.fail_on_issues {
-        Some("--fail-on-issues")
-    } else if flags.sarif_file.is_some() {
-        Some("--sarif-file")
-    } else if flags.summary {
-        Some("--summary")
-    } else if flags.explain {
-        Some("--explain")
-    } else if flags.runtime_coverage.is_some() {
+    let flag = if flags.runtime_coverage.is_some() {
         Some("--runtime-coverage")
     } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
         Some("--min-invocations-hot")

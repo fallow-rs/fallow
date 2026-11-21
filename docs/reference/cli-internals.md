@@ -1512,10 +1512,19 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
 clap propagates each global option (`global = true`) to every subcommand, so
 `fallow init --save-baseline x` parses. `GLOBAL_OPTION_SUPPORT` in
 `crates/cli/src/global_option_support.rs` has one row per global option. A
-row states for each top-level command whether the command uses the option,
-ignores it, or rejects it. The command line of a rejected pair exits with
-code 2 before a command runs. The check reads the clap matches, so an option
-counts only when the command line sets it, also before the subcommand.
+row states for each command whether the command uses the option, ignores
+it, or rejects it. A row names a command by its path, such as `dupes` or
+`impact statusline`. A subcommand without an entry of its own has the support
+of its parent command. The command line of a rejected pair exits with code 2
+before a command runs, and the run records a `Validation` failure in the
+telemetry. The check reads the clap matches, so an option counts only when
+the command line sets it, also before the subcommand. It reads the rows in
+table order and reports the first rejected option. `--tolerance` follows the
+other regression options in that order.
+
+An option that names a file is never ignored: the command writes or reads
+the file, or the command line fails. A command that prints its output to
+stdout, such as `fix`, `recommend` or `impact`, rejects `--output-file`.
 
 The help of `fallow security` hides each global option that the table does
 not mark as supported for `security`. `fallow schema --cli-reference` exports
@@ -1524,17 +1533,20 @@ the table as the `command_support` field of each global option.
 A command keeps its own check for a rule that depends on more than the
 command and the option. Examples: `similar-code` checks the options of each
 subcommand, `architecture --shared-state` rejects `--sarif-file`, and a bare
-run without the dead-code analysis rejects `--sarif-file`. The options of the
+run without the dead-code analysis rejects `--sarif-file` and the regression
+options. The options of the
 bare run that are not global (`--only`, `--score`, `--dupes-baseline` and the
 others) are not in the table. `doctor` and `similar-code` reject them through
 `first_bare_run_option`.
 
-Two tests guard the table. A unit test walks `Cli::command()` and fails for a
+Tests guard the table. A unit test walks `Cli::command()` and fails for a
 global option without a row, a row without a global option, or a row that
-names an unknown command. An integration test runs each supported pair of a
-command and an option that writes a file (`--save-baseline`,
-`--save-regression-baseline`, `--sarif-file`, `--output-file`) and checks
-that the file exists.
+names an unknown command path. Another unit test fails when a row ignores an
+option that names a file. An integration test runs each supported pair of a
+command path and an option that writes a file (`--save-baseline`,
+`--save-regression-baseline`, `--sarif-file`, `--output-file`) with
+`--format json`. The pair passes when the command exits with code 0 or 1 and
+the file has content.
 
 ## CLI reference contract
 

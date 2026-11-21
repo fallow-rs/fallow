@@ -55,11 +55,16 @@ fn every_row_names_existing_commands_once() {
     for row in GLOBAL_OPTION_SUPPORT {
         let mut seen: Vec<&str> = Vec::new();
         for entry in row.commands.iter().flat_map(|group| group.iter()) {
+            let known = entry.command == BARE_RUN
+                || entry
+                    .command
+                    .split(' ')
+                    .try_fold(&root, |cmd, name| cmd.find_subcommand(name))
+                    .is_some();
             assert!(
-                entry.command == BARE_RUN || root.find_subcommand(entry.command).is_some(),
+                known,
                 "{} names the unknown command {}",
-                row.option,
-                entry.command
+                row.option, entry.command
             );
             assert!(
                 !seen.contains(&entry.command),
@@ -303,7 +308,8 @@ fn no_command_ignores_an_option_that_names_a_file() {
         "--baseline",
         "--sarif-file",
         "--output-file",
-        "--save-snapshot",
+        "--diff-file",
+        "--churn-file",
     ] {
         let Some(row) = option_support(option) else {
             assert!(
@@ -360,4 +366,121 @@ fn lean_applies_to_the_commands_with_a_lean_envelope() {
             "{command}"
         );
     }
+}
+
+#[test]
+fn the_impact_statusline_rejects_the_output_and_gate_options() {
+    let gate = "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation";
+    for option in ["--ci", "--fail-on-issues"] {
+        assert_eq!(
+            rejection(&["impact", "statusline", option]).as_deref(),
+            Some(gate),
+            "{option}"
+        );
+        assert_eq!(rejection(&["impact", "status", option]), None, "{option}");
+    }
+    assert_eq!(
+        rejection(&["impact", "statusline", "--output-file", "s.out"]).as_deref(),
+        Some(
+            "`fallow impact` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead."
+        )
+    );
+}
+
+#[test]
+fn commands_that_print_to_stdout_reject_output_file() {
+    for args in [
+        &["fix", "--dry-run"][..],
+        &["recommend"],
+        &["workspaces"],
+        &["suppressions"],
+        &["viz"],
+        &["rule-pack", "list"],
+        &["agent", "status"],
+        &["impact", "status"],
+    ] {
+        let mut argv = args.to_vec();
+        argv.extend(["--output-file", "o.out"]);
+        let message = rejection(&argv).unwrap_or_else(|| panic!("{argv:?} is rejected"));
+        assert!(
+            message.contains(&format!("`fallow {}` prints its output to stdout", args[0])),
+            "{message}"
+        );
+    }
+    assert_eq!(
+        rejection(&["mutation", "tasks", "--output-file", "o.out"]),
+        None
+    );
+    assert_eq!(
+        rejection(&["type-aware", "status", "--output-file", "o.out"]),
+        None
+    );
+}
+
+#[test]
+fn a_subcommand_entry_names_the_subcommand_in_its_message() {
+    assert_eq!(
+        rejection(&["security", "blind-spots", "--sarif-file", "s.sarif"]).as_deref(),
+        Some("--sarif-file is not valid with `fallow security blind-spots`.")
+    );
+    assert_eq!(
+        rejection(&[
+            "security",
+            "survivors",
+            "--candidates",
+            "c.json",
+            "--verdicts",
+            "v.json",
+            "--summary"
+        ])
+        .as_deref(),
+        Some("--summary is not valid with `fallow security survivors`.")
+    );
+    assert_eq!(
+        rejection(&["security", "blind-spots", "--baseline", "b.json"]).as_deref(),
+        Some("--baseline is not valid with `fallow security`.")
+    );
+    assert_eq!(rejection(&["security", "--sarif-file", "s.sarif"]), None);
+}
+
+#[test]
+fn the_regression_options_keep_their_error_order() {
+    let first = |args: &[&str]| -> String {
+        let message = rejection(args).expect("rejected");
+        [
+            "--fail-on-regression",
+            "--regression-baseline",
+            "--save-regression-baseline",
+            "--tolerance",
+        ]
+        .into_iter()
+        .find(|option| message.contains(&format!("`{option}`")))
+        .expect("names a regression option")
+        .to_owned()
+    };
+    assert_eq!(
+        first(&[
+            "dupes",
+            "--tolerance",
+            "2",
+            "--regression-baseline",
+            "r.json"
+        ]),
+        "--regression-baseline"
+    );
+    assert_eq!(
+        first(&[
+            "dupes",
+            "--tolerance",
+            "2",
+            "--save-regression-baseline",
+            "--fail-on-regression"
+        ]),
+        "--fail-on-regression"
+    );
+    assert_eq!(
+        first(&["health", "--tolerance", "2", "--save-regression-baseline"]),
+        "--save-regression-baseline"
+    );
+    assert_eq!(first(&["fix", "--tolerance", "2"]), "--tolerance");
 }

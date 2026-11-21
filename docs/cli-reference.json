@@ -1661,6 +1661,16 @@
             "status": "rejected",
             "message": "<option> is not valid with `fallow doctor`.",
             "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
           }
         ]
       }
@@ -1750,6 +1760,16 @@
             "status": "rejected",
             "message": "<option> is not valid with this `fallow similar-code` command.",
             "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
           }
         ]
       }
@@ -1897,6 +1917,21 @@
             "status": "rejected",
             "message": "<option> is not valid with this `fallow similar-code` command.",
             "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "impact statusline"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
           }
         ]
       }
@@ -2044,6 +2079,21 @@
             "status": "rejected",
             "message": "<option> is not valid with this `fallow similar-code` command.",
             "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "impact statusline"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
           }
         ]
       }
@@ -2225,6 +2275,16 @@
             "status": "rejected",
             "message": "<option> is not valid with this `fallow similar-code` command.",
             "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
           }
         ]
       }
@@ -2364,6 +2424,46 @@
             "status": "rejected",
             "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
             "command": "audit-cache"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "agent"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "fix"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "impact"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "recommend"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "rule-pack"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "suppressions"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "viz"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "workspaces"
           },
           {
             "status": "rejected",

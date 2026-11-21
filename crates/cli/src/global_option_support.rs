@@ -2,15 +2,19 @@
 //!
 //! clap propagates a global option to every subcommand, so `fallow init
 //! --save-baseline x` parses. [`GLOBAL_OPTION_SUPPORT`] states for each global
-//! option what each top-level command does with it: the command uses the
+//! option what each command does with it: the command uses the
 //! option ([`Support::Supported`]), the command accepts the option and does
 //! not use it ([`Support::Ignored`]), or the command line fails with exit 2
 //! ([`Support::Rejected`]).
 //!
+//! A row names a command by its path, for example `dupes` or
+//! `impact statusline`. A subcommand without an entry of its own has the
+//! support of its parent command.
+//!
 //! The startup check ([`rejected_option`]), the CLI reference
 //! (`fallow schema --cli-reference`) and the drift tests read this table.
-//! A command can still reject an option for one of its subcommands, or for a
-//! combination with one of its own options, with its own check. A supported
+//! A command can still reject an option for a combination with one of its own
+//! options, with its own check. A supported
 //! option can also need an option of the command: `list` reads the regression
 //! options only with `--entry-weight`, and `flags` only with `--retirement`.
 //!
@@ -47,7 +51,8 @@ pub enum Support {
 /// The support of one global option for one command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandSupport {
-    /// The top-level command name, or [`BARE_RUN`].
+    /// The command path, such as `dupes` or `impact statusline`, or
+    /// [`BARE_RUN`].
     pub command: &'static str,
     /// What the command does with the option.
     pub support: Support,
@@ -66,15 +71,32 @@ pub struct GlobalOptionSupport {
 }
 
 impl GlobalOptionSupport {
-    /// The support of `command`, which is a top-level command name or
-    /// [`BARE_RUN`].
+    /// The support of `command`, which is a command path such as
+    /// `impact statusline`, or [`BARE_RUN`].
     #[must_use]
     pub fn support_for(&self, command: &str) -> Support {
-        self.commands
-            .iter()
-            .flat_map(|group| group.iter())
-            .find(|entry| entry.command == command)
-            .map_or(self.default, |entry| entry.support)
+        self.lookup(command).0
+    }
+
+    /// The support of `command`, with the command path of the entry that
+    /// decides it. The longest path with an entry decides. Without an entry,
+    /// the default decides for the top-level command.
+    fn lookup<'a>(&self, command: &'a str) -> (Support, &'a str) {
+        let mut path = command;
+        loop {
+            if let Some(entry) = self
+                .commands
+                .iter()
+                .flat_map(|group| group.iter())
+                .find(|entry| entry.command == path)
+            {
+                return (entry.support, path);
+            }
+            match path.rsplit_once(' ') {
+                Some((parent, _)) => path = parent,
+                None => return (self.default, path),
+            }
+        }
     }
 
     /// The `command_support` value of the CLI reference.
@@ -135,6 +157,8 @@ const AUDIT_BASELINE_MESSAGE: &str = "audit uses per-analysis baselines. Use --d
 const OUTPUT_GATE_MESSAGE: &str = "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation";
 const BASELINES_MESSAGE: &str = "`fallow baselines prune` does not accept `<option>`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config.";
 const SECURITY_MESSAGE: &str = "<option> is not valid with `fallow security`.";
+const SUBCOMMAND_MESSAGE: &str = "<option> is not valid with `fallow <command>`.";
+const STDOUT_REPORT_MESSAGE: &str = "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.";
 const DOCTOR_MESSAGE: &str = "<option> is not valid with `fallow doctor`.";
 const DOCTOR_OUTPUT_FILE_MESSAGE: &str = "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout";
 const SIMILAR_CODE_MESSAGE: &str = "<option> is not valid with this `fallow similar-code` command.";
@@ -195,6 +219,29 @@ const OUTPUT_GATE_REJECTED: &[CommandSupport] = &[
     rejected("hooks", OUTPUT_GATE_MESSAGE),
     rejected("setup-hooks", OUTPUT_GATE_MESSAGE),
     rejected("audit-cache", OUTPUT_GATE_MESSAGE),
+];
+
+/// The commands that print their output to stdout and do not write the file
+/// of `--output-file`.
+const STDOUT_REPORT_COMMANDS: &[CommandSupport] = &[
+    rejected("agent", STDOUT_REPORT_MESSAGE),
+    rejected("fix", STDOUT_REPORT_MESSAGE),
+    rejected("impact", STDOUT_REPORT_MESSAGE),
+    rejected("recommend", STDOUT_REPORT_MESSAGE),
+    rejected("rule-pack", STDOUT_REPORT_MESSAGE),
+    rejected("suppressions", STDOUT_REPORT_MESSAGE),
+    rejected("viz", STDOUT_REPORT_MESSAGE),
+    rejected("workspaces", STDOUT_REPORT_MESSAGE),
+];
+
+/// The Impact statusline prints one line before any report or gate runs.
+const IMPACT_STATUSLINE: &[CommandSupport] = &[rejected("impact statusline", OUTPUT_GATE_MESSAGE)];
+
+/// The security subcommands read saved candidates or list blind spots, so
+/// they have no gate, no SARIF file and no summary.
+const SECURITY_SUBCOMMANDS: &[CommandSupport] = &[
+    rejected("security survivors", SUBCOMMAND_MESSAGE),
+    rejected("security blind-spots", SUBCOMMAND_MESSAGE),
 ];
 
 /// The commands that write the file of `--sarif-file`.
@@ -258,7 +305,11 @@ const fn regression_row(
     }
 }
 
-/// The support of each global option, in the order of the clap definition.
+/// The support of each global option. The startup check reads the rows in
+/// this order and reports the first rejected option. The order is the clap
+/// definition order, except that `--tolerance` follows the other regression
+/// options, so `--fail-on-regression`, `--regression-baseline` and
+/// `--save-regression-baseline` come first in an error.
 pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
     row("--root", &[]),
     row("--config", &[]),
@@ -324,25 +375,47 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
         },
         commands: &[&[supported("health")]],
     },
-    row("--explain", &[DOCTOR]),
+    row("--explain", &[DOCTOR, SECURITY_SUBCOMMANDS]),
     row("--explain-skipped", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--summary", &[DOCTOR, SIMILAR_CODE]),
-    row("--ci", &[OUTPUT_GATE_REJECTED, DOCTOR, SIMILAR_CODE]),
+    row("--summary", &[DOCTOR, SIMILAR_CODE, SECURITY_SUBCOMMANDS]),
+    row(
+        "--ci",
+        &[
+            OUTPUT_GATE_REJECTED,
+            DOCTOR,
+            SIMILAR_CODE,
+            IMPACT_STATUSLINE,
+            SECURITY_SUBCOMMANDS,
+        ],
+    ),
     row(
         "--fail-on-issues",
-        &[OUTPUT_GATE_REJECTED, DOCTOR, SIMILAR_CODE],
+        &[
+            OUTPUT_GATE_REJECTED,
+            DOCTOR,
+            SIMILAR_CODE,
+            IMPACT_STATUSLINE,
+            SECURITY_SUBCOMMANDS,
+        ],
     ),
     GlobalOptionSupport {
         option: "--sarif-file",
         default: Support::Rejected {
             message: SARIF_OTHER_MESSAGE,
         },
-        commands: &[SARIF_COMMANDS, OUTPUT_GATE_REJECTED, DOCTOR, SIMILAR_CODE],
+        commands: &[
+            SARIF_COMMANDS,
+            OUTPUT_GATE_REJECTED,
+            DOCTOR,
+            SIMILAR_CODE,
+            SECURITY_SUBCOMMANDS,
+        ],
     },
     row(
         "--output-file",
         &[
             OUTPUT_GATE_REJECTED,
+            STDOUT_REPORT_COMMANDS,
             &[
                 rejected("doctor", DOCTOR_OUTPUT_FILE_MESSAGE),
                 rejected("telemetry", OUTPUT_GATE_MESSAGE),
@@ -387,6 +460,14 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
         ],
     ),
     regression_row(
+        "--regression-baseline",
+        &[REGRESSION_COMMANDS, SECURITY, DOCTOR, SIMILAR_CODE],
+    ),
+    regression_row(
+        "--save-regression-baseline",
+        &[REGRESSION_COMMANDS, SECURITY, DOCTOR, SIMILAR_CODE],
+    ),
+    regression_row(
         "--tolerance",
         &[
             REGRESSION_COMMANDS,
@@ -394,14 +475,6 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
             DOCTOR,
             SIMILAR_CODE,
         ],
-    ),
-    regression_row(
-        "--regression-baseline",
-        &[REGRESSION_COMMANDS, SECURITY, DOCTOR, SIMILAR_CODE],
-    ),
-    regression_row(
-        "--save-regression-baseline",
-        &[REGRESSION_COMMANDS, SECURITY, DOCTOR, SIMILAR_CODE],
     ),
     row("--dupes-mode", &[SECURITY, DOCTOR, SIMILAR_CODE]),
     row("--dupes-near", &[SECURITY, DOCTOR, SIMILAR_CODE]),
@@ -447,26 +520,36 @@ pub fn option_support(option: &str) -> Option<&'static GlobalOptionSupport> {
 /// takes the values out of them.
 #[must_use]
 pub fn rejected_option(root: &clap::Command, matches: &ArgMatches) -> Option<String> {
-    let command = matches.subcommand_name().unwrap_or(BARE_RUN);
-    let leaf = leaf_matches(matches);
+    let (path, leaf) = command_path(matches);
+    let command = if path.is_empty() {
+        BARE_RUN
+    } else {
+        path.as_str()
+    };
     GLOBAL_OPTION_SUPPORT.iter().find_map(|row| {
-        let Support::Rejected { message } = row.support_for(command) else {
+        let (Support::Rejected { message }, decided_by) = row.lookup(command) else {
             return None;
         };
         let id = global_arg_id(root, row.option)?;
         (leaf.value_source(id) == Some(ValueSource::CommandLine))
-            .then(|| render(message, row.option, command))
+            .then(|| render(message, row.option, decided_by))
     })
 }
 
-/// The matches of the deepest subcommand. clap copies the value of a global
+/// The subcommand path of `matches`, such as `impact statusline`, and the
+/// matches of the deepest subcommand. clap copies the value of a global
 /// option to the matches of each subcommand level.
-fn leaf_matches(matches: &ArgMatches) -> &ArgMatches {
+fn command_path(matches: &ArgMatches) -> (String, &ArgMatches) {
+    let mut path = String::new();
     let mut current = matches;
-    while let Some((_, sub)) = current.subcommand() {
+    while let Some((name, sub)) = current.subcommand() {
+        if !path.is_empty() {
+            path.push(' ');
+        }
+        path.push_str(name);
         current = sub;
     }
-    current
+    (path, current)
 }
 
 fn global_arg_id<'a>(root: &'a clap::Command, option: &str) -> Option<&'a str> {
