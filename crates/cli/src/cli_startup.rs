@@ -106,6 +106,15 @@ pub fn validate_inputs(
     validate_input_flags(cli, output, json_style)?;
     let root = resolve_validated_root(cli, output, json_style)?;
     validate_input_git_refs(cli, output, json_style)?;
+    if let Some(message) = missing_type_aware_project(cli, &root) {
+        return Err(emit_known_failure_with_style(
+            &message,
+            INVALID_INPUT,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        ));
+    }
 
     let threads = cli
         .threads
@@ -116,6 +125,28 @@ pub fn validate_inputs(
     });
 
     Ok((root, threads))
+}
+
+/// The error for a `--type-aware-project` path that does not exist, as given
+/// or relative to the project root, when `--type-aware` is on the command
+/// line. The check runs at startup, so it also fails a run in which no
+/// command reads the project, such as an audit with no changed file. The
+/// environment and the config can turn type-aware analysis on too; the
+/// command that reads the project checks those sources when it resolves its
+/// type-aware settings.
+fn missing_type_aware_project(cli: &Cli, root: &Path) -> Option<String> {
+    if !cli.type_aware {
+        return None;
+    }
+    cli.type_aware_project
+        .iter()
+        .find(|project| !project.exists() && !root.join(project).exists())
+        .map(|project| {
+            format!(
+                "--type-aware-project {} does not exist. Pass the path of a tsconfig file, relative to the project root.",
+                project.display()
+            )
+        })
 }
 
 /// Reject unsupported security globals, control characters in path-shaped flags,
@@ -707,13 +738,22 @@ fn flag_scope_error(cli: &Cli, root: &Path) -> Option<String> {
 }
 
 /// Reject a global `--dupes-*` option on a bare run without the duplication
-/// analysis, and `--churn-file` on a bare run without the health analysis.
-/// Only these analyses read the options.
+/// analysis, `--churn-file` on a bare run without the health analysis, and
+/// `--type-aware-project` on a bare run without the dead-code and the health
+/// analysis. Only these analyses read the options. `--only` and `--skip`
+/// decide here; `duplicates.enabled: false` in the config gives an
+/// inert-flag notice when the run starts (see `combined::bare_analyses`).
 fn analysis_flag_without_analysis_error(cli: &Cli) -> Option<String> {
     if cli.command.is_some() {
         return None;
     }
-    let (_, run_dupes, run_health) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
+    let (run_check, run_dupes, run_health) =
+        crate::combined::resolve_analyses(&cli.only, &cli.skip);
+    if !run_check && !run_health && !cli.type_aware_project.is_empty() {
+        return Some(
+            "This run does not include the dead-code or the health analysis, which read `--type-aware-project`, so the option has no effect. Include dead-code or health in the run, or remove `--type-aware-project`.".to_owned(),
+        );
+    }
     if !run_dupes && let Some(flag) = cli.dupes_overrides().first_global_flag() {
         return Some(format!(
             "This run does not include the duplication analysis, which reads `{flag}`, so the option has no effect. Include dupes in the run, or remove `{flag}`."
@@ -929,8 +969,25 @@ mod tests {
             );
         }
         for args in [
+            &["--only", "dupes", "--type-aware-project", "tsconfig.json"][..],
+            &[
+                "--skip",
+                "dead-code,health",
+                "--type-aware-project",
+                "tsconfig.json",
+            ],
+        ] {
+            let message = analysis_flag_error(args).unwrap_or_else(|| panic!("{args:?}"));
+            assert!(
+                message
+                    .starts_with("This run does not include the dead-code or the health analysis"),
+                "{message}"
+            );
+        }
+        for args in [
             &["--dupes-min-lines", "40"][..],
             &["--only", "dupes", "--dupes-min-lines", "40"],
+            &["--only", "health", "--type-aware-project", "tsconfig.json"],
             &["--skip", "dead-code", "--churn-file", "c.json"],
             &["health", "--churn-file", "c.json"],
         ] {

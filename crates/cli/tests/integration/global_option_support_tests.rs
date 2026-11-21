@@ -65,13 +65,19 @@ const READ_OPTIONS: &[ReadCase] = &[
     ReadCase::plain("--diff-file"),
     ReadCase::plain("--churn-file"),
     ReadCase::plain("--baseline"),
+    // `--fail-on-regression` fails without a regression baseline, so the base
+    // run leaves it out, and the run with the option must name the path.
     ReadCase {
         extra: &["--fail-on-regression"],
+        require_named: true,
         ..ReadCase::plain("--regression-baseline")
     },
-    // Type-aware analysis on from each source, and off.
+    // Type-aware analysis on from each source, and off. The base run has
+    // `--type-aware` too, so a command that fails with `--type-aware` alone
+    // cannot pass.
     ReadCase {
         extra: &["--type-aware"],
+        extra_in_base: true,
         ..ReadCase::type_aware()
     },
     ReadCase {
@@ -95,6 +101,11 @@ struct ReadCase {
     config: Option<&'static str>,
     /// Whether the run uses the type-aware companion of the repository.
     sidecar: bool,
+    /// Whether the base run has the extra arguments too.
+    extra_in_base: bool,
+    /// Whether the run with the option passes only when its output names
+    /// the path. Otherwise exit code 2 also passes.
+    require_named: bool,
 }
 
 impl ReadCase {
@@ -105,6 +116,8 @@ impl ReadCase {
             env: &[],
             config: None,
             sidecar: false,
+            extra_in_base: false,
+            require_named: false,
         }
     }
 
@@ -595,9 +608,8 @@ fn each_skipped_command_is_a_supported_pair() {
 /// Run the command with a path that does not exist, and return the problem
 /// Run `fallow` in `project` with the arguments, the environment and the
 /// config of `case`, and with the extra arguments, the option and a path
-/// that does not exist when `with_option` holds. The extra arguments belong
-/// to the option: `--fail-on-regression` fails without a regression
-/// baseline. The run ends, or it is stopped after
+/// that does not exist when `with_option` holds. The base run has the extra
+/// arguments too when [`ReadCase::extra_in_base`] holds. The run ends, or it is stopped after
 /// [`FILE_TIMEOUT`] or when its output names the path.
 fn run_read_case(
     args: &[String],
@@ -621,8 +633,11 @@ fn run_read_case(
         cmd.env(name, value);
     }
     cmd.current_dir(project).args(args);
+    if with_option || case.extra_in_base {
+        cmd.args(case.extra);
+    }
     if with_option {
-        cmd.args(case.extra).arg(case.option).arg(&missing);
+        cmd.arg(case.option).arg(&missing);
     }
     let mut child = cmd
         .stdin(Stdio::null())
@@ -665,7 +680,7 @@ fn check_missing_path(args: &[String], case: &ReadCase, project: &Path, home: &P
         ));
     }
     let (status, named, stderr) = run_read_case(args, case, true, project, home);
-    if named || status.is_some_and(|status| status.code() == Some(2)) {
+    if named || (!case.require_named && status.is_some_and(|status| status.code() == Some(2))) {
         return FileCheck::Pass;
     }
     FileCheck::Problem(format!(
@@ -897,4 +912,69 @@ fn each_supported_dupes_override_changes_the_result() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A `--type-aware-project` path that does not exist fails with
+/// `--type-aware`, also when no command reads the project: an audit of a
+/// clean tree, and a bare run of the duplication analysis only.
+#[test]
+fn a_missing_type_aware_project_fails_without_a_reader() {
+    let project = committed_fixture();
+    let missing = project.path().join("missing-project.json");
+    let missing_arg = missing.to_str().expect("utf8 path");
+    for args in [&["audit", "--base", "HEAD"][..], &["--only", "dupes"]] {
+        let mut cmd = Command::new(fallow_bin());
+        cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+        scrub_analysis_env(&mut cmd);
+        let output = cmd
+            .current_dir(project.path())
+            .args(args)
+            .args([
+                "--type-aware",
+                "--type-aware-project",
+                missing_arg,
+                "--quiet",
+            ])
+            .output()
+            .expect("run fallow");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("missing-project.json"),
+            "{args:?}: {stderr}"
+        );
+    }
+}
+
+/// With `duplicates.enabled: false`, a global duplication option on the bare
+/// run has no effect. The run keeps its exit code and reports an inert-flag
+/// notice that names the option and the config key.
+#[test]
+fn a_duplication_option_on_a_run_with_duplication_off_gives_a_notice() {
+    let project = copy_fixture("duplicate-code");
+    std::fs::write(
+        project.path().join(".fallowrc.json"),
+        r#"{"duplicates":{"enabled":false}}"#,
+    )
+    .expect("config");
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_analysis_env(&mut cmd);
+    let output = cmd
+        .current_dir(project.path())
+        .args(["--dupes-min-lines", "40", "--format", "json", "--quiet"])
+        .output()
+        .expect("run fallow");
+    assert!(matches!(output.status.code(), Some(0 | 1)), "{output:?}");
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
+    let notices = doc["workspace_diagnostics"]
+        .as_array()
+        .expect("diagnostics");
+    assert!(
+        notices.iter().any(|notice| {
+            let text = notice.to_string();
+            text.contains("--dupes-min-lines") && text.contains("duplicates.enabled")
+        }),
+        "{notices:#?}"
+    );
 }

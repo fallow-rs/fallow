@@ -1528,11 +1528,13 @@ the file, or the command line fails. A command that does not read
 it with "`fallow <command>` does not read `<option>`". Two exceptions are on
 purpose: a command that reads no project accepts `--root`, because a caller
 can pass it to each command, and `audit-cache` ignores `--config`, so a config
-that does not load cannot block the cleanup. A command that reads
-`--type-aware-project` fails with exit 2 when the option has no effect: when
-type-aware analysis is off for the run, and, when it is on from the flag,
-`FALLOW_TYPE_AWARE` or `typeAware.enabled`, for a project path that does not
-exist. The type-aware run skips a missing project in silence. A command that prints its output to
+that does not load cannot block the cleanup. With `--type-aware` on the
+command line, a `--type-aware-project` path that does not exist fails at
+startup, also when no command reads the project. A command that reads
+`--type-aware-project` also fails with exit 2 when type-aware analysis is
+off for the run, and, when `FALLOW_TYPE_AWARE` or `typeAware.enabled` turns
+it on, for a project path that does not exist. The type-aware run skips a
+missing project in silence. A command that prints its output to
 stdout, such as `recommend` or `impact`, rejects `--output-file`. A command
 that writes the file only with some output formats has the status
 `supported_with_formats`: `agent` and `rule-pack list` with `--format json`,
@@ -1547,9 +1549,12 @@ A command keeps its own check for a rule that depends on more than the
 command and the option. Examples: `similar-code` checks the options of each
 subcommand, `architecture --shared-state` rejects `--sarif-file`, and a bare
 run without the dead-code analysis rejects `--sarif-file` and the regression
-options. A bare run without the duplication analysis rejects the global
-`--dupes-*` options, and a bare run without the health analysis rejects
-`--churn-file`. The options of the
+options. With `--only` or `--skip`, a bare run without the duplication analysis
+rejects the global `--dupes-*` options, a bare run without the health
+analysis rejects `--churn-file`, and a bare run without the dead-code and the
+health analysis rejects `--type-aware-project`. With `duplicates.enabled:
+false` in the config, a global `--dupes-*` option gives an inert-flag notice
+and keeps the exit code, as `--dupes-baseline` does. The options of the
 bare run that are not global (`--only`, `--score`, `--dupes-baseline` and the
 others) are not in the table. `doctor` and `similar-code` reject them through
 `first_bare_run_option`.
