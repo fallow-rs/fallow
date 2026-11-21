@@ -210,6 +210,7 @@ jobs:
               - 'crates/cli/tests/integration/audit_tests.rs'
               - 'crates/cli/tests/integration/audit_orphaned_code_tests.rs'
               - 'crates/cli/tests/integration/exit_code_tests.rs'
+              - 'crates/cli/tests/integration/global_option_support_tests.rs'
               - 'crates/cli/src/agent_install/mcp.rs'
               - 'crates/cli/src/agent_install/mod.rs'
               - 'crates/cli/src/agent_install/status.rs'
