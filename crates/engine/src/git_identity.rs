@@ -12,8 +12,11 @@ use crate::repo_refs::run_git;
 #[must_use]
 pub fn current_user_identities(root: &Path) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
+    let name = read_git_config(root, "user.name");
     let raw = read_git_config(root, "user.email");
-    let resolved = raw.as_deref().and_then(|email| mailmap_email(root, email));
+    let resolved = raw
+        .as_deref()
+        .and_then(|email| mailmap_email(root, name.as_deref(), email));
     for email in [raw, resolved].into_iter().flatten() {
         let handle = ContributorId::new(&email).handle().to_owned();
         for id in [handle, email] {
@@ -22,7 +25,7 @@ pub fn current_user_identities(root: &Path) -> Vec<String> {
             }
         }
     }
-    if let Some(name) = read_git_config(root, "user.name") {
+    if let Some(name) = name {
         ids.push(name);
     }
     ids
@@ -33,16 +36,18 @@ pub fn current_user_identities(root: &Path) -> Vec<String> {
 #[must_use]
 pub fn current_user_email(root: &Path) -> Option<String> {
     let email = read_git_config(root, "user.email")?;
-    Some(mailmap_email(root, &email).unwrap_or(email))
+    let name = read_git_config(root, "user.name");
+    Some(mailmap_email(root, name.as_deref(), &email).unwrap_or(email))
 }
 
 fn read_git_config(root: &Path, key: &str) -> Option<String> {
     run_git(root, &["config", "--get", key])
 }
 
-/// The address that the repository mailmap gives for `email`.
-fn mailmap_email(root: &Path, email: &str) -> Option<String> {
-    let contact = format!("<{email}>");
+/// The address that the repository mailmap gives for `email`. The name
+/// matters, because a mailmap entry can match on the commit name and email.
+fn mailmap_email(root: &Path, name: Option<&str>, email: &str) -> Option<String> {
+    let contact = name.map_or_else(|| format!("<{email}>"), |name| format!("{name} <{email}>"));
     let resolved = run_git(root, &["check-mailmap", &contact])?;
     let (_, rest) = resolved.rsplit_once('<')?;
     let (address, _) = rest.split_once('>')?;
@@ -102,6 +107,22 @@ mod tests {
                 "missing {expected}: {ids:?}"
             );
         }
+    }
+
+    #[test]
+    fn current_user_email_follows_a_mailmap_entry_keyed_by_name() {
+        let dir = repo_with_email("test@example.com");
+        let root = dir.path();
+        std::fs::write(
+            root.join(".mailmap"),
+            "Canonical User <canonical@example.com> Test User <test@example.com>\n",
+        )
+        .expect("write mailmap");
+
+        assert_eq!(
+            current_user_email(root).as_deref(),
+            Some("canonical@example.com")
+        );
     }
 
     #[test]

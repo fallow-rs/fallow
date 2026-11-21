@@ -177,6 +177,8 @@ pub fn compute_ownership_with_identities<'a>(
         .map(|author| author.id)
         .collect();
 
+    debug_assert_eq!(reviewer_identities.len(), suggested_reviewers.len());
+
     Some(OwnershipWithIdentities {
         metrics: OwnershipMetrics {
             bus_factor,
