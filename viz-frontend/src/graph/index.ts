@@ -8,7 +8,6 @@ export { graphInitSteps, initGraphNodes } from "./build";
 export { renderGraph } from "./render";
 export { minimapHit, minimapPan } from "./minimap";
 export {
-  centerOnFile,
   clearGraphFocus,
   clearRoadHover,
   dismissIntro,

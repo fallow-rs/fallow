@@ -893,6 +893,22 @@ const fitClusters = (state: AppState, gvs: GraphViewState): GraphViewState["tran
   );
 };
 
+/**
+ * Store a camera transform from d3 zoom. The graph and the treemap share one
+ * canvas, so a camera move that ends after a switch to the map view must not
+ * paint the graph.
+ */
+export const applyZoom = (
+  state: AppState,
+  gvs: GraphViewState,
+  transform: GraphViewState["transform"],
+  byUser: boolean,
+): void => {
+  if (byUser) gvs.userMoved = true;
+  gvs.transform = { x: transform.x, y: transform.y, k: transform.k };
+  if (state.view === "graph") renderGraph(state);
+};
+
 /** Attach the d3 pan and zoom behavior to the canvas, starting at `fit`. */
 const attachZoom = (
   state: AppState,
@@ -915,9 +931,7 @@ const attachZoom = (
       return !(event as MouseEvent).button;
     })
     .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
-      if (event.sourceEvent) gvs.userMoved = true;
-      gvs.transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
-      renderGraph(state);
+      applyZoom(state, gvs, event.transform, event.sourceEvent != null);
     });
   const initialTransform = zoomIdentity.translate(fit.x, fit.y).scale(fit.k);
   select(state.canvas).call(zoomBehavior).call(zoomBehavior.transform, initialTransform);
