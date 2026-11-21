@@ -439,8 +439,11 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str], epoch: Option<u64>) {
-        let mut command = crate::git_env::git_command(root);
-        command.current_dir(root).args(args).stdout(Stdio::null());
+        let mut command = crate::git_fixture::fixture_git_command_with_identity(
+            root,
+            crate::git_fixture::FixtureIdentity::RepositoryConfig,
+        );
+        command.args(args).stdout(Stdio::null());
         if let Some(epoch) = epoch {
             let stamp = format!("{epoch} +0000");
             command

@@ -260,12 +260,13 @@ mod tests {
     use crate::repo_refs::{TemporaryBaseWorktree, create_detached_base_worktree};
 
     fn git(root: &Path, args: &[&str]) -> String {
-        let output = crate::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-            .arg("-C")
-            .arg(root)
-            .args(args)
-            .output()
-            .expect("git command starts");
+        let output = crate::git_fixture::fixture_git_command_with_identity(
+            root,
+            crate::git_fixture::FixtureIdentity::RepositoryConfig,
+        )
+        .args(args)
+        .output()
+        .expect("git command starts");
         assert!(
             output.status.success(),
             "git {args:?} failed: {}",

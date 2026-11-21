@@ -65,6 +65,9 @@ testing = ["fallow-config/testing"]
 schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
+# The integration tests build their Git fixtures with `git_fixture`, which
+# only the `testing` feature exports.
+fallow-engine = { workspace = true, features = ["testing"] }
 fallow-config = { workspace = true, features = ["testing"] }
 fallow-graph = { workspace = true, features = ["read-trace"] }
 criterion = { workspace = true }

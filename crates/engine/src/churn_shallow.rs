@@ -159,9 +159,8 @@ mod tests {
     fn mailmap_fingerprint_reads_only_a_regular_file() {
         let dir = tempfile::tempdir().expect("repo tempdir");
         let root = dir.path();
-        let status = crate::git_env::git_command(root)
+        let status = crate::git_fixture::fixture_git_command(root)
             .args(["init", "--quiet"])
-            .current_dir(root)
             .status()
             .expect("run git init");
         assert!(status.success());

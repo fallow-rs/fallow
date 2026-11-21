@@ -5,10 +5,9 @@
     reason = "integration tests use expect to keep fixture setup concise"
 )]
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
 use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn_cached};
+use fallow_engine::git_fixture::{FixtureIdentity, fixture_git_command_with_identity};
+use std::path::{Path, PathBuf};
 
 const OLD_EMAIL: &str = "old@corp.test";
 const NEW_EMAIL: &str = "new@corp.test";
@@ -18,10 +17,7 @@ fn window() -> SinceDuration {
 }
 
 fn git(root: &Path, args: &[&str]) {
-    let mut command = Command::new("git");
-    fallow_engine::changed_files::clear_ambient_git_env(&mut command);
-    let status = command
-        .current_dir(root)
+    let status = fixture_git_command_with_identity(root, FixtureIdentity::RepositoryConfig)
         .args(args)
         .status()
         .expect("run git");

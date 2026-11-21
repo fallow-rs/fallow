@@ -101,16 +101,18 @@ mod tests {
 
     use super::super::{
         ChurnCoverage, analyze_churn_cached, analyze_fresh_churn, extend_churn_cache, get_head_sha,
-        git_command, parse_since, read_churn_cache,
+        parse_since, read_churn_cache,
     };
     use super::is_unknown_cutoff_filter;
 
     fn git(root: &Path, args: &[&str]) {
-        let status = git_command(root)
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("run git");
+        let status = crate::git_fixture::fixture_git_command_with_identity(
+            root,
+            crate::git_fixture::FixtureIdentity::RepositoryConfig,
+        )
+        .args(args)
+        .status()
+        .expect("run git");
         assert!(status.success(), "git {args:?} failed");
     }
 

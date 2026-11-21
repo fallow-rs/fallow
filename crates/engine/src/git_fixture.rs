@@ -13,27 +13,72 @@ const NULL_CONFIG: &str = "/dev/null";
 const FIXTURE_NAME: &str = "test";
 const FIXTURE_EMAIL: &str = "test@test.com";
 
-/// Build a `git` command for a test fixture in `dir`.
+/// Author and committer of the commits that a fixture command makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixtureIdentity {
+    /// A fixed author and committer in the environment. Git prefers it to
+    /// the repository config.
+    Fixed,
+    /// No identity in the environment, so the `user.name` and `user.email`
+    /// of the repository config (or of a `-c` option) apply. Use it for a
+    /// fixture that commits as different authors.
+    RepositoryConfig,
+}
+
+/// Environment variables that carry the author and committer of a commit.
+const IDENTITY_ENV_VARS: [&str; 4] = [
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+];
+
+/// Build a `git` command for a test fixture in `dir`, with the fixed
+/// identity ([`FixtureIdentity::Fixed`]).
 ///
 /// The command removes the ambient repository variables that a Git hook sets
 /// ([`crate::changed_files::AMBIENT_GIT_ENV_VARS`]), ignores the global and
 /// the system config, and uses a fixed author and committer. A hook, a
 /// signing key or an identity of the developer thus cannot reach the fixture.
+pub fn fixture_git_command(dir: &Path) -> Command {
+    fixture_git_command_with_identity(dir, FixtureIdentity::Fixed)
+}
+
+/// Build a `git` command for a test fixture in `dir`, with `identity`.
+///
+/// The command ignores the global and the system config and removes the
+/// ambient repository variables, as [`fixture_git_command`] does. With
+/// [`FixtureIdentity::RepositoryConfig`], the command also removes the
+/// identity variables, so an identity of the developer cannot reach the
+/// fixture.
 #[expect(
     clippy::disallowed_methods,
     reason = "test fixtures run git without the analysis wrapper of the engine"
 )]
-pub fn fixture_git_command(dir: &Path) -> Command {
+pub fn fixture_git_command_with_identity(dir: &Path, identity: FixtureIdentity) -> Command {
     let mut command = Command::new("git");
     crate::git_env::clear_ambient_git_env(&mut command);
     command
         .current_dir(dir)
         .env("GIT_CONFIG_GLOBAL", NULL_CONFIG)
-        .env("GIT_CONFIG_SYSTEM", NULL_CONFIG)
-        .env("GIT_AUTHOR_NAME", FIXTURE_NAME)
-        .env("GIT_AUTHOR_EMAIL", FIXTURE_EMAIL)
-        .env("GIT_COMMITTER_NAME", FIXTURE_NAME)
-        .env("GIT_COMMITTER_EMAIL", FIXTURE_EMAIL);
+        .env("GIT_CONFIG_SYSTEM", NULL_CONFIG);
+    match identity {
+        FixtureIdentity::Fixed => {
+            for (var, value) in IDENTITY_ENV_VARS.iter().zip([
+                FIXTURE_NAME,
+                FIXTURE_EMAIL,
+                FIXTURE_NAME,
+                FIXTURE_EMAIL,
+            ]) {
+                command.env(var, value);
+            }
+        }
+        FixtureIdentity::RepositoryConfig => {
+            for var in IDENTITY_ENV_VARS {
+                command.env_remove(var);
+            }
+        }
+    }
     command
 }
 
@@ -70,7 +115,10 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
-    use super::{fixture_git, fixture_git_capture, fixture_git_command};
+    use super::{
+        FixtureIdentity, fixture_git, fixture_git_capture, fixture_git_command,
+        fixture_git_command_with_identity,
+    };
 
     /// How a command sets one environment variable.
     #[derive(Debug, PartialEq, Eq)]
@@ -119,6 +167,51 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn the_repository_config_identity_removes_the_identity_variables() {
+        let command =
+            fixture_git_command_with_identity(Path::new("."), FixtureIdentity::RepositoryConfig);
+        for name in super::IDENTITY_ENV_VARS {
+            assert_eq!(env_state(&command, name), EnvState::Removed, "{name}");
+        }
+        for name in ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"] {
+            assert_eq!(
+                env_state(&command, name),
+                EnvState::Set("/dev/null".to_owned()),
+                "{name}"
+            );
+        }
+        for var in crate::git_env::AMBIENT_GIT_ENV_VARS {
+            assert_eq!(env_state(&command, var), EnvState::Removed, "{var}");
+        }
+    }
+
+    #[test]
+    fn a_repository_config_identity_commit_uses_the_repository_author() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let git = |args: &[&str]| {
+            let output =
+                fixture_git_command_with_identity(temp.path(), FixtureIdentity::RepositoryConfig)
+                    .args(args)
+                    .output()
+                    .expect("run git");
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Repo Author"]);
+        git(&["config", "user.email", "repo@example.test"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+        assert_eq!(
+            git(&["log", "-1", "--format=%an <%ae> %cn <%ce>"]),
+            "Repo Author <repo@example.test> Repo Author <repo@example.test>"
+        );
     }
 
     #[cfg(unix)]

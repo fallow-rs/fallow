@@ -59,9 +59,8 @@ mod tests {
     use super::*;
 
     fn git(root: &Path, args: &[&str]) {
-        let status = crate::git_env::git_command(root)
+        let status = crate::git_fixture::fixture_git_command(root)
             .args(args)
-            .current_dir(root)
             .status()
             .expect("run git");
         assert!(status.success(), "git {args:?} failed");
