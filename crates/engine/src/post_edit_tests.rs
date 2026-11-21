@@ -211,3 +211,23 @@ fn check_edits_refuses_the_removal_of_an_export_that_is_not_removable() {
         Ok(())
     );
 }
+
+#[test]
+fn refuses_an_edit_that_leaves_an_overload_half_exported() {
+    let source = "export function f(a: string): void;\nexport function f(a: unknown) {}\n";
+    assert_eq!(
+        check(
+            "a.ts",
+            source,
+            "export function f(a: unknown)",
+            "function f(a: unknown)"
+        ),
+        Err(PostEditViolation::MixedExport {
+            name: "f".to_owned()
+        })
+    );
+    let both = "function f(a: string): void;\nfunction f(a: unknown) {}\nf('');\n";
+    let path = Path::new("a.ts");
+    let before = SourceFacts::collect(path, source).expect("parses");
+    assert!(before.check(path, both, &[]).is_ok());
+}

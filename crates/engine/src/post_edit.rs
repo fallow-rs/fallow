@@ -67,6 +67,13 @@ pub enum PostEditViolation {
         /// The exported name.
         name: String,
     },
+    /// One name has an exported declaration and a local declaration, as
+    /// after the removal of `export` from one overload signature. TypeScript
+    /// requires all declarations of one name to be exported, or none.
+    MixedExport {
+        /// The declared name.
+        name: String,
+    },
     /// An import stays, but the export list that used its binding is gone.
     ImportLeftBehind {
         /// The local name of the import binding.
@@ -93,6 +100,9 @@ impl PostEditViolation {
             }
             Self::ExportInUse { name } => {
                 format!("the edit removes the export `{name}`, and other code still uses it")
+            }
+            Self::MixedExport { name } => {
+                format!("the edit leaves `{name}` with exported and local declarations")
             }
             Self::ImportLeftBehind { name } => {
                 format!("the edit leaves the import of `{name}` with no use")
@@ -145,6 +155,10 @@ pub struct SourceFacts {
     import_uses: FxHashMap<String, usize>,
     /// The local names that an `export { ... }` list without `from` names.
     listed_locals: FxHashSet<String>,
+    /// The names of the top-level `export <declaration>` statements.
+    exported_declarations: FxHashSet<String>,
+    /// The names of the top-level declarations without `export`.
+    local_declarations: FxHashSet<String>,
 }
 
 impl SourceFacts {
@@ -221,6 +235,20 @@ impl SourceFacts {
         unresolved.sort();
         if let Some(name) = unresolved.first() {
             return Err(PostEditViolation::UnresolvedReference {
+                name: (*name).clone(),
+            });
+        }
+        let mut mixed: Vec<&String> = facts
+            .exported_declarations
+            .intersection(&facts.local_declarations)
+            .filter(|name| {
+                !(self.exported_declarations.contains(*name)
+                    && self.local_declarations.contains(*name))
+            })
+            .collect();
+        mixed.sort();
+        if let Some(name) = mixed.first() {
+            return Err(PostEditViolation::MixedExport {
                 name: (*name).clone(),
             });
         }
@@ -418,6 +446,7 @@ fn collect_module_facts(program: &Program<'_>, facts: &mut SourceFacts) {
         match statement {
             Statement::ExportDeclaration(export) => {
                 if let Some((_, names)) = declaration_names(&export.declaration) {
+                    facts.exported_declarations.extend(names.iter().cloned());
                     facts.exports.extend(names);
                 }
             }
@@ -442,7 +471,11 @@ fn collect_module_facts(program: &Program<'_>, facts: &mut SourceFacts) {
                     facts.exports.insert(exported.name().to_string());
                 }
             }
-            _ => {}
+            other => {
+                if let Some((_, names)) = other.as_declaration().and_then(declaration_names) {
+                    facts.local_declarations.extend(names);
+                }
+            }
         }
     }
     let semantic = oxc_semantic::SemanticBuilder::new().build(program);

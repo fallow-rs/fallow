@@ -19,17 +19,24 @@
 //! export list whose import stays (issue #4833), and a removed `export` of a
 //! declaration that also exports a name in use (issue #4659).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use oxc_ast::ast::{
-    BinaryOperator, Expression, TSEnumDeclaration, TSEnumMemberName, UnaryOperator,
+    BinaryOperator, Class, Expression, TSEnumDeclaration, TSEnumMemberName, UnaryOperator,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::SourceType;
 use rayon::prelude::*;
 
-use crate::common::{copy_fixture_tree, fixture_path, parse_json, run_fallow_in_root};
+use crate::common::{
+    CommandOutput, copy_fixture_tree, fixture_path, parse_json, run_fallow_in_root,
+    run_fallow_raw_with_type_aware_sidecar,
+};
+
+/// The fixtures whose name starts with this prefix run with the type-aware
+/// sidecar, because the class member fixer needs its evidence.
+const TYPE_AWARE_PREFIX: &str = "type-aware-";
 
 /// The fix entry types of the source fixers.
 const SOURCE_FIX_TYPES: [&str; 3] = ["remove_export", "remove_enum_member", "remove_class_member"];
@@ -123,26 +130,78 @@ enum Value {
 
 /// The constant value of each enum member of a text, keyed by the enum
 /// name, the position among the enums of that name, and the member name.
-/// `None` when the parse fails.
-fn enum_values(path: &Path, text: &str) -> Option<BTreeMap<(String, usize, String), Value>> {
+/// The facts of one text that the guard compares.
+struct FileFacts {
+    /// The constant value of each enum member, keyed by the enum name, the
+    /// position among the enums of that name, and the member name.
+    values: BTreeMap<(String, usize, String), Value>,
+    /// The number of members of each `(class or enum name, member key)`.
+    members: BTreeMap<(String, String), usize>,
+    /// The names of the references without a declaration.
+    unresolved: BTreeSet<String>,
+}
+
+/// The facts of a text. `None` when the parse fails.
+fn file_facts(path: &Path, text: &str) -> Option<FileFacts> {
     let source_type = SourceType::from_path(path).ok()?;
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, text, source_type).parse();
     if parsed.fatal_error || parsed.diagnostics.has_errors() {
         return None;
     }
-    let mut collector = EnumValues::default();
+    let mut collector = EnumValues {
+        text,
+        ..EnumValues::default()
+    };
     collector.visit_program(&parsed.program);
-    Some(collector.values)
+    let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
+    let unresolved = semantic
+        .semantic
+        .scoping()
+        .root_unresolved_references()
+        .keys()
+        .map(ToString::to_string)
+        .collect();
+    Some(FileFacts {
+        values: collector.values,
+        members: collector.members,
+        unresolved,
+    })
+}
+
+/// The constant enum values of a text. `None` when the parse fails.
+fn enum_values(path: &Path, text: &str) -> Option<BTreeMap<(String, usize, String), Value>> {
+    file_facts(path, text).map(|facts| facts.values)
 }
 
 #[derive(Default)]
-struct EnumValues {
+struct EnumValues<'t> {
+    text: &'t str,
     values: BTreeMap<(String, usize, String), Value>,
+    members: BTreeMap<(String, String), usize>,
     seen: BTreeMap<String, usize>,
 }
 
-impl<'a> Visit<'a> for EnumValues {
+impl<'a> Visit<'a> for EnumValues<'_> {
+    fn visit_class(&mut self, it: &Class<'a>) {
+        let name = it
+            .id
+            .as_ref()
+            .map_or_else(String::new, |id| id.name.to_string());
+        for element in &it.body.body {
+            let span = element
+                .property_key()
+                .map_or_else(|| oxc_span::GetSpan::span(element), oxc_span::GetSpan::span);
+            let key = self
+                .text
+                .get(span.start as usize..span.end as usize)
+                .unwrap_or_default()
+                .to_owned();
+            *self.members.entry((name.clone(), key)).or_default() += 1;
+        }
+        oxc_ast_visit::walk::walk_class(self, it);
+    }
+
     fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
         let name = it.id.name.to_string();
         let position = *self
@@ -170,6 +229,7 @@ impl<'a> Visit<'a> for EnumValues {
                 Some(Value::Number(number)) => Some(Value::Number(number + 1.0)),
                 _ => None,
             };
+            *self.members.entry((name.clone(), key.clone())).or_default() += 1;
             if let Some(value) = value {
                 known.insert(key.clone(), value.clone());
                 self.values.insert((name.clone(), position, key), value);
@@ -298,17 +358,23 @@ fn finding_remains(report: &serde_json::Value, fix: &serde_json::Value) -> bool 
     }
 }
 
-fn dead_code(root: &Path) -> serde_json::Value {
-    let output = run_fallow_in_root("dead-code", root, &["--format", "json", "--quiet"]);
-    parse_json(&output)
+fn dead_code(root: &Path, type_aware: bool) -> serde_json::Value {
+    parse_json(&run(
+        root,
+        type_aware,
+        "dead-code",
+        &["--format", "json", "--quiet"],
+    ))
 }
 
-/// The edited files that no longer parse, and the kept enum members whose
-/// constant value changed.
-fn enum_problems(
+/// The edited files that no longer parse, the kept enum members whose
+/// constant value changed, the kept class and enum members that are gone,
+/// and the new references without a declaration. A member is kept unless an
+/// applied fix entry names it, or names its whole class or enum.
+fn file_problems(
     name: &str,
-    files_before: &BTreeMap<PathBuf, String>,
-    files_after: &BTreeMap<PathBuf, String>,
+    (files_before, files_after): (&BTreeMap<PathBuf, String>, &BTreeMap<PathBuf, String>),
+    applied: &[serde_json::Value],
 ) -> Vec<String> {
     let mut problems = Vec::new();
     for (path, before) in files_before {
@@ -318,30 +384,73 @@ fn enum_problems(
         if after == before {
             continue;
         }
-        let Some(values_before) = enum_values(path, before) else {
+        let Some(facts_before) = file_facts(path, before) else {
             continue;
         };
-        let Some(values_after) = enum_values(path, after) else {
-            problems.push(format!(
-                "{name}: {} does not parse after the fix",
-                path.display()
-            ));
+        let display = path.display();
+        let Some(facts_after) = file_facts(path, after) else {
+            problems.push(format!("{name}: {display} does not parse after the fix"));
             continue;
         };
-        for (key, value) in &values_after {
-            if let Some(old) = values_before.get(key)
+        for (key, value) in &facts_after.values {
+            if let Some(old) = facts_before.values.get(key)
                 && old != value
             {
                 problems.push(format!(
-                    "{name}: {} changes {}.{} from {old:?} to {value:?}",
-                    path.display(),
-                    key.0,
-                    key.2
+                    "{name}: {display} changes {}.{} from {old:?} to {value:?}",
+                    key.0, key.2
                 ));
             }
         }
+        let relative = path.to_string_lossy().replace('\\', "/");
+        let entries: Vec<&serde_json::Value> = applied
+            .iter()
+            .filter(|fix| fix["path"].as_str() == Some(relative.as_str()))
+            .collect();
+        for ((container, member), count) in &facts_before.members {
+            let targeted = entries
+                .iter()
+                .filter(|fix| {
+                    // The parent of a class member entry is the name that the
+                    // analysis gives the class, such as the variable of a
+                    // class expression, so only the member name must match.
+                    fix["name"].as_str() == Some(member.as_str())
+                        && (fix["type"] == "remove_class_member"
+                            || fix["parent"].as_str() == Some(container.as_str()))
+                })
+                .count();
+            let whole = entries.iter().any(|fix| {
+                fix["type"] == "remove_export" && fix["name"].as_str() == Some(container.as_str())
+            });
+            let now = facts_after
+                .members
+                .get(&(container.clone(), member.clone()))
+                .copied()
+                .unwrap_or_default();
+            if !whole && now + targeted < *count {
+                problems.push(format!(
+                    "{name}: {display} loses the kept member {container}.{member}"
+                ));
+            }
+        }
+        for reference in facts_after.unresolved.difference(&facts_before.unresolved) {
+            problems.push(format!(
+                "{name}: {display} has a new reference without a declaration: `{reference}`"
+            ));
+        }
     }
     problems
+}
+
+/// Run `subcommand` on `root`, with the type-aware sidecar when `type_aware`.
+fn run(root: &Path, type_aware: bool, subcommand: &str, args: &[&str]) -> CommandOutput {
+    if !type_aware {
+        return run_fallow_in_root(subcommand, root, args);
+    }
+    let root_arg = root.to_string_lossy();
+    let mut full = vec![subcommand, "--root", &root_arg, "--type-aware"];
+    full.extend_from_slice(args);
+    run_fallow_raw_with_type_aware_sidecar(&full)
 }
 
 /// The problems that `fix --yes` gives on a copy of the fixture at `source`.
@@ -349,11 +458,17 @@ fn enum_problems(
 /// each applied fix entry.
 fn check_fixture(source: &Path) -> Option<(Vec<String>, Vec<String>)> {
     let name = source.file_name()?.to_string_lossy().to_string();
+    let type_aware = name.starts_with(TYPE_AWARE_PREFIX);
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     copy_fixture_tree(source, root);
 
-    let preview = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    let preview = run(
+        root,
+        type_aware,
+        "fix",
+        &["--dry-run", "--format", "json", "--quiet"],
+    );
     let Ok(preview) = serde_json::from_str::<serde_json::Value>(&preview.stdout) else {
         return None;
     };
@@ -371,8 +486,13 @@ fn check_fixture(source: &Path) -> Option<(Vec<String>, Vec<String>)> {
 
     let files_before = script_files(root);
     let others_before = other_files(root);
-    let report_before = dead_code(root);
-    let applied = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let report_before = dead_code(root, type_aware);
+    let applied = run(
+        root,
+        type_aware,
+        "fix",
+        &["--yes", "--format", "json", "--quiet"],
+    );
     restore_other_files(root, &others_before);
     let Ok(applied) = serde_json::from_str::<serde_json::Value>(&applied.stdout) else {
         return Some((
@@ -384,9 +504,16 @@ fn check_fixture(source: &Path) -> Option<(Vec<String>, Vec<String>)> {
         ));
     };
     let files_after = script_files(root);
-    let report_after = dead_code(root);
+    let report_after = dead_code(root, type_aware);
 
-    let mut problems = enum_problems(&name, &files_before, &files_after);
+    let applied_fixes: Vec<serde_json::Value> = applied["fixes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|fix| fix["applied"] == true)
+        .cloned()
+        .collect();
+    let mut problems = file_problems(&name, (&files_before, &files_after), &applied_fixes);
     let unresolved_before = unresolved_imports(&report_before);
     for import in unresolved_imports(&report_after) {
         if !unresolved_before.contains(&import) {
@@ -429,7 +556,7 @@ fn fix_output_keeps_program_meaning() {
         "only {} fixtures have a planned source fix",
         checked.len()
     );
-    for kind in ["remove_export", "remove_enum_member"] {
+    for kind in SOURCE_FIX_TYPES {
         assert!(
             checked
                 .iter()

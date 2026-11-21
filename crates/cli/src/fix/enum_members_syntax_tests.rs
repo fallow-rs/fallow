@@ -81,6 +81,7 @@ fn enum_fix_reports_only_the_members_it_removes_from_two_enums_with_one_name() {
     apply_enum_member_fixes(EnumMemberFixInput {
         root: dir.path(),
         members_by_file: &map,
+        foldable: &|_, _| true,
         hashes: &capture_hashes(&[&file]),
         plan: &mut plan,
         output: OutputFormat::Json,
@@ -126,6 +127,7 @@ fn enum_fix_does_not_fold_an_exported_enum_whose_name_has_another_enum() {
     apply_enum_member_fixes(EnumMemberFixInput {
         root: dir.path(),
         members_by_file: &map,
+        foldable: &|_, _| true,
         hashes: &capture_hashes(&[&file]),
         plan: &mut plan,
         output: OutputFormat::Json,

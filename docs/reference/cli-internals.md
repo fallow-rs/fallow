@@ -694,16 +694,24 @@ line states exit code 0.
   The check drops a group when the edited text does not parse, when a kept
   class or enum member is lost, when a kept enum member gets another constant
   value, when a reference that resolved before is unresolved after, when an
-  import stays whose binding only a removed export list used, or when the
+  import stays whose binding only a removed export list used, when one name
+  gets both exported and local declarations, or when the
   group removes an export that is not an unused-export finding or that a kept
   re-export still reads. A kept member is a member outside each deletion of
   the group. When the groups of a file fail together, the check splits them
-  in halves until each failing group is alone. It also drops each group that
+  in halves until each failing group is alone, for at most `MAX_BISECT_RUNS`
+  checks; after that, each group of a failing half goes. It also drops each group that
   shares a line with a dropped group, because the fix entries are matched to
   a group by their path and line. A file of a parsed type that does not parse
   before the edit keeps all its text. The JSON output lists no entry for a
   dropped group, and a human format prints one `Kept <path>:<line>` line on
-  stderr. The preview lines that a fixer printed before the check stay. The language server quick fix and the CI suggestion blocks call
+  stderr. The source fixers keep their `Would remove` and `Removed` lines in
+  the plan (`FixPlan::preview`), and the orchestrator prints them after the
+  check, without the lines of dropped edits. The export fixer removes the
+  `export` of each statement that exports the same single name, such as the
+  overload signatures of a function. The enum fixer removes a whole enum only
+  when the enum itself is an unused export; another enum with all members
+  unused keeps an empty body. The language server quick fix and the CI suggestion blocks call
   `fallow_engine::post_edit::check_edits`, which is the same rule for one
   file. A guard before an edit (`KeptReExport`, `SharedDeclarationInUse`, the
   enum value pins) stays: it gives a skip record or a safe edit, and the

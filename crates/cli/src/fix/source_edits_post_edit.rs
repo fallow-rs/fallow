@@ -98,19 +98,20 @@ impl SourceSnapshots {
                 continue;
             };
             let groups = group_numbers(snapshot);
+            let line_starts = line_starts(&snapshot.content);
             let mut check = FileCheck {
                 path: path.clone(),
                 before,
                 lines: groups
                     .iter()
-                    .map(|group| group_lines(snapshot, *group))
+                    .map(|group| group_lines(snapshot, &line_starts, *group))
                     .collect(),
                 accepted: vec![true; groups.len()],
                 groups,
                 exports: FxHashSet::default(),
                 dropped: Vec::new(),
             };
-            check.settle(snapshot, |_| Ok(()));
+            check.settle(snapshot, |_, _| Ok(()));
             checks.push(check);
         }
         (checks, unchecked)
@@ -123,30 +124,30 @@ impl SourceSnapshots {
         unused_exports: &FxHashMap<PathBuf, FxHashSet<String>>,
         re_exports: &ReExportIndex<'_>,
     ) {
+        let mut exports_now: ExportsNow = checks
+            .iter()
+            .map(|check| (check.path.clone(), check.exports.clone()))
+            .collect();
         let mut changed = true;
         while changed {
             changed = false;
-            let exports_now: ExportsNow = checks
-                .iter()
-                .map(|check| (check.path.clone(), check.exports.clone()))
-                .collect();
             for check in checks.iter_mut() {
                 let snapshot = &self.by_path[&check.path];
                 let path = check.path.clone();
-                let before_exports = check.before.exports().clone();
-                let exports_check = |exports: &FxHashSet<String>| {
+                let exports_check = |before: &FxHashSet<String>, after: &FxHashSet<String>| {
                     removed_exports_are_unused(
                         &path,
-                        (&before_exports, exports),
+                        (before, after),
                         unused_exports,
                         re_exports,
                         &exports_now,
                     )
                 };
-                if exports_check(&check.exports).is_ok() {
+                if exports_check(check.before.exports(), &check.exports).is_ok() {
                     continue;
                 }
                 check.settle(snapshot, exports_check);
+                exports_now.insert(path, check.exports.clone());
                 changed = true;
             }
         }
@@ -163,10 +164,11 @@ impl SourceSnapshots {
             let Some(snapshot) = self.by_path.get_mut(&path) else {
                 continue;
             };
+            let line_starts = line_starts(&snapshot.content);
             for group in group_numbers(snapshot) {
                 dropped.push(DroppedEdit {
                     path: path.clone(),
-                    lines: group_lines(snapshot, group),
+                    lines: group_lines(snapshot, &line_starts, group),
                     violation: PostEditViolation::DoesNotParse,
                 });
             }
@@ -192,29 +194,42 @@ impl SourceSnapshots {
 
 impl FileCheck {
     /// Keep the accepted groups when they pass together. Otherwise split
-    /// them in halves until each failing group is alone, and drop it. Then
-    /// drop each accepted group that shares a line with a dropped group, so
-    /// that each line of the fix output belongs to written edits only.
+    /// them in halves until each failing group is alone, and drop it. After
+    /// [`MAX_BISECT_RUNS`] checks, each group of a failing half goes without
+    /// more splits. Then drop each accepted group that shares a line with a
+    /// dropped group, so that each line of the fix output belongs to written
+    /// edits only. `extra` gets the exports before and after the edits.
     fn settle(
         &mut self,
         snapshot: &SourceSnapshot,
-        extra: impl Fn(&FxHashSet<String>) -> Result<(), PostEditViolation>,
+        extra: impl Fn(&FxHashSet<String>, &FxHashSet<String>) -> Result<(), PostEditViolation>,
     ) {
         let run = |mask: &[bool]| {
             let facts = evaluate(&self.path, &self.before, snapshot, &self.groups, mask)?;
-            extra(facts.exports())?;
+            extra(self.before.exports(), facts.exports())?;
             Ok::<SourceFacts, PostEditViolation>(facts)
         };
-        if let Ok(facts) = run(&self.accepted) {
-            self.exports.clone_from(facts.exports());
-            return;
-        }
+        let failure = match run(&self.accepted) {
+            Ok(facts) => {
+                self.exports.clone_from(facts.exports());
+                return;
+            }
+            Err(violation) => violation,
+        };
         let candidates: Vec<usize> = (0..self.groups.len())
             .filter(|position| self.accepted[*position])
             .collect();
         let mut mask = vec![false; self.groups.len()];
         let mut dropped = Vec::new();
-        bisect(&candidates, &mut mask, &mut dropped, &run);
+        let mut budget = MAX_BISECT_RUNS;
+        bisect(
+            Bisect {
+                candidates: &candidates,
+                failure: &failure,
+            },
+            (&mut mask, &mut dropped, &mut budget),
+            &run,
+        );
         self.drop_shared_lines(&mut mask, &mut dropped);
         match run(&mask) {
             Ok(facts) => self.exports.clone_from(facts.exports()),
@@ -233,14 +248,16 @@ impl FileCheck {
     }
 
     fn drop_shared_lines(&self, mask: &mut [bool], dropped: &mut Vec<(usize, PostEditViolation)>) {
+        let mut gone_lines: FxHashSet<usize> = FxHashSet::default();
         let mut position = 0;
         while position < dropped.len() {
             let (gone, violation) = dropped[position].clone();
+            gone_lines.extend(self.lines[gone].iter().copied());
             for kept in 0..mask.len() {
                 if mask[kept]
                     && self.lines[kept]
                         .iter()
-                        .any(|line| self.lines[gone].contains(line))
+                        .any(|line| gone_lines.contains(line))
                 {
                     mask[kept] = false;
                     dropped.push((kept, violation.clone()));
@@ -251,30 +268,65 @@ impl FileCheck {
     }
 }
 
-/// Accept `candidates` on top of `mask` when they pass together. Otherwise
-/// split them, and drop a candidate that fails alone.
+/// The number of checks that one failing file gets before each group of a
+/// failing half goes without more splits. Each check parses the file.
+const MAX_BISECT_RUNS: usize = 64;
+
+/// One step of [`bisect`]: the candidates, and the violation of the set that
+/// holds them.
+#[derive(Clone, Copy)]
+struct Bisect<'c> {
+    candidates: &'c [usize],
+    failure: &'c PostEditViolation,
+}
+
+/// Accept the candidates on top of `mask` when they pass together.
+/// Otherwise split them, and drop a candidate that fails alone. When the
+/// budget is used up, drop each candidate of a failing set.
 fn bisect(
-    candidates: &[usize],
-    mask: &mut Vec<bool>,
-    dropped: &mut Vec<(usize, PostEditViolation)>,
+    step: Bisect<'_>,
+    (mask, dropped, budget): (
+        &mut Vec<bool>,
+        &mut Vec<(usize, PostEditViolation)>,
+        &mut usize,
+    ),
     run: &impl Fn(&[bool]) -> Result<SourceFacts, PostEditViolation>,
 ) {
-    let Some((&first, rest)) = candidates.split_first() else {
+    let Bisect {
+        candidates,
+        failure,
+    } = step;
+    if candidates.is_empty() {
         return;
-    };
+    }
+    if *budget == 0 {
+        dropped.extend(
+            candidates
+                .iter()
+                .map(|position| (*position, failure.clone())),
+        );
+        return;
+    }
+    *budget -= 1;
     let mut trial = mask.clone();
     for position in candidates {
         trial[*position] = true;
     }
-    match run(&trial) {
-        Ok(_) => *mask = trial,
-        Err(violation) if rest.is_empty() => dropped.push((first, violation)),
-        Err(_) => {
-            let (left, right) = candidates.split_at(candidates.len() / 2);
-            bisect(left, mask, dropped, run);
-            bisect(right, mask, dropped, run);
-        }
+    let Err(violation) = run(&trial) else {
+        *mask = trial;
+        return;
+    };
+    if let [only] = candidates {
+        dropped.push((*only, violation));
+        return;
     }
+    let (left, right) = candidates.split_at(candidates.len() / 2);
+    let half = |candidates| Bisect {
+        candidates,
+        failure: &violation,
+    };
+    bisect(half(left), (mask, dropped, budget), run);
+    bisect(half(right), (mask, dropped, budget), run);
 }
 
 /// The distinct group numbers of the queued edits, in queue order.
@@ -353,17 +405,20 @@ fn removed_exports_are_unused(
     Ok(())
 }
 
+/// The byte offset of the start of each line of `content`.
+fn line_starts(content: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(content.match_indices('\n').map(|(offset, _)| offset + 1))
+        .collect()
+}
+
 /// The 1-based lines that the edits of `group` touch. A deletion that starts
 /// at the line ending before a line touches that line, not the line before.
-fn group_lines(snapshot: &SourceSnapshot, group: usize) -> Vec<usize> {
+/// `line_starts` holds the start of each line of the analysed text.
+fn group_lines(snapshot: &SourceSnapshot, line_starts: &[usize], group: usize) -> Vec<usize> {
     let content = snapshot.content.as_str();
     let line_ending = snapshot.meta.line_ending;
-    let line_of = |offset: usize| {
-        content
-            .get(..offset)
-            .map_or(0, |before| before.matches('\n').count())
-            + 1
-    };
+    let line_of = |offset: usize| line_starts.partition_point(|start| *start <= offset);
     let mut lines = Vec::new();
     for (_, edit) in snapshot.edits.iter().filter(|(number, _)| *number == group) {
         let mut start = edit.start;
@@ -418,7 +473,7 @@ pub(in crate::fix) fn withdraw_dropped_fixes(
         if !matches!(output, fallow_config::OutputFormat::Json) {
             let line = edit.lines.first().copied().unwrap_or(1);
             eprintln!(
-                "Kept {relative}:{line} as it is, so the planned edit listed above for this line does not happen: {}. Edit the file by hand, then run `fallow fix --dry-run` again.",
+                "Kept {relative}:{line} as it is: {}. Edit the file by hand, then run `fallow fix --dry-run` again.",
                 edit.violation.describe(),
             );
         }

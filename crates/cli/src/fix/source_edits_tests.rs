@@ -342,6 +342,39 @@ mod post_edit_check {
     }
 
     #[test]
+    fn drops_each_failing_group_when_many_groups_fail() {
+        let path = Path::new("/project/src/a.ts");
+        let count = 200;
+        let declarations: Vec<String> = (0..count)
+            .map(|number| format!("const v{number} = {number};\n"))
+            .collect();
+        let declarations = declarations.concat();
+        let names: Vec<String> = (0..count).map(|number| format!("v{number}")).collect();
+        let content = format!(
+            "{declarations}console.log({});\nconst spare = 1;\n",
+            names.join(", ")
+        );
+        let mut snapshots = snapshots_with(path, &content);
+        for number in 0..count {
+            let deletion = replace(&content, &format!("const v{number} = {number};\n"), "");
+            assert_eq!(snapshots.queue(path, vec![deletion]), QueueOutcome::Queued);
+        }
+        let spare = replace(&content, "const spare = 1;\n", "");
+        assert_eq!(snapshots.queue(path, vec![spare]), QueueOutcome::Queued);
+        let dropped = check(&mut snapshots);
+        assert!(
+            dropped.len() >= count,
+            "each failing group goes: {}",
+            dropped.len()
+        );
+        let rewrites = snapshots.into_rewrites();
+        let after = rewrites
+            .first()
+            .map(|(_, _, bytes)| String::from_utf8(bytes.clone()).unwrap());
+        assert!(after.is_none_or(|text| text.contains("const v0 = 0;")));
+    }
+
+    #[test]
     fn drops_a_passing_group_that_shares_a_line_with_a_dropped_group() {
         let path = Path::new("/project/src/a.ts");
         let content = "class K { a = 1; b() {} }\nnew K();\n";

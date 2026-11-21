@@ -168,8 +168,8 @@ fn apply_file(input: ClassMemberFileInput<'_>) {
             continue;
         }
         record_fix(
-            output,
-            dry_run,
+            (output, dry_run),
+            (&mut *plan, path),
             relative,
             member.finding,
             member.decision,
@@ -286,8 +286,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn record_fix(
-    output: OutputFormat,
-    dry_run: bool,
+    (output, dry_run): (OutputFormat, bool),
+    (plan, path): (&mut FixPlan, &Path),
     relative: &Path,
     finding: &UnusedClassMemberFinding,
     decision: &SemanticCandidateDecision,
@@ -295,7 +295,7 @@ fn record_fix(
 ) {
     if !matches!(output, OutputFormat::Json) {
         let action = if dry_run { "Would remove" } else { "Removed" };
-        eprintln!(
+        let text = format!(
             "{action} class member from {}:{} `{}.{}`: {}",
             relative.to_string_lossy().replace('\\', "/"),
             finding.member.line,
@@ -303,6 +303,7 @@ fn record_fix(
             finding.member.member_name,
             decision.explanation,
         );
+        plan.preview(path, finding.member.line as usize, text);
     }
     let mut record = serde_json::json!({
         "type": "remove_class_member",

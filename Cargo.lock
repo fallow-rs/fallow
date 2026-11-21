@@ -1174,6 +1174,7 @@ dependencies = [
  "oxc_ast_visit",
  "oxc_coverage_instrument",
  "oxc_parser",
+ "oxc_semantic",
  "oxc_span",
  "proc-macro2",
  "proptest",

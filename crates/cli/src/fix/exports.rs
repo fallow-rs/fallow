@@ -132,21 +132,18 @@ pub(super) struct ExportFixInput<'a, 'export> {
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
-fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
+fn dry_run_export_line(relative: &Path, fix: &ExportFix) -> String {
     let relative_display = relative.to_string_lossy().replace('\\', "/");
-    if matches!(fix.edit, ExportEdit::EnumDeclaration(_)) {
-        eprintln!(
-            "Would remove enum declaration from {relative_display}:{} `{}`",
-            fix.line_idx + 1,
-            fix.export_name,
-        );
+    let what = if matches!(fix.edit, ExportEdit::EnumDeclaration(_)) {
+        "enum declaration"
     } else {
-        eprintln!(
-            "Would remove export from {relative_display}:{} `{}`",
-            fix.line_idx + 1,
-            fix.export_name,
-        );
-    }
+        "export"
+    };
+    format!(
+        "Would remove {what} from {relative_display}:{} `{}`",
+        fix.line_idx + 1,
+        fix.export_name,
+    )
 }
 
 fn push_export_fix_json(
@@ -249,13 +246,13 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
         if input.dry_run {
             push_dry_run_export_fixes(
                 input.output,
-                input.fixes,
+                (input.fixes, &mut *input.plan),
                 file_plan.relative,
                 file_plan.path,
                 &file_plan.fixes,
             );
             if !matches!(input.output, OutputFormat::Json) {
-                emit_dry_run_import_removals(file_plan.relative, &import_removals);
+                preview_import_removals(input.plan, &file_plan, &import_removals);
             }
         } else {
             for fix in &file_plan.fixes {
@@ -475,14 +472,17 @@ fn removed_list_references(
     counts
 }
 
-fn emit_dry_run_import_removals(relative: &Path, removals: &[ImportRemoval]) {
-    let relative_display = relative.to_string_lossy().replace('\\', "/");
+fn preview_import_removals(
+    plan: &mut FixPlan,
+    file_plan: &FileExportPlan<'_>,
+    removals: &[ImportRemoval],
+) {
+    let relative_display = file_plan.relative.to_string_lossy().replace('\\', "/");
     for removal in removals {
         for name in &removal.names {
-            eprintln!(
-                "Would remove import from {relative_display}:{} `{name}`",
-                removal.start_line + 1,
-            );
+            let line = removal.start_line + 1;
+            let text = format!("Would remove import from {relative_display}:{line} `{name}`");
+            plan.preview(file_plan.path, line, text);
         }
     }
 }
@@ -594,6 +594,24 @@ fn statement_edit(
     })
 }
 
+/// `statement`, and each other statement that exports only the one name of
+/// `statement`, such as the overload signatures of a function. TypeScript
+/// requires all declarations of one name to be exported, or none, so the
+/// fixer removes the `export` of each of them.
+fn same_name_statements<'i>(
+    index: &'i SourceEditIndex,
+    statement: &'i ExportStatement,
+) -> impl Iterator<Item = &'i ExportStatement> {
+    let single = match statement.names.as_slice() {
+        [name] => Some(name.as_str()),
+        _ => None,
+    };
+    index.statements().iter().filter(move |other| {
+        other.start == statement.start
+            || single.is_some_and(|name| matches!(other.names.as_slice(), [other] if other == name))
+    })
+}
+
 /// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
 fn is_export_list(after_export: &str) -> bool {
     let s = after_export.trim_start();
@@ -603,14 +621,14 @@ fn is_export_list(after_export: &str) -> bool {
 
 fn push_dry_run_export_fixes(
     output: OutputFormat,
-    fixes: &mut Vec<serde_json::Value>,
+    (fixes, plan): (&mut Vec<serde_json::Value>, &mut FixPlan),
     relative: &Path,
     path: &Path,
     line_fixes: &[ExportFix],
 ) {
     for fix in line_fixes {
         if !matches!(output, OutputFormat::Json) {
-            emit_dry_run_export_fix(relative, fix);
+            plan.preview(path, fix.line_idx + 1, dry_run_export_line(relative, fix));
         }
         push_export_fix_json(fixes, relative, path, fix, None);
     }
@@ -638,15 +656,18 @@ fn export_source_edits(
         let on_line = || line_fixes.iter().filter(|fix| fix.edit_line() == edit_line);
         for fix in on_line() {
             if let ExportEdit::Keyword { start, .. } = fix.edit
-                && let Some(edit) = index
-                    .and_then(|index| index.statement_at(start))
-                    .and_then(ExportStatement::keyword_edit)
+                && let Some(index) = index
+                && let Some(statement) = index.statement_at(start)
             {
-                edits.push(SourceEdit {
-                    start: edit.start as usize,
-                    end: edit.end as usize,
-                    replacement: edit.replacement,
-                });
+                edits.extend(
+                    same_name_statements(index, statement)
+                        .filter_map(ExportStatement::keyword_edit)
+                        .map(|edit| SourceEdit {
+                            start: edit.start as usize,
+                            end: edit.end as usize,
+                            replacement: edit.replacement,
+                        }),
+                );
             }
         }
         let Some(edit) = on_line()
