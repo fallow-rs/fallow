@@ -21,9 +21,15 @@ pub struct EffectFacts {
     /// Sorted names of exports that an Effect schema declares.
     pub schema_exports: Vec<String>,
     /// Exports that are schemas only when an imported binding is a schema
-    /// (`export const B = Imported.pipe(Schema.brand("B"))`). The analyze
+    /// (`export const B = Imported.pipe(Schema.brand("B"))`), or a function
+    /// that returns a schema (`export const B = makeImported()`). The analyze
     /// layer resolves the import to decide.
     pub derived_schema_exports: Vec<EffectDerivedSchema>,
+    /// Sorted names of exported functions whose each `return` is an Effect
+    /// schema (`export const makeUser = () => Schema.Struct({...})`). The
+    /// function itself stays a value export. A call of it in another module
+    /// gives a schema.
+    pub schema_factory_exports: Vec<String>,
 }
 
 /// An export whose chain starts at an imported binding.
@@ -33,6 +39,10 @@ pub struct EffectDerivedSchema {
     pub export_name: String,
     /// The local name of the import binding at the root of the chain.
     pub import_local: String,
+    /// The chain calls the import binding itself (`makeImported()`), so the
+    /// export is also a schema when the import is a function that returns a
+    /// schema.
+    pub through_call: bool,
 }
 
 /// A module-scope class that extends a tagged error constructor.

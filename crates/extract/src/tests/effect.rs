@@ -471,3 +471,248 @@ export default Rule.pipe(Schema.brand("Branded"))
         facts.schema_exports
     );
 }
+
+#[test]
+fn records_a_call_of_a_local_helper_that_returns_a_schema() {
+    let names = schema_exports(
+        r#"
+import * as S from "effect/Schema"
+const Text = S.String
+const makeNamed = () => S.Struct({ name: Text })
+function makeFn() { return S.Struct({ name: Text }) }
+const makeArg = (n: string) => S.Struct({ [n]: Text })
+const makeExpression = function () { return Text.pipe(S.brand("Named")) }
+function makeEither(strict: boolean) {
+  if (strict) {
+    return S.Struct({ name: Text })
+  }
+  return S.Struct({})
+}
+function makeOrThrow(ok: boolean) {
+  if (ok) return S.String
+  throw new Error("no schema")
+}
+function makeWithLocal() {
+  const base = S.Struct({ name: Text })
+  return base.pipe(S.annotations({ title: "Named" }))
+}
+function makeInner() { return makeNamed() }
+function makeOuter() { return makeInner().annotations({ title: "Outer" }) }
+export const FromHelper = makeNamed()
+export const FromFn = makeFn()
+export const FromArg = makeArg("x")
+export const FromExpression = makeExpression()
+export const FromEither = makeEither(true)
+export const FromThrow = makeOrThrow(true)
+export const FromLocal = makeWithLocal()
+export const FromNested = makeOuter()
+export const FromPipe = makeNamed().pipe(S.annotations({ title: "Piped" }))
+export const FromHoisted = makeLater()
+function makeLater() { return S.Number }
+const Step = makeNamed()
+export const FromStep = Step.annotations({ title: "Step" })
+const MakeTyped = (name: string) => S.Struct({ [name]: Text })
+type MakeTyped = typeof Text
+function overloaded(name: string): typeof Text
+function overloaded(name: number): typeof Text
+function overloaded(name: unknown) { return Text.pipe(S.annotations({ title: String(name) })) }
+export const FromTypedName = MakeTyped("x")
+export const FromOverload = overloaded(1)
+export default makeNamed()
+"#,
+    );
+    assert_eq!(
+        names,
+        vec![
+            "FromArg",
+            "FromEither",
+            "FromExpression",
+            "FromFn",
+            "FromHelper",
+            "FromHoisted",
+            "FromLocal",
+            "FromNested",
+            "FromOverload",
+            "FromPipe",
+            "FromStep",
+            "FromThrow",
+            "FromTypedName",
+            "default",
+        ]
+    );
+}
+
+#[test]
+fn a_helper_with_a_return_that_is_no_schema_gives_no_schema() {
+    let names = schema_exports(
+        r#"
+import * as S from "effect/Schema"
+const Text = S.String
+const makeNamed = () => S.Struct({ name: Text })
+const one = () => 1
+function mixed(flag: boolean) {
+  if (flag) return S.String
+  return "text"
+}
+function mayEnd(flag: boolean) {
+  if (flag) return S.String
+}
+function bare(flag: boolean) {
+  if (flag) return
+  return S.String
+}
+async function later() { return S.String }
+function* each() { return S.String }
+const laterArrow = async () => S.String
+function decoder() { return S.decodeUnknownSync(Text) }
+function fromParameter(schema: typeof Text) { return schema.pipe(S.brand("P")) }
+function nested() {
+  const inner = () => S.String
+  return inner
+}
+function looped(): unknown { return looped() }
+let reassigned = () => S.String
+reassigned = () => 1 as never
+function replaced() { return S.String }
+replaced = (() => 1) as never
+function curried() { return () => S.String }
+function twice() { return S.String }
+function twice() { return 1 }
+function conditional(flag: boolean) { return flag ? S.String : 1 }
+function logical(value: unknown) { return value || S.String }
+function sequence() { return (1, S.String) }
+function inTry() { try { return S.String } finally { one() } }
+function inSwitch(kind: number) { switch (kind) { default: return S.String } }
+function inLoop() { for (;;) { return S.String } }
+declare function declared(): typeof Text
+function merged() { return S.String }
+namespace merged { export const extra = 1 }
+function ping(): unknown { return pong() }
+function pong(): unknown { return ping() }
+function shadowed(Text: number) { return Text }
+let Changed = S.String
+Changed = 1 as never
+function fromChanged() { return Changed }
+function d1() { return S.String }
+function d2() { return d1() }
+function d3() { return d2() }
+function d4() { return d3() }
+function d5() { return d4() }
+export const NotSchema = (() => 1)()
+export const FromOne = one()
+export const FromMixed = mixed(true)
+export const FromMayEnd = mayEnd(true)
+export const FromBare = bare(true)
+export const FromAsync = later()
+export const FromGenerator = each()
+export const FromAsyncArrow = laterArrow()
+export const FromDecoder = decoder()
+export const FromParameter = fromParameter(Text)
+export const FromNestedFunction = nested()
+export const FromLoop = looped()
+export const FromReassigned = reassigned()
+export const FromReplaced = replaced()
+export const FromCurried = curried()
+export const FromTwice = twice()
+export const FromConditional = conditional(true)
+export const FromLogical = logical(1)
+export const FromSequence = sequence()
+export const FromTry = inTry()
+export const FromSwitch = inSwitch(1)
+export const FromLoopBody = inLoop()
+export const FromDeclared = declared()
+export const FromMerged = merged()
+export const FromPing = ping()
+export const FromShadowed = shadowed(1)
+export const FromChanged = fromChanged()
+export const ChangedCopy = Changed
+export const CalledTwice = makeNamed()()
+export const TooDeep = d5()
+export const HelperAlias = makeNamed
+export const MadeValue = makeNamed().make({ name: "x" })
+export { makeNamed }
+export function exportedHelper() { return S.String }
+"#,
+    );
+    assert!(names.is_empty(), "no export is a schema: {names:?}");
+}
+
+#[test]
+fn a_helper_is_a_schema_after_the_module_declares_the_schema_that_it_returns() {
+    let facts = facts(
+        r#"
+import * as S from "effect/Schema"
+export function makeBase() { return Base.annotations({ title: "Base" }) }
+export const TooEarly = makeBase()
+const Base = S.String
+export const AfterBase = makeBase()
+"#,
+    );
+    assert_eq!(facts.schema_exports, vec!["AfterBase"]);
+    assert_eq!(facts.schema_factory_exports, vec!["makeBase"]);
+}
+
+#[test]
+fn a_helper_within_the_depth_limit_is_a_schema_after_a_deeper_one_fails() {
+    let names = schema_exports(
+        r#"
+import * as S from "effect/Schema"
+function d1() { return S.String }
+function d2() { return d1() }
+function d3() { return d2() }
+function d4() { return d3() }
+function d5() { return d4() }
+export const TooDeep = d5()
+export const AtLimit = d4()
+"#,
+    );
+    assert_eq!(names, vec!["AtLimit"]);
+}
+
+#[test]
+fn records_exported_helpers_and_calls_of_imported_helpers() {
+    let facts = facts(
+        r#"
+import { Schema } from "effect"
+import { Rule, makeRule } from "./contracts"
+export const makeNamed = () => Schema.Struct({})
+export function makeFn() { return Schema.String }
+const makeHidden = () => Schema.String
+export const makeFromImport = () => Rule.pipe(Schema.brand("R"))
+export const notAHelper = () => 1
+export const FromImported = makeRule()
+export const FromImportedPipe = makeRule("x").pipe(Schema.brand("B"))
+function wrap() { return makeRule() }
+export const FromWrapped = wrap()
+export const Chained = Rule.pipe(Schema.brand("C"))
+export const ImportedAlias = makeRule
+"#,
+    );
+    assert_eq!(facts.schema_factory_exports, vec!["makeFn", "makeNamed"]);
+    let derived: Vec<(&str, &str, bool)> = facts
+        .derived_schema_exports
+        .iter()
+        .map(|derived| {
+            (
+                derived.export_name.as_str(),
+                derived.import_local.as_str(),
+                derived.through_call,
+            )
+        })
+        .collect();
+    assert_eq!(
+        derived,
+        vec![
+            ("FromImported", "makeRule", true),
+            ("FromImportedPipe", "makeRule", true),
+            ("FromWrapped", "makeRule", true),
+            ("Chained", "Rule", false),
+            ("ImportedAlias", "makeRule", false),
+        ]
+    );
+    assert!(
+        facts.schema_exports.is_empty(),
+        "{:?}",
+        facts.schema_exports
+    );
+}

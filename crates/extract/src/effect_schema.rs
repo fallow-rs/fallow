@@ -19,6 +19,12 @@
 //! conservative: a chain that ends in `make`, `decode*`, a field read or an
 //! arrow function is not a schema. A chain on a member of a namespace import
 //! (`Imported.User.pipe(...)`) is not a schema: the root is the namespace.
+//!
+//! A call of a function is a schema when each `return` of the function is a
+//! schema (`const makeUser = () => Schema.Struct({...})`, then `makeUser()`).
+//! `effect_schema_helpers.rs` has the rules for such a function.
+
+use std::cell::RefCell;
 
 use oxc_ast::ast::{Argument, Class, Expression, IdentifierReference};
 use oxc_semantic::{Semantic, SymbolId};
@@ -29,6 +35,9 @@ use fallow_types::extract::{ImportInfo, ImportedName};
 #[path = "effect_schema_names.rs"]
 mod names;
 use names::{HTTP_API_PIPE_TRANSFORMS, PIPE_TRANSFORMS, TYPE_ONLY_NAMES};
+
+#[path = "effect_schema_helpers.rs"]
+mod helpers;
 
 /// `Schema` functions with a lowercase name that return a schema. Every
 /// other lowercase function (`decodeUnknownSync`, `is`, `isGreaterThan`)
@@ -161,8 +170,14 @@ fn unwrap<'e, 'a>(expression: &'e Expression<'a>) -> &'e Expression<'a> {
 pub enum SchemaShape {
     /// The module itself proves the schema.
     Known,
-    /// A schema only when the import with this local name is a schema.
-    Derived(String),
+    /// A schema only when the import with the local name `import_local` is
+    /// a schema. With `through_call`, the chain calls the import itself
+    /// (`makeImported()`), so the import can also be a function that returns
+    /// a schema.
+    Derived {
+        import_local: String,
+        through_call: bool,
+    },
 }
 
 /// Schema namespace bindings and the module-scope bindings found to be
@@ -176,6 +191,14 @@ pub struct SchemaShapes<'s, 'a> {
     imports: FxHashMap<SymbolId, String>,
     locals: FxHashMap<SymbolId, SchemaShape>,
     local_names: FxHashMap<String, SchemaShape>,
+    /// Functions whose each `return` is a schema, with the shape that a call
+    /// gives.
+    helpers: RefCell<FxHashMap<SymbolId, SchemaShape>>,
+    /// `const` schemas in the body of an inspected function.
+    helper_locals: RefCell<FxHashMap<SymbolId, SchemaShape>>,
+    /// The functions under inspection: a function that returns a call of a
+    /// second function adds one.
+    helpers_in_progress: RefCell<FxHashSet<SymbolId>>,
 }
 
 impl<'s, 'a> SchemaShapes<'s, 'a> {
@@ -217,11 +240,19 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
             imports,
             locals: FxHashMap::default(),
             local_names: FxHashMap::default(),
+            helpers: RefCell::new(FxHashMap::default()),
+            helper_locals: RefCell::new(FxHashMap::default()),
+            helpers_in_progress: RefCell::new(FxHashSet::default()),
         }
     }
 
-    /// Remember a module-scope binding with its schema shape.
+    /// Remember a module-scope binding with its schema shape. A binding that
+    /// the module assigns again (`let Base = Schema.String; Base = other`)
+    /// holds an unknown value, so it gets no shape.
     pub fn record(&mut self, symbol: SymbolId, name: &str, shape: SchemaShape) {
+        if self.semantic.scoping().symbol_is_mutated(symbol) {
+            return;
+        }
         self.locals.insert(symbol, shape.clone());
         self.local_names.insert(name.to_string(), shape);
     }
@@ -256,10 +287,14 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
             return None;
         }
         let mut members: Vec<&str> = Vec::new();
+        // The count of calls directly on the root: 1 for `root()` and
+        // `root().pipe(...)`, 0 for `root.pipe(...)`, 2 for `root()()`.
+        let mut root_calls = 0_u32;
         let mut current = expression;
         let root = loop {
             current = match unwrap(current) {
                 Expression::CallExpression(call) => {
+                    root_calls += 1;
                     if is_pipe_call(&call.callee)
                         && !call
                             .arguments
@@ -272,6 +307,7 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
                 }
                 Expression::StaticMemberExpression(member) => {
                     members.push(member.property.name.as_str());
+                    root_calls = 0;
                     &member.object
                 }
                 Expression::Identifier(identifier) => break identifier,
@@ -291,9 +327,20 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
         if let Some(shape) = self.locals.get(&symbol) {
             return Some(shape.clone());
         }
-        self.imports
-            .get(&symbol)
-            .map(|local| SchemaShape::Derived(local.clone()))
+        if let Some(shape) = self.helper_locals.borrow().get(&symbol) {
+            return Some(shape.clone());
+        }
+        let through_call = root_calls == 1;
+        if let Some(local) = self.imports.get(&symbol) {
+            return Some(SchemaShape::Derived {
+                import_local: local.clone(),
+                through_call,
+            });
+        }
+        if through_call {
+            return self.helper_call_shape(symbol);
+        }
+        None
     }
 
     /// True when a `pipe` argument is a `Schema` transform: a call such as

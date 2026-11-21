@@ -199,30 +199,32 @@ impl<'s, 'a> Collector<'s, 'a> {
         literal_tags.sort_unstable();
         let mut schema_exports: Vec<String> = Vec::new();
         let mut derived_schema_exports: Vec<EffectDerivedSchema> = Vec::new();
+        let mut schema_factory_exports: Vec<String> = Vec::new();
+        let mut record = |exported: String, shape: SchemaShape| match shape {
+            SchemaShape::Known => schema_exports.push(exported),
+            SchemaShape::Derived {
+                import_local,
+                through_call,
+            } => derived_schema_exports.push(EffectDerivedSchema {
+                export_name: exported,
+                import_local,
+                through_call,
+            }),
+        };
         for (local, exported) in self.export_bindings {
-            match self.schema.name_shape(&local) {
-                Some(SchemaShape::Known) => schema_exports.push(exported),
-                Some(SchemaShape::Derived(import_local)) => {
-                    derived_schema_exports.push(EffectDerivedSchema {
-                        export_name: exported,
-                        import_local: import_local.clone(),
-                    });
-                }
-                None => {}
+            if let Some(shape) = self.schema.name_shape(&local) {
+                record(exported, shape.clone());
+            } else if self.schema.is_schema_helper(&local) {
+                schema_factory_exports.push(exported);
             }
         }
-        match self.anonymous_default_schema {
-            Some(SchemaShape::Known) => schema_exports.push("default".to_string()),
-            Some(SchemaShape::Derived(import_local)) => {
-                derived_schema_exports.push(EffectDerivedSchema {
-                    export_name: "default".to_string(),
-                    import_local,
-                });
-            }
-            None => {}
+        if let Some(shape) = self.anonymous_default_schema {
+            record("default".to_string(), shape);
         }
         schema_exports.sort_unstable();
         schema_exports.dedup();
+        schema_factory_exports.sort_unstable();
+        schema_factory_exports.dedup();
         let facts = EffectFacts {
             tagged_errors: self.errors.into_iter().map(|error| error.error).collect(),
             caught_tags: self.caught_tags,
@@ -245,6 +247,7 @@ impl<'s, 'a> Collector<'s, 'a> {
             layer_root_keys,
             schema_exports,
             derived_schema_exports,
+            schema_factory_exports,
         };
         let empty = facts.tagged_errors.is_empty()
             && facts.caught_tags.is_empty()
@@ -252,7 +255,8 @@ impl<'s, 'a> Collector<'s, 'a> {
             && facts.layers.is_empty()
             && facts.layer_root_keys.is_empty()
             && facts.schema_exports.is_empty()
-            && facts.derived_schema_exports.is_empty();
+            && facts.derived_schema_exports.is_empty()
+            && facts.schema_factory_exports.is_empty();
         (!empty).then(|| Box::new(facts))
     }
 
