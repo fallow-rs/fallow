@@ -69,7 +69,10 @@ use fallow_engine::resolved_run::{ResolveError, ResolvedRun};
 /// that the base pass reads and the effective type-aware selection, and
 /// it holds no saved-baseline path. A version-23 snapshot of a type-aware
 /// base could serve a syntactic run.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 24;
+/// Version 25 keeps the clone groups that `duplicates.ignoredClones` hid at
+/// the base. A version-24 snapshot has no such groups, so an accepted clone
+/// that the change edited in every copy would look introduced.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 25;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -118,8 +121,35 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) branching: Vec<CachedFileBranching>,
     /// Instance locations of each base clone group, in snapshot order.
     pub(super) dupe_groups: Vec<Vec<CachedCloneSpan>>,
+    /// The base clone groups that `duplicates.ignoredClones` hid, each with
+    /// the entry that hid it, in snapshot order.
+    pub(super) accepted_dupe_groups: Vec<CachedAcceptedCloneGroup>,
     /// Unused-code keys of the base under its own config, sorted.
     pub(super) own_config_unused_code: Option<Vec<String>>,
+}
+
+fn cached_span(span: &fallow_api::diff_risk::clones::CloneSpan) -> CachedCloneSpan {
+    CachedCloneSpan {
+        path: span.path.clone(),
+        start_line: span.start_line,
+        end_line: span.end_line,
+    }
+}
+
+fn span_from_cached(span: CachedCloneSpan) -> fallow_api::diff_risk::clones::CloneSpan {
+    fallow_api::diff_risk::clones::CloneSpan {
+        path: span.path,
+        start_line: span.start_line,
+        end_line: span.end_line,
+    }
+}
+
+/// One base clone group that an `ignoredClones` entry hid, in the cached
+/// snapshot.
+#[derive(bitcode::Encode, bitcode::Decode)]
+pub(super) struct CachedAcceptedCloneGroup {
+    pub(super) key: String,
+    pub(super) instances: Vec<CachedCloneSpan>,
 }
 
 /// One clone instance location in the cached snapshot.
@@ -204,6 +234,14 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
                     .collect(),
             })
             .collect(),
+        accepted_dupe_groups: cached
+            .accepted_dupe_groups
+            .into_iter()
+            .map(|group| fallow_api::diff_risk::clones::AcceptedCloneGroup {
+                key: group.key,
+                instances: group.instances.into_iter().map(span_from_cached).collect(),
+            })
+            .collect(),
         inherited_health: Vec::new(),
         own_config_unused_code: cached
             .own_config_unused_code
@@ -253,6 +291,14 @@ pub(super) fn cached_from_snapshot(
                         end_line: span.end_line,
                     })
                     .collect()
+            })
+            .collect(),
+        accepted_dupe_groups: snapshot
+            .accepted_dupe_groups
+            .iter()
+            .map(|group| CachedAcceptedCloneGroup {
+                key: group.key.clone(),
+                instances: group.instances.iter().map(cached_span).collect(),
             })
             .collect(),
         own_config_unused_code: snapshot.own_config_unused_code.as_ref().map(sorted_keys),

@@ -332,12 +332,17 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * Audit-mode marker emitted on each finding when `fallow audit --format json`
  * runs with a base ref. `true` means the finding's structural key was not
  * present at the base ref (introduced by the current changeset); `false`
- * means it was inherited. Duplication findings carry one carve-out: a clone
- * group whose structural key is new but whose instances contain no added line
- * from the diff (a group re-shaped by removing duplication elsewhere) is
- * demoted to inherited and serializes `false` (issue #2164). Such demoted
- * groups additionally carry a `demotion_reason` field naming the rule, and
- * are counted in `attribution.duplication_demoted` (issue #2220).
+ * means it was inherited. Clone groups compare by content, not by key alone:
+ * `true` means the group adds a copy that the base did not have, or makes
+ * two different pieces of old code equal, and no `duplicates.ignoredClones`
+ * entry accepts it. A group whose copies the change edited inside one base
+ * clone serializes `false`, and its region has the grade `inherited-edited`
+ * (issue #4968). A clone group whose key is new but whose instances contain
+ * no added line from the diff (a group re-shaped by removing duplication
+ * elsewhere) is demoted to inherited and serializes `false` (issue #2164).
+ * Such demoted groups additionally carry a `demotion_reason` field naming the
+ * rule, and their regions are counted in `attribution.duplication_demoted`
+ * (issue #2220).
  *
  * Outside of audit sub-results the field is omitted, so call sites typically
  * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
@@ -1035,6 +1040,10 @@ export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "su
  * marker. A marker with a problem has no effect.
  */
 export type RangeMarkerProblemKind = ("unclosed_start" | "unmatched_end" | "nested_start" | "missing_kind" | "unsupported_kind" | "not_own_line")
+/**
+ * The audit grade of a clone region.
+ */
+export type CloneRegionGrade = ("introduced" | "inherited" | "inherited-edited")
 /**
  * Which complexity threshold was exceeded.
  */
@@ -2210,11 +2219,14 @@ complexity_inherited: number
  */
 complexity_worsened?: number
 /**
- * Clone groups absent from the base snapshot.
+ * Clone regions that fail the new-only gate: a member clone group has a
+ * copy that the base snapshot does not have. Overlapping clone groups
+ * are one region.
  */
 duplication_introduced: number
 /**
- * Clone groups already present in the base snapshot.
+ * Clone regions that do not fail the new-only gate, also the regions
+ * whose copies the change edited.
  */
 duplication_inherited: number
 styling_introduced: number
@@ -8446,6 +8458,12 @@ mirrored_directories?: MirroredDirectory[]
  */
 range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
+/**
+ * Set only by `fallow audit` with a base: the clone groups whose
+ * instances overlap, graded as one finding each. The new-only gate
+ * counts these regions.
+ */
+clone_regions?: CloneRegionFinding[]
 }
 /**
  * Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
@@ -8510,6 +8528,11 @@ introduced?: (AuditIntroduced | null)
  * --format json` (issue #2220).
  */
 demotion_reason?: (CloneDemotionReason | null)
+/**
+ * Set only by `fallow audit` with a base: the index of the region of
+ * this group in `clone_regions[]`.
+ */
+region?: (number | null)
 }
 /**
  * A single instance of duplicated code at a specific location.
@@ -8778,6 +8801,63 @@ clone_groups_ignored?: number
  * Near-miss candidate comparisons skipped by bounded-work limits.
  */
 near_candidates_skipped?: number
+}
+/**
+ * A clone region of `fallow audit`: the clone groups whose instances
+ * overlap, graded as one finding. One paste can give a long group with
+ * fewer copies and a short group with more copies; both are members of one
+ * region (issue #4967).
+ */
+export interface CloneRegionFinding {
+grade: CloneRegionGrade
+/**
+ * Whether the region fails the new-only gate. Each member group in
+ * `clone_groups[]` carries the same `introduced` value.
+ */
+introduced: boolean
+/**
+ * Indices of the member groups in `clone_groups[]`.
+ */
+groups: number[]
+/**
+ * The union of the member instance lines in each file.
+ */
+instances: CloneRegionSpan[]
+/**
+ * The `duplicates.ignoredClones` entries that accept the region. An
+ * entry accepts an `inherited-edited` region when it matched the base
+ * clone, and an `introduced` region when it hid the head group of each
+ * new copy.
+ */
+accepted_by?: string[]
+/**
+ * The keys to put in `duplicates.ignoredClones` in place of
+ * `accepted_by`, so that `fallow dupes` also hides the edited clone.
+ * Present only for an accepted `inherited-edited` region.
+ */
+ignore_hint?: string[]
+/**
+ * Set when the region does not fail the gate because the change wrote
+ * no line of a member group whose key is new (issue #2164).
+ */
+demotion_reason?: (CloneDemotionReason | null)
+}
+/**
+ * One file span of a clone region.
+ */
+export interface CloneRegionSpan {
+/**
+ * Project-root-relative path, with forward slashes.
+ */
+file: string
+/**
+ * 1-based first line.
+ */
+start_line: number
+/**
+ * 1-based last line, inclusive.
+ */
+end_line: number
 }
 /**
  * Result of complexity analysis for reporting.
@@ -15900,6 +15980,12 @@ mirrored_directories?: MirroredDirectory[]
 range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
 /**
+ * Set only by `fallow audit` with a base: the clone groups whose
+ * instances overlap, graded as one finding each. The new-only gate
+ * counts these regions.
+ */
+clone_regions?: CloneRegionFinding[]
+/**
  * Number of clone groups carried in `clone_groups[]`.
  */
 clone_groups_shown: number
@@ -18722,6 +18808,12 @@ mirrored_directories?: MirroredDirectory[]
  */
 range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
+/**
+ * Set only by `fallow audit` with a base: the clone groups whose
+ * instances overlap, graded as one finding each. The new-only gate
+ * counts these regions.
+ */
+clone_regions?: CloneRegionFinding[]
 /**
  * This run's view of the loaded duplication baseline, present only when
  * `--dupes-baseline` loaded one. Read `change_scoped` before dividing

@@ -696,19 +696,20 @@ line states exit code 0.
 - New output fields must move schemas, generated TypeScript contracts, MCP,
   LSP, VS Code, GitHub Action, and GitLab consumers together.
 - New-only duplication demotion (issues #2164, #2220): under `--gate new-only`
-  an introduced clone group none of whose instances overlap an added line is
-  demoted to inherited. Without an opt-in shared diff, the merge-base worktree
-  diff decides (`crates/api/src/audit_run/outcome.rs`,
-  `demote_preexisting_dupe_introductions`). The CLI and the programmatic
+  a clone group with a new key, none of whose instances overlap an added
+  line, is demoted to inherited. Without an opt-in shared diff, the
+  merge-base worktree diff decides (`attribute_clone_regions` in
+  `crates/api/src/audit_run/outcome.rs`). The CLI and the programmatic
   runtime run the same function.
   When an opt-in shared diff (`--diff-file`, `--diff-stdin`, or
   `$FALLOW_DIFF_FILE`) is active, it has already filtered the head duplication
   report with the same added-line overlap predicate. Every retained clone group
   therefore vetoes demotion, so a shared diff can prevent a demotion but cannot
-  produce a rendered shared-source demotion note. Demoted groups stay counted
+  produce a rendered shared-source demotion note. Demoted regions stay counted
   as inherited and are also reported through
-  `attribution.duplication_demoted` and a per-group `demotion_reason` field;
-  human output names the deciding diff source in the demotion note.
+  `attribution.duplication_demoted` and a `demotion_reason` field on the
+  region and on each demoted group; human output names the deciding diff
+  source in the demotion note.
 - Unified diffs: `fallow_output::unified_diff_events` is the one reader of
   unified diff text (`crates/output/src/unified_diff.rs`). It reads a file
   header only outside a hunk, decodes a quoted path of git, and removes the
@@ -716,26 +717,45 @@ line states exit code 0.
   and the change anchors of the walkthrough consume its events. One audit run
   reads its merge-base worktree diff at most one time (`RunChange::diff_index`
   in `crates/api/src/audit_run/outcome.rs`).
-- Clone groups inside a base clone group: after the demotion, the same
-  function marks an introduced clone group as inherited when each instance
-  lies inside a different instance of one base clone group
-  (`crates/api/src/audit_run/clone_containment.rs`). The check maps each head
-  instance to its base path through the rename list and the diff renames,
-  and to its base lines through the line changes of the diff
-  (`DiffIndex::base_line_range`). A rewritten line at the start or end of an
-  instance maps to the replaced base line next to the unchanged lines of the
-  instance, so a block that turns several lines into fewer does not move the
-  span outside its base instance. An edit inside one copy of a base clone
-  splits the base group into smaller groups with new keys, and this rule
-  keeps them inherited. The rule records no demotion, because the group
-  matches a base group. A file that the diff adds has no base lines, so a
-  pasted copy stays introduced. At least one instance must hold no added
-  line: when every copy holds an added line, the change wrote the same text
-  into each copy, and the group stays introduced.
+- Clone regions (issues #4967, #4968): the audit grades clone regions, not
+  clone groups (`crates/api/src/audit_run/clone_regions.rs`). The detector
+  keeps each maximal repeat, so one paste can give a long group with fewer
+  copies and a short group with more copies. The groups whose instances
+  overlap in a file are one region. Each member group gets one state:
+  - unchanged: the base has its key, or the change moved it to other files
+    with its text (issue #4670);
+  - demoted: the key is new, and no instance holds an added line (#2164);
+  - edited: each instance maps to a different instance of one base group;
+  - new: every other group.
+  The mapping takes each head instance to its base path through the rename
+  list and the diff renames, and to its base lines through the line changes
+  of the diff (`DiffIndex::base_line_range`). A rewritten line at the start
+  or end of an instance maps to the replaced base line next to the unchanged
+  lines of the instance. A file that the diff adds has no base lines, so a
+  pasted copy is new. A region with a new member is `introduced`. A region
+  with an edited member and no new member is `inherited-edited`, also when
+  the change made the same edit in every copy. Every other region is
+  `inherited`. Only an `introduced` region fails the gate, and the
+  attribution counts regions.
+  An `ignoredClones` entry follows the audit match, and its engine key does
+  not change. The engine returns the groups that the entry hid
+  (`IgnoredCloneGroup`), and the base snapshot keeps them
+  (`accepted_dupe_groups`). An edited member that fits an accepted base group
+  keeps the region accepted: `accepted_by` names the entry, and
+  `ignore_hint` names the new keys of those members for the config. A new
+  member is accepted when a hidden head group holds each of its new copies
+  and its other instances hold no added line. The base pass reports only the
+  groups in the changed files, so the old copies are not in the base
+  snapshot; equal text without an edit shows that the base had the clone.
+  An edited member must sit at the same line offset in each base copy, so
+  one new block at two places of an old clone is a new member. The
+  `introduced` flag of a group is its own state: an old group that overlaps a
+  new group stays `false`, and its rule severity does not take part in the
+  gate.
 - Audit clone-group gate: the `introduced-clone-group` rule decides how a
   clone group takes part in the verdict (`duplication_verdict_flags` in
   `crates/api/src/audit_run/outcome.rs`). Under `new-only`, only an
-  introduced group counts; under `all`, every group in the changed files
+  introduced group counts, and the attribution counts each region one time; under `all`, every group in the changed files
   counts. `error` fails the verdict, `warn` (the default) gives `warn`, and
   `off` removes the group from the verdict but keeps it in the report. With
   `overrides`, the rule resolves for each instance file and the most severe

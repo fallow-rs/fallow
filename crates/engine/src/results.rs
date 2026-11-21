@@ -185,6 +185,9 @@ pub struct ProjectAnalysisArtifacts {
     pub dead_code: DeadCodeAnalysisArtifacts,
     /// Duplication report for the same file set.
     pub duplication: duplicates::DuplicationReport,
+    /// The clone groups that `duplicates.ignoredClones` hid from
+    /// `duplication`.
+    pub ignored_clone_groups: Vec<duplicates::IgnoredCloneGroup>,
     /// Diff scope the run was limited to, when one was resolved.
     pub changed_files: Option<FxHashSet<PathBuf>>,
     /// Per-file source fingerprints for downstream cache invalidation.
@@ -209,8 +212,12 @@ impl ProjectAnalysisArtifacts {
 /// Typed duplication analysis result.
 #[derive(Debug)]
 pub struct DuplicationAnalysis {
+    /// The clone groups after every filter, with statistics.
     pub report: duplicates::DuplicationReport,
+    /// Files that the built-in duplication ignores skipped, per pattern.
     pub default_ignore_skips: duplicates::DefaultIgnoreSkips,
+    /// The clone groups that `duplicates.ignoredClones` hid from `report`.
+    pub ignored_clone_groups: Vec<duplicates::IgnoredCloneGroup>,
 }
 
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.

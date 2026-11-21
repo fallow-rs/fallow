@@ -302,6 +302,9 @@ pub struct DuplicationProgrammaticOutput {
     /// Maximum allowed duplication percentage from the resolved config;
     /// 0 disables the percentage gate.
     pub threshold: f64,
+    /// The clone groups that `duplicates.ignoredClones` hid from the report.
+    /// The audit reads them, so an accepted clone stays accepted.
+    pub ignored_clone_groups: Vec<fallow_engine::duplicates::IgnoredCloneGroup>,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<String>,
 }

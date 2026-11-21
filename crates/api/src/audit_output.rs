@@ -76,9 +76,12 @@ pub struct AuditAttribution {
     /// also counted in `complexity_inherited`.
     #[serde(default)]
     pub complexity_worsened: usize,
-    /// Clone groups absent from the base snapshot.
+    /// Clone regions that fail the new-only gate: a member clone group has a
+    /// copy that the base snapshot does not have. Overlapping clone groups
+    /// are one region.
     pub duplication_introduced: usize,
-    /// Clone groups already present in the base snapshot.
+    /// Clone regions that do not fail the new-only gate, also the regions
+    /// whose copies the change edited.
     pub duplication_inherited: usize,
 }
 
@@ -347,18 +350,23 @@ pub fn attach_audit_diff_risk_attribution(value: &mut serde_json::Value) {
 }
 
 /// Add `attribution.duplication_demoted`, derived from serialized clone
-/// groups.
+/// regions.
 ///
-/// Counts `duplication.clone_groups[]` entries carrying a `demotion_reason`
-/// (set by the new-only gate when it demotes an introduced group to
-/// inherited, issue #2220). Always inserted when an `attribution` object is
+/// Counts `duplication.clone_regions[]` entries carrying a `demotion_reason`
+/// (set by the new-only gate when it demotes an introduced region to
+/// inherited, issue #2220). Without `clone_regions`, it counts the
+/// `duplication.clone_groups[]` entries. Always inserted when an `attribution` object is
 /// present: an integer, `0` when the duplication section is absent. Wire-only,
 /// mirroring [`attach_audit_styling_attribution`], so the public Rust
 /// attribution struct stays source-compatible.
 pub fn attach_audit_duplication_demotion_attribution(value: &mut serde_json::Value) {
-    let demoted = value
-        .get("duplication")
-        .and_then(|duplication| duplication.get("clone_groups"))
+    let duplication = value.get("duplication");
+    let demoted = duplication
+        .and_then(|duplication| {
+            duplication
+                .get("clone_regions")
+                .or_else(|| duplication.get("clone_groups"))
+        })
         .and_then(serde_json::Value::as_array)
         .map_or(0, |items| {
             items

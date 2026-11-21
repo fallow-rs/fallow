@@ -2627,6 +2627,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         boundary_edges: std::iter::once("ui->-db".to_string()).collect(),
         cycles: std::iter::once("a.ts|b.ts".to_string()).collect(),
         public_api: std::iter::once("src/index.ts::foo".to_string()).collect(),
+        accepted_dupe_groups: Vec::new(),
         dupe_groups: vec![fallow_api::diff_risk::clones::BaseCloneGroup {
             instances: vec![
                 fallow_api::diff_risk::clones::CloneSpan {
@@ -3057,6 +3058,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         boundary_edges: FxHashSet::default(),
         cycles: FxHashSet::default(),
         public_api: FxHashSet::default(),
+        accepted_dupe_groups: Vec::new(),
         dupe_groups: Vec::new(),
         inherited_health: Vec::new(),
         own_config_unused_code: None,
@@ -3136,6 +3138,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
     };
     let cached = CachedAuditKeySnapshot {
         branching: Vec::new(),
+        accepted_dupe_groups: Vec::new(),
         dupe_groups: Vec::new(),
         version: AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         cli_version: env!("CARGO_PKG_VERSION").to_string(),

@@ -274,6 +274,8 @@ pub struct DupesResult {
     pub package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     pub report: DuplicationReport,
     pub default_ignore_skips: DefaultIgnoreSkips,
+    /// The clone groups that `duplicates.ignoredClones` hid from `report`.
+    pub ignored_clone_groups: Vec<fallow_engine::duplicates::IgnoredCloneGroup>,
     pub config: ResolvedConfig,
     pub elapsed: Duration,
     pub threshold: f64,
@@ -482,19 +484,19 @@ fn execute_dupes_inner(
     let change_scope_request = change_scope_request(opts, effective_changed_files);
 
     let mut workspace_diagnostics = Vec::new();
-    let (mut report, default_ignore_skips, change_scope) = match pre_discovered {
+    let (analysis, change_scope) = match pre_discovered {
         Some(files) => {
             let change_scope =
                 resolve_change_scope_for_pre_discovered_files(opts, &config, change_scope_request)?;
             crate::requests::measure_changed_since_scope(&files);
-            let (report, skips) = run_duplication_analysis(
+            let analysis = run_duplication_analysis(
                 opts,
                 &config,
                 &files,
                 &dupes_config,
                 effective_changed_files,
             );
-            (report, skips, change_scope)
+            (analysis, change_scope)
         }
         None => {
             let session = match crate::cli_production::open_session(opts.run, &config) {
@@ -509,16 +511,21 @@ fn execute_dupes_inner(
             crate::requests::measure_changed_since_scope(session.files());
             let change_scope =
                 resolve_change_scope(opts, &config, change_scope_request, session.workspaces())?;
-            let (report, skips) = run_duplication_analysis_with_session(
+            let analysis = run_duplication_analysis_with_session(
                 opts,
                 &session,
                 &dupes_config,
                 effective_changed_files,
             );
             workspace_diagnostics = session.workspace_diagnostics().to_vec();
-            (report, skips, change_scope)
+            (analysis, change_scope)
         }
     };
+    let fallow_engine::duplicates::DuplicationAnalysis {
+        mut report,
+        default_ignore_skips,
+        ignored_clone_groups,
+    } = analysis;
 
     if let Some(trace_spec) = opts.trace {
         fallow_engine::duplicates::apply_scope(
@@ -568,6 +575,7 @@ fn execute_dupes_inner(
         package_baselines: change_scope.package_baselines(),
         report,
         default_ignore_skips,
+        ignored_clone_groups,
         config,
         elapsed,
         threshold: dupes_config.threshold,
@@ -788,53 +796,9 @@ fn resolve_changed_since(
 
 use fallow_engine::duplicates::apply_top;
 
-fn run_duplication_analysis(
-    opts: &DupesOptions<'_>,
-    config: &ResolvedConfig,
-    files: &[fallow_types::discover::DiscoveredFile],
-    dupes_config: &fallow_config::DuplicatesConfig,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let cache_dir = (!opts.no_cache).then_some(config.cache_dir.as_path());
-    let analysis = if let Some(changed_files) = changed_files {
-        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-        fallow_engine::duplicates::find_duplicates_touching_files_with_defaults(
-            &config.root,
-            files,
-            dupes_config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        fallow_engine::duplicates::find_duplicates_with_defaults(
-            &config.root,
-            files,
-            dupes_config,
-            cache_dir,
-        )
-    };
-    (analysis.report, analysis.default_ignore_skips)
-}
-
-fn run_duplication_analysis_with_session(
-    opts: &DupesOptions<'_>,
-    session: &fallow_engine::session::AnalysisSession,
-    dupes_config: &fallow_config::DuplicatesConfig,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let cache_dir = (!opts.no_cache).then_some(session.config().cache_dir.as_path());
-    let analysis = if let Some(changed_files) = changed_files {
-        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-        session.find_duplicates_touching_files_with_defaults(
-            dupes_config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        session.find_duplicates_with_defaults(dupes_config, cache_dir)
-    };
-    (analysis.report, analysis.default_ignore_skips)
-}
+#[path = "dupes_analysis.rs"]
+mod analysis;
+use analysis::{run_duplication_analysis, run_duplication_analysis_with_session};
 
 /// The presentation choices a mode hands the duplication renderer.
 ///

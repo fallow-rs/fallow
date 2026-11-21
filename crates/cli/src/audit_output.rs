@@ -452,6 +452,8 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
         crate::dupes::print_audit_min_occurrences_note(dupes, quiet);
     }
 
+    print_audit_edited_accepted_clones(result);
+
     if !quiet {
         print_audit_status_line(result);
     }
@@ -595,6 +597,33 @@ fn print_audit_duplication_section(
         show_explain_tip: false,
         json_style: crate::json_style::JsonStyle::Compact,
     });
+}
+
+/// One line for each accepted clone that the change edited in every copy.
+/// The `duplicates.ignoredClones` entry still accepts the clone in the audit,
+/// but `fallow dupes` matches the entry by text, so the config needs the new
+/// keys (issue #4968). The line prints also under `--quiet`, because the
+/// config change is an action.
+fn print_audit_edited_accepted_clones(result: &AuditResult) {
+    let Some(comparison) = result.comparison.as_ref() else {
+        return;
+    };
+    for region in comparison
+        .dupe_regions
+        .regions()
+        .iter()
+        .filter(|region| !region.ignore_hint.is_empty())
+    {
+        outln!(
+            "  {}",
+            format!(
+                "edited accepted clone: duplicates.ignoredClones entry {} still accepts it in this audit; replace it with {}",
+                region.accepted_by.join(", "),
+                region.ignore_hint.join(", ")
+            )
+            .dimmed()
+        );
+    }
 }
 
 /// Per-group demotion detail under `--explain`: one line per introduced clone
@@ -1176,10 +1205,13 @@ fn print_audit_inherited_note(result: &AuditResult) {
 /// counted as inherited, so the parent line is guaranteed to print whenever
 /// this one does.
 fn print_audit_demotion_note(result: &AuditResult) {
-    let demoted = result
-        .comparison
-        .as_ref()
-        .map_or(0, |comparison| comparison.dupes.demoted_count());
+    let demoted = result.comparison.as_ref().map_or(0, |comparison| {
+        if comparison.dupe_regions.regions().is_empty() {
+            comparison.dupes.demoted_count()
+        } else {
+            comparison.dupe_regions.demoted_count()
+        }
+    });
     if demoted == 0 {
         return;
     }
@@ -1374,6 +1406,7 @@ fn build_audit_duplication_json(
                         comparison.dupes.demoted(),
                         fallow_api::CloneDemotionReason::NoAddedLines,
                     );
+                    comparison.dupe_regions.annotate_json(&mut json);
                 } else {
                     annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
                 }
