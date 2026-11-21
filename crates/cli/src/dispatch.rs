@@ -1101,7 +1101,7 @@ fn dispatch_flags_command(
 }
 
 /// The first regression-gate option on the command line, if any.
-fn first_regression_flag(cli: &Cli) -> Option<&'static str> {
+pub fn first_regression_flag(cli: &Cli) -> Option<&'static str> {
     [
         (cli.fail_on_regression, "--fail-on-regression"),
         (cli.regression_baseline.is_some(), "--regression-baseline"),

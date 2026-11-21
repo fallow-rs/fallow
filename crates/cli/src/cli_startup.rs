@@ -480,18 +480,7 @@ pub fn run_pre_dispatch_checks(
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
-    if let Some(message) = sarif_file_without_sarif_error(cli) {
-        let code = emit_known_failure_with_style(
-            &message,
-            INVALID_INPUT,
-            output,
-            json_style,
-            telemetry::FailureReason::Validation,
-        );
-        return Err(fail(code, telemetry::FailureReason::Validation));
-    }
-
-    if let Some(message) = crate::write_scope::write_path_error(cli, root) {
+    if let Some(message) = flag_scope_error(cli, root) {
         let code = emit_known_failure_with_style(
             &message,
             INVALID_INPUT,
@@ -713,6 +702,61 @@ fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
     };
     Some(format!(
         "{command} does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
+    ))
+}
+
+/// The first error of a flag that the command cannot use: `--sarif-file`
+/// without a SARIF writer, a regression flag without a regression baseline,
+/// or a save path outside the allowed directories.
+fn flag_scope_error(cli: &Cli, root: &Path) -> Option<String> {
+    sarif_file_without_sarif_error(cli)
+        .or_else(|| regression_flag_without_baseline_error(cli))
+        .or_else(|| crate::write_scope::write_path_error(cli, root))
+}
+
+/// Reject the regression flags on every command that has no regression
+/// baseline.
+///
+/// A bare run with the dead-code analysis, `dead-code` and `architecture`
+/// save and compare the issue counts. `fallow flags` and `fallow list` handle
+/// the flags themselves (they need `--retirement` or `--entry-weight`). The
+/// `security`, `similar-code` and `doctor` commands reject the flags with
+/// their own error. Each other command would accept the flags, exit 0, and
+/// save or compare nothing.
+fn regression_flag_without_baseline_error(cli: &Cli) -> Option<String> {
+    let flag = crate::dispatch::first_regression_flag(cli)?;
+    let (command, hint) = match cli.command.as_ref() {
+        None => {
+            let (run_check, _, _) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
+            return (!run_check).then(|| {
+                format!(
+                    "This run does not include the dead-code analysis, which owns the regression baseline, so `{flag}` has no effect. Include dead-code in the run, or use `fallow dead-code`."
+                )
+            });
+        }
+        Some(
+            Command::Check { .. }
+            | Command::Architecture { .. }
+            | Command::Flags { .. }
+            | Command::List { .. }
+            | Command::Workspaces
+            | Command::Security { .. }
+            | Command::SimilarCode { .. }
+            | Command::Doctor,
+        ) => return None,
+        Some(Command::Dupes { .. }) => (
+            "`fallow dupes`",
+            " To gate on new clone groups, use `fallow dupes --baseline <file>`.",
+        ),
+        Some(Command::Health { .. }) => (
+            "`fallow health`",
+            " To gate on new health findings, use `fallow health --baseline <file>`.",
+        ),
+        Some(Command::Audit { .. }) => ("`fallow audit`", ""),
+        Some(_) => ("This command", ""),
+    };
+    Some(format!(
+        "{command} has no regression baseline, so `{flag}` has no effect.{hint} The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`."
     ))
 }
 
