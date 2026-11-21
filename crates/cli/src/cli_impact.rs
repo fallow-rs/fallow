@@ -94,8 +94,8 @@ pub fn dispatch_impact(
     match subcommand {
         Some(ImpactCli::Enable) => impact_enable(root, quiet, output),
         Some(ImpactCli::Disable) => impact_disable(root, quiet, output),
-        Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
-        Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
+        Some(ImpactCli::Default { state }) => impact_set_default(state, quiet, output),
+        Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet, output),
         Some(ImpactCli::Statusline) => render_impact_statusline(root),
         Some(ImpactCli::Status) if matches!(output, fallow_config::OutputFormat::Human) => {
             render_impact_status_human(root, quiet)
@@ -123,7 +123,7 @@ pub fn render_impact_statusline(root: &Path) -> ExitCode {
 fn impact_enable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
     let newly = match impact::enable(root) {
         Ok(newly) => newly,
-        Err(newer) => return refuse_newer_store(&newer, output),
+        Err(err) => return refuse_store_change(&err, output),
     };
     if !quiet {
         if newly {
@@ -145,24 +145,25 @@ fn impact_enable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) 
     ExitCode::SUCCESS
 }
 
-/// Report a store that a newer Fallow wrote. The store stays unchanged.
-fn refuse_newer_store(
-    newer: &impact::NewerStoreSchema,
+/// Report a store change that was not saved. The store stays unchanged.
+fn refuse_store_change(
+    err: &impact::StoreWriteError,
     output: fallow_config::OutputFormat,
 ) -> ExitCode {
-    crate::emit_known_failure(
-        &newer.message(),
-        INVALID_INPUT,
-        output,
-        telemetry::FailureReason::Validation,
-    )
+    let reason = match err {
+        impact::StoreWriteError::Read(_) => telemetry::FailureReason::Validation,
+        impact::StoreWriteError::NoConfigDir | impact::StoreWriteError::Io { .. } => {
+            telemetry::FailureReason::Unknown
+        }
+    };
+    crate::emit_known_failure(&err.message(), INVALID_INPUT, output, reason)
 }
 
 /// Disable Fallow Impact for this project; history is retained.
 fn impact_disable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
     let was_enabled = match impact::disable(root) {
         Ok(was_enabled) => was_enabled,
-        Err(newer) => return refuse_newer_store(&newer, output),
+        Err(err) => return refuse_store_change(&err, output),
     };
     if !quiet {
         println!(
@@ -178,9 +179,16 @@ fn impact_disable(root: &Path, quiet: bool, output: fallow_config::OutputFormat)
 }
 
 /// Set the user-global Impact default for new projects.
-fn impact_set_default(state: ToggleState, quiet: bool) -> ExitCode {
+fn impact_set_default(
+    state: ToggleState,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
     let on = matches!(state, ToggleState::On);
-    let changed = impact::set_global_default(on);
+    let changed = match impact::set_global_default(on) {
+        Ok(changed) => changed,
+        Err(err) => return refuse_store_change(&err, output),
+    };
     if !quiet {
         let verb = if on { "on" } else { "off" };
         let body = if on {
@@ -200,9 +208,17 @@ fn impact_set_default(state: ToggleState, quiet: bool) -> ExitCode {
 }
 
 /// Reset Impact history for this project, or every project with `--all`.
-fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
+fn impact_reset(
+    root: &Path,
+    all: bool,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
     if all {
-        let removed = impact::reset_all();
+        let removed = match impact::reset_all(root) {
+            Ok(removed) => removed,
+            Err(err) => return refuse_store_change(&err, output),
+        };
         if !quiet {
             println!(
                 "{}",
@@ -214,7 +230,10 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
             );
         }
     } else {
-        let removed = impact::reset(root);
+        let removed = match impact::reset(root) {
+            Ok(removed) => removed,
+            Err(err) => return refuse_store_change(&err, output),
+        };
         if !quiet {
             println!(
                 "{}",

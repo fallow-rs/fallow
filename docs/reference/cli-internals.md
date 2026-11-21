@@ -292,8 +292,9 @@ line states exit code 0.
 - `crates/cli/src/viz/mod.rs`: the self-contained HTML map, plus the DOT and
   Mermaid text renderings of the import graph.
 - `crates/cli/src/telemetry.rs`: local opt-in telemetry state and spooling.
-- `crates/cli/src/cli_impact.rs` and `impact.rs`: local Impact history,
-  attribution, aggregation, and the status-bar surface.
+- `crates/cli/src/cli_impact.rs`, `impact.rs` and `impact_store.rs`: local
+  Impact history, attribution, aggregation, and the status-bar surface. Each
+  change of a project store goes through `transact` in `impact_store.rs`.
 - `crates/cli/src/runtime_support.rs`: shared config and ownership helpers.
 
 ## Invariants

@@ -381,260 +381,20 @@ fn impact_config_dir() -> Option<PathBuf> {
 #[path = "impact_record_gate.rs"]
 mod record_gate;
 use record_gate::record_gate_skips;
-
-/// Path to the per-project store file in the user's private config dir, or
-/// `None` when no config dir is resolvable (e.g. stripped CI env), in which
-/// case Impact is inert (no persistence). NEVER writes into the analyzed repo.
-fn store_path(root: &Path) -> Option<PathBuf> {
-    let (project_key, _, _) = project_identity(root);
-    Some(
-        impact_config_dir()?
-            .join("impact")
-            .join(format!("{project_key}.json")),
-    )
-}
-
-/// Path to a project's legacy in-repo store (`<root>/.fallow/impact.json`),
-/// read ONCE for migration into the user store, never written.
-fn legacy_store_path(root: &Path) -> PathBuf {
-    root.join(".fallow").join(STORE_FILE)
-}
-
-/// Load the store. Missing or unreadable files fall back to defaults; unreadable
-/// files are warned about rather than silently disabling tracking.
-pub fn load(root: &Path) -> ImpactStore {
-    let Some(path) = store_path(root) else {
-        return ImpactStore::default();
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => parse_store(&content, &path),
-        // No user-store file yet: attempt a one-time import of a legacy in-repo
-        // `.fallow/impact.json` (pre-relocation). Returns default if none.
-        Err(_) => migrate_legacy_store(root),
-    }
-}
-
-/// Stable failure states for status-bar callers. The statusline loader never
-/// logs the store path or substitutes corrupt/newer data with an empty report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatuslineLoadError {
-    /// The store is unreadable or corrupt.
-    DataUnavailable,
-    /// The store was written by a newer Fallow whose schema this build cannot read.
-    NewerSchema,
-}
-
-/// Load Impact state without writes, warnings, or path-bearing diagnostics.
-///
-/// Unlike [`load`], this does not persist a legacy in-repo store when the user
-/// store is missing. A corrupt, unreadable, or newer-schema store is reported
-/// as unavailable so the compact renderer cannot mislabel lost data as "off".
-pub fn load_statusline(root: &Path) -> Result<ImpactStore, StatuslineLoadError> {
-    let Some(path) = store_path(root) else {
-        return Ok(ImpactStore::default());
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => parse_statusline_store(&content),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            load_legacy_statusline_store(root)
-        }
-        Err(_) => Err(StatuslineLoadError::DataUnavailable),
-    }
-}
-
-fn parse_statusline_store(content: &str) -> Result<ImpactStore, StatuslineLoadError> {
-    let store = serde_json::from_str::<ImpactStore>(content)
-        .map_err(|_| StatuslineLoadError::DataUnavailable)?;
-    if store.schema_version > STORE_SCHEMA_VERSION {
-        return Err(StatuslineLoadError::NewerSchema);
-    }
-    Ok(store)
-}
-
-fn load_legacy_statusline_store(root: &Path) -> Result<ImpactStore, StatuslineLoadError> {
-    let legacy_path = legacy_store_path(root);
-    let content = match std::fs::read_to_string(legacy_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ImpactStore::default());
-        }
-        Err(_) => return Err(StatuslineLoadError::DataUnavailable),
-    };
-    let legacy = serde_json::from_str::<LegacyFlatStore>(&content)
-        .map_err(|_| StatuslineLoadError::DataUnavailable)?;
-    let (_, worktree, display) = project_identity(root);
-    let mut store = legacy.into_store(&worktree);
-    store.label = display;
-    Ok(store)
-}
-
-fn parse_store(content: &str, path: &Path) -> ImpactStore {
-    match serde_json::from_str::<ImpactStore>(content) {
-        Ok(store) => {
-            if store.schema_version > STORE_SCHEMA_VERSION {
-                tracing::warn!(
-                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort. This build does not write to it, so the store stays unchanged. Upgrade fallow to read it fully.",
-                    path.display(),
-                    store.schema_version,
-                    STORE_SCHEMA_VERSION,
-                );
-            }
-            store
-        }
-        Err(err) => {
-            if let Some(newer) = newer_schema_in(content, path) {
-                tracing::warn!("{}", newer.message());
-            } else {
-                tracing::warn!(
-                    "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
-                    path.display()
-                );
-            }
-            ImpactStore::default()
-        }
-    }
-}
-
-/// An Impact store written by a newer Fallow. This build refuses to write it,
-/// because a typed round trip through the older [`ImpactStore`] drops every
-/// field and every record shape that this build does not know.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewerStoreSchema {
-    path: PathBuf,
-    schema_version: u32,
-    writer_version: Option<String>,
-}
-
-impl NewerStoreSchema {
-    /// The user-facing explanation, with the next step.
-    #[must_use]
-    pub fn message(&self) -> String {
-        let writer = self
-            .writer_version
-            .as_deref()
-            .map_or_else(String::new, |version| {
-                format!(" (newest record by fallow {version})")
-            });
-        format!(
-            "fallow impact: the store at {} has schema_version {}{writer}, but this build supports up to schema_version {}. The store is unchanged. Upgrade fallow, or use the newer fallow binary, to change or record Impact data for this project.",
-            self.path.display(),
-            self.schema_version,
-            STORE_SCHEMA_VERSION,
-        )
-    }
-}
-
-/// Read only the schema marker and the newest writer version of a raw store.
-/// This works when the typed parse fails, because a newer schema can change
-/// the shape of a known field. Returns `None` for a supported or corrupt store.
-fn newer_schema_in(content: &str, path: &Path) -> Option<NewerStoreSchema> {
-    let raw: serde_json::Value = serde_json::from_str(content).ok()?;
-    let schema_version = raw.get("schema_version")?.as_u64()?;
-    if schema_version <= u64::from(STORE_SCHEMA_VERSION) {
-        return None;
-    }
-    Some(NewerStoreSchema {
-        path: path.to_path_buf(),
-        schema_version: u32::try_from(schema_version).unwrap_or(u32::MAX),
-        writer_version: newest_writer_version(&raw),
-    })
-}
-
-/// The fallow version on the newest record of either track, when present.
-fn newest_writer_version(raw: &serde_json::Value) -> Option<String> {
-    ["records", "project_records"]
-        .iter()
-        .filter_map(|track| raw.get(*track)?.as_array()?.last())
-        .filter_map(|record| {
-            let timestamp = record.get("timestamp")?.as_str()?;
-            let version = record.get("version")?.as_str()?;
-            Some((timestamp, version))
-        })
-        .max_by(|a, b| a.0.cmp(b.0))
-        .map(|(_, version)| version.to_owned())
-}
-
-/// Load the store for a load, mutate, and save cycle. Refuses a store that a
-/// newer Fallow wrote, so the caller leaves the file unchanged. Every write
-/// path must use this instead of [`load`].
-fn load_for_write(root: &Path) -> Result<ImpactStore, NewerStoreSchema> {
-    let Some(path) = store_path(root) else {
-        return Ok(ImpactStore::default());
-    };
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return Ok(migrate_legacy_store(root));
-    };
-    if let Some(newer) = newer_schema_in(&content, &path) {
-        return Err(newer);
-    }
-    Ok(parse_store(&content, &path))
-}
-
-/// Persist the store best-effort using atomic replace. No-op when no config dir
-/// is resolvable (e.g. stripped CI env). NEVER writes into the analyzed repo.
-fn save(store: &ImpactStore, root: &Path) {
-    let Some(path) = store_path(root) else {
-        return;
-    };
-    if let Some(parent) = path.parent()
-        && std::fs::create_dir_all(parent).is_err()
-    {
-        return;
-    }
-    if let Ok(json) = serde_json::to_string_pretty(store) {
-        let _ = fallow_config::atomic_write(&path, json.as_bytes());
-    }
-}
-
-/// The advisory-lock sidecar path for a store file (`<store>.json.lock`).
-fn lock_path_for(store: &Path) -> PathBuf {
-    let mut raw = store.as_os_str().to_owned();
-    raw.push(".lock");
-    PathBuf::from(raw)
-}
-
-/// Advisory lock serialising the load -> mutate -> save critical section of an
-/// Impact record across concurrent `fallow` processes.
-///
-/// Two worktrees of the same repo collapse to the SAME store key (and SAME
-/// store path), so a pre-commit gate firing in both at once would otherwise
-/// lost-update each other (A loads, B loads, A saves, B saves => A's record is
-/// dropped). Records BLOCK on this lock so a contended run is serialised rather
-/// than dropped. The `.lock` sidecar is intentionally never deleted (an
-/// unlinked-but-locked inode plus a racer's `O_CREAT` would split the lock
-/// across two inodes); the kernel releases the lock when the handle drops,
-/// including at process exit, so an abandoned record never wedges the next run.
-struct ImpactStoreLock {
-    _file: std::fs::File,
-}
-
-impl ImpactStoreLock {
-    /// Block until the per-project store lock for `root` is held. Best-effort:
-    /// returns `None` (proceed unlocked) when no store path resolves or the lock
-    /// file cannot be opened/locked, so a lock-layer failure never drops a
-    /// record (it only loses the cross-worktree serialisation guarantee).
-    fn acquire(root: &Path) -> Option<Self> {
-        let lock_path = lock_path_for(&store_path(root)?);
-        if let Some(parent) = lock_path.parent()
-            && std::fs::create_dir_all(parent).is_err()
-        {
-            return None;
-        }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .ok()?;
-        match file.lock() {
-            Ok(()) => Some(Self { _file: file }),
-            Err(err) => {
-                tracing::debug!(error = %err, "could not acquire impact store lock");
-                None
-            }
-        }
-    }
-}
+#[path = "impact_store.rs"]
+mod store;
+use store::{
+    Change, OnInvalid, finish_record, load_all, load_global_default, stamp_schema_version,
+};
+#[cfg(test)]
+use store::{
+    ImpactStoreLock, StoreReadError, legacy_store_path, lock_path_for, migration_marker_path,
+    store_path, write_store,
+};
+pub use store::{
+    StatuslineLoadError, StoreWriteError, load, load_statusline, reset, reset_all,
+    resolved_store_path, set_global_default, store_dir,
+};
 
 /// Resolve the store-GC window from [`STORE_MAX_AGE_ENV`]. `None` (no sweep)
 /// when unset, `0`, or unparseable.
@@ -655,7 +415,7 @@ fn resolve_store_max_age() -> Option<std::time::Duration> {
 /// never reclaimed by a stale-mtime race in the same run.
 ///
 /// Cross-project GC race: this sweep does NOT take the per-store
-/// [`ImpactStoreLock`] of the OTHER projects it inspects, so in principle it
+/// `ImpactStoreLock` of the OTHER projects it inspects, so in principle it
 /// could delete a store another process is mid-writing. This is a bounded,
 /// best-effort limitation rather than a corruption bug. A store becomes a
 /// deletion candidate only when its file mtime is already older than
@@ -697,48 +457,22 @@ fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
     }
 }
 
-/// One-time import of a pre-relocation in-repo `.fallow/impact.json` into the
-/// user store. The legacy store had a FLAT frontier (schema <= 3); this reads
-/// it via [`LegacyFlatStore`] and wraps the flat frontier under the current
-/// worktree key. The legacy file is left byte-for-byte untouched (it is no
-/// longer read once the user store exists; re-running finds the user store and
-/// does not re-import). Monorepo note: N subdir stores share one repo key, so
-/// whichever subdir runs first wins (pick-first); the others are not merged.
-fn migrate_legacy_store(root: &Path) -> ImpactStore {
-    let legacy_path = legacy_store_path(root);
-    let Ok(content) = std::fs::read_to_string(&legacy_path) else {
-        return ImpactStore::default();
-    };
-    let Ok(legacy) = serde_json::from_str::<LegacyFlatStore>(&content) else {
-        return ImpactStore::default();
-    };
-    let (_, worktree, display) = project_identity(root);
-    let mut store = legacy.into_store(&worktree);
-    // Backfill the cross-repo display label on migration so the imported repo
-    // is legible in `impact --all` without waiting for its next recorded run.
-    store.label = display;
-    save(&store, root);
-    store
-}
-
 /// Enable Impact tracking for THIS project (an explicit per-repo decision that
 /// overrides the user-global default). Writes nothing into the repo: the store
-/// lives in the user config dir.
+/// lives in the user config dir. A store that does not parse is replaced.
 ///
 /// # Errors
 ///
-/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
-/// Fallow wrote it.
-pub fn enable(root: &Path) -> Result<bool, NewerStoreSchema> {
-    let mut store = load_for_write(root)?;
-    let was_enabled = store.enabled;
-    store.enabled = true;
-    store.explicit_decision = true;
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-    save(&store, root);
-    Ok(!was_enabled)
+/// Returns [`StoreWriteError`] and leaves the store unchanged when a newer
+/// Fallow wrote it, when it cannot be read, or when the write fails.
+pub fn enable(root: &Path) -> Result<bool, StoreWriteError> {
+    store::transact(root, OnInvalid::Replace, |store| {
+        let was_enabled = store.enabled;
+        store.enabled = true;
+        store.explicit_decision = true;
+        stamp_schema_version(store);
+        Change::Write(!was_enabled)
+    })
 }
 
 /// Disable Impact tracking. Retains existing history. Returns whether it was
@@ -748,18 +482,16 @@ pub fn enable(root: &Path) -> Result<bool, NewerStoreSchema> {
 ///
 /// # Errors
 ///
-/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
-/// Fallow wrote it. This keeps the retained-history promise for that store.
-pub fn disable(root: &Path) -> Result<bool, NewerStoreSchema> {
-    let mut store = load_for_write(root)?;
-    let was_enabled = store.enabled;
-    store.enabled = false;
-    store.explicit_decision = true;
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-    save(&store, root);
-    Ok(was_enabled)
+/// Returns [`StoreWriteError`] and leaves the store unchanged when a newer
+/// Fallow wrote it, when it is not usable, or when the write fails.
+pub fn disable(root: &Path) -> Result<bool, StoreWriteError> {
+    store::transact(root, OnInvalid::Stop, |store| {
+        let was_enabled = store.enabled;
+        store.enabled = false;
+        store.explicit_decision = true;
+        stamp_schema_version(store);
+        Change::Write(was_enabled)
+    })
 }
 
 /// A due periodic value digest: the headline counters for "what has fallow
@@ -778,11 +510,18 @@ const DIGEST_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
 /// next one is at least `DIGEST_INTERVAL_SECS` away. Due means: tracking is
 /// enabled, there is non-zero value to report (anti-nag: a zero digest never
 /// surfaces), and the previous digest is older than the interval (or never
-/// happened). Best-effort like the rest of the store: a clean run that drops
-/// the emitted step simply defers the digest to the next interval.
+/// happened). A read without the lock checks this first, so a run without a due
+/// digest writes no file. A dropped emitted step defers the digest one interval.
 pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
-    let mut store = load_for_write(root).ok()?;
-    if !resolve_enabled(&store).0 {
+    stamp_due_digest(&mut load(root))?;
+    let stamped = store::transact(root, OnInvalid::Stop, |store| {
+        stamp_due_digest(store).map_or(Change::Keep(None), |digest| Change::Write(Some(digest)))
+    });
+    stamped.ok().flatten()
+}
+
+fn stamp_due_digest(store: &mut ImpactStore) -> Option<ImpactDigest> {
+    if !resolve_enabled(store).0 {
         return None;
     }
     let containment_count = store.containment.len();
@@ -799,7 +538,6 @@ pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
         return None;
     }
     store.last_digest_epoch = Some(now);
-    save(&store, root);
     Some(ImpactDigest {
         containment_count,
         resolved_total: store.resolved_total,
@@ -811,60 +549,15 @@ pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
 ///
 /// # Errors
 ///
-/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
-/// Fallow wrote it.
-pub fn decline_onboarding(root: &Path) -> Result<bool, NewerStoreSchema> {
-    let mut store = load_for_write(root)?;
-    let was_declined = store.onboarding_declined;
-    store.onboarding_declined = true;
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-    save(&store, root);
-    Ok(!was_declined)
-}
-
-/// The user-global Impact default, stored at `<config-dir>/fallow/impact.json`
-/// (sibling to `telemetry.json`). A single toggle: when on, new projects record
-/// without a per-repo `enable`. A per-repo explicit decision always wins.
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct GlobalImpactConfig {
-    #[serde(default)]
-    default_enabled: bool,
-}
-
-fn global_config_path() -> Option<PathBuf> {
-    Some(impact_config_dir()?.join(STORE_FILE))
-}
-
-/// Whether the user-global default is on. False when unset or unreadable.
-fn load_global_default() -> bool {
-    let Some(path) = global_config_path() else {
-        return false;
-    };
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|c| serde_json::from_str::<GlobalImpactConfig>(&c).ok())
-        .is_some_and(|c| c.default_enabled)
-}
-
-/// Set the user-global default. Returns whether the value changed.
-pub fn set_global_default(on: bool) -> bool {
-    let was = load_global_default();
-    if let Some(path) = global_config_path() {
-        if let Some(parent) = path.parent()
-            && std::fs::create_dir_all(parent).is_err()
-        {
-            return false;
-        }
-        let config = GlobalImpactConfig {
-            default_enabled: on,
-        };
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            let _ = fallow_config::atomic_write(&path, json.as_bytes());
-        }
-    }
-    was != on
+/// Returns [`StoreWriteError`] and leaves the store unchanged when a newer
+/// Fallow wrote it, when it is not usable, or when the write fails.
+pub fn decline_onboarding(root: &Path) -> Result<bool, StoreWriteError> {
+    store::transact(root, OnInvalid::Stop, |store| {
+        let was_declined = store.onboarding_declined;
+        store.onboarding_declined = true;
+        stamp_schema_version(store);
+        Change::Write(!was_declined)
+    })
 }
 
 /// Resolve whether Impact is active for this project and WHY. Precedence:
@@ -890,40 +583,10 @@ fn resolve_enabled(store: &ImpactStore) -> (bool, EnabledSource) {
     (false, EnabledSource::Default)
 }
 
-/// The resolved per-project store-file path for `root`, for `status` display
-/// (so a wrong key is debuggable). `None` when no config dir is resolvable.
-#[must_use]
-pub fn resolved_store_path(root: &Path) -> Option<PathBuf> {
-    store_path(root)
-}
-
 /// The resolved (worktree-collapsed) project key for `root`, for display.
 #[must_use]
 pub fn resolved_project_key(root: &Path) -> String {
     project_identity(root).0
-}
-
-/// The per-project store directory (`<config-dir>/fallow/impact/`), for the
-/// `impact --all` human discoverability footer. `None` when no config dir.
-#[must_use]
-pub fn store_dir() -> Option<PathBuf> {
-    impact_config_dir().map(|d| d.join("impact"))
-}
-
-/// Delete THIS project's store file. Returns whether a file was removed.
-pub fn reset(root: &Path) -> bool {
-    store_path(root).is_some_and(|p| std::fs::remove_file(&p).is_ok())
-}
-
-/// Delete the whole per-project impact dir (`<config-dir>/fallow/impact/`).
-/// Does NOT touch the global default toggle (`impact.json`): a data wipe should
-/// not silently re-disable an opt-in the user made. Returns whether the dir was
-/// present and removed.
-pub fn reset_all() -> bool {
-    let Some(dir) = impact_config_dir().map(|d| d.join("impact")) else {
-        return false;
-    };
-    dir.is_dir() && std::fs::remove_dir_all(&dir).is_ok()
 }
 
 /// Record an audit run into the rolling store.
@@ -942,6 +605,26 @@ pub fn record_audit_run(
     summary: &AuditSummary,
     record: &AuditRunRecord<'_>,
 ) -> Result<(), String> {
+    // Impact is a LOCAL-DEV signal. Never record in CI: a user-global default
+    // baked into a devcontainer/dotfiles image would otherwise start writing
+    // per-project files on every CI run (pre-relocation this was emergent from
+    // a fresh CI checkout having no in-repo store file; now it is explicit).
+    // A root in a temp folder is skipped too, see `record_gate_skips`.
+    if record_gate_skips(root) {
+        return Ok(());
+    }
+    let outcome = store::transact(root, OnInvalid::Stop, |store| {
+        apply_audit_record(store, root, summary, record)
+    });
+    finish_record(root, outcome)
+}
+
+fn apply_audit_record(
+    store: &mut ImpactStore,
+    root: &Path,
+    summary: &AuditSummary,
+    record: &AuditRunRecord<'_>,
+) -> Change<Result<bool, String>> {
     let AuditRunRecord {
         verdict,
         gate_source,
@@ -951,26 +634,12 @@ pub fn record_audit_run(
         attribution,
         analysis_identity,
     } = record;
-    // Impact is a LOCAL-DEV signal. Never record in CI: a user-global default
-    // baked into a devcontainer/dotfiles image would otherwise start writing
-    // per-project files on every CI run (pre-relocation this was emergent from
-    // a fresh CI checkout having no in-repo store file; now it is explicit).
-    // A root in a temp folder is skipped too, see `record_gate_skips`.
-    if record_gate_skips(root) {
-        return Ok(());
+    if !resolve_enabled(store).0 {
+        return Change::Keep(Ok(false));
     }
-    // Serialise the load -> mutate -> save window so two worktrees of the same
-    // repo (same store key) cannot lost-update each other's record.
-    let _lock = ImpactStoreLock::acquire(root);
-    let mut store = load_for_write(root).map_err(|newer| {
-        let message = newer.message();
-        tracing::warn!("{message}");
-        message
-    })?;
-    if !resolve_enabled(&store).0 {
-        return Ok(());
+    if let Err(message) = validate_store_identity(store, analysis_identity) {
+        return Change::Keep(Err(message));
     }
-    validate_store_identity(&store, analysis_identity)?;
     store.schema_version = STORE_SCHEMA_VERSION;
     store.analysis_identity = (*analysis_identity).clone();
     // Capture the repo basename for the cross-repo view (memoized; no extra git
@@ -985,7 +654,7 @@ pub fn record_audit_run(
     }
 
     apply_containment(
-        &mut store,
+        store,
         *verdict,
         gate_source.is_some(),
         *git_sha,
@@ -1001,18 +670,14 @@ pub fn record_audit_run(
         gate_source: *gate_source,
         counts,
     });
-    compact(&mut store);
+    compact(store);
 
     if let Some(attribution) = attribution {
         let (_, worktree, _) = project_identity(root);
-        apply_attribution(&mut store, attribution, &worktree, *git_sha, timestamp);
+        apply_attribution(store, attribution, &worktree, *git_sha, timestamp);
     }
 
-    save(&store, root);
-    if let Some(max_age) = resolve_store_max_age() {
-        sweep_old_stores(&project_identity(root).0, max_age);
-    }
-    Ok(())
+    Change::Write(Ok(true))
 }
 
 /// Record a whole-project combined run into the project track.
@@ -1032,16 +697,41 @@ pub fn record_combined_run(
     if record_gate_skips(root) {
         return Ok(());
     }
-    let _lock = ImpactStoreLock::acquire(root);
-    let mut store = load_for_write(root).map_err(|newer| {
-        let message = newer.message();
-        tracing::warn!("{message}");
-        message
-    })?;
-    if !resolve_enabled(&store).0 {
-        return Ok(());
+    let outcome = store::transact(root, OnInvalid::Stop, |store| {
+        apply_combined_record(
+            store,
+            root,
+            counts,
+            git_sha,
+            version,
+            timestamp,
+            attribution,
+            analysis_identity,
+        )
+    });
+    finish_record(root, outcome)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "historical impact writes keep provenance and analysis identity explicit"
+)]
+fn apply_combined_record(
+    store: &mut ImpactStore,
+    root: &Path,
+    counts: ImpactCounts,
+    git_sha: Option<&str>,
+    version: &str,
+    timestamp: &str,
+    attribution: Option<&AttributionInput<'_>>,
+    analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+) -> Change<Result<bool, String>> {
+    if !resolve_enabled(store).0 {
+        return Change::Keep(Ok(false));
     }
-    validate_store_identity(&store, analysis_identity)?;
+    if let Err(message) = validate_store_identity(store, analysis_identity) {
+        return Change::Keep(Err(message));
+    }
     store.schema_version = STORE_SCHEMA_VERSION;
     store.analysis_identity = analysis_identity.clone();
     store.label = project_identity(root).2;
@@ -1070,14 +760,10 @@ pub fn record_combined_run(
 
     if let Some(attribution) = attribution {
         let (_, worktree, _) = project_identity(root);
-        apply_attribution(&mut store, attribution, &worktree, git_sha, timestamp);
+        apply_attribution(store, attribution, &worktree, git_sha, timestamp);
     }
 
-    save(&store, root);
-    if let Some(max_age) = resolve_store_max_age() {
-        sweep_old_stores(&project_identity(root).0, max_age);
-    }
-    Ok(())
+    Change::Write(Ok(true))
 }
 
 fn validate_store_identity(
@@ -2001,40 +1687,6 @@ fn latest_activity(store: &ImpactStore) -> Option<String> {
         (Some(x), Some(y)) => Some(if x >= y { x } else { y }),
         (x, y) => x.or(y),
     }
-}
-
-/// Enumerate every per-project store in `<config-dir>/fallow/impact/`, returning
-/// `(project_key, store)` pairs plus the count of files that failed to parse.
-/// Read-only; never writes. The global `impact.json` toggle is a sibling FILE of
-/// this dir (one level up), so it is naturally excluded. Corrupt/newer-schema
-/// files are skipped and counted, never substituted with a default store.
-#[must_use]
-pub fn load_all() -> (Vec<(String, ImpactStore)>, usize) {
-    let Some(dir) = impact_config_dir().map(|d| d.join("impact")) else {
-        return (Vec::new(), 0);
-    };
-    let Ok(read) = std::fs::read_dir(&dir) else {
-        return (Vec::new(), 0);
-    };
-    let mut stores = Vec::new();
-    let mut unreadable = 0usize;
-    for entry in read.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(key) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
-            continue;
-        };
-        match std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|c| serde_json::from_str::<ImpactStore>(&c).ok())
-        {
-            Some(store) => stores.push((key, store)),
-            None => unreadable += 1,
-        }
-    }
-    (stores, unreadable)
 }
 
 /// Build the cross-repo aggregate from enumerated stores. Excludes

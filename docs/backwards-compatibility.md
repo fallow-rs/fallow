@@ -1184,6 +1184,26 @@ These are documented for the rare CI script that depended on the old behavior. N
   it did not know. Refusal is safer than a round trip of unknown keys, because
   a newer schema can also change the meaning or the shape of a known field.
 
+- **An Impact change that cannot be saved is an error, and a damaged store is
+  not overwritten.** `fallow impact enable`, `fallow impact disable`, `fallow
+  impact default on|off`, `fallow impact reset`, and `fallow init --decline`
+  exit with code 2 and an error when the change cannot be saved: no user config
+  folder resolves, or the write fails. Before, they printed success. A store
+  that cannot be read or does not parse stops `fallow impact disable`, `fallow
+  init --decline`, the record of a run, and the periodic digest, and the file
+  stays unchanged. `fallow impact enable` still replaces a store that does not
+  parse, and `fallow impact reset` removes each store. `fallow impact reset`
+  and `fallow impact reset --all` leave a marker file `<project_key>.migrated`
+  next to the store, so the history of an old in-repo `.fallow/impact.json` is
+  not imported again. `fallow impact reset --all` no longer removes the
+  `impact` folder: the lock files and the markers stay. `fallow impact` and the
+  statusline show the old in-repo history without a write, and the first change
+  of the store saves the import. `fallow impact --all` counts each store that a
+  newer fallow wrote in `unreadable_count`, and the statusline reports the
+  newer-fallow state for a newer store with a changed field shape. The store
+  schema version and the JSON output do not change. An older fallow ignores the
+  marker file and can import the in-repo history again after a reset.
+
 - **`code_execute` bounds the value a snippet returns, not only the fallow JSON
   it reads.** `max_output_bytes` previously capped host-call output alone, and
   any snippet result was returned whole with `ok:true`. The serialized result is

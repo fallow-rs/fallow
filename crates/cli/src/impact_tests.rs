@@ -39,6 +39,12 @@ fn seed_store_raw(root: &Path, bytes: &[u8]) {
     std::fs::write(&path, bytes).unwrap();
 }
 
+/// Write a store to the resolved store path, to seed a test.
+fn save(store: &ImpactStore, root: &Path) {
+    let path = store_path(root).expect("test config dir set");
+    write_store(store, &path).expect("seed store");
+}
+
 fn summary(dead: usize, complexity: usize, dupes: usize) -> AuditSummary {
     AuditSummary {
         dead_code_issues: dead,
@@ -548,15 +554,6 @@ fn corrupt_store_loads_as_default_no_panic() {
     let store = load(root);
     assert!(!store.enabled);
     assert!(store.records.is_empty());
-    record_v1(
-        root,
-        &summary(1, 0, 0),
-        AuditVerdict::Fail,
-        true,
-        None,
-        "2.0.0",
-        "t0",
-    );
 }
 
 #[test]
@@ -1566,7 +1563,7 @@ fn resolve_enabled_precedence_table() {
     assert_eq!(resolve_enabled(&never), (false, EnabledSource::Default));
 
     // never-asked + global default on => on (User).
-    assert!(set_global_default(true));
+    assert!(set_global_default(true).unwrap());
     assert_eq!(resolve_enabled(&never), (true, EnabledSource::User));
     // a per-repo disable still wins over the global default.
     assert_eq!(
@@ -1578,7 +1575,7 @@ fn resolve_enabled_precedence_table() {
 #[test]
 fn human_report_explains_user_global_default() {
     let (_config, _dir) = test_env();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     // A never-asked store resolved on a project: enabled via the global default.
     let report = build_report(&ImpactStore::default());
     assert_eq!(report.enabled_source, EnabledSource::User);
@@ -1601,10 +1598,10 @@ fn human_report_explains_user_global_default() {
 fn global_default_round_trips() {
     let (_config, _dir) = test_env();
     assert!(!load_global_default());
-    assert!(set_global_default(true));
+    assert!(set_global_default(true).unwrap());
     assert!(load_global_default());
-    assert!(!set_global_default(true)); // unchanged
-    assert!(set_global_default(false));
+    assert!(!set_global_default(true).unwrap()); // unchanged
+    assert!(set_global_default(false).unwrap());
     assert!(!load_global_default());
 }
 
@@ -1612,7 +1609,7 @@ fn global_default_round_trips() {
 fn global_default_records_without_per_repo_enable() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     // No `enable(root)` call: the global default alone should activate.
     record_v1(
         root,
@@ -1630,7 +1627,7 @@ fn global_default_records_without_per_repo_enable() {
 }
 
 #[test]
-fn legacy_in_repo_store_is_migrated_on_first_load() {
+fn legacy_in_repo_store_is_shown_on_load_and_saved_on_first_write() {
     let (_config, dir) = test_env();
     let root = dir.path();
     // Seed a pre-relocation v3 store with a FLAT frontier in the repo.
@@ -1650,11 +1647,11 @@ fn legacy_in_repo_store_is_migrated_on_first_load() {
     assert_eq!(store.resolved_total, 2);
     // The flat frontier was wrapped under the worktree key (nested v4 shape).
     assert!(frontier_paths(&store).contains("src/a.ts"));
-    // The user store now exists, so a second load does NOT re-import (it
-    // reads the user store directly).
-    assert!(store_path(root).is_some_and(|p| p.exists()));
-    let again = load(root);
-    assert_eq!(again.records.len(), 1);
+    let user_store = store_path(root).unwrap();
+    assert!(!user_store.exists(), "a read does not save the import");
+    decline_onboarding(root).unwrap();
+    assert!(user_store.exists(), "the first write saves the import");
+    assert_eq!(load(root).records.len(), 1);
 }
 
 #[test]
@@ -1672,19 +1669,19 @@ fn reset_removes_only_this_project() {
         "t0",
     );
     assert_eq!(load(root).records.len(), 1);
-    assert!(reset(root));
+    assert!(reset(root).unwrap());
     assert!(load(root).records.is_empty());
-    assert!(!reset(root)); // already gone
+    assert!(!reset(root).unwrap()); // already gone
 }
 
 #[test]
 fn reset_all_clears_dir_but_keeps_global_default() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     enable(root).unwrap();
     assert!(load(root).enabled);
-    assert!(reset_all());
+    assert!(reset_all(root).unwrap());
     // The global default toggle survives a data wipe.
     assert!(load_global_default());
 }
@@ -2863,7 +2860,7 @@ fn render_cross_repo_markdown_includes_project_wide_totals_when_present() {
     );
 }
 
-// ----- migrate_legacy_store: corrupt legacy file falls back to default ---
+// ----- legacy_view: corrupt legacy file falls back to default ----------
 
 #[test]
 #[cfg_attr(miri, ignore)]
@@ -2873,7 +2870,7 @@ fn migrate_legacy_store_corrupt_file_returns_default() {
     // Write a corrupt legacy in-repo store.
     std::fs::create_dir_all(root.join(".fallow")).unwrap();
     std::fs::write(legacy_store_path(root), b"{ corrupted json ][").unwrap();
-    // load() tries the user store (missing) then migrate_legacy_store.
+    // load() finds no user store and reads the legacy store.
     let store = load(root);
     // A corrupt legacy file must return a default store without panicking.
     assert!(!store.enabled);
@@ -2962,7 +2959,7 @@ fn statusline_loader_reports_corrupt_legacy_store() {
 #[test]
 fn resolve_enabled_user_source_appears_in_report() {
     let (_config, _dir) = test_env();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     let never_asked = ImpactStore::default();
     let (enabled, source) = resolve_enabled(&never_asked);
     assert!(enabled);
@@ -3263,4 +3260,359 @@ fn usable_temp_bases_drops_a_root_and_the_home_folder() {
     let bases = record_gate::usable_temp_bases(candidates, Some(home.path()));
 
     assert_eq!(bases, vec![home_parent, other.path().to_path_buf()]);
+}
+
+// ----- strict store read and the write transaction ----------------------
+
+/// A pre-relocation v3 in-repo store with one record.
+const LEGACY: &str = r#"{"schema_version":3,"enabled":true,"explicit_decision":true,
+            "records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,
+            "counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],
+            "resolved_total":2,
+            "frontier":{"src/a.ts":{"findings":[{"id":"x","kind":"unused-export","symbol":"foo"}],"suppressions":[]}},
+            "containment":[]}"#;
+
+fn write_legacy(root: &Path) {
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::write(legacy_store_path(root), LEGACY).unwrap();
+}
+
+#[test]
+fn cross_repo_skips_and_counts_a_newer_store_that_still_parses() {
+    let _cfg = aggregate_env();
+    seed_store("good", &store_with("good", 3, 0, "2026-06-10T00:00:00Z", 1));
+    let dir = impact_config_dir().unwrap().join("impact");
+    std::fs::write(
+        dir.join("newer.json"),
+        format!(
+            r#"{{"schema_version":{},"enabled":true,"resolved_total":5}}"#,
+            STORE_SCHEMA_VERSION + 1
+        ),
+    )
+    .unwrap();
+    let report = aggregate(CrossRepoSort::Recent);
+    assert_eq!(report.project_count, 1, "a newer store is not aggregated");
+    assert_eq!(report.unreadable_count, 1, "a newer store is counted");
+}
+
+#[test]
+fn statusline_reports_newer_schema_when_a_known_field_changed_shape() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(
+        root,
+        format!(
+            r#"{{"schema_version":{},"enabled":"per-worktree"}}"#,
+            STORE_SCHEMA_VERSION + 1
+        )
+        .as_bytes(),
+    );
+    assert!(matches!(
+        load_statusline(root),
+        Err(StatuslineLoadError::NewerSchema)
+    ));
+}
+
+#[test]
+fn load_does_not_import_the_legacy_store_over_an_unreadable_store() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, &[0xff, 0xfe]);
+    write_legacy(root);
+    assert!(load(root).records.is_empty());
+    assert_eq!(
+        std::fs::read(store_path(root).unwrap()).unwrap(),
+        [0xff, 0xfe]
+    );
+}
+
+#[test]
+fn legacy_view_is_absent_when_the_marker_exists() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    let store = store_path(root).unwrap();
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(migration_marker_path(&store), b"").unwrap();
+    assert!(load(root).records.is_empty());
+    assert!(load_statusline(root).unwrap().records.is_empty());
+}
+
+fn audit_record(root: &Path) -> Result<(), String> {
+    record_audit_run(
+        root,
+        &summary(1, 0, 0),
+        &AuditRunRecord {
+            verdict: AuditVerdict::Fail,
+            gate_source: Some(GateSource::Unknown),
+            git_sha: Some("abc1234"),
+            version: "2.0.0",
+            timestamp: "2026-10-02T00:00:00Z",
+            attribution: None,
+            analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        },
+    )
+}
+
+#[test]
+fn record_leaves_an_unparsable_store_unchanged() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    set_global_default(true).unwrap();
+    seed_store_raw(root, b"{not json");
+    assert!(audit_record(root).is_err());
+    assert_eq!(raw_store(root), "{not json");
+}
+
+/// Hold the store lock of a fresh project, run `change` on another thread, and
+/// check that `change` waits for the lock. `prepare` runs before the lock.
+fn assert_waits_for_store_lock(
+    prepare: impl FnOnce(&Path),
+    change: impl FnOnce(&Path) + Send + 'static,
+) -> (tempfile::TempDir, tempfile::TempDir) {
+    let (config, dir) = test_env();
+    let root = dir.path().to_path_buf();
+    prepare(&root);
+    let lock = ImpactStoreLock::acquire(&root).expect("lock");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let config_dir = config.path().to_path_buf();
+    let worker = std::thread::spawn(move || {
+        TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = Some(config_dir));
+        change(&root);
+        tx.send(()).unwrap();
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(300))
+            .is_err(),
+        "the change must wait for the store lock"
+    );
+    drop(lock);
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the change runs after the lock");
+    worker.join().unwrap();
+    (config, dir)
+}
+
+#[test]
+fn enable_waits_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            disable(root).unwrap();
+        },
+        |root| {
+            let _ = enable(root);
+        },
+    );
+    assert!(load(dir.path()).enabled);
+}
+
+#[test]
+fn record_keeps_the_file_when_tracking_is_off() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    assert_eq!(audit_record(root), Ok(()));
+    assert!(!store_path(root).unwrap().exists());
+}
+
+#[test]
+fn write_store_returns_the_io_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"").unwrap();
+    assert!(matches!(
+        write_store(&ImpactStore::default(), &blocker.join("x.json")),
+        Err(StoreWriteError::Io { .. })
+    ));
+}
+
+#[test]
+fn explicit_changes_fail_without_a_config_dir() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = None);
+    assert!(disable(root).is_err());
+    assert!(decline_onboarding(root).is_err());
+    assert_eq!(audit_record(root), Ok(()));
+    assert!(take_due_digest(root).is_none());
+    assert!(matches!(enable(root), Err(StoreWriteError::NoConfigDir)));
+    assert!(matches!(disable(root), Err(StoreWriteError::NoConfigDir)));
+    assert!(matches!(
+        decline_onboarding(root),
+        Err(StoreWriteError::NoConfigDir)
+    ));
+}
+
+#[test]
+fn unparsable_store_stops_disable_decline_and_digest() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, b"{not json");
+    assert!(disable(root).is_err());
+    assert!(decline_onboarding(root).is_err());
+    assert!(take_due_digest(root).is_none());
+    assert_eq!(raw_store(root), "{not json");
+    let err = disable(root).unwrap_err();
+    assert!(matches!(
+        err,
+        StoreWriteError::Read(StoreReadError::Invalid { .. })
+    ));
+    assert!(err.message().contains("fallow impact reset"));
+}
+
+#[test]
+fn disable_decline_and_digest_wait_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = disable(root);
+        },
+    );
+    assert!(!load(dir.path()).enabled);
+
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = decline_onboarding(root);
+        },
+    );
+    assert!(load(dir.path()).onboarding_declined);
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+            let mut store = load(root);
+            store.resolved_total = 3;
+            save(&store, root);
+        },
+        |root| {
+            let _ = take_due_digest(root);
+        },
+    );
+    assert!(load(dir.path()).last_digest_epoch.is_some());
+}
+
+#[test]
+fn digest_that_is_not_due_keeps_the_file() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    enable(root).unwrap();
+    let mut store = load(root);
+    store.resolved_total = 3;
+    store.containment.push(ContainmentEvent {
+        blocked_at: "2026-06-11T00:00:00Z".to_string(),
+        cleared_at: "2026-06-11T00:05:00Z".to_string(),
+        git_sha: None,
+        blocked_counts: ImpactCounts::default(),
+    });
+    save(&store, root);
+    assert!(take_due_digest(root).is_some());
+    let before = raw_store(root);
+    assert!(take_due_digest(root).is_none());
+    assert_eq!(raw_store(root), before);
+}
+
+#[test]
+fn enable_does_not_replace_a_store_that_is_not_utf8() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, &[0xff, 0xfe]);
+    assert!(matches!(
+        enable(root),
+        Err(StoreWriteError::Read(StoreReadError::Unreadable { .. }))
+    ));
+    assert_eq!(
+        std::fs::read(store_path(root).unwrap()).unwrap(),
+        [0xff, 0xfe]
+    );
+}
+
+#[test]
+fn global_default_fails_without_a_config_dir() {
+    let _cfg = aggregate_env();
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = None);
+    assert!(matches!(
+        set_global_default(true),
+        Err(StoreWriteError::NoConfigDir)
+    ));
+}
+
+#[test]
+fn reset_does_not_import_the_legacy_store_again() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    decline_onboarding(root).unwrap();
+    assert_eq!(load(root).records.len(), 1);
+    assert!(migration_marker_path(&store_path(root).unwrap()).exists());
+    assert!(reset(root).unwrap());
+    assert!(load(root).records.is_empty());
+    enable(root).unwrap();
+    record_v1(
+        root,
+        &summary(1, 0, 0),
+        AuditVerdict::Warn,
+        false,
+        None,
+        "2.0.0",
+        "t1",
+    );
+    assert_eq!(load(root).records.len(), 1);
+}
+
+#[test]
+fn reset_before_the_first_write_blocks_the_import() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    assert!(!reset(root).unwrap());
+    assert!(load(root).records.is_empty());
+}
+
+#[test]
+fn reset_all_keeps_markers_locks_and_the_global_default() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    set_global_default(true).unwrap();
+    enable(root).unwrap();
+    assert!(reset_all(root).unwrap());
+    let store = store_path(root).unwrap();
+    assert!(!store.exists());
+    assert!(migration_marker_path(&store).exists());
+    assert!(lock_path_for(&store).exists());
+    assert!(load_global_default());
+    assert!(load(root).records.is_empty());
+
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    assert!(!reset_all(root).unwrap());
+    assert!(load(root).records.is_empty());
+}
+
+#[test]
+fn reset_waits_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = reset(root);
+        },
+    );
+    assert!(!store_path(dir.path()).unwrap().exists());
+}
+
+#[test]
+fn digest_on_an_untracked_project_creates_no_file() {
+    let (config, dir) = test_env();
+    let root = dir.path();
+    assert!(take_due_digest(root).is_none());
+    assert!(
+        !config.path().join("impact").exists(),
+        "a digest that is not due must not create the store folder or a lock"
+    );
 }
