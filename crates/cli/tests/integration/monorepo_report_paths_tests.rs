@@ -9,9 +9,8 @@
 //! the repo toplevel, which is what every other fixture covers.
 
 use std::path::Path;
-use std::process::Command;
 
-use crate::common::{fallow_bin, git, git_command, parse_json};
+use crate::common::{git, git_command, parse_json, required_array};
 
 /// A repo whose `packages/pkg` is the analysis root, holding one function that
 /// trips a complexity rule.
@@ -54,44 +53,15 @@ const COMPLEX_JS: &str = "export function complex(a, b, c, d, e) {
 ";
 
 fn run(root: &Path, args: &[&str]) -> crate::common::CommandOutput {
-    let mut cmd = Command::new(fallow_bin());
-    cmd.current_dir(root)
-        .env("RUST_LOG", "")
-        .env("NO_COLOR", "1");
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    run_with_env(root, args, &[])
 }
 
 fn run_with_env(root: &Path, args: &[&str], env: &[(&str, &str)]) -> crate::common::CommandOutput {
-    let mut cmd = Command::new(fallow_bin());
-    cmd.current_dir(root)
-        .env("RUST_LOG", "")
-        .env("NO_COLOR", "1");
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::run_fallow_raw_in_dir_with_env(root, args, env)
 }
 
 fn review_comment_count(output: &crate::common::CommandOutput) -> usize {
-    parse_json(output)["comments"]
-        .as_array()
-        .map_or(0, Vec::len)
+    required_array(&parse_json(output), "/comments").len()
 }
 
 fn codeclimate_paths(output: &crate::common::CommandOutput) -> Vec<String> {
