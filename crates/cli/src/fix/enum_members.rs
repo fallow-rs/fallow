@@ -88,8 +88,11 @@ pub(super) struct EnumMemberFixInput<'a, 'member> {
 /// (`SourceEditIndex::remove_enum_members`). A member that owns its lines is
 /// deleted with its lines, also an initializer over several lines. A member
 /// that shares a line is deleted with one separating comma, and each other
-/// byte of the enum stays as it is. An exported enum whose members are all
-/// unused is removed as a whole. A file that does not parse gets no edit.
+/// byte of the enum stays as it is. A kept member that counts on from a
+/// removed member gets an initializer with its old value, so no kept value
+/// changes. When that old value is not a known integer, the enum gets no
+/// edit and no record. An exported enum whose members are all unused is
+/// removed as a whole. A file that does not parse gets no edit.
 pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
     let EnumMemberFixInput {
         root,
@@ -531,7 +534,10 @@ mod tests {
         let fixes = fix_single_member(root, &file, "Status", "Inactive", 3, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export enum Status {\n  Active,\n  Pending,\n}\n");
+        assert_eq!(
+            content,
+            "export enum Status {\n  Active,\n  Pending = 2,\n}\n"
+        );
         assert_eq!(fixes.len(), 1);
         assert_eq!(fixes[0]["type"], "remove_enum_member");
         assert_eq!(fixes[0]["parent"], "Status");
@@ -570,7 +576,7 @@ mod tests {
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export enum Status {\n  Inactive,\n}\n");
+        assert_eq!(content, "export enum Status {\n  Inactive = 1,\n}\n");
         assert_eq!(fixes.len(), 2);
     }
 
@@ -638,7 +644,7 @@ mod tests {
         fix_single_member(root, &file, "Status", "Inactive", 1, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "enum Status { Active, Pending }\n");
+        assert_eq!(content, "enum Status { Active, Pending = 2 }\n");
     }
 
     #[test]
@@ -719,7 +725,7 @@ mod tests {
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
             content,
-            "export enum Status {\r\n  Active,\r\n  Pending,\r\n}\r\n"
+            "export enum Status {\r\n  Active,\r\n  Pending = 2,\r\n}\r\n"
         );
     }
 
@@ -739,7 +745,7 @@ mod tests {
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
             content,
-            "    export enum Status {\n        Inactive,\n    }\n"
+            "    export enum Status {\n        Inactive = 1,\n    }\n"
         );
     }
 
@@ -843,7 +849,7 @@ mod tests {
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "enum Status { A, C }\n");
+        assert_eq!(content, "enum Status { A, C = 2 }\n");
         assert_eq!(fixes.len(), 2);
         assert!(fixes.iter().any(|fix| fix["name"] == "B"));
         assert!(fixes.iter().any(|fix| fix["name"] == "D"));
@@ -863,7 +869,28 @@ mod tests {
         fix_single_member(root, &file, "Status", "Active", 2, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "enum Status {\n  Inactive,\n  Pending,\n}\n");
+        assert_eq!(content, "enum Status {\n  Inactive = 1,\n  Pending,\n}\n");
+    }
+
+    #[test]
+    fn enum_fix_keeps_the_value_of_each_kept_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("level.ts");
+        std::fs::write(
+            &file,
+            "export enum Level {\n  Low,\n  Medium,\n  High,\n}\n",
+        )
+        .unwrap();
+
+        let fixes = fix_single_member(root, &file, "Level", "Low", 2, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export enum Level {\n  Medium = 1,\n  High,\n}\n");
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["type"], "remove_enum_member");
+        assert_eq!(fixes[0]["name"], "Low");
+        assert_eq!(fixes[0]["applied"], true);
     }
 
     #[test]
@@ -1016,7 +1043,7 @@ mod tests {
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
             content,
-            "const enum Direction {\n  Up,\n  Down,\n  Right,\n}\n"
+            "const enum Direction {\n  Up,\n  Down,\n  Right = 3,\n}\n"
         );
     }
 
@@ -1052,7 +1079,7 @@ mod tests {
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
             content,
-            "export enum Status {\n  Inactive,\n  Pending,\n}\n"
+            "export enum Status {\n  Inactive = 1,\n  Pending,\n}\n"
         );
         assert_eq!(fixes.len(), 1);
         assert_eq!(fixes[0]["type"], "remove_enum_member");
