@@ -4,7 +4,15 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -233,6 +241,30 @@ test("the options reject an unknown agent, an unknown prompt and a bad run count
   assert.deepEqual(options.promptIds, ["circular-imports"]);
   assert.equal(options.runs, 3);
   assert.equal(options.outDir, join(REPO_ROOT, ".plans", "agent-pick", "2026-11-10"));
+});
+
+test("an output directory under a symlinked .plans folder counts as ignored", () => {
+  // Maintainer worktrees link .plans to one shared folder. The tracked
+  // .gitignore must ignore that link, and the check must accept paths under it.
+  const root = mkdtempSync(join(tmpdir(), "agent-pick-symlink-"));
+  try {
+    const repo = join(root, "repo");
+    const shared = join(root, "shared-plans");
+    mkdirSync(repo);
+    mkdirSync(shared);
+    assert.equal(spawnSync("git", ["init", "-q"], { cwd: repo }).status, 0);
+    writeFileSync(join(repo, ".gitignore"), readFileSync(join(REPO_ROOT, ".gitignore"), "utf8"));
+    symlinkSync(shared, join(repo, ".plans"));
+    symlinkSync(shared, join(repo, "notes"));
+
+    assert.equal(checkOutDir(join(repo, ".plans", "agent-pick", "x"), repo).ok, true);
+    assert.match(checkOutDir(join(repo, "notes", "x"), repo).error, /does not ignore/u);
+    // A folder name that starts with two dots is still inside the repository.
+    assert.match(checkOutDir(join(repo, "..cache", "x"), repo).error, /does not ignore/u);
+    assert.match(checkOutDir(repo, repo).error, /^\. is inside/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the output directory must be outside the repository or ignored by git", () => {
