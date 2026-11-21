@@ -418,7 +418,10 @@ export const reconcileGraphView = (state: AppState): void => {
     const index = selectedRoadIndex(state, gvs);
     selectRoad(state, index === null ? null : buildRoadSelection(state, index));
   }
-  if (state.view !== "graph") return;
+  if (state.view !== "graph") {
+    select(state.canvas).interrupt("camera");
+    return;
+  }
   const before = gvs.standalone === null ? null : gvs.standalone.open;
   const after = standaloneVisible(state, gvs);
   if (before !== null && before !== after) resetGraphView(state);
