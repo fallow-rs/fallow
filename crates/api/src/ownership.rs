@@ -37,6 +37,13 @@ pub fn load_codeowners(root: &Path, config: &ResolvedConfig) -> Result<Option<Co
     }
 }
 
+/// Owner label of a path: the primary owner, or the unowned label.
+fn owner_label<'a>(codeowners: &'a CodeOwners, path: &str) -> &'a str {
+    codeowners
+        .owner_of(Path::new(path))
+        .unwrap_or(UNOWNED_LABEL)
+}
+
 /// Compute the ownership section.
 ///
 /// `changed` and `affected` are root-relative, forward-slashed paths.
@@ -50,19 +57,15 @@ pub fn compute_ownership_facts(
     affected: &[String],
     partition: Option<&PartitionOrderPaths>,
 ) -> OwnershipFacts {
-    let owner_of = |path: &str| -> String {
-        codeowners
-            .owner_of(Path::new(path))
-            .unwrap_or(UNOWNED_LABEL)
-            .to_string()
-    };
-
-    let mut counts: FxHashMap<String, (usize, usize)> = FxHashMap::default();
+    let mut changed_owners: FxHashMap<&str, &str> = FxHashMap::default();
+    let mut counts: FxHashMap<&str, (usize, usize)> = FxHashMap::default();
     for path in changed {
-        counts.entry(owner_of(path)).or_default().0 += 1;
+        let owner = owner_label(codeowners, path);
+        changed_owners.insert(path.as_str(), owner);
+        counts.entry(owner).or_default().0 += 1;
     }
     for path in affected {
-        counts.entry(owner_of(path)).or_default().1 += 1;
+        counts.entry(owner_label(codeowners, path)).or_default().1 += 1;
     }
 
     let unowned_direct_count = counts.get(UNOWNED_LABEL).map_or(0, |&(direct, _)| direct);
@@ -72,7 +75,7 @@ pub fn compute_ownership_facts(
     let mut groups: Vec<OwnerGroupFact> = counts
         .into_iter()
         .map(|(owner, (direct_count, affected_count))| OwnerGroupFact {
-            owner,
+            owner: owner.to_string(),
             direct_count,
             affected_count,
         })
@@ -92,7 +95,14 @@ pub fn compute_ownership_facts(
         unowned_direct_count,
         groups,
         groups_omitted,
-        slices: partition.map_or_else(Vec::new, |partition| slice_owners(partition, &owner_of)),
+        slices: partition.map_or_else(Vec::new, |partition| {
+            slice_owners(partition, &|file: &str| {
+                changed_owners
+                    .get(file)
+                    .copied()
+                    .unwrap_or_else(|| owner_label(codeowners, file))
+            })
+        }),
     }
 }
 
@@ -106,9 +116,9 @@ pub fn compute_ownership_facts(
 ///
 /// The owners come from the changed files of each unit, not from the module
 /// directory, because a CODEOWNERS rule can split a directory.
-fn slice_owners(
+fn slice_owners<'a>(
     partition: &PartitionOrderPaths,
-    owner_of: &dyn Fn(&str) -> String,
+    owner_of: &dyn Fn(&str) -> &'a str,
 ) -> Vec<OwnershipSliceFact> {
     if partition.independent_slices.len() < 2 {
         return Vec::new();
@@ -122,13 +132,13 @@ fn slice_owners(
         .independent_slices
         .iter()
         .map(|module_dirs| {
-            let owners: FxHashSet<String> = module_dirs
+            let owners: FxHashSet<&str> = module_dirs
                 .iter()
                 .filter_map(|dir| files_by_dir.get(dir.as_str()))
                 .flat_map(|files| files.iter())
                 .map(|file| owner_of(file))
                 .collect();
-            let mut owners: Vec<String> = owners.into_iter().collect();
+            let mut owners: Vec<String> = owners.into_iter().map(str::to_string).collect();
             owners.sort_unstable();
             debug_assert!(
                 !owners.is_empty(),
@@ -347,5 +357,24 @@ mod tests {
             Some(&partition),
         );
         assert!(facts.slices.is_empty());
+    }
+
+    #[test]
+    fn a_slice_file_outside_the_changed_list_still_gets_its_owner() {
+        let partition = partition(
+            &[
+                ("src/a", &["src/a/x.ts", "src/a/extra.ts"]),
+                ("src/b", &["src/b/z.ts"]),
+            ],
+            &[&["src/a"], &["src/b"]],
+        );
+        let facts = compute_ownership_facts(
+            &owners("src/ @team/all\nsrc/a/extra.ts @team/extra\n"),
+            &paths(&["src/a/x.ts", "src/b/z.ts"]),
+            &[],
+            Some(&partition),
+        );
+        assert_eq!(facts.slices[0].owners, paths(&["@team/all", "@team/extra"]));
+        assert_eq!(facts.slices[1].owners, paths(&["@team/all"]));
     }
 }
