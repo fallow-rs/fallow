@@ -1641,7 +1641,7 @@
       "type": "object",
       "properties": {
         "botPatterns": {
-          "description": "Glob patterns (matched against the author email local-part) that\nidentify bot or service-account commits to exclude from ownership\nsignals. Overrides the defaults entirely when set.",
+          "description": "Glob patterns that identify bot or service-account commits to exclude\nfrom ownership signals. A pattern matches the local part of the author\nemail or the full author value. Overrides the defaults entirely when set.",
           "type": "array",
           "items": {
             "type": "string"

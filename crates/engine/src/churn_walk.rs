@@ -81,7 +81,7 @@ fn churn_log_command(
             "--no-renames",
             "--use-mailmap",
             "-z",
-            "--format=format:%at|%ct|%H|%ae%x00",
+            "--format=format:%at|%ct|%H|%aE%x00",
         ])
         .current_dir(root);
     if let Some(cutoff) = cutoff_secs {

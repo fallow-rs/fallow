@@ -25,8 +25,8 @@
 //! Author emails are emitted in one of three modes per [`EmailMode`]:
 //!
 //! - `Raw`: full email as it appears in git history.
-//! - `Handle` (default): local-part only, with GitHub-style `12345+name`
-//!   noreply addresses unwrapped to `name`.
+//! - `Handle` (default): local-part only. A GitHub noreply address
+//!   `12345+name@users.noreply.github.com` gives `name`.
 //! - `Anonymized`: stable `xxh3:<16hex>` pseudonym derived from the raw email.
 //!
 //! Hashed mode is suitable for CI artifacts in regulated environments where
@@ -36,8 +36,6 @@
 use std::path::Path;
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
-use rustc_hash::{FxHashMap, FxHashSet};
-use xxhash_rust::xxh3::xxh3_64;
 
 use crate::churn::{AuthorContribution, FileChurn};
 use fallow_config::EmailMode;
@@ -46,6 +44,8 @@ use crate::codeowners::CodeOwners;
 use fallow_output::{
     ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
 };
+
+pub use super::contributor::ContributorId;
 
 /// Seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
@@ -61,6 +61,9 @@ const DRIFT_MAX_ORIGINAL_SHARE: f64 = 0.10;
 
 /// Declared owner activity window in days.
 const DECLARED_OWNER_ACTIVE_DAYS: u64 = 90;
+
+/// A suggested reviewer has a commit to the file within this many days.
+const SUGGESTED_REVIEWER_MAX_STALE_DAYS: u64 = 90;
 
 /// Inputs needed to compute ownership for one file. Built once per analysis
 /// run and reused for every hotspot.
@@ -79,7 +82,8 @@ pub struct OwnershipContext<'a> {
 
 /// Compile bot-author glob patterns from configuration.
 ///
-/// Each pattern is matched (via `globset`) against the raw author email.
+/// Each pattern is matched (via `globset`) against the local part of the author
+/// email and against the full author value.
 ///
 /// # Errors
 /// Returns the first invalid glob pattern encountered.
@@ -93,17 +97,30 @@ pub fn compile_bot_globs(patterns: &[String]) -> Result<GlobSet, globset::Error>
     builder.build()
 }
 
-/// Compute ownership signals for one file. Returns `None` when the file has
-/// no recorded authors or all authors are filtered out as bots.
+/// Ownership metrics of one file, with the identity of each contributor
+/// that reviewer routing can name. The identities are not part of the
+/// report, so the rendered identifiers keep the configured privacy mode.
+pub struct OwnershipWithIdentities<'a> {
+    /// The metrics that the report shows.
+    pub metrics: OwnershipMetrics,
+    /// Identity of `metrics.top_contributor`.
+    pub top_contributor: ContributorId<'a>,
+    /// Identities of `metrics.suggested_reviewers`, in the same order.
+    pub suggested_reviewers: Vec<ContributorId<'a>>,
+}
+
+/// Compute ownership signals for one file, with the contributor
+/// identities. Returns `None` when the file has no recorded authors or all
+/// authors are filtered out as bots.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "contributor counts and bus factor are bounded by author pool size"
 )]
-pub fn compute_ownership(
-    churn: &FileChurn,
+pub fn compute_ownership_with_identities<'a>(
+    churn: &'a FileChurn,
     relative_path: &Path,
-    ctx: &OwnershipContext<'_>,
-) -> Option<OwnershipMetrics> {
+    ctx: &OwnershipContext<'a>,
+) -> Option<OwnershipWithIdentities<'a>> {
     if churn.authors.is_empty() {
         return None;
     }
@@ -148,17 +165,35 @@ pub fn compute_ownership(
         (false, None)
     };
 
-    Some(OwnershipMetrics {
-        bus_factor,
-        contributor_count: filtered.len() as u32,
-        top_contributor,
-        recent_contributors,
-        suggested_reviewers,
-        declared_owner,
-        unowned,
-        ownership_state,
-        drift,
-        drift_reason,
+    let top_identity = filtered[0].id;
+    let reviewer_identities: Vec<ContributorId<'a>> = filtered
+        .iter()
+        .skip(1)
+        .take(3)
+        .filter(|author| {
+            stale_days(author.contribution.last_commit_ts, ctx.now_secs)
+                < SUGGESTED_REVIEWER_MAX_STALE_DAYS
+        })
+        .map(|author| author.id)
+        .collect();
+
+    debug_assert_eq!(reviewer_identities.len(), suggested_reviewers.len());
+
+    Some(OwnershipWithIdentities {
+        metrics: OwnershipMetrics {
+            bus_factor,
+            contributor_count: filtered.len() as u32,
+            top_contributor,
+            recent_contributors,
+            suggested_reviewers,
+            declared_owner,
+            unowned,
+            ownership_state,
+            drift,
+            drift_reason,
+        },
+        top_contributor: top_identity,
+        suggested_reviewers: reviewer_identities,
     })
 }
 
@@ -172,13 +207,13 @@ fn rank_non_bot_authors<'a>(
         .authors
         .iter()
         .filter_map(|(idx, contribution)| {
-            let raw_email = ctx.author_pool.get(*idx as usize)?;
-            if is_bot(raw_email, ctx.bot_globs) {
+            let id = ContributorId::new(ctx.author_pool.get(*idx as usize)?);
+            if id.is_bot(ctx.bot_globs) {
                 return None;
             }
             Some(RankedAuthor {
                 idx: *idx,
-                raw_email,
+                id,
                 contribution,
                 rendered: String::new(),
             })
@@ -189,14 +224,18 @@ fn rank_non_bot_authors<'a>(
         return filtered;
     }
 
-    render_author_identifiers(&mut filtered, ctx.email_mode);
+    let ids: Vec<ContributorId<'_>> = filtered.iter().map(|author| author.id).collect();
+    let rendered = super::contributor::render_identifiers(&ids, ctx.email_mode);
+    for (author, rendered) in filtered.iter_mut().zip(rendered) {
+        author.rendered = rendered;
+    }
 
     filtered.sort_by(|a, b| {
         b.contribution
             .weighted_commits
             .partial_cmp(&a.contribution.weighted_commits)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.raw_email.cmp(b.raw_email))
+            .then_with(|| a.id.raw().cmp(b.id.raw()))
     });
 
     filtered
@@ -238,7 +277,7 @@ fn build_ownership_contributors(
 
     let suggested_reviewers: Vec<ContributorEntry> = recent_contributors
         .iter()
-        .filter(|c| c.stale_days < 90)
+        .filter(|c| c.stale_days < SUGGESTED_REVIEWER_MAX_STALE_DAYS)
         .cloned()
         .collect();
 
@@ -250,71 +289,9 @@ struct RankedAuthor<'a> {
     /// Interned author pool index. Stable identifier for equality checks
     /// across `min_by_key` / sorted-position comparisons in drift detection.
     idx: u32,
-    raw_email: &'a str,
+    id: ContributorId<'a>,
     contribution: &'a AuthorContribution,
     rendered: String,
-}
-
-fn render_author_identifiers(authors: &mut [RankedAuthor<'_>], mode: EmailMode) {
-    match mode {
-        EmailMode::Raw => {
-            for author in authors {
-                author.rendered = author.raw_email.to_string();
-            }
-        }
-        EmailMode::Handle => render_handle_identifiers(authors),
-        EmailMode::Anonymized | EmailMode::Hash => {
-            for author in authors {
-                author.rendered = hash_email(author.raw_email);
-            }
-        }
-    }
-}
-
-fn render_handle_identifiers(authors: &mut [RankedAuthor<'_>]) {
-    let mut emails_by_handle: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
-    for author in authors.iter() {
-        emails_by_handle
-            .entry(extract_handle(author.raw_email))
-            .or_default()
-            .insert(author.raw_email.to_string());
-    }
-
-    for author in authors {
-        let base = extract_handle(author.raw_email);
-        let collides = emails_by_handle
-            .get(&base)
-            .is_some_and(|emails| emails.len() > 1);
-        if collides {
-            author.rendered = format!("{base}~{}", collision_suffix(author.raw_email));
-        } else {
-            author.rendered = base;
-        }
-    }
-}
-
-fn collision_suffix(email: &str) -> String {
-    let domain = email.split_once('@').map_or("", |(_, domain)| domain);
-    if domain.is_empty() {
-        return format!("id{:016x}", xxh3_64(email.as_bytes()));
-    }
-    sanitize_suffix(domain)
-}
-
-fn sanitize_suffix(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            out.push('-');
-        }
-    }
-    if out.is_empty() {
-        "unknown".to_string()
-    } else {
-        out
-    }
 }
 
 /// Avelino truck factor. Sort by weighted commits descending (already done
@@ -409,7 +386,7 @@ fn declared_owner_matches_author(owner: &str, author: &RankedAuthor<'_>) -> bool
         return false;
     }
 
-    if !owner.starts_with('@') && owner.eq_ignore_ascii_case(author.raw_email) {
+    if !owner.starts_with('@') && owner.eq_ignore_ascii_case(author.id.raw()) {
         return true;
     }
 
@@ -418,13 +395,13 @@ fn declared_owner_matches_author(owner: &str, author: &RankedAuthor<'_>) -> bool
         return false;
     }
 
-    let raw_handle = extract_handle(author.raw_email);
+    let raw_handle = author.id.handle();
     let rendered_handle = author
         .rendered
         .split('~')
         .next()
         .unwrap_or(&author.rendered);
-    owner_handle.eq_ignore_ascii_case(&raw_handle)
+    owner_handle.eq_ignore_ascii_case(raw_handle)
         || owner_handle.eq_ignore_ascii_case(rendered_handle)
 }
 
@@ -445,39 +422,6 @@ const fn identifier_format(mode: EmailMode) -> ContributorIdentifierFormat {
 
 fn round3(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
-}
-
-fn is_bot(email: &str, bot_globs: &GlobSet) -> bool {
-    bot_globs.is_match(email)
-}
-
-/// Extract a display handle from an email address.
-///
-/// Strips the domain and unwraps GitHub-style numeric noreply prefixes
-/// (`12345+alice@users.noreply.github.com` -> `alice`).
-fn extract_handle(email: &str) -> String {
-    let local = email.split('@').next().unwrap_or(email);
-    if let Some(plus_idx) = local.find('+') {
-        let after_plus = &local[plus_idx + 1..];
-        if !after_plus.is_empty() {
-            return after_plus.to_string();
-        }
-    }
-    if local.is_empty() {
-        return email.to_string();
-    }
-    local.to_string()
-}
-
-/// Stable non-cryptographic pseudonym for an email address.
-///
-/// Uses xxh3 (already a workspace dep) prefixed with `xxh3:` so consumers
-/// can recognize the pseudonym format. Not suitable as a security primitive
-/// because given a known list of org emails, rebuilding the rainbow table is
-/// trivial. The intent is to avoid emitting raw PII into CI artifacts.
-fn hash_email(email: &str) -> String {
-    let h = xxh3_64(email.as_bytes());
-    format!("xxh3:{h:016x}")
 }
 
 #[cfg(test)]
@@ -533,46 +477,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn extract_handle_strips_domain() {
-        assert_eq!(extract_handle("alice@example.com"), "alice");
-    }
-
-    #[test]
-    fn extract_handle_unwraps_github_noreply() {
-        assert_eq!(
-            extract_handle("12345+alice@users.noreply.github.com"),
-            "alice"
-        );
-    }
-
-    #[test]
-    fn extract_handle_keeps_plus_suffix_when_present() {
-        assert_eq!(extract_handle("user+tag@example.com"), "tag");
-    }
-
-    #[test]
-    fn extract_handle_falls_back_for_no_at() {
-        assert_eq!(extract_handle("alice"), "alice");
-    }
-
-    #[test]
-    fn extract_handle_empty_local_falls_back() {
-        assert_eq!(extract_handle("@example.com"), "@example.com");
-    }
-
-    #[test]
-    fn hash_email_is_stable() {
-        let a = hash_email("alice@example.com");
-        let b = hash_email("alice@example.com");
-        assert_eq!(a, b);
-        assert!(a.starts_with("xxh3:"));
-        assert_eq!(a.len(), "xxh3:".len() + 16);
-    }
-
-    #[test]
-    fn hash_email_differs_per_input() {
-        assert_ne!(hash_email("alice@x"), hash_email("bob@x"));
+    fn compute_ownership<'a>(
+        churn: &'a FileChurn,
+        relative_path: &Path,
+        ctx: &OwnershipContext<'a>,
+    ) -> Option<OwnershipMetrics> {
+        compute_ownership_with_identities(churn, relative_path, ctx).map(|owned| owned.metrics)
     }
 
     /// Raw mode is the default: `compute_ownership` reports the unmodified
@@ -643,6 +553,74 @@ mod tests {
     }
 
     #[test]
+    fn identities_follow_the_metrics_in_anonymized_mode() {
+        let pool = vec![
+            "alice@example.com".to_string(),
+            "bob@example.com".to_string(),
+        ];
+        let churn = churn_with_authors(
+            "f.ts",
+            &[
+                (0, 9, 9.0, ts_days_ago(60), ts_days_ago(1)),
+                (1, 5, 5.0, ts_days_ago(50), ts_days_ago(2)),
+            ],
+        );
+        let globs = empty_globs();
+        let mut ctx = ctx_with(&pool, &globs, None);
+        ctx.email_mode = EmailMode::Anonymized;
+        let owned = compute_ownership_with_identities(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(owned.top_contributor.raw(), "alice@example.com");
+        assert_eq!(owned.suggested_reviewers.len(), 1);
+        assert_eq!(owned.suggested_reviewers[0].raw(), "bob@example.com");
+        assert_eq!(owned.metrics.suggested_reviewers.len(), 1);
+        assert!(
+            owned
+                .metrics
+                .top_contributor
+                .identifier
+                .starts_with("xxh3:")
+        );
+    }
+
+    #[test]
+    fn handle_mode_keeps_plus_addressed_contributors_distinct() {
+        let pool = vec![
+            "john+github@gmail.com".to_string(),
+            "jane+github@gmail.com".to_string(),
+        ];
+        let churn = churn_with_authors(
+            "f.ts",
+            &[
+                (0, 8, 8.0, ts_days_ago(80), ts_days_ago(3)),
+                (1, 9, 9.0, ts_days_ago(70), ts_days_ago(1)),
+            ],
+        );
+        let globs = empty_globs();
+        let mut ctx = ctx_with(&pool, &globs, None);
+        ctx.email_mode = EmailMode::Handle;
+        let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(m.top_contributor.identifier, "jane+github");
+        assert_eq!(m.recent_contributors[0].identifier, "john+github");
+    }
+
+    #[test]
+    fn bot_pattern_without_wildcard_excludes_the_bot() {
+        let pool = vec!["alice@x".to_string(), "release-bot@corp.com".to_string()];
+        let churn = churn_with_authors(
+            "f.ts",
+            &[
+                (0, 1, 1.0, ts_days_ago(60), ts_days_ago(10)),
+                (1, 100, 100.0, ts_days_ago(30), ts_days_ago(1)),
+            ],
+        );
+        let globs = compile_bot_globs(&["release-bot".to_string()]).unwrap();
+        let ctx = ctx_with(&pool, &globs, None);
+        let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(m.contributor_count, 1);
+        assert_eq!(m.top_contributor.identifier, "alice@x");
+    }
+
+    #[test]
     fn bot_globs_match_default_patterns() {
         let globs = compile_bot_globs(&[
             r"*\[bot\]*".to_string(),
@@ -650,25 +628,22 @@ mod tests {
             "github-actions*".to_string(),
         ])
         .unwrap();
-        assert!(is_bot("dependabot[bot]@users.noreply.github.com", &globs));
-        assert!(is_bot("dependabot@github.com", &globs));
-        assert!(is_bot("github-actions@users.noreply.github.com", &globs));
-        assert!(!is_bot("alice@example.com", &globs));
+        assert!(ContributorId::new("dependabot[bot]@users.noreply.github.com").is_bot(&globs));
+        assert!(ContributorId::new("dependabot@github.com").is_bot(&globs));
+        assert!(ContributorId::new("github-actions@users.noreply.github.com").is_bot(&globs));
+        assert!(!ContributorId::new("alice@example.com").is_bot(&globs));
     }
 
     #[test]
     fn human_github_noreply_is_not_a_bot() {
         let globs =
             compile_bot_globs(&fallow_config::OwnershipConfig::default().bot_patterns).unwrap();
-        assert!(!is_bot(
-            "49056869+sapphi-red@users.noreply.github.com",
-            &globs
-        ));
-        assert!(!is_bot("12345+alice@users.noreply.github.com", &globs));
-        assert!(is_bot(
-            "41898282+github-actions[bot]@users.noreply.github.com",
-            &globs
-        ));
+        assert!(!ContributorId::new("49056869+sapphi-red@users.noreply.github.com").is_bot(&globs));
+        assert!(!ContributorId::new("12345+alice@users.noreply.github.com").is_bot(&globs));
+        assert!(
+            ContributorId::new("41898282+github-actions[bot]@users.noreply.github.com")
+                .is_bot(&globs)
+        );
     }
 
     #[test]

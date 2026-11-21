@@ -25,6 +25,7 @@ use branching::branching_by_file;
 mod change_coupling_section;
 mod churn_file;
 mod component_rollup;
+mod contributor;
 mod core_pipeline;
 mod coverage_gaps;
 mod coverage_intelligence;

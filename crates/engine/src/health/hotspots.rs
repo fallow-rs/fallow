@@ -6,7 +6,7 @@
 use fallow_output::{ClockProvenance, ClockSource, FileHealthScore, HotspotEntry, HotspotSummary};
 
 use super::HealthOptions;
-use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
+use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership_with_identities};
 use crate::test_paths::is_test_path;
 
 /// Result of fetching churn data, including cache hit/miss info and timing.
@@ -637,7 +637,8 @@ fn collect_hotspot_entries(ctx: &HotspotEntryCtx<'_>) -> (Vec<HotspotEntry>, usi
         let relative = score.path.strip_prefix(ctx.root).unwrap_or(&score.path);
         let ownership = ctx
             .ownership_ctx
-            .and_then(|own| compute_ownership(churn, relative, own));
+            .and_then(|own| compute_ownership_with_identities(churn, relative, own))
+            .map(|owned| owned.metrics);
         let dispersion = ctx.dispersion.and_then(|map| map.get(&score.path));
 
         hotspot_entries.push(HotspotEntry {

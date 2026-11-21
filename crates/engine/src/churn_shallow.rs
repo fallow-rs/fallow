@@ -42,6 +42,45 @@ impl ShallowState {
     }
 }
 
+/// Hash of the `.mailmap` file at the repository top level, or 0 when the
+/// file does not exist, is not a regular file, or the top level is unknown.
+/// Git does not follow a symlinked in-tree `.mailmap`, and a symlink to a
+/// FIFO or a device would block the read.
+#[must_use]
+pub fn mailmap_fingerprint(root: &Path) -> u64 {
+    let mut command = crate::git_env::git_command(root);
+    command
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root);
+    let Ok(output) = command.output() else {
+        return 0;
+    };
+    if !output.status.success() {
+        return 0;
+    }
+    let toplevel = String::from_utf8_lossy(&output.stdout);
+    let path = Path::new(toplevel.trim()).join(".mailmap");
+    let is_regular_file = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file());
+    if !is_regular_file {
+        return 0;
+    }
+    std::fs::read(path).map_or(0, |bytes| xxhash_rust::xxh3::xxh3_64(&bytes))
+}
+
+/// Get the full HEAD SHA for cache keying.
+pub fn get_head_sha(root: &Path) -> Option<String> {
+    crate::repo_refs::head_sha(root).ok().flatten()
+}
+
+/// Check whether `ancestor` is still reachable from `descendant`.
+pub fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
+    let mut command = crate::git_env::git_command(root);
+    command
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .current_dir(root);
+    command.status().is_ok_and(|s| s.success())
+}
+
 /// What a churn history covers: the project root, the revision, the shallow
 /// state of the clone, and the oldest committer time that the walk loaded.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -53,6 +92,10 @@ pub struct ChurnCoverage {
     pub head_sha: String,
     /// Shallow state of the clone.
     pub shallow: ShallowState,
+    /// [`mailmap_fingerprint`] of the repository. `git log --use-mailmap`
+    /// reads the mailmap from the worktree, so an edit changes author
+    /// emails without a change of HEAD.
+    pub mailmap: u64,
     /// Oldest committer time that the history holds. `None` means that the
     /// walk had no cutoff.
     pub earliest_cutoff_secs: Option<u64>,
@@ -66,6 +109,7 @@ impl ChurnCoverage {
     pub fn covers(&self, wanted: &Self) -> bool {
         self.root_key == wanted.root_key
             && self.shallow == wanted.shallow
+            && self.mailmap == wanted.mailmap
             && cutoff_covers(self.earliest_cutoff_secs, wanted.earliest_cutoff_secs)
     }
 
@@ -81,6 +125,7 @@ impl ChurnCoverage {
             root_key: self.root_key,
             head_sha: head_sha.to_owned(),
             shallow: self.shallow,
+            mailmap: self.mailmap,
             earliest_cutoff_secs,
         }
     }
@@ -104,8 +149,40 @@ mod tests {
             root_key,
             head_sha: "a".to_owned(),
             shallow: ShallowState::default(),
+            mailmap: 0,
             earliest_cutoff_secs: cutoff,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mailmap_fingerprint_reads_only_a_regular_file() {
+        let dir = tempfile::tempdir().expect("repo tempdir");
+        let root = dir.path();
+        let status = crate::git_env::git_command(root)
+            .args(["init", "--quiet"])
+            .current_dir(root)
+            .status()
+            .expect("run git init");
+        assert!(status.success());
+        assert_eq!(mailmap_fingerprint(root), 0);
+
+        std::fs::write(root.join("aliases"), "A <a@x.test> <b@x.test>\n").expect("write aliases");
+        std::os::unix::fs::symlink(root.join("aliases"), root.join(".mailmap"))
+            .expect("symlink mailmap");
+        assert_eq!(mailmap_fingerprint(root), 0);
+
+        std::fs::remove_file(root.join(".mailmap")).expect("remove symlink");
+        std::fs::copy(root.join("aliases"), root.join(".mailmap")).expect("copy mailmap");
+        assert_ne!(mailmap_fingerprint(root), 0);
+    }
+
+    #[test]
+    fn covers_requires_the_same_mailmap() {
+        let have = coverage(1, None);
+        let mut wanted = coverage(1, None);
+        wanted.mailmap = 7;
+        assert!(!have.covers(&wanted));
     }
 
     #[test]

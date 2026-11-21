@@ -1456,28 +1456,7 @@ pub fn default_workspace_ref_for_workspaces(
     detect_remote_default_ref(root)
 }
 
-/// Git identities for the current user in forms useful for self-routing.
-///
-/// Includes `user.email`, its local-part handle, a GitHub no-reply unwrapped
-/// handle when applicable, and `user.name`. Missing config values are ignored.
-#[must_use]
-pub fn current_user_identities(root: &Path) -> Vec<String> {
-    let mut ids = Vec::new();
-    if let Some(email) = read_git_config(root, "user.email") {
-        if let Some((local, _)) = email.split_once('@') {
-            ids.push(local.rsplit('+').next().unwrap_or(local).to_owned());
-        }
-        ids.push(email);
-    }
-    if let Some(name) = read_git_config(root, "user.name") {
-        ids.push(name);
-    }
-    ids
-}
-
-fn read_git_config(root: &Path, key: &str) -> Option<String> {
-    run_git(root, &["config", "--get", key])
-}
+pub use crate::git_identity::{current_user_email, current_user_identities};
 
 fn git_ref_exists(root: &Path, reference: &str) -> bool {
     run_git(root, &["rev-parse", "--verify", "--quiet", reference]).is_some()
@@ -1564,7 +1543,7 @@ fn git_command(root: &Path) -> Command {
 /// callers feed these values straight back to git as refs and compare them as
 /// paths, where a trailing newline is rejected or silently mismatches. Non-UTF-8
 /// output stays `None` rather than becoming a mangled ref or path.
-fn run_git(root: &Path, args: &[&str]) -> Option<String> {
+pub(crate) fn run_git(root: &Path, args: &[&str]) -> Option<String> {
     let output = git_command(root).args(args).output().ok()?;
     if !output.status.success() {
         return None;

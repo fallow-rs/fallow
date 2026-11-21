@@ -3,7 +3,7 @@
 //! Per changed file, name the expert(s) to route the review to: CODEOWNERS
 //! declared owner plus git-blame / recency contributors, and flag a bus-factor-1
 //! risk (the only qualified owner is one person). Reuses the health ownership /
-//! bus-factor machinery (`compute_ownership`, `CodeOwners`, churn) rather than a
+//! bus-factor machinery (`compute_ownership_with_identities`, `CodeOwners`, churn) rather than a
 //! parallel implementation.
 //!
 //! This is the people-layer of the review direction: it answers "who do I ask?".
@@ -16,7 +16,10 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
 use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn_cached};
-use fallow_engine::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
+use fallow_engine::health::ownership::{
+    ContributorId, OwnershipContext, OwnershipWithIdentities, compile_bot_globs,
+    compute_ownership_with_identities,
+};
 
 /// Churn window of the audit brief, in months: enough history to name the
 /// per-file experts and to find hidden change coupling. It matches the
@@ -91,11 +94,14 @@ pub fn compute_routing_from_churn(
     // The current reviewer (git user) is excluded from routing: you do not "ask
     // yourself". On a solo repo every file routes to the author, so this is what
     // turns "ask: bart (bus-factor 1)" on every decision into silence.
-    let self_ids = fallow_engine::repo_refs::current_user_identities(root);
+    let reviewer = Reviewer {
+        ids: fallow_engine::repo_refs::current_user_identities(root),
+        email: fallow_engine::repo_refs::current_user_email(root),
+    };
 
     let mut units: Vec<RoutingUnit> = changed_files
         .iter()
-        .filter_map(|abs| route_one(abs, root, churn_result, &ctx, &self_ids))
+        .filter_map(|abs| route_one(abs, root, churn_result, &ctx, &reviewer))
         .collect();
     units.sort_by(|a, b| a.file.cmp(&b.file));
     RoutingFacts { units }
@@ -110,6 +116,53 @@ fn expert_is_self(expert: &str, self_ids: &[String]) -> bool {
         .any(|id| id.trim_start_matches('@').to_ascii_lowercase() == normalized)
 }
 
+/// The current reviewer, as git config names that person.
+struct Reviewer {
+    /// Name, email and handle strings, for a declared CODEOWNERS owner.
+    ids: Vec<String>,
+    /// Email of the reviewer after mailmap, for contributor identities.
+    email: Option<String>,
+}
+
+impl Reviewer {
+    /// True when a contributor is the reviewer. The identity comparison
+    /// does not depend on the privacy mode of `rendered`.
+    fn is_contributor(&self, id: ContributorId<'_>, rendered: &str) -> bool {
+        expert_is_self(rendered, &self.ids)
+            || self
+                .email
+                .as_deref()
+                .is_some_and(|email| ContributorId::new(email).same_person(id))
+    }
+}
+
+/// The experts to ask about one file, without the reviewer: the declared
+/// CODEOWNERS owner, otherwise the top contributor and up to two suggested
+/// reviewers.
+fn select_experts(owned: &OwnershipWithIdentities<'_>, reviewer: &Reviewer) -> Vec<String> {
+    let metrics = &owned.metrics;
+    if let Some(owner) = &metrics.declared_owner {
+        if expert_is_self(owner, &reviewer.ids) {
+            return Vec::new();
+        }
+        return vec![owner.clone()];
+    }
+    let top = (&metrics.top_contributor, owned.top_contributor);
+    let reviewers = metrics
+        .suggested_reviewers
+        .iter()
+        .zip(owned.suggested_reviewers.iter().copied())
+        .take(2);
+    let mut expert: Vec<String> = Vec::new();
+    for (entry, id) in std::iter::once(top).chain(reviewers) {
+        if reviewer.is_contributor(id, &entry.identifier) || expert.contains(&entry.identifier) {
+            continue;
+        }
+        expert.push(entry.identifier.clone());
+    }
+    expert
+}
+
 /// Route a single changed file: resolve its experts and bus-factor flag from the
 /// ownership machinery. Returns `None` when the file has no churn record (no
 /// signal to route on).
@@ -118,32 +171,14 @@ fn route_one(
     root: &Path,
     churn_result: &ChurnResult,
     ctx: &OwnershipContext<'_>,
-    self_ids: &[String],
+    reviewer: &Reviewer,
 ) -> Option<RoutingUnit> {
     let file_churn = churn_result.files.get(abs)?;
     let relative = abs.strip_prefix(root).unwrap_or(abs);
-    let metrics = compute_ownership(file_churn, relative, ctx)?;
-
-    // Prefer the declared CODEOWNERS owner; otherwise the top contributor, then
-    // the suggested reviewers. Deduped, capped to keep the routing line tight.
-    let mut expert: Vec<String> = Vec::new();
-    if let Some(owner) = &metrics.declared_owner {
-        expert.push(owner.clone());
-    }
-    if expert.is_empty() {
-        expert.push(metrics.top_contributor.identifier.clone());
-        for reviewer in metrics.suggested_reviewers.iter().take(2) {
-            if !expert.contains(&reviewer.identifier) {
-                expert.push(reviewer.identifier.clone());
-            }
-        }
-    }
-
-    // Drop the current reviewer: there is no one to "ask" if you own it. A unit
-    // whose every expert is the reviewer carries no routing signal and is omitted
-    // (same doctrine as a file with no ownership signal), so a solo repo emits no
-    // routing noise.
-    expert.retain(|e| !expert_is_self(e, self_ids));
+    let owned = compute_ownership_with_identities(file_churn, relative, ctx)?;
+    // A unit whose every expert is the reviewer carries no routing signal and
+    // is omitted, so a solo repo emits no routing noise.
+    let expert = select_experts(&owned, reviewer);
     if expert.is_empty() {
         return None;
     }
@@ -151,12 +186,13 @@ fn route_one(
     Some(RoutingUnit {
         file: relative.to_string_lossy().replace('\\', "/"),
         expert,
-        bus_factor_one: metrics.bus_factor == 1,
+        bus_factor_one: owned.metrics.bus_factor == 1,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use fallow_engine::health::ownership::{ContributorId, OwnershipWithIdentities};
     use fallow_output::{
         ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
     };
@@ -206,41 +242,98 @@ mod tests {
         assert!(!super::expert_is_self("bart", &[]));
     }
 
-    /// `route_one`'s expert-selection logic, exercised through a small shim that
-    /// mirrors its branching without needing a live git repo.
-    fn select_expert(metrics: &OwnershipMetrics) -> (Vec<String>, bool) {
-        let mut expert: Vec<String> = Vec::new();
-        if let Some(owner) = &metrics.declared_owner {
-            expert.push(owner.clone());
+    fn owned<'a>(
+        metrics: OwnershipMetrics,
+        top: &'a str,
+        reviewers: &[&'a str],
+    ) -> OwnershipWithIdentities<'a> {
+        OwnershipWithIdentities {
+            metrics,
+            top_contributor: ContributorId::new(top),
+            suggested_reviewers: reviewers.iter().copied().map(ContributorId::new).collect(),
         }
-        if expert.is_empty() {
-            expert.push(metrics.top_contributor.identifier.clone());
-            for reviewer in metrics.suggested_reviewers.iter().take(2) {
-                if !expert.contains(&reviewer.identifier) {
-                    expert.push(reviewer.identifier.clone());
-                }
-            }
+    }
+
+    fn reviewer(ids: &[&str], email: Option<&str>) -> super::Reviewer {
+        super::Reviewer {
+            ids: ids.iter().map(|id| (*id).to_string()).collect(),
+            email: email.map(str::to_string),
         }
-        (expert, metrics.bus_factor == 1)
     }
 
     #[test]
     fn declared_owner_wins() {
-        let (expert, _) = select_expert(&metrics(Some("@team/web"), 3));
-        assert_eq!(expert, vec!["@team/web".to_string()]);
+        let owned = owned(
+            metrics(Some("@team/web"), 3),
+            "alice@x.test",
+            &["bob@x.test"],
+        );
+        assert_eq!(
+            super::select_experts(&owned, &reviewer(&[], None)),
+            vec!["@team/web".to_string()]
+        );
     }
 
     #[test]
     fn falls_back_to_git_contributors() {
-        let (expert, _) = select_expert(&metrics(None, 2));
-        assert_eq!(expert, vec!["alice".to_string(), "bob".to_string()]);
+        let owned = owned(metrics(None, 2), "alice@x.test", &["bob@x.test"]);
+        assert_eq!(
+            super::select_experts(&owned, &reviewer(&[], None)),
+            vec!["alice".to_string(), "bob".to_string()]
+        );
     }
 
     #[test]
-    fn bus_factor_one_is_flagged() {
-        let (_, bus1) = select_expert(&metrics(None, 1));
-        assert!(bus1);
-        let (_, bus2) = select_expert(&metrics(None, 2));
-        assert!(!bus2);
+    fn anonymized_reviewer_is_not_routed_to_self() {
+        let mut m = metrics(None, 1);
+        m.top_contributor = contributor("xxh3:0123456789abcdef");
+        m.suggested_reviewers = vec![];
+        let experts = super::select_experts(
+            &owned(m, "bart@corp.com", &[]),
+            &reviewer(&["bart", "bart@corp.com"], Some("bart@corp.com")),
+        );
+        assert!(experts.is_empty(), "{experts:?}");
+    }
+
+    #[test]
+    fn reviewer_with_a_second_email_is_not_routed_to_self() {
+        let mut m = metrics(None, 1);
+        m.top_contributor = contributor("bart~corp.com");
+        m.suggested_reviewers = vec![contributor("bart~gmail.com")];
+        let experts = super::select_experts(
+            &owned(m, "bart@corp.com", &["bart@gmail.com"]),
+            &reviewer(&["bart", "bart@gmail.com"], Some("bart@gmail.com")),
+        );
+        assert!(experts.is_empty(), "{experts:?}");
+    }
+
+    #[test]
+    fn other_contributor_stays_an_expert_in_each_mode() {
+        let me = reviewer(&["bart", "bart@corp.com"], Some("bart@corp.com"));
+        for identifier in ["alice", "alice@corp.com", "xxh3:00000000000000aa"] {
+            let mut m = metrics(None, 1);
+            m.top_contributor = contributor(identifier);
+            m.suggested_reviewers = vec![];
+            assert_eq!(
+                super::select_experts(&owned(m, "alice@corp.com", &[]), &me),
+                vec![identifier.to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn declared_owner_that_is_the_reviewer_is_dropped() {
+        let me = reviewer(&["bart"], None);
+        let own = owned(metrics(Some("@bart"), 1), "alice@x.test", &["bob@x.test"]);
+        assert!(super::select_experts(&own, &me).is_empty());
+        let team = owned(
+            metrics(Some("@team/web"), 1),
+            "alice@x.test",
+            &["bob@x.test"],
+        );
+        assert_eq!(
+            super::select_experts(&team, &me),
+            vec!["@team/web".to_string()]
+        );
     }
 }
