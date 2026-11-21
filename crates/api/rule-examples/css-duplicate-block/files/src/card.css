@@ -1,3 +1,7 @@
+.card-list {
+  display: grid;
+}
+
 .card {
   padding: 16px;
   border: 1px solid #ddd;

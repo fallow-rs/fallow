@@ -133,7 +133,7 @@ pub use explain::{
     rule_guide, rule_has_guide, rule_rationale, rule_severity_key, security_meta,
     serialize_explain_programmatic_json, unknown_explain_error,
 };
-pub use explain_examples::{ExampleFile, RuleExample, rule_example, rule_examples};
+pub use explain_examples::{ExampleAnchor, ExampleFile, RuleExample, rule_example, rule_examples};
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{
     AuditGate, AuditWorsened, HealthConfig, ProductionAnalysis, ProductionEnv, TypeAwareRequire,

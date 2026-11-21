@@ -20085,7 +20085,7 @@
         "example_files": [
           {
             "path": "src/ui/forms/index.ts",
-            "code": "export * from \"..\";\nexport { TextField } from \"./text-field\";\n"
+            "code": "export { TextField } from \"./text-field\";\nexport * from \"..\";\n"
           },
           {
             "path": "src/ui/index.ts",
@@ -20462,7 +20462,7 @@
           },
           {
             "path": "src/money.ts",
-            "code": "// fallow-ignore-next-line unused-export\nexport const formatPrice = (cents: number): string => `${(cents / 100).toFixed(2)} EUR`;\n"
+            "code": "// Money helpers for the checkout.\n\n// fallow-ignore-next-line unused-export\nexport const formatPrice = (cents: number): string => `${(cents / 100).toFixed(2)} EUR`;\n"
           }
         ],
         "example_base_files": [],
@@ -22500,7 +22500,7 @@
         "example_files": [
           {
             "path": "src/button.css",
-            "code": ".button {\n  color: #1a2b3c;\n}\n"
+            "code": ".button-row {\n  display: flex;\n}\n\n.button {\n  color: #1a2b3c;\n}\n"
           },
           {
             "path": "src/theme.css",
@@ -22552,7 +22552,7 @@
         "example_files": [
           {
             "path": "src/card.css",
-            "code": ".card {\n  padding: 16px;\n  border: 1px solid #ddd;\n  border-radius: 8px;\n  background: white;\n}\n"
+            "code": ".card-list {\n  display: grid;\n}\n\n.card {\n  padding: 16px;\n  border: 1px solid #ddd;\n  border-radius: 8px;\n  background: white;\n}\n"
           },
           {
             "path": "src/panel.css",

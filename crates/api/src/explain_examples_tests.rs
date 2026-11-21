@@ -94,6 +94,7 @@ fn project_files(dir: &Path) -> Vec<String> {
 struct Meta {
     args: Vec<String>,
     hidden: BTreeSet<String>,
+    file_level: bool,
 }
 
 fn read_meta(example: &Path) -> Meta {
@@ -102,6 +103,7 @@ fn read_meta(example: &Path) -> Meta {
         return Meta {
             args: Vec::new(),
             hidden: BTreeSet::new(),
+            file_level: false,
         };
     };
     let value: serde_json::Value = serde_json::from_str(&text)
@@ -109,7 +111,7 @@ fn read_meta(example: &Path) -> Meta {
     let object = value.as_object().expect("example.json holds an object");
     for key in object.keys() {
         assert!(
-            key == "args" || key == "hidden",
+            key == "args" || key == "hidden" || key == "anchor",
             "{} has the unknown key `{key}`",
             path.display()
         );
@@ -126,9 +128,18 @@ fn read_meta(example: &Path) -> Meta {
             })
             .unwrap_or_default()
     };
+    let file_level = match object.get("anchor") {
+        None => false,
+        Some(serde_json::Value::String(anchor)) if anchor == "file-level" => true,
+        Some(other) => panic!(
+            "{}: `anchor` is `\"file-level\"` or absent, not {other}",
+            path.display()
+        ),
+    };
     Meta {
         args: strings("args"),
         hidden: strings("hidden").into_iter().collect(),
+        file_level,
     }
 }
 
@@ -157,7 +168,7 @@ fn render_table() -> String {
          //! Generated from that directory. Do not edit by hand. To write the file again, run\n\
          //! `FALLOW_UPDATE_RULE_EXAMPLES=1 cargo test -p fallow-api --lib explain_examples`.\n\
          \n\
-         use super::{ExampleFile, RuleExample};\n\
+         use super::{ExampleAnchor, ExampleFile, RuleExample};\n\
          \n\
          macro_rules! file {\n\
          \x20   ($rule:literal, $part:literal, $path:literal, $hidden:literal) => {\n\
@@ -194,6 +205,8 @@ fn render_table() -> String {
         writeln!(out, "    RuleExample {{").expect("write to a string");
         writeln!(out, "        rule: {rule:?},").expect("write to a string");
         writeln!(out, "        args: &{:?},", meta.args).expect("write to a string");
+        let anchor = if meta.file_level { "FileLevel" } else { "Line" };
+        writeln!(out, "        anchor: ExampleAnchor::{anchor},").expect("write to a string");
         render_files(&mut out, &rule, "base", &base, &meta);
         render_files(&mut out, &rule, "files", &files, &meta);
         writeln!(out, "    }},").expect("write to a string");
