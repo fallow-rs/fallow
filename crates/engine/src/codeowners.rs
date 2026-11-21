@@ -153,7 +153,10 @@ impl CodeOwners {
     }
 
     /// Parse CODEOWNERS content into a lookup structure.
+    ///
+    /// The parser ignores a UTF-8 byte order mark at the start of the content.
     pub fn parse(content: &str) -> Result<Self, String> {
+        let content = content.strip_prefix('\u{FEFF}').unwrap_or(content);
         let mut parser = CodeOwnersParser::new();
         for line in content.lines() {
             parser.parse_line(line)?;
@@ -1502,5 +1505,17 @@ src/components/
             co.owner_of(Path::new("src/api/users.ts")),
             Some("@api-lead")
         );
+    }
+
+    #[test]
+    fn parse_ignores_a_leading_bom() {
+        for content in ["\u{FEFF}* @team\n", "* @team\n"] {
+            let co = CodeOwners::parse(content).unwrap();
+            assert_eq!(co.owner_of(Path::new("src/a.ts")), Some("@team"));
+            assert_eq!(co.owner_count_of(Path::new("src/a.ts")), Some(1));
+        }
+        let co = CodeOwners::parse("\u{FEFF}[Docs] @docs\ndocs/\n").unwrap();
+        assert!(co.has_sections());
+        assert_eq!(co.owner_of(Path::new("docs/a.md")), Some("@docs"));
     }
 }

@@ -215,3 +215,58 @@ fn health_group_by_owner_uses_directory_rules_without_trailing_slash() {
     keys.sort_unstable();
     assert_eq!(keys, ["@app-team", "@search-team"]);
 }
+
+/// Project with `src/alpha/index.ts`, `src/beta/orphan.ts` and the given
+/// `.gitlab/CODEOWNERS` content.
+fn grouping_project(codeowners: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write(
+        &root.join("package.json"),
+        r#"{"name":"codeowners-fx","version":"1.0.0","private":true,"main":"src/alpha/index.js"}"#,
+    );
+    write(
+        &root.join("src/alpha/index.ts"),
+        "export const main = (value: number): number => (value > 1 ? value : 0);\n",
+    );
+    write(
+        &root.join("src/beta/orphan.ts"),
+        "export const orphan = (value: number): number => (value > 2 ? value : 1);\n",
+    );
+    write(&root.join(".gitlab/CODEOWNERS"), codeowners);
+    dir
+}
+
+/// Run `fallow health --group-by <mode>` and return the exit code and JSON.
+fn grouped_health(dir: &Path, mode: &str) -> (i32, serde_json::Value) {
+    let output = crate::common::run_fallow_in_root(
+        "health",
+        dir,
+        &[
+            "--group-by",
+            mode,
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    (output.code, crate::common::parse_json(&output))
+}
+
+fn group_keys(json: &serde_json::Value) -> Vec<&str> {
+    json["groups"]
+        .as_array()
+        .expect("groups array")
+        .iter()
+        .filter_map(|group| group["key"].as_str())
+        .collect()
+}
+
+#[test]
+fn health_owner_groups_ignore_a_leading_bom() {
+    let dir = grouping_project("\u{FEFF}* @team\n");
+    let (code, json) = grouped_health(dir.path(), "owner");
+    assert_eq!(group_keys(&json), ["@team"], "groups: {}", json["groups"]);
+    assert_eq!(code, 0, "json: {json}");
+}
