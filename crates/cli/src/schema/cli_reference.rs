@@ -272,7 +272,7 @@ fn option_json(cmd: &Command, arg: &Arg) -> Value {
 }
 
 /// A global option with its `command_support` value: the support of the
-/// option per top-level command, from [`GLOBAL_OPTION_SUPPORT`]. The value
+/// option per command path, from [`GLOBAL_OPTION_SUPPORT`]. The value
 /// is `null` for an option without a row.
 ///
 /// [`GLOBAL_OPTION_SUPPORT`]: crate::global_option_support::GLOBAL_OPTION_SUPPORT

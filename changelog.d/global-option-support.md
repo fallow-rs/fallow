@@ -9,6 +9,10 @@
   - `fallow impact`, `recommend`, `suppressions`, `viz`, `workspaces` and the `rule-pack` subcommands other than `list` with `--output-file`. These commands print their output to stdout and left an empty file.
   - `fallow agent` and `fallow rule-pack list` with `--output-file` and a format other than `--format json`, and `fallow fix` with `--output-file` and a format other than `--format github-summary`. These formats left an empty file. The formats that write the file keep working, and the CLI reference lists them as `supported_with_formats`.
   - `fallow impact statusline` with `--ci` or `--fail-on-issues`.
+  - `--churn-file` on each command other than `fallow health` and bare `fallow`.
+  - `--type-aware-project` on each command other than bare `fallow`, `dead-code`, `architecture`, `health`, `audit`, `fix`, `inspect` and `watch`, and a `--type-aware-project` path that does not exist when `--type-aware` is on.
+  - `--config` on `fallow agent`, `ci`, `cloud`, `explain`, `hooks`, `impact`, `init`, `license`, `recommend`, `rule-pack schema`, `security survivors`, `setup-hooks`, `type-aware` and the schema commands.
+  - `--diff-file` on `fallow schema`, `config-schema`, `plugin-schema`, `rule-pack-schema`, `telemetry` and `impact statusline`. The schema commands and `telemetry` still accept `--root`, because a caller can pass it to each command.
   - `fallow workspaces` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `--tolerance 0` on `fallow doctor` and on each command without a regression baseline. The earlier checks compared the value with `0` and so missed an explicit `0`.
 

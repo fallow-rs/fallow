@@ -189,6 +189,8 @@ const BASELINES_MESSAGE: &str = "`fallow baselines prune` does not accept `<opti
 const SECURITY_MESSAGE: &str = "<option> is not valid with `fallow security`.";
 const SUBCOMMAND_MESSAGE: &str = "<option> is not valid with `fallow <command>`.";
 const FORMATS_OUTPUT_FILE_MESSAGE: &str = "`fallow <command>` writes the file of `--output-file` only with <formats>. With another format it prints its output to stdout, so `--output-file` has no effect.";
+const NOT_READ_MESSAGE: &str =
+    "`fallow <command>` does not read `<option>`, so the option has no effect.";
 const STDOUT_REPORT_MESSAGE: &str = "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.";
 const DOCTOR_MESSAGE: &str = "<option> is not valid with `fallow doctor`.";
 const DOCTOR_OUTPUT_FILE_MESSAGE: &str = "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout";
@@ -206,6 +208,8 @@ const SARIF_OTHER_MESSAGE: &str = "This command does not write a SARIF file, so 
 
 // Reasons.
 
+const NO_PROJECT_ROOT_REASON: &str = "The command reads no project. It accepts `--root` because a caller can pass it to each command.";
+const AUDIT_CACHE_CONFIG_REASON: &str = "`fallow audit-cache` removes cache folders without the config, so a config that does not load cannot block the cleanup.";
 const FULL_TABLES_REASON: &str = "`--full-tables` changes only the health tables of `--lean`.";
 const SECURITY_TOLERANCE_REASON: &str =
     "`fallow security` has no regression gate, and `--tolerance` sets only the gate.";
@@ -251,6 +255,72 @@ const OUTPUT_GATE_REJECTED: &[CommandSupport] = &[
     rejected("setup-hooks", OUTPUT_GATE_MESSAGE),
     rejected("audit-cache", OUTPUT_GATE_MESSAGE),
 ];
+
+/// The commands that read no project and so reject `--config` and
+/// `--diff-file`.
+const NO_PROJECT_COMMANDS: &[CommandSupport] = &[
+    rejected("config-schema", NOT_READ_MESSAGE),
+    rejected("plugin-schema", NOT_READ_MESSAGE),
+    rejected("rule-pack-schema", NOT_READ_MESSAGE),
+    rejected("schema", NOT_READ_MESSAGE),
+    rejected("telemetry", NOT_READ_MESSAGE),
+];
+
+/// The commands that read no project. A caller can pass `--root` to each
+/// command, so these commands accept it.
+const NO_PROJECT_ROOT: &[CommandSupport] = &[
+    ignored("config-schema", NO_PROJECT_ROOT_REASON),
+    ignored("plugin-schema", NO_PROJECT_ROOT_REASON),
+    ignored("rule-pack-schema", NO_PROJECT_ROOT_REASON),
+    ignored("schema", NO_PROJECT_ROOT_REASON),
+    ignored("telemetry", NO_PROJECT_ROOT_REASON),
+];
+
+/// The commands that read a project but load no config file.
+const NO_CONFIG_COMMANDS: &[CommandSupport] = &[
+    rejected("agent", NOT_READ_MESSAGE),
+    ignored("audit-cache", AUDIT_CACHE_CONFIG_REASON),
+    rejected("ci", NOT_READ_MESSAGE),
+    rejected("cloud", NOT_READ_MESSAGE),
+    rejected("explain", NOT_READ_MESSAGE),
+    rejected("hooks", NOT_READ_MESSAGE),
+    rejected("impact", NOT_READ_MESSAGE),
+    rejected("init", NOT_READ_MESSAGE),
+    rejected("license", NOT_READ_MESSAGE),
+    rejected("recommend", NOT_READ_MESSAGE),
+    rejected("rule-pack schema", NOT_READ_MESSAGE),
+    rejected("security survivors", NOT_READ_MESSAGE),
+    rejected("setup-hooks", NOT_READ_MESSAGE),
+    rejected("type-aware", NOT_READ_MESSAGE),
+];
+
+/// The commands that read `--churn-file`.
+const CHURN_FILE_COMMANDS: &[CommandSupport] = &[supported(BARE_RUN), supported("health")];
+
+/// The commands that pass `--type-aware-project` to the type-aware run.
+const TYPE_AWARE_PROJECT_COMMANDS: &[CommandSupport] = &[
+    supported(BARE_RUN),
+    supported("dead-code"),
+    supported("architecture"),
+    supported("health"),
+    supported("audit"),
+    supported("fix"),
+    supported("inspect"),
+    supported("watch"),
+];
+
+const fn not_read_row(
+    option: &'static str,
+    commands: &'static [&'static [CommandSupport]],
+) -> GlobalOptionSupport {
+    GlobalOptionSupport {
+        option,
+        default: Support::Rejected {
+            message: NOT_READ_MESSAGE,
+        },
+        commands,
+    }
+}
 
 /// The commands that print their output to stdout and do not write the file
 /// of `--output-file`, or write it only with some output formats.
@@ -347,8 +417,8 @@ const fn regression_row(
 /// options, so `--fail-on-regression`, `--regression-baseline` and
 /// `--save-regression-baseline` come first in an error.
 pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
-    row("--root", &[]),
-    row("--config", &[]),
+    row("--root", &[NO_PROJECT_ROOT]),
+    row("--config", &[NO_PROJECT_COMMANDS, NO_CONFIG_COMMANDS]),
     row("--allow-remote-extends", &[DOCTOR]),
     row("--format", &[]),
     row("--pretty", &[]),
@@ -373,9 +443,16 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
     row("--quiet", &[]),
     row("--changed-since", &[DOCTOR]),
     row("--no-package-baselines", &[SECURITY, DOCTOR, SIMILAR_CODE]),
-    row("--diff-file", &[DOCTOR]),
+    row(
+        "--diff-file",
+        &[
+            DOCTOR,
+            NO_PROJECT_COMMANDS,
+            &[rejected("impact statusline", NOT_READ_MESSAGE)],
+        ],
+    ),
     row("--diff-stdin", &[DOCTOR]),
-    row("--churn-file", &[DOCTOR, SIMILAR_CODE]),
+    not_read_row("--churn-file", &[CHURN_FILE_COMMANDS, DOCTOR, SIMILAR_CODE]),
     row("--max-file-size", &[DOCTOR]),
     baseline_row(
         "--baseline",
@@ -534,7 +611,10 @@ pub const GLOBAL_OPTION_SUPPORT: &[GlobalOptionSupport] = &[
     row("--show-cascade", &[SECURITY, DOCTOR, SIMILAR_CODE]),
     row("--type-aware", &[DOCTOR, SIMILAR_CODE]),
     row("--no-type-aware", &[DOCTOR, SIMILAR_CODE]),
-    row("--type-aware-project", &[DOCTOR, SIMILAR_CODE]),
+    not_read_row(
+        "--type-aware-project",
+        &[TYPE_AWARE_PROJECT_COMMANDS, DOCTOR, SIMILAR_CODE],
+    ),
     row("--type-aware-require", &[DOCTOR, SIMILAR_CODE]),
     row("--no-cache", &[DOCTOR]),
     row("--threads", &[DOCTOR]),

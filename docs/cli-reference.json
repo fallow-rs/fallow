@@ -479,7 +479,33 @@
         "default": {
           "status": "supported"
         },
-        "commands": []
+        "commands": [
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "config-schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "telemetry"
+          }
+        ]
       }
     },
     {
@@ -512,7 +538,103 @@
         "default": {
           "status": "supported"
         },
-        "commands": []
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "agent"
+          },
+          {
+            "status": "ignored",
+            "reason": "`fallow audit-cache` removes cache folders without the config, so a config that does not load cannot block the cleanup.",
+            "command": "audit-cache"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "ci"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "cloud"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "explain"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "impact"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "init"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "recommend"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "rule-pack schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "setup-hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "type-aware"
+          }
+        ]
       }
     },
     {
@@ -948,6 +1070,36 @@
             "status": "rejected",
             "message": "<option> is not valid with `fallow doctor`.",
             "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "impact statusline"
           }
         ]
       }
@@ -1017,9 +1169,18 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `<option>`, so the option has no effect."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow doctor`.",
@@ -3940,9 +4101,42 @@
       "negated_by": null,
       "command_support": {
         "default": {
-          "status": "supported"
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `<option>`, so the option has no effect."
         },
         "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "supported",
+            "command": "audit"
+          },
+          {
+            "status": "supported",
+            "command": "fix"
+          },
+          {
+            "status": "supported",
+            "command": "inspect"
+          },
+          {
+            "status": "supported",
+            "command": "watch"
+          },
           {
             "status": "rejected",
             "message": "<option> is not valid with `fallow doctor`.",

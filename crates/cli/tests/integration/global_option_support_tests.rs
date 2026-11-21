@@ -36,6 +36,26 @@ const NOT_RUNNABLE: &[(&str, &str)] = &[
 /// The longest time that the test waits for a command.
 const FILE_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// A part of the message for a format that a command does not support for
+/// `--output-file`.
+const FORMATS_MESSAGE_PART: &str = "writes the file of `--output-file` only with";
+
+/// Subcommand forms that the file test runs besides the command paths that
+/// the table names. Each form has the support of its parent command.
+const EXTRA_FORMS: &[&str] = &["agent install", "agent uninstall"];
+
+/// The global options that read a path, with the extra arguments that make
+/// the command read it.
+const READ_OPTIONS: &[(&str, &[&str])] = &[
+    ("--root", &[]),
+    ("--config", &[]),
+    ("--diff-file", &[]),
+    ("--churn-file", &[]),
+    ("--baseline", &[]),
+    ("--regression-baseline", &["--fail-on-regression"]),
+    ("--type-aware-project", &["--type-aware"]),
+];
+
 /// The line that `watch` prints on stderr when its first report is ready.
 const WATCH_READY: &str = "Watching for changes";
 
@@ -93,9 +113,45 @@ fn command_args(command: &str, project: &Path, scratch: &Path) -> Option<Vec<Str
             ]
         }
         "agent" => vec!["agent".into(), "status".into()],
+        "agent install" => vec!["agent".into(), "install".into(), "--dry-run".into()],
+        "agent uninstall" => vec!["agent".into(), "uninstall".into(), "--dry-run".into()],
         "fix" => vec!["fix".into(), "--dry-run".into()],
-        "rule-pack list" => vec!["rule-pack".into(), "list".into()],
+
         "flags" => vec!["flags".into(), "--retirement".into()],
+        "init" | "recommend" | "workspaces" | "suppressions" | "plugin-check" | "config"
+        | "doctor" => vec![command.to_owned()],
+        "inspect" => vec!["inspect".into(), "--file".into(), "src/index.ts".into()],
+        "trace" => vec!["trace".into(), "src/utils.ts:unusedFunction".into()],
+        "explain" => vec!["explain".into(), "unused-files".into()],
+        "hooks" => vec!["hooks".into(), "status".into()],
+        "impact" => vec!["impact".into(), "status".into()],
+        "impact statusline" => vec!["impact".into(), "statusline".into()],
+        "license" => vec!["license".into(), "status".into()],
+        "audit-cache" => vec!["audit-cache".into(), "prune".into()],
+        "ci-template" => vec!["ci-template".into(), "github".into()],
+        "migrate" | "setup-hooks" => vec![command.into(), "--dry-run".into()],
+        "cloud" => vec!["cloud".into(), "logout".into()],
+        "coverage" => vec!["coverage".into(), "analyze".into()],
+        "rule-pack" | "rule-pack list" => vec!["rule-pack".into(), "list".into()],
+        "rule-pack schema" => vec!["rule-pack".into(), "schema".into()],
+        "viz" => vec![
+            "viz".into(),
+            "--no-open".into(),
+            "--out".into(),
+            path(&scratch.join("viz.html")),
+        ],
+        "ci" => {
+            let body = scratch.join("body.md");
+            std::fs::write(&body, "body").expect("write body");
+            vec![
+                "ci".into(),
+                "plan-pr-comment".into(),
+                "--body".into(),
+                path(&body),
+                "--marker-id".into(),
+                "m".into(),
+            ]
+        }
         "list" => vec!["list".into(), "--entry-weight".into()],
         _ => return None,
     };
@@ -146,6 +202,11 @@ struct Pair {
 /// the bare run, each top-level command and each subcommand path that a row
 /// names.
 fn supported_pairs() -> Vec<Pair> {
+    supported_pairs_for(FILE_OPTIONS)
+}
+
+/// Each supported pair of one of `options` and a command path.
+fn supported_pairs_for(options: &[&str]) -> Vec<Pair> {
     let reference = run_fallow_raw(&["schema", "--cli-reference"]);
     assert_eq!(reference.code, 0, "{}", reference.stderr);
     let doc: serde_json::Value = serde_json::from_str(&reference.stdout).expect("reference JSON");
@@ -176,8 +237,9 @@ fn supported_pairs() -> Vec<Pair> {
             }
         }
     }
+    commands.extend(EXTRA_FORMS.iter().map(|form| (*form).to_owned()));
     let mut pairs = Vec::new();
-    for option in FILE_OPTIONS {
+    for option in options {
         let row = globals
             .iter()
             .find(|row| row["long"] == *option)
@@ -352,12 +414,22 @@ fn check_rejected_format(
         .arg("--quiet")
         .output()
         .expect("run fallow");
-    if output.status.code() == Some(2) {
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if output.status.code() != Some(2) {
+        return FileCheck::Problem(format!(
+            "--format {format} exited with {}, not 2",
+            output.status
+        ));
+    }
+    if text.contains(FORMATS_MESSAGE_PART) {
         FileCheck::Pass
     } else {
         FileCheck::Problem(format!(
-            "--format {format} exited with {}, not 2",
-            output.status
+            "--format {format} exited with 2, but not with the message of the table: {text}"
         ))
     }
 }
@@ -433,4 +505,95 @@ fn each_skipped_command_is_a_supported_pair() {
             "{name} is skipped ({reason}) but has no supported file option"
         );
     }
+}
+
+/// Run the command with a path that does not exist, and return the problem
+/// when the command exits 0 or 1 and names the path nowhere.
+fn check_missing_path(
+    args: &[String],
+    option: &str,
+    extra: &[&str],
+    project: &Path,
+    home: &Path,
+) -> FileCheck {
+    let missing = project.join("missing-input-path.json");
+    let missing_arg = missing.to_str().expect("utf8 path");
+    let out_path = home.join("stdout.log");
+    let err_path = home.join("stderr.log");
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .env("HOME", home);
+    scrub_analysis_env(&mut cmd);
+    let mut child = cmd
+        .current_dir(project)
+        .args(args)
+        .args([option, missing_arg])
+        .args(extra)
+        .stdin(Stdio::null())
+        .stdout(std::fs::File::create(&out_path).expect("stdout log"))
+        .stderr(std::fs::File::create(&err_path).expect("stderr log"))
+        .spawn()
+        .expect("start fallow");
+    let names_path = || {
+        [&out_path, &err_path].iter().any(|log| {
+            std::fs::read_to_string(log).is_ok_and(|text| text.contains("missing-input-path"))
+        })
+    };
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll fallow") {
+            break Some(status);
+        }
+        if names_path() || start.elapsed() > FILE_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    };
+    if status.is_some_and(|status| status.code() == Some(2)) || names_path() {
+        return FileCheck::Pass;
+    }
+    let stderr = std::fs::read_to_string(&err_path).unwrap_or_default();
+    FileCheck::Problem(format!(
+        "accepted the missing path in silence ({}): {stderr}",
+        status.map_or_else(|| "still running".to_owned(), |status| status.to_string())
+    ))
+}
+
+/// A supported option that reads a path fails, or warns with the path, when
+/// the path does not exist. A command that accepts the option and reads
+/// nothing would exit 0 in silence, which is the shape of issue #4931.
+#[test]
+fn each_supported_read_option_reads_its_path() {
+    let options: Vec<&str> = READ_OPTIONS.iter().map(|(option, _)| *option).collect();
+    let pairs = supported_pairs_for(&options);
+    let mut failures = Vec::new();
+    for pair in &pairs {
+        let (option, command) = (&pair.option, &pair.command);
+        if NOT_RUNNABLE.iter().any(|(name, _)| name == command) {
+            continue;
+        }
+        let extra = READ_OPTIONS
+            .iter()
+            .find(|(name, _)| name == option)
+            .map_or(&[][..], |(_, extra)| *extra);
+        let project = committed_fixture();
+        let scratch = tempfile::tempdir().expect("scratch dir");
+        let home = scratch.path().join("home");
+        std::fs::create_dir_all(&home).expect("home dir");
+        let Some(args) = command_args(command, project.path(), scratch.path()) else {
+            failures.push(format!(
+                "{command} {option}: the table marks the pair as supported, but the test has no command line for {command}"
+            ));
+            continue;
+        };
+        if let FileCheck::Problem(problem) =
+            check_missing_path(&args, option, extra, project.path(), &home)
+        {
+            failures.push(format!("{command} {option}: {problem}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }

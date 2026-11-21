@@ -299,6 +299,11 @@ fn analysis_commands_without_a_regression_baseline_reject_the_regression_options
     assert_eq!(rejection(&["security", "--tolerance", "2"]), None);
 }
 
+/// The pairs of a file option and a command that ignore the option on
+/// purpose. `audit-cache` must clean up when the config does not load
+/// (`audit_cache_prune_ignores_a_config_that_does_not_load`).
+const INTENTIONALLY_IGNORED: &[(&str, &str)] = &[("--config", "audit-cache")];
+
 /// A command that ignores an option that names a file accepts the command
 /// line, exits 0, and reads or writes no file (issue #4931). Such a pair is
 /// supported, so the file test runs it, or it is rejected.
@@ -314,6 +319,8 @@ fn no_command_ignores_an_option_that_names_a_file() {
         "--output-file",
         "--diff-file",
         "--churn-file",
+        "--config",
+        "--type-aware-project",
     ] {
         let Some(row) = option_support(option) else {
             assert!(
@@ -327,6 +334,9 @@ fn no_command_ignores_an_option_that_names_a_file() {
             "{option} has an ignored default"
         );
         for entry in row.commands.iter().flat_map(|group| group.iter()) {
+            if INTENTIONALLY_IGNORED.contains(&(option, entry.command)) {
+                continue;
+            }
             assert!(
                 !matches!(entry.support, Support::Ignored { .. }),
                 "{} ignores {option}",
@@ -517,6 +527,44 @@ fn output_file_works_with_the_formats_that_write_the_file() {
     assert!(rejection(&["agent", "status", "--output-file", "o.out"]).is_some());
     assert_eq!(
         rejection(&["agent", "status", "--format", "markdown"]),
+        None
+    );
+}
+
+#[test]
+fn a_command_that_does_not_read_a_file_option_rejects_it() {
+    let not_read = |command: &str, option: &str| {
+        format!("`fallow {command}` does not read `{option}`, so the option has no effect.")
+    };
+    assert_eq!(
+        rejection(&["dead-code", "--churn-file", "c.json"]),
+        Some(not_read("dead-code", "--churn-file"))
+    );
+    assert_eq!(rejection(&["health", "--churn-file", "c.json"]), None);
+    assert_eq!(rejection(&["--churn-file", "c.json"]), None);
+    assert_eq!(
+        rejection(&["explain", "unused-files", "--config", "f.json"]),
+        Some(not_read("explain", "--config"))
+    );
+    assert_eq!(rejection(&["schema", "--root", "."]), None);
+    assert_eq!(
+        rejection(&["schema", "--config", "f.json"]),
+        Some(not_read("schema", "--config"))
+    );
+    assert_eq!(
+        rejection(&["audit-cache", "prune", "--config", "f.json"]),
+        None
+    );
+    assert_eq!(
+        rejection(&["impact", "statusline", "--diff-file", "d.patch"]),
+        Some(not_read("impact statusline", "--diff-file"))
+    );
+    assert_eq!(
+        rejection(&["dupes", "--type-aware-project", "tsconfig.json"]),
+        Some(not_read("dupes", "--type-aware-project"))
+    );
+    assert_eq!(
+        rejection(&["dead-code", "--type-aware-project", "tsconfig.json"]),
         None
     );
 }

@@ -1523,7 +1523,14 @@ table order and reports the first rejected option. `--tolerance` follows the
 other regression options in that order.
 
 An option that names a file is never ignored: the command writes or reads
-the file, or the command line fails. A command that prints its output to
+the file, or the command line fails. A command that does not read
+`--churn-file`, `--type-aware-project`, `--config` or `--diff-file` rejects
+it with "`fallow <command>` does not read `<option>`". Two exceptions are on
+purpose: a command that reads no project accepts `--root`, because a caller
+can pass it to each command, and `audit-cache` ignores `--config`, so a config
+that does not load cannot block the cleanup. With `--type-aware`, a
+`--type-aware-project` path that does not exist fails at startup, because the
+type-aware run skips a missing project in silence. A command that prints its output to
 stdout, such as `recommend` or `impact`, rejects `--output-file`. A command
 that writes the file only with some output formats has the status
 `supported_with_formats`: `agent` and `rule-pack list` with `--format json`,
@@ -1550,7 +1557,11 @@ option that names a file. An integration test runs each supported pair of a
 command path and an option that writes a file (`--save-baseline`,
 `--save-regression-baseline`, `--sarif-file`, `--output-file`) with
 `--format json`. The pair passes when the command exits with code 0 or 1 and
-the file has content.
+the file has content. For a format that a command does not support for
+`--output-file`, the test requires exit 2 and the message of the table. A
+third test runs each supported pair of an option that reads a path with a
+path that does not exist. The pair passes when the command exits with code 2
+or names the path in its output.
 
 ## CLI reference contract
 

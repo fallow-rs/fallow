@@ -106,6 +106,15 @@ pub fn validate_inputs(
     validate_input_flags(cli, output, json_style)?;
     let root = resolve_validated_root(cli, output, json_style)?;
     validate_input_git_refs(cli, output, json_style)?;
+    if let Some(message) = missing_type_aware_project(cli, &root) {
+        return Err(emit_known_failure_with_style(
+            &message,
+            INVALID_INPUT,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        ));
+    }
 
     let threads = cli
         .threads
@@ -116,6 +125,25 @@ pub fn validate_inputs(
     });
 
     Ok((root, threads))
+}
+
+/// The error for a `--type-aware-project` path that does not exist, as given
+/// or relative to the project root. The type-aware run skips a missing
+/// project in silence, so the command line would exit 0 with no project.
+/// Without `--type-aware`, the command rejects the option with its own error.
+fn missing_type_aware_project(cli: &Cli, root: &Path) -> Option<String> {
+    if !cli.type_aware {
+        return None;
+    }
+    cli.type_aware_project
+        .iter()
+        .find(|project| !project.exists() && !root.join(project).exists())
+        .map(|project| {
+            format!(
+                "--type-aware-project {} does not exist. Pass the path of a tsconfig file, relative to the project root.",
+                project.display()
+            )
+        })
 }
 
 /// Reject unsupported security globals, control characters in path-shaped flags,
