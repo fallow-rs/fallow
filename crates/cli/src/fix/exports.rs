@@ -10,9 +10,9 @@ use super::list_imports::{ImportRemoval, plan_import_removals};
 use fallow_engine::module_graph::NamedReExport;
 use fallow_types::output_dead_code::ReachabilityCaveat;
 
-use super::plan::{
-    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, skip_generated_source,
-    stage_fixed_content,
+use super::plan::{CapturedHashes, FixPlan, SkipReason, skip_generated_source};
+use super::source_edits::{
+    QueueOutcome, SourceEdit, line_deletions, line_edit, read_source_snapshot, split_line_starts,
 };
 
 /// Directory names whose contents are commonly consumed through paths
@@ -225,10 +225,6 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
         for (fix, reason) in &file_plan.withheld {
             push_withheld_export_entry(input, file_plan.relative, fix, *reason);
         }
-        let lines: Vec<&str> = file_plan
-            .content
-            .split(file_plan.meta.line_ending)
-            .collect();
         let rewrites = rewrite_list_statements(&file_plan.lists, &mut file_plan.fixes);
         if file_plan.fixes.is_empty() {
             continue;
@@ -246,6 +242,16 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
             )
         });
 
+        let edits = export_source_edits(
+            &file_plan.content,
+            file_plan.meta.line_ending,
+            &file_plan.fixes,
+            &rewrites,
+            &import_removals,
+        );
+        if input.plan.sources_mut().queue(file_plan.path, edits) != QueueOutcome::Queued {
+            continue;
+        }
         if input.dry_run {
             push_dry_run_export_fixes(
                 input.output,
@@ -258,18 +264,15 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
                 emit_dry_run_import_removals(file_plan.relative, &import_removals);
             }
         } else {
-            apply_grouped_export_fixes(GroupedExportFixInput {
-                plan: input.plan,
-                path: file_plan.path,
-                fixes: input.fixes,
-                relative: file_plan.relative,
-                content: &file_plan.content,
-                meta: &file_plan.meta,
-                lines: &lines,
-                line_fixes: &file_plan.fixes,
-                rewrites,
-                import_removals,
-            });
+            for fix in &file_plan.fixes {
+                push_export_fix_json(
+                    input.fixes,
+                    file_plan.relative,
+                    file_plan.path,
+                    fix,
+                    Some(true),
+                );
+            }
         }
     }
 }
@@ -294,8 +297,7 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
             continue;
         }
 
-        let Some((content, meta)) =
-            read_source_with_hash_check(root, path, input.hashes, input.plan)
+        let Some((content, meta)) = read_source_snapshot(root, path, input.hashes, input.plan)
         else {
             continue;
         };
@@ -617,151 +619,122 @@ fn push_dry_run_export_fixes(
     }
 }
 
-struct GroupedExportFixInput<'a> {
-    plan: &'a mut FixPlan,
-    path: &'a Path,
-    fixes: &'a mut Vec<serde_json::Value>,
-    relative: &'a Path,
-    content: &'a str,
-    meta: &'a super::io::EncodingMetadata,
-    lines: &'a [&'a str],
-    line_fixes: &'a [ExportFix],
-    /// The rewrite of each list statement, keyed by its first line.
-    rewrites: FxHashMap<usize, ListRewriteOutcome>,
-    /// The imports that only the removed list specifiers use. Their lines
-    /// never hold an export edit.
-    import_removals: Vec<ImportRemoval>,
-}
-
-fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
-    let GroupedExportFixInput {
-        plan,
-        path,
-        fixes,
-        relative,
-        content,
-        meta,
-        lines,
-        line_fixes,
-        mut rewrites,
-        import_removals,
-    } = input;
-
-    let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
-    let mut lines_to_delete = Vec::new();
+/// The byte edits of the planned export fixes of one file, against the
+/// analysed text `content`.
+///
+/// Fixes are grouped by their edit line. On one line, each shared
+/// declaration keyword goes, and then the first other edit of the line.
+fn export_source_edits(
+    content: &str,
+    line_ending: &str,
+    line_fixes: &[ExportFix],
+    rewrites: &FxHashMap<usize, ListRewriteOutcome>,
+    import_removals: &[ImportRemoval],
+) -> Vec<SourceEdit> {
+    let starts = split_line_starts(content, line_ending);
+    let lines: Vec<&str> = content.split(line_ending).collect();
+    let mut edits = Vec::new();
+    let mut line_indexes = Vec::new();
 
     let mut edit_lines: Vec<usize> = line_fixes.iter().map(ExportFix::edit_line).collect();
     edit_lines.dedup();
     for edit_line in edit_lines {
-        apply_export_line_group(
-            &mut new_lines,
-            &mut lines_to_delete,
-            line_fixes,
-            &mut rewrites,
-            edit_line,
-        );
+        let on_line = || line_fixes.iter().filter(|fix| fix.edit_line() == edit_line);
+        for fix in on_line() {
+            if let ExportEdit::SharedDeclaration { start_col, .. } = fix.edit {
+                edits.extend(shared_keyword_edit(
+                    lines[edit_line],
+                    starts[edit_line],
+                    start_col,
+                ));
+            }
+        }
+        let Some(edit) = on_line()
+            .map(|fix| fix.edit)
+            .find(|edit| !matches!(edit, ExportEdit::SharedDeclaration { .. }))
+        else {
+            continue;
+        };
+        match edit {
+            ExportEdit::EnumDeclaration(range) => {
+                line_indexes.extend(range.start_line..=range.end_line);
+            }
+            ExportEdit::List(statement) => {
+                match rewrites
+                    .get(&statement.start_line)
+                    .map(|outcome| &outcome.rewrite)
+                {
+                    Some(ListRewrite::Replace(rewritten)) if !rewritten.is_empty() => {
+                        edits.push(line_edit(
+                            content,
+                            line_ending,
+                            statement.start_line,
+                            statement.end_line,
+                            Some(rewritten),
+                        ));
+                    }
+                    Some(_) => line_indexes.extend(statement.start_line..=statement.end_line),
+                    None => {}
+                }
+            }
+            ExportEdit::Keyword => {
+                edits.push(direct_keyword_edit(lines[edit_line], starts[edit_line]));
+            }
+            ExportEdit::SharedDeclaration { .. } => {}
+        }
     }
 
     for removal in import_removals {
-        let kept = removal.replacement.map_or(0, |replacement| {
-            let kept = replacement.len();
-            for (offset, line) in replacement.into_iter().enumerate() {
-                new_lines[removal.start_line + offset] = line;
-            }
-            kept
-        });
-        lines_to_delete.extend(removal.start_line + kept..=removal.end_line);
+        match &removal.replacement {
+            Some(replacement) if !replacement.is_empty() => edits.push(line_edit(
+                content,
+                line_ending,
+                removal.start_line,
+                removal.end_line,
+                Some(replacement),
+            )),
+            _ => line_indexes.extend(removal.start_line..=removal.end_line),
+        }
     }
 
-    delete_export_lines(&mut new_lines, lines_to_delete);
-    stage_fixed_content(plan, path, &new_lines, meta, content);
-    for fix in line_fixes {
-        push_export_fix_json(fixes, relative, path, fix, Some(true));
-    }
+    edits.extend(line_deletions(content, line_ending, &line_indexes));
+    edits
 }
 
-fn apply_export_line_group(
-    new_lines: &mut [String],
-    lines_to_delete: &mut Vec<usize>,
-    line_fixes: &[ExportFix],
-    rewrites: &mut FxHashMap<usize, ListRewriteOutcome>,
-    edit_line: usize,
-) {
-    let on_line = || line_fixes.iter().filter(|fix| fix.edit_line() == edit_line);
-    // Several declarations can share a line. Each removal at a higher column
-    // goes first, so the columns of the others stay valid.
-    let mut columns: Vec<usize> = on_line()
-        .filter_map(|fix| match fix.edit {
-            ExportEdit::SharedDeclaration { start_col, .. } => Some(start_col),
-            ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) | ExportEdit::List(_) => None,
-        })
-        .collect();
-    columns.sort_unstable_by(|a, b| b.cmp(a));
-    columns.dedup();
-    for col in columns {
-        new_lines[edit_line] = remove_export_keyword_at(&new_lines[edit_line], col);
+/// The deletion of the `export` keyword at byte `col` of `line`, with the
+/// spaces and tabs after it. `line_start` is the offset of `line` in the
+/// file.
+fn shared_keyword_edit(line: &str, line_start: usize, col: usize) -> Option<SourceEdit> {
+    if !line.get(col..)?.starts_with("export") {
+        return None;
     }
-    let Some(edit) = on_line()
-        .map(|fix| fix.edit)
-        .find(|edit| !matches!(edit, ExportEdit::SharedDeclaration { .. }))
-    else {
-        return;
-    };
-    match edit {
-        ExportEdit::EnumDeclaration(range) => {
-            lines_to_delete.extend(range.start_line..=range.end_line);
-        }
-        ExportEdit::List(statement) => {
-            match rewrites
-                .remove(&statement.start_line)
-                .map(|outcome| outcome.rewrite)
-            {
-                Some(ListRewrite::DeleteStatement) => {
-                    lines_to_delete.extend(statement.start_line..=statement.end_line);
-                }
-                Some(ListRewrite::Replace(rewritten)) => {
-                    let kept = rewritten.len();
-                    for (offset, line) in rewritten.into_iter().enumerate() {
-                        new_lines[statement.start_line + offset] = line;
-                    }
-                    lines_to_delete.extend(statement.start_line + kept..=statement.end_line);
-                }
-                None => {}
-            }
-        }
-        ExportEdit::SharedDeclaration { .. } => {}
-        ExportEdit::Keyword => {
-            let line = new_lines[edit_line].clone();
-            let trimmed = line.trim_start();
-            let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-            new_lines[edit_line] = remove_direct_export_keyword(&line, trimmed, after_export);
-        }
-    }
+    let removed = line.len() - remove_export_keyword_at(line, col).len();
+    Some(SourceEdit {
+        start: line_start + col,
+        end: line_start + col + removed,
+        replacement: String::new(),
+    })
 }
 
-fn remove_direct_export_keyword(line: &str, trimmed: &str, after_export: &str) -> String {
+/// The deletion of the `export ` at the start of `line`, with the `default `
+/// after it for a default function or class.
+fn direct_keyword_edit(line: &str, line_start: usize) -> SourceEdit {
+    let trimmed = line.trim_start();
     let indent = line.len() - trimmed.len();
-    let replacement = if after_export.starts_with("default function ")
+    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let removes_default = after_export.starts_with("default function ")
         || after_export.starts_with("default async function ")
         || after_export.starts_with("default class ")
-        || after_export.starts_with("default abstract class ")
-    {
-        after_export
-            .strip_prefix("default ")
-            .unwrap_or(after_export)
+        || after_export.starts_with("default abstract class ");
+    let length = if removes_default {
+        "export default ".len()
     } else {
-        after_export
+        "export ".len()
     };
-
-    let prefix = &line[..indent];
-    format!("{prefix}{replacement}")
-}
-
-fn delete_export_lines(new_lines: &mut Vec<String>, mut delete_indices: Vec<usize>) {
-    delete_indices.sort_unstable();
-    delete_indices.dedup();
-    for &idx in delete_indices.iter().rev() {
-        new_lines.remove(idx);
+    SourceEdit {
+        start: line_start + indent,
+        end: line_start + indent + length,
+        replacement: String::new(),
     }
 }
 

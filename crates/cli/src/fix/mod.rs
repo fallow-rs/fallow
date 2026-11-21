@@ -18,6 +18,7 @@ mod exports;
 mod io;
 mod list_imports;
 mod plan;
+mod source_edits;
 
 pub use fallow_config::is_config_fixable;
 

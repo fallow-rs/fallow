@@ -179,6 +179,7 @@ pub(super) struct FixPlan {
     canonical_root: PathBuf,
     entries: Vec<PlannedWrite>,
     skipped: Vec<SkippedFile>,
+    sources: super::source_edits::SourceSnapshots,
 }
 
 impl FixPlan {
@@ -187,7 +188,13 @@ impl FixPlan {
             canonical_root: std::fs::canonicalize(root)?,
             entries: Vec::new(),
             skipped: Vec::new(),
+            sources: super::source_edits::SourceSnapshots::default(),
         })
+    }
+
+    /// The source snapshots and their queued edits.
+    pub(super) fn sources_mut(&mut self) -> &mut super::source_edits::SourceSnapshots {
+        &mut self.sources
     }
 
     /// Queue a replacement for an existing target. The last replacement wins,
@@ -275,7 +282,11 @@ impl FixPlan {
 
     /// Stage every entry to a sibling `NamedTempFile`, then promote each to
     /// its final path.
-    pub(super) fn commit(self) -> CommitOutcome {
+    pub(super) fn commit(mut self) -> CommitOutcome {
+        for (path, original, rewritten) in std::mem::take(&mut self.sources).into_rewrites() {
+            debug_assert!(self.staged_content(&path).is_none());
+            self.stage_existing(path, &original, rewritten);
+        }
         if self.entries.is_empty() {
             return CommitOutcome::empty();
         }

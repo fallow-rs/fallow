@@ -11,10 +11,8 @@ use fallow_types::semantic::{
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 
-use super::io::bytes_with_optional_bom;
-use super::plan::{
-    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, skip_generated_source,
-};
+use super::plan::{CapturedHashes, FixPlan, SkipReason, skip_generated_source};
+use super::source_edits::{QueueOutcome, SourceEdit, read_source_snapshot};
 
 pub(super) struct ClassMemberFixInput<'a> {
     pub(super) root: &'a Path,
@@ -146,7 +144,7 @@ fn apply_file(input: ClassMemberFileInput<'_>) {
         dry_run,
         fixes,
     } = input;
-    let Some((content, metadata)) = read_source_with_hash_check(root, path, hashes, plan) else {
+    let Some((content, metadata)) = read_source_snapshot(root, path, hashes, plan) else {
         return;
     };
     if skip_generated_source(root, path, &content, plan) {
@@ -161,6 +159,14 @@ fn apply_file(input: ClassMemberFileInput<'_>) {
 
     let relative = path.strip_prefix(root).unwrap_or(path);
     for member in &planned {
+        let edit = SourceEdit {
+            start: member.range.start,
+            end: member.range.end,
+            replacement: String::new(),
+        };
+        if plan.sources_mut().queue(path, vec![edit]) != QueueOutcome::Queued {
+            continue;
+        }
         record_fix(
             output,
             dry_run,
@@ -170,17 +176,6 @@ fn apply_file(input: ClassMemberFileInput<'_>) {
             fixes,
         );
     }
-    if dry_run {
-        return;
-    }
-
-    let original = bytes_with_optional_bom(content.clone(), &metadata);
-    let mut rewritten = content;
-    for member in planned {
-        rewritten.replace_range(member.range, "");
-    }
-    let rewritten = bytes_with_optional_bom(rewritten, &metadata);
-    plan.stage_existing(path.to_path_buf(), &original, rewritten);
 }
 
 fn plan_members<'a>(
