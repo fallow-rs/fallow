@@ -61,7 +61,8 @@ pub use re_exports::GraphReExportCycle;
 pub use shortest_import_path::ImportPathHop;
 pub use test_reach::{ExportTestReach, ExportTestReachResult, TestMaskingState};
 pub use types::{
-    ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,
+    ExportSymbol, ModuleNode, ReExportEdge, ReachabilityRoots, ReferenceKind, ReferencePathId,
+    SymbolReference,
 };
 
 /// Direct declaration selected by one unique effective export binding.
@@ -140,17 +141,6 @@ pub fn is_declaration_file_path(path: &Path) -> bool {
         .is_some_and(|name| {
             name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
         })
-}
-
-/// The entry points of a graph build, split by reachability role.
-#[derive(Debug, Clone, Copy)]
-pub struct ReachabilityRoots<'a> {
-    /// Every entry point, of any role.
-    pub all: &'a [EntryPoint],
-    /// Runtime/application entry points.
-    pub runtime: &'a [EntryPoint],
-    /// Test entry points.
-    pub test: &'a [EntryPoint],
 }
 
 /// The core module dependency graph.
@@ -777,6 +767,7 @@ impl ModuleGraph {
                 all: entry_points,
                 runtime: runtime_entry_points,
                 test: test_entry_points,
+                consumer_checked: &FxHashSet::default(),
             },
             files,
             &FxHashSet::default(),
@@ -804,6 +795,7 @@ impl ModuleGraph {
             all: entry_points,
             runtime: runtime_entry_points,
             test: test_entry_points,
+            consumer_checked,
         } = *roots;
         let _span = tracing::info_span!("build_graph").entered();
 
@@ -888,6 +880,7 @@ impl ModuleGraph {
         graph.re_export_cycles = graph.resolve_re_export_chains(
             &module_by_id,
             &exposed_namespace_targets,
+            consumer_checked,
             &mut reference_paths,
         );
         let finalized_paths = reference_paths.finalize(&mut graph.modules);
@@ -1693,6 +1686,7 @@ mod tests {
                 all: &[],
                 runtime: &[],
                 test: &[],
+                consumer_checked: &FxHashSet::default(),
             },
             &files,
             unseeded,

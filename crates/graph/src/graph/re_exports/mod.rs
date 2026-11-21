@@ -122,7 +122,7 @@ impl ReExportTuple {
 }
 
 struct ReExportContext<'a> {
-    entry_star_targets: &'a FxHashSet<FileId>,
+    open_star_barrels: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     binding_usage: &'a ImportBindingUsageIndex,
     effective_exports: &'a super::effective_exports::EffectiveExportIndex,
@@ -529,7 +529,7 @@ fn exposes_here(
 
 struct ReExportFixpointInput<'a> {
     re_export_info: &'a [ReExportTuple],
-    entry_star_targets: &'a FxHashSet<FileId>,
+    open_star_barrels: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     reference_paths: &'a mut ReferencePathInterner,
@@ -540,7 +540,7 @@ struct LegacyReExportFullScan<'a> {
     modules: &'a mut [super::types::ModuleNode],
     edges: &'a [Edge],
     re_export_info: &'a [ReExportTuple],
-    entry_star_targets: &'a FxHashSet<FileId>,
+    open_star_barrels: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     effective_exports: &'a super::effective_exports::EffectiveExportIndex,
@@ -608,6 +608,7 @@ impl ModuleGraph {
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
         exposed_namespace_targets: &ExposedNamespaceTargets,
+        consumer_checked: &FxHashSet<FileId>,
         reference_paths: &mut ReferencePathInterner,
     ) -> Vec<GraphReExportCycle> {
         let re_export_info = self.collect_re_export_tuples();
@@ -618,12 +619,13 @@ impl ModuleGraph {
 
         let cycles = find_re_export_cycles(&self.modules, &re_export_info);
 
-        let entry_star_targets = self.collect_entry_star_targets(exposed_namespace_targets);
+        let open_star_barrels =
+            self.collect_open_star_barrels(exposed_namespace_targets, consumer_checked);
         let edges_by_target = self.build_edges_by_target();
 
         self.run_re_export_fixpoint(ReExportFixpointInput {
             re_export_info: &re_export_info,
-            entry_star_targets: &entry_star_targets,
+            open_star_barrels: &open_star_barrels,
             edges_by_target: &edges_by_target,
             module_by_id,
             reference_paths,
@@ -681,26 +683,28 @@ impl ModuleGraph {
         asset_loaded
     }
 
-    /// Compute the transitive closure of `export *` source files whose every
-    /// named export is credited: star sources of entry-point barrels, closed
-    /// over plain `export *` chains, plus every member of the exposed
-    /// namespace closure (`collect_exposed_namespace_targets`, computed once
-    /// per build and threaded in).
-    fn collect_entry_star_targets(
+    /// The modules whose plain `export *` credits every named export of its
+    /// source, because a consumer that the graph cannot list reads the names.
+    ///
+    /// The members are the entry points, their star sources closed over plain
+    /// `export *` chains, and every member of the exposed namespace closure
+    /// (`collect_exposed_namespace_targets`, computed once per build and
+    /// threaded in). An entry point in `consumer_checked` is not a member on
+    /// its own: its `export *` credits only the names that an importer uses.
+    fn collect_open_star_barrels(
         &self,
         exposed_namespace_targets: &ExposedNamespaceTargets,
+        consumer_checked: &FxHashSet<FileId>,
     ) -> FxHashSet<FileId> {
-        let mut entry_star_targets: FxHashSet<FileId> = exposed_namespace_targets.files().collect();
-        entry_star_targets.extend(self.modules.iter().filter(|m| m.is_entry_point()).flat_map(
-            |m| {
-                m.re_exports
-                    .iter()
-                    .filter(|re| re.exported_name == "*")
-                    .map(|re| re.source_file)
-            },
-        ));
-        self.extend_plain_star_closure(&mut entry_star_targets);
-        entry_star_targets
+        let mut open_star_barrels: FxHashSet<FileId> = exposed_namespace_targets.files().collect();
+        open_star_barrels.extend(
+            self.modules
+                .iter()
+                .filter(|m| m.is_entry_point() && !consumer_checked.contains(&m.file_id))
+                .map(|m| m.file_id),
+        );
+        self.extend_plain_star_closure(&mut open_star_barrels);
+        open_star_barrels
     }
 
     /// Every module whose full namespace object is handed to consumers the
@@ -912,7 +916,7 @@ impl ModuleGraph {
     fn run_re_export_fixpoint(&mut self, input: ReExportFixpointInput<'_>) {
         let ReExportFixpointInput {
             re_export_info,
-            entry_star_targets,
+            open_star_barrels,
             edges_by_target,
             module_by_id,
             reference_paths,
@@ -954,7 +958,7 @@ impl ModuleGraph {
             processed += 1;
 
             let mut context = ReExportContext {
-                entry_star_targets,
+                open_star_barrels,
                 edges_by_target,
                 binding_usage: &binding_usage,
                 effective_exports: &self.effective_exports,
@@ -984,7 +988,7 @@ impl ModuleGraph {
                     modules: legacy_modules,
                     edges: &self.edges,
                     re_export_info,
-                    entry_star_targets,
+                    open_star_barrels,
                     edges_by_target,
                     module_by_id,
                     effective_exports: &self.effective_exports,
@@ -1072,7 +1076,7 @@ impl ModuleGraph {
                 barrel_idx,
                 source_id: entry.source,
                 source_idx,
-                entry_star_targets: context.entry_star_targets,
+                open_star_barrels: context.open_star_barrels,
                 triggering_is_type_only: entry.is_type_only,
                 synthetic_stubs: context.synthetic_stubs,
                 reference_paths: context.reference_paths,
@@ -1103,7 +1107,7 @@ impl ModuleGraph {
             modules,
             edges,
             re_export_info,
-            entry_star_targets,
+            open_star_barrels,
             edges_by_target,
             module_by_id,
             effective_exports,
@@ -1120,7 +1124,7 @@ impl ModuleGraph {
             let mut changed = false;
             for entry in re_export_info {
                 let mut context = ReExportContext {
-                    entry_star_targets,
+                    open_star_barrels,
                     edges_by_target,
                     binding_usage: &binding_usage,
                     effective_exports,

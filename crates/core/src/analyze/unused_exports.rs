@@ -35,6 +35,9 @@ mod declaration_siblings;
 use declaration_siblings::{
     DeclarationSiblingCredit, declaration_sibling_credit, runtime_sibling_path,
 };
+#[path = "unused_exports_entry_star.rs"]
+mod entry_star;
+use entry_star::{EntryStarCredit, EntryStarCreditInput};
 #[path = "unused_exports_manual_mocks.rs"]
 mod manual_mocks;
 use manual_mocks::drop_manual_mocks_of_group_modules;
@@ -67,6 +70,7 @@ struct UnusedExportModuleContext<'a> {
     /// Export names of each declaration file that the importers of its JS
     /// sibling use (`lib.d.mts` next to `lib.mjs`).
     declaration_sibling_credit: &'a DeclarationSiblingCredit,
+    entry_star_credit: &'a EntryStarCredit<'a>,
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
@@ -451,6 +455,13 @@ pub fn find_unused_exports(
     let ambiguity = graph.ambiguity_participants();
     let declaration_sibling_credit =
         declaration_sibling_credit(graph, modules, module_info_by_id.as_ref());
+    let entry_star_credit = EntryStarCredit::build(&EntryStarCreditInput {
+        graph,
+        config,
+        ignore_matchers,
+        plugin_matchers: &plugin_matchers,
+        config_export_credit: &config_export_credit,
+    });
     let module_context = UnusedExportModuleContext {
         graph,
         config,
@@ -463,6 +474,7 @@ pub fn find_unused_exports(
         ambiguity: &ambiguity,
         schema_exports: schema_exports.as_ref(),
         declaration_sibling_credit: &declaration_sibling_credit,
+        entry_star_credit: &entry_star_credit,
     };
 
     let module_results: Vec<UnusedExportModuleResult> = graph
@@ -518,7 +530,8 @@ fn find_unused_exports_for_module(
         .map(|re| re.exported_name.as_str())
         .collect();
 
-    let config_credited_exports = config_credited_exports(module, ctx);
+    let config_credited_exports =
+        config_credited_exports(module, ctx.config, ctx.config_export_credit);
     let mut match_ctx = UnusedExportMatchContext {
         same_file_used_exports: &same_file_used_exports,
         re_export_names: &re_export_names,
@@ -580,14 +593,15 @@ fn collect_module_unused_export_findings(
 /// The export names that a tool reads from `module` as its config file.
 fn config_credited_exports<'a>(
     module: &ModuleNode,
-    ctx: &UnusedExportModuleContext<'a>,
+    config: &ResolvedConfig,
+    credit: &ConfigExportCredit<'a>,
 ) -> Vec<&'a [String]> {
-    if ctx.config_export_credit.is_empty() || !ctx.config.include_entry_exports_for(&module.path) {
+    if credit.is_empty() || !config.include_entry_exports_for(&module.path) {
         return Vec::new();
     }
-    let relative_path = module.path.strip_prefix(&ctx.config.root);
+    let relative_path = module.path.strip_prefix(&config.root);
     let file_str = relative_path.unwrap_or(&module.path).to_string_lossy();
-    ctx.config_export_credit.exports_for(file_str.as_ref())
+    credit.exports_for(file_str.as_ref())
 }
 
 fn same_file_used_exports(
@@ -719,6 +733,7 @@ fn unused_export_candidate_is_skipped(
     }
 
     cjs::is_credited(module, export_str, match_ctx)
+        || ctx.entry_star_credit.credits(module.file_id, export_str)
 }
 
 fn build_unused_export(

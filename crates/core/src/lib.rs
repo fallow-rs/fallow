@@ -25,6 +25,7 @@ pub mod discover;
 pub(crate) mod errors;
 mod external_style_usage;
 pub mod extract;
+mod graph_build;
 mod graph_cache_key;
 mod package_assets;
 mod package_credits;
@@ -1722,15 +1723,12 @@ fn build_analysis_graph(input: &mut BuildAnalysisGraphInput<'_>) -> graph::Modul
     });
     production_scope::neutralize(&mut input.project.modules, input.excluded);
 
-    let mut graph = graph::ModuleGraph::build_with_declaration_seeding(
-        &input.project.modules,
-        &input.project.replaced_module_targets,
-        &graph::ReachabilityRoots {
-            all: &input.entry_points.all,
-            runtime: &input.entry_points.runtime,
-            test: &input.entry_points.test,
-        },
+    let mut graph = graph_build::build_module_graph(
+        input.config,
+        input.project,
+        input.entry_points,
         input.files,
+        input.workspaces,
         input.unseeded_declaration_files,
     );
     graph.set_support_entry_points(&input.entry_points.support);
@@ -1788,6 +1786,7 @@ fn build_graph_cache_manifest(
             entry_points,
             files,
             unseeded_declaration_files,
+            &graph_build::consumer_checked_entries(config, entry_points, files, workspaces),
             &config.root,
         ),
         graph_cache_key::plugin_config_hash(plugin_result, &config.root),

@@ -818,6 +818,21 @@ its deepest bound workspace. An unused dependency uses the workspace of its
 list runs first, so a workspace list gets credit only for a finding that the
 global list did not hide.
 
+`includeEntryExports` also changes the graph. A plain `export *` of an entry
+point credits every named export of its source, because the consumers of an
+entry point are not in the graph. `consumer_checked_entries`
+(`crates/core/src/graph_build.rs`) gives the graph build the entry points
+that the option covers. `collect_open_star_barrels` leaves those out, so their
+`export *` lines credit only the names that an importer uses, like the
+`export *` of any other module, and the unused names are reported at their
+declarations (issue #4986). The function binds `workspaces.settings` itself,
+because the graph build runs before the dead-code pass. `entry_points_hash`
+keys the graph cache on the set. The entry file has no export symbol for a
+name behind its star, so `EntryStarCredit`
+(`crates/core/src/analyze/unused_exports_entry_star.rs`) applies the
+`ignoreExports`, plugin `usedExports` and config-file credit rules of the
+entry file to the files that its plain `export *` chains reach.
+
 In production mode, a file that only user entry rules with an explicit
 `"entryPointRole": "support"` match (inline `framework[]` entries and plugin
 files) takes no part in dead-code analysis (issue #4068). A plugin that sets

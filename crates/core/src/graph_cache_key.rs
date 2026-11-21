@@ -82,10 +82,13 @@ fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
 /// in reachability roots misses the cache. The declaration files the graph
 /// does not seed are reachability roots too: they depend on package.json,
 /// tsconfig and sibling files the manifest does not track.
+/// `consumer_checked` holds the entry points that `includeEntryExports`
+/// covers: their `export *` lines credit fewer names in the graph.
 pub fn entry_points_hash(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
     unseeded_declaration_files: &FxHashSet<discover::FileId>,
+    consumer_checked: &FxHashSet<discover::FileId>,
     root: &std::path::Path,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -120,6 +123,16 @@ pub fn entry_points_hash(
     unseeded.sort_unstable();
     unseeded.len().hash(&mut hasher);
     for key in unseeded {
+        key.hash(&mut hasher);
+    }
+    let mut checked: Vec<String> = files
+        .iter()
+        .filter(|file| consumer_checked.contains(&file.id))
+        .map(|file| root_relative_key(root, &file.path))
+        .collect();
+    checked.sort_unstable();
+    checked.len().hash(&mut hasher);
+    for key in checked {
         key.hash(&mut hasher);
     }
     hasher.finish()

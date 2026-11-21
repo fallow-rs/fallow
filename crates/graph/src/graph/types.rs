@@ -5,9 +5,24 @@ use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::PathBuf;
 
-use fallow_types::discover::FileId;
+use fallow_types::discover::{EntryPoint, FileId};
 use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 use rustc_hash::{FxHashMap, FxHashSet};
+
+/// The entry points of a graph build, split by reachability role.
+#[derive(Debug, Clone, Copy)]
+pub struct ReachabilityRoots<'a> {
+    /// Every entry point, of any role.
+    pub all: &'a [EntryPoint],
+    /// Runtime/application entry points.
+    pub runtime: &'a [EntryPoint],
+    /// Test entry points.
+    pub test: &'a [EntryPoint],
+    /// The entry points whose exports need a consumer in the graph
+    /// (`includeEntryExports`). An `export *` of such a file credits only the
+    /// names that an importer uses, like the `export *` of any other module.
+    pub consumer_checked: &'a FxHashSet<FileId>,
+}
 
 /// A single module in the graph.
 ///
