@@ -140,9 +140,10 @@ impl OwnershipResolver {
 
     /// Look up the section default owners for a group key.
     ///
-    /// Returns `Some(&[...])` only in Section mode when `rel_path` resolves
-    /// to a rule inside a named section. Used to emit the `owners` metadata
-    /// array in grouped JSON output.
+    /// Returns `Some` only in Section mode, for a path that an owning rule
+    /// matches. The slice is empty for a rule before the first section
+    /// header. Used to emit the `owners` metadata array in grouped JSON
+    /// output.
     pub(crate) fn section_owners_of<'a>(&'a self, rel_path: &'a Path) -> Option<&'a [String]> {
         self.group_of(rel_path).section_owners
     }

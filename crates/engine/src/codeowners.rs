@@ -304,23 +304,21 @@ impl CodeOwnersParser {
     fn enter_section(&mut self, name: String, defaults: Vec<String>) {
         let key = name.to_lowercase();
         let idx = if let Some(&idx) = self.section_index.get(&key) {
-            for owner in &defaults {
-                if self.section_owners_seen.insert((idx, owner.clone())) {
-                    self.sections[idx].default_owners.push(owner.clone());
-                }
-            }
             idx
         } else {
             let idx = self.sections.len();
-            self.section_owners_seen
-                .extend(defaults.iter().map(|owner| (idx, owner.clone())));
             self.sections.push(Section {
                 name,
-                default_owners: defaults.clone(),
+                default_owners: Vec::new(),
             });
             self.section_index.insert(key, idx);
             idx
         };
+        for owner in &defaults {
+            if self.section_owners_seen.insert((idx, owner.clone())) {
+                self.sections[idx].default_owners.push(owner.clone());
+            }
+        }
         self.current_section = Some(idx);
         self.current_section_owners = defaults;
     }
@@ -1571,5 +1569,15 @@ src/components/
         for path in ["src/a/x.ts", "src/b/x.ts", "src/c/x.ts"] {
             assert_eq!(section_and_owners(&co, path), team, "{path}");
         }
+    }
+
+    #[test]
+    fn a_section_header_keeps_each_default_owner_one_time() {
+        let co = CodeOwners::parse("[Team] @a @b @a\nsrc/\n").unwrap();
+        assert_eq!(
+            section_and_owners(&co, "src/x.ts"),
+            (Some("Team"), owner_list(&["@a", "@b"]))
+        );
+        assert_eq!(co.owner_count_of(Path::new("src/x.ts")), Some(3));
     }
 }
