@@ -122,11 +122,11 @@ pub fn write_inline_threshold_markdown(
             };
             let _ = writeln!(
                 out,
-                "| `{path}:{}` | {} | {} | `{}` | {metrics} | {outstanding} |",
-                state.comment_line,
+                "| {} | {} | {} | {} | {metrics} | {outstanding} |",
+                markdown_table_code_span(&format!("{path}:{}", state.comment_line)),
                 dimension_label(state.dimension),
                 status_label(state.status),
-                state.target_label(&path),
+                markdown_table_code_span(&state.target_label(&path)),
             );
         }
         out.push('\n');
@@ -137,9 +137,12 @@ pub fn write_inline_threshold_markdown(
         for problem in &report.inline_threshold_override_problems {
             let _ = writeln!(
                 out,
-                "| `{}:{}` | {} |",
-                display_path(&problem.path),
-                problem.line,
+                "| {} | {} |",
+                markdown_table_code_span(&format!(
+                    "{}:{}",
+                    display_path(&problem.path),
+                    problem.line
+                )),
                 problem.problem.description(),
             );
         }
@@ -337,6 +340,31 @@ mod tests {
             out.contains("| `src/a.ts:9` | the comment has no reason"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn markdown_cells_escape_a_backtick_and_a_pipe_in_the_path() {
+        let mut report = report();
+        report.inline_threshold_overrides[0].path = "/root/src/a`b|c.ts".into();
+        report.inline_threshold_override_problems[0].path = "/root/src/a`b|c.ts".into();
+        let mut out = String::new();
+        write_inline_threshold_markdown(&mut out, &report, display);
+        for line in out.lines().filter(|line| line.contains("a`b")) {
+            let cells = line.matches(" | ").count();
+            let escaped_pipes = line.matches("\\|").count();
+            assert!(escaped_pipes > 0, "{line}");
+            assert!(
+                line.contains("``"),
+                "a path with a backtick needs a longer code fence: {line}"
+            );
+            assert!(cells >= 1, "{line}");
+        }
+        let row = out
+            .lines()
+            .find(|line| line.contains("insufficient"))
+            .expect("row");
+        let unescaped = row.replace("\\|", "");
+        assert_eq!(unescaped.matches('|').count(), 7, "{row}");
     }
 
     #[test]

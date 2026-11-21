@@ -91,7 +91,7 @@ impl InlineThresholdProblemKind {
                 "the comment sets no threshold; use maxCyclomatic, maxCognitive, maxCrap or maxUnitSize"
             }
             Self::InvalidKey => {
-                "unknown or repeated key; use maxCyclomatic, maxCognitive, maxCrap or maxUnitSize, each one time"
+                "unknown or repeated key; write each threshold as key=value (maxCyclomatic, maxCognitive, maxCrap or maxUnitSize), each one time"
             }
             Self::InvalidValue => {
                 "the value is not valid; use a whole number (a finite number for maxCrap), as in maxCognitive=40"
