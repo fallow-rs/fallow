@@ -11,6 +11,7 @@
 pub mod coverage;
 mod coverage_license;
 mod coverage_rows;
+mod coverage_sidecar;
 pub mod mutation_report;
 pub mod optimization_target;
 mod runtime_static_signals;
