@@ -295,7 +295,7 @@ fn subdirectory_root_keys_churn_under_the_root() {
     assert_eq!(changed_files(&cold, &app), vec!["src/a.ts".to_string()]);
     assert_eq!(cold.files[&app.join("src/a.ts")].commits, 2);
 
-    // The incremental `<cached>..HEAD` scan must apply the same scope.
+    // The incremental `<cached>..<head>` scan must apply the same scope.
     commit_file(&fixture.root, "other/b.ts", "b2", head + SECS_PER_DAY);
     commit_file(
         &fixture.root,
@@ -627,4 +627,76 @@ fn warm_cache_after_deepen_matches_cold() {
     let warm = fixture.warm_matching_cold();
     assert!(warm.shallow_clone, "a deepened clone is still shallow");
     assert_eq!(fixture.index_commits(&warm), 2);
+}
+
+#[test]
+fn sibling_roots_that_share_a_cache_dir_do_not_share_churn() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    commit_file(root, "packages/app/src/a.ts", "a1", BASE_EPOCH);
+    commit_file(
+        root,
+        "packages/lib/src/b.ts",
+        "b1",
+        BASE_EPOCH + SECS_PER_DAY,
+    );
+    let app = root.join("packages/app");
+    let lib = root.join("packages/lib");
+    let shared = tempfile::tempdir().expect("shared cache directory");
+
+    let (app_result, _) = churn(&app, shared.path(), false);
+    assert_eq!(
+        changed_files(&app_result, &app),
+        vec!["src/a.ts".to_string()]
+    );
+
+    let (lib_result, from_cache) = churn(&lib, shared.path(), false);
+    assert!(!from_cache, "the entry of another root is not reused");
+    assert_eq!(
+        changed_files(&lib_result, &lib),
+        vec!["src/b.ts".to_string()]
+    );
+    let (cold, _) = churn(&lib, shared.path(), true);
+    assert_eq!(churn_rows(&lib_result, &lib), churn_rows(&cold, &lib));
+}
+
+#[test]
+fn an_older_head_date_does_not_reuse_a_cache_with_a_later_cutoff() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    commit_file(root, "src/old.ts", "old", BASE_EPOCH);
+    commit_file(root, "src/new.ts", "new", BASE_EPOCH + 100 * SECS_PER_DAY);
+    // The cutoff is day 10, so this entry does not hold `src/old.ts`.
+    let (first, _) = churn(root, &fixture.cache, false);
+    assert_eq!(changed_files(&first, root), vec!["src/new.ts".to_string()]);
+
+    // HEAD is dated day 80. The cutoff moves back to day -10.
+    commit_file(root, "src/late.ts", "late", BASE_EPOCH + 80 * SECS_PER_DAY);
+    let (warm, _) = churn(root, &fixture.cache, false);
+    let (cold, _) = churn(root, &root.join(".fallow-cold-cache"), true);
+    assert_eq!(churn_rows(&warm, root), churn_rows(&cold, root));
+    assert!(changed_files(&warm, root).contains(&"src/old.ts".to_string()));
+}
+
+#[test]
+fn an_old_dated_commit_does_not_hide_an_in_window_ancestor() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    let head = BASE_EPOCH + 400 * SECS_PER_DAY;
+    commit_file(root, "src/x.ts", "x", head - 10 * SECS_PER_DAY);
+    commit_file(root, "src/o.ts", "o", head - 200 * SECS_PER_DAY);
+    commit_file(root, "src/h.ts", "h", head);
+
+    let (cold, _) = churn(root, &root.join(".fallow-cold-cache"), true);
+    assert_eq!(
+        changed_files(&cold, root),
+        vec!["src/h.ts".to_string(), "src/x.ts".to_string()]
+    );
+
+    let wide = SinceDuration::relative(1, ChurnWindowUnit::Years, "1 year");
+    analyze_churn_cached(root, &wide, &fixture.cache, false).expect("wide churn");
+    let (narrow, narrow_hit) =
+        analyze_churn_cached(root, &window(), &fixture.cache, false).expect("narrow churn");
+    assert!(narrow_hit, "the 1y entry covers the 90 day request");
+    assert_eq!(churn_rows(&narrow, root), churn_rows(&cold, root));
 }

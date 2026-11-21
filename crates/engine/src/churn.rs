@@ -13,9 +13,16 @@ use fallow_types::path_guard::CacheTarget;
 use serde::Deserialize;
 
 use crate::changed_files::git_path_from_bytes;
-use crate::churn_shallow::{RepoSnapshot, ShallowState};
+use crate::churn_shallow::{ChurnCoverage, ShallowState};
 
 pub use fallow_types::churn::ChurnTrend;
+
+#[path = "churn_cache_path.rs"]
+mod cache_path;
+use cache_path::{path_from_cache_bytes, path_to_cache_bytes};
+#[path = "churn_walk.rs"]
+mod walk;
+use walk::analyze_churn_events;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
@@ -576,14 +583,17 @@ const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 /// rebuild the file set of each commit from the cache.
 /// Version 9 stores a hash of the shallow boundary, so an entry built before
 /// `git fetch --unshallow` or `git fetch --deepen` is rejected.
-const CHURN_CACHE_VERSION: u8 = 9;
+/// Version 10 stores a hash of the project root and the oldest committer time
+/// that the entry covers, so an entry of another root or of a later cutoff is
+/// rejected.
+const CHURN_CACHE_VERSION: u8 = 10;
 
 /// Serializable per-commit event for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
 struct CachedCommitEvent {
     timestamp: u64,
-    /// Committer timestamp. `git log --after` filters on this, while recency
-    /// weighting stays on the author timestamp, so a rebased commit lands in
+    /// Committer timestamp. The cutoff filter of the walk reads this, while
+    /// recency weighting stays on the author timestamp, so a rebased commit lands in
     /// the same window warm and cold without its age changing.
     committed_at: u64,
     lines_added: u32,
@@ -613,6 +623,10 @@ struct ChurnCache {
     shallow_clone: bool,
     /// [`ShallowState::boundary`] of the repository when this entry was built.
     shallow_boundary: u64,
+    /// [`ChurnCoverage::root_key`] of the project root of this entry.
+    root_key: u64,
+    /// [`ChurnCoverage::earliest_cutoff_secs`] of this entry.
+    earliest_cutoff_secs: Option<u64>,
     /// Author email pool referenced by [`CachedCommitEvent::author_idx`].
     author_pool: Vec<String>,
     /// Commit id pool referenced by [`CachedCommitEvent::commit_idx`].
@@ -684,30 +698,12 @@ fn window_covers(
     }
 }
 
-/// Load a cache entry whose window covers `window`, plus the window that the
-/// entry was built for.
-///
-/// One cache file serves several windows. Health reads a 12 month history
-/// while target churn reads 6 months. A narrower request prunes the wider
-/// entry to its own cutoff, which gives the same events as a cold
-/// `git log --after`, so the commands do not overwrite each other's entry.
-fn load_covering_churn_cache(
-    cache_dir: &Path,
-    window: &ChurnWindow,
-    clock: &crate::clock::AnalysisClock,
-) -> Option<(ChurnCache, SinceDuration)> {
-    let cache = read_churn_cache(cache_dir)?;
-    let cached = parse_since(&cache.window_token).ok()?;
-    window_covers(&cached.window, window, clock).then_some((cache, cached))
-}
-
 /// Save churn data to disk cache, unless a symlink leaves the `target` base.
 fn save_churn_cache(
     target: CacheTarget<'_>,
-    last_indexed_sha: &str,
     window_token: &str,
     state: &ChurnEventState,
-    shallow: ShallowState,
+    coverage: &ChurnCoverage,
 ) {
     let files: Vec<CachedFileChurn> = state
         .files
@@ -719,11 +715,13 @@ fn save_churn_cache(
         .collect();
     let cache = ChurnCache {
         version: CHURN_CACHE_VERSION,
-        last_indexed_sha: last_indexed_sha.to_string(),
+        last_indexed_sha: coverage.head_sha.clone(),
         window_token: window_token.to_string(),
         files,
-        shallow_clone: shallow.shallow,
-        shallow_boundary: shallow.boundary,
+        shallow_clone: coverage.shallow.shallow,
+        shallow_boundary: coverage.shallow.boundary,
+        root_key: coverage.root_key,
+        earliest_cutoff_secs: coverage.earliest_cutoff_secs,
         author_pool: state.author_pool.clone(),
         commit_pool: state.commit_pool.clone(),
     };
@@ -732,7 +730,7 @@ fn save_churn_cache(
 
 /// Analyze churn with disk caching. Uses cached result when HEAD SHA and
 /// since duration match. If HEAD advanced from the cached SHA, runs an
-/// incremental `git log <cached>..HEAD --numstat` scan and merges it.
+/// incremental `git log <cached>..<head> --numstat` scan and merges it.
 ///
 /// Returns `(ChurnResult, bool)` where the bool indicates whether reusable
 /// cache state was used.
@@ -769,54 +767,57 @@ pub fn analyze_churn_cached_with_history(
         since
     };
     let files_cutoff = since.window.cutoff_secs(&clock);
-    let repo = RepoSnapshot {
-        head_sha: &head_sha,
+    let wanted = ChurnCoverage {
+        root_key: xxhash_rust::xxh3::xxh3_64(&path_to_cache_bytes(root)),
+        head_sha,
         shallow: ShallowState::read(root),
+        earliest_cutoff_secs: history.window.cutoff_secs(&clock),
     };
+    let shallow_clone = wanted.shallow.shallow;
 
-    if !no_cache && let Some(state) = try_reuse_churn_cache(root, history, cache_dir, repo, &clock)
-    {
+    if !no_cache && let Some(state) = try_reuse_churn_cache(root, cache_dir, &wanted, &clock) {
         return Some((
-            build_windowed_churn_result(state, files_cutoff, repo.shallow.shallow, clock),
+            build_windowed_churn_result(state, files_cutoff, shallow_clone, clock),
             true,
         ));
     }
 
-    let state = analyze_fresh_churn(root, history, cache_dir, no_cache, repo, &clock)?;
+    let state = analyze_fresh_churn(root, history, cache_dir, no_cache, &wanted, &clock)?;
     Some((
-        build_windowed_churn_result(state, files_cutoff, repo.shallow.shallow, clock),
+        build_windowed_churn_result(state, files_cutoff, shallow_clone, clock),
         false,
     ))
 }
 
 fn try_reuse_churn_cache(
     root: &Path,
-    since: &SinceDuration,
     cache_dir: &Path,
-    repo: RepoSnapshot<'_>,
+    wanted: &ChurnCoverage,
     clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
-    let RepoSnapshot { head_sha, shallow } = repo;
-    let (cache, cached_since) = load_covering_churn_cache(cache_dir, &since.window, clock)?;
+    let cache = read_churn_cache(cache_dir)?;
+    let have = cache.coverage();
     // A fetch that unshallows or deepens the clone adds history below the
     // cached commits. An extend scan never reaches that history, so only a
     // full walk gives the same events as a cold run.
-    if cache.shallow_clone != shallow.shallow || cache.shallow_boundary != shallow.boundary {
+    if !have.covers(wanted) {
         return None;
     }
-    let cutoff = since.window.cutoff_secs(clock);
-    if cache.last_indexed_sha == head_sha {
-        return Some(cache.into_event_state(cutoff));
+    if have.head_sha == wanted.head_sha {
+        return Some(cache.into_event_state(wanted.earliest_cutoff_secs));
     }
-
-    if !is_ancestor(root, &cache.last_indexed_sha, head_sha) {
+    if !is_ancestor(root, &have.head_sha, &wanted.head_sha) {
         return None;
     }
-
     // Extend the entry over its own window, so a narrower request does not
     // shrink the entry that a wider request saved.
-    let mut state = extend_churn_cache(root, &cached_since, cache_dir, repo, cache, clock)?;
-    state.retain_window(cutoff);
+    let cached_since = parse_since(&cache.window_token).ok()?;
+    let extended = have.extended_to(&wanted.head_sha, cached_since.window.cutoff_secs(clock));
+    if !extended.covers(wanted) {
+        return None;
+    }
+    let mut state = extend_churn_cache(root, &cached_since, cache_dir, &extended, cache, clock)?;
+    state.retain_window(wanted.earliest_cutoff_secs);
     Some(state)
 }
 
@@ -824,20 +825,20 @@ fn extend_churn_cache(
     root: &Path,
     since: &SinceDuration,
     cache_dir: &Path,
-    repo: RepoSnapshot<'_>,
+    coverage: &ChurnCoverage,
     cache: ChurnCache,
     clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
-    let range = format!("{}..HEAD", cache.last_indexed_sha);
-    let delta = analyze_churn_events(root, since, Some(&range), clock)?;
-    let mut state = cache.into_event_state(since.window.cutoff_secs(clock));
+    let cutoff = since.window.cutoff_secs(clock);
+    let range = format!("{}..{}", cache.last_indexed_sha, coverage.head_sha);
+    let delta = analyze_churn_events(root, cutoff, &range, clock)?;
+    let mut state = cache.into_event_state(cutoff);
     merge_churn_states(&mut state, delta);
     save_churn_cache(
         CacheTarget::new(root, cache_dir),
-        repo.head_sha,
         &since.window.cache_token(),
         &state,
-        repo.shallow,
+        coverage,
     );
     Some(state)
 }
@@ -847,17 +848,21 @@ fn analyze_fresh_churn(
     since: &SinceDuration,
     cache_dir: &Path,
     no_cache: bool,
-    repo: RepoSnapshot<'_>,
+    coverage: &ChurnCoverage,
     clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
-    let state = analyze_churn_events(root, since, None, clock)?;
+    let state = analyze_churn_events(
+        root,
+        coverage.earliest_cutoff_secs,
+        &coverage.head_sha,
+        clock,
+    )?;
     if !no_cache {
         save_churn_cache(
             CacheTarget::new(root, cache_dir),
-            repo.head_sha,
             &since.window.cache_token(),
             &state,
-            repo.shallow,
+            coverage,
         );
     }
 
@@ -865,12 +870,25 @@ fn analyze_fresh_churn(
 }
 
 impl ChurnCache {
+    /// The coverage that this entry was saved with.
+    fn coverage(&self) -> ChurnCoverage {
+        ChurnCoverage {
+            root_key: self.root_key,
+            head_sha: self.last_indexed_sha.clone(),
+            shallow: ShallowState {
+                shallow: self.shallow_clone,
+                boundary: self.shallow_boundary,
+            },
+            earliest_cutoff_secs: self.earliest_cutoff_secs,
+        }
+    }
+
     /// Rehydrate the cached events, dropping everything the current window no
     /// longer covers.
     ///
     /// The cache only ever appends, so an entry minted months ago still holds
-    /// commits a cold `git log --after` would exclude today. Without this prune
-    /// a warm run reports more history than a cold run over the same commit,
+    /// commits that the cutoff filter of the walk excludes today. Without this
+    /// prune a warm run reports more history than a cold run over the same commit,
     /// which is exactly the cache-transparency invariant fallow asserts
     /// elsewhere.
     fn into_event_state(self, cutoff_secs: Option<u64>) -> ChurnEventState {
@@ -910,105 +928,6 @@ impl ChurnEventState {
             !file.events.is_empty()
         });
     }
-}
-
-#[cfg(unix)]
-fn path_to_cache_bytes(path: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-
-    path.as_os_str().as_bytes().to_vec()
-}
-
-#[cfg(unix)]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "Windows rejects truncated UTF-16 bytes through this shared fallible contract"
-)]
-fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-
-    Some(PathBuf::from(OsStr::from_bytes(path)))
-}
-
-#[cfg(windows)]
-fn path_to_cache_bytes(path: &Path) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt;
-
-    path.as_os_str()
-        .encode_wide()
-        .flat_map(u16::to_le_bytes)
-        .collect()
-}
-
-#[cfg(windows)]
-fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-
-    let (chunks, remainder) = path.as_chunks::<2>();
-    if !remainder.is_empty() {
-        return None;
-    }
-    let wide: Vec<u16> = chunks
-        .iter()
-        .map(|&pair| u16::from_le_bytes(pair))
-        .collect();
-    Some(PathBuf::from(OsString::from_wide(&wide)))
-}
-
-/// Run `git log --numstat` and return event-level churn state.
-///
-/// The window is passed as an absolute `--after=@<epoch>` resolved against the
-/// run clock rather than as a phrase git re-resolves against the wall clock, so
-/// two runs over one commit see the same window boundary.
-fn analyze_churn_events(
-    root: &Path,
-    since: &SinceDuration,
-    revision_range: Option<&str>,
-    clock: &crate::clock::AnalysisClock,
-) -> Option<ChurnEventState> {
-    let mut command = git_command(root);
-    command.arg("log");
-    if let Some(range) = revision_range {
-        command.arg(range);
-    }
-    command
-        .args([
-            "--numstat",
-            "--no-merges",
-            "--no-renames",
-            "--use-mailmap",
-            "-z",
-            "--format=format:%at|%ct|%H|%ae%x00",
-        ])
-        .current_dir(root);
-    if let Some(cutoff) = since.window.cutoff_secs(clock) {
-        command.arg(format!("--after=@{cutoff}"));
-    }
-    // numstat paths are relative to the git toplevel. When the project root
-    // is a subdirectory, `--relative` rewrites them relative to the root, and
-    // the `.` pathspec skips commits and files outside it. Both are no-ops at
-    // the toplevel.
-    command.args(["--relative", "--", "."]);
-
-    let output = match spawn_output(&mut command) {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::warn!("hotspot analysis skipped: failed to run git: {e}");
-            return None;
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!("hotspot analysis skipped: git log failed: {stderr}");
-        return None;
-    }
-
-    let mut state = parse_git_log_events_z(&output.stdout, root, clock.epoch_secs());
-    state.git_log_bytes = output.stdout.len() as u64;
-    Some(state)
 }
 
 /// Intern every value of `delta` into `base` and map each old `delta` index to
@@ -1453,7 +1372,8 @@ mod tests {
     fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
         let clock = crate::clock::AnalysisClock::for_repo(root);
         let shallow = ShallowState::read(root).shallow;
-        let state = analyze_churn_events(root, since, None, &clock)?;
+        let head = get_head_sha(root)?;
+        let state = analyze_churn_events(root, since.window.cutoff_secs(&clock), &head, &clock)?;
         Some(build_churn_result(state, shallow, clock))
     }
 
@@ -1896,7 +1816,11 @@ mod tests {
         };
         let cache_dir = tempfile::tempdir().expect("cache directory");
         let target = CacheTarget::inside(cache_dir.path());
-        save_churn_cache(target, "abc123", "1y", &state, ShallowState::default());
+        let coverage = ChurnCoverage {
+            head_sha: "abc123".to_owned(),
+            ..ChurnCoverage::default()
+        };
+        save_churn_cache(target, "1y", &state, &coverage);
         let warm = load_churn_cache(cache_dir.path(), "1y")
             .expect("warm churn cache")
             .into_event_state(None);
@@ -1917,6 +1841,8 @@ mod tests {
             }],
             shallow_clone: false,
             shallow_boundary: 0,
+            root_key: 0,
+            earliest_cutoff_secs: None,
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
         };
@@ -1936,6 +1862,8 @@ mod tests {
             files: Vec::new(),
             shallow_clone: false,
             shallow_boundary: 0,
+            root_key: 0,
+            earliest_cutoff_secs: None,
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
         };
