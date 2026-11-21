@@ -65,34 +65,19 @@ pub(super) fn append_shared<T: Clone>(shared: &mut Arc<[T]>, added: &mut Vec<T>)
 }
 
 impl ModuleInfoExtractor {
-    /// Seed a markup snippet extractor with the bindings that the script pass
-    /// of the same component declares. A markup snippet has no declarations of
-    /// its own, so without this seed a `dispatch("save")` call in markup is an
-    /// ordinary call. A template local in `locals` (`{#each items as
+    /// Give a markup snippet extractor the bindings that the script pass of
+    /// the same component declares. A markup snippet has no declarations of
+    /// its own, so without them a `dispatch("save")` call in markup is an
+    /// ordinary call. The extractor reads the shared context and copies none
+    /// of its bindings. A template local in `locals` (`{#each items as
     /// dispatch}`) shadows the script binding of the same name.
-    pub(crate) fn seed_script_binding_context(
+    pub(crate) fn use_script_binding_context(
         &mut self,
-        context: &ScriptBindingContext,
+        context: Arc<ScriptBindingContext>,
         locals: &[String],
     ) {
-        let visible = |name: &&String| !locals.contains(name);
-        self.event_dispatch_bindings.extend(
-            context
-                .event_dispatch_bindings
-                .iter()
-                .filter(visible)
-                .cloned(),
-        );
-        self.template_emits
-            .bindings
-            .extend(context.emit_bindings.iter().filter(visible).cloned());
-        self.module_static_sink_literals.extend(
-            context
-                .static_sink_literals
-                .iter()
-                .filter(|(name, _)| !locals.contains(name))
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
+        self.markup.script = Some(context);
+        self.markup.locals = locals.to_vec();
     }
 
     /// Add the bindings of this script that its markup can call or read.
@@ -109,16 +94,16 @@ impl ModuleInfoExtractor {
 
     /// Mark each declared emit that a markup snippet calls as used.
     pub(crate) fn merge_template_emits(&mut self, info: &mut ModuleInfo) {
-        info.has_dynamic_emit |= self.template_emits.dynamic;
-        if self.template_emits.emitted.is_empty() {
+        info.has_dynamic_emit |= self.markup.dynamic;
+        if self.markup.emitted.is_empty() {
             return;
         }
         for emit in &mut info.component_emits {
-            if self.template_emits.emitted.contains(&emit.name) {
+            if self.markup.emitted.contains(&emit.name) {
                 emit.used = true;
             }
         }
-        self.template_emits.emitted.clear();
+        self.markup.emitted.clear();
     }
 
     /// Keep only the imports whose specifier passes `keep`. Without

@@ -309,3 +309,49 @@ fn long_chains_cost_linear_extraction_work() {
         failures.join("\n")
     );
 }
+
+/// Snippets and script literal constants of the short component.
+const SNIPPETS: usize = 250;
+
+/// A Vue component with `n` literal constants in its script and `n` markup
+/// snippets that call a function. Each snippet reads the script binding
+/// context, so a copy of the context per snippet costs `n * n`.
+fn vue_snippets_and_literals(n: usize) -> String {
+    let mut source = String::from("<script setup>\nimport { helper } from './helper';\n");
+    for index in 0..n {
+        let _ = writeln!(source, "const literal{index} = 'value{index}';");
+    }
+    source.push_str("</script>\n<template>\n");
+    for index in 0..n {
+        let _ = writeln!(source, "<p @click=\"helper({index})\">x</p>");
+    }
+    source.push_str("</template>\n");
+    source
+}
+
+#[test]
+fn markup_snippets_with_script_literals_cost_linear_work() {
+    let (steps, bytes, short, long) = std::thread::Builder::new()
+        .stack_size(STACK)
+        .spawn(|| {
+            crate::stack::register_thread_stack(STACK);
+            extraction_work("a.vue", &vue_snippets_and_literals(1));
+            let short = extraction_work("a.vue", &vue_snippets_and_literals(SNIPPETS));
+            let long = extraction_work("a.vue", &vue_snippets_and_literals(SCALE * SNIPPETS));
+            let ratio = |long: usize, short: usize| long as f64 / short.max(1) as f64;
+            (
+                ratio(long.walk_steps, short.walk_steps),
+                ratio(long.allocated_bytes, short.allocated_bytes),
+                short,
+                long,
+            )
+        })
+        .expect("spawn the extraction thread")
+        .join()
+        .expect("extraction must not panic");
+    assert!(
+        steps <= MAX_GROWTH && bytes <= MAX_GROWTH,
+        "markup snippet work grew faster than the component: walk steps {steps:.1}x, \
+         allocated bytes {bytes:.1}x ({short:?} -> {long:?})"
+    );
+}

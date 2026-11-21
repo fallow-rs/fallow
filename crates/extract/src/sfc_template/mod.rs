@@ -73,6 +73,13 @@ fn collect_template_usage(
     }
 }
 
+/// Whether the root `<template>` of a Vue SFC uses a language other than HTML
+/// (`lang="pug"`), whose expressions the template scan cannot read.
+#[must_use]
+pub fn vue_template_is_not_html(source: &str) -> bool {
+    vue::has_non_html_template(source)
+}
+
 /// Collect Svelte custom-event listener names from template `on:<name>`
 /// bindings on component tags (PascalCase). DOM-element `on:click` is excluded.
 /// Feeds the `unused-svelte-event` detector's liberal project-wide listened set.

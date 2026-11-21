@@ -453,9 +453,10 @@ pub(crate) fn parse_sfc_to_module_with_mode(
         combined.has_props_attrs_fallthrough = true;
     }
 
-    // A template can call `$emit` and the `defineEmits()` return binding. The
-    // markup snippet visitor then marks each emitted event as used.
+    // The template can call `$emit` and the `defineEmits()` binding. A template in
+    // another language (`lang="pug"`) is not scanned, so the component abstains.
     if kind == SfcKind::Vue && !combined.component_emits.is_empty() {
+        combined.has_dynamic_emit |= crate::sfc_template::vue_template_is_not_html(source);
         script_binding_context
             .emit_bindings
             .insert("$emit".to_string());
@@ -482,9 +483,8 @@ pub(crate) fn parse_sfc_to_module_with_mode(
 
     // Harvest Svelte template `on:<name>` listener bindings on component tags
     // into the per-file listened set; the `unused-svelte-event` detector unions
-    // these project-wide to decide which dispatched events are dead. The event
-    // name is an attribute name, not an expression, so the markup snippet
-    // visitor cannot see it, and this tag scan stays.
+    // these project-wide to decide which dispatched events are dead. The name
+    // is an attribute name, which the snippet visitor cannot see.
     if kind == SfcKind::Svelte {
         combined.svelte_listened_events =
             crate::sfc_template::collect_svelte_listened_events(source);

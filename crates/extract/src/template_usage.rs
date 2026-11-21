@@ -48,7 +48,7 @@ impl ScriptBindingContext {
 /// the markup tag that holds the snippet.
 #[derive(Debug, Clone)]
 pub struct MarkupFactSink {
-    context: ScriptBindingContext,
+    context: std::sync::Arc<ScriptBindingContext>,
     module: Box<ModuleInfo>,
     anchor: u32,
     /// The snippets that merged, by anchor and text. The Svelte scanner reads
@@ -104,7 +104,7 @@ impl TemplateUsage {
     pub(crate) fn with_markup_sink(context: ScriptBindingContext, module: ModuleInfo) -> Self {
         Self {
             markup: Some(Box::new(MarkupFactSink {
-                context,
+                context: std::sync::Arc::new(context),
                 module: Box::new(module),
                 anchor: 0,
                 absorbed: FxHashSet::default(),
@@ -261,7 +261,7 @@ pub fn analyze_template_snippet_into(usage: &mut TemplateUsage, input: &Template
         if parser_return.fatal_error || !parser_return.diagnostics.is_empty() {
             sink.abstain_on_unparsed(snippet);
         }
-        extractor.seed_script_binding_context(&sink.context, input.locals);
+        extractor.use_script_binding_context(std::sync::Arc::clone(&sink.context), input.locals);
     }
     extractor.register_template_object_locals(used_bindings.iter().cloned());
     extractor.visit_program(&parser_return.program);

@@ -18,6 +18,9 @@ use super::parse_at_path;
 /// spans and list order do not count.
 type FactView = BTreeMap<&'static str, String>;
 
+/// The global objects of the env read shapes.
+const GLOBAL_OBJECTS: &[&str] = &["import.meta", "process"];
+
 static NUMBER_RE: LazyLock<regex::Regex> = LazyLock::new(|| crate::static_regex(r"\d+"));
 
 fn normalize(value: &dyn std::fmt::Debug) -> String {
@@ -40,10 +43,23 @@ macro_rules! fact_view {
 /// Give the script and the markup form of a whole-object read of an import
 /// one form. The semantic pass of a script records it as a namespace member
 /// use of the import. The markup scan records it as a whole-object use.
+/// The markup scan records a member access only on a template-visible name
+/// (an import or a bound target), so a member read of a global
+/// (`import.meta.env.X`, `process.env.X`) counts only in its env read fact.
 /// The top-level runtime statement fact is script-only
 /// (`ModuleInfoExtractor::clear_script_only_facts`), so it goes too.
 fn canonical(info: &ModuleInfo) -> ModuleInfo {
     let mut info = info.clone();
+    info.member_accesses = info
+        .member_accesses
+        .iter()
+        .filter(|access| {
+            !GLOBAL_OBJECTS
+                .iter()
+                .any(|global| access.object.starts_with(global))
+        })
+        .cloned()
+        .collect();
     let mut whole_object_uses = info.whole_object_uses.to_vec();
     let semantic_facts: Vec<SemanticFact> = info
         .semantic_facts
@@ -210,6 +226,14 @@ const SHAPES: &[Shape] = &[
     Shape {
         name: "sink call with a script literal",
         expression: "eval(literal)",
+    },
+    Shape {
+        name: "import.meta env read",
+        expression: "helper(import.meta.env.VITE_API_URL)",
+    },
+    Shape {
+        name: "process env read",
+        expression: "helper(process.env.API_URL)",
     },
 ];
 
@@ -407,4 +431,67 @@ fn html_inline_script_require_is_no_module_load() {
     );
     assert!(info.require_calls.is_empty(), "{:?}", info.require_calls);
     assert!(!info.has_cjs_exports);
+}
+
+/// A Svelte markup local (`{#each}` item) shadows the script binding of the
+/// same name: a shadowed dispatcher dispatches nothing, and a shadowed script
+/// literal is no literal, as for a script function parameter.
+#[test]
+fn markup_local_shadows_a_script_binding() {
+    let head = "<script>\nimport { createEventDispatcher } from 'svelte';\n\
+                const dispatch = createEventDispatcher();\nconst literal = '1 + 1';\n\
+                const handlers = [];\n";
+    let script = format!(
+        "{head}function run(literal) {{ eval(literal); }}\n\
+         </script>\n<button on:click={{run}}>x</button>\n"
+    );
+    let markup = format!(
+        "{head}</script>\n{{#each handlers as dispatch}}{{#each handlers as literal}}\
+         <button on:click={{() => {{ dispatch('save'); eval(literal); }}}}>x</button>\
+         {{/each}}{{/each}}\n"
+    );
+    let script = parse_at_path("Component.svelte", &script);
+    let markup = parse_at_path("Component.svelte", &markup);
+    assert!(
+        markup.svelte_dispatched_events.is_empty() && !markup.has_dynamic_dispatch,
+        "a shadowed dispatch is no dispatcher: {:?}",
+        markup.svelte_dispatched_events
+    );
+    assert!(!script.security_sinks.is_empty());
+    assert_eq!(
+        normalize(&script.security_sinks),
+        normalize(&markup.security_sinks),
+        "a shadowed script literal is no literal in markup either"
+    );
+}
+
+/// The template scan reads only HTML tags. For a template in another
+/// language, the component must never report an emit that the same call in
+/// script marks as used.
+#[test]
+fn non_html_template_never_loses_an_emit_that_script_marks_used() {
+    let script = parse_at_path("Component.vue", &vue_script("emit('close')"));
+    assert!(
+        script
+            .component_emits
+            .iter()
+            .any(|emit| emit.name == "close" && emit.used)
+    );
+    for lang in ["pug", "slm"] {
+        let markup = parse_at_path(
+            "Component.vue",
+            &format!(
+                "<script setup>\nconst emit = defineEmits(['close', 'open']);\n</script>\n\
+                 <template lang=\"{lang}\">\nbutton(@click=\"emit('close')\") x\n</template>\n"
+            ),
+        );
+        let close_used = markup
+            .component_emits
+            .iter()
+            .any(|emit| emit.name == "close" && emit.used);
+        assert!(
+            close_used || markup.has_dynamic_emit,
+            "lang=\"{lang}\": `close` would be reported as unused"
+        );
+    }
 }

@@ -24,6 +24,10 @@ use super::shared::{
 static TEMPLATE_OPEN_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>"#));
 
+/// The `lang` attribute value of a `<template>` open tag.
+static TEMPLATE_LANG_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| crate::static_regex(r#"(?i)\blang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#));
+
 static VUE_FOR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
 
@@ -120,6 +124,27 @@ pub(super) fn collect_template_usage_seeded(
     );
 
     usage
+}
+
+/// Whether the root `<template>` uses a language other than HTML
+/// (`lang="pug"`). The template scan reads only HTML tags, so it cannot see
+/// the expressions of such a template.
+pub(super) fn has_non_html_template(source: &str) -> bool {
+    let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
+        .find_iter(source)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    let Some(open) = TEMPLATE_OPEN_RE.find_iter(source).find(|open| {
+        !comment_ranges
+            .iter()
+            .any(|&(start, end)| open.start() >= start && open.start() < end)
+    }) else {
+        return false;
+    };
+    TEMPLATE_LANG_RE
+        .captures(open.as_str())
+        .and_then(|caps| caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)))
+        .is_some_and(|lang| !lang.as_str().trim().eq_ignore_ascii_case("html"))
 }
 
 /// Compute the `(start, end)` byte ranges of each root `<template>` body, mirroring

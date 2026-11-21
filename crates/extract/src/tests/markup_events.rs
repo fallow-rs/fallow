@@ -134,3 +134,31 @@ fn vue_template_member_emit_call_is_not_an_emit() {
     assert!(used_emit_names(&info).is_empty());
     assert!(!info.has_dynamic_emit);
 }
+
+#[test]
+fn vue_pug_template_abstains_from_emit_findings() {
+    let info = vue_emits(
+        r#"<script setup>const emit = defineEmits(['a','never'])</script><template lang="pug">button(@click="emit('a')") x</template>"#,
+    );
+    assert!(
+        info.has_dynamic_emit,
+        "the tag scan cannot read a Pug template, so the component abstains"
+    );
+}
+
+#[test]
+fn vue_template_in_another_language_abstains_from_emit_findings() {
+    let info = vue_emits(
+        "<script setup>const emit = defineEmits(['a'])</script>\n<template lang='slm'>\nbutton @click=\"emit('a')\" x\n</template>",
+    );
+    assert!(info.has_dynamic_emit);
+}
+
+#[test]
+fn vue_html_template_lang_keeps_emit_findings() {
+    let info = vue_emits(
+        r#"<script setup>const emit = defineEmits(['a','never'])</script><template lang="html"><button @click="emit('a')">x</button></template>"#,
+    );
+    assert!(!info.has_dynamic_emit);
+    assert_eq!(used_emit_names(&info), vec!["a"]);
+}

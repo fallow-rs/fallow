@@ -311,7 +311,7 @@ struct TemplateRegionContext {
     /// `const utils: Util[]` element class (issue #1713).
     array_element_types: rustc_hash::FxHashMap<String, String>,
     /// The frontmatter bindings that a template region can read.
-    script: crate::template_usage::ScriptBindingContext,
+    script: std::sync::Arc<crate::template_usage::ScriptBindingContext>,
 }
 
 impl TemplateRegionContext {
@@ -320,7 +320,7 @@ impl TemplateRegionContext {
         extractor.extend_script_binding_context(&mut script);
         Self {
             array_element_types: extractor.array_binding_element_types().clone(),
-            script,
+            script: std::sync::Arc::new(script),
         }
     }
 }
@@ -384,7 +384,7 @@ fn extend_template_expression_usage(
         }
         let mut extractor = ModuleInfoExtractor::new();
         extractor.seed_array_binding_element_types(&context.array_element_types);
-        extractor.seed_script_binding_context(&context.script, &[]);
+        extractor.use_script_binding_context(std::sync::Arc::clone(&context.script), &[]);
         extractor.visit_program(&parser_return.program);
         scan_template_usage(
             region,

@@ -1344,8 +1344,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// binding was used as a whole value (passed / returned). Forces the
     /// `unused-svelte-event` detector to abstain on the whole component.
     has_dynamic_dispatch: bool,
-    /// The Vue emit calls of a markup snippet.
-    template_emits: visit_impl::TemplateEmits,
+    /// The script binding context and the emit calls of a markup snippet.
+    markup: visit_impl::MarkupContext,
 }
 
 /// Metadata for a named arrow / function-expression that may be a React

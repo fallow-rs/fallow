@@ -149,7 +149,7 @@ pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
 pub(super) use visit_security_sinks::SinkAliasState;
 pub(super) use visit_security_sinks::flatten_callee_path;
-pub(super) use visit_svelte_events::TemplateEmits;
+pub(super) use visit_svelte_events::MarkupContext;
 #[path = "visit_impl_taint_chain.rs"]
 mod taint_chain;
 use taint_chain::collect_chained_taint_idents;

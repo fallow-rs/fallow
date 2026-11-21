@@ -510,12 +510,15 @@ code in a script block. The rules are:
   bindings that markup can call or read: the Svelte `createEventDispatcher()`
   bindings, the Vue `defineEmits()` return binding with `$emit`, and the
   script constants with a literal value, which a security sink argument
-  reads as a literal. Each snippet extractor starts from this context. A
-  template local of the same name shadows it. The context has no import
+  reads as a literal. All snippets of a component share this context by
+  reference, so no snippet copies it. A template local of the same name
+  shadows a binding of the context. The context has no import
   declarations, so a sink callee that only an import names (for example
   `exec` from `child_process`) is not a sink in markup.
 - A snippet that does not parse and names a dispatch or emit binding makes
   the component abstain, as a call with no literal event name does.
+- The template scan reads only HTML tags. A Vue component whose root
+  `<template>` has another `lang` (`lang="pug"`) abstains from emit findings.
 - Each snippet extractor merges into the component module through
   `ModuleInfoExtractor::merge_into`, the merge of the script blocks. Each
   span of a snippet moves to the start of its markup tag or region.
