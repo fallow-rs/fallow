@@ -18,11 +18,14 @@ const PATHS: &[&str] = &[
 ];
 
 fn query(owners: &CodeOwners, path: &Path) {
-    let _ = owners.owner_of(path);
-    let _ = owners.owner_count_of(path);
-    let _ = owners.owner_and_rule_of(path);
-    let _ = owners.section_of(path);
-    let _ = owners.section_and_owners_of(path);
+    let matched = owners.match_path(path);
+    assert_eq!(owners.owner_of(path), matched.and_then(|m| m.owner));
+    assert_eq!(owners.owner_count_of(path), matched.map(|m| m.owner_count));
+    if let Some(m) = matched {
+        // A GitLab exclusion has no owner, and an owning rule has at least one.
+        assert_eq!(m.owner.is_none(), m.owner_count == 0);
+        assert!(m.section.is_some() || m.section_owners.is_empty());
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
