@@ -474,7 +474,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "config-schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "schema"
+          },
+          {
+            "status": "ignored",
+            "reason": "The command reads no project. It accepts `--root` because a caller can pass it to each command.",
+            "command": "telemetry"
+          }
+        ]
+      }
     },
     {
       "id": "config",
@@ -501,7 +533,119 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "agent"
+          },
+          {
+            "status": "ignored",
+            "reason": "`fallow audit-cache` removes cache folders without the config, so a config that does not load cannot block the cleanup.",
+            "command": "audit-cache"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "ci"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "cloud"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "explain"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "impact"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "init"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "migrate"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "recommend"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "rule-pack schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "setup-hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "type-aware"
+          }
+        ]
+      }
     },
     {
       "id": "allow_remote_extends",
@@ -526,7 +670,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "format",
@@ -642,7 +798,13 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": []
+      }
     },
     {
       "id": "pretty",
@@ -667,7 +829,13 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": []
+      }
     },
     {
       "id": "lean",
@@ -692,7 +860,27 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "--lean applies to `fallow dead-code`, `fallow health` and bare `fallow`. Remove --lean."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          }
+        ]
+      }
     },
     {
       "id": "full_tables",
@@ -717,7 +905,23 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "ignored",
+          "reason": "`--full-tables` changes only the health tables of `--lean`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          }
+        ]
+      }
     },
     {
       "id": "quiet",
@@ -742,7 +946,13 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": []
+      }
     },
     {
       "id": "changed_since",
@@ -774,7 +984,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "no_package_baselines",
@@ -799,7 +1021,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "diff_file",
@@ -826,7 +1070,59 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "telemetry"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "impact statusline"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "migrate"
+          }
+        ]
+      }
     },
     {
       "id": "diff_stdin",
@@ -851,7 +1147,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "churn_file",
@@ -878,7 +1186,33 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `<option>`, so the option has no effect."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "max_file_size",
@@ -905,7 +1239,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "baseline",
@@ -932,7 +1278,60 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not load or save a baseline, so `<option>` has no effect. Use `<option>` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "dupes"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow baselines prune` does not accept `<option>`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config.",
+            "command": "baselines"
+          },
+          {
+            "status": "rejected",
+            "message": "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "baseline_mode",
@@ -972,7 +1371,24 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "parent_run",
@@ -999,7 +1415,24 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "save_baseline",
@@ -1026,7 +1459,60 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not load or save a baseline, so `<option>` has no effect. Use `<option>` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "dupes"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow baselines prune` does not accept `<option>`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config.",
+            "command": "baselines"
+          },
+          {
+            "status": "rejected",
+            "message": "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "production",
@@ -1051,7 +1537,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": "--no-production"
+      "negated_by": "--no-production",
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "no_production",
@@ -1078,7 +1586,29 @@
         "--production"
       ],
       "negates": "--production",
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "workspace",
@@ -1105,7 +1635,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "changed_workspaces",
@@ -1132,7 +1674,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "group_by",
@@ -1192,7 +1746,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "group",
@@ -1219,7 +1795,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "--group is valid with `fallow health --group-by` only."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "health"
+          }
+        ]
+      }
     },
     {
       "id": "explain",
@@ -1244,7 +1832,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
+          }
+        ]
+      }
     },
     {
       "id": "explain_skipped",
@@ -1269,7 +1879,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "summary",
@@ -1294,7 +1926,34 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
+          }
+        ]
+      }
     },
     {
       "id": "ci",
@@ -1319,7 +1978,144 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "init"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-check"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "explain"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "inspect"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "trace"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "flags"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "migrate"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "cloud"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "coverage"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "setup-hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "audit-cache"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "impact statusline"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
+          }
+        ]
+      }
     },
     {
       "id": "fail_on_issues",
@@ -1344,7 +2140,144 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "init"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-check"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "explain"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "inspect"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "trace"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "flags"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "migrate"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "cloud"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "coverage"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "setup-hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "audit-cache"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "impact statusline"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
+          }
+        ]
+      }
     },
     {
       "id": "sarif_file",
@@ -1371,7 +2304,171 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "This command does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`.",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`.",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "init"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-check"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "explain"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "inspect"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "trace"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "flags"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "migrate"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "cloud"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "coverage"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "setup-hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "audit-cache"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security survivors"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow <command>`.",
+            "command": "security blind-spots"
+          }
+        ]
+      }
     },
     {
       "id": "output_file",
@@ -1398,7 +2495,183 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "init"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "plugin-check"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "rule-pack-schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "schema"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "explain"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "config"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "ci"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "inspect"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "trace"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "flags"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "migrate"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "cloud"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "coverage"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "setup-hooks"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "audit-cache"
+          },
+          {
+            "status": "supported_with_formats",
+            "formats": [
+              "json"
+            ],
+            "message": "`fallow <command>` writes the file of `--output-file` only with <formats>. With another format it prints its output to stdout, so `--output-file` has no effect.",
+            "command": "agent"
+          },
+          {
+            "status": "supported_with_formats",
+            "formats": [
+              "github-summary"
+            ],
+            "message": "`fallow <command>` writes the file of `--output-file` only with <formats>. With another format it prints its output to stdout, so `--output-file` has no effect.",
+            "command": "fix"
+          },
+          {
+            "status": "supported_with_formats",
+            "formats": [
+              "json"
+            ],
+            "message": "`fallow <command>` writes the file of `--output-file` only with <formats>. With another format it prints its output to stdout, so `--output-file` has no effect.",
+            "command": "rule-pack list"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "impact"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "recommend"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "rule-pack"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "suppressions"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow viz` writes the map to the path of `--out`, so `--output-file` has no effect. Use `fallow viz --out <PATH>`.",
+            "command": "viz"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.",
+            "command": "workspaces"
+          },
+          {
+            "status": "rejected",
+            "message": "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
+            "command": "telemetry"
+          }
+        ]
+      }
     },
     {
       "id": "report_path_prefix",
@@ -1430,7 +2703,24 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "fail_on_regression",
@@ -1455,7 +2745,65 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "This command has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "flags"
+          },
+          {
+            "status": "supported",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new clone groups, use `fallow dupes --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new health findings, use `fallow health --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "fail_on_stale_baseline",
@@ -1480,7 +2828,24 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "fail_on_baseline_growth",
@@ -1505,7 +2870,59 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not load or save a baseline, so `<option>` has no effect. Use `<option>` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "dupes"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow baselines prune` does not accept `<option>`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config.",
+            "command": "baselines"
+          },
+          {
+            "status": "supported",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "baseline_base",
@@ -1532,7 +2949,59 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not load or save a baseline, so `<option>` has no effect. Use `<option>` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "dupes"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow baselines prune` does not accept `<option>`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config.",
+            "command": "baselines"
+          },
+          {
+            "status": "supported",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "fail_on_parse_error",
@@ -1557,7 +3026,34 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "--fail-on-parse-error is not valid with `fallow <command>`. Use it with dead-code, architecture, health, audit or the bare run.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "--fail-on-parse-error is not valid with `fallow <command>`. Use it with dead-code, architecture, health, audit or the bare run.",
+            "command": "fix"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "tolerance",
@@ -1584,7 +3080,65 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "This command has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "flags"
+          },
+          {
+            "status": "supported",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new clone groups, use `fallow dupes --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new health findings, use `fallow health --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "audit"
+          },
+          {
+            "status": "ignored",
+            "reason": "`fallow security` has no regression gate, and `--tolerance` sets only the gate.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "regression_baseline",
@@ -1611,7 +3165,65 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "This command has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "flags"
+          },
+          {
+            "status": "supported",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new clone groups, use `fallow dupes --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new health findings, use `fallow health --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "save_regression_baseline",
@@ -1638,7 +3250,65 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "This command has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "flags"
+          },
+          {
+            "status": "supported",
+            "command": "list"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new clone groups, use `fallow dupes --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. To gate on new health findings, use `fallow health --baseline <file>`. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "health"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` has no regression baseline, so `<option>` has no effect. The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`.",
+            "command": "audit"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_mode",
@@ -1690,7 +3360,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-mode`. Set `duplicates.mode` in the config, or pass `--dupes-mode` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-mode`. Use `fallow dupes --mode`, or set `duplicates.mode` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_near",
@@ -1715,7 +3417,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-near`. Set `duplicates.near` in the config, or pass `--dupes-near` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-near`. Use `fallow dupes --near`, or set `duplicates.near` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_threshold",
@@ -1742,7 +3476,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-threshold`. Set `duplicates.threshold` in the config, or pass `--dupes-threshold` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-threshold`. Use `fallow dupes --threshold`, or set `duplicates.threshold` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_min_tokens",
@@ -1769,7 +3535,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-min-tokens`. Set `duplicates.minTokens` in the config, or pass `--dupes-min-tokens` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-min-tokens`. Use `fallow dupes --min-tokens`, or set `duplicates.minTokens` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_min_lines",
@@ -1796,7 +3594,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-min-lines`. Set `duplicates.minLines` in the config, or pass `--dupes-min-lines` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-min-lines`. Use `fallow dupes --min-lines`, or set `duplicates.minLines` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_min_occurrences",
@@ -1823,7 +3653,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-min-occurrences`. Set `duplicates.minOccurrences` in the config, or pass `--dupes-min-occurrences` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-min-occurrences`. Use `fallow dupes --min-occurrences`, or set `duplicates.minOccurrences` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_skip_local",
@@ -1848,7 +3710,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-skip-local`. Set `duplicates.skipLocal` in the config, or pass `--dupes-skip-local` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-skip-local`. Use `fallow dupes --skip-local`, or set `duplicates.skipLocal` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_cross_language",
@@ -1873,7 +3767,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-cross-language`. Set `duplicates.crossLanguage` in the config, or pass `--dupes-cross-language` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-cross-language`. Use `fallow dupes --cross-language`, or set `duplicates.crossLanguage` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_ignore_imports",
@@ -1898,7 +3824,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-ignore-imports`. Set `duplicates.ignoreImports` in the config, or pass `--dupes-ignore-imports` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-ignore-imports`. Use `fallow dupes --ignore-imports`, or set `duplicates.ignoreImports` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_no_ignore_imports",
@@ -1925,7 +3883,39 @@
         "--dupes-ignore-imports"
       ],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-no-ignore-imports`. Set `duplicates.ignoreImports` in the config, or pass `--dupes-no-ignore-imports` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-no-ignore-imports`. Use `fallow dupes --no-ignore-imports`, or set `duplicates.ignoreImports` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_ignore_symlinks",
@@ -1950,7 +3940,39 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-ignore-symlinks`. Set `duplicates.ignoreSymlinks` in the config, or pass `--dupes-ignore-symlinks` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-ignore-symlinks`. Use `fallow dupes --ignore-symlinks`, or set `duplicates.ignoreSymlinks` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "dupes_no_ignore_symlinks",
@@ -1977,7 +3999,39 @@
         "--dupes-ignore-symlinks"
       ],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `--dupes-no-ignore-symlinks`. Set `duplicates.ignoreSymlinks` in the config, or pass `--dupes-no-ignore-symlinks` to bare `fallow`."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow dupes` does not read `--dupes-no-ignore-symlinks`. Use `fallow dupes --no-ignore-symlinks`, or set `duplicates.ignoreSymlinks` in the config.",
+            "command": "dupes"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "include_entry_exports",
@@ -2002,7 +4056,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "show_cascade",
@@ -2027,7 +4103,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "type_aware",
@@ -2052,7 +4150,24 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": "--no-type-aware"
+      "negated_by": "--no-type-aware",
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "no_type_aware",
@@ -2079,7 +4194,24 @@
         "--type-aware"
       ],
       "negates": "--type-aware",
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "type_aware_project",
@@ -2106,7 +4238,57 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "rejected",
+          "message": "`fallow <command>` does not read `<option>`, so the option has no effect."
+        },
+        "commands": [
+          {
+            "status": "supported",
+            "command": "fallow"
+          },
+          {
+            "status": "supported",
+            "command": "dead-code"
+          },
+          {
+            "status": "supported",
+            "command": "architecture"
+          },
+          {
+            "status": "supported",
+            "command": "health"
+          },
+          {
+            "status": "supported",
+            "command": "audit"
+          },
+          {
+            "status": "supported",
+            "command": "fix"
+          },
+          {
+            "status": "supported",
+            "command": "inspect"
+          },
+          {
+            "status": "supported",
+            "command": "watch"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "type_aware_require",
@@ -2146,7 +4328,24 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     },
     {
       "id": "no_cache",
@@ -2171,7 +4370,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "threads",
@@ -2198,7 +4409,19 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          }
+        ]
+      }
     },
     {
       "id": "performance",
@@ -2223,7 +4446,29 @@
       "required": false,
       "conflicts_with": [],
       "negates": null,
-      "negated_by": null
+      "negated_by": null,
+      "command_support": {
+        "default": {
+          "status": "supported"
+        },
+        "commands": [
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow security`.",
+            "command": "security"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with `fallow doctor`.",
+            "command": "doctor"
+          },
+          {
+            "status": "rejected",
+            "message": "<option> is not valid with this `fallow similar-code` command.",
+            "command": "similar-code"
+          }
+        ]
+      }
     }
   ],
   "commands": [

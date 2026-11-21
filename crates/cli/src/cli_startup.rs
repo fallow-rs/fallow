@@ -106,6 +106,15 @@ pub fn validate_inputs(
     validate_input_flags(cli, output, json_style)?;
     let root = resolve_validated_root(cli, output, json_style)?;
     validate_input_git_refs(cli, output, json_style)?;
+    if let Some(message) = missing_type_aware_project(cli, &root) {
+        return Err(emit_known_failure_with_style(
+            &message,
+            INVALID_INPUT,
+            output,
+            json_style,
+            telemetry::FailureReason::Validation,
+        ));
+    }
 
     let threads = cli
         .threads
@@ -116,6 +125,28 @@ pub fn validate_inputs(
     });
 
     Ok((root, threads))
+}
+
+/// The error for a `--type-aware-project` path that does not exist, as given
+/// or relative to the project root, when `--type-aware` is on the command
+/// line. The check runs at startup, so it also fails a run in which no
+/// command reads the project, such as an audit with no changed file. The
+/// environment and the config can turn type-aware analysis on too; the
+/// command that reads the project checks those sources when it resolves its
+/// type-aware settings.
+fn missing_type_aware_project(cli: &Cli, root: &Path) -> Option<String> {
+    if !cli.type_aware {
+        return None;
+    }
+    cli.type_aware_project
+        .iter()
+        .find(|project| !project.exists() && !root.join(project).exists())
+        .map(|project| {
+            format!(
+                "--type-aware-project {} does not exist. Pass the path of a tsconfig file, relative to the project root.",
+                project.display()
+            )
+        })
 }
 
 /// Reject unsupported security globals, control characters in path-shaped flags,
@@ -149,37 +180,7 @@ fn validate_input_flags(
         ));
     }
 
-    if matches!(&cli.command, Some(Command::Security { .. }))
-        && let Some(flag) = crate::unsupported_security_global(cli)
-    {
-        return Err(validation_failure(&format!(
-            "{flag} is not valid with `fallow security`."
-        )));
-    }
-
-    // The parse-error gate reads the dead-code and health sections. `dupes`
-    // and `fix` have neither, so the flag would pass with no gate and no
-    // message.
-    if cli.fail_on_parse_error
-        && let Some(command) = match &cli.command {
-            Some(Command::Dupes { .. }) => Some("dupes"),
-            Some(Command::Fix { .. }) => Some("fix"),
-            _ => None,
-        }
-    {
-        return Err(validation_failure(&format!(
-            "--fail-on-parse-error is not valid with `fallow {command}`. Use it with dead-code, architecture, health, audit or the bare run."
-        )));
-    }
-
-    // The group selector is only built into the health grouping. Other
-    // commands would accept it and report every group.
     if let Some(patterns) = cli.group.as_deref() {
-        if !matches!(&cli.command, Some(Command::Health { .. })) {
-            return Err(validation_failure(
-                "--group is valid with `fallow health --group-by` only.",
-            ));
-        }
         for pattern in patterns {
             if let Err(e) = validate::validate_no_control_chars(pattern, "--group") {
                 return Err(validation_failure(&e));
@@ -395,17 +396,33 @@ fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool)
     }
 }
 
-/// Parse argv like `Cli::try_parse`, and also return the deprecated options
-/// that the command line sets.
-fn parse_cli_with_deprecations()
--> Result<(Cli, Vec<&'static crate::schema::deprecations::Deprecation>), clap::Error> {
+/// A parsed command line.
+struct ParsedCommandLine {
+    cli: Cli,
+    /// The deprecated options that the command line sets.
+    deprecated: Vec<&'static crate::schema::deprecations::Deprecation>,
+    /// The clap command tree and the matches with their value sources, for
+    /// the global option check after the output format is resolved.
+    root: clap::Command,
+    matches: clap::ArgMatches,
+}
+
+/// Parse argv like `Cli::try_parse`, and also read the deprecated options of
+/// the command line.
+fn parse_command_line() -> Result<ParsedCommandLine, clap::Error> {
     use clap::{CommandFactory, FromArgMatches};
     let root = Cli::command();
     let mut matches = root.clone().try_get_matches()?;
     let deprecated = crate::schema::deprecations::options_on_command_line(&root, &matches);
+    let checked = matches.clone();
     let cli =
         Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(&mut root.clone()))?;
-    Ok((cli, deprecated))
+    Ok(ParsedCommandLine {
+        cli,
+        deprecated,
+        root,
+        matches: checked,
+    })
 }
 
 fn warn_deprecated_options(entries: &[&crate::schema::deprecations::Deprecation], quiet: bool) {
@@ -419,11 +436,16 @@ fn warn_deprecated_options(entries: &[&crate::schema::deprecations::Deprecation]
 
 /// Parse argv into a `Cli`, apply the legacy-alias warning and process-wide
 /// overrides (max-file-size, workspace PR marker), and resolve the output
-/// format. Returns the parse error's exit code on failure.
-pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
+/// format. Returns the parse error's exit code on failure. The third value is
+/// the error message for a global option that the command rejects.
+pub fn parse_cli_args() -> Result<(Cli, FormatConfig, Option<String>), ExitCode> {
     let used_legacy_check_alias = raw_args_use_legacy_check_alias();
-    let (mut cli, deprecated_options) =
-        parse_cli_with_deprecations().map_err(|err| handle_cli_parse_error(&err))?;
+    let ParsedCommandLine {
+        mut cli,
+        deprecated: deprecated_options,
+        root,
+        matches,
+    } = parse_command_line().map_err(|err| handle_cli_parse_error(&err))?;
     warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
     warn_deprecated_options(&deprecated_options, cli.quiet);
     apply_review_alias(
@@ -439,7 +461,46 @@ pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
     }
 
     let fmt = resolve_format(&cli);
-    Ok((cli, fmt))
+    let rejected_option =
+        crate::global_option_support::rejected_option(&root, &matches, fmt.output);
+    Ok((cli, fmt, rejected_option))
+}
+
+/// Emit the error of a global option that the command rejects. The commands
+/// that run before the telemetry run starts (the schema commands, `telemetry`,
+/// `doctor` and the Impact statusline) record no run, as for their other
+/// errors.
+pub fn reject_global_option(cli: &Cli, fmt: &FormatConfig, message: &str) -> ExitCode {
+    let records_no_run = crate::is_impact_statusline(cli)
+        || matches!(
+            cli.command,
+            Some(
+                Command::Schema(_)
+                    | Command::ConfigSchema
+                    | Command::PluginSchema
+                    | Command::RulePackSchema
+                    | Command::Telemetry { .. }
+                    | Command::Doctor
+            )
+        );
+    if records_no_run {
+        return crate::error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
+    }
+    let telemetry_run = crate::cli_telemetry::start_telemetry_run(cli, fmt);
+    let code = emit_known_failure_with_style(
+        message,
+        INVALID_INPUT,
+        fmt.output,
+        fmt.json_style,
+        telemetry::FailureReason::Validation,
+    );
+    record_run_epilogue(
+        telemetry_run,
+        code,
+        Some(telemetry::FailureReason::Validation),
+        cli.parent_run.as_deref(),
+        None,
+    )
 }
 
 /// Run the pre-dispatch validation gates (diff filter, output-gate flags, global
@@ -465,19 +526,6 @@ pub fn run_pre_dispatch_checks(
 
     if let Err(code) = init_cli_diff_filter(cli, root, output, quiet) {
         return Err(fail(code, telemetry::FailureReason::Diff));
-    }
-
-    if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some() || cli.output_file.is_some())
-        && command_rejects_output_gate(cli.command.as_ref())
-    {
-        let code = emit_known_failure_with_style(
-            "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
-            INVALID_INPUT,
-            output,
-            json_style,
-            telemetry::FailureReason::Validation,
-        );
-        return Err(fail(code, telemetry::FailureReason::Validation));
     }
 
     if let Some(message) = flag_scope_error(cli, root) {
@@ -677,210 +725,72 @@ pub fn bare_combined_baseline_subcommand_error_message(flag: &str) -> String {
     )
 }
 
-/// Reject `--sarif-file` on every command that writes no SARIF file.
-///
-/// Only a bare run with the dead-code analysis, `dead-code`, `architecture`
-/// and `security` write the file (see `writes_sarif` in `write_scope.rs`).
-/// The `security` subcommands reject the flag with their own error. Each other
-/// command would accept the flag, exit 0 and write nothing.
-fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
-    cli.sarif_file.as_ref()?;
-    let command = match cli.command.as_ref() {
-        None => {
-            let (run_check, _, _) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
-            return (!run_check).then(|| {
-                "This run does not include the dead-code analysis, which writes the SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or include dead-code in the run.".to_string()
-            });
-        }
-        Some(Command::Check { .. } | Command::Architecture { .. } | Command::Security { .. }) => {
-            return None;
-        }
-        Some(Command::Dupes { .. }) => "`fallow dupes`",
-        Some(Command::Health { .. }) => "`fallow health`",
-        Some(Command::Audit { .. }) => "`fallow audit`",
-        Some(_) => "This command",
-    };
-    Some(format!(
-        "{command} does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
-    ))
-}
-
-/// The first error of a flag that the command cannot use: `--sarif-file`
-/// without a SARIF writer, a regression flag without a regression baseline,
-/// or a save path outside the allowed directories.
+/// The first error of a flag that a bare run cannot use: `--sarif-file` or a
+/// regression flag without the dead-code analysis, or a save path outside the
+/// allowed directories. [`crate::global_option_support`] decides each flag
+/// for each subcommand.
 fn flag_scope_error(cli: &Cli, root: &Path) -> Option<String> {
     sarif_file_without_sarif_error(cli)
+        .map(str::to_owned)
         .or_else(|| regression_flag_without_baseline_error(cli))
+        .or_else(|| analysis_flag_without_analysis_error(cli))
         .or_else(|| crate::write_scope::write_path_error(cli, root))
 }
 
-/// Reject the regression flags on every command that has no regression
-/// baseline.
+/// Reject a global `--dupes-*` option on a bare run without the duplication
+/// analysis, `--churn-file` on a bare run without the health analysis, and
+/// `--type-aware-project` on a bare run without the dead-code and the health
+/// analysis. Only these analyses read the options. `--only` and `--skip`
+/// decide here; `duplicates.enabled: false` in the config gives an
+/// inert-flag notice when the run starts (see `combined::bare_analyses`).
+fn analysis_flag_without_analysis_error(cli: &Cli) -> Option<String> {
+    if cli.command.is_some() {
+        return None;
+    }
+    let (run_check, run_dupes, run_health) =
+        crate::combined::resolve_analyses(&cli.only, &cli.skip);
+    if !run_check && !run_health && !cli.type_aware_project.is_empty() {
+        return Some(
+            "This run does not include the dead-code or the health analysis, which read `--type-aware-project`, so the option has no effect. Include dead-code or health in the run, or remove `--type-aware-project`.".to_owned(),
+        );
+    }
+    if !run_dupes && let Some(flag) = cli.dupes_overrides().first_global_flag() {
+        return Some(format!(
+            "This run does not include the duplication analysis, which reads `{flag}`, so the option has no effect. Include dupes in the run, or remove `{flag}`."
+        ));
+    }
+    (!run_health && cli.churn_file.is_some()).then(|| {
+        "This run does not include the health analysis, which reads the churn file, so `--churn-file` has no effect. Include health in the run, or use `fallow health --churn-file`.".to_owned()
+    })
+}
+
+/// Reject `--sarif-file` on a bare run without the dead-code analysis.
 ///
-/// A bare run with the dead-code analysis, `dead-code` and `architecture`
-/// save and compare the issue counts. `fallow flags` and `fallow list` handle
-/// the flags themselves (they need `--retirement` or `--entry-weight`). The
-/// `security`, `similar-code` and `doctor` commands reject the flags with
-/// their own error. Each other command would accept the flags, exit 0, and
-/// save or compare nothing.
+/// Only the dead-code analysis writes the SARIF file of a bare run.
+fn sarif_file_without_sarif_error(cli: &Cli) -> Option<&'static str> {
+    cli.sarif_file.as_ref()?;
+    if cli.command.is_some() {
+        return None;
+    }
+    let (run_check, _, _) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
+    (!run_check).then_some(
+        "This run does not include the dead-code analysis, which writes the SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or include dead-code in the run.",
+    )
+}
+
+/// Reject the regression flags on a bare run without the dead-code analysis,
+/// which owns the regression baseline.
 fn regression_flag_without_baseline_error(cli: &Cli) -> Option<String> {
     let flag = crate::dispatch::first_regression_flag(cli)?;
-    let (command, hint) = match cli.command.as_ref() {
-        None => {
-            let (run_check, _, _) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
-            return (!run_check).then(|| {
-                format!(
-                    "This run does not include the dead-code analysis, which owns the regression baseline, so `{flag}` has no effect. Include dead-code in the run, or use `fallow dead-code`."
-                )
-            });
-        }
-        Some(
-            Command::Check { .. }
-            | Command::Architecture { .. }
-            | Command::Flags { .. }
-            | Command::List { .. }
-            | Command::Workspaces
-            | Command::Security { .. }
-            | Command::SimilarCode { .. }
-            | Command::Doctor,
-        ) => return None,
-        Some(Command::Dupes { .. }) => (
-            "`fallow dupes`",
-            " To gate on new clone groups, use `fallow dupes --baseline <file>`.",
-        ),
-        Some(Command::Health { .. }) => (
-            "`fallow health`",
-            " To gate on new health findings, use `fallow health --baseline <file>`.",
-        ),
-        Some(Command::Audit { .. }) => ("`fallow audit`", ""),
-        Some(_) => ("This command", ""),
-    };
-    Some(format!(
-        "{command} has no regression baseline, so `{flag}` has no effect.{hint} The regression flags work with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow flags --retirement` and `fallow list --entry-weight`."
-    ))
-}
-
-/// Return the global baseline flag (`--baseline`, `--save-baseline`,
-/// `--fail-on-baseline-growth` or `--baseline-base`) on the command line, if
-/// any.
-pub fn cli_global_baseline_flag(cli: &Cli) -> Option<&'static str> {
-    if cli.baseline.is_some() {
-        Some("--baseline")
-    } else if cli.save_baseline.is_some() {
-        Some("--save-baseline")
-    } else if cli.fail_on_baseline_growth {
-        Some("--fail-on-baseline-growth")
-    } else if cli.baseline_base.is_some() {
-        Some("--baseline-base")
-    } else {
-        None
+    if cli.command.is_some() {
+        return None;
     }
-}
-
-/// Return the name of a subcommand that loads and saves no baseline.
-///
-/// The global `--baseline` and `--save-baseline` flags have no effect on these
-/// subcommands, so the caller rejects them instead of a silent exit 0. The
-/// match has no wildcard arm, so a new subcommand must take a side.
-pub fn command_without_global_baseline(command: &Command) -> Option<&'static str> {
-    match command {
-        // These use the flags, or reject them with their own message.
-        Command::Check { .. }
-        | Command::Architecture { .. }
-        | Command::Dupes { .. }
-        | Command::Health { .. }
-        | Command::Audit { .. }
-        | Command::Security { .. }
-        | Command::Doctor
-        | Command::Baselines { .. }
-        | Command::SimilarCode { .. } => None,
-        Command::Watch { .. } => Some("watch"),
-        Command::TypeAware { .. } => Some("type-aware"),
-        Command::Inspect { .. } => Some("inspect"),
-        Command::Trace { .. } => Some("trace"),
-        Command::TraceError { .. } => Some("trace-error"),
-        Command::Fix { .. } => Some("fix"),
-        Command::Init { .. } => Some("init"),
-        Command::Hooks { .. } => Some("hooks"),
-        Command::Agent { .. } => Some("agent"),
-        Command::Ci { .. } => Some("ci"),
-        Command::ConfigSchema => Some("config-schema"),
-        Command::PluginSchema => Some("plugin-schema"),
-        Command::PluginCheck => Some("plugin-check"),
-        Command::RulePackSchema => Some("rule-pack-schema"),
-        Command::RulePack { .. } => Some("rule-pack"),
-        Command::Guard { .. } => Some("guard"),
-        Command::Config(_) => Some("config"),
-        Command::Recommend => Some("recommend"),
-        Command::List { .. } => Some("list"),
-        Command::Workspaces => Some("workspaces"),
-        Command::Flags { .. } => Some("flags"),
-        Command::Suppressions { .. } => Some("suppressions"),
-        Command::Explain { .. } => Some("explain"),
-        Command::AuditCache { .. } => Some("audit-cache"),
-        Command::DecisionSurface { .. } => Some("decision-surface"),
-        Command::Impact { .. } => Some("impact"),
-        Command::Report { .. } => Some("report"),
-        Command::Schema(_) => Some("schema"),
-        Command::CiTemplate { .. } => Some("ci-template"),
-        Command::Migrate { .. } => Some("migrate"),
-        Command::License { .. } => Some("license"),
-        Command::Cloud { .. } => Some("cloud"),
-        Command::Telemetry { .. } => Some("telemetry"),
-        Command::Coverage { .. } => Some("coverage"),
-        Command::SetupHooks { .. } => Some("setup-hooks"),
-        Command::Viz { .. } => Some("viz"),
-        Command::Mutation { .. } => Some("mutation"),
-    }
-}
-
-pub fn global_baseline_subcommand_error_message(command: &str, flag: &str) -> String {
-    format!(
-        "`fallow {command}` does not load or save a baseline, so `{flag}` has no effect. Use `{flag}` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
-    )
-}
-
-/// Reject the global baseline flags on a subcommand that has no baseline.
-pub fn reject_global_baseline_flags(cli: &Cli, format: &FormatConfig) -> Option<ExitCode> {
-    let name = cli
-        .command
-        .as_ref()
-        .and_then(command_without_global_baseline)?;
-    let flag = cli_global_baseline_flag(cli)?;
-    Some(crate::error::emit_input_error_with_style(
-        &global_baseline_subcommand_error_message(name, flag),
-        format.output,
-        format.json_style,
-    ))
-}
-
-fn command_rejects_output_gate(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        Some(
-            Command::Init { .. }
-                | Command::ConfigSchema
-                | Command::PluginSchema
-                | Command::PluginCheck
-                | Command::RulePackSchema
-                | Command::Schema(_)
-                | Command::Explain { .. }
-                | Command::CiTemplate { .. }
-                | Command::Config(_)
-                | Command::Ci { .. }
-                | Command::List { .. }
-                | Command::Inspect { .. }
-                | Command::Trace { .. }
-                | Command::Flags { .. }
-                | Command::Migrate { .. }
-                | Command::License { .. }
-                | Command::Cloud { .. }
-                | Command::Coverage { .. }
-                | Command::Hooks { .. }
-                | Command::SetupHooks { .. }
-                | Command::AuditCache { .. }
+    let (run_check, _, _) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
+    (!run_check).then(|| {
+        format!(
+            "This run does not include the dead-code analysis, which owns the regression baseline, so `{flag}` has no effect. Include dead-code in the run, or use `fallow dead-code`."
         )
-    )
+    })
 }
 
 fn global_filter_error(cli: &Cli) -> Option<&'static str> {
@@ -1030,18 +940,58 @@ mod tests {
         assert!(!tracing_uses_ansi(false, None, Some(OsStr::new("0"))));
     }
 
-    /// The hint names every subcommand that loads and saves the global
-    /// baseline.
+    fn analysis_flag_error(args: &[&str]) -> Option<String> {
+        use clap::Parser;
+        let argv = std::iter::once("fallow").chain(args.iter().copied());
+        analysis_flag_without_analysis_error(&Cli::try_parse_from(argv).expect("parses"))
+    }
+
     #[test]
-    fn global_baseline_hint_names_every_baseline_command() {
-        let message = global_baseline_subcommand_error_message("inspect", "--baseline");
-        for command in [
-            "`fallow dead-code`",
-            "`fallow architecture`",
-            "`fallow dupes`",
-            "`fallow health`",
+    fn a_bare_run_without_the_reading_analysis_rejects_its_option() {
+        for args in [
+            &["--only", "dead-code", "--dupes-min-lines", "40"][..],
+            &["--skip", "dupes", "--dupes-min-lines", "40"],
         ] {
-            assert!(message.contains(command), "{command}: {message}");
+            let message = analysis_flag_error(args).unwrap_or_else(|| panic!("{args:?}"));
+            assert!(
+                message.starts_with("This run does not include the duplication analysis, which reads `--dupes-min-lines`"),
+                "{message}"
+            );
+        }
+        for args in [
+            &["--only", "dupes", "--churn-file", "c.json"][..],
+            &["--skip", "health", "--churn-file", "c.json"],
+        ] {
+            let message = analysis_flag_error(args).unwrap_or_else(|| panic!("{args:?}"));
+            assert!(
+                message.starts_with("This run does not include the health analysis"),
+                "{message}"
+            );
+        }
+        for args in [
+            &["--only", "dupes", "--type-aware-project", "tsconfig.json"][..],
+            &[
+                "--skip",
+                "dead-code,health",
+                "--type-aware-project",
+                "tsconfig.json",
+            ],
+        ] {
+            let message = analysis_flag_error(args).unwrap_or_else(|| panic!("{args:?}"));
+            assert!(
+                message
+                    .starts_with("This run does not include the dead-code or the health analysis"),
+                "{message}"
+            );
+        }
+        for args in [
+            &["--dupes-min-lines", "40"][..],
+            &["--only", "dupes", "--dupes-min-lines", "40"],
+            &["--only", "health", "--type-aware-project", "tsconfig.json"],
+            &["--skip", "dead-code", "--churn-file", "c.json"],
+            &["health", "--churn-file", "c.json"],
+        ] {
+            assert_eq!(analysis_flag_error(args), None, "{args:?}");
         }
     }
 

@@ -2189,9 +2189,8 @@ fn audit_notes_route_to_the_config_keys_audit_honors() {
         noted.stderr
     );
 
-    // Audit builds its `DupesOptions` from config alone, so the flags the other
-    // two modes honor parse here and change nothing. A note naming them would
-    // fail silently, which is why audit names the keys instead.
+    // Audit builds its `DupesOptions` from config alone, so it rejects the
+    // global flags and names the config key instead.
     let flagged = run_fallow_in_root(
         "audit",
         dir.path(),
@@ -2204,9 +2203,12 @@ fn audit_notes_route_to_the_config_keys_audit_honors() {
             "2",
         ],
     );
+    assert_eq!(flagged.code, 2, "stderr: {}", flagged.stderr);
     assert!(
-        flagged.stderr.contains(WIRING_NOTE) && flagged.stderr.contains(GATE_NOTE),
-        "the `--dupes-` globals must remain inert under audit. stderr: {}",
+        flagged.stderr.contains(
+            "`fallow audit` does not read `--dupes-min-occurrences`. Set `duplicates.minOccurrences` in the config"
+        ),
+        "audit rejects the `--dupes-` globals and names the config key. stderr: {}",
         flagged.stderr
     );
 

@@ -3,40 +3,7 @@ use std::ffi::OsStr;
 use clap::CommandFactory;
 
 use crate::Cli;
-
-pub const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
-    "baseline",
-    "save-baseline",
-    "fail-on-stale-baseline",
-    "fail-on-baseline-growth",
-    "baseline-base",
-    "fail-on-parse-error",
-    "production",
-    "no-production",
-    "no-package-baselines",
-    "group-by",
-    "performance",
-    "explain-skipped",
-    "fail-on-regression",
-    "regression-baseline",
-    "save-regression-baseline",
-    "dupes-mode",
-    "dupes-near",
-    "dupes-threshold",
-    "dupes-min-tokens",
-    "dupes-min-lines",
-    "dupes-min-occurrences",
-    "dupes-skip-local",
-    "dupes-ignore-symlinks",
-    "dupes-no-ignore-symlinks",
-    "dupes-cross-language",
-    "dupes-ignore-imports",
-    "dupes-no-ignore-imports",
-    "include-entry-exports",
-    "show-cascade",
-    "lean",
-    "full-tables",
-];
+use crate::global_option_support::Support;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityHelpTarget {
@@ -164,6 +131,9 @@ Options:
     .to_owned()
 }
 
+/// Whether `fallow security` does not use the global option `--<long>`, so
+/// its help hides the option.
 pub fn security_unsupported_global_long(long: &str) -> bool {
-    SECURITY_UNSUPPORTED_GLOBAL_LONGS.contains(&long)
+    crate::global_option_support::option_support(&format!("--{long}"))
+        .is_some_and(|row| row.support_for("security") != Support::Supported)
 }

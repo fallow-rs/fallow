@@ -839,3 +839,35 @@ fn deprecated_options_and_commands_name_their_replacement() {
     );
     assert!(commands["architecture"].get("deprecated").is_none());
 }
+
+/// Each global option carries its support per command, so a reader of the
+/// reference sees which commands use, ignore or reject it.
+#[test]
+fn global_options_carry_their_command_support() {
+    let doc = reference();
+    let globals = doc["global_options"].as_array().expect("global_options");
+    for option in globals {
+        let support = &option["command_support"];
+        assert!(
+            support["default"]["status"].is_string(),
+            "{} has no command_support",
+            option["long"]
+        );
+    }
+    let sarif = globals
+        .iter()
+        .find(|option| option["long"] == "--sarif-file")
+        .expect("--sarif-file is global");
+    let dupes = sarif["command_support"]["commands"]
+        .as_array()
+        .expect("commands")
+        .iter()
+        .find(|entry| entry["command"] == "dupes")
+        .expect("dupes has a status");
+    assert_eq!(dupes["status"], "rejected");
+    assert!(
+        dupes["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("does not write a SARIF file"))
+    );
+}

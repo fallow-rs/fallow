@@ -23,7 +23,7 @@ use crate::base_worktree::{
 use crate::error::emit_input_error;
 use crate::runtime_support::{load_config_file, loaded_config};
 use fallow_engine::project_config::{ConfigFile, ConfigFileOptions};
-use fallow_engine::resolved_run::{ResolveError, ResolvedRun};
+use fallow_engine::resolved_run::ResolvedRun;
 
 /// Version 11: complexity keys hold path and function name only, and each
 /// complexity entry carries its metric values (#3277). A version-10 snapshot
@@ -708,20 +708,22 @@ fn config_identity(
 }
 
 /// The type-aware selection of the base pass, from the resolver of the
-/// dead-code pass. `Err` when the run cannot use a type-aware variable.
-/// The head pass reports that error, so this function stays silent.
+/// dead-code pass. `Err` when the run cannot use a type-aware variable or a
+/// given project. The head pass reports that error, so this function stays
+/// silent. `root` resolves a relative project path.
 fn type_aware_fingerprint(
     head: &ResolvedRun,
     type_aware: AuditTypeAwareOptions<'_>,
     section: &fallow_config::TypeAwareConfig,
-) -> Result<Option<AuditTypeAwareFingerprint>, ResolveError> {
+    root: &Path,
+) -> Result<Option<AuditTypeAwareFingerprint>, String> {
     let request = crate::check::TypeAwareRequest {
         enabled: type_aware.enabled,
         config_override: type_aware.config_default,
         projects: type_aware.projects,
         require: type_aware.require,
     };
-    let values = crate::check::type_aware_values(Some(head), &request, section)?;
+    let values = crate::check::type_aware_values(Some(head), &request, section, root)?;
     Ok(values.enabled.then(|| AuditTypeAwareFingerprint {
         projects: values
             .projects
@@ -810,7 +812,7 @@ pub(super) fn audit_base_snapshot_cache_key(
         return Ok(None);
     };
     let (config_file, section) = config_identity(opts)?;
-    let Ok(type_aware) = type_aware_fingerprint(head, type_aware, &section) else {
+    let Ok(type_aware) = type_aware_fingerprint(head, type_aware, &section, opts.root) else {
         return Ok(None);
     };
     // The options of the base pass. The key reads only the fields that do

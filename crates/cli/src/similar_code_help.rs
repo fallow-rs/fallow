@@ -58,62 +58,38 @@ impl SimilarCodeInvocation {
 /// Presentation options (`format`, `pretty`, and `quiet`) are valid for every
 /// target. Every other option is admitted by the target-specific groups below.
 pub fn unsupported_similar_code_option(cli: &Cli) -> Option<&'static str> {
-    unsupported_similar_code_option_with_explicit_tolerance(
-        cli,
-        raw_args_contain_long_option("tolerance"),
-    )
-}
-
-fn unsupported_similar_code_option_with_explicit_tolerance(
-    cli: &Cli,
-    explicit_tolerance: bool,
-) -> Option<&'static str> {
     let command = cli.command.as_ref()?;
     let invocation = SimilarCodeInvocation::from_command(command)?;
     let project = invocation.allows_project_options();
     let analysis = invocation.allows_analysis_options();
 
-    if cli.root.is_some() && !project {
-        return Some("--root");
-    }
-    if cli.config.is_some() && !project {
-        return Some("--config");
-    }
-    if cli.allow_remote_extends && !project {
-        return Some("--allow-remote-extends");
-    }
-    if cli.no_cache && !analysis {
-        return Some("--no-cache");
-    }
-    if cli.threads.is_some() && !analysis {
-        return Some("--threads");
-    }
-    if cli.changed_since.is_some() && !analysis {
-        return Some("--changed-since");
-    }
-    if cli.diff_file.is_some() && !analysis {
-        return Some("--diff-file");
-    }
-    if cli.diff_stdin && !analysis {
-        return Some("--diff-stdin");
-    }
-    if cli.max_file_size.is_some() && !analysis {
-        return Some("--max-file-size");
-    }
-    if cli.workspace.is_some() && !analysis {
-        return Some("--workspace");
-    }
-    if cli.changed_workspaces.is_some() && !analysis {
-        return Some("--changed-workspaces");
-    }
-    if cli.explain && !analysis {
-        return Some("--explain");
-    }
-    if cli.output_file.is_some() && !invocation.allows_output_file() {
-        return Some("--output-file");
+    let project_options = [
+        (cli.root.is_some(), "--root"),
+        (cli.config.is_some(), "--config"),
+        (cli.allow_remote_extends, "--allow-remote-extends"),
+    ];
+    let analysis_options = [
+        (cli.no_cache, "--no-cache"),
+        (cli.threads.is_some(), "--threads"),
+        (cli.changed_since.is_some(), "--changed-since"),
+        (cli.diff_file.is_some(), "--diff-file"),
+        (cli.diff_stdin, "--diff-stdin"),
+        (cli.max_file_size.is_some(), "--max-file-size"),
+        (cli.workspace.is_some(), "--workspace"),
+        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
+        (cli.explain, "--explain"),
+    ];
+    let output_options = [(cli.output_file.is_some(), "--output-file")];
+    let global = [
+        (!project, project_options.as_slice()),
+        (!analysis, analysis_options.as_slice()),
+        (!invocation.allows_output_file(), output_options.as_slice()),
+    ];
+    if let Some(flag) = first_given_option(&global) {
+        return Some(flag);
     }
 
-    if let Some(flag) = unsupported_universal_analysis_option(cli, explicit_tolerance) {
+    if let Some(flag) = first_bare_run_option(cli) {
         return Some(flag);
     }
 
@@ -127,58 +103,34 @@ fn unsupported_similar_code_option_with_explicit_tolerance(
     else {
         unreachable!("invocation was derived from similar-code")
     };
-    if !analysis {
-        if threshold.is_some() {
-            return Some("--threshold");
-        }
-        if min_lines.is_some() {
-            return Some("--min-lines");
-        }
-        if top.is_some() {
-            return Some("--top");
-        }
-        if !file.is_empty() {
-            return Some("--file");
-        }
-    }
-    None
+    let command_options = [
+        (threshold.is_some(), "--threshold"),
+        (min_lines.is_some(), "--min-lines"),
+        (top.is_some(), "--top"),
+        (!file.is_empty(), "--file"),
+    ];
+    first_given_option(&[(!analysis, command_options.as_slice())])
 }
 
-fn unsupported_universal_analysis_option(
-    cli: &Cli,
-    explicit_tolerance: bool,
-) -> Option<&'static str> {
-    let dupes_flag = cli.dupes_overrides().first_global_flag();
+/// The first option that is given in a group that the invocation rejects.
+/// Each group is `(rejected, [(given, flag)])`, in the order of the checks.
+fn first_given_option(groups: &[(bool, &[(bool, &'static str)])]) -> Option<&'static str> {
+    groups
+        .iter()
+        .filter(|(rejected, _)| *rejected)
+        .flat_map(|(_, options)| options.iter())
+        .find(|(given, _)| *given)
+        .map(|(_, flag)| *flag)
+}
+
+/// The first option of the bare run on the command line. A subcommand that
+/// reads none of them rejects them. [`crate::global_option_support`] covers
+/// the global options.
+pub fn first_bare_run_option(cli: &Cli) -> Option<&'static str> {
     [
-        (cli.churn_file.is_some(), "--churn-file"),
-        (cli.baseline.is_some(), "--baseline"),
-        (cli.baseline_mode.is_some(), "--baseline-mode"),
-        (cli.parent_run.is_some(), "--parent-run"),
-        (cli.save_baseline.is_some(), "--save-baseline"),
-        (cli.fail_on_baseline_growth, "--fail-on-baseline-growth"),
-        (cli.baseline_base.is_some(), "--baseline-base"),
-        (cli.production, "--production"),
-        (cli.no_production, "--no-production"),
-        (cli.no_package_baselines, "--no-package-baselines"),
         (cli.production_dead_code, "--production-dead-code"),
         (cli.production_health, "--production-health"),
         (cli.production_dupes, "--production-dupes"),
-        (cli.group_by.is_some(), "--group-by"),
-        (cli.performance, "--performance"),
-        (cli.explain_skipped, "--explain-skipped"),
-        (cli.summary, "--summary"),
-        (cli.ci, "--ci"),
-        (cli.fail_on_issues, "--fail-on-issues"),
-        (cli.sarif_file.is_some(), "--sarif-file"),
-        (cli.report_path_prefix.is_some(), "--report-path-prefix"),
-        (cli.fail_on_regression, "--fail-on-regression"),
-        (cli.tolerance != "0" || explicit_tolerance, "--tolerance"),
-        (cli.regression_baseline.is_some(), "--regression-baseline"),
-        (
-            cli.save_regression_baseline.is_some(),
-            "--save-regression-baseline",
-        ),
-        (dupes_flag.is_some(), dupes_flag.unwrap_or_default()),
         (!cli.only.is_empty(), "--only"),
         (!cli.skip.is_empty(), "--skip"),
         (cli.score, "--score"),
@@ -189,12 +141,6 @@ fn unsupported_universal_analysis_option(
         (cli.coverage_root.is_some(), "--coverage-root"),
         (cli.dupes_baseline.is_some(), "--dupes-baseline"),
         (cli.health_baseline.is_some(), "--health-baseline"),
-        (cli.include_entry_exports, "--include-entry-exports"),
-        (cli.show_cascade, "--show-cascade"),
-        (cli.type_aware, "--type-aware"),
-        (cli.no_type_aware, "--no-type-aware"),
-        (!cli.type_aware_project.is_empty(), "--type-aware-project"),
-        (cli.type_aware_require.is_some(), "--type-aware-require"),
     ]
     .into_iter()
     .find_map(|(used, flag)| used.then_some(flag))
@@ -328,23 +274,6 @@ fn option_consumes_next(arg: &str) -> bool {
             | "--candidates"
             | "--verdicts"
     )
-}
-
-fn raw_args_contain_long_option(long: &str) -> bool {
-    args_contain_long_option(std::env::args_os(), long)
-}
-
-fn args_contain_long_option<I, S>(args: I, long: &str) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let exact = format!("--{long}");
-    let prefix = format!("--{long}=");
-    args.into_iter().any(|arg| {
-        let arg = arg.as_ref().to_string_lossy();
-        arg == exact || arg.starts_with(&prefix)
-    })
 }
 
 pub fn render_similar_code_help(target: SimilarCodeHelpTarget) -> &'static str {
@@ -518,15 +447,6 @@ mod tests {
         assert_eq!(similar_code_help_target(["--help", "similar-code"]), None);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn non_utf8_argv_never_panics_during_explicit_option_detection() {
-        use std::os::unix::ffi::OsStringExt as _;
-
-        let invalid = std::ffi::OsString::from_vec(vec![b'b', b'a', b'd', 0xff]);
-        assert!(!args_contain_long_option([invalid], "tolerance"));
-    }
-
     #[test]
     fn every_help_surface_has_a_closed_format_set() {
         for target in [
@@ -552,6 +472,45 @@ mod tests {
                     "unexpected {unsupported} in:\n{help}"
                 );
             }
+        }
+    }
+
+    /// Assert that `expected` is the first option that a `similar-code`
+    /// command line rejects. The global option table rejects the global
+    /// options that no similar-code command uses, and
+    /// `unsupported_similar_code_option` rejects the others.
+    fn assert_rejects(argv: &[&str], expected: &str) {
+        let cli = Cli::try_parse_from(argv).expect("global option parses before validation");
+        let root = <Cli as clap::CommandFactory>::command();
+        let matches = root
+            .clone()
+            .try_get_matches_from(argv)
+            .expect("global option parses before validation");
+        let table_rejects =
+            crate::global_option_support::option_support(expected).is_some_and(|row| {
+                matches!(
+                    row.support_for("similar-code"),
+                    crate::global_option_support::Support::Rejected { .. }
+                )
+            });
+        if table_rejects {
+            assert_eq!(
+                crate::global_option_support::rejected_option(
+                    &root,
+                    &matches,
+                    fallow_config::OutputFormat::Human,
+                ),
+                Some(format!(
+                    "{expected} is not valid with this `fallow similar-code` command."
+                )),
+                "{argv:?}"
+            );
+        } else {
+            assert_eq!(
+                unsupported_similar_code_option(&cli),
+                Some(expected),
+                "{argv:?}"
+            );
         }
     }
 
@@ -642,14 +601,7 @@ mod tests {
                 "--tolerance",
             ),
         ] {
-            let cli = Cli::try_parse_from(&argv).expect("global option parses before validation");
-            assert_eq!(
-                unsupported_similar_code_option_with_explicit_tolerance(
-                    &cli,
-                    args_contain_long_option(&argv, "tolerance"),
-                ),
-                Some(expected)
-            );
+            assert_rejects(&argv, expected);
         }
     }
 

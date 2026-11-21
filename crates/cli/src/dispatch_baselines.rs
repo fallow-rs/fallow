@@ -25,14 +25,6 @@ pub(super) fn dispatch_baselines_command(
             output,
         );
     }
-    if let Some(flag) = cli_global_baseline_flag(cli) {
-        return emit_input_error(
-            &format!(
-                "`fallow baselines prune` does not accept `{flag}`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config."
-            ),
-            output,
-        );
-    }
     // The analyses of the prune run quietly, as the analyses of a baseline
     // save do. The `loaded config` line still follows `--quiet`.
     let quiet_inputs = dispatch.run_inputs.map(|inputs| {

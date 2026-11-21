@@ -142,9 +142,21 @@ pub fn planned_lists(
 /// the command read that key, so a CI script that passes it must keep its
 /// exit code.
 pub fn note_inert_dupes_baseline(root: &std::path::Path, output: OutputFormat, quiet: bool) {
+    note_inert_duplication_flag(root, "--dupes-baseline", output, quiet);
+}
+
+/// Record the inert-flag notice of a duplication flag, such as
+/// `--dupes-baseline` or `--dupes-min-lines`, on a run in which
+/// `duplicates.enabled: false` turned the duplication analysis off.
+fn note_inert_duplication_flag(
+    root: &std::path::Path,
+    flag: &str,
+    output: OutputFormat,
+    quiet: bool,
+) {
     crate::report::notices::record_inert_flag(
         root,
-        "--dupes-baseline",
+        flag,
         fallow_config::PlannedAnalysis::Duplication,
         crate::report::notices::InertReason::OffByConfig("duplicates.enabled"),
         output,
@@ -165,17 +177,27 @@ pub struct BareAnalyses {
 /// `--only` and `--skip` select as in [`resolve_analyses`]. Without `--only`,
 /// `duplicates.enabled: false` in the config also turns duplication off, so a
 /// project that turned duplication detection off gets no clone groups from
-/// the bare run. `--only dupes` names the analysis and runs it. The resolver
+/// the bare run. A duplication flag on such a run gives an inert-flag notice. `--only dupes` names the analysis and runs it. The resolver
 /// fails a run that selects no analysis.
 pub fn bare_analyses(
     dispatch: &crate::DispatchContext<'_>,
     run: &fallow_engine::resolved_run::ResolvedRun,
 ) -> BareAnalyses {
     let plan = crate::cli_production::run_plan(run);
-    if plan.duplication.off_by(ConfigKey::DuplicatesEnabled)
-        && dispatch.cli.dupes_baseline.is_some()
-    {
-        note_inert_dupes_baseline(run.root().value(), dispatch.output, dispatch.quiet);
+    if plan.duplication.off_by(ConfigKey::DuplicatesEnabled) {
+        // `--only` and `--skip` decide at startup. Only the config can turn
+        // the analysis off here, which gives a notice and not a failure.
+        let flags = [
+            dispatch
+                .cli
+                .dupes_baseline
+                .is_some()
+                .then_some("--dupes-baseline"),
+            dispatch.cli.dupes_overrides().first_global_flag(),
+        ];
+        for flag in flags.into_iter().flatten() {
+            note_inert_duplication_flag(run.root().value(), flag, dispatch.output, dispatch.quiet);
+        }
     }
     BareAnalyses {
         run_check: plan.dead_code.runs(),

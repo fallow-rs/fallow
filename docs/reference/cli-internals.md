@@ -1507,6 +1507,73 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   of each consumer site from the first member (`R.useSelector()` gives
   `useSelector`).
 
+## Global option support
+
+clap propagates each global option (`global = true`) to every subcommand, so
+`fallow init --save-baseline x` parses. `GLOBAL_OPTION_SUPPORT` in
+`crates/cli/src/global_option_support.rs` has one row per global option. A
+row states for each command whether the command uses the option, ignores
+it, or rejects it. A row names a command by its path, such as `dupes` or
+`impact statusline`. A subcommand without an entry of its own has the support
+of its parent command. The command line of a rejected pair exits with code 2
+before a command runs, and the run records a `Validation` failure in the
+telemetry. The check reads the clap matches, so an option counts only when
+the command line sets it, also before the subcommand. It reads the rows in
+table order and reports the first rejected option. `--tolerance` follows the
+other regression options in that order.
+
+An option that names a file is never ignored: the command writes or reads
+the file, or the command line fails. A command that does not read
+`--churn-file`, `--type-aware-project`, `--config` or `--diff-file` rejects
+it with "`fallow <command>` does not read `<option>`". Two exceptions are on
+purpose: a command that reads no project accepts `--root`, because a caller
+can pass it to each command, and `audit-cache` ignores `--config`, so a config
+that does not load cannot block the cleanup. With `--type-aware` on the
+command line, a `--type-aware-project` path that does not exist fails at
+startup, also when no command reads the project. A command that reads
+`--type-aware-project` also fails with exit 2 when type-aware analysis is
+off for the run, and, when `FALLOW_TYPE_AWARE` or `typeAware.enabled` turns
+it on, for a project path that does not exist. The type-aware run skips a
+missing project in silence. A command that prints its output to
+stdout, such as `recommend` or `impact`, rejects `--output-file`. A command
+that writes the file only with some output formats has the status
+`supported_with_formats`: `agent` and `rule-pack list` with `--format json`,
+and `fix` with `--format github-summary`. With another format, the command
+line fails with exit 2.
+
+The help of `fallow security` hides each global option that the table does
+not mark as supported for `security`. `fallow schema --cli-reference` exports
+the table as the `command_support` field of each global option.
+
+A command keeps its own check for a rule that depends on more than the
+command and the option. Examples: `similar-code` checks the options of each
+subcommand, `architecture --shared-state` rejects `--sarif-file`, and a bare
+run without the dead-code analysis rejects `--sarif-file` and the regression
+options. With `--only` or `--skip`, a bare run without the duplication analysis
+rejects the global `--dupes-*` options, a bare run without the health
+analysis rejects `--churn-file`, and a bare run without the dead-code and the
+health analysis rejects `--type-aware-project`. With `duplicates.enabled:
+false` in the config, a global `--dupes-*` option gives an inert-flag notice
+and keeps the exit code, as `--dupes-baseline` does. The options of the
+bare run that are not global (`--only`, `--score`, `--dupes-baseline` and the
+others) are not in the table. `doctor` and `similar-code` reject them through
+`first_bare_run_option`.
+
+Tests guard the table. A unit test walks `Cli::command()` and fails for a
+global option without a row, a row without a global option, or a row that
+names an unknown command path. Another unit test fails when a row ignores an
+option that names a file. An integration test runs each supported pair of a
+command path and an option that writes a file (`--save-baseline`,
+`--save-regression-baseline`, `--sarif-file`, `--output-file`) with
+`--format json`. The pair passes when the command exits with code 0 or 1 and
+the file has content. For a format that a command does not support for
+`--output-file`, the test requires exit 2 and the message of the table. A
+third test runs each supported pair of an option that reads a path with a
+path that does not exist. The pair passes when the command exits with code 2
+or names the path in its output, and when the same command line without the
+option exits with code 0 or 1. It runs `--type-aware-project` with type-aware
+analysis on from the flag, the environment and the config, and with it off.
+
 ## CLI reference contract
 
 `fallow schema` prints the capability manifest for agents. `fallow schema
@@ -1524,8 +1591,16 @@ The document has these top-level fields:
 - `version`, `name`, `about`, `usage`: the binary and its root usage line.
 - `root_command`: the positionals and the options of bare `fallow` that are
   not global.
-- `global_options[]`: the options that every command accepts. A command does
-  not repeat them in its own `options[]`.
+- `global_options[]`: the options that clap propagates to every command. A
+  command does not repeat them in its own `options[]`. Each global option
+  has a `command_support` object: `default` is the support of each command
+  that `commands[]` does not name, and `commands[]` gives the support of the
+  other commands, each with `command`. A support has a `status` of
+  `supported`, `supported_with_formats` (with the `formats` that the command
+  supports the option with, and the error `message` for another format),
+  `ignored` (with a `reason`) or `rejected` (with the error `message`). In a message, `<option>` stands for the long option and
+  `<command>` for the command name. The command name `fallow` stands for a
+  run without a subcommand.
 - `commands[]`: the top-level commands in the order and with the
   `help_group` heading of the root `--help`, then the hidden commands with a
   null `help_group`. Each command has `name`, `path` (for example
