@@ -1,20 +1,12 @@
 use std::fs;
-use std::process::Command;
 
-use fallow_engine::changed_files::clear_ambient_git_env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::mutation::{MutationRunOptions, MutationRunScope};
 use crate::{AnalysisOptions, plan_mutation, run_mutation};
 
-fn git(root: &Path, args: &[&str]) {
-    let mut command = Command::new("git");
-    command.args(args).current_dir(root);
-    clear_ambient_git_env(&mut command);
-    let output = command.output().expect("git runs");
-    assert!(output.status.success(), "git {args:?}: {output:?}");
-}
+use fallow_engine::git_fixture::fixture_git as git;
 
 fn commit_all(root: &Path) {
     git(root, &["init", "-q"]);
@@ -436,9 +428,8 @@ fn the_last_report_is_saved_in_the_ignored_cache() {
     let saved: serde_json::Value =
         serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
     assert_eq!(saved["kind"], "mutation");
-    let status = Command::new("git")
+    let status = fallow_engine::git_fixture::fixture_git_command(project.path())
         .args(["status", "--porcelain", "--untracked-files=all"])
-        .current_dir(project.path())
         .output()
         .expect("git status");
     assert_eq!(

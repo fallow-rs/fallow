@@ -648,7 +648,6 @@ fn logical_group_info_to_output(group: &LogicalGroupInfo) -> BoundariesListLogic
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
 
     use fallow_config::ResolvedZone;
     use fallow_types::discover::FileId;
@@ -725,14 +724,7 @@ mod tests {
             .collect()
     }
 
-    fn git(project: &Path, args: &[&str]) {
-        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-            .args(args)
-            .current_dir(project)
-            .status()
-            .expect("git command should run");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    use fallow_engine::git_fixture::fixture_git as git;
 
     fn setup_changed_boundary_project() -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
