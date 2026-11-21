@@ -774,3 +774,34 @@ fn impact_default_exits_2_when_the_config_folder_is_a_file() {
         output.stdout
     );
 }
+
+#[test]
+fn reset_history_is_not_imported_again() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    let legacy_path = project.path().join(".fallow").join("impact.json");
+    std::fs::create_dir_all(legacy_path.parent().unwrap()).expect("legacy dir");
+    let legacy = r#"{"schema_version":3,"enabled":true,"explicit_decision":true,"records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,"counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],"containment":[]}"#;
+    std::fs::write(&legacy_path, legacy).expect("legacy store");
+    let record_count = || {
+        let output = run_isolated(
+            home.path(),
+            &["impact", "--root", root, "--format", "json", "--quiet"],
+        );
+        assert_eq!(output.code, 0, "impact report failed: {}", output.stderr);
+        let value: serde_json::Value = serde_json::from_str(&output.stdout).expect("json");
+        value["record_count"].as_u64().expect("record_count")
+    };
+
+    assert_eq!(record_count(), 1, "the legacy history is shown");
+    let decline = run_isolated(
+        home.path(),
+        &["init", "--decline", "--root", root, "--quiet"],
+    );
+    assert_eq!(decline.code, 0, "init --decline failed: {}", decline.stderr);
+    let reset = run_isolated(home.path(), &["impact", "reset", "--root", root, "--quiet"]);
+    assert_eq!(reset.code, 0, "impact reset failed: {}", reset.stderr);
+    assert_eq!(record_count(), 0, "a reset stays reset");
+    assert_eq!(read(&legacy_path), legacy, "the legacy file is unchanged");
+}

@@ -1669,9 +1669,9 @@ fn reset_removes_only_this_project() {
         "t0",
     );
     assert_eq!(load(root).records.len(), 1);
-    assert!(reset(root));
+    assert!(reset(root).unwrap());
     assert!(load(root).records.is_empty());
-    assert!(!reset(root)); // already gone
+    assert!(!reset(root).unwrap()); // already gone
 }
 
 #[test]
@@ -1681,7 +1681,7 @@ fn reset_all_clears_dir_but_keeps_global_default() {
     set_global_default(true).unwrap();
     enable(root).unwrap();
     assert!(load(root).enabled);
-    assert!(reset_all());
+    assert!(reset_all(root).unwrap());
     // The global default toggle survives a data wipe.
     assert!(load_global_default());
 }
@@ -3525,4 +3525,71 @@ fn global_default_fails_without_a_config_dir() {
         set_global_default(true),
         Err(StoreWriteError::NoConfigDir)
     ));
+}
+
+#[test]
+fn reset_does_not_import_the_legacy_store_again() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    decline_onboarding(root).unwrap();
+    assert_eq!(load(root).records.len(), 1);
+    assert!(migration_marker_path(&store_path(root).unwrap()).exists());
+    assert!(reset(root).unwrap());
+    assert!(load(root).records.is_empty());
+    enable(root).unwrap();
+    record_v1(
+        root,
+        &summary(1, 0, 0),
+        AuditVerdict::Warn,
+        false,
+        None,
+        "2.0.0",
+        "t1",
+    );
+    assert_eq!(load(root).records.len(), 1);
+}
+
+#[test]
+fn reset_before_the_first_write_blocks_the_import() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    assert!(!reset(root).unwrap());
+    assert!(load(root).records.is_empty());
+}
+
+#[test]
+fn reset_all_keeps_markers_locks_and_the_global_default() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    set_global_default(true).unwrap();
+    enable(root).unwrap();
+    assert!(reset_all(root).unwrap());
+    let store = store_path(root).unwrap();
+    assert!(!store.exists());
+    assert!(migration_marker_path(&store).exists());
+    assert!(lock_path_for(&store).exists());
+    assert!(load_global_default());
+    assert!(load(root).records.is_empty());
+
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    assert!(!reset_all(root).unwrap());
+    assert!(load(root).records.is_empty());
+}
+
+#[test]
+fn reset_waits_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = reset(root);
+        },
+    );
+    assert!(!store_path(dir.path()).unwrap().exists());
 }

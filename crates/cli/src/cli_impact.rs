@@ -95,7 +95,7 @@ pub fn dispatch_impact(
         Some(ImpactCli::Enable) => impact_enable(root, quiet, output),
         Some(ImpactCli::Disable) => impact_disable(root, quiet, output),
         Some(ImpactCli::Default { state }) => impact_set_default(state, quiet, output),
-        Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
+        Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet, output),
         Some(ImpactCli::Statusline) => render_impact_statusline(root),
         Some(ImpactCli::Status) if matches!(output, fallow_config::OutputFormat::Human) => {
             render_impact_status_human(root, quiet)
@@ -208,9 +208,17 @@ fn impact_set_default(
 }
 
 /// Reset Impact history for this project, or every project with `--all`.
-fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
+fn impact_reset(
+    root: &Path,
+    all: bool,
+    quiet: bool,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
     if all {
-        let removed = impact::reset_all();
+        let removed = match impact::reset_all(root) {
+            Ok(removed) => removed,
+            Err(err) => return refuse_store_change(&err, output),
+        };
         if !quiet {
             println!(
                 "{}",
@@ -222,7 +230,10 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
             );
         }
     } else {
-        let removed = impact::reset(root);
+        let removed = match impact::reset(root) {
+            Ok(removed) => removed,
+            Err(err) => return refuse_store_change(&err, output),
+        };
         if !quiet {
             println!(
                 "{}",

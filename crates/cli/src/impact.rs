@@ -385,16 +385,15 @@ use record_gate::record_gate_skips;
 mod store;
 use store::{
     Change, OnInvalid, finish_record, load_all, load_global_default, stamp_schema_version,
-    store_path,
 };
 #[cfg(test)]
 use store::{
     ImpactStoreLock, StoreReadError, legacy_store_path, lock_path_for, migration_marker_path,
-    write_store,
+    store_path, write_store,
 };
 pub use store::{
-    StatuslineLoadError, StoreWriteError, load, load_statusline, resolved_store_path,
-    set_global_default, store_dir,
+    StatuslineLoadError, StoreWriteError, load, load_statusline, reset, reset_all,
+    resolved_store_path, set_global_default, store_dir,
 };
 
 /// Resolve the store-GC window from [`STORE_MAX_AGE_ENV`]. `None` (no sweep)
@@ -591,22 +590,6 @@ fn resolve_enabled(store: &ImpactStore) -> (bool, EnabledSource) {
 #[must_use]
 pub fn resolved_project_key(root: &Path) -> String {
     project_identity(root).0
-}
-
-/// Delete THIS project's store file. Returns whether a file was removed.
-pub fn reset(root: &Path) -> bool {
-    store_path(root).is_some_and(|p| std::fs::remove_file(&p).is_ok())
-}
-
-/// Delete the whole per-project impact dir (`<config-dir>/fallow/impact/`).
-/// Does NOT touch the global default toggle (`impact.json`): a data wipe should
-/// not silently re-disable an opt-in the user made. Returns whether the dir was
-/// present and removed.
-pub fn reset_all() -> bool {
-    let Some(dir) = impact_config_dir().map(|d| d.join("impact")) else {
-        return false;
-    };
-    dir.is_dir() && std::fs::remove_dir_all(&dir).is_ok()
 }
 
 /// Record an audit run into the rolling store.

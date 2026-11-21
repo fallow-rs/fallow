@@ -116,7 +116,12 @@ impl ImpactStoreLock {
     /// file cannot be opened/locked, so a lock-layer failure never drops a
     /// record (it only loses the cross-worktree serialisation guarantee).
     pub(super) fn acquire(root: &Path) -> Option<Self> {
-        let lock_path = lock_path_for(&store_path(root)?);
+        Self::acquire_for_store(&store_path(root)?)
+    }
+
+    /// Block until the lock of the store file at `store` is held.
+    fn acquire_for_store(store: &Path) -> Option<Self> {
+        let lock_path = lock_path_for(store);
         if let Some(parent) = lock_path.parent()
             && std::fs::create_dir_all(parent).is_err()
         {
@@ -505,7 +510,77 @@ pub(super) fn transact<T>(
             value
         }
     };
+    if imported && path.exists() {
+        let _ = mark_migrated(&path);
+    }
     Ok(value)
+}
+
+/// Record that the legacy in-repo store must not be imported again.
+fn mark_migrated(store: &Path) -> Result<(), StoreWriteError> {
+    let marker = migration_marker_path(store);
+    let io = |source| StoreWriteError::Io {
+        path: marker.clone(),
+        source,
+    };
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).map_err(io)?;
+    }
+    std::fs::write(&marker, b"").map_err(io)
+}
+
+/// Mark the project as imported, then remove its store file. `Ok(false)`
+/// when the file did not exist.
+fn remove_store(path: &Path) -> Result<bool, StoreWriteError> {
+    let _lock = ImpactStoreLock::acquire_for_store(path);
+    mark_migrated(path)?;
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(StoreWriteError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// Delete THIS project's store file. Returns whether a file was removed.
+/// The import marker stays, so the legacy in-repo store is not imported
+/// again. Without a config folder there is no store, and the result is
+/// `Ok(false)`.
+///
+/// # Errors
+///
+/// Returns [`StoreWriteError`] when the marker or the removal fails.
+pub fn reset(root: &Path) -> Result<bool, StoreWriteError> {
+    let Some(path) = store_path(root) else {
+        return Ok(false);
+    };
+    remove_store(&path)
+}
+
+/// Delete every project store file, and mark the project at `root` as
+/// imported. The lock files, the import markers and the global default
+/// toggle stay. Returns whether a file was removed.
+///
+/// # Errors
+///
+/// Returns [`StoreWriteError`] when a marker or a removal fails.
+pub fn reset_all(root: &Path) -> Result<bool, StoreWriteError> {
+    let mut removed = reset(root)?;
+    let Some(dir) = store_dir() else {
+        return Ok(removed);
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(removed);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            removed |= remove_store(&path)?;
+        }
+    }
+    Ok(removed)
 }
 
 /// Map the result of a record transaction. Recording is ancillary to the
