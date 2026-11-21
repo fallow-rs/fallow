@@ -195,16 +195,6 @@ pub fn compute_ownership_with_identities<'a>(
     })
 }
 
-/// Compute ownership signals for one file. Returns `None` when the file has
-/// no recorded authors or all authors are filtered out as bots.
-pub fn compute_ownership(
-    churn: &FileChurn,
-    relative_path: &Path,
-    ctx: &OwnershipContext<'_>,
-) -> Option<OwnershipMetrics> {
-    compute_ownership_with_identities(churn, relative_path, ctx).map(|owned| owned.metrics)
-}
-
 /// Build the non-bot author ranking for one file: filtered, identifier-rendered,
 /// and sorted by recency-weighted commits (then raw email for determinism).
 fn rank_non_bot_authors<'a>(
@@ -483,6 +473,14 @@ mod tests {
             email_mode: EmailMode::Raw,
             now_secs: NOW,
         }
+    }
+
+    fn compute_ownership<'a>(
+        churn: &'a FileChurn,
+        relative_path: &Path,
+        ctx: &OwnershipContext<'a>,
+    ) -> Option<OwnershipMetrics> {
+        compute_ownership_with_identities(churn, relative_path, ctx).map(|owned| owned.metrics)
     }
 
     /// Raw mode is the default: `compute_ownership` reports the unmodified
