@@ -303,78 +303,6 @@ fn public_api_keys_from_check(check: Option<&CheckResult>, root: &Path) -> FxHas
     review_deltas::public_export_keys_for(graph, &check.config, &check.workspaces, root)
 }
 
-/// Build the `AuditOptions` for the isolated base-worktree analysis pass.
-#[expect(
-    clippy::ref_option,
-    reason = "AuditOptions.config_path is &Option<PathBuf>; the borrow is stored into the returned struct"
-)]
-fn build_base_audit_options<'a>(
-    opts: &AuditOptions<'a>,
-    base_root: &'a Path,
-    current_config_path: &'a Option<PathBuf>,
-    base_cache_dir: &'a Path,
-    base_coverage: &'a fallow_api::audit_run::BaseCoverageInputs,
-) -> AuditOptions<'a> {
-    AuditOptions {
-        root: base_root,
-        config_path: current_config_path,
-        cache_dir: base_cache_dir,
-        output: opts.output,
-        json_style: opts.json_style,
-        no_cache: opts.no_cache,
-        threads: opts.threads,
-        quiet: true,
-        allow_remote_extends: opts.allow_remote_extends,
-        changed_since: None,
-        production: opts.production,
-        production_dead_code: opts.production_dead_code,
-        production_health: opts.production_health,
-        production_dupes: opts.production_dupes,
-        workspace: opts.workspace,
-        changed_workspaces: None,
-        explain: false,
-        explain_skipped: false,
-        performance: false,
-        group_by: opts.group_by,
-        dead_code_baseline: None,
-        health_baseline: None,
-        dupes_baseline: None,
-        health_baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
-        fail_on_stale_baseline: false,
-        max_crap: opts.max_crap,
-        file_lines_check: opts.file_lines_check,
-        coverage: base_coverage.coverage.as_deref(),
-        coverage_root: base_coverage.coverage_root.as_deref(),
-        gate: AuditGate::All,
-        worsened: fallow_config::AuditWorsened::Warn,
-        include_entry_exports: opts.include_entry_exports,
-        show_cascade: opts.show_cascade,
-        fail_on_parse_error: false,
-        analyses: opts.analyses,
-        // Base styling keys keep opt-in `rules.css-* = error` gated on
-        // introduced findings only; the base snapshot is cached.
-        css: opts.css,
-        css_deep: opts.css_deep,
-        runtime_coverage: None,
-        min_invocations_hot: opts.min_invocations_hot,
-        mutation_report: None,
-        brief: false,
-        max_decisions: 4,
-        walkthrough_guide: false,
-        walkthrough: false,
-        mark_viewed: &[],
-        show_cleared: false,
-        walkthrough_file: None,
-        show_deprioritized: false,
-        // Deliberately unscoped: the base pass runs in another worktree whose
-        // path spelling differs, so a head-root scope would narrow the base
-        // focus to empty and misattribute everything as introduced. The head
-        // pass is already scope-narrowed; a full base snapshot joins correctly
-        // against it.
-        scope: None,
-    }
-}
-
 #[cfg(test)]
 use std::time::SystemTime;
 
@@ -400,6 +328,9 @@ pub mod weakening;
 mod security_scan;
 use security_scan::compute_security_step_signals;
 
+#[path = "audit_base_run.rs"]
+mod base_run;
+use base_run::BaseRunInputs;
 #[path = "audit_dead_code.rs"]
 mod dead_code;
 use dead_code::{CheckPass, run_audit_check};
@@ -509,6 +440,8 @@ struct CliAuditBackend<'a> {
     base_ref: &'a str,
     /// Loaded on first use, so an audit without changes reads no config.
     workspace_patterns: OnceLock<Vec<String>>,
+    /// Resolved on first use, so an audit without changes reads no config.
+    base_run: OnceLock<BaseRunInputs>,
 }
 
 impl CliAuditBackend<'_> {
@@ -516,6 +449,11 @@ impl CliAuditBackend<'_> {
     fn workspace_patterns(&self) -> &[String] {
         self.workspace_patterns
             .get_or_init(|| audit_workspace_patterns(self.opts))
+    }
+
+    fn base_run(&self) -> &BaseRunInputs {
+        self.base_run
+            .get_or_init(|| BaseRunInputs::resolve(self.opts))
     }
 }
 
@@ -579,6 +517,7 @@ impl AuditBackend for CliAuditBackend<'_> {
     ) -> Result<HeadAnalyses, ExitCode> {
         run_audit_base_analyses(
             self.opts,
+            self.base_run(),
             self.head,
             self.type_aware,
             BaseAnalysisRoots {
@@ -645,6 +584,7 @@ struct BaseAnalysisRoots<'a> {
 /// results stay unscoped.
 fn run_audit_base_analyses(
     opts: &AuditOptions<'_>,
+    base_run: &BaseRunInputs,
     head: &ResolvedRun,
     type_aware: AuditTypeAwareOptions<'_>,
     roots: BaseAnalysisRoots<'_>,
@@ -655,19 +595,7 @@ fn run_audit_base_analyses(
     // its own cache directory inside the base worktree.
     let base_cache_dir = worktree_cache::cache_dir(base_root);
     let _base_parse_cache = worktree_cache::lend_to_base(opts, roots.host, base_root);
-    let current_config_path = opts
-        .config_path
-        .clone()
-        .or_else(|| fallow_engine::project_config::find_config_file(opts.root));
-    let base_coverage =
-        fallow_api::audit_run::base_coverage_inputs(opts.root, opts.coverage, opts.coverage_root);
-    let base_opts = build_base_audit_options(
-        opts,
-        base_root,
-        &current_config_path,
-        &base_cache_dir,
-        &base_coverage,
-    );
+    let base_opts = base_run.options(opts, base_root, &base_run.config_path, &base_cache_dir);
     let run = runs::worktree_run(head, base_root, opts, "--base")?;
     let share_dead_code_parse_with_health =
         opts.analyses.health && run.production_modes().dead_code_matches_health();
@@ -704,10 +632,10 @@ fn run_audit_base_analyses(
         dead_code::base_own_config_unused_code(&dead_code::BaseOwnConfigInput {
             opts,
             head,
-            current_config_path: current_config_path.as_deref(),
+            current_config_path: base_run.config_path.as_deref(),
             base_root,
             base_cache_dir: &base_cache_dir,
-            base_coverage: &base_coverage,
+            base_run,
             focus,
             base_check: check.as_ref(),
         });
@@ -1280,6 +1208,7 @@ fn execute_audit_for_host(
         type_aware,
         base_ref: &base_ref,
         workspace_patterns: OnceLock::new(),
+        base_run: OnceLock::new(),
     };
     let run = fallow_api::audit_run::run(
         &backend,
@@ -1586,6 +1515,7 @@ pub fn benchmark_audit_analyses(
     let base_root = base_root.as_path();
     let base_focus = fallow_api::audit_run::remap_focus_files(&focus, head_root, base_root);
     let run = runs::options_run(&opts)?;
+    let base_run = BaseRunInputs::resolve(&opts);
     let (head, base) = rayon::join(
         || {
             let type_aware = AuditTypeAwareOptions::default();
@@ -1594,6 +1524,7 @@ pub fn benchmark_audit_analyses(
         || {
             run_audit_base_analyses(
                 &opts,
+                &base_run,
                 &run,
                 AuditTypeAwareOptions::default(),
                 BaseAnalysisRoots {
