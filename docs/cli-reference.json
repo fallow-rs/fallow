@@ -582,6 +582,11 @@
           {
             "status": "rejected",
             "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
             "command": "cloud"
           },
           {
@@ -608,6 +613,11 @@
             "status": "rejected",
             "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
             "command": "license"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "migrate"
           },
           {
             "status": "rejected",
@@ -1100,6 +1110,16 @@
             "status": "rejected",
             "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
             "command": "impact statusline"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "ci-template"
+          },
+          {
+            "status": "rejected",
+            "message": "`fallow <command>` does not read `<option>`, so the option has no effect.",
+            "command": "migrate"
           }
         ]
       }

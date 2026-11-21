@@ -12,7 +12,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::common::{copy_fixture, fallow_bin, git, run_fallow_raw, scrub_analysis_env};
+use crate::common::{
+    configure_type_aware_sidecar, copy_fixture, fallow_bin, git, run_fallow_raw, scrub_analysis_env,
+};
 
 /// The global options that write a file.
 const FILE_OPTIONS: &[&str] = &[
@@ -27,6 +29,14 @@ const BARE_RUN: &str = "fallow";
 /// The supported commands that the test cannot run, with the reason.
 const NOT_RUNNABLE: &[(&str, &str)] = &[
     (
+        "license",
+        "`license status` exits 3 without an installed license, and the other subcommands change the license",
+    ),
+    (
+        "coverage",
+        "`coverage analyze` needs a runtime coverage source, and the other subcommands need Fallow Cloud",
+    ),
+    (
         "similar-code",
         "needs the similar-code companion binary, which the test build does not have",
     ),
@@ -37,6 +47,8 @@ const NOT_RUNNABLE: &[(&str, &str)] = &[
 /// The longest time that the test waits for a command.
 const FILE_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// How long a read check waits. `watch` runs until it is stopped.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// A part of the message for a format that a command does not support for
 /// `--output-file`.
 const FORMATS_MESSAGE_PART: &str = "writes the file of `--output-file` only with";
@@ -47,15 +59,62 @@ const EXTRA_FORMS: &[&str] = &["agent install", "agent uninstall"];
 
 /// The global options that read a path, with the extra arguments that make
 /// the command read it.
-const READ_OPTIONS: &[(&str, &[&str])] = &[
-    ("--root", &[]),
-    ("--config", &[]),
-    ("--diff-file", &[]),
-    ("--churn-file", &[]),
-    ("--baseline", &[]),
-    ("--regression-baseline", &["--fail-on-regression"]),
-    ("--type-aware-project", &["--type-aware"]),
+const READ_OPTIONS: &[ReadCase] = &[
+    ReadCase::plain("--root"),
+    ReadCase::plain("--config"),
+    ReadCase::plain("--diff-file"),
+    ReadCase::plain("--churn-file"),
+    ReadCase::plain("--baseline"),
+    ReadCase {
+        extra: &["--fail-on-regression"],
+        ..ReadCase::plain("--regression-baseline")
+    },
+    // Type-aware analysis on from each source, and off.
+    ReadCase {
+        extra: &["--type-aware"],
+        ..ReadCase::type_aware()
+    },
+    ReadCase {
+        env: &[("FALLOW_TYPE_AWARE", "1")],
+        ..ReadCase::type_aware()
+    },
+    ReadCase {
+        config: Some(r#"{"typeAware":{"enabled":true}}"#),
+        ..ReadCase::type_aware()
+    },
+    ReadCase::plain("--type-aware-project"),
 ];
+
+/// One way to run a read option: the environment and the config that the
+/// base command line and the run with the option share, and the extra
+/// arguments of the run with the option.
+struct ReadCase {
+    option: &'static str,
+    extra: &'static [&'static str],
+    env: &'static [(&'static str, &'static str)],
+    config: Option<&'static str>,
+    /// Whether the run uses the type-aware companion of the repository.
+    sidecar: bool,
+}
+
+impl ReadCase {
+    const fn plain(option: &'static str) -> Self {
+        Self {
+            option,
+            extra: &[],
+            env: &[],
+            config: None,
+            sidecar: false,
+        }
+    }
+
+    const fn type_aware() -> Self {
+        Self {
+            sidecar: true,
+            ..Self::plain("--type-aware-project")
+        }
+    }
+}
 
 /// The line that `watch` prints on stderr when its first report is ready.
 const WATCH_READY: &str = "Watching for changes";
@@ -86,7 +145,15 @@ fn command_args(command: &str, project: &Path, scratch: &Path) -> Option<Vec<Str
                 path(&verdicts),
             ]
         }
-        "audit" | "decision-surface" => vec![command.into(), "--base".into(), "HEAD".into()],
+        "audit" => {
+            // A changed file, so the audit runs its analyses.
+            let index = project.join("src/index.ts");
+            let mut text = std::fs::read_to_string(&index).expect("read index");
+            text.push_str("\nexport const auditChange = 1;\n");
+            std::fs::write(&index, text).expect("write index");
+            vec!["audit".into(), "--base".into(), "HEAD".into()]
+        }
+        "decision-surface" => vec![command.into(), "--base".into(), "HEAD".into()],
         "type-aware" => vec!["type-aware".into(), "status".into()],
         "trace-error" => vec!["trace-error".into(), "src/index.ts".into()],
         "guard" => vec!["guard".into(), "src/index.ts".into()],
@@ -121,7 +188,12 @@ fn command_args(command: &str, project: &Path, scratch: &Path) -> Option<Vec<Str
         "flags" => vec!["flags".into(), "--retirement".into()],
         "init" | "recommend" | "workspaces" | "suppressions" | "plugin-check" | "config"
         | "doctor" => vec![command.to_owned()],
-        "inspect" => vec!["inspect".into(), "--file".into(), "src/index.ts".into()],
+        // A symbol target, so that inspect runs its type-aware evidence.
+        "inspect" => vec![
+            "inspect".into(),
+            "--symbol".into(),
+            "src/utils.ts:unusedFunction".into(),
+        ],
         "trace" => vec!["trace".into(), "src/utils.ts:unusedFunction".into()],
         "explain" => vec!["explain".into(), "unused-files".into()],
         "hooks" => vec!["hooks".into(), "status".into()],
@@ -129,8 +201,13 @@ fn command_args(command: &str, project: &Path, scratch: &Path) -> Option<Vec<Str
         "impact statusline" => vec!["impact".into(), "statusline".into()],
         "license" => vec!["license".into(), "status".into()],
         "audit-cache" => vec!["audit-cache".into(), "prune".into()],
-        "ci-template" => vec!["ci-template".into(), "github".into()],
-        "migrate" | "setup-hooks" => vec![command.into(), "--dry-run".into()],
+        "ci-template" => vec!["ci-template".into(), "gitlab".into()],
+        "migrate" => {
+            std::fs::write(project.join("knip.json"), r#"{"ignore":["src/legacy/**"]}"#)
+                .expect("write knip.json");
+            vec!["migrate".into(), "--dry-run".into()]
+        }
+        "setup-hooks" => vec!["setup-hooks".into(), "--dry-run".into()],
         "cloud" => vec!["cloud".into(), "logout".into()],
         "coverage" => vec!["coverage".into(), "analyze".into()],
         "rule-pack" | "rule-pack list" => vec!["rule-pack".into(), "list".into()],
@@ -504,7 +581,9 @@ fn each_supported_file_option_writes_its_file() {
 /// list does not outlive the reason for it.
 #[test]
 fn each_skipped_command_is_a_supported_pair() {
-    let pairs = supported_pairs();
+    let mut pairs = supported_pairs();
+    let read_options: Vec<&str> = READ_OPTIONS.iter().map(|case| case.option).collect();
+    pairs.extend(supported_pairs_for(&read_options));
     for (name, reason) in NOT_RUNNABLE {
         assert!(
             pairs.iter().any(|pair| pair.command == *name),
@@ -514,16 +593,20 @@ fn each_skipped_command_is_a_supported_pair() {
 }
 
 /// Run the command with a path that does not exist, and return the problem
-/// when the command exits 0 or 1 and names the path nowhere.
-fn check_missing_path(
+/// Run `fallow` in `project` with the arguments, the environment and the
+/// config of `case`, and with the extra arguments, the option and a path
+/// that does not exist when `with_option` holds. The extra arguments belong
+/// to the option: `--fail-on-regression` fails without a regression
+/// baseline. The run ends, or it is stopped after
+/// [`FILE_TIMEOUT`] or when its output names the path.
+fn run_read_case(
     args: &[String],
-    option: &str,
-    extra: &[&str],
+    case: &ReadCase,
+    with_option: bool,
     project: &Path,
     home: &Path,
-) -> FileCheck {
+) -> (Option<std::process::ExitStatus>, bool, String) {
     let missing = project.join("missing-input-path.json");
-    let missing_arg = missing.to_str().expect("utf8 path");
     let out_path = home.join("stdout.log");
     let err_path = home.join("stderr.log");
     let mut cmd = Command::new(fallow_bin());
@@ -531,11 +614,17 @@ fn check_missing_path(
         .env("NO_COLOR", "1")
         .env("HOME", home);
     scrub_analysis_env(&mut cmd);
+    if case.sidecar {
+        configure_type_aware_sidecar(&mut cmd);
+    }
+    for (name, value) in case.env {
+        cmd.env(name, value);
+    }
+    cmd.current_dir(project).args(args);
+    if with_option {
+        cmd.args(case.extra).arg(case.option).arg(&missing);
+    }
     let mut child = cmd
-        .current_dir(project)
-        .args(args)
-        .args([option, missing_arg])
-        .args(extra)
         .stdin(Stdio::null())
         .stdout(std::fs::File::create(&out_path).expect("stdout log"))
         .stderr(std::fs::File::create(&err_path).expect("stderr log"))
@@ -551,17 +640,34 @@ fn check_missing_path(
         if let Some(status) = child.try_wait().expect("poll fallow") {
             break Some(status);
         }
-        if names_path() || start.elapsed() > FILE_TIMEOUT {
+        if (with_option && names_path()) || start.elapsed() > READ_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
             break None;
         }
         std::thread::sleep(POLL_INTERVAL);
     };
-    if status.is_some_and(|status| status.code() == Some(2)) || names_path() {
+    let stderr = std::fs::read_to_string(&err_path).unwrap_or_default();
+    (status, names_path(), stderr)
+}
+
+/// Check one read case: the base command line ends without an error, and
+/// the run with a path that does not exist fails or names the path. A base
+/// command line that runs on until [`READ_TIMEOUT`], such as `watch`, counts
+/// as a base that works.
+fn check_missing_path(args: &[String], case: &ReadCase, project: &Path, home: &Path) -> FileCheck {
+    let (base, _, base_stderr) = run_read_case(args, case, false, project, home);
+    if let Some(status) = base
+        && !matches!(status.code(), Some(0 | 1))
+    {
+        return FileCheck::Problem(format!(
+            "base command fails without the option ({status}): {base_stderr}"
+        ));
+    }
+    let (status, named, stderr) = run_read_case(args, case, true, project, home);
+    if named || status.is_some_and(|status| status.code() == Some(2)) {
         return FileCheck::Pass;
     }
-    let stderr = std::fs::read_to_string(&err_path).unwrap_or_default();
     FileCheck::Problem(format!(
         "accepted the missing path in silence ({}): {stderr}",
         status.map_or_else(|| "still running".to_owned(), |status| status.to_string())
@@ -570,35 +676,40 @@ fn check_missing_path(
 
 /// A supported option that reads a path fails, or warns with the path, when
 /// the path does not exist. A command that accepts the option and reads
-/// nothing would exit 0 in silence, which is the shape of issue #4931.
+/// nothing would exit 0 in silence, which is the shape of issue #4931. The
+/// base command line of each pair must work without the option, so an exit
+/// 2 of the base cannot pass the check.
 #[test]
 fn each_supported_read_option_reads_its_path() {
-    let options: Vec<&str> = READ_OPTIONS.iter().map(|(option, _)| *option).collect();
-    let pairs = supported_pairs_for(&options);
     let mut failures = Vec::new();
-    for pair in &pairs {
-        let (option, command) = (&pair.option, &pair.command);
-        if NOT_RUNNABLE.iter().any(|(name, _)| name == command) {
-            continue;
-        }
-        let extra = READ_OPTIONS
-            .iter()
-            .find(|(name, _)| name == option)
-            .map_or(&[][..], |(_, extra)| *extra);
-        let project = committed_fixture();
-        let scratch = tempfile::tempdir().expect("scratch dir");
-        let home = scratch.path().join("home");
-        std::fs::create_dir_all(&home).expect("home dir");
-        let Some(args) = command_args(command, project.path(), scratch.path()) else {
-            failures.push(format!(
-                "{command} {option}: the table marks the pair as supported, but the test has no command line for {command}"
-            ));
-            continue;
-        };
-        if let FileCheck::Problem(problem) =
-            check_missing_path(&args, option, extra, project.path(), &home)
-        {
-            failures.push(format!("{command} {option}: {problem}"));
+    for case in READ_OPTIONS {
+        for pair in &supported_pairs_for(&[case.option]) {
+            let command = &pair.command;
+            if NOT_RUNNABLE.iter().any(|(name, _)| name == command) {
+                continue;
+            }
+            let project = committed_fixture();
+            if let Some(config) = case.config {
+                std::fs::write(project.path().join(".fallowrc.json"), config).expect("config");
+            }
+            let scratch = tempfile::tempdir().expect("scratch dir");
+            let home = scratch.path().join("home");
+            std::fs::create_dir_all(&home).expect("home dir");
+            let Some(args) = command_args(command, project.path(), scratch.path()) else {
+                failures.push(format!(
+                    "{command} {}: the table marks the pair as supported, but the test has no command line for {command}",
+                    case.option
+                ));
+                continue;
+            };
+            if let FileCheck::Problem(problem) =
+                check_missing_path(&args, case, project.path(), &home)
+            {
+                failures.push(format!(
+                    "{command} {} {:?} {:?} {:?}: {problem}",
+                    case.option, case.extra, case.env, case.config
+                ));
+            }
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");

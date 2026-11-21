@@ -106,15 +106,6 @@ pub fn validate_inputs(
     validate_input_flags(cli, output, json_style)?;
     let root = resolve_validated_root(cli, output, json_style)?;
     validate_input_git_refs(cli, output, json_style)?;
-    if let Some(message) = missing_type_aware_project(cli, &root) {
-        return Err(emit_known_failure_with_style(
-            &message,
-            INVALID_INPUT,
-            output,
-            json_style,
-            telemetry::FailureReason::Validation,
-        ));
-    }
 
     let threads = cli
         .threads
@@ -125,25 +116,6 @@ pub fn validate_inputs(
     });
 
     Ok((root, threads))
-}
-
-/// The error for a `--type-aware-project` path that does not exist, as given
-/// or relative to the project root. The type-aware run skips a missing
-/// project in silence, so the command line would exit 0 with no project.
-/// Without `--type-aware`, the command rejects the option with its own error.
-fn missing_type_aware_project(cli: &Cli, root: &Path) -> Option<String> {
-    if !cli.type_aware {
-        return None;
-    }
-    cli.type_aware_project
-        .iter()
-        .find(|project| !project.exists() && !root.join(project).exists())
-        .map(|project| {
-            format!(
-                "--type-aware-project {} does not exist. Pass the path of a tsconfig file, relative to the project root.",
-                project.display()
-            )
-        })
 }
 
 /// Reject unsupported security globals, control characters in path-shaped flags,
@@ -730,7 +702,26 @@ fn flag_scope_error(cli: &Cli, root: &Path) -> Option<String> {
     sarif_file_without_sarif_error(cli)
         .map(str::to_owned)
         .or_else(|| regression_flag_without_baseline_error(cli))
+        .or_else(|| analysis_flag_without_analysis_error(cli))
         .or_else(|| crate::write_scope::write_path_error(cli, root))
+}
+
+/// Reject a global `--dupes-*` option on a bare run without the duplication
+/// analysis, and `--churn-file` on a bare run without the health analysis.
+/// Only these analyses read the options.
+fn analysis_flag_without_analysis_error(cli: &Cli) -> Option<String> {
+    if cli.command.is_some() {
+        return None;
+    }
+    let (_, run_dupes, run_health) = crate::combined::resolve_analyses(&cli.only, &cli.skip);
+    if !run_dupes && let Some(flag) = cli.dupes_overrides().first_global_flag() {
+        return Some(format!(
+            "This run does not include the duplication analysis, which reads `{flag}`, so the option has no effect. Include dupes in the run, or remove `{flag}`."
+        ));
+    }
+    (!run_health && cli.churn_file.is_some()).then(|| {
+        "This run does not include the health analysis, which reads the churn file, so `--churn-file` has no effect. Include health in the run, or use `fallow health --churn-file`.".to_owned()
+    })
 }
 
 /// Reject `--sarif-file` on a bare run without the dead-code analysis.
@@ -907,6 +898,44 @@ mod tests {
             Some(OsStr::new("1"))
         ));
         assert!(!tracing_uses_ansi(false, None, Some(OsStr::new("0"))));
+    }
+
+    fn analysis_flag_error(args: &[&str]) -> Option<String> {
+        use clap::Parser;
+        let argv = std::iter::once("fallow").chain(args.iter().copied());
+        analysis_flag_without_analysis_error(&Cli::try_parse_from(argv).expect("parses"))
+    }
+
+    #[test]
+    fn a_bare_run_without_the_reading_analysis_rejects_its_option() {
+        for args in [
+            &["--only", "dead-code", "--dupes-min-lines", "40"][..],
+            &["--skip", "dupes", "--dupes-min-lines", "40"],
+        ] {
+            let message = analysis_flag_error(args).unwrap_or_else(|| panic!("{args:?}"));
+            assert!(
+                message.starts_with("This run does not include the duplication analysis, which reads `--dupes-min-lines`"),
+                "{message}"
+            );
+        }
+        for args in [
+            &["--only", "dupes", "--churn-file", "c.json"][..],
+            &["--skip", "health", "--churn-file", "c.json"],
+        ] {
+            let message = analysis_flag_error(args).unwrap_or_else(|| panic!("{args:?}"));
+            assert!(
+                message.starts_with("This run does not include the health analysis"),
+                "{message}"
+            );
+        }
+        for args in [
+            &["--dupes-min-lines", "40"][..],
+            &["--only", "dupes", "--dupes-min-lines", "40"],
+            &["--skip", "dead-code", "--churn-file", "c.json"],
+            &["health", "--churn-file", "c.json"],
+        ] {
+            assert_eq!(analysis_flag_error(args), None, "{args:?}");
+        }
     }
 
     #[test]

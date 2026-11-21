@@ -1528,9 +1528,11 @@ the file, or the command line fails. A command that does not read
 it with "`fallow <command>` does not read `<option>`". Two exceptions are on
 purpose: a command that reads no project accepts `--root`, because a caller
 can pass it to each command, and `audit-cache` ignores `--config`, so a config
-that does not load cannot block the cleanup. With `--type-aware`, a
-`--type-aware-project` path that does not exist fails at startup, because the
-type-aware run skips a missing project in silence. A command that prints its output to
+that does not load cannot block the cleanup. A command that reads
+`--type-aware-project` fails with exit 2 when the option has no effect: when
+type-aware analysis is off for the run, and, when it is on from the flag,
+`FALLOW_TYPE_AWARE` or `typeAware.enabled`, for a project path that does not
+exist. The type-aware run skips a missing project in silence. A command that prints its output to
 stdout, such as `recommend` or `impact`, rejects `--output-file`. A command
 that writes the file only with some output formats has the status
 `supported_with_formats`: `agent` and `rule-pack list` with `--format json`,
@@ -1545,7 +1547,9 @@ A command keeps its own check for a rule that depends on more than the
 command and the option. Examples: `similar-code` checks the options of each
 subcommand, `architecture --shared-state` rejects `--sarif-file`, and a bare
 run without the dead-code analysis rejects `--sarif-file` and the regression
-options. The options of the
+options. A bare run without the duplication analysis rejects the global
+`--dupes-*` options, and a bare run without the health analysis rejects
+`--churn-file`. The options of the
 bare run that are not global (`--only`, `--score`, `--dupes-baseline` and the
 others) are not in the table. `doctor` and `similar-code` reject them through
 `first_bare_run_option`.
@@ -1561,7 +1565,9 @@ the file has content. For a format that a command does not support for
 `--output-file`, the test requires exit 2 and the message of the table. A
 third test runs each supported pair of an option that reads a path with a
 path that does not exist. The pair passes when the command exits with code 2
-or names the path in its output.
+or names the path in its output, and when the same command line without the
+option exits with code 0 or 1. It runs `--type-aware-project` with type-aware
+analysis on from the flag, the environment and the config, and with it off.
 
 ## CLI reference contract
 

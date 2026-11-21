@@ -584,8 +584,8 @@ pub fn resolve_type_aware_health_options(
             require: options.require,
         },
         &config.type_aware,
-    )
-    .map_err(|err| err.message())?;
+        &config.root,
+    )?;
     Ok(ResolvedTypeAwareHealthOptions {
         enabled: values.enabled,
         projects: values.projects,

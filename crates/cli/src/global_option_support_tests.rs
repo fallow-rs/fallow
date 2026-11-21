@@ -301,8 +301,18 @@ fn analysis_commands_without_a_regression_baseline_reject_the_regression_options
 
 /// The pairs of a file option and a command that ignore the option on
 /// purpose. `audit-cache` must clean up when the config does not load
-/// (`audit_cache_prune_ignores_a_config_that_does_not_load`).
-const INTENTIONALLY_IGNORED: &[(&str, &str)] = &[("--config", "audit-cache")];
+/// (`audit_cache_prune_ignores_a_config_that_does_not_load`). The schema
+/// commands and `telemetry` read no project, and accept `--root` because a
+/// caller can pass it to each command
+/// (`rule_pack_schema_matches_legacy_top_level_command`).
+const INTENTIONALLY_IGNORED: &[(&str, &str)] = &[
+    ("--config", "audit-cache"),
+    ("--root", "config-schema"),
+    ("--root", "plugin-schema"),
+    ("--root", "rule-pack-schema"),
+    ("--root", "schema"),
+    ("--root", "telemetry"),
+];
 
 /// A command that ignores an option that names a file accepts the command
 /// line, exits 0, and reads or writes no file (issue #4931). Such a pair is
@@ -320,6 +330,7 @@ fn no_command_ignores_an_option_that_names_a_file() {
         "--diff-file",
         "--churn-file",
         "--config",
+        "--root",
         "--type-aware-project",
     ] {
         let Some(row) = option_support(option) else {
@@ -588,5 +599,23 @@ fn only_the_bare_run_reads_the_global_duplication_overrides() {
         let message = rejection(&[command, "--dupes-mode", "semantic"])
             .unwrap_or_else(|| panic!("{command} rejects --dupes-mode"));
         assert!(message.contains("`duplicates.mode`"), "{message}");
+    }
+}
+
+#[test]
+fn ci_template_and_migrate_read_no_config_and_no_diff() {
+    for command in [&["ci-template", "gitlab"][..], &["migrate", "--dry-run"]] {
+        for option in ["--config", "--diff-file"] {
+            let mut argv = command.to_vec();
+            argv.extend([option, "x.json"]);
+            assert_eq!(
+                rejection(&argv),
+                Some(format!(
+                    "`fallow {}` does not read `{option}`, so the option has no effect.",
+                    command[0]
+                )),
+                "{argv:?}"
+            );
+        }
     }
 }
