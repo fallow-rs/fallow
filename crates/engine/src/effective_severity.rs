@@ -334,7 +334,7 @@ pub fn apply_prop_drilling_severities(results: &mut AnalysisResults, config: &Re
 }
 
 /// Resolve source-owned component health severities without promoting warnings.
-fn apply_component_shape_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
+pub fn apply_component_shape_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
     let source = SeveritySource::from_config(config);
     retain_component_findings(&mut results.thin_wrappers, &source);
     retain_component_findings(&mut results.duplicate_prop_shapes, &source);

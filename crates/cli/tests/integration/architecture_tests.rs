@@ -342,6 +342,35 @@ fn architecture_reports_only_architecture_findings() {
 }
 
 #[test]
+fn architecture_diff_scope_drops_policy_findings_outside_the_diff() {
+    let dir = architecture_project("");
+    write(
+        dir.path(),
+        "pr.diff",
+        "diff --git a/src/shared/utils.ts b/src/shared/utils.ts\n\
+         --- a/src/shared/utils.ts\n\
+         +++ b/src/shared/utils.ts\n\
+         @@ -1,1 +1,2 @@\n\
+         \x20export const helper = () => 'help';\n\
+         +export const neverUsed = 1;\n",
+    );
+    let diff = dir.path().join("pr.diff");
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--diff-file",
+            diff.to_str().expect("utf-8 path"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    assert_eq!(array_len(&json, "policy_violations"), 0, "{json}");
+}
+
+#[test]
 fn architecture_filter_flags_select_one_kind() {
     let dir = architecture_project("");
     let cycles = parse_json(&run(

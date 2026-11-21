@@ -9,52 +9,97 @@ use std::path::Path;
 
 use fallow_output::DiffIndex;
 use fallow_types::duplicates::{CloneInstance, DuplicationReport};
-use fallow_types::results::{AnalysisResults, TraceHopRole};
+use fallow_types::results::{AnalysisResults, SecurityFinding, TraceHopRole};
+
+use crate::result_scope::{
+    Anchor, ComponentRule, OwnerRule, ProjectFinding, ResultScope, SiteRule,
+};
 
 /// Drop the dead-code findings whose source line is not on an added line of
 /// the diff.
 ///
 /// Range-shaped findings (clone instances, complexity hotspots) have their own
 /// filters. This filter governs the per-file findings on [`AnalysisResults`].
-///
-/// **Project-level findings bypass the filter.** A change that deletes the
-/// last consumer of a package causes the `unused-dependency` finding, even
-/// when the diff does not touch `package.json`. The same holds for catalog
-/// entries, dependency overrides, type-only dependencies and test-only
-/// dependencies. The line filter reduces noise for source-anchored findings.
-/// CI must still fail on the project-level findings that the change caused.
+/// A finding with no real line (an unused file, a route file, an unzoned file,
+/// a member of a cycle) stays when the diff touches its file.
 ///
 /// [`DiffIndex::key_for`] gives the diff key of a finding path, relative to the
 /// base of the diff and not to `root`. When a path has no key (a different
 /// drive, or a path outside the base), the finding stays: a path that the
 /// filter cannot judge is better shown than hidden.
 pub fn filter_dead_code_by_diff(results: &mut AnalysisResults, diff: &DiffIndex, root: &Path) {
-    let touches_file = |path: &Path| -> bool {
-        diff.key_for(path, root)
-            .is_none_or(|rel| diff.touches_file(&rel))
-    };
-    let line_in_diff = |path: &Path, line: u32| -> bool {
-        diff.key_for(path, root)
-            .is_none_or(|rel| diff.line_is_added(&rel, u64::from(line)))
-    };
+    crate::result_scope::retain_in_scope(results, &DiffLines { diff, root });
+}
 
-    if let Some(inventory) = &mut results.shared_state {
-        inventory.retain_sites(|site| line_in_diff(&site.path, site.line as u32));
+/// A unified diff as a result scope.
+struct DiffLines<'a> {
+    diff: &'a DiffIndex,
+    root: &'a Path,
+}
+
+impl DiffLines<'_> {
+    fn touches_file(&self, path: &Path) -> bool {
+        self.diff
+            .key_for(path, self.root)
+            .is_none_or(|rel| self.diff.touches_file(&rel))
     }
-    filter_source_findings(results, &touches_file, &line_in_diff);
-    filter_security_findings(results, &touches_file, &line_in_diff);
-    filter_dependency_findings(results, &line_in_diff);
-    filter_graph_findings(results, &touches_file, &line_in_diff);
-    filter_framework_findings(results, &line_in_diff);
-    results.prop_drilling_chains.retain(|finding| {
-        finding.effective_severity != Some(fallow_types::output_dead_code::EffectiveSeverity::Error)
-            || finding.chain.hops.is_empty()
-            || finding
-                .chain
-                .hops
-                .iter()
-                .any(|hop| line_in_diff(&hop.file, hop.line))
-    });
+
+    fn line_in_diff(&self, path: &Path, line: u32) -> bool {
+        self.diff
+            .key_for(path, self.root)
+            .is_none_or(|rel| self.diff.line_is_added(&rel, u64::from(line)))
+    }
+}
+
+impl ResultScope for DiffLines<'_> {
+    fn keeps(&self, anchor: Anchor<'_>) -> bool {
+        match anchor {
+            Anchor::Line { path, line } => self.line_in_diff(path, line),
+            Anchor::File { path } => self.touches_file(path),
+        }
+    }
+
+    /// Project-level findings bypass the filter. A change that deletes the
+    /// last consumer of a package causes the `unused-dependency` finding, even
+    /// when the diff does not touch `package.json`. The same holds for catalog
+    /// entries, dependency overrides, type-only dependencies and test-only
+    /// dependencies. The line filter reduces noise for source-anchored
+    /// findings. CI must still fail on the project-level findings that the
+    /// change caused.
+    fn keeps_project_finding(&self, _finding: ProjectFinding<'_>) -> bool {
+        true
+    }
+
+    fn keeps_security_finding(&self, finding: &SecurityFinding) -> bool {
+        self.line_in_diff(&finding.path, finding.line)
+            || finding.trace.iter().any(|hop| {
+                self.line_in_diff(&hop.path, hop.line)
+                    || (matches!(hop.role, TraceHopRole::SecretSource)
+                        && self.touches_file(&hop.path))
+            })
+            || finding.reachability.as_ref().is_some_and(|reachability| {
+                // Any hop on an added line keeps the finding for display, whatever
+                // its role. Do not add a role check here: unlike the strict
+                // `--gate new` filter of `fallow security`, the display must show a
+                // finding whose module-level source sits on an added line.
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| self.line_in_diff(&hop.path, hop.line))
+            })
+    }
+
+    fn site_rule(&self) -> SiteRule {
+        SiteRule::TrimSites
+    }
+
+    fn owner_rule(&self) -> OwnerRule {
+        OwnerRule::AnyOwner
+    }
+
+    fn component_rule(&self) -> ComponentRule {
+        ComponentRule::EnforcedOnly
+    }
 }
 
 /// Keep only the clone groups with at least one instance whose line range
@@ -88,196 +133,6 @@ pub fn filter_duplication_by_diff(report: &mut DuplicationReport, diff: &DiffInd
     crate::duplicates::refresh_scoped_report(report, root);
 }
 
-fn filter_source_findings(
-    results: &mut AnalysisResults,
-    touches_file: &dyn Fn(&Path) -> bool,
-    line_in_diff: &dyn Fn(&Path, u32) -> bool,
-) {
-    results
-        .unused_files
-        .retain(|finding| touches_file(&finding.file.path));
-    results
-        .unused_exports
-        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
-    results
-        .unused_types
-        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
-    results
-        .private_type_leaks
-        .retain(|finding| line_in_diff(&finding.leak.path, finding.leak.line));
-    results
-        .deprecated_exports_in_use
-        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
-    results
-        .unused_enum_members
-        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
-    results
-        .unused_class_members
-        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
-    results
-        .unused_store_members
-        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
-    results
-        .unused_namespace_members
-        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
-    results
-        .unused_protected_class_members
-        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
-    results
-        .unprovided_injects
-        .retain(|finding| line_in_diff(&finding.inject.path, finding.inject.line));
-    results
-        .unrendered_components
-        .retain(|finding| line_in_diff(&finding.component.path, finding.component.line));
-    results
-        .unused_component_props
-        .retain(|finding| line_in_diff(&finding.prop.path, finding.prop.line));
-    results
-        .absent_component_props
-        .retain(|finding| line_in_diff(&finding.prop.path, finding.prop.line));
-    results
-        .constant_parameters
-        .retain(|finding| line_in_diff(&finding.parameter.path, finding.parameter.line));
-    results
-        .unused_component_emits
-        .retain(|finding| line_in_diff(&finding.emit.path, finding.emit.line));
-    results
-        .unused_component_inputs
-        .retain(|finding| line_in_diff(&finding.input.path, finding.input.line));
-    results
-        .unused_component_outputs
-        .retain(|finding| line_in_diff(&finding.output.path, finding.output.line));
-    results
-        .unused_svelte_events
-        .retain(|finding| line_in_diff(&finding.event.path, finding.event.line));
-    results
-        .unused_effect_layers
-        .retain(|finding| line_in_diff(&finding.layer.path, finding.layer.line));
-    results.duplicate_export_aliases.retain(|finding| {
-        finding
-            .alias
-            .locations
-            .iter()
-            .any(|location| line_in_diff(&finding.alias.path, location.line))
-    });
-    results
-        .unused_tagged_errors
-        .retain(|finding| line_in_diff(&finding.error.path, finding.error.line));
-    results
-        .unproduced_catch_tags
-        .retain(|finding| line_in_diff(&finding.catch_tag.path, finding.catch_tag.line));
-    results
-        .unused_server_actions
-        .retain(|finding| line_in_diff(&finding.action.path, finding.action.line));
-    results
-        .unused_load_data_keys
-        .retain(|finding| line_in_diff(&finding.key.path, finding.key.line));
-    results
-        .unresolved_imports
-        .retain(|finding| line_in_diff(&finding.import.path, finding.import.line));
-}
-
-fn filter_security_findings(
-    results: &mut AnalysisResults,
-    touches_file: &dyn Fn(&Path) -> bool,
-    line_in_diff: &dyn Fn(&Path, u32) -> bool,
-) {
-    results.security_findings.retain(|finding| {
-        line_in_diff(&finding.path, finding.line)
-            || finding.trace.iter().any(|hop| {
-                line_in_diff(&hop.path, hop.line)
-                    || (matches!(hop.role, TraceHopRole::SecretSource) && touches_file(&hop.path))
-            })
-            || finding.reachability.as_ref().is_some_and(|reachability| {
-                // Any hop on an added line keeps the finding for display, whatever
-                // its role. Do not add a role check here: unlike the strict
-                // `--gate new` filter of `fallow security`, the display must show a
-                // finding whose module-level source sits on an added line.
-                reachability
-                    .untrusted_source_trace
-                    .iter()
-                    .any(|hop| line_in_diff(&hop.path, hop.line))
-            })
-    });
-    results
-        .security_unresolved_callee_diagnostics
-        .retain(|finding| line_in_diff(&finding.path, finding.line));
-}
-
-fn filter_dependency_findings(
-    results: &mut AnalysisResults,
-    line_in_diff: &dyn Fn(&Path, u32) -> bool,
-) {
-    for finding in &mut results.unlisted_dependencies {
-        finding
-            .dep
-            .imported_from
-            .retain(|source| line_in_diff(&source.path, source.line));
-    }
-    results
-        .unlisted_dependencies
-        .retain(|finding| !finding.dep.imported_from.is_empty());
-    for finding in &mut results.unlisted_binaries {
-        finding
-            .binary
-            .used_in
-            .retain(|site| line_in_diff(&site.path, site.line));
-    }
-    results
-        .unlisted_binaries
-        .retain(|finding| !finding.binary.used_in.is_empty());
-}
-
-fn filter_graph_findings(
-    results: &mut AnalysisResults,
-    touches_file: &dyn Fn(&Path) -> bool,
-    line_in_diff: &dyn Fn(&Path, u32) -> bool,
-) {
-    results.duplicate_exports.retain(|finding| {
-        finding
-            .export
-            .locations
-            .iter()
-            .any(|location| line_in_diff(&location.path, location.line))
-    });
-    results
-        .circular_dependencies
-        .retain(|cycle| cycle.cycle.files.iter().any(|path| touches_file(path)));
-    results
-        .re_export_cycles
-        .retain(|cycle| cycle.cycle.files.iter().any(|path| touches_file(path)));
-    results.package_cycles.retain(|cycle| {
-        cycle
-            .cycle
-            .edges
-            .iter()
-            .any(|edge| touches_file(&edge.path))
-    });
-    results
-        .boundary_violations
-        .retain(|finding| line_in_diff(&finding.violation.from_path, finding.violation.line));
-    results
-        .stale_suppressions
-        .retain(|finding| line_in_diff(&finding.path, finding.line));
-}
-
-fn filter_framework_findings(
-    results: &mut AnalysisResults,
-    line_in_diff: &dyn Fn(&Path, u32) -> bool,
-) {
-    results
-        .invalid_client_exports
-        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
-    results
-        .mixed_client_server_barrels
-        .retain(|finding| line_in_diff(&finding.barrel.path, finding.barrel.line));
-    results
-        .misplaced_directives
-        .retain(|finding| line_in_diff(&finding.directive_site.path, finding.directive_site.line));
-    results
-        .route_collisions
-        .retain(|finding| line_in_diff(&finding.collision.path, finding.collision.line));
-    results
-        .dynamic_segment_name_conflicts
-        .retain(|finding| line_in_diff(&finding.conflict.path, finding.conflict.line));
-}
+#[cfg(test)]
+#[path = "diff_scope_tests.rs"]
+mod tests;
