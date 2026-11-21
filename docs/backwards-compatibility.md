@@ -1187,9 +1187,10 @@ These are documented for the rare CI script that depended on the old behavior. N
 
 - **An Impact change that cannot be saved is an error, and a damaged store is
   not overwritten.** `fallow impact enable`, `fallow impact disable`, `fallow
-  impact default on|off`, `fallow impact reset`, and `fallow init --decline`
-  exit with code 2 and an error when the change cannot be saved: no user config
-  folder resolves, or the write fails. Before, they printed success. A store
+  impact default on|off`, and `fallow init --decline` exit with code 2 and an
+  error when the change cannot be saved: no user config folder resolves, or the
+  write fails. `fallow impact reset` exits with code 2 when it cannot remove a
+  store file. Before, they printed success. A store
   that cannot be read or does not parse stops `fallow impact disable`, `fallow
   init --decline`, the record of a run, and the periodic digest, and the file
   stays unchanged. `fallow impact enable` still replaces a store that does not
