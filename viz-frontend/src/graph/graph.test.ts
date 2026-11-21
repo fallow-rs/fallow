@@ -366,13 +366,26 @@ describe("graph view state", () => {
 
   it("reconciles the strip after a lens change made outside the graph view", () => {
     const state = viewState();
-    expect(standaloneVisible(state, getGVS(state))).toBe(false);
+    const gvs = getGVS(state);
+    let cameraMoves = 0;
+    const zoom = {
+      scaleExtent: () => zoom,
+      transform: () => {
+        cameraMoves += 1;
+      },
+    };
+    gvs.zoomBehavior = zoom as never;
+    state.canvas = { parentElement: { clientWidth: 1000, clientHeight: 800 } } as never;
+    expect(standaloneVisible(state, gvs)).toBe(false);
     state.view = "map";
     state.lens = "unused";
     reconcileGraphView(state);
+    expect(cameraMoves).toBe(0);
     state.view = "graph";
     reconcileGraphView(state);
-    expect(standaloneVisible(state, getGVS(state))).toBe(true);
+    expect(standaloneVisible(state, gvs)).toBe(true);
+    // The strip opened, so the camera refits to include it.
+    expect(cameraMoves).toBe(1);
   });
 
   it("drops a selected road that the new grouping does not have", () => {
