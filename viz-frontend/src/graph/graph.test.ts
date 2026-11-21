@@ -19,7 +19,7 @@ import {
 } from "./shared";
 import type { AppState } from "../state";
 import { assignCoordinates, assignLayers, partitionEdges, tarjanSCC, type MetaEdge } from "./build";
-import { graphHandleClick, reconcileGraphView } from "./interact";
+import { centerOnFile, graphHandleClick, reconcileGraphView } from "./interact";
 
 /** Canvas text metrics stub: every glyph is 7px wide. */
 const ctx = {
@@ -400,5 +400,26 @@ describe("graph view state", () => {
     expect(state.selectedRoad).toBeNull();
     expect(selectedRoadIndex(state, gvs)).toBeNull();
     expect(graphHandleClick(state, 100, 300)).toEqual({ kind: "none" });
+  });
+
+  it("opens the standalone strip for a centered file", () => {
+    const centerState = (): AppState => {
+      const state = viewState();
+      const gvs = getGVS(state);
+      gvs.fileNodes[0] = { fileIndex: 0, radius: 4, cluster: 0, x: 0, y: 0 };
+      gvs.fileNodes[2] = { fileIndex: 2, radius: 4, cluster: 2, x: 0, y: 400 };
+      gvs.zoomBehavior = { transform: () => {} } as never;
+      state.canvas = { parentElement: { clientWidth: 1000, clientHeight: 800 } } as never;
+      return state;
+    };
+
+    const isolated = centerState();
+    expect(standaloneVisible(isolated, getGVS(isolated))).toBe(false);
+    centerOnFile(isolated, 2);
+    expect(standaloneVisible(isolated, getGVS(isolated))).toBe(true);
+
+    const connected = centerState();
+    centerOnFile(connected, 0);
+    expect(standaloneVisible(connected, getGVS(connected))).toBe(false);
   });
 });

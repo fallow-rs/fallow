@@ -391,6 +391,10 @@ export const centerOnFile = (state: AppState, fileIndex: number): void => {
   if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   const node = gvs.fileNodes[fileIndex];
   if (!node || node.x == null || node.y == null) return;
+  // The renderer skips an isolated cluster while the strip is closed.
+  if (gvs.clusters[node.cluster].isolated && !standaloneVisible(state, gvs)) {
+    setStandaloneOpen(state, gvs, true);
+  }
   const stageEl = state.canvas.parentElement;
   const width = stageEl ? stageEl.clientWidth : window.innerWidth;
   const height = stageEl ? stageEl.clientHeight : window.innerHeight;
