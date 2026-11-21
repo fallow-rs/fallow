@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use fallow_engine::source_edits::SourceEditIndex;
 use fallow_output::{CiIssue, CiProvider as Provider};
 use fallow_types::output_dead_code::description_carries_caveat;
 
@@ -19,10 +20,13 @@ pub fn suggestion_block(provider: Provider, issue: &CiIssue) -> Option<String> {
     let Some(source) = std::fs::read_to_string(path).ok() else {
         return (!block.is_empty()).then_some(block);
     };
-    let Some(line) = source.lines().nth(issue.line.saturating_sub(1) as usize) else {
-        return (!block.is_empty()).then_some(block);
-    };
-    if let Some(suggestion) = suggestion_or_withheld_hint(provider, issue, line) {
+    if let Some(suggestion) = suggestion_or_withheld_hint(
+        provider,
+        issue,
+        Path::new(&issue.path),
+        &source,
+        u32::try_from(issue.line).unwrap_or(u32::MAX),
+    ) {
         block.push_str(&suggestion);
     }
     (!block.is_empty()).then_some(block)
@@ -37,8 +41,14 @@ pub fn suggestion_block(provider: Provider, issue: &CiIssue) -> Option<String> {
 /// announcing a withheld one-click fix there would invent a fix that never
 /// existed, which is the same overclaiming in the other direction.
 #[must_use]
-fn suggestion_or_withheld_hint(provider: Provider, issue: &CiIssue, line: &str) -> Option<String> {
-    let suggestion = suggestion_block_for_issue_line(provider, &issue.rule_id, line)?;
+fn suggestion_or_withheld_hint(
+    provider: Provider,
+    issue: &CiIssue,
+    path: &Path,
+    source: &str,
+    line: u32,
+) -> Option<String> {
+    let suggestion = suggestion_block_for_issue_line(provider, &issue.rule_id, path, source, line)?;
     Some(if description_carries_caveat(&issue.description) {
         withheld_suggestion_hint()
     } else {
@@ -65,22 +75,127 @@ fn fix_intent_block(intent: &str) -> String {
     format!("\n\n**Fix:** {intent}")
 }
 
+/// The `suggestion` block for the finding of `rule_id` on the 1-based `line`
+/// of the file at `path` with the text `source`.
+///
+/// The export and member rules parse the file. They give a block only when
+/// the parser confirms that the edit of the one line changes exactly the
+/// statement or the member of the finding.
 #[must_use]
 pub fn suggestion_block_for_issue_line(
     provider: Provider,
     rule_id: &str,
-    line: &str,
+    path: &Path,
+    source: &str,
+    line: u32,
 ) -> Option<String> {
+    let line_text = source.lines().nth(line.checked_sub(1)? as usize)?;
     if rule_id.contains("unused-import") {
-        return unused_import_suggestion(provider, line);
+        return unused_import_suggestion(provider, line_text);
     }
-    if rule_id.contains("unused-enum-member") || rule_id.contains("unused-class-member") {
-        return delete_line_suggestion(provider, line);
+    let is_member_rule =
+        rule_id.contains("unused-enum-member") || rule_id.contains("unused-class-member");
+    let is_export_rule = rule_id.contains("unused-export") || rule_id.contains("unused-type");
+    if !is_member_rule && !is_export_rule {
+        return None;
     }
-    if rule_id.contains("unused-export") || rule_id.contains("unused-type") {
-        return unused_export_suggestion(provider, line);
+    let index = SourceEditIndex::parse(path, source)?;
+    let line_start = line_start(source, line)?;
+    if is_member_rule {
+        let deletable = member_line_is_deletable(&index, source, line, line_start, line_text)
+            && deletion_keeps_other_members(path, &index, source, line_start, line_text);
+        return deletable.then(|| delete_line_suggestion(provider));
     }
-    None
+    let fixed = unused_export_line(&index, line, line_start, line_text)?;
+    Some(match provider {
+        Provider::Github => format!("\n\n```suggestion\n{fixed}\n```"),
+        Provider::Gitlab => format!("\n\n```suggestion:-0+0\n{fixed}\n```"),
+    })
+}
+
+/// The byte offset of the start of the 1-based `line` of `source`.
+fn line_start(source: &str, line: u32) -> Option<usize> {
+    let index = line.checked_sub(1)? as usize;
+    if index == 0 {
+        return Some(0);
+    }
+    source
+        .match_indices('\n')
+        .nth(index - 1)
+        .map(|(offset, _)| offset + 1)
+}
+
+/// The text of `line` without the `export` of its one statement, when the
+/// line holds one complete edit: one export statement starts at the line
+/// start, no other statement covers the line, the statement exports one
+/// name, and its keyword edit ends on the line.
+fn unused_export_line<'a>(
+    index: &SourceEditIndex,
+    line: u32,
+    line_start: usize,
+    line_text: &'a str,
+) -> Option<&'a str> {
+    let mut on_line = index.export_statements_on_line(line);
+    let (Some(statement), None) = (on_line.next(), on_line.next()) else {
+        return None;
+    };
+    let line_idx = line.saturating_sub(1) as usize;
+    let covered_by_another = index.statements().iter().any(|other| {
+        let (first, last) = index.line_range(other.start, other.end);
+        other.start != statement.start && (first..=last).contains(&line_idx)
+    });
+    // An overload or a merged declaration of the same name must keep its
+    // `export` together with the other declarations of the name.
+    let shares_its_name = index.statements().iter().any(|other| {
+        other.start != statement.start
+            && other
+                .names
+                .iter()
+                .any(|name| statement.names.contains(name))
+    });
+    if covered_by_another
+        || shares_its_name
+        || statement.start as usize != line_start
+        || statement.names.len() != 1
+    {
+        return None;
+    }
+    let edit = statement.keyword_edit()?;
+    let removed = (edit.end as usize).checked_sub(line_start)?;
+    line_text.get(removed..)
+}
+
+/// True when the line holds exactly one member, from its first byte to its
+/// last, with only white space before it and only an optional `,` or `;`,
+/// white space and an optional `//` comment after it.
+fn member_line_is_deletable(
+    index: &SourceEditIndex,
+    source: &str,
+    line: u32,
+    line_start: usize,
+    line_text: &str,
+) -> bool {
+    let mut on_line = index.members_on_line(line);
+    let (Some(member), None) = (on_line.next(), on_line.next()) else {
+        return false;
+    };
+    let (first, last) = index.line_range(member.start, member.end);
+    if first != last || !member.deletion_keeps_values || member.shares_its_key {
+        return false;
+    }
+    let Some(before) = source.get(line_start..member.start as usize) else {
+        return false;
+    };
+    let Some(after) = line_text.get(member.end as usize - line_start..) else {
+        return false;
+    };
+    let after = after.trim_start();
+    let after = after
+        .strip_prefix(',')
+        .or_else(|| after.strip_prefix(';'))
+        .unwrap_or(after)
+        .trim();
+    before.trim().is_empty() && (after.is_empty() || after.starts_with("//"))
 }
 
 /// Text hint for `unused-file` findings. Neither GitHub nor GitLab supports
@@ -122,28 +237,57 @@ fn withheld_suggestion_hint() -> String {
         .to_owned()
 }
 
-fn unused_export_suggestion(provider: Provider, line: &str) -> Option<String> {
-    let fixed = line
-        .strip_prefix("export default ")
-        .or_else(|| line.strip_prefix("export "))?;
-    if fixed == line {
-        return None;
-    }
-
-    match provider {
-        Provider::Github => Some(format!("\n\n```suggestion\n{fixed}\n```")),
-        Provider::Gitlab => Some(format!("\n\n```suggestion:-0+0\n{fixed}\n```")),
-    }
+/// True when the text without the line still parses, and each other member
+/// keeps its text. Without a semicolon after the member above, the deletion
+/// can join that member with the member below, as in `count = 0` followed by
+/// `[Symbol.iterator]() {}`.
+fn deletion_keeps_other_members(
+    path: &Path,
+    index: &SourceEditIndex,
+    source: &str,
+    line_start: usize,
+    line_text: &str,
+) -> bool {
+    let line_end = source[line_start..]
+        .find('\n')
+        .map_or(source.len(), |newline| line_start + newline + 1);
+    let mut rest = String::with_capacity(source.len());
+    rest.push_str(&source[..line_start]);
+    rest.push_str(&source[line_end..]);
+    let Some(after) = SourceEditIndex::parse(path, &rest) else {
+        return false;
+    };
+    let Ok(removed) = u32::try_from(line_end - line_start) else {
+        return false;
+    };
+    let text_of = |start: u32, end: u32| rest.get(start as usize..end as usize);
+    let shift = |offset: u32| {
+        if offset as usize >= line_end {
+            offset - removed
+        } else {
+            offset
+        }
+    };
+    let deleted_line = line_start..line_start + line_text.len();
+    let kept: Option<Vec<&str>> = index
+        .members()
+        .iter()
+        .filter(|member| !deleted_line.contains(&(member.start as usize)))
+        .map(|member| text_of(shift(member.start), shift(member.end)))
+        .collect();
+    let now: Option<Vec<&str>> = after
+        .members()
+        .iter()
+        .map(|member| text_of(member.start, member.end))
+        .collect();
+    kept.is_some() && kept == now
 }
 
-/// Delete the matched line entirely for unused enum/class members.
-fn delete_line_suggestion(provider: Provider, line: &str) -> Option<String> {
-    if line.trim().is_empty() {
-        return None;
-    }
+/// The block that deletes the line of the finding.
+fn delete_line_suggestion(provider: Provider) -> String {
     match provider {
-        Provider::Github => Some("\n\n```suggestion\n\n```".to_owned()),
-        Provider::Gitlab => Some("\n\n```suggestion:-0+0\n\n```".to_owned()),
+        Provider::Github => "\n\n```suggestion\n\n```".to_owned(),
+        Provider::Gitlab => "\n\n```suggestion:-0+0\n\n```".to_owned(),
     }
 }
 
@@ -177,15 +321,32 @@ fn unused_import_suggestion(provider: Provider, line: &str) -> Option<String> {
         }
     }
 
-    match provider {
-        Provider::Github => Some("\n\n```suggestion\n\n```".to_string()),
-        Provider::Gitlab => Some("\n\n```suggestion:-0+0\n\n```".to_string()),
-    }
+    Some(delete_line_suggestion(provider))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The suggestion for the member on line 2 of a file `src/dead.ts`.
+    fn member_suggestion(provider: Provider, rule_id: &str, source: &str) -> Option<String> {
+        super::suggestion_block_for_issue_line(
+            provider,
+            rule_id,
+            Path::new("src/dead.ts"),
+            source,
+            2,
+        )
+    }
+
+    /// The suggestion for a file `src/dead.ts` whose whole text is `line`.
+    fn suggestion_block_for_issue_line(
+        provider: Provider,
+        rule_id: &str,
+        line: &str,
+    ) -> Option<String> {
+        super::suggestion_block_for_issue_line(provider, rule_id, Path::new("src/dead.ts"), line, 1)
+    }
 
     #[test]
     fn renders_github_suggestion() {
@@ -207,9 +368,18 @@ mod tests {
                 Provider::Gitlab,
                 "fallow/unused-export",
                 "export default thing;"
+            ),
+            None,
+            "an edit to `thing;` changes what the module does"
+        );
+        assert_eq!(
+            suggestion_block_for_issue_line(
+                Provider::Gitlab,
+                "fallow/unused-export",
+                "export default function thing() {}"
             )
             .as_deref(),
-            Some("\n\n```suggestion:-0+0\nthing;\n```")
+            Some("\n\n```suggestion:-0+0\nfunction thing() {}\n```")
         );
     }
 
@@ -324,19 +494,19 @@ mod tests {
     #[test]
     fn renders_unused_enum_member_delete_suggestion() {
         assert_eq!(
-            suggestion_block_for_issue_line(
+            member_suggestion(
                 Provider::Github,
                 "fallow/unused-enum-member",
-                "  Deprecated,"
+                "enum E {\n  Deprecated,\n  Kept = 2,\n}\n"
             )
             .as_deref(),
             Some("\n\n```suggestion\n\n```")
         );
         assert_eq!(
-            suggestion_block_for_issue_line(
+            member_suggestion(
                 Provider::Gitlab,
                 "fallow/unused-enum-member",
-                "  Deprecated,"
+                "enum E {\n  Deprecated,\n  Kept = 2,\n}\n"
             )
             .as_deref(),
             Some("\n\n```suggestion:-0+0\n\n```")
@@ -374,10 +544,10 @@ mod tests {
     #[test]
     fn renders_unused_class_member_delete_suggestion() {
         assert_eq!(
-            suggestion_block_for_issue_line(
+            member_suggestion(
                 Provider::Github,
                 "fallow/unused-class-member",
-                "  legacyMethod() { return null; }"
+                "class Widget {\n  legacyMethod() { return null; }\n}\n"
             )
             .as_deref(),
             Some("\n\n```suggestion\n\n```")
@@ -431,13 +601,18 @@ mod tests {
     /// the committable edit.
     #[test]
     fn a_caveated_finding_gets_no_committable_suggestion() {
-        for (rule, line) in [
+        for (rule, source, line) in [
             (
                 "fallow/unused-class-member",
-                "  legacyMethod() { return null; }",
+                "class Widget {\n  legacyMethod() { return null; }\n}\n",
+                2,
             ),
-            ("fallow/unused-enum-member", "  Deprecated,"),
-            ("fallow/unused-export", "export const value = 1;"),
+            (
+                "fallow/unused-enum-member",
+                "enum E {\n  Deprecated,\n  Kept = 2,\n}\n",
+                2,
+            ),
+            ("fallow/unused-export", "export const value = 1;\n", 1),
         ] {
             for provider in [Provider::Github, Provider::Gitlab] {
                 let body = suggestion_or_withheld_hint(
@@ -446,6 +621,8 @@ mod tests {
                         rule,
                         "Something is never referenced (caveat: incomplete import graph)",
                     ),
+                    Path::new("src/dead.ts"),
+                    source,
                     line,
                 )
                 .expect("a finding that had a block still renders something");
@@ -472,7 +649,9 @@ mod tests {
                     "fallow/unused-class-member",
                     "Class member 'Widget.legacyMethod' is never referenced"
                 ),
-                "  legacyMethod() { return null; }"
+                Path::new("src/dead.ts"),
+                "class Widget {\n  legacyMethod() { return null; }\n}\n",
+                2,
             )
             .as_deref(),
             Some("\n\n```suggestion\n\n```"),
@@ -492,7 +671,9 @@ mod tests {
                     "fallow/unused-dependency",
                     "Dependency 'lodash' is never imported (caveat: incomplete import graph)"
                 ),
-                "  \"lodash\": \"^4.17.21\","
+                Path::new("package.json"),
+                "{\n  \"lodash\": \"^4.17.21\",\n}\n",
+                2,
             ),
             None
         );
@@ -539,3 +720,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "suggestion_syntax_tests.rs"]
+mod syntax_tests;

@@ -10,7 +10,10 @@
 
 use std::path::Path;
 
-use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Program, Statement};
+use oxc_ast::ast::{
+    ClassBody, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumBody,
+};
+use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, SourceType};
 
 /// One replacement of a byte range of the source text.
@@ -77,9 +80,27 @@ impl ExportStatement {
     }
 }
 
-/// The export statements of one file text.
+/// One class element or enum member.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemberSpan {
+    /// The byte offset of the first byte of the member.
+    pub start: u32,
+    /// The byte offset after the last byte of the member.
+    pub end: u32,
+    /// False for an enum member whose deletion changes the value of the next
+    /// member: the next member has no initializer, so its value counts on
+    /// from this member. Always true for a class element.
+    pub deletion_keeps_values: bool,
+    /// True for a class element whose static key another element of the same
+    /// class also has, such as an overload signature, its implementation, or
+    /// one half of a getter and setter pair. Always false for an enum member.
+    pub shares_its_key: bool,
+}
+
+/// The export statements and the class and enum members of one file text.
 pub struct SourceEditIndex {
     statements: Vec<ExportStatement>,
+    members: Vec<MemberSpan>,
     source: String,
     line_starts: Vec<u32>,
 }
@@ -95,7 +116,10 @@ impl SourceEditIndex {
     /// or when a block does not parse without an error.
     #[must_use]
     pub fn parse(path: &Path, source: &str) -> Option<Self> {
-        let statements = parse_statements(path, source)?;
+        let Parsed {
+            statements,
+            members,
+        } = parse_file(path, source)?;
         let line_starts = std::iter::once(0)
             .chain(
                 source
@@ -105,6 +129,7 @@ impl SourceEditIndex {
             .collect();
         Some(Self {
             statements,
+            members,
             source: source.to_owned(),
             line_starts,
         })
@@ -161,6 +186,31 @@ impl SourceEditIndex {
         &self.statements
     }
 
+    /// The statements whose `export` keyword is on the 1-based `line`.
+    pub fn export_statements_on_line(&self, line: u32) -> impl Iterator<Item = &ExportStatement> {
+        let line_idx = line.saturating_sub(1) as usize;
+        self.statements
+            .iter()
+            .filter(move |statement| self.line_of(statement.start) == line_idx)
+    }
+
+    /// The class elements and enum members whose first byte is on the
+    /// 1-based `line`, at each depth of the file.
+    pub fn members_on_line(&self, line: u32) -> impl Iterator<Item = &MemberSpan> {
+        let line_idx = line.saturating_sub(1) as usize;
+        self.members
+            .iter()
+            .filter(move |member| self.line_of(member.start) == line_idx)
+    }
+
+    /// Each class element and enum member of the file. The elements of one
+    /// class body or enum body are in source order, and each body comes
+    /// before the members nested inside it.
+    #[must_use]
+    pub fn members(&self) -> &[MemberSpan] {
+        &self.members
+    }
+
     /// The statement whose `export` keyword is at byte `start`.
     #[must_use]
     pub fn statement_at(&self, start: u32) -> Option<&ExportStatement> {
@@ -172,12 +222,16 @@ impl SourceEditIndex {
     /// The 0-based first and last line of the bytes `start..end`.
     #[must_use]
     pub fn line_range(&self, start: u32, end: u32) -> (usize, usize) {
-        let line_of = |offset: u32| {
-            self.line_starts
-                .partition_point(|line_start| *line_start <= offset)
-                .saturating_sub(1)
-        };
-        (line_of(start), line_of(end.saturating_sub(1).max(start)))
+        (
+            self.line_of(start),
+            self.line_of(end.saturating_sub(1).max(start)),
+        )
+    }
+
+    fn line_of(&self, offset: u32) -> usize {
+        self.line_starts
+            .partition_point(|line_start| *line_start <= offset)
+            .saturating_sub(1)
     }
 
     /// True when no other text shares the lines of `start..end`: only white
@@ -198,7 +252,14 @@ impl SourceEditIndex {
     }
 }
 
-fn parse_statements(path: &Path, source: &str) -> Option<Vec<ExportStatement>> {
+/// The statements and members of a file or of its script blocks.
+#[derive(Default)]
+struct Parsed {
+    statements: Vec<ExportStatement>,
+    members: Vec<MemberSpan>,
+}
+
+fn parse_file(path: &Path, source: &str) -> Option<Parsed> {
     if fallow_extract::is_sfc_file(path) {
         let scripts = fallow_extract::extract_sfc_scripts(source);
         return parse_blocks(source, scripts.iter().filter(|script| script.src.is_none()));
@@ -217,8 +278,8 @@ fn parse_statements(path: &Path, source: &str) -> Option<Vec<ExportStatement>> {
 fn parse_blocks<'a>(
     file: &str,
     scripts: impl Iterator<Item = &'a fallow_extract::sfc::SfcScript>,
-) -> Option<Vec<ExportStatement>> {
-    let mut statements = Vec::new();
+) -> Option<Parsed> {
+    let mut parsed = Parsed::default();
     for script in scripts {
         let source_type = match (script.is_typescript, script.is_jsx) {
             (true, true) => SourceType::tsx(),
@@ -227,27 +288,79 @@ fn parse_blocks<'a>(
             (false, false) => SourceType::mjs(),
         };
         let offset = u32::try_from(script.byte_offset).ok()?;
-        statements.extend(parse_block(file, &script.body, source_type, offset)?);
+        let block = parse_block(file, &script.body, source_type, offset)?;
+        parsed.statements.extend(block.statements);
+        parsed.members.extend(block.members);
     }
-    Some(statements)
+    Some(parsed)
 }
 
 /// Parse one block of script text that starts at byte `offset` of `file`.
-fn parse_block(
-    file: &str,
-    source: &str,
-    source_type: SourceType,
-    offset: u32,
-) -> Option<Vec<ExportStatement>> {
+fn parse_block(file: &str, source: &str, source_type: SourceType, offset: u32) -> Option<Parsed> {
     fallow_extract::parse_bounded(source, || {
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
         if parsed.fatal_error || parsed.diagnostics.has_errors() {
             return None;
         }
-        Some(collect(&parsed.program, file, offset))
+        let mut members = MemberCollector {
+            offset,
+            members: Vec::new(),
+        };
+        members.visit_program(&parsed.program);
+        Some(Parsed {
+            statements: collect(&parsed.program, file, offset),
+            members: members.members,
+        })
     })
     .flatten()
+}
+
+/// Collects the span of each class element and each enum member.
+struct MemberCollector {
+    offset: u32,
+    members: Vec<MemberSpan>,
+}
+
+impl MemberCollector {
+    fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool, shares_its_key: bool) {
+        self.members.push(MemberSpan {
+            start: span.start + self.offset,
+            end: span.end + self.offset,
+            deletion_keeps_values,
+            shares_its_key,
+        });
+    }
+}
+
+impl<'a> Visit<'a> for MemberCollector {
+    fn visit_class_body(&mut self, it: &ClassBody<'a>) {
+        let names: Vec<_> = it
+            .body
+            .iter()
+            .map(|element| element.static_name())
+            .collect();
+        for (position, element) in it.body.iter().enumerate() {
+            let shares_its_key = names[position].as_ref().is_some_and(|name| {
+                names.iter().enumerate().any(|(other, other_name)| {
+                    other != position && other_name.as_ref() == Some(name)
+                })
+            });
+            self.push(element.span(), true, shares_its_key);
+        }
+        oxc_ast_visit::walk::walk_class_body(self, it);
+    }
+
+    fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
+        for (position, member) in it.members.iter().enumerate() {
+            let next_has_value = it
+                .members
+                .get(position + 1)
+                .is_none_or(|next| next.initializer.is_some());
+            self.push(member.span, next_has_value, false);
+        }
+        oxc_ast_visit::walk::walk_ts_enum_body(self, it);
+    }
 }
 
 fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatement> {
@@ -565,6 +678,78 @@ mod tests {
             texts("page.astro", source),
             vec!["export const [a, b] = [1, 2];"]
         );
+    }
+
+    /// The text of each member that starts on `line`.
+    fn members(source: &str, line: u32) -> Vec<String> {
+        let index = index("store.ts", source);
+        index
+            .members_on_line(line)
+            .map(|member| source[member.start as usize..member.end as usize].to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn members_on_line_gives_class_and_enum_members() {
+        let class = "class C {\n  one() { return 1; }\n  legacy() {\n    return null;\n  }\n  value = 1;\n}\n";
+        assert_eq!(members(class, 2), vec!["one() { return 1; }"]);
+        assert_eq!(members(class, 3), vec!["legacy() {\n    return null;\n  }"]);
+        assert_eq!(members(class, 6), vec!["value = 1;"]);
+        assert!(members(class, 4).is_empty());
+
+        let enumeration = "enum E {\n  A,\n  B, C,\n  D = \"x,y\"\n}\n";
+        assert_eq!(members(enumeration, 2), vec!["A"]);
+        assert_eq!(members(enumeration, 3), vec!["B", "C"]);
+        assert_eq!(members(enumeration, 4), vec!["D = \"x,y\""]);
+    }
+
+    #[test]
+    fn a_class_element_knows_whether_it_shares_its_key() {
+        let source = "class K {\n  m(a: string): void;\n  m(a: any) {}\n  get x() { return 1; }\n  set x(v) {}\n  only() {}\n}\n";
+        let index = index("store.ts", source);
+        let shares = |line| {
+            index
+                .members_on_line(line)
+                .map(|member| member.shares_its_key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shares(2), vec![true]);
+        assert_eq!(shares(3), vec![true]);
+        assert_eq!(shares(4), vec![true]);
+        assert_eq!(shares(5), vec![true]);
+        assert_eq!(shares(6), vec![false]);
+    }
+
+    #[test]
+    fn an_enum_member_knows_whether_its_deletion_shifts_a_value() {
+        let source = "enum E {\n  A,\n  B,\n  C = 5,\n  D,\n}\nclass K {\n  m() {}\n}\n";
+        let index = index("store.ts", source);
+        let keeps = |line| {
+            index
+                .members_on_line(line)
+                .map(|member| member.deletion_keeps_values)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keeps(2), vec![false], "B counts on from A");
+        assert_eq!(keeps(3), vec![true], "C has its own value");
+        assert_eq!(keeps(4), vec![false], "D counts on from C");
+        assert_eq!(keeps(5), vec![true], "D is the last member");
+        assert_eq!(keeps(8), vec![true], "a class element");
+    }
+
+    #[test]
+    fn members_on_line_reads_a_nested_class() {
+        let source = "export function f() {\n  return class {\n    inner() {}\n  };\n}\n";
+        assert_eq!(members(source, 3), vec!["inner() {}"]);
+    }
+
+    #[test]
+    fn export_statements_on_line_gives_each_keyword_of_the_line() {
+        let source = "export const a = 1; export const b = 2;\nexport function f() {\n}\n";
+        let index = index("store.ts", source);
+        assert_eq!(index.export_statements_on_line(1).count(), 2);
+        assert_eq!(index.export_statements_on_line(2).count(), 1);
+        assert_eq!(index.export_statements_on_line(3).count(), 0);
     }
 
     #[test]
