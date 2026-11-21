@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::AuditGate;
+use rustc_hash::FxHashSet;
 
-use super::AuditOptions;
+use super::cache::BaseKeyRequest;
+use super::{AuditOptions, CliAuditBackend};
 
 /// The inputs of the base pass that do not depend on the base worktree. The
 /// cache key is computed before the worktree exists, so the base pass and the
@@ -103,3 +105,25 @@ impl BaseRunInputs {
         }
     }
 }
+
+impl CliAuditBackend<'_> {
+    /// The cache key inputs of the base pass for `base_ref` and the changed
+    /// files `focus`.
+    pub(super) fn base_key_request<'b>(
+        &'b self,
+        base_ref: &'b str,
+        focus: &'b FxHashSet<PathBuf>,
+    ) -> BaseKeyRequest<'b> {
+        BaseKeyRequest {
+            opts: self.opts,
+            base_run: self.base_run(),
+            base_ref,
+            changed_files: focus,
+            workspace_patterns: self.workspace_patterns(),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "audit_base_run_tests.rs"]
+mod tests;

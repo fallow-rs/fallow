@@ -533,7 +533,7 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_ref: &str,
         focus: &FxHashSet<PathBuf>,
     ) -> Result<Option<AuditBaseSnapshotCacheKey>, ExitCode> {
-        audit_base_snapshot_cache_key(self.opts, base_ref, focus, self.workspace_patterns())
+        audit_base_snapshot_cache_key(&self.base_key_request(base_ref, focus))
     }
 
     fn cached_base_sha<'k>(&self, key: &'k AuditBaseSnapshotCacheKey) -> Option<&'k str> {

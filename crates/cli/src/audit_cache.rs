@@ -5,13 +5,15 @@ use std::time::{Duration, SystemTime};
 
 use fallow_output::{ExceededThreshold, FindingSeverity};
 use fallow_types::audit_cache::{
-    AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
+    AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFileFingerprint,
+    AuditCoverageFingerprint,
 };
 use fallow_types::path_guard::CacheTarget;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
+use super::base_run::BaseRunInputs;
 use super::keys::{ComplexityBaseline, ComplexityMetrics};
 use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{
@@ -62,7 +64,11 @@ use fallow_engine::project_config::{ConfigFile, ConfigFileOptions};
 /// Version 23 makes the fragment hash of a clone-group key independent of
 /// the instance order. A version-22 snapshot holds hashes in instance order,
 /// so its clone groups with unequal fragments would not match the head keys.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 23;
+/// Version 24 changes the key payload. The key holds each coverage file
+/// that the base pass reads and the effective type-aware selection, and
+/// it holds no saved-baseline path. A version-23 snapshot of a type-aware
+/// base could serve a syntactic run.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 24;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -640,30 +646,41 @@ pub(super) fn config_file_fingerprint(
     })
 }
 
-fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> AuditCoverageFingerprint {
-    let resolved = crate::health::scoring::resolve_relative_to_root(path, Some(project_root));
-    let file_path = if resolved.is_dir() {
-        resolved.join("coverage-final.json")
-    } else {
-        resolved
+/// `path` is the coverage path of the base pass. It is absolute.
+fn coverage_fingerprint(path: &Path) -> AuditCoverageFingerprint {
+    let (files, error) = match fallow_engine::health::coverage_input::selected_coverage_files(path)
+    {
+        Ok(files) => (
+            files
+                .iter()
+                .map(PathBuf::as_path)
+                .map(coverage_file_fingerprint)
+                .collect(),
+            None,
+        ),
+        Err(message) => (Vec::new(), Some(message)),
     };
-    match std::fs::read(&file_path) {
-        Ok(bytes) => {
-            let source = std::fs::metadata(&file_path)
+    AuditCoverageFingerprint {
+        path: path.to_string_lossy().to_string(),
+        files,
+        error,
+    }
+}
+
+fn coverage_file_fingerprint(file: &Path) -> AuditCoverageFileFingerprint {
+    let path = file.to_string_lossy().to_string();
+    match std::fs::read(file) {
+        Ok(bytes) => AuditCoverageFileFingerprint {
+            path,
+            source: std::fs::metadata(file)
                 .ok()
-                .map(|metadata| SourceFingerprint::from_metadata(&metadata));
-            AuditCoverageFingerprint {
-                path: path.to_string_lossy().to_string(),
-                resolved_path: file_path.to_string_lossy().to_string(),
-                source,
-                content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
-                len: Some(bytes.len()),
-                error: None,
-            }
-        }
-        Err(err) => AuditCoverageFingerprint {
-            path: path.to_string_lossy().to_string(),
-            resolved_path: file_path.to_string_lossy().to_string(),
+                .map(|metadata| SourceFingerprint::from_metadata(&metadata)),
+            content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+            len: Some(bytes.len()),
+            error: None,
+        },
+        Err(err) => AuditCoverageFileFingerprint {
+            path,
             source: None,
             content_hash: None,
             len: None,
@@ -672,14 +689,28 @@ fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> AuditCoverageF
     }
 }
 
-/// `workspace_patterns` must be the patterns that the base checkout gets, so
-/// the key covers each context directory that the checkout links.
+/// The inputs of one base snapshot cache key.
+pub(super) struct BaseKeyRequest<'a> {
+    /// The head options.
+    pub(super) opts: &'a AuditOptions<'a>,
+    pub(super) base_run: &'a BaseRunInputs,
+    pub(super) base_ref: &'a str,
+    pub(super) changed_files: &'a FxHashSet<PathBuf>,
+    /// The patterns that the base checkout gets, so the key covers each
+    /// context directory that the checkout links.
+    pub(super) workspace_patterns: &'a [String],
+}
+
 pub(super) fn audit_base_snapshot_cache_key(
-    opts: &AuditOptions<'_>,
-    base_ref: &str,
-    changed_files: &FxHashSet<PathBuf>,
-    workspace_patterns: &[String],
+    request: &BaseKeyRequest<'_>,
 ) -> Result<Option<AuditBaseSnapshotCacheKey>, ExitCode> {
+    let BaseKeyRequest {
+        opts,
+        base_run,
+        base_ref,
+        changed_files,
+        workspace_patterns,
+    } = *request;
     if opts.no_cache {
         return Ok(None);
     }
@@ -687,13 +718,10 @@ pub(super) fn audit_base_snapshot_cache_key(
         return Ok(None);
     };
     let config_file = config_file_fingerprint(opts)?;
-    // Auto-detected coverage feeds the base pass too (#2347), so its content
-    // must invalidate cached base snapshots exactly like explicit `--coverage`.
-    let coverage_file = opts
-        .coverage
-        .map(Path::to_path_buf)
-        .or_else(|| fallow_engine::health::scoring::auto_detect_coverage(opts.root))
-        .map(|p| coverage_file_fingerprint(&p, opts.root));
+    // The options of the base pass. The key reads only the fields that do
+    // not depend on the base worktree, so the head root stands in for it.
+    let base = base_run.options(opts, opts.root, &base_run.config_path, opts.cache_dir);
+    let coverage = base.coverage.map(coverage_fingerprint);
     let materialized_context = fallow_engine::repo_refs::audit_materialized_context_fingerprint(
         opts.root,
         workspace_patterns,
@@ -723,9 +751,9 @@ pub(super) fn audit_base_snapshot_cache_key(
     // so a non-brief snapshot must never serve a brief run.
     .brief(opts.brief)
     .health(
-        opts.max_crap,
-        coverage_file,
-        opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
+        base.max_crap,
+        coverage,
+        base.coverage_root.map(|p| p.to_string_lossy().to_string()),
     )
     .analyses(
         opts.analyses.dead_code,

@@ -62,23 +62,34 @@ pub struct AuditConfigFingerprint {
     pub resolved_hash: Option<String>,
 }
 
-/// Fingerprint of an optional coverage input that can affect health findings.
+/// Fingerprint of the coverage input of the base pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditCoverageFingerprint {
-    /// User-provided coverage path.
+    /// The coverage path that the base pass gets.
     pub path: String,
-    /// Actual file path hashed after directory resolution.
-    pub resolved_path: String,
-    /// Metadata freshness for the resolved coverage file, when it was readable.
+    /// Each file that the coverage reader selects for `path`, in the order
+    /// of the reader.
+    pub files: Vec<AuditCoverageFileFingerprint>,
+    /// The selection error, when the reader selects no file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Fingerprint of one selected coverage file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditCoverageFileFingerprint {
+    /// Path of the selected file.
+    pub path: String,
+    /// Metadata freshness of the file, when it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceFingerprint>,
-    /// Stable content hash for the resolved coverage file, when it was readable.
+    /// Stable content hash of the file, when it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
     /// File length in bytes, when it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub len: Option<usize>,
-    /// I/O error kind, when the resolved coverage file was not readable.
+    /// I/O error kind, when the file was not readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -347,10 +358,13 @@ mod tests {
     fn audit_cache_key_builder_preserves_typed_fields() {
         let coverage = AuditCoverageFingerprint {
             path: "coverage".to_string(),
-            resolved_path: "coverage/coverage-final.json".to_string(),
-            source: Some(SourceFingerprint::new(12, 34)),
-            content_hash: Some("hash".to_string()),
-            len: Some(34),
+            files: vec![AuditCoverageFileFingerprint {
+                path: "coverage/coverage-final.json".to_string(),
+                source: Some(SourceFingerprint::new(12, 34)),
+                content_hash: Some("hash".to_string()),
+                len: Some(34),
+                error: None,
+            }],
             error: None,
         };
 
@@ -384,8 +398,13 @@ mod tests {
         assert!(payload.include_entry_exports);
         assert!(payload.css);
         assert!(payload.css_deep);
+        assert_eq!(payload.coverage.as_ref().map(|c| c.files.len()), Some(1));
         assert_eq!(
-            payload.coverage.as_ref().and_then(|c| c.source),
+            payload
+                .coverage
+                .as_ref()
+                .and_then(|c| c.files.first())
+                .and_then(|f| f.source),
             Some(SourceFingerprint::new(12, 34))
         );
     }
