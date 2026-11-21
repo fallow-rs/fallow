@@ -311,6 +311,7 @@ pub fn push_package_cycle_diagnostics(
 pub fn push_re_export_cycle_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for cycle in &results.re_export_cycles {
         let message = re_export_cycle_message(&cycle.cycle);
@@ -320,7 +321,7 @@ pub fn push_re_export_cycle_diagnostics(
                 idx,
                 finding_id: cycle.finding_id.as_deref(),
             };
-            push_re_export_member_diagnostic(map, &cycle.cycle, &member, &message);
+            push_re_export_member_diagnostic(map, &cycle.cycle, &member, &message, mapper);
         }
     }
 }
@@ -349,6 +350,22 @@ fn re_export_cycle_message(cycle: &fallow_api::editor_results::ReExportCycle) ->
     )
 }
 
+/// The range of a re-export cycle member. The cycle carries the line of the
+/// re-export that closes it in `files[0]`; the other members, and a cycle
+/// without a known line, use the first line.
+fn re_export_member_range(
+    cycle: &fallow_api::editor_results::ReExportCycle,
+    idx: usize,
+    path: &std::path::Path,
+    mapper: &mut PositionMapper,
+) -> Range {
+    if idx == 0 && cycle.line > 0 {
+        line_range_from_byte_col(mapper, path, cycle.line - 1, cycle.col)
+    } else {
+        FIRST_LINE_RANGE
+    }
+}
+
 /// One member file of a re-export cycle.
 struct ReExportMember<'a> {
     path: &'a std::path::Path,
@@ -363,6 +380,7 @@ fn push_re_export_member_diagnostic(
     cycle: &fallow_api::editor_results::ReExportCycle,
     member: &ReExportMember<'_>,
     message: &str,
+    mapper: &mut PositionMapper,
 ) {
     let ReExportMember {
         path: member_path,
@@ -377,21 +395,22 @@ fn push_re_export_member_diagnostic(
         .iter()
         .enumerate()
         .filter(|(i, _)| *i != idx)
-        .filter_map(|(_, other)| {
+        .filter_map(|(i, other)| {
             let other_uri = Uri::from_file_path(other)?;
             let name = cycle_file_name(other);
             Some(DiagnosticRelatedInformation {
                 location: Location {
                     uri: other_uri,
-                    range: FIRST_LINE_RANGE,
+                    range: re_export_member_range(cycle, i, other, mapper),
                 },
                 message: format!("Other member: {name}"),
             })
         })
         .collect();
 
+    let range = re_export_member_range(cycle, idx, member_path, mapper);
     map.entry(uri).or_default().push(Diagnostic {
-        range: FIRST_LINE_RANGE,
+        range,
         severity: Some(DiagnosticSeverity::WARNING),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String("re-export-cycle".to_string())),
@@ -1168,6 +1187,36 @@ mod tests {
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].location.uri, uri_b);
         assert!(related[0].message.contains("Other member"));
+    }
+
+    #[test]
+    fn re_export_cycle_points_at_the_closing_re_export_in_the_first_member() {
+        use fallow_api::editor_results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+
+        let root = test_root();
+        let file_a = root.join("src/api/index.ts");
+        let file_b = root.join("src/api/internal/index.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![file_a.clone(), file_b.clone()],
+                kind: ReExportCycleKind::MultiNode,
+                line: 4,
+                col: 0,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
+
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
+        let uri_b = Uri::from_file_path(&file_b).unwrap();
+        assert_eq!(diags[&uri_a][0].range.start.line, 3);
+        assert_eq!(diags[&uri_b][0].range.start.line, 0);
+        let related_b = diags[&uri_b][0].related_information.as_ref().unwrap();
+        assert_eq!(related_b[0].location.uri, uri_a);
+        assert_eq!(related_b[0].location.range.start.line, 3);
     }
 
     #[test]
