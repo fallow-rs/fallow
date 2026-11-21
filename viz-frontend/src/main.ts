@@ -25,6 +25,7 @@ import {
   graphInitSteps,
   initGraphNodes,
   nodeScreenPos,
+  reconcileGraphView,
   refitOnResize,
   usableStageWidth,
   minimapHit,
@@ -33,9 +34,9 @@ import {
   resetEgoTrail,
   resetGraphView,
   roadFacts,
+  selectRoad,
   setClusterMode,
   startGraphLensFade,
-  syncStandaloneForLens,
 } from "./graph";
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, updateChrome } from "./chrome";
@@ -146,8 +147,7 @@ const init = (): void => {
     if (state.view === "graph") startGraphLensFade(state, prev);
     // The ranked panel opens or closes with the lens; keep the graph
     // fitted to the space that remains while the camera is untouched.
-    if (state.view === "graph") refitOnResize(state);
-    if (state.view === "graph") syncStandaloneForLens(state);
+    reconcileGraphView(state);
     requestRender();
   };
 
@@ -160,14 +160,15 @@ const init = (): void => {
     startLensFade(state, prev);
     if (state.view === "graph") {
       startGraphLensFade(state, prev);
-      refitOnResize(state);
     }
+    reconcileGraphView(state);
     requestRender();
   };
 
   const setView = (view: "map" | "graph"): void => {
     if (state.view === view) return;
     state.view = view;
+    reconcileGraphView(state);
     state.hoveredCell = null;
     state.graphHovered = null;
     hideTooltip();
@@ -330,7 +331,6 @@ const init = (): void => {
           panel,
           (fileIndex) => selectFile(fileIndex, true),
           () => {
-            state.selectedRoad = null;
             clearGraphFocus(state);
             selectFile(null);
           },
@@ -488,16 +488,15 @@ const init = (): void => {
     if (event.shiftKey && graphPathTrace(state, x, y)) return;
     const result = graphHandleClick(state, x, y);
     if (result.kind === "file") {
-      state.selectedRoad = null;
+      selectRoad(state, null);
       hideTooltip();
       selectFile(result.fileIndex);
     } else if (result.kind === "road") {
-      state.selectedRoad = result.road;
       state.selected = null;
       hideTooltip();
       requestRender();
     } else if (result.kind === "none") {
-      state.selectedRoad = null;
+      selectRoad(state, null);
       selectFile(null);
     } else {
       requestRender();
@@ -524,8 +523,7 @@ const init = (): void => {
     } else if (state.selectedClone !== null) {
       state.selectedClone = null;
       requestRender();
-    } else if (clearGraphFocus(state) || state.selectedRoad !== null) {
-      state.selectedRoad = null;
+    } else if (clearGraphFocus(state)) {
       requestRender();
     } else if (state.search !== "" && refs) {
       refs.search.value = "";
@@ -614,11 +612,10 @@ const init = (): void => {
     requestRender();
   });
   window.addEventListener("hashchange", () => {
-    const lensBefore = state.lens;
     applyHash(state, window.location.hash);
-    // Back and forward can change the lens; the strip of unconnected
-    // folders must follow it as it does for a tab click.
-    if (state.lens !== lensBefore && state.view === "graph") syncStandaloneForLens(state);
+    // A hash edit can change the lens and the view; the strip of
+    // unconnected folders and the camera fit must follow.
+    reconcileGraphView(state);
     requestRender();
   });
 

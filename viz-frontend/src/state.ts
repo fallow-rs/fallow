@@ -192,6 +192,9 @@ export const applyHash = (state: AppState, hash: string): void => {
   // only the honest all-files scope can be restored.
   if (params.get("diff") === "all") state.diffScope = "all";
   if (params.get("filter") === "all") state.filterMode = "all";
+  // The hash has no key for a clone group or a road, so a restored hash shows neither.
+  state.selectedClone = null;
+  state.selectedRoad = null;
   const path = params.get("path");
   state.drillPath = path && state.index.nodesByPath.has(path) ? path : "";
   const file = params.get("file");

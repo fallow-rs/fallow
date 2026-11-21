@@ -37,6 +37,8 @@ import {
   roadGeometry,
   roadIsDrawn,
   roadWidth,
+  selectedRoadIndex,
+  standaloneVisible,
   taperedRibbon,
   usableStageWidth,
 } from "./shared";
@@ -156,8 +158,9 @@ interface HoverContext {
 /** Guard + path setup shared by every hull pass. */
 const forEachHull = (scene: Scene, draw: (cluster: ClusterInfo) => void): void => {
   const { state, gvs } = scene;
+  const standaloneShown = standaloneVisible(state, gvs);
   for (const cluster of gvs.clusters) {
-    if (cluster.isolated && !gvs.standaloneOpen) continue;
+    if (cluster.isolated && !standaloneShown) continue;
     if (cluster.hull.length < 3) continue;
     state.ctx.beginPath();
     hullPath(state.ctx, cluster.hull);
@@ -244,7 +247,7 @@ const drawRoads = (scene: Scene): void => {
   const litCluster = gvs.hoveredCluster;
   // Census focus: a focused road keeps its weight and the others fade to
   // 18%, so its path reads end to end through the mesh.
-  const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
+  const focusRoad = gvs.hoveredRoad ?? selectedRoadIndex(state, gvs);
   for (const [roadIndex, road] of roads.entries()) {
     const lit = litCluster !== null && (road.src === litCluster || road.dst === litCluster);
     if (!roadIsDrawn(gvs, road, roadFloor)) continue;
@@ -466,10 +469,11 @@ const drawNodes = (scene: Scene, hover: HoverContext, width: number, height: num
   const files = data.files;
   const { importers: hoverImporters, imports: hoverImports } = hover;
   const beacons = beaconFiles(scene);
+  const standaloneShown = standaloneVisible(state, gvs);
   // Nodes.
   for (const node of fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
-    if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
+    if (clusters[node.cluster].isolated && !standaloneShown) continue;
     const look = nodeAppearance(scene, hover, node);
     if (!look) continue;
     const file = files[node.fileIndex];

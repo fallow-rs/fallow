@@ -18,11 +18,12 @@ export {
   graphHoverTarget,
   graphPathTrace,
   nodeScreenPos,
+  reconcileGraphView,
   refitOnResize,
-  syncStandaloneForLens,
   resetEgoTrail,
   resetGraphView,
   roadFacts,
+  selectRoad,
   setClusterMode,
   startGraphLensFade,
 } from "./interact";
