@@ -45,11 +45,7 @@ fn run(root: &Path, home: &Path, args: &[&str], env: &[(&str, &str)]) -> Command
         .arg("--no-cache")
         .args(args);
     let output = cmd.output().expect("run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn hint_count(text: &str) -> usize {
@@ -264,11 +260,7 @@ fn no_hint_from_the_agent_setup_commands() {
             .arg(project.path())
             .output()
             .expect("run fallow binary");
-        let output = CommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            code: output.status.code().unwrap_or(-1),
-        };
+        let output = CommandOutput::from_process(output);
         assert!(
             output.code == 0 || output.code == 1,
             "{args:?}: {}",

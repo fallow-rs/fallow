@@ -109,11 +109,7 @@ fn run(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> CommandOutput {
         .arg("--root")
         .arg(root);
     let output = cmd.output().expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn with_args<'a>(command: &[&'a str], extra: &[&'a str]) -> Vec<&'a str> {

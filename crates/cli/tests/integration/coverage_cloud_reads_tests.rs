@@ -113,11 +113,7 @@ fn run(args: &[&str], root: &Path, agent_source: Option<&str>) -> CommandOutput 
         None => command.env("FALLOW_AGENT_SOURCE", "none"),
     };
     let output = command.output().expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn runtime_context_body(file_path: &str, repo_path: Option<&str>) -> String {

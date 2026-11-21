@@ -340,11 +340,7 @@ fn run_reconcile_with_identity_and_retries(
         command.env("FALLOW_BOT_LOGIN", bot_login);
     }
     let output = command.output().expect("run fallow");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 fn run_post_review(
@@ -388,11 +384,7 @@ fn run_post_review_with_identity(
         command.env("FALLOW_BOT_LOGIN", bot_login);
     }
     let output = command.output().expect("run fallow post-review");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 fn github_comments(body: &'static str) -> MockResponse {

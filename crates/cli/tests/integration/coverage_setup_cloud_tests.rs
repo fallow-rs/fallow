@@ -84,11 +84,7 @@ fn run(args: &[&str], root: &Path) -> CommandOutput {
         .env_remove("CI_PROJECT_PATH")
         .output()
         .expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn activation_body(complete: bool) -> String {

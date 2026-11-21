@@ -144,11 +144,7 @@ mod gated {
             cmd.args(["--runtime-coverage", &coverage.to_string_lossy()]);
         }
         let output = cmd.output().expect("run fallow binary");
-        CommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            code: output.status.code().unwrap_or(-1),
-        }
+        CommandOutput::from_process(output)
     }
 
     /// Every focus unit (`review_here` ++ `deprioritized`).

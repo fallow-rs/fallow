@@ -163,11 +163,7 @@ pub fn run_with(
     };
     customize(&mut command);
     let output = command.output().expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 pub fn project() -> (TempDir, TempDir) {

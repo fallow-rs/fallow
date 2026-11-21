@@ -30,7 +30,7 @@ fn run_with_env(subcommand: &str, args: &[&str], env: &[(&str, &OsStr)]) -> (i32
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    (output.status.code().unwrap_or(-1), text)
+    (crate::common::exit_code(&output), text)
 }
 
 fn unknown(subcommand: &str, args: &[&str]) -> (i32, String) {

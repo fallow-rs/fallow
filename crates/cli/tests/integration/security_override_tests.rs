@@ -62,7 +62,7 @@ fn run_security(root: &Path) -> (i32, Vec<String>) {
         .map(|finding| finding["path"].as_str().expect("path").replace('\\', "/"))
         .collect();
     paths.sort();
-    (out.status.code().unwrap_or(-1), paths)
+    (crate::common::exit_code(&out), paths)
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn run_security_leaks(root: &Path) -> (i32, Vec<String>) {
         .map(|finding| finding["path"].as_str().expect("path").replace('\\', "/"))
         .collect();
     paths.sort();
-    (out.status.code().unwrap_or(-1), paths)
+    (crate::common::exit_code(&out), paths)
 }
 
 #[test]

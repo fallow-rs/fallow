@@ -87,11 +87,7 @@ fn coverage_analyze_cloud_fetches_percent_encoded_runtime_context() {
         .output()
         .expect("run fallow");
     handle.join().expect("server joins");
-    let command_output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    };
+    let command_output = crate::common::CommandOutput::from_process(output);
     assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
     let json = parse_json(&command_output);
     assert_eq!(
@@ -197,11 +193,7 @@ fn coverage_analyze_cloud_keeps_inventory_backfill_candidates_conservative() {
         .output()
         .expect("run fallow");
     handle.join().expect("server joins");
-    let command_output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    };
+    let command_output = crate::common::CommandOutput::from_process(output);
     assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
     let json = parse_json(&command_output);
     assert_eq!(
@@ -282,11 +274,7 @@ fn coverage_analyze_explain_attaches_meta_block() {
         .output()
         .expect("run fallow");
     handle.join().expect("server joins");
-    let command_output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    };
+    let command_output = crate::common::CommandOutput::from_process(output);
     assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
     let json = parse_json(&command_output);
     assert_eq!(
@@ -335,11 +323,7 @@ fn coverage_analyze_cloud_keeps_the_cloud_context_of_each_row() {
         .output()
         .expect("run fallow");
     handle.join().expect("server joins");
-    let command_output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    };
+    let command_output = crate::common::CommandOutput::from_process(output);
     assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
     let json = parse_json(&command_output);
     let pointer = |path: &str| json.pointer(path).cloned();
@@ -478,11 +462,7 @@ fn coverage_analyze_reads_production_from_the_config() {
         .output()
         .expect("run fallow");
     handle.join().expect("server joins");
-    let command_output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    };
+    let command_output = crate::common::CommandOutput::from_process(output);
     assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
     let json = parse_json(&command_output);
     assert_eq!(

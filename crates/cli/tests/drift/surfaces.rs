@@ -125,11 +125,7 @@ pub fn run_cli_format(root: &Path, args: &[String], format: &str) -> CommandOutp
         .arg(root)
         .args(["--format", format, "--quiet", "--no-cache"]);
     let output = command.output().expect("run the fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 /// Parse a CLI run as a JSON envelope, with the exit-code rule for findings.

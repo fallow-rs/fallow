@@ -45,7 +45,7 @@ fn run_security_gate(
     }
     let out = child.wait_with_output().unwrap();
     (
-        out.status.code().unwrap_or(-1),
+        crate::common::exit_code(&out),
         String::from_utf8_lossy(&out.stdout).into_owned(),
     )
 }

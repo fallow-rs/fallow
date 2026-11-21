@@ -186,11 +186,7 @@ fn run_fallow_raw_with_env(
         cmd.arg(arg);
     }
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 fn audit_cache_paths(root: &Path, base_sha: &str) -> (std::path::PathBuf, std::path::PathBuf) {
@@ -3978,11 +3974,7 @@ fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> crate::common::CommandOu
         cmd.env(key, value);
     }
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 /// Regression test for issue #301. When git invokes hooks (`pre-commit`,
@@ -4834,11 +4826,7 @@ fn run_audit_string_env(
     cmd.args(["--format", "json", "--quiet"]);
     cmd.args(extra_args);
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 /// Add a second commit so `HEAD~1` resolves, then return the fixture.
