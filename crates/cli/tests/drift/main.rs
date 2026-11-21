@@ -16,6 +16,7 @@
 //! The harness needs the `fallow-mcp` binary next to the `fallow` binary:
 //! run `cargo build -p fallow-mcp` before `cargo test -p fallow-cli --test drift`.
 
+mod clone_controls;
 mod clones;
 #[path = "../common/mod.rs"]
 mod common;
@@ -34,7 +35,10 @@ use proptest::test_runner::{
 use serde_json::Value;
 use tempfile::TempDir;
 
-use crate::clones::{clone_edit_is_small, clone_holds_added_line, clone_line_counts, clone_texts};
+use crate::clones::{
+    base_clone_groups, case_min_lines, clone_holds_added_line, clone_line_counts, clone_spans,
+    clone_texts,
+};
 use crate::invariants::{ExitRule, Verdict, VerdictRuns};
 use crate::keys::{
     AuditKeys, FindingKey, IdentifiedFinding, KeySet, audit_keys, combined_keys,
@@ -1411,92 +1415,6 @@ fn i5_audit_config_section_agrees_across_surfaces() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
-/// Positive control of the clone-group rules of I4. A clone that grows with
-/// one added line in each instance is a new clone group, but the added line
-/// alone is shorter than a clone, so audit grades it `inherited-edited` and
-/// reports it as inherited (#4968). A clone that changes shape only because a
-/// deleted file took an import away holds no added line, so audit demotes it
-/// to inherited (#2164). A clone whose copies the head edits in one line
-/// after a delete is a small edit of the base clone too. Without this control, an identity that
-/// ignores the clone size, or an expected split without the demotion or the
-/// edit rule, passes I4 until a random case finds the gap.
-#[test]
-#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
-fn audit_controls_see_clone_group_changes() {
-    use crate::model::{ChangeSpec, ExportSpec, FileSpec};
-    let file = |exports: usize, imports: Vec<(usize, usize)>| FileSpec {
-        second_package: false,
-        entry_imported: false,
-        suppress_file: false,
-        exports: vec![
-            ExportSpec {
-                is_type: false,
-                suppressed: false,
-            };
-            exports
-        ],
-        imports,
-    };
-    let model = |files: Vec<FileSpec>, duplicate: (usize, usize), changes| ProjectModel {
-        workspaces: false,
-        files,
-        deps: Vec::new(),
-        duplicate: Some((duplicate.0, duplicate.1, false)),
-        complex: None,
-        changes,
-        baseline_mask: vec![false],
-    };
-    let grown = model(
-        vec![file(0, Vec::new()), file(0, Vec::new())],
-        (0, 1),
-        vec![ChangeSpec::Edit(0), ChangeSpec::Edit(1)],
-    );
-    let reshaped = model(
-        vec![
-            file(1, Vec::new()),
-            file(1, Vec::new()),
-            file(0, vec![(0, 0)]),
-        ],
-        (1, 2),
-        vec![ChangeSpec::Delete(0)],
-    );
-    // Both clone files import the deleted file, so the head edits the
-    // `console.log` line that starts the surviving clone in both. Its text
-    // changes, so the key is new, but the edit is one line.
-    let edited = model(
-        vec![
-            file(1, Vec::new()),
-            file(1, Vec::new()),
-            file(0, vec![(0, 0), (1, 0)]),
-            file(0, vec![(0, 0), (1, 0)]),
-        ],
-        (2, 3),
-        vec![ChangeSpec::Delete(1)],
-    );
-    for (name, model, split) in [
-        ("grown", grown, "inherited"),
-        ("reshaped", reshaped, "inherited"),
-        ("edited", edited, "inherited"),
-    ] {
-        let project = Project::new(&model, true);
-        let expected = expected_audit_split(&project);
-        let keys = if split == "introduced" {
-            &expected.introduced
-        } else {
-            &expected.inherited
-        };
-        assert!(
-            keys.iter().any(|key| key.kind == keys::DUPLICATION_KIND),
-            "the {name} control has no {split} clone group\n{}",
-            keys::render(keys)
-        );
-        let cli = audit_keys(&cli_audit(&project.root));
-        project
-            .explain(invariants::i4_audit_attribution(&expected, &cli))
-            .unwrap_or_else(|err| panic!("{name} control: {err}"));
-    }
-}
-
 /// Two stale suppressions in one file are two findings. The base has a stale
 /// `unused-export` suppression. The head deletes the importer, so the file is
 /// unused, and its `unused-type` suppression is stale too. That one is
@@ -1641,17 +1559,30 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         .into_iter()
         .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
         .collect();
-    let mut base_clones: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
     for key in &base_keys {
-        let key_identity = identity(key, &renames, &project.files.base);
-        if key.kind == keys::DUPLICATION_KIND {
-            base_clones.insert((
-                key_identity.1.clone(),
-                keys::clone_instances(&key.symbol).count(),
-            ));
-        }
-        *base_counts.entry(key_identity).or_default() += 1;
+        *base_counts
+            .entry(identity(key, &renames, &project.files.base))
+            .or_default() += 1;
     }
+    // The edit rule of the audit, on the same diff that the audit reads.
+    let base_clones = base_clone_groups(&base_keys);
+    let renamed: Vec<fallow_engine::changed_files::RenamedFile> = git_renames
+        .iter()
+        .map(|(old, new)| fallow_engine::changed_files::RenamedFile {
+            from: project.root.join(old),
+            to: project.root.join(new),
+        })
+        .collect();
+    let diff = fallow_output::DiffIndex::from_unified_diff(
+        &fallow_engine::changed_files::try_get_changed_diff(&project.root, BASE_REF)
+            .expect("read the diff of the case"),
+    );
+    let change = fallow_api::audit_run::CloneChange {
+        root: &project.root,
+        diff: &diff,
+        renames: &renamed,
+    };
+    let min_lines = case_min_lines(&project.files.head);
     let mut head_keys: Vec<FindingKey> = Analysis::ALL
         .into_iter()
         .flat_map(|analysis| cli_keys(analysis, &project.root, &unscoped, None))
@@ -1677,8 +1608,9 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         let untouched_clone =
             key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
         let edited_clone = key.kind == keys::DUPLICATION_KIND
-            && base_clones.contains(&(key_identity.1, keys::clone_instances(&key.symbol).count()))
-            && clone_edit_is_small(&key.symbol, &added);
+            && clone_spans(&key.symbol).is_some_and(|spans| {
+                fallow_api::audit_run::edits_base_clone(&spans, &change, &base_clones, min_lines)
+            });
         if untouched_clone || edited_clone || in_base {
             expected.inherited.insert(key);
         } else {

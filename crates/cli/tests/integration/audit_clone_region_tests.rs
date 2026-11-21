@@ -299,12 +299,23 @@ fn handler_with(extra: &str) -> String {
 
 /// The base holds one clone in `a.js` and `b.js`. The head writes `extra`
 /// into both copies. With `accept`, the base config accepts the base clone.
+/// With `min_lines`, the config sets `duplicates.minLines`.
 fn audit_after_block_in_every_copy(
     extra: &str,
     accept: bool,
+    min_lines: Option<usize>,
 ) -> (CommandOutput, serde_json::Value) {
     let tmp = new_repo("block");
     let repo = tmp.path();
+    if let Some(min_lines) = min_lines {
+        fs::write(
+            repo.join(".fallowrc.json"),
+            format!(
+                r#"{{"rules":{{"introduced-clone-group":"error"}},"duplicates":{{"minLines":{min_lines}}}}}"#
+            ),
+        )
+        .unwrap();
+    }
     let body = handler_with("");
     fs::write(repo.join("src/a.js"), &body).unwrap();
     fs::write(repo.join("src/b.js"), &body).unwrap();
@@ -334,7 +345,7 @@ fn forty_new_lines() -> String {
 /// the block alone is a clone.
 #[test]
 fn large_block_in_every_copy_is_introduced() {
-    let (output, json) = audit_after_block_in_every_copy(&forty_new_lines(), false);
+    let (output, json) = audit_after_block_in_every_copy(&forty_new_lines(), false, None);
     assert_eq!(output.code, 1, "the new block must fail the gate: {json}");
     assert!(
         regions(&json)
@@ -349,9 +360,29 @@ fn large_block_in_every_copy_is_introduced() {
 /// `ignoredClones` key.
 #[test]
 fn large_block_in_every_copy_of_an_accepted_clone_gets_no_ignore_hint() {
-    let (output, json) = audit_after_block_in_every_copy(&forty_new_lines(), true);
+    let (output, json) = audit_after_block_in_every_copy(&forty_new_lines(), true, None);
     assert_eq!(output.code, 1, "the new block must fail the gate: {json}");
     for region in regions(&json) {
         assert!(region.get("ignore_hint").is_none(), "{json}");
     }
+}
+
+/// Six new lines in every copy grow each copy by six lines. With the default
+/// `duplicates.minLines` (5), the six lines can be a clone alone, so the
+/// region is introduced. With `minLines: 8`, they cannot, so the region is
+/// `inherited-edited` and the gate passes.
+#[test]
+fn growth_compares_with_the_configured_min_lines() {
+    let six: String = (1..=6).map(|index| assignment("w", index)).collect();
+    let (output, json) = audit_after_block_in_every_copy(&six, false, None);
+    assert_eq!(
+        output.code, 1,
+        "six lines must fail under minLines 5: {json}"
+    );
+    let (output, json) = audit_after_block_in_every_copy(&six, false, Some(8));
+    assert_eq!(
+        output.code, 0,
+        "six lines must pass under minLines 8: {json}"
+    );
+    assert_one_region(&json, "inherited-edited");
 }

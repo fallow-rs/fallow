@@ -1,6 +1,7 @@
 //! One row per change shape: the grade of each region and whether it fails
 //! the `introduced-clone-group` gate. A new shape is one new row.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use super::*;
@@ -492,7 +493,7 @@ fn large_block_appended_to_every_copy() -> Case {
     }
 }
 
-/// A block of `minLines - 1` lines in every copy is a small edit.
+/// Every copy grows by `minLines - 1` lines: a small edit.
 fn small_block_inserted_into_every_copy() -> Case {
     Case {
         groups: vec![group(vec![
@@ -501,6 +502,141 @@ fn small_block_inserted_into_every_copy() -> Case {
         ])],
         diff: Some(insert_in_both(11, MIN_LINES - 1)),
         base_groups: ab_base(),
+        ..Case::default()
+    }
+}
+
+/// Every copy grows by `minLines` lines: the added lines can be a clone.
+fn growth_of_min_lines_in_every_copy() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 21),
+            instance("src/b.js", 1, 21),
+        ])],
+        diff: Some(insert_in_both(11, MIN_LINES)),
+        base_groups: ab_base(),
+        ..Case::default()
+    }
+}
+
+/// The base clone `src/a.js:1-20` and `src/b.js:1-20`.
+fn ab_base_of_20() -> Vec<BaseCloneGroup> {
+    vec![base_group(vec![
+        span("src/a.js", 1, 20),
+        span("src/b.js", 1, 20),
+    ])]
+}
+
+/// The same 4 new lines after each of the first 19 old lines of both copies.
+/// No run reaches `minLines`, but each copy grows by 76 lines.
+fn split_additions_in_every_copy() -> Case {
+    let hunks = |path: &str| -> String {
+        let mut text = format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n");
+        for line in 1..20 {
+            let start = line + 4 * (line - 1) + 1;
+            let _ = writeln!(text, "@@ -{line},0 +{start},4 @@");
+            text.push_str(&"+new\n".repeat(4));
+        }
+        text
+    };
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 96),
+            instance("src/b.js", 1, 96),
+        ])],
+        diff: Some([hunks("src/a.js"), hunks("src/b.js")].concat()),
+        base_groups: ab_base_of_20(),
+        ..Case::default()
+    }
+}
+
+/// A rewrite of `minLines` lines in every copy, for example a renamed
+/// variable, keeps the line count, so the copies do not grow.
+fn rewrite_without_growth_in_every_copy() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 16),
+            instance("src/b.js", 1, 16),
+        ])],
+        diff: Some(
+            [
+                replace("src/a.js", 5, MIN_LINES + 1, MIN_LINES + 1),
+                replace("src/b.js", 5, MIN_LINES + 1, MIN_LINES + 1),
+            ]
+            .concat(),
+        ),
+        base_groups: ab_base(),
+        ..Case::default()
+    }
+}
+
+/// Base copies of 30 lines each. The head parts start one line apart, the
+/// tolerance of a copy that does not grow.
+fn offset_at_the_tolerance() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 6, 12),
+            instance("src/b.js", 7, 13),
+        ])],
+        diff: Some([replace("src/a.js", 6, 1, 1), replace("src/b.js", 7, 1, 1)].concat()),
+        base_groups: vec![base_group(vec![
+            span("src/a.js", 1, 30),
+            span("src/b.js", 1, 30),
+        ])],
+        ..Case::default()
+    }
+}
+
+/// The same base copies. The head parts start two lines apart.
+fn offset_past_the_tolerance() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 6, 12),
+            instance("src/b.js", 8, 14),
+        ])],
+        diff: Some([replace("src/a.js", 6, 1, 1), replace("src/b.js", 8, 1, 1)].concat()),
+        ..offset_at_the_tolerance()
+    }
+}
+
+/// An old clone `1-10`, and two other functions at `30-40` that differ in one
+/// line. The change makes them equal: a new clone outside the old one.
+fn two_old_functions_made_equal_next_to_an_old_clone() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 30, 40),
+            instance("src/b.js", 30, 40),
+        ])],
+        diff: Some(replace("src/b.js", 35, 1, 1)),
+        base_groups: vec![base_group(vec![
+            span("src/a.js", 1, 10),
+            span("src/b.js", 1, 10),
+        ])],
+        ..Case::default()
+    }
+}
+
+/// A 3-copy base clone. The change makes the same edit in `a` and `b`, and
+/// another edit in `c`. The group of `a` and `b` is an edit of the base clone.
+fn same_edit_in_two_of_three_copies() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 16),
+            instance("src/b.js", 1, 16),
+        ])],
+        diff: Some(
+            [
+                replace("src/a.js", 7, 1, 1),
+                replace("src/b.js", 7, 1, 1),
+                replace("src/c.js", 9, 1, 1),
+            ]
+            .concat(),
+        ),
+        base_groups: vec![base_group(vec![
+            span("src/a.js", 1, 16),
+            span("src/b.js", 1, 16),
+            span("src/c.js", 1, 16),
+        ])],
         ..Case::default()
     }
 }
@@ -657,8 +793,43 @@ const ROWS: &[Row] = &[
         &[expect(Introduced, true)],
     ),
     (
-        "small block inserted into every copy",
+        "growth of minLines - 1 in every copy",
         small_block_inserted_into_every_copy,
+        &[expect(InheritedEdited, false)],
+    ),
+    (
+        "growth of minLines in every copy",
+        growth_of_min_lines_in_every_copy,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "split additions in every copy",
+        split_additions_in_every_copy,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "rewrite without growth in every copy",
+        rewrite_without_growth_in_every_copy,
+        &[expect(InheritedEdited, false)],
+    ),
+    (
+        "offset at the tolerance",
+        offset_at_the_tolerance,
+        &[expect(InheritedEdited, false)],
+    ),
+    (
+        "offset past the tolerance",
+        offset_past_the_tolerance,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "two old functions made equal next to an old clone",
+        two_old_functions_made_equal_next_to_an_old_clone,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "same edit in two of three copies",
+        same_edit_in_two_of_three_copies,
         &[expect(InheritedEdited, false)],
     ),
     (
@@ -714,6 +885,36 @@ fn demoted_group_in_an_introduced_region_stays_demoted() {
     assert_eq!(regions.introduced_count(), 1);
     assert!(regions.group_demoted(0));
     assert!(!regions.group_introduced(0));
+}
+
+/// The public check that the drift harness calls gives the edit result of
+/// the region grade for each row with one group: `inherited-edited` exactly
+/// when the check holds.
+#[test]
+fn edits_base_clone_agrees_with_the_grade() {
+    for (name, case, _) in ROWS {
+        let case = case();
+        let (Some(diff), [group]) = (case.diff.as_deref(), case.groups.as_slice()) else {
+            continue;
+        };
+        if !case.accepted.is_empty() || !case.base_keys.is_empty() {
+            continue;
+        }
+        let diff = DiffIndex::from_unified_diff(diff);
+        let spans = head_spans(group, &root());
+        let edits = edits_base_clone(
+            &spans,
+            &CloneChange {
+                root: &root(),
+                diff: &diff,
+                renames: &case.renames,
+            },
+            &case.base_groups,
+            MIN_LINES,
+        );
+        let grade = grade(&case).regions()[0].grade;
+        assert_eq!(edits, grade == InheritedEdited, "row: {name}");
+    }
 }
 
 #[test]

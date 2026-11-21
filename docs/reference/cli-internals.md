@@ -726,8 +726,10 @@ line states exit code 0.
     with its text (issue #4670);
   - demoted: the key is new, and no instance holds an added line (#2164);
   - edited: each instance maps to a different instance of one base group,
-    and no instance holds `duplicates.minLines` or more added lines in a
-    row, so the added lines cannot be a clone alone;
+    and each instance grows by fewer lines than `duplicates.minLines` (its
+    head line count minus the line count of its mapped base span), so the
+    added lines cannot be a clone alone. A rewrite that keeps the line count
+    does not grow;
   - new: every other group.
   The mapping takes each head instance to its base path through the rename
   list and the diff renames, and to its base lines through the line changes
@@ -750,7 +752,7 @@ line states exit code 0.
   groups in the changed files, so the old copies are not in the base
   snapshot; equal text without an edit shows that the base had the clone.
   An edited member must sit at the same relative place in each base copy,
-  with a tolerance of its longest added run plus one line, so one new block
+  with a tolerance of its growth plus one line, so one new block
   at two places of an old clone is a new member. The
   `introduced` flag of a group is its own state: an old group that overlaps a
   new group stays `false`, and its rule severity does not take part in the

@@ -11,7 +11,7 @@
 //! - `inherited`: each member group is a base group, or the change wrote no
 //!   line of it.
 //! - `inherited-edited`: each member group lies inside a base group, and the
-//!   change edited one or more of its copies with fewer added lines in a row
+//!   change edited one or more of its copies. Each copy grows by fewer lines
 //!   than `duplicates.minLines`, so the edit cannot write a clone alone.
 //!
 //! The `introduced-clone-group` gate counts regions, and only an
@@ -273,17 +273,19 @@ impl<'a> BaseMapper<'a> {
         }
     }
 
-    /// The base span of `instance`. `None` when the instance has no base
+    /// The base span of a head span. `None` when the span has no base
     /// lines, for example a copy in a new file.
-    fn base_span(&self, instance: &CloneInstance) -> Option<CloneSpan> {
-        let rel = relative_key_path(&instance.file, self.root);
-        let key = self.diff.key_for(&instance.file, self.root)?;
-        let start = u64::try_from(instance.start_line).ok()?;
-        let end = u64::try_from(instance.end_line).ok()?;
-        let (base_start, base_end) = self.diff.base_line_range(&key, start, end)?;
-        let path = self.head_to_base.get(&rel).cloned().unwrap_or_else(|| {
+    fn base_span(&self, head: &CloneSpan) -> Option<CloneSpan> {
+        let rel = &head.path;
+        let key = self.diff.key_for(&self.root.join(rel), self.root)?;
+        let (base_start, base_end) = self.diff.base_line_range(
+            &key,
+            u64::from(head.start_line),
+            u64::from(head.end_line),
+        )?;
+        let path = self.head_to_base.get(rel).cloned().unwrap_or_else(|| {
             self.diff
-                .old_path_for_root_relative(&rel)
+                .old_path_for_root_relative(rel)
                 .map_or_else(|| rel.clone(), |old| old.into_owned())
         });
         Some(CloneSpan {
@@ -303,28 +305,6 @@ impl<'a> BaseMapper<'a> {
         let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
         let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
         self.diff.range_overlaps_added(&key, start, end)
-    }
-
-    /// The most added lines in a row inside `instance`. An instance whose
-    /// path does not map into the diff gives `usize::MAX`.
-    fn longest_added_run(&self, instance: &CloneInstance) -> usize {
-        let Some(key) = self.diff.key_for(&instance.file, self.root) else {
-            return usize::MAX;
-        };
-        let Some(added) = self.diff.added_lines_in(&key) else {
-            return 0;
-        };
-        let mut longest = 0;
-        let mut run = 0;
-        for line in instance.start_line..=instance.end_line {
-            if u64::try_from(line).is_ok_and(|line| added.contains(&line)) {
-                run += 1;
-                longest = longest.max(run);
-            } else {
-                run = 0;
-            }
-        }
-        longest
     }
 }
 
@@ -385,57 +365,104 @@ fn member_against_base(
     if !touched.contains(&true) {
         return Member::Demoted;
     }
-    let mapped: Vec<Option<CloneSpan>> = group
-        .instances
-        .iter()
-        .map(|instance| mapper.base_span(instance))
-        .collect();
-    // An added run of `minLines` lines can be a clone alone, so a group with
-    // such a run in a copy can hold new duplication inside the old clone.
-    let longest_run = group
-        .instances
-        .iter()
-        .map(|instance| mapper.longest_added_run(instance))
-        .max()
-        .unwrap_or(0);
-    let small_edit = longest_run < head.min_lines;
-    if small_edit && let Some(spans) = mapped.iter().cloned().collect::<Option<Vec<CloneSpan>>>() {
-        match fitting_base_group(&spans, base, longest_run) {
-            Some(Fit::Visible) => return Member::Edited { accepted: None },
-            Some(Fit::Accepted(key)) => {
-                return Member::Edited {
-                    accepted: Some(key.to_owned()),
-                };
-            }
-            None => {}
+    let spans = head_spans(group, head.root);
+    let mapped: Vec<Option<CloneSpan>> = spans.iter().map(|span| mapper.base_span(span)).collect();
+    match edited_fit(&spans, &mapped, base.groups, base.accepted, head.min_lines) {
+        Some(Fit::Visible) => return Member::Edited { accepted: None },
+        Some(Fit::Accepted(key)) => {
+            return Member::Edited {
+                accepted: Some(key.to_owned()),
+            };
         }
+        None => {}
     }
     Member::New {
         accepted: accepting_ignored_groups(group, &mapped, &touched, head),
     }
 }
 
-/// The base group that the spans fit in: each span lies inside a different
-/// instance of the group. A base group that `ignoredClones` did not hide
-/// wins. Two spans inside one base copy are a new clone of the copy with
-/// itself, so each base instance takes at most one span. `added_run` is the
-/// most added lines in a row in a head instance.
-fn fitting_base_group<'a>(
-    spans: &[CloneSpan],
-    base: &CloneRegionBase<'a>,
-    added_run: usize,
-) -> Option<Fit<'a>> {
-    if base
-        .groups
+/// The head spans of a clone group, root-relative.
+fn head_spans(group: &CloneGroup, root: &Path) -> Vec<CloneSpan> {
+    group
+        .instances
         .iter()
-        .any(|group| spans_fit_in_group(spans, &group.instances, added_run))
+        .map(|instance| CloneSpan {
+            path: relative_key_path(&instance.file, root),
+            start_line: u32::try_from(instance.start_line).unwrap_or(u32::MAX),
+            end_line: u32::try_from(instance.end_line).unwrap_or(u32::MAX),
+        })
+        .collect()
+}
+
+/// The number of lines of a span.
+fn span_lines(span: &CloneSpan) -> u32 {
+    span.end_line.saturating_sub(span.start_line) + 1
+}
+
+/// The base group that a head group edits: each head span maps to base
+/// lines, and the mapped spans fit in one base group. A base group that
+/// `ignoredClones` did not hide wins.
+///
+/// The growth of a copy is its head line count minus the line count of its
+/// mapped base span. Each copy must grow by fewer than `min_lines` lines, so
+/// the lines that the change added cannot be a clone alone. A rewrite that
+/// keeps the line count does not grow the copy. `mapped` holds the base span
+/// of each head span, `None` for a span with no base lines.
+fn edited_fit<'a>(
+    head: &[CloneSpan],
+    mapped: &[Option<CloneSpan>],
+    visible: &[BaseCloneGroup],
+    accepted: &'a [AcceptedCloneGroup],
+    min_lines: usize,
+) -> Option<Fit<'a>> {
+    let spans: Vec<CloneSpan> = mapped.iter().cloned().collect::<Option<_>>()?;
+    let growth = head
+        .iter()
+        .zip(&spans)
+        .map(|(head, base)| span_lines(head).saturating_sub(span_lines(base)))
+        .max()
+        .unwrap_or(0);
+    if usize::try_from(growth).unwrap_or(usize::MAX) >= min_lines {
+        return None;
+    }
+    if visible
+        .iter()
+        .any(|group| spans_fit_in_group(&spans, &group.instances, growth))
     {
         return Some(Fit::Visible);
     }
-    base.accepted
+    accepted
         .iter()
-        .find(|group| spans_fit_in_group(spans, &group.instances, added_run))
+        .find(|group| spans_fit_in_group(&spans, &group.instances, growth))
         .map(|group| Fit::Accepted(group.key.as_str()))
+}
+
+/// The change that a head clone group compares with: the diff of the run and
+/// its renamed files.
+pub struct CloneChange<'a> {
+    /// Root that the head paths are relative to.
+    pub root: &'a Path,
+    /// The diff of the run.
+    pub diff: &'a DiffIndex,
+    /// The renamed files of the change.
+    pub renames: &'a [RenamedFile],
+}
+
+/// Whether the head clone group with the root-relative spans `head` is an
+/// edit of one of `base_groups`, by the rule that grades a clone region
+/// `inherited-edited`: each copy maps through the diff into a different copy
+/// of one base group, at the same relative place, and grows by fewer than
+/// `min_lines` lines. The base group may have more copies.
+#[must_use]
+pub fn edits_base_clone(
+    head: &[CloneSpan],
+    change: &CloneChange<'_>,
+    base_groups: &[BaseCloneGroup],
+    min_lines: usize,
+) -> bool {
+    let mapper = BaseMapper::new(change.root, change.diff, change.renames);
+    let mapped: Vec<Option<CloneSpan>> = head.iter().map(|span| mapper.base_span(span)).collect();
+    edited_fit(head, &mapped, base_groups, &[], min_lines).is_some()
 }
 
 /// Whether each span lies inside a different instance of `base`, at the
@@ -445,10 +472,11 @@ fn fitting_base_group<'a>(
 /// the same relative place in each copy. Two base copies can differ in line
 /// count when their formatting differs, so the check scales the offset of
 /// the first span to the length of each other copy. The scaled offset may
-/// differ by the added run plus one line for a rewritten first line. Without
+/// differ by the growth of the copies plus one line for a rewritten first
+/// line. Without
 /// this check, one new block that replaces lines at two different places of
 /// a base clone would map inside the base clone.
-fn spans_fit_in_group(spans: &[CloneSpan], base: &[CloneSpan], added_run: usize) -> bool {
+fn spans_fit_in_group(spans: &[CloneSpan], base: &[CloneSpan], growth: u32) -> bool {
     let mut used = vec![false; base.len()];
     let mut offsets: Vec<(u32, u32)> = Vec::with_capacity(spans.len());
     let all_inside = spans.iter().all(|span| {
@@ -474,9 +502,7 @@ fn spans_fit_in_group(spans: &[CloneSpan], base: &[CloneSpan], added_run: usize)
     let Some(&(first_offset, first_length)) = offsets.first() else {
         return true;
     };
-    let tolerance = u64::try_from(added_run)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
+    let tolerance = u64::from(growth).saturating_add(1);
     offsets.iter().all(|&(offset, length)| {
         // `offset / length` against `first_offset / first_length`, in lines
         // of the first copy.

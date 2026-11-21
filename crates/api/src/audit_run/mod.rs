@@ -43,7 +43,7 @@ pub use base_ref::{
     AuditBaseError, AuditBaseOrigin, audit_base_override, parse_audit_base_override,
     resolve_audit_base, resolve_audit_base_decided,
 };
-pub use clone_regions::{CloneRegion, CloneRegions};
+pub use clone_regions::{CloneChange, CloneRegion, CloneRegions, edits_base_clone};
 pub use outcome::{
     DupeBase, DupeDemotionDiffSource, RunChange, SharedDiff, attribute_clone_regions, compare,
     outcome, realign_styling_introductions, styling_finding_gates, styling_rule_severity,

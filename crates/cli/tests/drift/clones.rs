@@ -1,29 +1,50 @@
-//! Clone-group helpers of the I4 expected split: the text, the size and the
-//! added lines of the instances in a clone-group symbol.
+//! Clone-group helpers of the I4 expected split: the text, the size, the
+//! spans and the added lines of the instances in a clone-group symbol, and
+//! the base clone groups that the edit check of the audit compares with.
 
 use std::collections::BTreeMap;
 
-use crate::keys;
+use fallow_api::diff_risk::clones::{BaseCloneGroup, CloneSpan};
 
-/// The default `duplicates.minLines`: the fewest lines of a clone.
-const MIN_CLONE_LINES: u64 = 5;
+use crate::keys::{self, FindingKey};
 
-/// Whether each instance of a clone-group symbol holds fewer added lines in a
-/// row than a clone has. Such an edit cannot write a new clone alone, so the
-/// audit grades the group of an old clone `inherited-edited`.
-pub fn clone_edit_is_small(symbol: &str, added: &BTreeMap<String, Vec<(u64, u64)>>) -> bool {
-    keys::clone_instances(symbol).all(|instance| {
-        let Some(instance) = instance else {
-            return false;
-        };
-        added.get(instance.path).is_none_or(|hunks| {
-            hunks.iter().all(|&(first, last)| {
-                let overlap_start = first.max(instance.start_line);
-                let overlap_end = last.min(instance.end_line);
-                overlap_end < overlap_start || overlap_end - overlap_start + 1 < MIN_CLONE_LINES
+/// The `duplicates.minLines` of a case: the value in its `.fallowrc.json`,
+/// else the default.
+pub fn case_min_lines(files: &BTreeMap<String, String>) -> usize {
+    files
+        .get(".fallowrc.json")
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .and_then(|config| config["duplicates"]["minLines"].as_u64())
+        .and_then(|lines| usize::try_from(lines).ok())
+        .unwrap_or_else(|| fallow_config::DuplicatesConfig::default().min_lines)
+}
+
+/// The root-relative spans of a clone-group symbol. `None` when an instance
+/// does not parse.
+pub fn clone_spans(symbol: &str) -> Option<Vec<CloneSpan>> {
+    keys::clone_instances(symbol)
+        .map(|instance| {
+            let instance = instance?;
+            Some(CloneSpan {
+                path: instance.path.to_string(),
+                start_line: u32::try_from(instance.start_line).ok()?,
+                end_line: u32::try_from(instance.end_line).ok()?,
             })
         })
-    })
+        .collect()
+}
+
+/// The clone groups of the base keys, at base paths.
+pub fn base_clone_groups(base_keys: &[FindingKey]) -> Vec<BaseCloneGroup> {
+    base_keys
+        .iter()
+        .filter(|key| key.kind == keys::DUPLICATION_KIND)
+        .filter_map(|key| {
+            Some(BaseCloneGroup {
+                instances: clone_spans(&key.symbol)?,
+            })
+        })
+        .collect()
 }
 
 /// Whether an instance of a clone-group symbol holds an added line of its
