@@ -101,12 +101,27 @@ impl CloneDetector {
     /// All files still participate in matching, so focused files can be reported
     /// as duplicated against unchanged files. Groups that only involve
     /// non-focused files are dropped before expensive result building.
+    ///
+    /// The statistics count only the passed files. The pipeline calls
+    /// `detect_touching_files_with_totals` to report against the corpus
+    /// before a prefilter.
     pub fn detect_touching_files(
         &self,
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
         focus_files: &FxHashSet<PathBuf>,
     ) -> DuplicationReport {
         self.detect_inner(file_data, Some(focus_files), None)
+    }
+
+    /// Run [`Self::detect_touching_files`] and report the statistics against
+    /// `totals`, the totals of the corpus before a prefilter.
+    pub(super) fn detect_touching_files_with_totals(
+        &self,
+        file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
+        focus_files: &FxHashSet<PathBuf>,
+        totals: CorpusTotals,
+    ) -> DuplicationReport {
+        self.detect_inner(file_data, Some(focus_files), Some(totals))
     }
 
     fn detect_inner(
