@@ -59,7 +59,10 @@ pub(super) enum QueueOutcome {
 struct SourceSnapshot {
     content: String,
     meta: EncodingMetadata,
-    edits: Vec<SourceEdit>,
+    /// Each queued edit, with the number of the group that queued it.
+    edits: Vec<(usize, SourceEdit)>,
+    /// The number of groups that went in.
+    groups: usize,
 }
 
 /// The analysed text of each source file that a fixer read, with the edits
@@ -85,6 +88,7 @@ impl SourceSnapshots {
                 content,
                 meta,
                 edits: Vec::new(),
+                groups: 0,
             },
         );
     }
@@ -117,7 +121,7 @@ impl SourceSnapshots {
         let mut fresh = Vec::with_capacity(group.len());
         for edit in group {
             let mut covered = false;
-            for queued in &snapshot.edits {
+            for (_, queued) in &snapshot.edits {
                 if *queued == edit
                     || (queued.is_deletion()
                         && queued.start <= edit.start
@@ -135,7 +139,11 @@ impl SourceSnapshots {
         if fresh.is_empty() {
             return QueueOutcome::Covered;
         }
-        snapshot.edits.extend(fresh);
+        let group = snapshot.groups;
+        snapshot.groups += 1;
+        snapshot
+            .edits
+            .extend(fresh.into_iter().map(|edit| (group, edit)));
         QueueOutcome::Queued
     }
 
@@ -150,20 +158,37 @@ impl SourceSnapshots {
             if snapshot.edits.is_empty() {
                 continue;
             }
-            let line_ending = snapshot.meta.line_ending;
-            let mut result = snapshot.content.clone();
-            for edit in merge_shared_line_endings(snapshot.edits).iter().rev() {
-                result.replace_range(edit.start..edit.end, &edit.replacement);
-            }
-            if snapshot.content.ends_with(line_ending) && !result.ends_with(line_ending) {
-                result.push_str(line_ending);
-            }
+            let result = snapshot.rewritten();
             let original = bytes_with_optional_bom(snapshot.content, &snapshot.meta);
             let rewritten = bytes_with_optional_bom(result, &snapshot.meta);
             rewrites.push((path, original, rewritten));
         }
         rewrites
     }
+}
+
+impl SourceSnapshot {
+    /// The text with each queued edit applied.
+    fn rewritten(&self) -> String {
+        apply_edits(
+            &self.content,
+            self.meta.line_ending,
+            self.edits.iter().map(|(_, edit)| edit.clone()).collect(),
+        )
+    }
+}
+
+/// `content` with `edits` applied. A text that ends with a line ending keeps
+/// it.
+fn apply_edits(content: &str, line_ending: &str, edits: Vec<SourceEdit>) -> String {
+    let mut result = content.to_owned();
+    for edit in merge_shared_line_endings(edits).iter().rev() {
+        result.replace_range(edit.start..edit.end, &edit.replacement);
+    }
+    if content.ends_with(line_ending) && !result.ends_with(line_ending) {
+        result.push_str(line_ending);
+    }
+    result
 }
 
 /// The edits sorted by start, with each pair of deletions that share a line
@@ -291,6 +316,11 @@ pub(super) fn line_deletions(content: &str, line_ending: &str, lines: &[usize]) 
     edits.push(line_edit(content, line_ending, run_first, run_last, None));
     edits
 }
+
+#[path = "source_edits_post_edit.rs"]
+mod post_edit;
+
+pub(super) use post_edit::{PostEditInput, unused_export_names, withdraw_dropped_fixes};
 
 #[cfg(test)]
 #[path = "source_edits_tests.rs"]

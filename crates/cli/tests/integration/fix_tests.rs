@@ -207,8 +207,11 @@ fn fix_removes_unused_exported_enum_declaration() {
     assert!(json["fixes"].as_array().unwrap().is_empty());
 }
 
+/// An imported enum whose members are all unused is still in use: the
+/// importer reads the enum itself. The fold would remove the declaration and
+/// break the import, so the post-edit check keeps the file.
 #[test]
-fn fix_folds_imported_enum_with_all_members_unused() {
+fn fix_keeps_an_imported_enum_with_all_members_unused() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -222,41 +225,26 @@ fn fix_folds_imported_enum_with_all_members_unused() {
         "import { MyEnum } from './enum';\nconsole.log(typeof MyEnum);\n",
     )
     .unwrap();
-    std::fs::write(
-        root.join("src/enum.ts"),
-        "export enum MyEnum {\n  A,\n  B,\n}\n",
-    )
-    .unwrap();
-
-    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
-    let json = parse_json(&output);
-    let fixes = json["fixes"].as_array().unwrap();
-    assert_eq!(
-        fixes.len(),
-        1,
-        "fold should collapse the per-member fixes into a single remove_export entry"
-    );
-    assert_eq!(fixes[0]["type"], "remove_export");
-    assert_eq!(fixes[0]["name"], "MyEnum");
-
-    let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
-    assert_eq!(
-        output.code, 0,
-        "fix should exit 0, stdout: {}, stderr: {}",
-        output.stdout, output.stderr
-    );
-
-    let after = std::fs::read_to_string(root.join("src/enum.ts")).unwrap();
-    assert_eq!(
-        after, "\n",
-        "enum.ts should be empty after the fold (single trailing newline)"
-    );
+    let source = "export enum MyEnum {\n  A,\n  B,\n}\n";
+    std::fs::write(root.join("src/enum.ts"), source).unwrap();
 
     let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     let json = parse_json(&output);
     assert!(
         json["fixes"].as_array().unwrap().is_empty(),
-        "second pass should find nothing more to fix"
+        "the fold removes an export in use, so the preview lists no fix: {json}"
+    );
+
+    let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output.stderr.contains("Kept src/enum.ts:1 as it is"),
+        "stderr: {}",
+        output.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/enum.ts")).unwrap(),
+        source
     );
 }
 

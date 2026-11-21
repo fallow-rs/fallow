@@ -301,3 +301,89 @@ fn queue_joins_deletions_that_share_a_line_ending() {
         "deletions that share more than a line ending still conflict"
     );
 }
+
+mod post_edit_check {
+    use super::*;
+
+    fn replace(content: &str, old: &str, new: &str) -> SourceEdit {
+        let start = content.find(old).expect("the old text is in the content");
+        SourceEdit {
+            start,
+            end: start + old.len(),
+            replacement: new.to_owned(),
+        }
+    }
+
+    fn check(snapshots: &mut SourceSnapshots) -> Vec<post_edit::DroppedEdit> {
+        let unused = rustc_hash::FxHashMap::default();
+        snapshots.check_edits(&PostEditInput {
+            unused_exports: &unused,
+            re_exports: &[],
+        })
+    }
+
+    #[test]
+    fn keeps_each_group_that_passes_and_drops_the_one_that_fails() {
+        let path = Path::new("/project/src/a.ts");
+        let content = "const a = 1;\nconst b = 2;\nconst c = 3;\nconsole.log(a, c);\n";
+        let mut snapshots = snapshots_with(path, content);
+        for old in ["const a = 1;\n", "const b = 2;\n", "const c = 3;\n"] {
+            let deletion = replace(content, old, "");
+            assert_eq!(snapshots.queue(path, vec![deletion]), QueueOutcome::Queued);
+        }
+        let dropped = check(&mut snapshots);
+        let lines: Vec<&[usize]> = dropped.iter().map(|edit| edit.lines.as_slice()).collect();
+        assert_eq!(lines, [&[1][..], &[3][..]]);
+        let rewrites = snapshots.into_rewrites();
+        assert_eq!(
+            String::from_utf8(rewrites[0].2.clone()).unwrap(),
+            "const a = 1;\nconst c = 3;\nconsole.log(a, c);\n"
+        );
+    }
+
+    #[test]
+    fn drops_a_passing_group_that_shares_a_line_with_a_dropped_group() {
+        let path = Path::new("/project/src/a.ts");
+        let content = "class K { a = 1; b() {} }\nnew K();\n";
+        let mut snapshots = snapshots_with(path, content);
+        let fine = replace(content, "a = 1; ", "");
+        let broken = replace(content, "b() {}", "b( {}");
+        assert_eq!(snapshots.queue(path, vec![fine]), QueueOutcome::Queued);
+        assert_eq!(snapshots.queue(path, vec![broken]), QueueOutcome::Queued);
+        let dropped = check(&mut snapshots);
+        assert_eq!(dropped.len(), 2, "{dropped:?}");
+        assert!(snapshots.into_rewrites().is_empty());
+    }
+
+    #[test]
+    fn drops_each_edit_of_a_file_that_does_not_parse_before_the_edit() {
+        let path = Path::new("/project/src/a.ts");
+        let content = "export const a = ;\nexport const b = 1;\n";
+        let mut snapshots = snapshots_with(path, content);
+        let deletion = replace(content, "export ", "");
+        assert_eq!(snapshots.queue(path, vec![deletion]), QueueOutcome::Queued);
+        let dropped = check(&mut snapshots);
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(
+            dropped[0].violation,
+            fallow_engine::post_edit::PostEditViolation::DoesNotParse
+        );
+        assert!(snapshots.into_rewrites().is_empty());
+    }
+
+    #[test]
+    fn drops_the_removal_of_an_export_that_is_not_an_unused_finding() {
+        let path = Path::new("/project/src/a.ts");
+        let content = "export const a = 1;\n";
+        let mut snapshots = snapshots_with(path, content);
+        let deletion = replace(content, "export ", "");
+        assert_eq!(snapshots.queue(path, vec![deletion]), QueueOutcome::Queued);
+        let dropped = check(&mut snapshots);
+        assert_eq!(
+            dropped[0].violation,
+            fallow_engine::post_edit::PostEditViolation::ExportInUse {
+                name: "a".to_owned()
+            }
+        );
+    }
+}

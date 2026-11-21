@@ -686,6 +686,30 @@ line states exit code 0.
   file one time. An edit that overlaps a queued edit is not applied and gets
   no fix record. The fixers of `package.json`, `pnpm-workspace.yaml` and the
   config file still stage whole files.
+- Post-edit check of `fallow fix`: before the plan writes, or before a
+  preview prints its JSON, `SourceSnapshots::check_edits`
+  (`crates/cli/src/fix/source_edits_post_edit.rs`) applies the queued edits
+  of each file and compares the facts of the text before and after
+  (`fallow_engine::post_edit::SourceFacts`). Each `queue` call is one group.
+  The check drops a group when the edited text does not parse, when a kept
+  class or enum member is lost, when a kept enum member gets another constant
+  value, when a reference that resolved before is unresolved after, when an
+  import stays whose binding only a removed export list used, or when the
+  group removes an export that is not an unused-export finding or that a kept
+  re-export still reads. A kept member is a member outside each deletion of
+  the group. When the groups of a file fail together, the check splits them
+  in halves until each failing group is alone. It also drops each group that
+  shares a line with a dropped group, because the fix entries are matched to
+  a group by their path and line. A file of a parsed type that does not parse
+  before the edit keeps all its text. The JSON output lists no entry for a
+  dropped group, and a human format prints one `Kept <path>:<line>` line on
+  stderr. The preview lines that a fixer printed before the check stay. The language server quick fix and the CI suggestion blocks call
+  `fallow_engine::post_edit::check_edits`, which is the same rule for one
+  file. A guard before an edit (`KeptReExport`, `SharedDeclarationInUse`, the
+  enum value pins) stays: it gives a skip record or a safe edit, and the
+  post-edit check catches each shape that no guard knows.
+  `fix_output_keeps_program_meaning` runs `fix --yes` on each fixture with a
+  planned source fix and checks the result.
 - `fallow impact statusline` stays path-free, read-only, plain text, and
   epilogue-free. Its trend compares only whole-project scans.
 - `fallow doctor` stays path-free, local, read-only, and epilogue-free. It may

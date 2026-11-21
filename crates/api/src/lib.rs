@@ -152,6 +152,7 @@ pub use fallow_engine::git_fixture;
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
 /// Byte spans of the export statements of a file, for a surface that edits
 /// source text, such as the quick fix of the language server.
+pub use fallow_engine::post_edit;
 pub use fallow_engine::source_edits;
 /// Stack size for threads that run analysis, and the registration that lets a
 /// bounded parse stay on such a thread.

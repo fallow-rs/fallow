@@ -277,6 +277,15 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         fixes: &mut fixes,
     });
 
+    let unused_exports = source_edits::unused_export_names(&results);
+    let dropped = plan
+        .sources_mut()
+        .check_edits(&source_edits::PostEditInput {
+            unused_exports: &unused_exports,
+            re_exports: &re_exports,
+        });
+    source_edits::withdraw_dropped_fixes(opts.root, &mut fixes, &dropped, opts.output);
+
     let exit_code = finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals);
     *fix_count = fixes.len();
     exit_code
