@@ -63,44 +63,30 @@ pub fn unsupported_similar_code_option(cli: &Cli) -> Option<&'static str> {
     let project = invocation.allows_project_options();
     let analysis = invocation.allows_analysis_options();
 
-    if cli.root.is_some() && !project {
-        return Some("--root");
-    }
-    if cli.config.is_some() && !project {
-        return Some("--config");
-    }
-    if cli.allow_remote_extends && !project {
-        return Some("--allow-remote-extends");
-    }
-    if cli.no_cache && !analysis {
-        return Some("--no-cache");
-    }
-    if cli.threads.is_some() && !analysis {
-        return Some("--threads");
-    }
-    if cli.changed_since.is_some() && !analysis {
-        return Some("--changed-since");
-    }
-    if cli.diff_file.is_some() && !analysis {
-        return Some("--diff-file");
-    }
-    if cli.diff_stdin && !analysis {
-        return Some("--diff-stdin");
-    }
-    if cli.max_file_size.is_some() && !analysis {
-        return Some("--max-file-size");
-    }
-    if cli.workspace.is_some() && !analysis {
-        return Some("--workspace");
-    }
-    if cli.changed_workspaces.is_some() && !analysis {
-        return Some("--changed-workspaces");
-    }
-    if cli.explain && !analysis {
-        return Some("--explain");
-    }
-    if cli.output_file.is_some() && !invocation.allows_output_file() {
-        return Some("--output-file");
+    let project_options = [
+        (cli.root.is_some(), "--root"),
+        (cli.config.is_some(), "--config"),
+        (cli.allow_remote_extends, "--allow-remote-extends"),
+    ];
+    let analysis_options = [
+        (cli.no_cache, "--no-cache"),
+        (cli.threads.is_some(), "--threads"),
+        (cli.changed_since.is_some(), "--changed-since"),
+        (cli.diff_file.is_some(), "--diff-file"),
+        (cli.diff_stdin, "--diff-stdin"),
+        (cli.max_file_size.is_some(), "--max-file-size"),
+        (cli.workspace.is_some(), "--workspace"),
+        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
+        (cli.explain, "--explain"),
+    ];
+    let output_options = [(cli.output_file.is_some(), "--output-file")];
+    let global = [
+        (!project, project_options.as_slice()),
+        (!analysis, analysis_options.as_slice()),
+        (!invocation.allows_output_file(), output_options.as_slice()),
+    ];
+    if let Some(flag) = first_given_option(&global) {
+        return Some(flag);
     }
 
     if let Some(flag) = first_bare_run_option(cli) {
@@ -117,21 +103,24 @@ pub fn unsupported_similar_code_option(cli: &Cli) -> Option<&'static str> {
     else {
         unreachable!("invocation was derived from similar-code")
     };
-    if !analysis {
-        if threshold.is_some() {
-            return Some("--threshold");
-        }
-        if min_lines.is_some() {
-            return Some("--min-lines");
-        }
-        if top.is_some() {
-            return Some("--top");
-        }
-        if !file.is_empty() {
-            return Some("--file");
-        }
-    }
-    None
+    let command_options = [
+        (threshold.is_some(), "--threshold"),
+        (min_lines.is_some(), "--min-lines"),
+        (top.is_some(), "--top"),
+        (!file.is_empty(), "--file"),
+    ];
+    first_given_option(&[(!analysis, command_options.as_slice())])
+}
+
+/// The first option that is given in a group that the invocation rejects.
+/// Each group is `(rejected, [(given, flag)])`, in the order of the checks.
+fn first_given_option(groups: &[(bool, &[(bool, &'static str)])]) -> Option<&'static str> {
+    groups
+        .iter()
+        .filter(|(rejected, _)| *rejected)
+        .flat_map(|(_, options)| options.iter())
+        .find(|(given, _)| *given)
+        .map(|(_, flag)| *flag)
 }
 
 /// The first option of the bare run on the command line. A subcommand that
