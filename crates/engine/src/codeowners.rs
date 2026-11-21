@@ -29,10 +29,16 @@
 //! - Exclusion patterns: `!path` clears ownership for matching files
 //!   (GitLab 17.10+). A negation that is the last matching rule for a
 //!   file makes it unowned.
+//! - Repeated section names: headers with the same name, compared without
+//!   case, form one section. The section keeps the name of its first header.
+//!   Its default owners are the default owners of all its headers, in file
+//!   order, each one time. A pattern line without inline owners inherits the
+//!   default owners of the header directly above it.
 
 use std::path::Path;
 
 use globset::{Candidate, Glob, GlobBuilder, GlobSet, GlobSetBuilder};
+use rustc_hash::FxHashMap;
 
 /// Wildcards (`*`, `?`, `[`, `{`) allowed in one CODEOWNERS pattern.
 ///
@@ -295,6 +301,8 @@ struct CodeOwnersParser {
     glob_rules: Vec<usize>,
     rules: Vec<Rule>,
     sections: Vec<Section>,
+    /// Index into `sections` by lowercase section name.
+    section_index: FxHashMap<String, usize>,
     current_section: Option<usize>,
     /// Default owners of the header directly above the current line.
     current_section_owners: Vec<String>,
@@ -308,6 +316,7 @@ impl CodeOwnersParser {
             glob_rules: Vec::new(),
             rules: Vec::new(),
             sections: Vec::new(),
+            section_index: FxHashMap::default(),
             current_section: None,
             current_section_owners: Vec::new(),
             wildcards: 0,
@@ -318,12 +327,7 @@ impl CodeOwnersParser {
         match parse_codeowners_line(line, &self.current_section_owners) {
             ParsedCodeOwnersLine::Skip => Ok(()),
             ParsedCodeOwnersLine::Section { name, defaults } => {
-                self.sections.push(Section {
-                    name,
-                    default_owners: defaults.clone(),
-                });
-                self.current_section = Some(self.sections.len() - 1);
-                self.current_section_owners = defaults;
+                self.enter_section(name, defaults);
                 Ok(())
             }
             ParsedCodeOwnersLine::Rule {
@@ -333,6 +337,32 @@ impl CodeOwnersParser {
                 negate,
             } => self.add_rule(pattern, owner, owner_count, negate),
         }
+    }
+
+    /// Make the section of a header the current section.
+    ///
+    /// GitLab combines sections with the same name and compares the names
+    /// without case. The section keeps the name of its first header.
+    fn enter_section(&mut self, name: String, defaults: Vec<String>) {
+        let key = name.to_lowercase();
+        let idx = if let Some(&idx) = self.section_index.get(&key) {
+            let merged = &mut self.sections[idx].default_owners;
+            for owner in &defaults {
+                if !merged.contains(owner) {
+                    merged.push(owner.clone());
+                }
+            }
+            idx
+        } else {
+            self.sections.push(Section {
+                name,
+                default_owners: defaults.clone(),
+            });
+            self.section_index.insert(key, self.sections.len() - 1);
+            self.sections.len() - 1
+        };
+        self.current_section = Some(idx);
+        self.current_section_owners = defaults;
     }
 
     fn add_rule(
@@ -1503,5 +1533,55 @@ src/components/
         let co = CodeOwners::parse("\u{FEFF}[Docs] @docs\ndocs/\n").unwrap();
         assert!(co.has_sections());
         assert_eq!(co.owner_of(Path::new("docs/a.md")), Some("@docs"));
+    }
+
+    fn section_and_owners<'a>(co: &'a CodeOwners, path: &str) -> (Option<&'a str>, Vec<String>) {
+        let m = co.match_path(Path::new(path)).unwrap();
+        (m.section, m.section_owners.to_vec())
+    }
+
+    fn owner_list(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| (*item).to_string()).collect()
+    }
+
+    #[test]
+    fn repeated_section_headers_merge_their_default_owners() {
+        let co = CodeOwners::parse(
+            "[Team] @alice\nsrc/a/\n!src/a/vendor/\n[Other] @carol\nsrc/c/\n[Team] @bob\nsrc/b/\n",
+        )
+        .unwrap();
+        let team = (Some("Team"), owner_list(&["@alice", "@bob"]));
+        assert_eq!(section_and_owners(&co, "src/a/x.ts"), team);
+        assert_eq!(section_and_owners(&co, "src/b/x.ts"), team);
+        assert_eq!(co.owner_of(Path::new("src/a/x.ts")), Some("@alice"));
+        assert_eq!(co.owner_of(Path::new("src/b/x.ts")), Some("@bob"));
+        assert_eq!(co.owner_count_of(Path::new("src/b/x.ts")), Some(1));
+
+        let excluded = co.match_path(Path::new("src/a/vendor/x.js")).unwrap();
+        assert_eq!(excluded.owner, None);
+        assert_eq!(excluded.owner_count, 0);
+        assert_eq!(excluded.pattern, "!src/a/vendor/");
+        assert_eq!(co.owner_count_of(Path::new("src/a/vendor/x.js")), Some(0));
+        assert_eq!(co.owner_count_of(Path::new("other/x.ts")), None);
+    }
+
+    #[test]
+    fn repeated_section_headers_merge_without_case() {
+        let co = CodeOwners::parse("[Docs] @a\ndocs/\n[DOCS] @b\nREADME.md\n").unwrap();
+        let docs = (Some("Docs"), owner_list(&["@a", "@b"]));
+        assert_eq!(section_and_owners(&co, "docs/guide.md"), docs);
+        assert_eq!(section_and_owners(&co, "README.md"), docs);
+    }
+
+    #[test]
+    fn repeated_section_headers_keep_each_owner_one_time() {
+        let co = CodeOwners::parse(
+            "[Team] @alice @bob\nsrc/a/\n[Team]\nsrc/b/ @x\n[Team] @bob @carol\nsrc/c/\n",
+        )
+        .unwrap();
+        let team = (Some("Team"), owner_list(&["@alice", "@bob", "@carol"]));
+        for path in ["src/a/x.ts", "src/b/x.ts", "src/c/x.ts"] {
+            assert_eq!(section_and_owners(&co, path), team, "{path}");
+        }
     }
 }

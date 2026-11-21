@@ -270,3 +270,16 @@ fn health_owner_groups_ignore_a_leading_bom() {
     assert_eq!(group_keys(&json), ["@team"], "groups: {}", json["groups"]);
     assert_eq!(code, 0, "json: {json}");
 }
+
+#[test]
+fn health_section_groups_merge_repeated_headers() {
+    let dir = grouping_project("[Team] @alice\nsrc/alpha/\n\n[team] @bob\nsrc/beta/\n");
+    let (code, json) = grouped_health(dir.path(), "section");
+    assert_eq!(group_keys(&json), ["Team"], "groups: {}", json["groups"]);
+    assert_eq!(code, 0, "json: {json}");
+    assert_eq!(json["grouped_by"], "section");
+    assert_eq!(
+        json["groups"][0]["owners"],
+        serde_json::json!(["@alice", "@bob"])
+    );
+}
