@@ -921,12 +921,10 @@ line states exit code 0.
    omits, with the same gates as `assembly.rs`. Thus a `--score` run keeps
    the score and counts of each group, but no group findings. The group
    duplication penalty counts each clone group with two or more instances in
-   total and one or more in the group. The group counts only the lines and a
-   share of the tokens of its own instances. Thus a clone that spans two
-   groups lowers the score of each group, and the group `duplicated_lines`
-   sum to the project value when the groups partition the files. Each
-   instance carries `token_count * (total - 1) / total` redundant tokens,
-   rounded down, so the group token values do not exceed the project value.
+   total and one or more in the group. The group counts only the lines of
+   its own instances. Thus a clone that spans two groups lowers the score of
+   each group, and the group `duplicated_lines` sum to the project value when
+   the groups partition the files.
 
    The three scoped duplication lenses use different rules:
    - `health --group-by` measures the lines of each group, as above.

@@ -256,7 +256,7 @@ fn compute_health_score_metrics(
     if opts.score
         && let Some(report) = dupes_report
     {
-        apply_duplication_metrics(vital_signs, counts, report);
+        apply_duplication_metrics(vital_signs, counts, &report.stats);
     }
     opts.score
         .then(|| vital_signs::compute_health_score(vital_signs, total_files_scoped))

@@ -23,7 +23,6 @@ use fallow_output::{
     LargeFunctionEntry, RefactoringTarget, RefactoringTargetFinding, VitalSigns, VitalSignsCounts,
     summarize_coverage_source_consistency,
 };
-use fallow_types::duplicates::CloneGroup;
 use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
 /// Bucket of file paths sharing a resolver key.
@@ -450,132 +449,52 @@ fn apply_group_duplication_metrics(
     let Some(report) = input.dupes_report else {
         return;
     };
-    let dupes_report = subset_duplication_report(report, input, paths);
-    apply_duplication_metrics(vital_signs, counts, &dupes_report);
+    let stats = group_clone_coverage(report, paths).into_stats(
+        crate::duplicates::CorpusTotals {
+            files: paths.len(),
+            lines: total_lines_for_paths(input, paths),
+            tokens: report.stats.total_tokens,
+        },
+        crate::duplicates::CarriedCounters::default(),
+    );
+    apply_duplication_metrics(vital_signs, counts, &stats);
 }
 
 /// Fewest instances that make a clone group.
 const MIN_CLONE_INSTANCES: usize = 2;
 
-/// A project clone group restricted to the instances inside one health group.
-struct GroupClone {
-    /// The clone group with only the instances inside the health group.
-    clone: CloneGroup,
-    /// Number of instances of the clone group in the whole project.
-    total_instances: usize,
-}
-
-/// Restrict the project duplication report to the files of one health group.
+/// Collect the clone instances of the project report that lie in the
+/// files of one health group.
 ///
 /// A health group counts a clone group when the clone group has two or more
 /// instances in total and one or more inside the health group. The health
-/// group keeps only its own instances, so it counts only its own lines. A
+/// group counts only its own instances, so it counts only its own lines. A
 /// clone that spans two groups thus lowers the score of each group, and the
 /// group `duplicated_lines` sum to the project value when the groups
 /// partition the files. `dupes --group-by` uses a different rule: it assigns
 /// each clone group to the owner with the most instances.
-fn subset_duplication_report(
-    report: &DuplicationReport,
-    input: &HealthGroupingInput<'_>,
-    paths: &FxHashSet<PathBuf>,
-) -> DuplicationReport {
-    let group_clones = report
-        .clone_groups
-        .iter()
-        .filter(|group| group.instances.len() >= MIN_CLONE_INSTANCES)
-        .filter_map(|group| {
-            let instances = group
-                .instances
-                .iter()
-                .filter(|instance| paths.contains(&instance.file))
-                .cloned()
-                .collect::<Vec<_>>();
-            (!instances.is_empty()).then_some(GroupClone {
-                clone: CloneGroup {
-                    instances,
-                    token_count: group.token_count,
-                    line_count: group.line_count,
-                    similarity: group.similarity,
-                },
-                total_instances: group.instances.len(),
-            })
-        })
-        .collect::<Vec<_>>();
-    let stats = subset_duplication_stats(report, input, paths, &group_clones);
-    DuplicationReport {
-        stats,
-        clone_groups: group_clones.into_iter().map(|group| group.clone).collect(),
-        clone_families: Vec::new(),
-        mirrored_directories: Vec::new(),
-        range_marker_problems: Vec::new(),
-    }
-}
-
-/// Redundant tokens that `own` of the `total` instances of a clone group
-/// carry.
 ///
-/// The project counts `token_count * (total - 1)` redundant tokens for a clone
-/// group. Each instance carries the same share of that value, so the shares of
-/// all instances sum to the project value. Integer division rounds down, so
-/// the sum of the group values never exceeds the project value.
-fn duplicated_token_share(token_count: usize, own: usize, total: usize) -> usize {
-    if total < MIN_CLONE_INSTANCES {
-        return 0;
-    }
-    let share =
-        (token_count as u128) * (own.min(total) as u128) * ((total - 1) as u128) / (total as u128);
-    usize::try_from(share).unwrap_or(usize::MAX)
-}
-
-fn subset_duplication_stats(
-    report: &DuplicationReport,
-    input: &HealthGroupingInput<'_>,
+/// The `duplicated_tokens` of the result has no meaning for a health group.
+/// Only the line fields reach the output.
+fn group_clone_coverage<'a>(
+    report: &'a DuplicationReport,
     paths: &FxHashSet<PathBuf>,
-    group_clones: &[GroupClone],
-) -> fallow_types::duplicates::DuplicationStats {
-    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
-    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
-    let mut duplicated_tokens = 0usize;
-    let mut clone_instances = 0usize;
-
-    for group in group_clones {
-        let own = &group.clone.instances;
-        for instance in own {
-            files_with_clones.insert(&instance.file);
-            clone_instances += 1;
-            let lines = file_dup_lines.entry(&instance.file).or_default();
-            for line in instance.start_line..=instance.end_line {
-                lines.insert(line);
-            }
+) -> crate::duplicates::CloneCoverage<'a> {
+    let mut coverage = crate::duplicates::CloneCoverage::default();
+    for group in &report.clone_groups {
+        if group.instances.len() < MIN_CLONE_INSTANCES {
+            continue;
         }
-        duplicated_tokens +=
-            duplicated_token_share(group.clone.token_count, own.len(), group.total_instances);
+        let mut own = group
+            .instances
+            .iter()
+            .filter(|instance| paths.contains(&instance.file))
+            .peekable();
+        if own.peek().is_some() {
+            coverage.add_group(own, group.token_count);
+        }
     }
-
-    let duplicated_lines = file_dup_lines.values().map(FxHashSet::len).sum::<usize>();
-    let total_lines = total_lines_for_paths(input, paths);
-
-    fallow_types::duplicates::DuplicationStats {
-        total_files: paths.len(),
-        files_with_clones: files_with_clones.len(),
-        total_lines,
-        duplicated_lines,
-        total_tokens: report.stats.total_tokens,
-        duplicated_tokens: duplicated_tokens.min(report.stats.duplicated_tokens),
-        clone_groups: group_clones.len(),
-        // The scoped report carries no families, so nothing is withheld from an
-        // empty array.
-        clone_families: 0,
-        clone_instances,
-        duplication_percentage: if total_lines > 0 {
-            (duplicated_lines as f64 / total_lines as f64) * 100.0
-        } else {
-            0.0
-        },
-        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
-        clone_groups_ignored: report.stats.clone_groups_ignored,
-        near_candidates_skipped: report.stats.near_candidates_skipped,
-    }
+    coverage
 }
 
 fn total_lines_for_paths(input: &HealthGroupingInput<'_>, paths: &FxHashSet<PathBuf>) -> usize {
@@ -750,6 +669,8 @@ fn absent_group_status(selection: &StoredSelection, key: &str) -> GroupTrendStat
 
 #[cfg(test)]
 mod tests {
+    use fallow_types::duplicates::{CloneGroup, CloneInstance};
+
     use super::*;
 
     fn selector(patterns: &[&str]) -> GroupSelector {
@@ -809,17 +730,86 @@ mod tests {
         assert_eq!(s.unmatched(&["@team/a", "@team/b"]), vec!["@nobody/*"]);
     }
 
+    fn clone_instance(file: &str, start_line: usize, end_line: usize) -> CloneInstance {
+        CloneInstance {
+            is_symlink: false,
+            file: PathBuf::from(file),
+            start_line,
+            end_line,
+            start_col: 0,
+            end_col: 0,
+            fragment: String::new(),
+        }
+    }
+
+    fn clone_group(instances: Vec<CloneInstance>) -> CloneGroup {
+        CloneGroup {
+            instances,
+            token_count: 40,
+            line_count: 10,
+            similarity: None,
+        }
+    }
+
     #[test]
-    fn token_shares_of_all_instances_sum_to_the_project_value() {
-        assert_eq!(duplicated_token_share(90, 1, 2), 45);
-        assert_eq!(duplicated_token_share(90, 2, 2), 90);
-        // Three instances split two and one: the project counts 2 * 90.
-        let split = duplicated_token_share(90, 2, 3) + duplicated_token_share(90, 1, 3);
-        assert_eq!(split, 180);
-        // Rounding down keeps each split at or below the project value.
-        let uneven = duplicated_token_share(10, 1, 3) * 3;
-        assert!(uneven <= 10 * 2);
-        assert_eq!(duplicated_token_share(90, 1, 1), 0);
+    fn group_coverage_counts_only_the_lines_inside_the_group() {
+        use crate::duplicates::{CarriedCounters, CorpusTotals};
+
+        let report = DuplicationReport {
+            clone_groups: vec![clone_group(vec![
+                clone_instance("/repo/a/x.ts", 1, 10),
+                clone_instance("/repo/b/y.ts", 1, 10),
+            ])],
+            ..DuplicationReport::default()
+        };
+        let paths: FxHashSet<PathBuf> = std::iter::once(PathBuf::from("/repo/a/x.ts")).collect();
+
+        let stats = group_clone_coverage(&report, &paths).into_stats(
+            CorpusTotals {
+                files: 1,
+                lines: 100,
+                tokens: 1000,
+            },
+            CarriedCounters::default(),
+        );
+
+        assert_eq!(stats.duplicated_lines, 10);
+        assert_eq!(stats.clone_instances, 1);
+        assert_eq!(stats.duplicated_tokens, 0);
+        assert!((stats.duplication_percentage - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn group_coverage_merges_overlapping_clones_and_skips_single_instances() {
+        use crate::duplicates::{CarriedCounters, CorpusTotals};
+
+        let report = DuplicationReport {
+            clone_groups: vec![
+                clone_group(vec![
+                    clone_instance("/repo/a/x.ts", 1, 10),
+                    clone_instance("/repo/b/y.ts", 1, 10),
+                ]),
+                clone_group(vec![
+                    clone_instance("/repo/a/x.ts", 5, 12),
+                    clone_instance("/repo/b/z.ts", 1, 8),
+                ]),
+                clone_group(vec![clone_instance("/repo/a/x.ts", 50, 60)]),
+            ],
+            ..DuplicationReport::default()
+        };
+        let paths: FxHashSet<PathBuf> = std::iter::once(PathBuf::from("/repo/a/x.ts")).collect();
+
+        let stats = group_clone_coverage(&report, &paths).into_stats(
+            CorpusTotals {
+                files: 1,
+                lines: 100,
+                tokens: 1000,
+            },
+            CarriedCounters::default(),
+        );
+
+        assert_eq!(stats.duplicated_lines, 12);
+        assert_eq!(stats.clone_groups, 2);
     }
 
     #[test]

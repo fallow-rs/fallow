@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use fallow_engine::duplicates::CloneFingerprintSet;
-use fallow_types::duplicates::{CloneGroup, DuplicationReport, DuplicationStats};
+use fallow_types::duplicates::{CloneGroup, DuplicationReport};
 use fallow_types::results::AnalysisResults;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -597,10 +597,26 @@ fn duplication_group(
     report: &DuplicationReport,
     fingerprints: &CloneFingerprintSet,
 ) -> DuplicationGroup {
-    let mut subset = duplication_subset_report(&attributed_groups, report);
-    subset.stats = fallow_engine::duplicates::recompute_stats(&subset);
     let clone_families = clone_families_for_bucket(&attributed_groups, report, fingerprints);
-    subset.stats.clone_families = clone_families.len();
+    let mut coverage = fallow_engine::duplicates::CloneCoverage::default();
+    for group in &attributed_groups {
+        coverage.add_group(
+            group
+                .instances
+                .iter()
+                .map(|attributed| &attributed.instance),
+            group.token_count,
+        );
+    }
+    // Filtering and bounded-work counters are report-scoped and cannot be
+    // attributed reliably to one grouped bucket.
+    let stats = coverage.into_stats(
+        fallow_engine::duplicates::CorpusTotals::of(&report.stats),
+        fallow_engine::duplicates::CarriedCounters {
+            clone_families: clone_families.len(),
+            ..Default::default()
+        },
+    );
     let clone_groups = attributed_groups
         .into_iter()
         .map(|group| {
@@ -611,50 +627,9 @@ fn duplication_group(
 
     DuplicationGroup {
         key,
-        stats: subset.stats,
+        stats,
         clone_groups,
         clone_families,
-    }
-}
-
-fn duplication_subset_report(
-    attributed_groups: &[AttributedCloneGroup],
-    report: &DuplicationReport,
-) -> DuplicationReport {
-    DuplicationReport {
-        clone_groups: attributed_groups
-            .iter()
-            .map(|group| CloneGroup {
-                instances: group
-                    .instances
-                    .iter()
-                    .map(|instance| instance.instance.clone())
-                    .collect(),
-                token_count: group.token_count,
-                line_count: group.line_count,
-                similarity: group.similarity,
-            })
-            .collect(),
-        clone_families: Vec::new(),
-        mirrored_directories: Vec::new(),
-        range_marker_problems: Vec::new(),
-        stats: DuplicationStats {
-            total_files: report.stats.total_files,
-            files_with_clones: 0,
-            total_lines: report.stats.total_lines,
-            duplicated_lines: 0,
-            total_tokens: report.stats.total_tokens,
-            duplicated_tokens: 0,
-            clone_groups: 0,
-            clone_families: 0,
-            clone_instances: 0,
-            duplication_percentage: 0.0,
-            // Filtering and bounded-work counters are report-scoped and cannot
-            // be attributed reliably to one grouped bucket.
-            clone_groups_below_min_occurrences: 0,
-            clone_groups_ignored: 0,
-            near_candidates_skipped: 0,
-        },
     }
 }
 

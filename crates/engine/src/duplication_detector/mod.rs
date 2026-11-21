@@ -148,7 +148,7 @@ pub fn find_duplicates(
 /// returns the per-file token data alongside the corpus totals.
 fn tokenize_corpus_for_duplicates(
     input: TokenizeCorpusInput<'_>,
-) -> (Vec<TokenizedFile>, detect::CorpusTotals) {
+) -> (Vec<TokenizedFile>, crate::duplicates::CorpusTotals) {
     let (files, config) = (input.files, input.config);
     let normalization =
         fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
@@ -205,7 +205,7 @@ fn tokenize_corpus_for_duplicates(
         "tokenized files for duplication analysis"
     );
 
-    let corpus_totals = detect::CorpusTotals {
+    let corpus_totals = crate::duplicates::CorpusTotals {
         files: file_data.len(),
         lines: file_data
             .iter()
@@ -223,7 +223,7 @@ fn detect_and_postprocess(
     root: &Path,
     config: &DuplicatesConfig,
     mut file_data: Vec<TokenizedFile>,
-    corpus_totals: detect::CorpusTotals,
+    corpus_totals: crate::duplicates::CorpusTotals,
     focus_files: Option<&FxHashSet<PathBuf>>,
 ) -> DuplicationReport {
     let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
@@ -273,7 +273,7 @@ fn detect_and_postprocess(
     let detector = CloneDetector::new(config.min_tokens, config.min_lines, config.skip_local)
         .with_consistent_identifiers(normalization.consistent_identifiers);
     let mut report = if let Some(focus_files) = focus_files {
-        detector.detect_touching_files(detector_data, focus_files)
+        detector.detect_touching_files_with_totals(detector_data, focus_files, corpus_totals)
     } else {
         detector.detect_with_totals(detector_data, corpus_totals)
     };
@@ -1171,6 +1171,81 @@ export function renderInvoice(id: string): string {
         assert!(
             !cache_root.exists(),
             "small projects should avoid token-cache IO overhead"
+        );
+    }
+
+    #[test]
+    fn focused_shingle_prefilter_preserves_corpus_totals() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let focused_code = r"
+export function focused(input: number): number {
+    const doubled = input * 2;
+    const shifted = doubled + 10;
+    return shifted / 2;
+}
+";
+        let untouched_code = r#"
+export function untouched(input: string): string {
+    const lowered = input.toLowerCase();
+    const padded = lowered.padStart(10, "x");
+    return padded.slice(0, 8);
+}
+"#;
+        let table_code =
+            "export const primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43];\n";
+
+        let changed_path = src_dir.join("changed.ts");
+        let sources = [
+            (changed_path.clone(), focused_code),
+            (src_dir.join("focused-copy.ts"), focused_code),
+            (src_dir.join("untouched-a.ts"), untouched_code),
+            (src_dir.join("untouched-b.ts"), untouched_code),
+            (src_dir.join("table.ts"), table_code),
+        ];
+        let files: Vec<DiscoveredFile> = sources
+            .iter()
+            .enumerate()
+            .map(|(index, (path, code))| {
+                std::fs::write(path, code).expect("write source");
+                DiscoveredFile {
+                    id: FileId(u32::try_from(index).expect("small index")),
+                    path: path.clone(),
+                    size_bytes: code.len() as u64,
+                }
+            })
+            .collect();
+
+        let config_for = |min_corpus_size_for_shingle_filter| DuplicatesConfig {
+            mode: DetectionMode::Strict,
+            min_tokens: 5,
+            min_lines: 2,
+            min_corpus_size_for_shingle_filter,
+            ..DuplicatesConfig::default()
+        };
+        let mut focus = FxHashSet::default();
+        focus.insert(changed_path);
+
+        let filtered =
+            detect_duplicates(dir.path(), &files, &config_for(1), Some(&focus), None).report;
+        let unfiltered = detect_duplicates(
+            dir.path(),
+            &files,
+            &config_for(usize::MAX),
+            Some(&focus),
+            None,
+        )
+        .report;
+
+        assert_eq!(filtered.stats.total_files, files.len());
+        assert_eq!(filtered.stats.total_files, unfiltered.stats.total_files);
+        assert_eq!(filtered.stats.total_lines, unfiltered.stats.total_lines);
+        assert_eq!(filtered.stats.total_tokens, unfiltered.stats.total_tokens);
+        assert!(
+            (filtered.stats.duplication_percentage - unfiltered.stats.duplication_percentage).abs()
+                < f64::EPSILON
         );
     }
 
