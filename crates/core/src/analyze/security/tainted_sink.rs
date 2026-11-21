@@ -319,7 +319,7 @@ fn sink_sources<'t>(
 type TaintedSinkSource<'a> = (&'a str, &'a str, Option<u32>);
 
 fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str, &str)>) -> bool {
-    matcher.sink_shape == sink.sink_shape
+    matcher.admits_sink_shape(sink.sink_shape)
         && matcher.admits_arg_index(sink.arg_index)
         && (sink.arg_is_non_literal || matcher.is_literal_aware())
         && matcher.admits_arg_kind(sink.arg_kind)
@@ -338,7 +338,7 @@ fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str,
         // source, not request input.
         && (matcher.requires_source_kinds.is_empty()
             || source.is_some_and(|(id, _)| matcher.requires_source_kinds.iter().any(|k| k == id)))
-        && matcher.first_matching_pattern(&sink.callee_path).is_some()
+        && matcher.admits_callee(sink.sink_shape, &sink.callee_path)
 }
 
 /// The catalogue id of the secret-to-network exfil category (issue #890). The
@@ -866,11 +866,12 @@ fn collect_module_tainted_sinks(
         run.context.request_receivers,
     );
 
-    // A variadic row (`path.join` segments, #3712) can admit several arguments
-    // of one call. Keep one candidate per call and row, and prefer a
-    // source-backed argument over a source-free one.
-    let mut variadic_calls: FxHashMap<(u32, *const Matcher), usize> = FxHashMap::default();
-    let mut suppressed_variadic_calls: FxHashSet<(u32, *const Matcher)> = FxHashSet::default();
+    // A variadic row (`path.join` segments, #3712) or an any-non-literal row
+    // (log calls) can admit several arguments of one call. Keep one candidate
+    // per call and row, and prefer a source-backed argument over a source-free
+    // one.
+    let mut multi_arg_calls: FxHashMap<(u32, *const Matcher), usize> = FxHashMap::default();
+    let mut suppressed_multi_arg_calls: FxHashSet<(u32, *const Matcher)> = FxHashSet::default();
 
     let module_kinds = ModuleSourceKinds::new(module);
 
@@ -901,18 +902,18 @@ fn collect_module_tainted_sinks(
             .suppressions
             .is_suppressed(file_id, line, IssueKind::SecuritySink)
         {
-            if !matcher.variadic
-                || suppressed_variadic_calls.insert((sink.span_start, std::ptr::from_ref(matcher)))
+            if !matcher.reads_several_arguments()
+                || suppressed_multi_arg_calls.insert((sink.span_start, std::ptr::from_ref(matcher)))
             {
                 suppressed.push(finding);
             }
             continue;
         }
-        if !matcher.variadic {
+        if !matcher.reads_several_arguments() {
             findings.push(finding);
             continue;
         }
-        match variadic_calls.entry((sink.span_start, std::ptr::from_ref(matcher))) {
+        match multi_arg_calls.entry((sink.span_start, std::ptr::from_ref(matcher))) {
             std::collections::hash_map::Entry::Occupied(slot) => {
                 let existing = &mut findings[*slot.get()];
                 if finding.source_backed && !existing.source_backed {

@@ -18,6 +18,7 @@ use fallow_config::EffectKind;
 use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkShape};
 use rustc_hash::FxHashSet;
 
+mod call_forms;
 mod identity;
 mod predicates;
 mod provenance;
@@ -25,6 +26,7 @@ mod rules;
 mod severity;
 mod stable_id;
 
+pub use call_forms::{ArgumentSelector, CallForms};
 pub use identity::{security_rule_id, stamp_security_finding_ids};
 pub use provenance::{ProvenanceBindings, import_source_matches};
 pub use rules::{
@@ -86,11 +88,15 @@ struct RawMatcher {
     sink_shape: String,
     callee_patterns: Vec<String>,
     arg_index: u32,
-    /// Optional variadic gate: when `true`, the row also matches every
-    /// argument after `arg_index`. Lets `path.join` / `path.resolve` inspect
-    /// each path segment, not only the first one (issue #3712).
+    /// `call`, `new`, or both. Unset means the form of `sink_shape`.
     #[serde(default)]
-    variadic: bool,
+    forms: Option<Vec<String>>,
+    /// `index` (default), `variadic` or `any-non-literal`; see [`ArgumentSelector`].
+    #[serde(default)]
+    arguments: Option<String>,
+    /// Whether a call of a member of `this` itself (`this.m(x)`) matches the row.
+    #[serde(default)]
+    this_receiver: bool,
     evidence_template: String,
     #[serde(default)]
     import_provenance: Option<String>,
@@ -346,9 +352,11 @@ pub struct Matcher {
     pub sink_shape: SinkShape,
     pub callee_patterns: Vec<CalleePattern>,
     pub arg_index: u32,
-    /// Whether the row also matches every argument after `arg_index`. A
-    /// variadic row reports at most one candidate per call.
-    pub variadic: bool,
+    pub forms: CallForms,
+    /// A row that reads several positions reports one candidate per call.
+    pub arguments: ArgumentSelector,
+    /// Whether a call of a member of `this` itself (`this.m(x)`) matches the row.
+    pub this_receiver: bool,
     pub evidence_template: String,
     pub import_provenance: Option<String>,
     /// Framework enabler package gate (issue #861). `None` = global row.
@@ -473,13 +481,6 @@ impl Matcher {
     #[must_use]
     pub fn first_matching_pattern(&self, callee_path: &str) -> Option<&CalleePattern> {
         self.callee_patterns.iter().find(|p| p.matches(callee_path))
-    }
-
-    /// Whether a captured argument position is admitted by this matcher. A
-    /// variadic row admits `arg_index` and every later position.
-    #[must_use]
-    pub fn admits_arg_index(&self, arg_index: u32) -> bool {
-        arg_index == self.arg_index || (self.variadic && arg_index > self.arg_index)
     }
 
     /// Whether a captured argument shape is admitted by this matcher. `None`
@@ -765,10 +766,12 @@ fn parse_catalogue(src: &str) -> Result<Catalogue, String> {
 /// arg_kinds / evidence_template, and a non-empty enabler when present.
 fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
     let (sink_shape, callee_patterns) = validate_matcher_core(&entry)?;
+    let forms = call_forms::parse_call_forms(&entry.id, sink_shape, entry.forms.as_deref())?;
+    let arguments = call_forms::parse_argument_selector(&entry, sink_shape)?;
     let arg_kinds = parse_matcher_arg_kinds(&entry.id, entry.arg_kinds.as_deref())?;
     let enabler = validate_matcher_enabler(&entry.id, entry.enabler)?;
     let object_properties = parse_object_property_predicates(&entry.id, entry.object_properties)?;
-    Ok(Matcher {
+    call_forms::check_matcher(Matcher {
         id: entry.id,
         cwe: entry.cwe,
         title: entry.title,
@@ -776,7 +779,9 @@ fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
         sink_shape,
         callee_patterns,
         arg_index: entry.arg_index,
-        variadic: entry.variadic,
+        forms,
+        arguments,
+        this_receiver: entry.this_receiver,
         evidence_template: entry.evidence_template,
         import_provenance: entry.import_provenance,
         enabler,
@@ -1122,7 +1127,7 @@ mod tests {
             .iter()
             .find(|m| m.id == "path-traversal" && m.first_matching_pattern("path.join").is_some())
             .expect("path.join row exists");
-        assert!(row.variadic, "path.join must inspect every segment (#3712)");
+        assert_eq!(row.arguments, ArgumentSelector::Variadic, "#3712");
         assert!(row.admits_arg_index(0));
         assert!(row.admits_arg_index(3));
 

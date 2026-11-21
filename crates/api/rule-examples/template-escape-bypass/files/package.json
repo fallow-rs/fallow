@@ -1,0 +1,1 @@
+{"name":"example","private":true,"main":"src/profile.ts","dependencies":{"handlebars":"^4.0.0"}}

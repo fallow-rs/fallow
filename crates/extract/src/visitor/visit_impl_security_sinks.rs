@@ -1,7 +1,6 @@
 use oxc_ast::ast::*;
 use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::borrow::Cow;
 
 use fallow_types::extract::{
     SecurityControlSite, SinkArgKind, SinkCallOptions, SinkLiteralValue, SinkShape, SinkSite,
@@ -19,7 +18,10 @@ use super::{
     static_string_literal_value, unwrap_parens, unwrap_static_expr,
 };
 use crate::js_text::JsText;
+use canonical_call::{CallArgKind, CallForm, CanonicalCall, ReceiverPath};
 
+#[path = "canonical_call.rs"]
+pub(super) mod canonical_call;
 #[path = "visit_impl_security_local_callees.rs"]
 mod local_callees;
 
@@ -76,26 +78,6 @@ const SCRIPT_ELEMENT_CODE_PROPERTIES: &[&str] = &["src", "text", "textContent", 
 
 /// Callee root that names a proven `<script>` element in a sink path.
 const SCRIPT_ELEMENT_ROOT: &str = "HTMLScriptElement";
-
-/// Methods that parse their argument as markup. A call of one of these
-/// methods on an object that the static path cannot flatten
-/// (`document.createRange().createContextualFragment(x)`) still resolves
-/// through [`ModuleInfoExtractor::sink_object_path`].
-const OBJECT_ROOTED_HTML_METHODS: &[&str] = &["createContextualFragment", "insertAdjacentHTML"];
-
-/// Raw SQL methods of a query builder or a database client. A knex builder
-/// chain starts with a call (`db("t").whereRaw(x)`), and a Prisma client often
-/// comes from a call (`getPrisma()`) or a class field (`this.prisma`). A call
-/// of one of these methods also resolves through
-/// [`ModuleInfoExtractor::sink_object_path`], and the matching `*.` rows of
-/// the `sql-injection` matcher then match the path.
-const OBJECT_ROOTED_RAW_SQL_METHODS: &[&str] = &[
-    "whereRaw",
-    "havingRaw",
-    "orderByRaw",
-    "$queryRawUnsafe",
-    "$executeRawUnsafe",
-];
 
 /// Per-module local bindings that re-expose a sink under another name.
 #[derive(Default)]
@@ -578,8 +560,8 @@ fn collect_arg_source_paths(expr: &Expression<'_>) -> Vec<String> {
 /// string literal or a no-substitution template (almost always intended auth);
 /// `None` when it is dynamic (an interpolated URL, an env-configured base, a
 /// variable) or absent. A dynamic destination is the higher-signal exfil case.
-fn call_url_arg_literal(expr: &CallExpression<'_>) -> Option<String> {
-    match expr.arguments.first()?.as_expression()? {
+fn call_url_arg_literal(arguments: &[Argument<'_>]) -> Option<String> {
+    match arguments.first()?.as_expression()? {
         Expression::StringLiteral(lit) => Some(lit.value.text().into_owned()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             tpl.quasis.first().map(|q| q.value.raw.to_string())
@@ -996,31 +978,26 @@ impl ModuleInfoExtractor {
     }
 
     fn capture_call_sink(&mut self, expr: &CallExpression<'_>) {
-        let Some(callee_path) = self.call_sink_callee_path(&expr.callee) else {
+        let Some(call) =
+            self.canonical_call(&expr.callee, &expr.arguments, CallForm::Call, expr.span)
+        else {
             self.record_unresolved_call_sink(expr);
             return;
         };
-        self.capture_security_control_call(&callee_path, expr.span);
-        let inert_root = self.inert_local_callee_root(&expr.callee);
+        // A `this.m(x)` call is no security control: the method is the code
+        // of the enclosing class or of its base.
+        if !call.receiver.is_own_member() {
+            self.capture_security_control_call(&call.path, expr.span);
+        }
+        let inert_root = self.inert_local_callee_root(&call.receiver);
         let sinks_before = self.security_sinks.len();
-        let sink_shape = if callee_path.contains('.') {
-            SinkShape::MemberCall
-        } else {
-            SinkShape::Call
-        };
-        self.capture_call_sink_args(expr, &callee_path, sink_shape);
-        self.capture_function_body_after_spread(
-            &callee_path,
-            sink_shape,
-            &expr.arguments,
-            expr.span,
-        );
-        self.capture_set_attribute_sink(expr, &callee_path);
-        if should_capture_missing_jwt_verify_options(&callee_path, sink_shape, expr.arguments.len())
-        {
+        let sink_shape = call.sink_shape();
+        self.capture_canonical_call_args(&call);
+        self.capture_set_attribute_sink(expr, &call.path);
+        if should_capture_missing_jwt_verify_options(&call.path, sink_shape, expr.arguments.len()) {
             self.security_sinks.push(SinkSite {
                 sink_shape,
-                callee_path,
+                callee_path: call.path.clone(),
                 arg_index: 2,
                 arg_is_non_literal: false,
                 arg_kind: SinkArgKind::Object,
@@ -1055,26 +1032,26 @@ impl ModuleInfoExtractor {
         self.record_skipped_security_callee(&expr.callee, reason);
     }
 
-    fn capture_call_sink_args(
-        &mut self,
-        expr: &CallExpression<'_>,
-        callee_path: &str,
-        sink_shape: SinkShape,
-    ) {
+    /// Capture one sink site per admitted argument of a call or a `new`
+    /// expression, and the Function constructor body after a spread.
+    fn capture_canonical_call_args(&mut self, call: &CanonicalCall<'_, '_>) {
+        let callee_path = call.path.as_str();
+        let sink_shape = call.sink_shape();
         // The arg-0 URL literal is captured once per call so secret-to-network
         // findings can carry a destination-host signal on the arg-1 sink.
-        let url_arg_literal = call_url_arg_literal(expr);
-        let mut call_options =
-            is_spawn_callee(callee_path).then(|| Box::new(spawn_call_options(&expr.arguments)));
+        let url_arg_literal = match call.form {
+            CallForm::Call => call_url_arg_literal(call.arguments),
+            CallForm::New => None,
+        };
+        let mut call_options = (call.form == CallForm::Call && is_spawn_callee(callee_path))
+            .then(|| Box::new(spawn_call_options(call.arguments)));
         let args_get_options =
-            call_options.is_some() && argument_array_gets_options(callee_path, &expr.arguments);
-        for (index, arg) in expr.arguments.iter().enumerate() {
-            let Some(arg_expr) = arg.as_expression() else {
+            call_options.is_some() && argument_array_gets_options(callee_path, call.arguments);
+        for arg in call.args() {
+            if arg.kind == CallArgKind::Spread {
                 continue;
-            };
-            let Ok(arg_index) = u32::try_from(index) else {
-                continue;
-            };
+            }
+            let (arg_index, arg_expr) = (arg.index, arg.expr);
             if callee_path.ends_with(".writeHead")
                 && matches!(arg_index, 1 | 2)
                 && is_static_write_head_headers(arg_expr)
@@ -1088,7 +1065,7 @@ impl ModuleInfoExtractor {
                 arg_index,
                 arg_expr,
                 url_arg_literal: url_arg_literal.clone(),
-                span: expr.span,
+                span: call.span,
             });
             // The command and the argument array both get the options: with
             // `shell: true`, the shell also parses each argument.
@@ -1101,13 +1078,16 @@ impl ModuleInfoExtractor {
                 };
             }
         }
+        self.capture_function_body_after_spread(callee_path, sink_shape, call.arguments, call.span);
     }
 
-    /// Capture constructor-call sink sites. This is intentionally separate from
-    /// call capture because oxc represents `new Function("...")` as a
-    /// `NewExpression`, not a `CallExpression`.
+    /// Capture constructor-call sink sites. oxc represents `new F(x)` as a
+    /// `NewExpression`, so the visitor calls this hook apart from the call
+    /// hook. Both read the same [`CanonicalCall`].
     pub(super) fn capture_new_expression_sink(&mut self, expr: &NewExpression<'_>) {
-        let Some(callee_path) = self.security_callee_path(&expr.callee) else {
+        let Some(call) =
+            self.canonical_call(&expr.callee, &expr.arguments, CallForm::New, expr.span)
+        else {
             if contains_computed_member(&expr.callee) {
                 self.record_skipped_security_callee(
                     &expr.callee,
@@ -1116,28 +1096,7 @@ impl ModuleInfoExtractor {
             }
             return;
         };
-        for (index, arg) in expr.arguments.iter().enumerate() {
-            let Some(arg_expr) = arg.as_expression() else {
-                continue;
-            };
-            let Ok(arg_index) = u32::try_from(index) else {
-                continue;
-            };
-            self.push_security_sink_arg(PushSinkArgInput {
-                callee_path: &callee_path,
-                sink_shape: SinkShape::NewExpression,
-                arg_index,
-                arg_expr,
-                url_arg_literal: None,
-                span: expr.span,
-            });
-        }
-        self.capture_function_body_after_spread(
-            &callee_path,
-            SinkShape::NewExpression,
-            &expr.arguments,
-            expr.span,
-        );
+        self.capture_canonical_call_args(&call);
     }
 
     /// The Function constructor takes its code as the last argument. When a
@@ -1299,10 +1258,7 @@ impl ModuleInfoExtractor {
         object: &Expression<'_>,
         property: &str,
     ) -> Option<String> {
-        let object_path = self
-            .static_callee_path(object)
-            .or_else(|| self.sink_object_path(object));
-        let Some(object_path) = object_path else {
+        let Some(object_path) = self.receiver_path(object).map(|receiver| receiver.path) else {
             self.record_skipped_security_callee(
                 object,
                 SkippedSecurityCalleeReason::UnsupportedAssignmentObject,
@@ -1345,7 +1301,7 @@ impl ModuleInfoExtractor {
 
     /// Resolve a callee to the dotted path the catalogue matches.
     ///
-    /// On top of [`Self::static_callee_path`], this maps a global-object prefix
+    /// On top of the static receiver path of [`Self::receiver_path`], this maps a global-object prefix
     /// on a code-executing global (`window.eval`) and a local alias of one
     /// (`const e = eval; e(code)`) to the bare global. A binding of a Node.js
     /// built-in module in
@@ -1357,7 +1313,15 @@ impl ModuleInfoExtractor {
     /// `import { promises as fsp } from "node:fs"`). `node:fs.promises.<member>`
     /// becomes `node:fs.<member>`, the path of an `fs/promises` import.
     fn security_callee_path(&self, expr: &Expression<'_>) -> Option<String> {
-        let path = normalize_global_code_exec_path(self.static_callee_path(expr)?);
+        let receiver = self.receiver_path(expr)?;
+        receiver
+            .is_static()
+            .then(|| self.resolve_static_callee_path(receiver.path))
+    }
+
+    /// Resolve a static callee path (see [`Self::security_callee_path`]).
+    fn resolve_static_callee_path(&self, path: String) -> String {
+        let path = normalize_global_code_exec_path(path);
         let (root, rest) = match path.split_once('.') {
             Some((root, rest)) => (root, Some(rest)),
             None => (path.as_str(), None),
@@ -1378,7 +1342,7 @@ impl ModuleInfoExtractor {
             }
             _ => None,
         };
-        Some(resolved.unwrap_or(path))
+        resolved.unwrap_or(path)
     }
 
     /// The sink binding that the innermost binding of `name` holds. A
@@ -1430,126 +1394,6 @@ impl ModuleInfoExtractor {
         self.sink_aliases.catch_param_names.pop();
     }
 
-    /// Flatten a callee or assignment object to a dotted path.
-    ///
-    /// Accepts identifiers, static members, computed members whose key folds to
-    /// a constant string (`win["ev" + "al"]`), and the indirect-call sequence
-    /// `(0, eval)` whose leading expressions are literals. Anything else is
-    /// `None`, and the caller records a blind spot.
-    fn static_callee_path(&self, expr: &Expression<'_>) -> Option<String> {
-        let mut properties: Vec<Cow<'_, str>> = Vec::new();
-        let mut expr = expr;
-        let root = loop {
-            crate::cost::walk_step();
-            match unwrap_parens(expr) {
-                Expression::Identifier(ident) => break ident.name.as_str(),
-                Expression::StaticMemberExpression(member) => {
-                    properties.push(Cow::Borrowed(member.property.name.as_str()));
-                    expr = &member.object;
-                }
-                Expression::ComputedMemberExpression(member) => {
-                    properties.push(Cow::Owned(self.static_property_key(&member.expression)?));
-                    expr = &member.object;
-                }
-                Expression::SequenceExpression(seq) if properties.is_empty() => {
-                    let (last, leading) = seq.expressions.split_last()?;
-                    if !leading
-                        .iter()
-                        .all(|item| sink_literal_value(item).is_some())
-                    {
-                        return None;
-                    }
-                    expr = last;
-                }
-                _ => return None,
-            }
-        };
-        Some(join_member_path(root, &properties))
-    }
-
-    /// Flatten the object of a member sink to a dotted path when
-    /// [`Self::static_callee_path`] cannot: a `this` root, TypeScript
-    /// wrappers (`el!`, `el as T`), optional chains (`a?.b`) and calls, which
-    /// keep a `()` suffix (`document.createRange()`). Only member-assign
-    /// objects, [`OBJECT_ROOTED_HTML_METHODS`] and
-    /// [`OBJECT_ROOTED_RAW_SQL_METHODS`] use this path, so call rows with
-    /// broad patterns do not see these roots.
-    fn sink_object_path(&self, expr: &Expression<'_>) -> Option<String> {
-        let mut segments: Vec<String> = Vec::new();
-        let mut calls = 0_usize;
-        let mut expr = expr;
-        loop {
-            crate::cost::walk_step();
-            let (segment, next): (Cow<'_, str>, Option<&Expression<'_>>) =
-                match unwrap_static_expr(expr) {
-                    Expression::Identifier(ident) => (Cow::Borrowed(ident.name.as_str()), None),
-                    Expression::ThisExpression(_) => (Cow::Borrowed("this"), None),
-                    Expression::StaticMemberExpression(member) => (
-                        Cow::Borrowed(member.property.name.as_str()),
-                        Some(&member.object),
-                    ),
-                    Expression::ComputedMemberExpression(member) => (
-                        Cow::Owned(self.static_property_key(&member.expression)?),
-                        Some(&member.object),
-                    ),
-                    Expression::CallExpression(call) => {
-                        calls += 1;
-                        expr = &call.callee;
-                        continue;
-                    }
-                    Expression::ChainExpression(chain) => match &chain.expression {
-                        ChainElement::StaticMemberExpression(member) => (
-                            Cow::Borrowed(member.property.name.as_str()),
-                            Some(&member.object),
-                        ),
-                        ChainElement::ComputedMemberExpression(member) => (
-                            Cow::Owned(self.static_property_key(&member.expression)?),
-                            Some(&member.object),
-                        ),
-                        ChainElement::CallExpression(call) => {
-                            calls += 1;
-                            expr = &call.callee;
-                            continue;
-                        }
-                        ChainElement::TSNonNullExpression(non_null) => {
-                            expr = &non_null.expression;
-                            continue;
-                        }
-                        ChainElement::PrivateFieldExpression(_) => return None,
-                    },
-                    _ => return None,
-                };
-            let mut segment = segment.into_owned();
-            for _ in 0..calls {
-                segment.push_str("()");
-            }
-            calls = 0;
-            segments.push(segment);
-            match next {
-                Some(object) => expr = object,
-                None => break,
-            }
-        }
-        segments.reverse();
-        Some(segments.join("."))
-    }
-
-    /// The callee path of a call sink. A method in
-    /// [`OBJECT_ROOTED_HTML_METHODS`] or [`OBJECT_ROOTED_RAW_SQL_METHODS`]
-    /// also resolves on an object that only [`Self::sink_object_path`] can
-    /// flatten.
-    fn call_sink_callee_path(&self, callee: &Expression<'_>) -> Option<String> {
-        self.security_callee_path(callee).or_else(|| {
-            let method = super::visit_helpers::terminal_static_member_name(callee)?;
-            if !OBJECT_ROOTED_HTML_METHODS.contains(&method)
-                && !OBJECT_ROOTED_RAW_SQL_METHODS.contains(&method)
-            {
-                return None;
-            }
-            self.sink_object_path(callee)
-        })
-    }
-
     /// A computed property key that folds to a constant identifier-like string.
     /// Keys with a `.` are rejected, because they would split into two path
     /// segments.
@@ -1596,7 +1440,15 @@ impl ModuleInfoExtractor {
         pattern: &ObjectPattern<'_>,
         init: &Expression<'_>,
     ) {
-        let module = self.node_binding_module_of_require(init);
+        let module = self.node_binding_module_of_require(init).or_else(|| {
+            let Expression::Identifier(ident) = unwrap_static_expr(init) else {
+                return None;
+            };
+            match self.sink_binding(ident.name.as_str()) {
+                Some(SinkBinding::NodeModule(module)) => Some(module.clone()),
+                _ => None,
+            }
+        });
         for property in &pattern.properties {
             let BindingPattern::BindingIdentifier(local) = &property.value else {
                 continue;
@@ -1842,7 +1694,7 @@ impl ModuleInfoExtractor {
         if expr.quasi.expressions.is_empty() {
             return;
         }
-        let Some(callee_path) = flatten_callee_path(&expr.tag) else {
+        let Some(callee_path) = self.receiver_path(&expr.tag).map(|receiver| receiver.path) else {
             return;
         };
         let mut arg_idents: Vec<String> = Vec::new();

@@ -382,6 +382,8 @@ mod security_react_router_client_roots;
 mod security_request_receivers;
 #[path = "integration_test/security_secret_to_network.rs"]
 mod security_secret_to_network;
+#[path = "integration_test/security_shape_matrix.rs"]
+mod security_shape_matrix;
 #[path = "integration_test/security_taint_confidence.rs"]
 mod security_taint_confidence;
 #[path = "integration_test/security_template_xss_sinks.rs"]

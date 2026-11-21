@@ -42,10 +42,6 @@ const RULES_WITHOUT_EXAMPLE: &[(&str, &str)] = &[
         "tainted-sink",
         "each finding of the family reports under the id of its category",
     ),
-    (
-        "template-escape-bypass",
-        "the matcher does not see `new Handlebars.SafeString(...)`, the correct form of the call",
-    ),
 ];
 
 const UPDATE_ENV: &str = "FALLOW_UPDATE_RULE_EXAMPLES";

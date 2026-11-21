@@ -868,10 +868,10 @@ fn is_side_effect_sink(module: &ModuleInfo, site: &SinkSite) -> bool {
         .matchers()
         .iter()
         .any(|matcher| {
-            matcher.sink_shape == site.sink_shape
+            matcher.admits_sink_shape(site.sink_shape)
                 && SIDE_EFFECTS.contains(&matcher.effect)
                 && !RESPONSE_SHAPING_ROWS.contains(&matcher.id.as_str())
-                && matcher.first_matching_pattern(&site.callee_path).is_some()
+                && matcher.admits_callee(site.sink_shape, &site.callee_path)
                 && matcher.provenance_satisfied(
                     module,
                     &site.callee_path,
