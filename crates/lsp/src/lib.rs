@@ -695,7 +695,7 @@ impl LanguageServer for FallowLspServer {
             &file_path,
             uri,
             &params.range,
-            &file_lines,
+            code_actions::DocumentText::new(&file_content, &file_lines),
         );
         if analysis
             .document_versions

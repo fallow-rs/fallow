@@ -112,6 +112,11 @@ lifecycle behavior.
   stay registered separately because `initializationOptions.configPath` can
   still point at one.
 - Code actions must be safe, scoped, and derived from the current issue.
+- The remove-export quick fix parses the live document text with
+  `fallow_api::source_edits::SourceEditIndex`. It offers the edit only for an
+  export statement that the parser finds, and only when each name that the
+  `export` keyword of the statement exports is an unused finding. A document
+  with a syntax error gets no remove-export quick fix.
 - Initialization options and issue metadata stay aligned with generated VS
   Code contracts.
 - Shutdown must prevent late publication and clean up owned subprocess work.

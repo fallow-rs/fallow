@@ -6105,7 +6105,7 @@ fn absent_component_prop_editor_analysis_severity_and_live_suppression() {
             &card,
             &uri,
             &diagnostic.range,
-            &lines,
+            crate::code_actions::DocumentText::new(&text, &lines),
         )
         .with_current_absent_prop_source(&text),
     )
