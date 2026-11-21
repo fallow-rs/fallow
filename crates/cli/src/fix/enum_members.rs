@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
+use fallow_engine::source_edits::SourceEditIndex;
 
 use super::enum_helpers::{
     EnumDeclarationRange, declares_exported_enum, removable_exported_enum_range,
@@ -81,7 +82,14 @@ fn enum_body_drained_after_removal(
 /// removed because every member is in the fix list. Each entry corresponds to
 /// one folded enum; per-member edits for these enums are skipped in favour of
 /// a single whole-block delete.
-fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<FoldedEnum> {
+fn detect_folded_enums(
+    index: Option<&SourceEditIndex>,
+    lines: &[&str],
+    member_fixes: &[EnumMemberFix],
+) -> Vec<FoldedEnum> {
+    let Some(index) = index else {
+        return Vec::new();
+    };
     let mut by_parent: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
     for fix in member_fixes {
         by_parent
@@ -95,7 +103,7 @@ fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<Fo
         let Some(decl_line) = find_enum_declaration_line(lines, parent_name) else {
             continue;
         };
-        let Some(range) = removable_exported_enum_range(lines, decl_line, parent_name) else {
+        let Some(range) = removable_exported_enum_range(index, lines, parent_name) else {
             continue;
         };
         if !enum_body_drained_after_removal(lines, range, member_names) {
@@ -156,7 +164,8 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         }
 
         let relative = path.strip_prefix(root).unwrap_or(path);
-        let folded = detect_folded_enums(&lines, &member_fixes);
+        let index = SourceEditIndex::parse(path, &content);
+        let folded = detect_folded_enums(index.as_ref(), &lines, &member_fixes);
 
         let mut parents: Vec<&str> = member_fixes
             .iter()

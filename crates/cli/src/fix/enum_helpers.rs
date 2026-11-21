@@ -3,6 +3,8 @@
 //! itself is unused) and `enum_members.rs` (when every member of the enum is
 //! unused, even if the enum has importers).
 
+use fallow_engine::source_edits::{ExportStatement, ExportStatementKind, SourceEditIndex};
+
 #[derive(Clone, Copy)]
 pub(super) struct EnumDeclarationRange {
     pub(super) start_line: usize,
@@ -43,45 +45,6 @@ pub(super) fn declares_exported_enum(line: &str, enum_name: &str) -> bool {
         .is_some_and(|ch| ch.is_whitespace() || ch == '{')
 }
 
-fn find_enum_declaration_range(lines: &[&str], line_idx: usize) -> Option<EnumDeclarationRange> {
-    let start_line = lines.get(line_idx)?;
-    let export_col = start_line.find("export")?;
-    if !start_line[..export_col].trim().is_empty() {
-        return None;
-    }
-
-    let mut brace_depth = 0i32;
-    let mut saw_open_brace = false;
-
-    for (idx, line) in lines.iter().enumerate().skip(line_idx) {
-        let chars: Vec<char> = line.chars().collect();
-        for (char_idx, ch) in chars.iter().enumerate() {
-            match ch {
-                '{' => {
-                    saw_open_brace = true;
-                    brace_depth += 1;
-                }
-                '}' if saw_open_brace => {
-                    brace_depth -= 1;
-                    if brace_depth == 0 {
-                        let suffix: String = chars[char_idx + 1..].iter().collect();
-                        if suffix.trim().trim_end_matches(';').trim().is_empty() {
-                            return Some(EnumDeclarationRange {
-                                start_line: line_idx,
-                                end_line: idx,
-                            });
-                        }
-                        return None;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    None
-}
-
 fn is_ident_char(ch: char) -> bool {
     ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()
 }
@@ -102,21 +65,43 @@ fn has_identifier_outside_range(lines: &[&str], name: &str, range: EnumDeclarati
         .any(|(_, line)| contains_identifier(line, name))
 }
 
-/// Returns the byte range of an exported enum declaration if it is safe to
-/// remove the whole block: the line declares `export enum NAME`, the brace
-/// structure is well-formed, and the enum name does not appear anywhere
-/// outside the declaration body in the same file. Importers in OTHER files
-/// are not consulted; callers must guarantee the enum is dead at the
+/// The lines of the exported enum `statement` when it is safe to remove the
+/// whole statement: no other text shares its lines, and the enum name does
+/// not appear outside the statement in the same file. Importers in other
+/// files are not consulted; callers must guarantee the enum is dead at the
 /// project level before invoking this.
-pub(super) fn removable_exported_enum_range(
+pub(super) fn enum_statement_range(
+    index: &SourceEditIndex,
     lines: &[&str],
-    line_idx: usize,
-    enum_name: &str,
+    statement: &ExportStatement,
 ) -> Option<EnumDeclarationRange> {
-    let line = *lines.get(line_idx)?;
-    if !declares_exported_enum(line, enum_name) {
+    if statement.kind != ExportStatementKind::Enum
+        || !index.owns_its_lines(statement.start, statement.end)
+    {
         return None;
     }
-    let range = find_enum_declaration_range(lines, line_idx)?;
-    (!has_identifier_outside_range(lines, enum_name, range)).then_some(range)
+    let name = statement.names.first()?;
+    let (start_line, end_line) = index.line_range(statement.start, statement.end);
+    let range = EnumDeclarationRange {
+        start_line,
+        end_line,
+    };
+    (!has_identifier_outside_range(lines, name, range)).then_some(range)
+}
+
+/// The lines of the exported enum `enum_name` when it is safe to remove the
+/// whole declaration. See [`enum_statement_range`].
+pub(super) fn removable_exported_enum_range(
+    index: &SourceEditIndex,
+    lines: &[&str],
+    enum_name: &str,
+) -> Option<EnumDeclarationRange> {
+    let statement = index.statements().iter().find(|statement| {
+        statement.kind == ExportStatementKind::Enum
+            && statement
+                .names
+                .first()
+                .is_some_and(|name| name == enum_name)
+    })?;
+    enum_statement_range(index, lines, statement)
 }
