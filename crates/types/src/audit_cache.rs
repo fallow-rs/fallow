@@ -94,6 +94,16 @@ pub struct AuditCoverageFileFingerprint {
     pub error: Option<String>,
 }
 
+/// The type-aware selection of a base pass that runs the type-aware
+/// companion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditTypeAwareFingerprint {
+    /// The TypeScript project configs, in the order of the run.
+    pub projects: Vec<String>,
+    /// The completeness policy.
+    pub require: String,
+}
+
 /// Typed payload hashed to address an audit base-snapshot cache entry.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AuditCacheKeyPayload {
@@ -153,6 +163,10 @@ pub struct AuditCacheKeyPayload {
     /// it out, so the key bytes of a default run do not change.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub type_aware_backend: Option<String>,
+    /// The effective type-aware selection. A syntactic base pass leaves
+    /// it out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_aware: Option<AuditTypeAwareFingerprint>,
 }
 
 /// Builder for audit base-snapshot cache keys.
@@ -200,6 +214,7 @@ impl AuditCacheKeyBuilder {
                 css: false,
                 css_deep: false,
                 type_aware_backend: None,
+                type_aware: None,
             },
         }
     }
@@ -294,6 +309,13 @@ impl AuditCacheKeyBuilder {
     #[must_use]
     pub fn type_aware_backend(mut self, backend: Option<String>) -> Self {
         self.payload.type_aware_backend = backend;
+        self
+    }
+
+    /// Set the effective type-aware selection.
+    #[must_use]
+    pub fn type_aware(mut self, selection: Option<AuditTypeAwareFingerprint>) -> Self {
+        self.payload.type_aware = selection;
         self
     }
 
@@ -442,6 +464,29 @@ mod tests {
         let default = build(None);
         assert!(!String::from_utf8_lossy(&default).contains("type_aware_backend"));
         assert_ne!(default, build(Some("tsrs")));
+    }
+
+    #[test]
+    fn audit_cache_key_bytes_include_only_an_enabled_type_aware_selection() {
+        let build = |selection: Option<AuditTypeAwareFingerprint>| {
+            AuditCacheKeyBuilder::new(1, "1.0.0", "base", config(), Vec::new(), context())
+                .type_aware(selection)
+                .to_json_bytes()
+                .expect("payload should serialize")
+        };
+        let selection = |projects: &[&str]| AuditTypeAwareFingerprint {
+            projects: projects.iter().map(|p| (*p).to_string()).collect(),
+            require: "BestEffort".to_string(),
+        };
+
+        let syntactic = build(None);
+        assert!(!String::from_utf8_lossy(&syntactic).contains("\"type_aware\""));
+        let default_projects = build(Some(selection(&[])));
+        assert_ne!(syntactic, default_projects);
+        assert_ne!(
+            default_projects,
+            build(Some(selection(&["tsconfig.app.json"])))
+        );
     }
 
     #[test]

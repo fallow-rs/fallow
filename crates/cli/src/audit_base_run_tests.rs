@@ -4,8 +4,11 @@ use std::process::Command;
 use rustc_hash::FxHashSet;
 
 use super::super::cache::{BaseKeyRequest, audit_base_snapshot_cache_key};
-use super::super::{AuditOptions, audit_review_benchmark_options};
+use super::super::{AuditOptions, AuditTypeAwareOptions, audit_review_benchmark_options};
 use super::BaseRunInputs;
+use fallow_config::{CommandKind, EnvSnapshot, RunInputs, SelectionInput, Surface};
+use fallow_engine::resolved_run::{ResolvedRun, resolve_run};
+use fallow_types::sourced::{Given, Origin};
 
 const EMPTY_V8_DUMP: &str = r#"{"result":[]}"#;
 
@@ -78,7 +81,43 @@ fn options<'a>(
     opts
 }
 
+/// The head run of `fallow audit`. `env` is the whole environment of the
+/// run, so the process environment does not reach the test.
+fn head_run(root: &Path, env: &[(&str, &str)]) -> ResolvedRun {
+    let mut inputs = RunInputs::new(
+        Surface::Cli,
+        EnvSnapshot::from_pairs(env, Some(root)),
+        CommandKind::Audit,
+        SelectionInput::Lists {
+            only: Vec::new(),
+            skip: Vec::new(),
+            origin: Origin::Flag("--only"),
+        },
+    );
+    inputs.root = Some(Given {
+        value: root.to_path_buf(),
+        origin: Origin::Flag("--root"),
+    });
+    inputs.threads = Some(Given {
+        value: 1,
+        origin: Origin::Flag("--threads"),
+    });
+    resolve_run(&inputs).expect("head run")
+}
+
 fn key_hash(opts: &AuditOptions<'_>) -> u64 {
+    key_hash_with(
+        opts,
+        &head_run(opts.root, &[]),
+        AuditTypeAwareOptions::default(),
+    )
+}
+
+fn key_hash_with(
+    opts: &AuditOptions<'_>,
+    head: &ResolvedRun,
+    type_aware: AuditTypeAwareOptions<'_>,
+) -> u64 {
     let base_run = BaseRunInputs::resolve(opts);
     audit_base_snapshot_cache_key(&BaseKeyRequest {
         opts,
@@ -86,6 +125,8 @@ fn key_hash(opts: &AuditOptions<'_>) -> u64 {
         base_ref: "HEAD",
         changed_files: &FxHashSet::default(),
         workspace_patterns: &[],
+        head,
+        type_aware,
     })
     .expect("key should compute")
     .expect("key should exist")
@@ -189,4 +230,79 @@ fn a_saved_baseline_path_does_not_change_the_base_key() {
             );
         }
     }
+}
+
+fn type_aware_off() -> AuditTypeAwareOptions<'static> {
+    AuditTypeAwareOptions {
+        enabled: Some(false),
+        ..AuditTypeAwareOptions::default()
+    }
+}
+
+#[test]
+fn the_type_aware_flag_changes_the_base_key_of_a_type_aware_config() {
+    let tmp = repo(&[(".fallowrc.json", r#"{"typeAware":{"enabled":true}}"#)]);
+    let root = tmp.path();
+    let config_path = None;
+    let cache_dir = root.join(".fallow/cache");
+    let opts = options(root, &config_path, &cache_dir);
+    let head = head_run(root, &[]);
+
+    assert_ne!(
+        key_hash_with(&opts, &head, AuditTypeAwareOptions::default()),
+        key_hash_with(&opts, &head, type_aware_off()),
+        "--no-type-aware must change the base key of a type-aware config"
+    );
+}
+
+#[test]
+fn a_flag_that_keeps_the_selection_keeps_the_base_key() {
+    let tmp = repo(&[]);
+    let root = tmp.path();
+    let config_path = None;
+    let cache_dir = root.join(".fallow/cache");
+    let opts = options(root, &config_path, &cache_dir);
+    let head = head_run(root, &[]);
+
+    assert_eq!(
+        key_hash_with(&opts, &head, AuditTypeAwareOptions::default()),
+        key_hash_with(&opts, &head, type_aware_off()),
+        "two syntactic runs must share the base key"
+    );
+}
+
+#[test]
+fn the_type_aware_environment_changes_the_base_key() {
+    let tmp = repo(&[]);
+    let root = tmp.path();
+    let config_path = None;
+    let cache_dir = root.join(".fallow/cache");
+    let opts = options(root, &config_path, &cache_dir);
+    let hash = |env: &[(&str, &str)]| {
+        key_hash_with(
+            &opts,
+            &head_run(root, env),
+            AuditTypeAwareOptions::default(),
+        )
+    };
+
+    let syntactic = hash(&[]);
+    let type_aware = hash(&[("FALLOW_TYPE_AWARE", "1")]);
+    let with_project = hash(&[
+        ("FALLOW_TYPE_AWARE", "1"),
+        ("FALLOW_TYPE_AWARE_PROJECTS", "tsconfig.app.json"),
+    ]);
+
+    assert_ne!(
+        syntactic, type_aware,
+        "FALLOW_TYPE_AWARE must change the base key"
+    );
+    assert_ne!(
+        with_project, syntactic,
+        "FALLOW_TYPE_AWARE_PROJECTS must change the base key"
+    );
+    assert_ne!(
+        with_project, type_aware,
+        "FALLOW_TYPE_AWARE_PROJECTS must change the base key"
+    );
 }

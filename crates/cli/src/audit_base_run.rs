@@ -120,6 +120,8 @@ impl CliAuditBackend<'_> {
             base_ref,
             changed_files: focus,
             workspace_patterns: self.workspace_patterns(),
+            head: self.head,
+            type_aware: self.type_aware,
         }
     }
 }

@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use fallow_output::{ExceededThreshold, FindingSeverity};
 use fallow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFileFingerprint,
-    AuditCoverageFingerprint,
+    AuditCoverageFingerprint, AuditTypeAwareFingerprint,
 };
 use fallow_types::path_guard::CacheTarget;
 use fallow_types::source_fingerprint::SourceFingerprint;
@@ -15,7 +15,7 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use super::base_run::BaseRunInputs;
 use super::keys::{ComplexityBaseline, ComplexityMetrics};
-use super::{AuditKeySnapshot, AuditOptions};
+use super::{AuditKeySnapshot, AuditOptions, AuditTypeAwareOptions};
 use crate::base_worktree::{
     SECONDS_PER_DAY, SweepDecision, SweepDisposition, SweepEntry, SweepMode, SweepPass,
     git_rev_parse, git_toplevel,
@@ -23,6 +23,7 @@ use crate::base_worktree::{
 use crate::error::emit_input_error;
 use crate::runtime_support::{load_config_file, loaded_config};
 use fallow_engine::project_config::{ConfigFile, ConfigFileOptions};
+use fallow_engine::resolved_run::{ResolveError, ResolvedRun};
 
 /// Version 11: complexity keys hold path and function name only, and each
 /// complexity entry carries its metric values (#3277). A version-10 snapshot
@@ -614,25 +615,36 @@ pub(super) fn audit_workspace_patterns(opts: &AuditOptions<'_>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn config_file_fingerprint(
     opts: &AuditOptions<'_>,
 ) -> Result<AuditConfigFingerprint, ExitCode> {
+    config_identity(opts).map(|(fingerprint, _)| fingerprint)
+}
+
+fn config_identity(
+    opts: &AuditOptions<'_>,
+) -> Result<(AuditConfigFingerprint, fallow_config::TypeAwareConfig), ExitCode> {
     let file = load_config_file(
         opts.root,
         opts.config_path.as_deref(),
         opts.allow_remote_extends,
         opts.output,
     )?;
+    let section = file.config.type_aware.clone();
     let ConfigFile {
         config,
         path: Some(path),
         ..
     } = file
     else {
-        return Ok(AuditConfigFingerprint {
-            path: None,
-            resolved_hash: None,
-        });
+        return Ok((
+            AuditConfigFingerprint {
+                path: None,
+                resolved_hash: None,
+            },
+            section,
+        ));
     };
     let bytes = serde_json::to_vec(&config).map_err(|e| {
         emit_input_error(
@@ -640,10 +652,38 @@ pub(super) fn config_file_fingerprint(
             opts.output,
         )
     })?;
-    Ok(AuditConfigFingerprint {
-        path: Some(path.to_string_lossy().to_string()),
-        resolved_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
-    })
+    Ok((
+        AuditConfigFingerprint {
+            path: Some(path.to_string_lossy().to_string()),
+            resolved_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+        },
+        section,
+    ))
+}
+
+/// The type-aware selection of the base pass, from the resolver of the
+/// dead-code pass. `Err` when the run cannot use a type-aware variable.
+/// The head pass reports that error, so this function stays silent.
+fn type_aware_fingerprint(
+    head: &ResolvedRun,
+    type_aware: AuditTypeAwareOptions<'_>,
+    section: &fallow_config::TypeAwareConfig,
+) -> Result<Option<AuditTypeAwareFingerprint>, ResolveError> {
+    let request = crate::check::TypeAwareRequest {
+        enabled: type_aware.enabled,
+        config_override: type_aware.config_default,
+        projects: type_aware.projects,
+        require: type_aware.require,
+    };
+    let values = crate::check::type_aware_values(Some(head), &request, section)?;
+    Ok(values.enabled.then(|| AuditTypeAwareFingerprint {
+        projects: values
+            .projects
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect(),
+        require: format!("{:?}", values.require),
+    }))
 }
 
 /// `path` is the coverage path of the base pass. It is absolute.
@@ -699,6 +739,10 @@ pub(super) struct BaseKeyRequest<'a> {
     /// The patterns that the base checkout gets, so the key covers each
     /// context directory that the checkout links.
     pub(super) workspace_patterns: &'a [String],
+    /// The resolved run of the head side. Its environment snapshot holds
+    /// the type-aware variables.
+    pub(super) head: &'a ResolvedRun,
+    pub(super) type_aware: AuditTypeAwareOptions<'a>,
 }
 
 pub(super) fn audit_base_snapshot_cache_key(
@@ -710,6 +754,8 @@ pub(super) fn audit_base_snapshot_cache_key(
         base_ref,
         changed_files,
         workspace_patterns,
+        head,
+        type_aware,
     } = *request;
     if opts.no_cache {
         return Ok(None);
@@ -717,7 +763,10 @@ pub(super) fn audit_base_snapshot_cache_key(
     let Some(base_sha) = git_rev_parse(opts.root, base_ref) else {
         return Ok(None);
     };
-    let config_file = config_file_fingerprint(opts)?;
+    let (config_file, section) = config_identity(opts)?;
+    let Ok(type_aware) = type_aware_fingerprint(head, type_aware, &section) else {
+        return Ok(None);
+    };
     // The options of the base pass. The key reads only the fields that do
     // not depend on the base worktree, so the head root stands in for it.
     let base = base_run.options(opts, opts.root, &base_run.config_path, opts.cache_dir);
@@ -763,6 +812,7 @@ pub(super) fn audit_base_snapshot_cache_key(
         base.analyses.architecture_label(),
     )
     .styling(base.css, base.css_deep)
+    .type_aware(type_aware)
     .type_aware_backend(
         std::env::var("FALLOW_TYPE_AWARE_BACKEND")
             .ok()

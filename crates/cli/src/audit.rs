@@ -223,10 +223,8 @@ pub struct AuditTypeAwareOptions<'a> {
 }
 
 impl AuditTypeAwareOptions<'_> {
-    /// Whether the CLI explicitly forced type-aware analysis on. Guards the
-    /// base-snapshot cache exactly like the previous boolean flag did; runs
-    /// enabled through config alone are still isolated by the config
-    /// fingerprint inside the cache key.
+    /// Whether `--type-aware` is on the command line. Such a run does not
+    /// read or write the base-snapshot cache.
     const fn cli_enabled(&self) -> bool {
         matches!(self.enabled, Some(true))
     }
@@ -255,7 +253,7 @@ pub use cache::sweep_base_snapshot_cache;
 use cache::{
     AUDIT_BASE_SNAPSHOT_CACHE_VERSION, CachedAuditKeySnapshot, MAX_AUDIT_BASE_SNAPSHOT_FILES,
     audit_base_snapshot_cache_dir, audit_base_snapshot_cache_file, cached_from_snapshot,
-    config_file_fingerprint, ensure_audit_base_snapshot_cache_dir, snapshot_from_cached,
+    ensure_audit_base_snapshot_cache_dir, snapshot_from_cached,
 };
 use cache::{
     AuditBaseSnapshotCacheKey, audit_base_snapshot_cache_key, audit_workspace_patterns,
@@ -541,8 +539,7 @@ impl AuditBackend for CliAuditBackend<'_> {
     }
 
     fn load_cached_base(&self, key: &AuditBaseSnapshotCacheKey) -> Option<AuditKeySnapshot> {
-        // A run with `--type-aware` computes its base afresh: the cache key
-        // guards it only through the config fingerprint.
+        // A run with `--type-aware` computes its base afresh.
         if self.type_aware.cli_enabled() {
             return None;
         }
