@@ -105,6 +105,7 @@ mod fix_export_list_import_tests;
 mod fix_generated_file_tests;
 mod fix_multiline_reexport_tests;
 mod fix_shared_declaration_tests;
+mod fix_snapshot_tests;
 mod fix_tests;
 mod flags_tests;
 mod gate_outcome_tests;

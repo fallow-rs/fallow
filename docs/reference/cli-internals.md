@@ -669,6 +669,14 @@ line states exit code 0.
   options forward the same choice to the engine findings builder.
 - `fix` remains preview-first. Non-interactive mutation requires explicit
   confirmation.
+- Source edits of `fallow fix`: each source fixer (class members, exports,
+  enum members) reads a file through `read_source_snapshot`
+  (`crates/cli/src/fix/source_edits.rs`) and gets the text that the analysis
+  read, also after another fixer queued edits for the file. The fixer queues
+  byte edits against that text, and `FixPlan::commit` applies the edits of a
+  file one time. An edit that overlaps a queued edit is not applied and gets
+  no fix record. The fixers of `package.json`, `pnpm-workspace.yaml` and the
+  config file still stage whole files.
 - `fallow impact statusline` stays path-free, read-only, plain text, and
   epilogue-free. Its trend compares only whole-project scans.
 - `fallow doctor` stays path-free, local, read-only, and epilogue-free. It may
