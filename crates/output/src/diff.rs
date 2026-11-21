@@ -267,6 +267,25 @@ impl DiffIndex {
         self.added_line_count
     }
 
+    /// The scope that a diff filter keeps: the indexed added lines, plus one
+    /// for each touched head-tree file that adds no line, such as a pure
+    /// rename. The filter keeps a finding on a whole touched file, so `0`
+    /// means that the diff touches no file and adds no line. At the
+    /// [`MAX_ADDED_LINES`] cap it returns the cap, because the files after the
+    /// cap have no indexed line and would each count as a file without lines.
+    #[must_use]
+    pub fn filter_scope_size(&self) -> usize {
+        if self.added_line_count >= MAX_ADDED_LINES {
+            return self.added_line_count;
+        }
+        let files_without_lines = self
+            .touched_files
+            .iter()
+            .filter(|path| !self.added_lines.contains_key(*path))
+            .count();
+        self.added_line_count.saturating_add(files_without_lines)
+    }
+
     /// Number of parsed unified-diff hunk headers.
     #[must_use]
     pub fn hunk_count(&self) -> usize {
@@ -559,6 +578,7 @@ mod tests {
             Some(index.net_lines()),
             i64::try_from(MAX_ADDED_LINES + 100).ok()
         );
+        assert_eq!(index.filter_scope_size(), index.added_line_count());
         assert_eq!(index.hunk_count(), 1);
         assert_eq!(
             index.base_line_range("other.txt", 1, 1),
@@ -708,6 +728,44 @@ rename to src/new.ts
         let index = DiffIndex::from_unified_diff("");
         assert_eq!(index.added_line_count(), 0);
         assert!(!index.touches_file("src/a.ts"));
+        assert_eq!(index.filter_scope_size(), 0);
+    }
+
+    #[test]
+    fn filter_scope_size_counts_added_lines_and_files_without_lines() {
+        let diff = "\
+diff --git a/src/old.ts b/src/renamed.ts
+similarity index 100%
+rename from src/old.ts
+rename to src/renamed.ts
+diff --git a/src/a.ts b/src/a.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,2 @@
+ keep
++added
+diff --git a/bin/run.ts b/bin/run.ts
+old mode 100644
+new mode 100755
+diff --git a/src/gone.ts b/src/gone.ts
+deleted file mode 100644
+--- a/src/gone.ts
++++ /dev/null
+@@ -1,1 +0,0 @@
+-old
+";
+        let index = DiffIndex::from_unified_diff(diff);
+        assert_eq!(index.added_line_count(), 1);
+        assert!(
+            !index.touches_file("bin/run.ts"),
+            "a mode-only section names no head path, so the filter keeps nothing on it"
+        );
+        assert_eq!(
+            index.filter_scope_size(),
+            2,
+            "one added line plus the renamed file; the mode-only and deleted files \
+             are not touched in the head tree"
+        );
     }
 
     #[test]
