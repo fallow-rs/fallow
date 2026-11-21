@@ -650,7 +650,8 @@ fn each_skipped_command_is_a_supported_pair() {
 /// config of `case`, and with the extra arguments, the option and a path
 /// that does not exist when `with_option` holds. The base run has the extra
 /// arguments too when [`ReadCase::extra_in_base`] holds. The run ends, or it
-/// is stopped after [`READ_TIMEOUT`] or when its output names the path.
+/// is stopped after [`READ_TIMEOUT`]. A run whose output names the path gets
+/// [`STOP_GRACE`] to end on its own before it is stopped.
 fn run_read_case(
     args: &[String],
     case: &ReadCase,
