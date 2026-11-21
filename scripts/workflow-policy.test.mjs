@@ -369,6 +369,32 @@ test("public skill PR parity uses the exact base while push and candidate checks
     /working-directory: \$\{\{ github\.event_name == 'pull_request' && '\.fallow-skills-base' \|\| '\.' \}\}/u,
   );
   assert.match(job, /run: node scripts\/vendor-skills\.mjs --check/u);
+  const headWarning = job.match(
+    /- name: Warn when the pull request head needs the companion sync\n[\s\S]*?(?=\n\s+- name: )/u,
+  );
+  assert.ok(headWarning, "a pull request warns early about drift on its head");
+  assert.match(headWarning[0], /if: github\.event_name == 'pull_request'/u);
+  assert.doesNotMatch(headWarning[0], /working-directory:/u, "the warning checks the head tree");
+  assert.match(
+    headWarning[0],
+    /node scripts\/vendor-skills\.mjs --check \|\| status=\$\?\n\s+if \[ "\$status" -eq 1 \]; then\n\s+echo "::warning [^\n]*companion sync[^\n]*sync-skills-companion\.mjs --pin <merge commit>/u,
+    "head drift emits a warning with the sync command and does not fail the job",
+  );
+  assert.match(
+    headWarning[0],
+    /elif \[ "\$status" -ne 0 \]; then\n\s+echo "::warning [^\n]*could not run/u,
+    "a check error is not reported as drift",
+  );
+  assert.doesNotMatch(
+    headWarning[0],
+    /exit "?\$status"?\n/u,
+    "the warning step never fails the job",
+  );
+  assert.ok(
+    job.indexOf("Warn when the pull request head") <
+      job.indexOf("Check public skill matches the Fallow source contract"),
+    "the warning runs before the deciding base check",
+  );
   assert.match(job, /FALLOW_SKILLS_DIR: \$\{\{ github\.workspace \}\}\/\.fallow-skills-src/u);
   assert.doesNotMatch(job, /continue-on-error: true|contents: write|id-token: write/u);
   assert.match(aggregate, /needs: \[[^\n]*skills-vendor/u);
