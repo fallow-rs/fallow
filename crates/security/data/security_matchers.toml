@@ -30,6 +30,12 @@
 # `call` for the others). The callee pattern alone tells a bare call from a
 # member call.
 #
+# Optional `this_receiver = true` lets a call of a member of `this` itself
+# (`this.whereRaw(x)`) match the row. A class method of that name runs code of
+# the class or of its base in most cases, so only rows with a method name that
+# belongs to a library set it. A member of a field (`this.db.query(x)`) matches
+# every row.
+#
 # Optional `arguments` says which argument positions the row reads: `index`
 # (only arg_index, the default), `variadic` (arg_index and every later
 # position), or `any-non-literal` (every non-literal argument, for log calls
@@ -119,6 +125,7 @@ title = "Dangerous HTML sink"
 effect = "dom"
 sink_shape = "member-call"
 callee_patterns = ["*.insertAdjacentHTML"]
+this_receiver = true
 arg_index = 1
 evidence_template = "Non-literal HTML passed to {callee}(). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
 
@@ -131,6 +138,7 @@ title = "Dangerous HTML sink"
 effect = "dom"
 sink_shape = "member-call"
 callee_patterns = ["*.createContextualFragment"]
+this_receiver = true
 arg_index = 0
 evidence_template = "Non-literal HTML passed to {callee}(). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
 
@@ -561,6 +569,7 @@ callee_patterns = [
   "sequelize.literal",
   "Sequelize.literal",
 ]
+this_receiver = true
 arg_index = 0
 evidence_template = "Non-literal value passed to {callee}(). Candidate for verification: raw SQL escape hatches bypass parameterization; confirm the fragment is not attacker-controlled."
 

@@ -94,6 +94,9 @@ struct RawMatcher {
     /// `index` (default), `variadic` or `any-non-literal`; see [`ArgumentSelector`].
     #[serde(default)]
     arguments: Option<String>,
+    /// Whether a call of a member of `this` itself (`this.m(x)`) matches the row.
+    #[serde(default)]
+    this_receiver: bool,
     evidence_template: String,
     #[serde(default)]
     import_provenance: Option<String>,
@@ -352,6 +355,8 @@ pub struct Matcher {
     pub forms: CallForms,
     /// A row that reads several positions reports one candidate per call.
     pub arguments: ArgumentSelector,
+    /// Whether a call of a member of `this` itself (`this.m(x)`) matches the row.
+    pub this_receiver: bool,
     pub evidence_template: String,
     pub import_provenance: Option<String>,
     /// Framework enabler package gate (issue #861). `None` = global row.
@@ -766,7 +771,7 @@ fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
     let arg_kinds = parse_matcher_arg_kinds(&entry.id, entry.arg_kinds.as_deref())?;
     let enabler = validate_matcher_enabler(&entry.id, entry.enabler)?;
     let object_properties = parse_object_property_predicates(&entry.id, entry.object_properties)?;
-    call_forms::check_any_non_literal(Matcher {
+    call_forms::check_matcher(Matcher {
         id: entry.id,
         cwe: entry.cwe,
         title: entry.title,
@@ -776,6 +781,7 @@ fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
         arg_index: entry.arg_index,
         forms,
         arguments,
+        this_receiver: entry.this_receiver,
         evidence_template: entry.evidence_template,
         import_provenance: entry.import_provenance,
         enabler,

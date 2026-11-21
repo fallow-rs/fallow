@@ -86,6 +86,27 @@ impl Matcher {
     pub fn reads_several_arguments(&self) -> bool {
         self.arguments != ArgumentSelector::Index
     }
+
+    /// Whether the row matches the callee path of a sink site of `shape`. A
+    /// call of a member of `this` itself (`this.query(x)`) runs code of the
+    /// class or of its base in most cases, so it matches only a call row that
+    /// sets `this_receiver`. A member of a field (`this.db.query(x)`) and a
+    /// member assignment (`this.innerHTML = x`) match as any other path.
+    #[must_use]
+    pub fn admits_callee(&self, shape: SinkShape, callee_path: &str) -> bool {
+        if is_call_shape(shape) && is_this_member_path(callee_path) && !self.this_receiver {
+            return false;
+        }
+        self.first_matching_pattern(callee_path).is_some()
+    }
+}
+
+/// Whether a callee path is a member of `this` itself (`this.query`).
+#[must_use]
+pub fn is_this_member_path(callee_path: &str) -> bool {
+    callee_path
+        .strip_prefix("this.")
+        .is_some_and(|member| !member.is_empty() && !member.contains('.'))
 }
 
 /// Whether a sink shape is one of the call shapes.
@@ -173,16 +194,37 @@ pub fn parse_argument_selector(
     Ok(selector)
 }
 
+/// Check the call-form fields of a parsed row.
+///
 /// `any-non-literal` reads every non-literal argument, so a row with a
-/// literal or context predicate cannot use it.
-pub fn check_any_non_literal(matcher: Matcher) -> Result<Matcher, String> {
+/// literal or context predicate cannot use it. `this_receiver` needs a call
+/// row with a `*.m` pattern, the only pattern that a `this.m` path can match.
+pub fn check_matcher(matcher: Matcher) -> Result<Matcher, String> {
     if matcher.arguments == ArgumentSelector::AnyNonLiteral && matcher.is_literal_aware() {
         return Err(format!(
             "matcher {:?} uses any-non-literal, which needs no literal predicate",
             matcher.id
         ));
     }
+    if matcher.this_receiver
+        && (!is_call_shape(matcher.sink_shape)
+            || !matcher
+                .callee_patterns
+                .iter()
+                .any(|pattern| single_member_wildcard(pattern.raw())))
+    {
+        return Err(format!(
+            "matcher {:?} sets this_receiver, which needs a call row with a `*.m` pattern",
+            matcher.id
+        ));
+    }
     Ok(matcher)
+}
+
+/// Whether a raw pattern is `*.m`, a wildcard receiver and one member.
+fn single_member_wildcard(raw: &str) -> bool {
+    raw.strip_prefix("*.")
+        .is_some_and(|member| !member.is_empty() && !member.contains('.'))
 }
 
 #[cfg(test)]
@@ -304,5 +346,52 @@ evidence_template = "x"
             .find(|m| m.id == "secret-pii-log")
             .unwrap();
         assert_eq!(row.arguments, ArgumentSelector::AnyNonLiteral);
+    }
+
+    /// The rows that set `this_receiver` name exactly the library methods
+    /// that a `this` root reached before the canonical call: the markup
+    /// parsers and the raw SQL methods.
+    #[test]
+    fn this_receiver_rows_name_the_library_methods() {
+        let names: std::collections::BTreeSet<&str> = catalogue()
+            .matchers()
+            .iter()
+            .filter(|m| m.this_receiver)
+            .flat_map(|m| m.callee_patterns.iter())
+            .filter_map(|pattern| pattern.raw().strip_prefix("*."))
+            .filter(|member| !member.contains('.'))
+            .collect();
+        let expected = std::collections::BTreeSet::from([
+            "createContextualFragment",
+            "insertAdjacentHTML",
+            "whereRaw",
+            "havingRaw",
+            "orderByRaw",
+            "$queryRawUnsafe",
+            "$executeRawUnsafe",
+        ]);
+        assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn this_member_path_needs_the_row_flag() {
+        let plain = parse_catalogue(&call_row("")).unwrap();
+        let flagged = parse_catalogue(&call_row("this_receiver = true")).unwrap();
+        let (plain, flagged) = (&plain.matchers()[0], &flagged.matchers()[0]);
+        assert!(!plain.admits_callee(SinkShape::MemberCall, "this.m"));
+        assert!(flagged.admits_callee(SinkShape::MemberCall, "this.m"));
+        assert!(plain.admits_callee(SinkShape::MemberCall, "this.db.m"));
+        assert!(plain.admits_callee(SinkShape::MemberCall, "db.m"));
+        assert!(!plain.admits_callee(SinkShape::NewExpression, "this.m"));
+    }
+
+    #[test]
+    fn parse_rejects_this_receiver_without_a_member_pattern() {
+        let exact = call_row("this_receiver = true").replace("\"*.m\"", "\"db.m\"");
+        let err = parse_catalogue(&exact).unwrap_err();
+        assert!(err.contains("this_receiver"), "got: {err}");
+        let assign = call_row("this_receiver = true").replace("member-call", "member-assign");
+        let err = parse_catalogue(&assign).unwrap_err();
+        assert!(err.contains("this_receiver"), "got: {err}");
     }
 }

@@ -67,7 +67,8 @@ impl ReceiverPath {
         self.root == ReceiverRoot::Identifier && !self.through_call
     }
     /// Whether the path is a member of `this` itself (`this.query`). Such a
-    /// call runs a method of the class, not a library sink of the same name.
+    /// call runs code of the class or of its base in most cases, so it
+    /// matches only the catalogue rows that set `this_receiver`.
     pub(in crate::visitor) fn is_own_member(&self) -> bool {
         self.root == ReceiverRoot::This
             && !self.through_call

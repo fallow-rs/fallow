@@ -338,7 +338,7 @@ fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str,
         // source, not request input.
         && (matcher.requires_source_kinds.is_empty()
             || source.is_some_and(|(id, _)| matcher.requires_source_kinds.iter().any(|k| k == id)))
-        && matcher.first_matching_pattern(&sink.callee_path).is_some()
+        && matcher.admits_callee(sink.sink_shape, &sink.callee_path)
 }
 
 /// The catalogue id of the secret-to-network exfil category (issue #890). The

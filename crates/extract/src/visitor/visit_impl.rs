@@ -5008,7 +5008,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // `this` in the class body is the instance of this class, also when
         // the class is declared in a function with its own `this`.
         let outer_independent_this_depth = std::mem::replace(&mut self.independent_this_depth, 0);
-        self.walk_class_with_this_frame(class);
+        walk::walk_class(self, class);
         self.independent_this_depth = outer_independent_this_depth;
         self.pop_direct_object_binding_scope();
         self.record_class_this_facts(

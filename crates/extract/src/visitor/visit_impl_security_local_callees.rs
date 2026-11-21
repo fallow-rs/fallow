@@ -630,7 +630,6 @@ impl ModuleInfoExtractor {
     ) {
         walk::walk_program(self, program);
         let mut dropped = vec![false; self.security_sinks.len()];
-        self.mark_project_this_member_sinks(program, &mut dropped);
         self.mark_inert_callee_sinks(program, &mut dropped);
         if !dropped.contains(&true) {
             return;

@@ -14,15 +14,15 @@
 //! - a `require()` namespace, a destructured `require()`, and a destructured
 //!   module binding, for a `node:` pattern;
 //! - a `this.field` receiver, a call-result receiver, a chain with more call
-//!   results than the extractor walks, and a method that the class inherits
-//!   from a library, for a pattern with a leading `*.`;
+//!   results than the extractor walks, for a pattern with a leading `*.`;
 //! - an extra leading literal argument, for a row that admits more than one
 //!   argument position.
 //!
-//! A `this.m(x)` call that runs code of the project must give no candidate:
-//! a method that the class declares (also from an arrow callback in an object
-//! literal), a method of a local base class, a function on a prototype, and a
-//! method of an options object.
+//! A call of a member of `this` itself (`this.m(x)`) must give a candidate
+//! exactly when the row sets `this_receiver`. The matrix writes that call in a
+//! class with a library base, a class that declares `m`, an arrow callback in
+//! an object literal, a class with a local base, a prototype function, and an
+//! options object.
 //!
 //! A pattern with no baseline must be in [`PATTERNS_WITHOUT_BASELINE`], with a
 //! reason. A candidate counts for a row only when its category and its
@@ -88,19 +88,18 @@ enum Receiver {
     CallResult,
     /// A chain with more call results than the extractor walks.
     LongChain,
-    /// `this.m(x)` in a class that inherits `m`.
+    /// `this.m(x)` in a class that extends a class from outside the file.
     InheritedMethod,
-    /// `this.m(x)` in a class that declares `m` itself. No candidate.
+    /// `this.m(x)` in a class that declares `m` itself.
     OwnMethod,
     /// `this.m(x)` in an arrow callback inside an object literal, in a class
-    /// that declares `m`. No candidate.
+    /// that declares `m`.
     ObjectCallback,
-    /// `this.m(x)` in a function on a prototype. No candidate.
+    /// `this.m(x)` in a function on a prototype.
     PrototypeMethod,
-    /// `this.m(x)` in a class whose base class the file declares. No
-    /// candidate.
+    /// `this.m(x)` in a class whose base class the file declares.
     LocalBase,
-    /// `this.m(x)` in a method of an options object. No candidate.
+    /// `this.m(x)` in a method of an options object.
     OptionsObject,
     /// `const aliasFn = eval; aliasFn(x)`.
     CodeExecAlias,
@@ -122,17 +121,20 @@ struct Case {
 }
 
 impl Case {
-    /// Whether the case must give the candidate of the row. A `this.m(x)`
-    /// call that runs code of the project gives none.
-    fn expects_candidate(&self) -> bool {
-        !matches!(
-            self.receiver,
-            Receiver::OwnMethod
-                | Receiver::ObjectCallback
-                | Receiver::PrototypeMethod
-                | Receiver::LocalBase
-                | Receiver::OptionsObject
-        )
+    /// Whether the case must give the candidate of the row. A call of a
+    /// member of `this` itself (`this.m(x)`) gives one only for a row that
+    /// sets `this_receiver`.
+    fn expects_candidate(&self, matcher: &Matcher) -> bool {
+        matcher.this_receiver
+            || !matches!(
+                self.receiver,
+                Receiver::InheritedMethod
+                    | Receiver::OwnMethod
+                    | Receiver::ObjectCallback
+                    | Receiver::PrototypeMethod
+                    | Receiver::LocalBase
+                    | Receiver::OptionsObject
+            )
     }
 }
 
@@ -719,7 +721,7 @@ fn every_call_row_reports_each_equivalent_form() {
                 relative.clone(),
                 *matcher,
                 source.clone(),
-                case.expects_candidate(),
+                case.expects_candidate(matcher),
             ));
             form_files.push((relative, source));
         }
@@ -1023,4 +1025,67 @@ fn method_of_a_vue_options_object_is_not_a_candidate() {
          };\n",
     );
     assert!(!categories.contains("sql-injection"), "{categories:?}");
+}
+
+/// A call of a member of `this` itself matches only the rows that set
+/// `this_receiver`, whatever the class extends.
+#[test]
+fn this_query_matches_no_broad_row_in_any_class_shape() {
+    for source in [
+        "import { BaseRepo } from \"./base\";\n\
+         export class Repo extends BaseRepo {\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); }\n\
+         }\n",
+        "import React from \"react\";\n\
+         export class Repo extends React.Component {\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); }\n\
+         }\n",
+        "declare const mixin: any;\n\
+         class LocalBase {}\n\
+         export class Repo extends mixin(LocalBase) {\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); }\n\
+         }\n",
+        "export class Repo {\n\
+           constructor(private query: (text: string) => unknown) {}\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); }\n\
+         }\n",
+        "interface Repo { query(text: string): unknown }\n\
+         export const run = function (this: Repo, req: any) {\n\
+           return this.query(\"select \" + req.body.q);\n\
+         };\n",
+    ] {
+        let categories = analyze_module("", source);
+        assert!(
+            !categories.contains("sql-injection"),
+            "{categories:?}\n{source}"
+        );
+    }
+}
+
+/// A library method name that a row allows on `this` gives a candidate in
+/// every class shape.
+#[test]
+fn this_raw_query_is_a_candidate_in_every_class_shape() {
+    for source in [
+        "import { PrismaClient } from \"@prisma/client\";\n\
+         class Base extends PrismaClient {}\n\
+         export class Db extends Base {\n\
+           run(req: any) { return this.$queryRawUnsafe(\"select \" + req.body.q); }\n\
+         }\n",
+        "import { PrismaClient } from \"@prisma/client\";\n\
+         export class Db extends PrismaClient {\n\
+           run(req: any) { return this.$queryRawUnsafe(\"select \" + req.body.q); }\n\
+         }\n\
+         export function local() { class PrismaClient {} return PrismaClient; }\n",
+        "declare class Client { $queryRawUnsafe(text: string): unknown }\n\
+         export class Db extends Client {\n\
+           run(req: any) { return this.$queryRawUnsafe(\"select \" + req.body.q); }\n\
+         }\n",
+    ] {
+        let categories = analyze_module("\"@prisma/client\": \"^5.0.0\"", source);
+        assert!(
+            categories.contains("sql-injection"),
+            "{categories:?}\n{source}"
+        );
+    }
 }
