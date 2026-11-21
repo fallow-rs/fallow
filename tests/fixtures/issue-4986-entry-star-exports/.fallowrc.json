@@ -1,0 +1,8 @@
+{
+  "publicPackages": ["@p/pub"],
+  "workspaces": {
+    "settings": {
+      "packages/*": { "includeEntryExports": true }
+    }
+  }
+}

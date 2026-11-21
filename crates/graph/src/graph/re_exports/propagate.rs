@@ -84,7 +84,7 @@ pub(in crate::graph) struct StarReExportPropagation<'a> {
     pub(in crate::graph) barrel_idx: usize,
     pub(in crate::graph) source_id: FileId,
     pub(in crate::graph) source_idx: usize,
-    pub(in crate::graph) entry_star_targets: &'a FxHashSet<FileId>,
+    pub(in crate::graph) open_star_barrels: &'a FxHashSet<FileId>,
     pub(in crate::graph) triggering_is_type_only: bool,
     pub(in crate::graph) synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     pub(in crate::graph) reference_paths: &'a mut ReferencePathInterner,
@@ -172,16 +172,14 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         barrel_idx,
         source_id,
         source_idx,
-        entry_star_targets,
+        open_star_barrels,
         triggering_is_type_only,
         synthetic_stubs,
         reference_paths,
         named_star_refs,
     } = input;
 
-    if modules[barrel_idx].is_entry_point()
-        || entry_star_targets.contains(&modules[barrel_idx].file_id)
-    {
+    if open_star_barrels.contains(&modules[barrel_idx].file_id) {
         return propagate_entry_point_star(EntryPointStarPropagation {
             modules,
             barrel_id,

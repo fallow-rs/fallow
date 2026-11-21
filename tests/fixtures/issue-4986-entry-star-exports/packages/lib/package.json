@@ -1,0 +1,9 @@
+{
+  "name": "@p/lib",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./sub": { "types": "./src/sub/index.ts", "import": "./src/sub/index.ts" }
+  },
+  "dependencies": { "ext-lib": "1.0.0" }
+}

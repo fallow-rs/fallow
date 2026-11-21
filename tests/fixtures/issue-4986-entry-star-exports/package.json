@@ -1,0 +1,5 @@
+{
+  "name": "issue-4986-entry-star-exports",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"]
+}
