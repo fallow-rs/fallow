@@ -3480,6 +3480,18 @@ fn disable_decline_and_digest_wait_for_the_store_lock() {
         },
     );
     assert!(load(dir.path()).onboarding_declined);
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+            let mut store = load(root);
+            store.resolved_total = 3;
+            save(&store, root);
+        },
+        |root| {
+            let _ = take_due_digest(root);
+        },
+    );
+    assert!(load(dir.path()).last_digest_epoch.is_some());
 }
 
 #[test]
@@ -3592,4 +3604,15 @@ fn reset_waits_for_the_store_lock() {
         },
     );
     assert!(!store_path(dir.path()).unwrap().exists());
+}
+
+#[test]
+fn digest_on_an_untracked_project_creates_no_file() {
+    let (config, dir) = test_env();
+    let root = dir.path();
+    assert!(take_due_digest(root).is_none());
+    assert!(
+        !config.path().join("impact").exists(),
+        "a digest that is not due must not create the store folder or a lock"
+    );
 }

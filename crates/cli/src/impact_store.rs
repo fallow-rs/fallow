@@ -224,7 +224,7 @@ impl StoreReadError {
         match self {
             Self::Newer { schema, .. } => schema.message(),
             Self::Unreadable { path, source } => format!(
-                "fallow impact: could not read the store at {} ({source}). The store is unchanged. Correct the access to the file, or run `fallow impact reset` to remove the store.",
+                "fallow impact: could not read the store at {} ({source}). The store is unchanged. Correct the access to the file and its folder, or run `fallow impact reset` to remove the store.",
                 path.display()
             ),
             Self::Invalid { path, reason } => format!(
@@ -423,10 +423,10 @@ impl StoreWriteError {
     #[must_use]
     pub fn message(&self) -> String {
         match self {
-            Self::NoConfigDir => "fallow impact: no user config folder resolves (HOME, XDG_CONFIG_HOME or APPDATA is not set). The change was not saved.".to_owned(),
+            Self::NoConfigDir => "fallow impact: no user config folder resolves (HOME, XDG_CONFIG_HOME or APPDATA is not set). The change was not saved. Set HOME, then run the command again.".to_owned(),
             Self::Read(err) => err.message(),
             Self::Io { path, source } => format!(
-                "fallow impact: could not write {}: {source}. The change was not saved.",
+                "fallow impact: could not write {}: {source}. The change was not saved. Check that the folder exists and that you can write to it, then run the command again.",
                 path.display()
             ),
         }

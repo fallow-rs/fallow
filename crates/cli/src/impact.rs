@@ -510,17 +510,14 @@ const DIGEST_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
 /// next one is at least `DIGEST_INTERVAL_SECS` away. Due means: tracking is
 /// enabled, there is non-zero value to report (anti-nag: a zero digest never
 /// surfaces), and the previous digest is older than the interval (or never
-/// happened). Best-effort like the rest of the store: a clean run that drops
-/// the emitted step simply defers the digest to the next interval.
+/// happened). A read without the lock checks this first, so a run without a due
+/// digest writes no file. A dropped emitted step defers the digest one interval.
 pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
-    store::transact(root, OnInvalid::Stop, |store| {
-        match stamp_due_digest(store) {
-            Some(digest) => Change::Write(Some(digest)),
-            None => Change::Keep(None),
-        }
-    })
-    .ok()
-    .flatten()
+    stamp_due_digest(&mut load(root))?;
+    let stamped = store::transact(root, OnInvalid::Stop, |store| {
+        stamp_due_digest(store).map_or(Change::Keep(None), |digest| Change::Write(Some(digest)))
+    });
+    stamped.ok().flatten()
 }
 
 fn stamp_due_digest(store: &mut ImpactStore) -> Option<ImpactDigest> {

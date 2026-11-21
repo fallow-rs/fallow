@@ -805,3 +805,43 @@ fn reset_history_is_not_imported_again() {
     assert_eq!(record_count(), 0, "a reset stays reset");
     assert_eq!(read(&legacy_path), legacy, "the legacy file is unchanged");
 }
+
+#[cfg(unix)]
+#[test]
+fn impact_disable_exits_2_when_the_store_folder_is_read_only() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    let enable = run_isolated(
+        home.path(),
+        &["impact", "enable", "--root", root, "--quiet"],
+    );
+    assert_eq!(enable.code, 0, "seed enable failed: {}", enable.stderr);
+    let store = find_store(home.path());
+    let dir = store.parent().expect("store folder").to_path_buf();
+    let mode = |bits| std::fs::Permissions::from_mode(bits);
+    std::fs::set_permissions(&dir, mode(0o555)).expect("read-only folder");
+    let probe = dir.join("probe");
+    if std::fs::write(&probe, b"").is_ok() {
+        // The root user can write a read-only folder, so the input does not apply.
+        let _ = std::fs::remove_file(&probe);
+        std::fs::set_permissions(&dir, mode(0o755)).expect("restore folder");
+        return;
+    }
+    let before = read(&store);
+    let output = run_isolated(home.path(), &["impact", "disable", "--root", root]);
+    std::fs::set_permissions(&dir, mode(0o755)).expect("restore folder");
+    assert_eq!(
+        output.code, 2,
+        "disable must fail when the store cannot be written: {} {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        output.stderr.contains("could not write"),
+        "the error names the failed write: {}",
+        output.stderr
+    );
+    assert!(!output.stdout.contains("disabled"), "{}", output.stdout);
+    assert_eq!(read(&store), before, "the store is unchanged");
+}
