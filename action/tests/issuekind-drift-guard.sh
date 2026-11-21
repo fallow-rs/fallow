@@ -98,7 +98,10 @@ fallow_dead_code_schema_rows() {
   repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
   bin="${FALLOW_BIN:-}"
   if [ -z "$bin" ]; then
-    for cand in "$repo_root/target/debug/fallow" "$repo_root/target/release/fallow"; do
+    # Cargo builds into $CARGO_TARGET_DIR when it is set, and into target/
+    # of the repository when it is not.
+    for cand in ${CARGO_TARGET_DIR:+"$CARGO_TARGET_DIR/debug/fallow" "$CARGO_TARGET_DIR/release/fallow"} \
+      "$repo_root/target/debug/fallow" "$repo_root/target/release/fallow"; do
       if [ -x "$cand" ]; then bin="$cand"; break; fi
     done
   fi
