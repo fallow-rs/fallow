@@ -25,6 +25,7 @@ import {
   middleTruncate,
   roadGeometry,
   routePoint,
+  standaloneVisible,
   tailTruncate,
   panelDocksBelow,
   usableStageWidth,
@@ -500,7 +501,7 @@ const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
   ctx.font = FONT_LEGEND;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  const label = gvs.standaloneOpen
+  const label = standaloneVisible(state, gvs)
     ? "Hide folders that are not connected"
     : `Show ${formatCount(fileCount)} files in folders that are not connected`;
   const textW = ctx.measureText(label).width;
@@ -655,8 +656,9 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
   // so no connected dot floats unexplained. On small maps every
   // cluster fits comfortably, so nothing is culled.
   const manyClusters = gvs.clusters.filter((otherCluster) => !otherCluster.isolated).length > 10;
+  const standaloneShown = standaloneVisible(state, gvs);
   for (const [rank, cluster] of ordered.entries()) {
-    if (cluster.isolated && !getGVS(state).standaloneOpen) continue;
+    if (cluster.isolated && !standaloneShown) continue;
     if (manyClusters && cluster.indices.length >= 2 && cluster.indices.length < 6 && kRel < 1.5) {
       continue;
     }

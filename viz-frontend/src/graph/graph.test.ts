@@ -19,6 +19,7 @@ import {
 } from "./shared";
 import type { AppState } from "../state";
 import { assignCoordinates, assignLayers, partitionEdges, tarjanSCC, type MetaEdge } from "./build";
+import { reconcileGraphView } from "./interact";
 
 /** Canvas text metrics stub: every glyph is 7px wide. */
 const ctx = {
@@ -151,7 +152,7 @@ describe("spatial hit grid", () => {
     gvs.clusters = [cluster({})];
     gvs.transform = { x: 0, y: 0, k };
     gvs.grid = buildSpatialGrid(nodes);
-    gvs.standaloneOpen = true;
+    setStandaloneOpen(state, gvs, true);
     return state;
   };
 
@@ -164,9 +165,10 @@ describe("spatial hit grid", () => {
     const floor = 9 / transform.k;
     let best: number | null = null;
     let bestD = Infinity;
+    const standaloneShown = standaloneVisible(state, gvs);
     for (const node of fileNodes) {
       if (!node || node.x == null || node.y == null) continue;
-      if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
+      if (clusters[node.cluster].isolated && !standaloneShown) continue;
       const dx = gx - node.x;
       const dy = gy - node.y;
       const d = dx * dx + dy * dy;
@@ -304,7 +306,7 @@ describe("graph view state", () => {
           { path: "b/y.ts", status: "clean", unused_export_count: 0 },
           { path: "c/z.ts", status: "unused", unused_export_count: 0 },
         ],
-        edges: [[0, 1]],
+        edges: [[0, 1, 0]],
       },
       index: {},
     } as unknown as AppState;
@@ -360,5 +362,30 @@ describe("graph view state", () => {
     const isolatedGvs = getGVS(allIsolated);
     isolatedGvs.clusters = isolatedGvs.clusters.map((entry) => ({ ...entry, isolated: true }));
     expect(standaloneVisible(allIsolated, isolatedGvs)).toBe(true);
+  });
+
+  it("reconciles the strip after a lens change made outside the graph view", () => {
+    const state = viewState();
+    expect(standaloneVisible(state, getGVS(state))).toBe(false);
+    state.view = "map";
+    state.lens = "unused";
+    reconcileGraphView(state);
+    state.view = "graph";
+    reconcileGraphView(state);
+    expect(standaloneVisible(state, getGVS(state))).toBe(true);
+  });
+
+  it("drops a selected road that the new grouping does not have", () => {
+    const regrouped = viewState();
+    regrouped.selectedRoad = roadAB();
+    getGVS(regrouped).clusters[1] = cluster({ key: "other", indices: [1], cx: 200, cy: 0 });
+    reconcileGraphView(regrouped);
+    expect(regrouped.selectedRoad).toBeNull();
+
+    const rebuilt = viewState();
+    rebuilt.selectedRoad = roadAB();
+    rebuilt.data.edges.push([0, 1, 0]);
+    reconcileGraphView(rebuilt);
+    expect(rebuilt.selectedRoad?.pairs.length).toBe(2);
   });
 });

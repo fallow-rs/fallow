@@ -189,10 +189,9 @@ export interface GraphViewState {
   /** Transient HUD notice (e.g. "no dependency path found"). */
   notice: string;
   noticeAt: number;
-  /** Standalone strip expanded state + chip hit rect (screen space). */
-  standaloneOpen: boolean;
   /** Standalone strip state for one lens; null until the first read after a layout build. */
   standalone: { lens: Lens; open: boolean } | null;
+  /** Standalone strip chip hit rect (screen space). */
   standaloneChip: { x: number; y: number; w: number; h: number } | null;
   /** Ego-view "back to map" chip hit rect (screen space). */
   egoBackChip: { x: number; y: number; w: number; h: number } | null;
@@ -272,7 +271,6 @@ export const getGVS = (state: AppState): GraphViewState => {
       lensFadeAt: 0,
       hoverFadeFile: null,
       hoverFadeAt: 0,
-      standaloneOpen: false,
       standalone: null,
       standaloneChip: null,
       egoBackChip: null,
@@ -570,6 +568,7 @@ export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): 
   const gvs = getGVS(state);
   const { transform, fileNodes, clusters, grid } = gvs;
   if (!grid) return null;
+  const standaloneShown = standaloneVisible(state, gvs);
   const gx = (canvasX - transform.x) / transform.k;
   const gy = (canvasY - transform.y) / transform.k;
   // Nearest-wins with a 9px screen-space floor so dots stay clickable
@@ -584,7 +583,7 @@ export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): 
   for (const nodeIndex of gridQuery(grid, gx, gy, maxWorldRadius)) {
     const node = fileNodes[nodeIndex];
     if (!node || node.x == null || node.y == null) continue;
-    if (clusters[node.cluster].isolated && !gvs.standaloneOpen) continue;
+    if (clusters[node.cluster].isolated && !standaloneShown) continue;
     const dx = gx - node.x;
     const dy = gy - node.y;
     const distSq = dx * dx + dy * dy;
@@ -732,7 +731,7 @@ export const stageSize = (state: AppState): { w: number; h: number } => {
  * lens flags. Unused files are standalone by definition, so the strip
  * must open for those lenses or their findings never reach the map.
  */
-export const lensFlagsStandalone = (state: AppState, clusters: ClusterInfo[]): boolean =>
+const lensFlagsStandalone = (state: AppState, clusters: ClusterInfo[]): boolean =>
   // Overview flags almost everything somewhere; its triage cards lead to
   // the lens that needs the strip instead.
   state.lens !== "overview" &&

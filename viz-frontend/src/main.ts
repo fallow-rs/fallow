@@ -25,6 +25,7 @@ import {
   graphInitSteps,
   initGraphNodes,
   nodeScreenPos,
+  reconcileGraphView,
   refitOnResize,
   usableStageWidth,
   minimapHit,
@@ -35,7 +36,6 @@ import {
   roadFacts,
   setClusterMode,
   startGraphLensFade,
-  syncStandaloneForLens,
 } from "./graph";
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, updateChrome } from "./chrome";
@@ -146,8 +146,7 @@ const init = (): void => {
     if (state.view === "graph") startGraphLensFade(state, prev);
     // The ranked panel opens or closes with the lens; keep the graph
     // fitted to the space that remains while the camera is untouched.
-    if (state.view === "graph") refitOnResize(state);
-    if (state.view === "graph") syncStandaloneForLens(state);
+    reconcileGraphView(state);
     requestRender();
   };
 
@@ -160,14 +159,15 @@ const init = (): void => {
     startLensFade(state, prev);
     if (state.view === "graph") {
       startGraphLensFade(state, prev);
-      refitOnResize(state);
     }
+    reconcileGraphView(state);
     requestRender();
   };
 
   const setView = (view: "map" | "graph"): void => {
     if (state.view === view) return;
     state.view = view;
+    reconcileGraphView(state);
     state.hoveredCell = null;
     state.graphHovered = null;
     hideTooltip();
@@ -614,11 +614,10 @@ const init = (): void => {
     requestRender();
   });
   window.addEventListener("hashchange", () => {
-    const lensBefore = state.lens;
     applyHash(state, window.location.hash);
-    // Back and forward can change the lens; the strip of unconnected
-    // folders must follow it as it does for a tab click.
-    if (state.lens !== lensBefore && state.view === "graph") syncStandaloneForLens(state);
+    // A hash edit can change the lens and the view; the strip of
+    // unconnected folders and the camera fit must follow.
+    reconcileGraphView(state);
     requestRender();
   });
 
