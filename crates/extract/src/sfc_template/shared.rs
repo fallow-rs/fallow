@@ -3,8 +3,7 @@ use std::sync::LazyLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::template_usage::{
-    TemplateSnippetKind, TemplateUsage, analyze_template_snippet,
-    analyze_template_snippet_with_bound_targets,
+    TemplateSnippet, TemplateSnippetKind, TemplateUsage, analyze_template_snippet_into,
 };
 
 use super::scanners::scan_curly_section;
@@ -109,13 +108,17 @@ fn merge_snippet_usage(
     locals: &[String],
     allow_dollar_prefixed_refs: bool,
 ) {
-    usage.merge(analyze_template_snippet(
-        snippet,
-        kind,
-        imported_bindings,
-        locals,
-        allow_dollar_prefixed_refs,
-    ));
+    analyze_template_snippet_into(
+        usage,
+        &TemplateSnippet {
+            source: snippet,
+            kind,
+            imported_bindings,
+            bound_targets: &FxHashMap::default(),
+            locals,
+            allow_dollar_prefixed_refs,
+        },
+    );
 }
 
 struct BoundSnippetUsageInput<'a> {
@@ -129,16 +132,17 @@ struct BoundSnippetUsageInput<'a> {
 }
 
 fn merge_snippet_usage_with_bound_targets(input: &mut BoundSnippetUsageInput<'_>) {
-    input
-        .usage
-        .merge(analyze_template_snippet_with_bound_targets(
-            input.snippet,
-            input.kind,
-            input.imported_bindings,
-            input.bound_targets,
-            input.locals,
-            input.allow_dollar_prefixed_refs,
-        ));
+    analyze_template_snippet_into(
+        input.usage,
+        &TemplateSnippet {
+            source: input.snippet,
+            kind: input.kind,
+            imported_bindings: input.imported_bindings,
+            bound_targets: input.bound_targets,
+            locals: input.locals,
+            allow_dollar_prefixed_refs: input.allow_dollar_prefixed_refs,
+        },
+    );
 }
 
 pub(super) fn merge_component_tag_usage(

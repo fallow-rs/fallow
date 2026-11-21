@@ -1,4 +1,5 @@
-//! Svelte event-dispatch and load-data whole-use capture.
+//! Component event calls (Svelte dispatch, Vue emit in markup) and
+//! load-data whole-use capture.
 
 use oxc_ast::ast::*;
 
@@ -7,7 +8,52 @@ use fallow_types::extract::DispatchedEvent;
 use super::{ModuleInfoExtractor, ROUTE_LOADER_DATA_OBJECT};
 use crate::js_text::JsText;
 
+/// The Vue emit calls of a markup snippet. A script leaves `bindings` empty,
+/// because the `defineEmits` harvest marks the emits of a script.
+#[derive(Debug, Default)]
+pub struct TemplateEmits {
+    /// The `defineEmits()` return binding of `<script setup>` and `$emit`.
+    pub(in crate::visitor) bindings: rustc_hash::FxHashSet<String>,
+    /// The event names of the emit calls with a literal event name.
+    pub(in crate::visitor) emitted: Vec<String>,
+    /// An emit call has no literal event name. The component then abstains.
+    pub(in crate::visitor) dynamic: bool,
+}
+
 impl ModuleInfoExtractor {
+    /// Record the component event calls of one call expression.
+    pub(super) fn record_component_event_calls(&mut self, expr: &CallExpression<'_>) {
+        self.record_svelte_dispatch_call(expr);
+        self.record_svelte_dispatch_whole_arg_use(expr);
+        self.record_template_emit_call(expr);
+    }
+
+    /// Record a Vue `emit("close")` or `$emit("close")` call in a markup
+    /// snippet. A call with no literal event name sets the abstain flag.
+    fn record_template_emit_call(&mut self, expr: &CallExpression<'_>) {
+        let Expression::Identifier(callee) = &expr.callee else {
+            return;
+        };
+        if !self.template_emits.bindings.contains(callee.name.as_str()) {
+            return;
+        }
+        match expr.arguments.first() {
+            Some(Argument::StringLiteral(lit)) => {
+                self.template_emits
+                    .emitted
+                    .push(lit.value.text().into_owned());
+            }
+            Some(Argument::TemplateLiteral(tpl)) if tpl.expressions.is_empty() => {
+                if let Some(quasi) = tpl.quasis.first() {
+                    self.template_emits
+                        .emitted
+                        .push(quasi.value.raw.to_string());
+                }
+            }
+            _ => self.template_emits.dynamic = true,
+        }
+    }
+
     /// Track the load-data detector's two call-argument exceptions.
     ///
     /// Generic call arguments are intentionally not recorded as whole-object
@@ -67,7 +113,7 @@ impl ModuleInfoExtractor {
     /// `has_dynamic_dispatch` (the event name is unknowable, so the whole
     /// component abstains). Gated on the callee resolving to a tracked dispatch
     /// binding, so an ordinary `foo('bar')` call is inert.
-    pub(super) fn record_svelte_dispatch_call(&mut self, expr: &CallExpression<'_>) {
+    fn record_svelte_dispatch_call(&mut self, expr: &CallExpression<'_>) {
         let Expression::Identifier(callee) = &expr.callee else {
             return;
         };
@@ -102,7 +148,7 @@ impl ModuleInfoExtractor {
     /// can dispatch any event opaquely, so the whole component must abstain. The
     /// callee position is the dispatch call itself (handled by
     /// `record_svelte_dispatch_call`), so only argument positions are inspected.
-    pub(super) fn record_svelte_dispatch_whole_arg_use(&mut self, expr: &CallExpression<'_>) {
+    fn record_svelte_dispatch_whole_arg_use(&mut self, expr: &CallExpression<'_>) {
         for arg in &expr.arguments {
             let used_whole = match arg {
                 Argument::Identifier(id) => self.event_dispatch_bindings.contains(id.name.as_str()),

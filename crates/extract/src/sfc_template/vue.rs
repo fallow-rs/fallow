@@ -53,11 +53,30 @@ pub(super) fn collect_template_usage(
     )
 }
 
+#[cfg(test)]
 pub(super) fn collect_template_usage_with_bound_targets(
     source: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     iterable_types: &FxHashMap<String, String>,
+) -> TemplateUsage {
+    collect_template_usage_seeded(
+        source,
+        imported_bindings,
+        bound_targets,
+        iterable_types,
+        TemplateUsage::default(),
+    )
+}
+
+/// Scan the template into `seed`. A seed with a markup sink merges the facts
+/// of each template expression into the component module.
+pub(super) fn collect_template_usage_seeded(
+    source: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
+    seed: TemplateUsage,
 ) -> TemplateUsage {
     let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
         .find_iter(source)
@@ -80,15 +99,17 @@ pub(super) fn collect_template_usage_with_bound_targets(
     );
     let effective_bound_targets = augmented.as_ref().unwrap_or(bound_targets);
 
-    let mut usage = TemplateUsage::default();
+    let mut usage = seed;
     for &(body_start, body_end) in &body_ranges {
-        usage.merge(scan_template_body(
+        let body = scan_template_body(
             &source[body_start..body_end],
             body_start,
             imported_bindings,
             effective_bound_targets,
             iterable_types,
-        ));
+            &mut usage,
+        );
+        usage.merge(body);
     }
 
     scan_style_vbind_usage(
@@ -244,6 +265,7 @@ fn scan_style_vbind_usage(
         let Some(body) = caps.name("body") else {
             continue;
         };
+        let body_start = body.start();
         let body = body.as_str();
         let bytes = body.as_bytes();
         let mut index = 0;
@@ -262,6 +284,7 @@ fn scan_style_vbind_usage(
                 && bytes.get(paren) == Some(&b'(')
                 && let Some((expr, next)) = scan_paren_section(body, paren)
             {
+                usage.set_markup_anchor(body_start + start);
                 credit_style_vbind_expr(expr.trim(), imported_bindings, bound_targets, usage);
                 index = next;
                 continue;
@@ -394,8 +417,10 @@ fn scan_template_body(
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     iterable_types: &FxHashMap<String, String>,
+    outer: &mut TemplateUsage,
 ) -> TemplateUsage {
     let mut usage = TemplateUsage::default();
+    usage.take_markup_sink_from(outer);
     let mut scopes: Vec<Vec<String>> = vec![Vec::new()];
     let bytes = body.as_bytes();
     let mut index = 0;
@@ -414,6 +439,7 @@ fn scan_template_body(
             let Some((expr, next_index)) = scan_curly_section(body, index, 2, 2) else {
                 break;
             };
+            usage.set_markup_anchor(body_offset + index);
             merge_expression_usage_with_bound_targets(
                 &mut usage,
                 expr.trim(),
@@ -429,6 +455,7 @@ fn scan_template_body(
             let Some((tag, next_index)) = scan_html_tag(body, index) else {
                 break;
             };
+            usage.set_markup_anchor(body_offset + index);
             apply_tag(VueTagInput {
                 tag,
                 tag_start: body_offset + index,

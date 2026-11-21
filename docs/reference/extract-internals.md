@@ -502,6 +502,32 @@ context into resolution so a stylesheet cannot resolve to a same-named
 component through the JavaScript extension order. Preserve template-local
 bindings, whole-object credit and framework metadata when changing scanners.
 
+A markup snippet (a Vue or Svelte template expression, an Astro template
+region) and an inline HTML script give their host the same facts as the same
+code in a script block. The rules are:
+
+- The script pass of a component builds a `ScriptBindingContext` with the
+  bindings that markup can call or read: the Svelte `createEventDispatcher()`
+  bindings, the Vue `defineEmits()` return binding with `$emit`, and the
+  script constants with a literal value, which a security sink argument
+  reads as a literal. Each snippet extractor starts from this context. A
+  template local of the same name shadows it. The context has no import
+  declarations, so a sink callee that only an import names (for example
+  `exec` from `child_process`) is not a sink in markup.
+- A snippet that does not parse and names a dispatch or emit binding makes
+  the component abstain, as a call with no literal event name does.
+- Each snippet extractor merges into the component module through
+  `ModuleInfoExtractor::merge_into`, the merge of the script blocks. Each
+  span of a snippet moves to the start of its markup tag or region.
+- `ModuleInfoExtractor::clear_script_only_facts` is the one list of the facts
+  that do not go to the host. A new fact goes to the host by default.
+- `crates/extract/src/tests/markup_parity.rs` extracts a set of expression
+  shapes once in a script function and once in markup, for each host, and
+  asserts equal facts. Its field list names each `ModuleInfo` field, so a new
+  field must be sorted into a compared or an ignored group.
+- The Svelte `on:<name>` listener scan stays a tag scan, because the event
+  name is an attribute name, not an expression.
+
 Import facts also come from JSDoc type references, import-then-export syntax,
 namespace destructuring and proven Node child-process entry calls. These paths
 must retain import provenance, type/value meaning and lexical binding identity.

@@ -304,6 +304,27 @@ fn collect_template_member_tag_accesses(
     accesses
 }
 
+/// The frontmatter facts that a template region can read.
+struct TemplateRegionContext {
+    /// The element class of each frontmatter array binding, so a region can
+    /// type a `{utils.map((util) => util.getter)}` callback param to the
+    /// `const utils: Util[]` element class (issue #1713).
+    array_element_types: rustc_hash::FxHashMap<String, String>,
+    /// The frontmatter bindings that a template region can read.
+    script: crate::template_usage::ScriptBindingContext,
+}
+
+impl TemplateRegionContext {
+    fn from_frontmatter(extractor: &ModuleInfoExtractor) -> Self {
+        let mut script = crate::template_usage::ScriptBindingContext::default();
+        extractor.extend_script_binding_context(&mut script);
+        Self {
+            array_element_types: extractor.array_binding_element_types().clone(),
+            script,
+        }
+    }
+}
+
 /// Run the member-recording visitor over every Astro template `{ ... }`
 /// expression region and append what it records to `info`: the member accesses
 /// (`icon={SC.Moon}`, `{SC.helper()}`) and whole-object uses (`{...SC}`,
@@ -311,8 +332,10 @@ fn collect_template_member_tag_accesses(
 /// iteration credits (`{utils.map((util) => util.getter)}` resolves to
 /// `Util.getter` through the seeded frontmatter element types, issue #1713).
 /// Each region is parsed as a standalone TSX expression (Astro template
-/// expressions contain JSX) and visited by one extractor shared across the
-/// file's regions. A bare mention of a frontmatter import binding inside a
+/// expressions contain JSX) and visited by its own extractor. The other facts
+/// of the region (calls, dynamic imports, security sinks) merge into `info`
+/// through `merge_into`, the same merge that SFC scripts use, with each span
+/// at the region start. A bare mention of a frontmatter import binding inside a
 /// parsed region (`all={SC}`) is the one shape the visitor does not record as
 /// a whole-object use, so the text scan adds it.
 ///
@@ -326,8 +349,9 @@ fn collect_template_member_tag_accesses(
 fn extend_template_expression_usage(
     info: &mut ModuleInfo,
     template: &str,
+    template_offset: usize,
     regions: &[(usize, usize)],
-    frontmatter_array_element_types: &rustc_hash::FxHashMap<String, String>,
+    context: &TemplateRegionContext,
 ) -> Vec<(usize, usize)> {
     let mut parsed_regions = Vec::with_capacity(regions.len());
     if regions.is_empty() {
@@ -340,8 +364,7 @@ fn extend_template_expression_usage(
         .collect();
     let mut accesses = Vec::new();
     let mut whole_object_uses = Vec::new();
-    let mut extractor = ModuleInfoExtractor::new();
-    extractor.seed_array_binding_element_types(frontmatter_array_element_types);
+    let mut region_extractors = Vec::new();
     for &(start, end) in regions {
         let Some(region) = template.get(start..end) else {
             continue;
@@ -359,6 +382,9 @@ fn extend_template_expression_usage(
         if parser_return.fatal_error || !parser_return.diagnostics.is_empty() {
             continue;
         }
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.seed_array_binding_element_types(&context.array_element_types);
+        extractor.seed_script_binding_context(&context.script, &[]);
         extractor.visit_program(&parser_return.program);
         scan_template_usage(
             region,
@@ -367,11 +393,19 @@ fn extend_template_expression_usage(
             &mut accesses,
             &mut whole_object_uses,
         );
+        let (visited_accesses, visited_whole_object_uses) =
+            extractor.take_template_expression_usage();
+        accesses.extend(visited_accesses);
+        whole_object_uses.extend(visited_whole_object_uses);
+        extractor.clear_script_only_facts();
+        let anchor = u32::try_from(template_offset + start).unwrap_or(u32::MAX);
+        extractor.remap_spans_with(|_| Span::new(anchor, anchor));
+        region_extractors.push(extractor);
         parsed_regions.push((start, end));
     }
-    let (visited_accesses, visited_whole_object_uses) = extractor.take_template_expression_usage();
-    accesses.extend(visited_accesses);
-    whole_object_uses.extend(visited_whole_object_uses);
+    for extractor in region_extractors {
+        extractor.merge_into(info);
+    }
     extend_member_accesses(info, accesses);
     extend_whole_object_uses(info, whole_object_uses);
     parsed_regions
@@ -609,11 +643,9 @@ pub(crate) fn parse_astro_to_module_with_mode(
         mode,
     ));
 
-    // Capture the frontmatter's array/reactive-array element-type map before
-    // `into_module_info` consumes the extractor, so the template-expression pass
-    // below can type a `{utils.map((util) => util.getter)}` callback param to the
-    // `const utils: Util[]` element class (issue #1713).
-    let frontmatter_array_element_types = extractor.array_binding_element_types().clone();
+    // Capture the frontmatter facts that the template regions read before
+    // `into_module_info` consumes the extractor (issue #1713).
+    let region_context = TemplateRegionContext::from_frontmatter(&extractor);
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     degradation.apply_to(&mut info);
@@ -656,8 +688,9 @@ pub(crate) fn parse_astro_to_module_with_mode(
     let parsed_regions = extend_template_expression_usage(
         &mut info,
         template,
+        template_offset,
         &collect_template_expression_regions(template, &masked),
-        &frontmatter_array_element_types,
+        &region_context,
     );
     // Every mention the two passes above did not classify keeps its binding on
     // the mark-all path (issue #2355), in the markup and in the frontmatter.

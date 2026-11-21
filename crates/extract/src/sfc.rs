@@ -94,18 +94,6 @@ static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
 static SVELTE_TEMPLATE_DATA_WHOLE_USE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?:=\s*\{\s*data\s*\}|\{\s*\.\.\.\s*data\s*\})"));
 
-/// Matches an emit-style call in template markup: a callee identifier (or
-/// `$emit`) followed by `(` and its first argument. Group 1 is the callee name
-/// (filtered against the harvested emit binding / `$emit` by the caller), groups
-/// 2 and 3 are a string-literal first arg (single- or double-quoted: the event
-/// name, credited as used), and group 4 is the first non-space character of a
-/// NON-literal first arg (a dynamic emit, whose event name is unknowable, forcing
-/// a whole-file abstain). Event names allow kebab and namespaced forms
-/// (`update:modelValue`, `my-event`). The Rust `regex` crate has no
-/// backreferences, so the two quote styles are separate alternatives.
-static TEMPLATE_EMIT_CALL_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r#"([\w$]+)\s*\(\s*(?:'([\w:-]*)'|"([\w:-]*)"|(\S))"#));
-
 /// Regex to extract `<style>` block content from Vue/Svelte SFCs.
 /// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
 /// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
@@ -427,6 +415,7 @@ pub(crate) fn parse_sfc_to_module_with_mode(
     let mut props_return_binding: Option<String> = None;
     let mut emit_return_binding: Option<String> = None;
     let mut shared_scope_references = SharedScopeReferences::default();
+    let mut script_binding_context = crate::template_usage::ScriptBindingContext::default();
     let has_setup_script = scripts.iter().any(|script| script.is_setup);
 
     for script in &scripts {
@@ -441,6 +430,7 @@ pub(crate) fn parse_sfc_to_module_with_mode(
             template_visible_iterable_types: &mut template_visible_iterable_types,
             props_return_binding: &mut props_return_binding,
             emit_return_binding: &mut emit_return_binding,
+            script_binding_context: &mut script_binding_context,
             need_complexity,
             mode,
         });
@@ -463,9 +453,21 @@ pub(crate) fn parse_sfc_to_module_with_mode(
         combined.has_props_attrs_fallthrough = true;
     }
 
+    // A template can call `$emit` and the `defineEmits()` return binding. The
+    // markup snippet visitor then marks each emitted event as used.
+    if kind == SfcKind::Vue && !combined.component_emits.is_empty() {
+        script_binding_context
+            .emit_bindings
+            .insert("$emit".to_string());
+        script_binding_context
+            .emit_bindings
+            .extend(emit_return_binding.iter().cloned());
+    }
+
     apply_template_usage(TemplateUsageInput {
         kind,
         source,
+        script_binding_context,
         template_visible_imports,
         template_visible_bound_targets,
         template_visible_iterable_types: &template_visible_iterable_types,
@@ -478,16 +480,11 @@ pub(crate) fn parse_sfc_to_module_with_mode(
         append_template_complexity(kind, source, &mut combined);
     }
 
-    // Credit `<emit_binding>('event')` / `$emit('event')` calls in the template
-    // (`@click="emit('close')"`), which the script-only emit usage walk cannot
-    // see. A dynamic template emit (`$emit(someVar)`) abstains the whole file.
-    if kind == SfcKind::Vue && !combined.component_emits.is_empty() {
-        apply_template_emit_usage(source, emit_return_binding.as_deref(), &mut combined);
-    }
-
     // Harvest Svelte template `on:<name>` listener bindings on component tags
     // into the per-file listened set; the `unused-svelte-event` detector unions
-    // these project-wide to decide which dispatched events are dead.
+    // these project-wide to decide which dispatched events are dead. The event
+    // name is an attribute name, not an expression, so the markup snippet
+    // visitor cannot see it, and this tag scan stays.
     if kind == SfcKind::Svelte {
         combined.svelte_listened_events =
             crate::sfc_template::collect_svelte_listened_events(source);
@@ -990,6 +987,7 @@ fn build_generic_attr_probe_source(script: &SfcScript) -> Option<String> {
 struct TemplateUsageInput<'a> {
     kind: SfcKind,
     source: &'a str,
+    script_binding_context: crate::template_usage::ScriptBindingContext,
     template_visible_imports: FxHashSet<String>,
     template_visible_bound_targets: FxHashMap<String, String>,
     template_visible_iterable_types: &'a FxHashMap<String, String>,
@@ -1002,6 +1000,7 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
     let TemplateUsageInput {
         kind,
         source,
+        script_binding_context,
         template_visible_imports,
         template_visible_bound_targets,
         template_visible_iterable_types,
@@ -1016,14 +1015,31 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
         source,
         combined,
     );
-    let template_usage = compute_template_usage(
+    let file_id = combined.file_id;
+    let seed = crate::template_usage::TemplateUsage::with_markup_sink(
+        script_binding_context,
+        std::mem::replace(combined, ModuleInfo::empty(file_id)),
+    );
+    let mut template_visible_bound_targets = template_visible_bound_targets;
+    if credit_load_data {
+        template_visible_bound_targets.remove("data");
+    }
+    let mut template_usage = compute_template_usage(
         kind,
         source,
         &credited,
-        template_visible_bound_targets,
+        &template_visible_bound_targets,
         template_visible_iterable_types,
-        credit_load_data,
+        seed,
     );
+    let module = template_usage.take_markup_module();
+    debug_assert!(
+        module.is_some(),
+        "the template scan gives back the component module of its markup sink"
+    );
+    if let Some(module) = module {
+        *combined = module;
+    }
     apply_prop_template_credit(&template_usage, props_return_binding, combined);
     merge_template_usage_into_combined(template_usage, combined);
 }
@@ -1070,27 +1086,26 @@ fn build_template_credited_set(
     credited
 }
 
-/// Scan the template for usage of the credited names and bound targets. For a
-/// SvelteKit route, `data` is dropped from the bound targets so its template
-/// member accesses stay keyed on `data` (not remapped onto the generated
-/// `PageData` / `LayoutData` type) for the cross-file load-data join.
+/// Scan the template for usage of the credited names and bound targets into
+/// `seed`. For a SvelteKit route, the caller drops `data` from the bound
+/// targets so its template member accesses stay keyed on `data` (not remapped
+/// onto the generated `PageData` / `LayoutData` type) for the cross-file
+/// load-data join.
 fn compute_template_usage(
     kind: SfcKind,
     source: &str,
     credited: &FxHashSet<String>,
-    mut template_visible_bound_targets: FxHashMap<String, String>,
+    template_visible_bound_targets: &FxHashMap<String, String>,
     template_visible_iterable_types: &FxHashMap<String, String>,
-    credit_load_data: bool,
+    seed: crate::template_usage::TemplateUsage,
 ) -> crate::template_usage::TemplateUsage {
-    if credit_load_data {
-        template_visible_bound_targets.remove("data");
-    }
-    collect_template_usage_with_bound_targets(
+    crate::sfc_template::collect_template_usage_seeded(
         kind,
         source,
         credited,
-        &template_visible_bound_targets,
+        template_visible_bound_targets,
         template_visible_iterable_types,
+        seed,
     )
 }
 
@@ -1159,65 +1174,6 @@ fn merge_template_usage_into_combined(
         names.sort_unstable();
         combined.auto_import_candidates.extend(names);
         combined.auto_import_candidates.dedup();
-    }
-}
-
-/// Credit emit events fired from the `<template>` (`@click="emit('close')"`,
-/// `@click="$emit('remove')"`, `:close="{ onClick: () => emit('close') }"`),
-/// which the script-only emit usage walk in `harvest_define_emits` cannot see.
-///
-/// Scans the template-only region (scripts/styles/comments masked) for
-/// [`TEMPLATE_EMIT_CALL_RE`]: a call whose callee is the harvested emit binding
-/// (`emit` / `emits` / whatever it was bound to) or the implicit `$emit` (always
-/// available in a Vue template regardless of `<script setup>` binding). A
-/// string-literal first arg credits the matching `ComponentEmit` as used; a
-/// non-literal first arg (a variable / template-literal) is a dynamic template
-/// emit whose event is unknowable, so the whole file abstains (`has_dynamic_emit`)
-/// to preserve the zero-FP doctrine.
-///
-/// Over-crediting is the safe direction (it only suppresses a finding), so a
-/// liberal raw-source scan is intentional here. The scan is byte-safe: the regex
-/// runs over the `&str` template and only reads captured-group text, never
-/// slicing at arbitrary byte offsets.
-fn apply_template_emit_usage(
-    source: &str,
-    emit_return_binding: Option<&str>,
-    combined: &mut ModuleInfo,
-) {
-    let masked = mask_non_markup_regions(source);
-    let mut used: FxHashSet<String> = FxHashSet::default();
-    let mut dynamic = false;
-
-    for caps in TEMPLATE_EMIT_CALL_RE.captures_iter(&masked) {
-        let Some(callee) = caps.get(1) else {
-            continue;
-        };
-        let callee = callee.as_str();
-        let is_emit_call =
-            callee == "$emit" || emit_return_binding.is_some_and(|binding| callee == binding);
-        if !is_emit_call {
-            continue;
-        }
-        if let Some(event) = caps.get(2).or_else(|| caps.get(3)) {
-            // String-literal first arg (single- or double-quoted): the event
-            // name. Credit it as used.
-            used.insert(event.as_str().to_string());
-        } else if caps.get(4).is_some() {
-            // Non-literal first arg (`$emit(someVar)`, `emit(\`x\`)`): the event
-            // cannot be known. Abstain on the whole file.
-            dynamic = true;
-        }
-    }
-
-    if dynamic {
-        combined.has_dynamic_emit = true;
-    }
-    if !used.is_empty() {
-        for emit in &mut combined.component_emits {
-            if used.contains(&emit.name) {
-                emit.used = true;
-            }
-        }
     }
 }
 
