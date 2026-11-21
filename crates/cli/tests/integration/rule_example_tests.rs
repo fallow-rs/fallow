@@ -7,9 +7,12 @@
 //!
 //! The test runs each example in SARIF, JSON, CodeClimate and compact
 //! output. SARIF is the reference: each SARIF result of the rule is one
-//! finding. Each other format must report each finding in the same file and
-//! on the same line, and the location must match the anchor that the example
-//! declares. The LSP is not part of this test: the CLI test crate does not
+//! finding, and its location must match the anchor that the example
+//! declares. Each other format must report the findings of the rule one to
+//! one: each finding in the same file and on the same line, and no finding
+//! that SARIF does not have. A compact tag that more than one rule writes
+//! (for example `high-complexity:`) is the one exception: a compact line of
+//! another rule can have that tag, so the test allows extra lines there. The LSP is not part of this test: the CLI test crate does not
 //! depend on `fallow-lsp`.
 
 #![allow(
@@ -362,74 +365,149 @@ fn tagged_rows<'a>(node: &'a Value, rule: &str, rows: &mut Vec<&'a Value>) {
     }
 }
 
-/// Each `(path, line)` pair in a JSON row and the objects in it. An object
-/// names its file as `path`, `file`, `from_path` or `files[0]`, and its line
-/// as `line` or `start_line`. An object with a path and no line gives `None`.
-fn json_locations(node: &Value, found: &mut BTreeSet<(String, Option<u64>)>) {
-    match node {
-        Value::Array(items) => items.iter().for_each(|item| json_locations(item, found)),
-        Value::Object(object) => {
-            let path = object
-                .get("path")
-                .or_else(|| object.get("file"))
-                .or_else(|| object.get("from_path"))
-                .or_else(|| object.get("files").and_then(|files| files.get(0)))
-                .and_then(Value::as_str);
-            if let Some(path) = path {
-                let line = object
-                    .get("line")
-                    .or_else(|| object.get("start_line"))
-                    .and_then(Value::as_u64);
-                found.insert((path.to_string(), line));
-            }
-            object
-                .values()
-                .for_each(|value| json_locations(value, found));
-        }
-        _ => {}
+/// A location that a format reports: the project path, and the 1-based line
+/// or `None` when the format gives no line.
+type Found = (String, Option<u64>);
+
+/// The location of one JSON row: the file in `path`, `file`, `from_path` or
+/// `files[0]` (a cycle), and the line in `line` or `start_line`. Only the
+/// fields of the row itself count, not the objects in it.
+fn row_location(row: &Value) -> Option<Found> {
+    let object = row.as_object()?;
+    let path = object
+        .get("path")
+        .or_else(|| object.get("file"))
+        .or_else(|| object.get("from_path"))
+        .or_else(|| object.get("files").and_then(|files| files.get(0)))
+        .and_then(Value::as_str)?;
+    let line = object
+        .get("line")
+        .or_else(|| object.get("start_line"))
+        .and_then(Value::as_u64);
+    Some((path.to_string(), line))
+}
+
+/// How a JSON row of a rule holds its location, when the row itself has no
+/// location field.
+#[derive(Clone, Copy)]
+enum RowLocations {
+    /// Each item of the array is the location of one SARIF result.
+    Each(&'static str),
+    /// The first item of the array is the location of the one SARIF result.
+    First(&'static str),
+}
+
+/// The documented location array of each rule whose JSON row has no
+/// location field of its own.
+const JSON_LOCATION_ARRAYS: &[(&str, RowLocations)] = &[
+    ("code-duplication", RowLocations::Each("instances")),
+    ("duplicate-export", RowLocations::Each("locations")),
+    ("flag-retirement-candidate", RowLocations::First("sites")),
+    ("package-cycle", RowLocations::First("edges")),
+    ("prop-drilling", RowLocations::First("hops")),
+    ("unlisted-dependency", RowLocations::Each("imported_from")),
+];
+
+/// The locations of the JSON rows of `rule`, one for each finding.
+fn json_found(report: &Value, rule: &str) -> Result<Vec<Found>, String> {
+    let rows = json_rule_rows(report, rule);
+    if rows.is_empty() {
+        return Err(format!("the JSON report has no row of {rule}"));
     }
+    let array = JSON_LOCATION_ARRAYS
+        .iter()
+        .find(|(id, _)| *id == rule)
+        .map(|(_, locations)| *locations);
+    let mut found = Vec::new();
+    for row in rows {
+        let items: Vec<&Value> = match array {
+            Some(RowLocations::Each(key)) => row[key].as_array().into_iter().flatten().collect(),
+            Some(RowLocations::First(key)) => row[key].get(0).into_iter().collect(),
+            None => vec![row],
+        };
+        for item in items {
+            let location = row_location(item)
+                .ok_or_else(|| format!("a JSON row of {rule} has no location field: {item}"))?;
+            found.push(location);
+        }
+    }
+    Ok(found)
 }
 
-/// The line field of a compact line.
-#[derive(Debug, PartialEq, Eq)]
-enum CompactLine {
-    /// The path has no line number after it.
-    Absent,
-    /// The 1-based line number after the path.
-    Number(u64),
+/// The CodeClimate check names of each rule whose check name is not its
+/// rule id and that has no dead-code output contract.
+const CODECLIMATE_CHECK_NAMES: &[(&str, &str)] =
+    &[("flag-retirement-candidate", "fallow/flag-retirement")];
+
+/// The CodeClimate check names of `rule`: the names of its output contract,
+/// the entry in `CODECLIMATE_CHECK_NAMES`, or the rule id.
+fn codeclimate_check_names(rule: &str, rule_id: &str) -> Vec<String> {
+    if let Some(contract) = issue_output_contract_by_code(rule) {
+        return contract.codeclimate_check_names;
+    }
+    CODECLIMATE_CHECK_NAMES
+        .iter()
+        .find(|(id, _)| *id == rule)
+        .map_or_else(
+            || vec![rule_id.to_string()],
+            |(_, name)| vec![(*name).to_string()],
+        )
 }
 
-/// The line field of a compact line with the tag `tag`: the line has the
-/// form `<tag>:<field>...:<path>[:<line>...]`, with `fields` fields before
-/// the path. `None` when the line has another tag or another path.
-fn compact_location(text: &str, (tag, fields): (&str, usize), path: &str) -> Option<CompactLine> {
+/// The locations of the CodeClimate issues with one of `check_names`.
+fn codeclimate_found(report: &Value, check_names: &[String]) -> Vec<Found> {
+    report
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|issue| {
+            issue["check_name"]
+                .as_str()
+                .is_some_and(|name| check_names.iter().any(|wanted| wanted == name))
+        })
+        .filter_map(|issue| {
+            let location = &issue["location"];
+            let line = location["lines"]["begin"]
+                .as_u64()
+                .or_else(|| location["positions"]["begin"]["line"].as_u64());
+            Some((uri_to_path(location["path"].as_str()?), line))
+        })
+        .collect()
+}
+
+/// The location of a compact line with the tag `tag`. The line has the form
+/// `<tag>:<field>...:<path>[:<line>...]`, with `fields` fields before the
+/// path. The path ends at `:` or at a space. `None` when the line has
+/// another tag.
+fn compact_found(text: &str, (tag, fields): (&str, usize)) -> Option<Found> {
     let mut rest = text.strip_prefix(tag)?.strip_prefix(':')?;
     for _ in 0..fields {
         rest = rest.split_once(':')?.1;
     }
     let rest = uri_to_path(rest);
-    let after = rest.strip_prefix(path)?;
-    if after.is_empty() || after.starts_with(' ') {
-        return Some(CompactLine::Absent);
-    }
-    let field = after.strip_prefix(':')?;
-    let digits: String = field.chars().take_while(char::is_ascii_digit).collect();
-    Some(
-        digits
-            .parse()
-            .map_or(CompactLine::Absent, CompactLine::Number),
-    )
+    let end = rest.find([':', ' ']).unwrap_or(rest.len());
+    let (path, after) = rest.split_at(end);
+    let line = after
+        .strip_prefix(':')
+        .map(|field| {
+            field
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+        })
+        .and_then(|digits| digits.parse().ok());
+    Some((path.to_string(), line))
 }
 
-/// Whether the compact line `text` has the tag `tag`, the path `path` and
-/// the line `line`. A file-level finding (`line` is `None`) has no line
-/// number, or line 1.
-fn compact_line_has(text: &str, tag: (&str, usize), path: &str, line: Option<u64>) -> bool {
-    match (compact_location(text, tag, path), line) {
-        (Some(found), Some(line)) => found == CompactLine::Number(line),
-        (Some(found), None) => matches!(found, CompactLine::Absent | CompactLine::Number(1)),
-        (None, _) => false,
-    }
+/// Whether more than one rule writes compact lines with the tag of `rule`.
+/// For such a rule, a line of another rule can have the same tag, so the
+/// test allows compact lines that SARIF does not have.
+fn compact_tag_is_shared(rule: &str) -> bool {
+    let (tag, _) = compact_tag(rule);
+    all_rules()
+        .filter(|other| compact_tag(bare_rule_id(other)).0 == tag)
+        .count()
+        > 1
 }
 
 /// The line that a format must report for `location`. A file-level finding
@@ -441,74 +519,71 @@ fn expected_line(location: &Location, format: Format) -> Option<u64> {
     }
 }
 
-/// The SARIF locations that `format` does not report.
-fn missing_in(
+/// Whether `found` reports `location`: the same path and line. A file-level
+/// finding (no line in SARIF) can have no line, or line 1.
+fn reports(found: &Found, location: &Location, format: Format) -> bool {
+    found.0 == location.path
+        && match expected_line(location, format) {
+            Some(line) => found.1 == Some(line),
+            None => matches!(found.1, None | Some(1)),
+        }
+}
+
+/// The result of a one-to-one match of SARIF locations and the locations
+/// of one format.
+#[derive(Default)]
+struct Mismatch {
+    /// The SARIF locations that the format does not report.
+    missing: Vec<Location>,
+    /// The locations of the format that match no SARIF location.
+    extra: Vec<Found>,
+}
+
+/// Match each SARIF location to one location of `found`.
+fn match_one_to_one(sarif: &[Location], mut found: Vec<Found>, format: Format) -> Mismatch {
+    let mut mismatch = Mismatch::default();
+    for location in sarif {
+        match found
+            .iter()
+            .position(|candidate| reports(candidate, location, format))
+        {
+            Some(index) => {
+                found.swap_remove(index);
+            }
+            None => mismatch.missing.push(location.clone()),
+        }
+    }
+    mismatch.extra = found;
+    mismatch
+}
+
+/// Compare the report of `format` with the SARIF locations of the rule.
+fn compare(
     format: Format,
     rule: &str,
+    rule_id: &str,
     report: &str,
     sarif: &[Location],
-) -> Result<Vec<Location>, String> {
-    let missing = match format {
+) -> Result<Mismatch, String> {
+    let found = match format {
         Format::Json => {
             let value: Value = serde_json::from_str(report).map_err(|error| error.to_string())?;
-            let rows = json_rule_rows(&value, rule);
-            if rows.is_empty() {
-                return Err(format!("the JSON report has no row of {rule}"));
-            }
-            let mut found = BTreeSet::new();
-            for row in &rows {
-                json_locations(row, &mut found);
-            }
-            sarif
-                .iter()
-                .filter(|location| {
-                    !found.contains(&(location.path.clone(), expected_line(location, format)))
-                })
-                .cloned()
-                .collect()
+            json_found(&value, rule)?
         }
         Format::CodeClimate => {
             let value: Value = serde_json::from_str(report).map_err(|error| error.to_string())?;
-            let mut issues: Vec<(String, Option<u64>)> = value
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|issue| {
-                    let location = &issue["location"];
-                    let line = location["lines"]["begin"]
-                        .as_u64()
-                        .or_else(|| location["positions"]["begin"]["line"].as_u64());
-                    Some((uri_to_path(location["path"].as_str()?), line))
-                })
-                .collect();
-            let mut missing = Vec::new();
-            for location in sarif {
-                let wanted = (location.path.clone(), expected_line(location, format));
-                match issues.iter().position(|issue| *issue == wanted) {
-                    Some(index) => {
-                        issues.swap_remove(index);
-                    }
-                    None => missing.push(location.clone()),
-                }
-            }
-            missing
+            codeclimate_found(&value, &codeclimate_check_names(rule, rule_id))
         }
-        Format::Compact => sarif
-            .iter()
-            .filter(|location| {
-                !report.lines().any(|text| {
-                    compact_line_has(
-                        text,
-                        compact_tag(rule),
-                        &location.path,
-                        expected_line(location, format),
-                    )
-                })
-            })
-            .cloned()
+        Format::Compact => report
+            .lines()
+            .filter_map(|text| compact_found(text, compact_tag(rule)))
             .collect(),
     };
-    Ok(missing)
+    let mut mismatch = match_one_to_one(sarif, found, format);
+    if format == Format::Compact && compact_tag_is_shared(rule) {
+        mismatch.extra.clear();
+    }
+    Ok(mismatch)
 }
 
 /// Why the SARIF location does not match the anchor of the example, or
@@ -614,16 +689,26 @@ fn check(example: &RuleExample) -> Outcome {
             ));
             continue;
         }
-        match missing_in(format, example.rule, &output.stdout, &sarif) {
-            Ok(missing) if missing.is_empty() => {}
-            Ok(missing) => {
-                let missing: Vec<String> = missing.iter().map(ToString::to_string).collect();
+        match compare(format, example.rule, rule.id, &output.stdout, &sarif) {
+            Ok(mismatch) if mismatch.missing.is_empty() && mismatch.extra.is_empty() => {}
+            Ok(mismatch) => {
+                let missing: Vec<String> =
+                    mismatch.missing.iter().map(ToString::to_string).collect();
+                let extra: Vec<String> = mismatch
+                    .extra
+                    .iter()
+                    .map(|(path, line)| match line {
+                        Some(line) => format!("{path}:{line}"),
+                        None => format!("{path} (no line)"),
+                    })
+                    .collect();
                 outcome.failed.push((
                     Check::Output(format),
                     format!(
-                        "{}: {format} does not report the SARIF location {}",
+                        "{}: {format} does not match SARIF. Missing: [{}]. Not in SARIF: [{}]",
                         example.rule,
-                        missing.join(", ")
+                        missing.join(", "),
+                        extra.join(", ")
                     ),
                 ));
             }
@@ -690,52 +775,76 @@ fn each_example_reports_its_rule_at_one_location_in_each_format() {
 }
 
 #[test]
-fn compact_line_has_matches_a_path_and_a_line() {
-    let has = |text: &str, path: &str, line: Option<u64>| {
+fn compact_found_reads_the_path_and_the_line() {
+    let found = |text: &str, fields: usize| {
         let tag = text.split(':').next().unwrap();
-        compact_line_has(text, (tag, 0), path, line)
+        compact_found(text, (tag, fields))
     };
-    assert!(has("unused-export:src/a.ts:3:x", "src/a.ts", Some(3)));
-    assert!(has("code-duplication:src/a.ts:3-11:f", "src/a.ts", Some(3)));
-    assert!(!has("unused-export:src/a.ts:31:x", "src/a.ts", Some(3)));
-    assert!(!has(
-        "re-export-cycle:src/a.ts:src/a.ts <-> src/b.ts",
-        "src/a.ts",
-        Some(1)
-    ));
-    assert!(has("unused-file:src/a.ts", "src/a.ts", None));
-    assert!(has(
-        "route-collision:app/a.tsx:1 (url /a)",
-        "app/a.tsx",
+    let at = |path: &str, line: Option<u64>| Some((path.to_string(), line));
+    assert_eq!(
+        found("unused-export:src/a.ts:3:x", 0),
+        at("src/a.ts", Some(3))
+    );
+    assert_eq!(
+        found("code-duplication:src/a.ts:3-11:f", 0),
+        at("src/a.ts", Some(3))
+    );
+    assert_eq!(
+        found("re-export-cycle:src/a.ts:src/a.ts <-> src/b.ts", 0),
+        at("src/a.ts", None)
+    );
+    assert_eq!(found("unused-file:src/a.ts", 0), at("src/a.ts", None));
+    assert_eq!(
+        found("route-collision:app/%5Bid%5D/page.tsx:1 (url)", 0),
+        at("app/[id]/page.tsx", Some(1))
+    );
+    assert_eq!(
+        found(
+            "dynamic-segment-name-conflict:app/a.tsx:1 ([id] vs [slug])",
+            0
+        ),
+        at("app/a.tsx", Some(1))
+    );
+    assert_eq!(
+        found("flag-retire:single-read-site:src/a.ts:5:FLAG", 1),
+        at("src/a.ts", Some(5))
+    );
+    assert_eq!(
+        compact_found("unused-type:src/a.ts:3:x", ("unused-export", 0)),
         None
-    ));
-    assert!(!has(
-        "route-collision:app/a.tsx:7 (url /a)",
-        "app/a.tsx",
-        None
-    ));
-    assert!(!has(
-        "boundary-violation:src/b.ts:4:src/a.ts -> src/c.ts",
-        "src/a.ts",
-        Some(4)
-    ));
-    assert!(has(
-        "route-collision:app/%5Bid%5D/page.tsx:1 (url)",
-        "app/[id]/page.tsx",
-        Some(1)
-    ));
-    assert!(!compact_line_has(
-        "unused-type:src/a.ts:3:x",
-        ("unused-export", 0),
-        "src/a.ts",
-        Some(3)
-    ));
-    assert!(compact_line_has(
-        "flag-retire:single-read-site:src/a.ts:5:FLAG",
-        ("flag-retire", 1),
-        "src/a.ts",
-        Some(5)
-    ));
+    );
+}
+
+#[test]
+fn one_to_one_match_reports_missing_and_extra_locations() {
+    let location = |path: &str, line: Option<u64>| Location {
+        path: path.to_string(),
+        line,
+        column: None,
+    };
+    let sarif = [location("src/a.ts", Some(3)), location("src/a.ts", Some(3))];
+    let one = vec![("src/a.ts".to_string(), Some(3))];
+    let mismatch = match_one_to_one(&sarif, one, Format::Json);
+    assert_eq!(mismatch.missing.len(), 1, "two findings need two rows");
+
+    let extra = vec![
+        ("src/a.ts".to_string(), Some(3)),
+        ("src/a.ts".to_string(), Some(3)),
+        ("src/a.ts".to_string(), Some(9)),
+    ];
+    let mismatch = match_one_to_one(&sarif, extra, Format::Json);
+    assert!(mismatch.missing.is_empty());
+    assert_eq!(mismatch.extra, vec![("src/a.ts".to_string(), Some(9))]);
+
+    let file_level = [location("src/a.ts", None)];
+    let on_line_7 = vec![("src/a.ts".to_string(), Some(7))];
+    assert_eq!(
+        match_one_to_one(&file_level, on_line_7, Format::Compact)
+            .missing
+            .len(),
+        1,
+        "a file-level finding has no line, or line 1"
+    );
 }
 
 /// The result kinds of dead-code output that have no rule example. The test
