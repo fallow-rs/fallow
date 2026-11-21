@@ -212,10 +212,10 @@ pub struct PluginResult {
     /// edge.
     jsx_package_credits: Vec<JsxImportSourceRule>,
     /// The directories of the tsconfig files that set the JSX runtime of
-    /// TypeScript files, through `jsxImportSource` or a `jsx` mode that adds
-    /// no automatic runtime import. Vite then does not use the default
-    /// `react` runtime for the TypeScript files below these directories.
-    tsconfig_jsx_dirs: Vec<PathBuf>,
+    /// TypeScript files, each with the runtime that the tsconfig selects.
+    /// Vite then does not use its own default runtime for the TypeScript
+    /// files below these directories.
+    tsconfig_jsx_dirs: Vec<registry::TsconfigJsxDir>,
 }
 
 /// What a Module Federation config declares, and where, for the trace output.

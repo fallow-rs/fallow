@@ -1,0 +1,1 @@
+{ "name": "react-no-jsx", "private": true, "main": "src/index.ts", "dependencies": { "react": "^19.0.0" } }
