@@ -100,7 +100,12 @@ fn every_rejected_message_uses_known_placeholders() {
             {
                 for name in placeholder(message) {
                     assert!(
-                        matches!(name.as_str(), "option" | "command" | "file" | "formats"),
+                        // `<file>` and `<PATH>` are value names of the text, not
+                        // placeholders.
+                        matches!(
+                            name.as_str(),
+                            "option" | "command" | "formats" | "file" | "PATH"
+                        ),
                         "{} has the unknown placeholder <{name}>: {message}",
                         row.option
                     );
@@ -418,7 +423,6 @@ fn commands_that_print_to_stdout_reject_output_file() {
         &["recommend"][..],
         &["workspaces"],
         &["suppressions"],
-        &["viz"],
         &["rule-pack", "schema"],
         &["impact", "status"],
     ] {
@@ -618,4 +622,14 @@ fn ci_template_and_migrate_read_no_config_and_no_diff() {
             );
         }
     }
+}
+
+#[test]
+fn viz_names_its_out_option_for_output_file() {
+    assert_eq!(
+        rejection(&["viz", "--no-open", "--output-file", "out.html"]).as_deref(),
+        Some(
+            "`fallow viz` writes the map to the path of `--out`, so `--output-file` has no effect. Use `fallow viz --out <PATH>`."
+        )
+    );
 }

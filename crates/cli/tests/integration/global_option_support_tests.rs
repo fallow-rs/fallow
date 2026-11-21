@@ -978,3 +978,29 @@ fn a_duplication_option_on_a_run_with_duplication_off_gives_a_notice() {
         "{notices:#?}"
     );
 }
+
+/// `fallow viz` writes the map to the path of `--out`, so `--output-file`
+/// would leave an empty file and write the map to `fallow-viz.html`
+/// (issue #5007). The command line fails, and neither file exists.
+#[test]
+fn viz_rejects_output_file_and_writes_no_file() {
+    let project = copy_fixture("basic-project");
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_analysis_env(&mut cmd);
+    let output = cmd
+        .current_dir(project.path())
+        .args(["viz", "--no-open", "--output-file", "out.html"])
+        .output()
+        .expect("run fallow");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains(
+            "`fallow viz` writes the map to the path of `--out`, so `--output-file` has no effect. Use `fallow viz --out <PATH>`."
+        ),
+        "{stderr}"
+    );
+    assert!(!project.path().join("out.html").exists());
+    assert!(!project.path().join("fallow-viz.html").exists());
+}

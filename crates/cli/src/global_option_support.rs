@@ -191,6 +191,7 @@ const SUBCOMMAND_MESSAGE: &str = "<option> is not valid with `fallow <command>`.
 const FORMATS_OUTPUT_FILE_MESSAGE: &str = "`fallow <command>` writes the file of `--output-file` only with <formats>. With another format it prints its output to stdout, so `--output-file` has no effect.";
 const NOT_READ_MESSAGE: &str =
     "`fallow <command>` does not read `<option>`, so the option has no effect.";
+const VIZ_OUTPUT_FILE_MESSAGE: &str = "`fallow viz` writes the map to the path of `--out`, so `--output-file` has no effect. Use `fallow viz --out <PATH>`.";
 const STDOUT_REPORT_MESSAGE: &str = "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.";
 const DOCTOR_MESSAGE: &str = "<option> is not valid with `fallow doctor`.";
 const DOCTOR_OUTPUT_FILE_MESSAGE: &str = "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout";
@@ -325,7 +326,8 @@ const fn not_read_row(
 }
 
 /// The commands that print their output to stdout and do not write the file
-/// of `--output-file`, or write it only with some output formats.
+/// of `--output-file`, or write it only with some output formats. `viz`
+/// writes its map to the path of its own `--out` option.
 const STDOUT_REPORT_COMMANDS: &[CommandSupport] = &[
     supported_with_formats("agent", &[Format::Json], FORMATS_OUTPUT_FILE_MESSAGE),
     supported_with_formats("fix", &[Format::GithubSummary], FORMATS_OUTPUT_FILE_MESSAGE),
@@ -338,7 +340,7 @@ const STDOUT_REPORT_COMMANDS: &[CommandSupport] = &[
     rejected("recommend", STDOUT_REPORT_MESSAGE),
     rejected("rule-pack", STDOUT_REPORT_MESSAGE),
     rejected("suppressions", STDOUT_REPORT_MESSAGE),
-    rejected("viz", STDOUT_REPORT_MESSAGE),
+    rejected("viz", VIZ_OUTPUT_FILE_MESSAGE),
     rejected("workspaces", STDOUT_REPORT_MESSAGE),
 ];
 
