@@ -145,12 +145,23 @@ tests are in `crates/engine/src/changed_files.rs`,
     instances holds an added line of the diff against the base commit. This
     models the clone-group demotion of `new-only` (#2164): the change did not
     write the duplicated text.
+  - A clone group with a new identity is inherited when the base has a clone
+    group with the same paths and the same instance count, and no instance
+    holds `duplicates.minLines` (5) or more added lines in a row. This models
+    the `inherited-edited` grade of a clone region (#4968): an edit in every
+    copy that is shorter than a clone cannot write a new clone. A larger
+    block in every copy stays introduced. The audit grades clone regions,
+    but it sets the `introduced` flag of each clone group from the group
+    alone, so the harness compares each group.
 - **Positive control**: on a fixed project whose head commit renames a file
   with an unused export and adds a dependency to the manifest, the expected
   split holds the moved export and the old dependency as inherited and the new
   dependency as introduced, and the audit matches it. Git detects the rename
   of the control. The same project
   without the manifest change has no dependency finding in the audit.
+- **Clone control**: one added line in each copy of a clone, and a one-line
+  edit in each copy after a delete, are inherited. A clone that changes
+  shape only because a deleted file took an import away is inherited.
 - **Designed exceptions**: none.
 - **Status**: checked by the harness.
 

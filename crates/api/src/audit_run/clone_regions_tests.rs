@@ -48,6 +48,9 @@ fn base_group(instances: Vec<CloneSpan>) -> BaseCloneGroup {
     BaseCloneGroup { instances }
 }
 
+/// The default `duplicates.minLines`.
+const MIN_LINES: usize = 5;
+
 /// The base clone of most rows: `src/a.js:1-16` and `src/b.js:1-16`.
 fn ab_base() -> Vec<BaseCloneGroup> {
     vec![base_group(vec![
@@ -121,6 +124,7 @@ fn grade(case: &Case) -> CloneRegions {
             groups: &groups,
             ignored: &case.ignored,
             root: &root(),
+            min_lines: MIN_LINES,
         },
         &CloneRegionBase {
             keys: &keys,
@@ -184,7 +188,8 @@ fn nested_paste_with_accepted_outer_group() -> Case {
     case
 }
 
-/// Issue #4968: the same edit in every copy of a base clone.
+/// Issue #4968: the same one-line edit in every copy of a base clone. The
+/// added line alone is shorter than `minLines`, so it cannot be a clone.
 fn edit_in_every_copy() -> Case {
     Case {
         groups: vec![group(vec![
@@ -451,6 +456,90 @@ fn new_block_at_two_places_of_a_base_clone() -> Case {
     }
 }
 
+/// A diff that inserts `lines` new lines after line `after` of `a.js` and of
+/// `b.js`.
+fn insert_in_both(after: usize, lines: usize) -> String {
+    let body = "+new\n".repeat(lines);
+    ["src/a.js", "src/b.js"]
+        .map(|path| {
+            format!(
+                "diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -{after},0 +{},{lines} @@\n{body}",
+                after + 1,
+            )
+        })
+        .concat()
+}
+
+/// The same 40-line block inserted inside every copy of a base clone. The
+/// block alone is a clone, so the change wrote new duplication.
+fn large_block_inserted_into_every_copy() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 56),
+            instance("src/b.js", 1, 56),
+        ])],
+        diff: Some(insert_in_both(11, 40)),
+        base_groups: ab_base(),
+        ..Case::default()
+    }
+}
+
+/// The same 40-line block appended at the end of every copy of a base clone.
+fn large_block_appended_to_every_copy() -> Case {
+    Case {
+        diff: Some(insert_in_both(16, 40)),
+        ..large_block_inserted_into_every_copy()
+    }
+}
+
+/// A block of `minLines - 1` lines in every copy is a small edit.
+fn small_block_inserted_into_every_copy() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 20),
+            instance("src/b.js", 1, 20),
+        ])],
+        diff: Some(insert_in_both(11, MIN_LINES - 1)),
+        base_groups: ab_base(),
+        ..Case::default()
+    }
+}
+
+/// The base copies hold the same tokens on 30 and on 60 lines. A small new
+/// block replaces lines at the start of one copy and at the middle of the
+/// other, so it is not at the same place of the clone.
+fn new_block_at_other_places_of_differently_wrapped_copies() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 6, 12),
+            instance("src/b.js", 31, 37),
+        ])],
+        diff: Some([replace("src/a.js", 6, 2, 2), replace("src/b.js", 31, 2, 2)].concat()),
+        base_groups: vec![base_group(vec![
+            span("src/a.js", 1, 30),
+            span("src/b.js", 1, 60),
+        ])],
+        ..Case::default()
+    }
+}
+
+/// The same base copies, and an edit in one copy. The split part starts at
+/// the same relative place of both copies.
+fn edit_in_one_of_differently_wrapped_copies() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 7, 30),
+            instance("src/b.js", 13, 60),
+        ])],
+        diff: Some(replace("src/a.js", 7, 1, 1)),
+        base_groups: vec![base_group(vec![
+            span("src/a.js", 1, 30),
+            span("src/b.js", 1, 60),
+        ])],
+        ..Case::default()
+    }
+}
+
 type Row = (&'static str, fn() -> Case, &'static [Expect]);
 
 use CloneRegionGrade::{Inherited, InheritedEdited, Introduced};
@@ -557,7 +646,48 @@ const ROWS: &[Row] = &[
         new_block_at_two_places_of_a_base_clone,
         &[expect(Introduced, true)],
     ),
+    (
+        "large block inserted into every copy",
+        large_block_inserted_into_every_copy,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "large block appended to every copy",
+        large_block_appended_to_every_copy,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "small block inserted into every copy",
+        small_block_inserted_into_every_copy,
+        &[expect(InheritedEdited, false)],
+    ),
+    (
+        "new block at other places of differently wrapped copies",
+        new_block_at_other_places_of_differently_wrapped_copies,
+        &[expect(Introduced, true)],
+    ),
+    (
+        "edit in one of differently wrapped copies",
+        edit_in_one_of_differently_wrapped_copies,
+        &[expect(InheritedEdited, false)],
+    ),
 ];
+
+/// A large block in every copy of an accepted clone is new duplication, so
+/// the region fails the gate and offers no `ignoredClones` key.
+#[test]
+fn large_block_in_an_accepted_clone_gets_no_ignore_hint() {
+    let mut case = large_block_inserted_into_every_copy();
+    case.accepted = vec![AcceptedCloneGroup {
+        key: "dup:0bbbe8b1:2".to_owned(),
+        instances: case.base_groups.remove(0).instances,
+    }];
+    let regions = grade(&case);
+    let region = &regions.regions()[0];
+    assert!(region.gates);
+    assert!(region.accepted_by.is_empty());
+    assert!(region.ignore_hint.is_empty());
+}
 
 /// The gate fails on the region, but only the new group is introduced. A
 /// rule override for the file of the old group then cannot fail the gate

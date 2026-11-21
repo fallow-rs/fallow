@@ -280,3 +280,78 @@ fn accepted_clone_stays_accepted_after_an_edit_in_every_copy() {
         human.stderr
     );
 }
+
+/// One assignment line of the test function.
+fn assignment(name: &str, index: usize) -> String {
+    format!(
+        "  const {name}{index} = input.{name}{index} ?? computeDefault(\"{name}{index}\", {index}) + offset * {index};\n"
+    )
+}
+
+/// One 23-line function, with `extra` after its tenth assignment.
+fn handler_with(extra: &str) -> String {
+    let head: String = (1..=10).map(|index| assignment("v", index)).collect();
+    let tail: String = (11..=20).map(|index| assignment("v", index)).collect();
+    format!(
+        "export function handler(input, offset) {{\n{head}{extra}{tail}  return v1 + v20;\n}}\n"
+    )
+}
+
+/// The base holds one clone in `a.js` and `b.js`. The head writes `extra`
+/// into both copies. With `accept`, the base config accepts the base clone.
+fn audit_after_block_in_every_copy(
+    extra: &str,
+    accept: bool,
+) -> (CommandOutput, serde_json::Value) {
+    let tmp = new_repo("block");
+    let repo = tmp.path();
+    let body = handler_with("");
+    fs::write(repo.join("src/a.js"), &body).unwrap();
+    fs::write(repo.join("src/b.js"), &body).unwrap();
+    if accept {
+        let key = only_ignore_key(repo);
+        fs::write(
+            repo.join(".fallowrc.json"),
+            format!(
+                r#"{{"rules":{{"introduced-clone-group":"error"}},"duplicates":{{"ignoredClones":["{key}"]}}}}"#
+            ),
+        )
+        .unwrap();
+    }
+    commit_all(repo, "base");
+    let edited = handler_with(extra);
+    fs::write(repo.join("src/a.js"), &edited).unwrap();
+    fs::write(repo.join("src/b.js"), &edited).unwrap();
+    commit_all(repo, "edit");
+    audit(repo, "HEAD~1")
+}
+
+fn forty_new_lines() -> String {
+    (1..=40).map(|index| assignment("w", index)).collect()
+}
+
+/// The same 40-line block in every copy of an old clone is new duplication:
+/// the block alone is a clone.
+#[test]
+fn large_block_in_every_copy_is_introduced() {
+    let (output, json) = audit_after_block_in_every_copy(&forty_new_lines(), false);
+    assert_eq!(output.code, 1, "the new block must fail the gate: {json}");
+    assert!(
+        regions(&json)
+            .iter()
+            .any(|region| region["grade"] == "introduced" && region["introduced"] == true),
+        "{json}"
+    );
+}
+
+/// The base clone is accepted, but a large block in every copy is new
+/// duplication. The region fails the gate, and the output offers no new
+/// `ignoredClones` key.
+#[test]
+fn large_block_in_every_copy_of_an_accepted_clone_gets_no_ignore_hint() {
+    let (output, json) = audit_after_block_in_every_copy(&forty_new_lines(), true);
+    assert_eq!(output.code, 1, "the new block must fail the gate: {json}");
+    for region in regions(&json) {
+        assert!(region.get("ignore_hint").is_none(), "{json}");
+    }
+}

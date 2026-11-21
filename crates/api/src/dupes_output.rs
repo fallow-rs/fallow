@@ -198,8 +198,10 @@ pub enum CloneRegionGrade {
     Introduced,
     /// Each member group is a base group, or the change wrote no line of it.
     Inherited,
-    /// Each member group lies inside a base group, and the change edited one
-    /// or more of its copies. The region does not fail the gate.
+    /// Each member group lies inside a base group, at the same place of each
+    /// base copy, and the change edited one or more of its copies with fewer
+    /// added lines in a row than `duplicates.minLines`. Such an edit cannot
+    /// write a clone alone. The region does not fail the gate.
     InheritedEdited,
 }
 

@@ -297,6 +297,7 @@ pub fn attribute_clone_regions(
         groups: &duplication.clone_groups,
         ignored: duplication.ignored_groups,
         root: duplication.root,
+        min_lines: duplication.config.duplicates.min_lines,
     };
     let changed = changed_paths_of(change.changed_files, duplication.root);
     let region_base = CloneRegionBase {
