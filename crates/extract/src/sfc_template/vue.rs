@@ -24,9 +24,10 @@ use super::shared::{
 static TEMPLATE_OPEN_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"(?is)<template\b(?:[^>"']|"[^"]*"|'[^']*')*>"#));
 
-/// The `lang` attribute value of a `<template>` open tag.
+/// The `lang` attribute value of a `<template>` open tag. The attribute name
+/// must follow whitespace, so `xml:lang` and `data-lang` do not match.
 static TEMPLATE_LANG_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r#"(?i)\blang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#));
+    LazyLock::new(|| crate::static_regex(r#"(?i)\slang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#));
 
 static VUE_FOR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
@@ -144,7 +145,10 @@ pub(super) fn has_non_html_template(source: &str) -> bool {
     TEMPLATE_LANG_RE
         .captures(open.as_str())
         .and_then(|caps| caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)))
-        .is_some_and(|lang| !lang.as_str().trim().eq_ignore_ascii_case("html"))
+        .is_some_and(|lang| {
+            let lang = lang.as_str().trim();
+            !lang.is_empty() && !lang.eq_ignore_ascii_case("html")
+        })
 }
 
 /// Compute the `(start, end)` byte ranges of each root `<template>` body, mirroring

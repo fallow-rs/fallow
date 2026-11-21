@@ -54,9 +54,13 @@ fn canonical(info: &ModuleInfo) -> ModuleInfo {
         .member_accesses
         .iter()
         .filter(|access| {
-            !GLOBAL_OBJECTS
-                .iter()
-                .any(|global| access.object.starts_with(global))
+            !GLOBAL_OBJECTS.iter().any(|global| {
+                access.object == *global
+                    || access
+                        .object
+                        .strip_prefix(global)
+                        .is_some_and(|rest| rest.starts_with('.'))
+            })
         })
         .cloned()
         .collect();

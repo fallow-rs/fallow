@@ -162,3 +162,19 @@ fn vue_html_template_lang_keeps_emit_findings() {
     assert!(!info.has_dynamic_emit);
     assert_eq!(used_emit_names(&info), vec!["a"]);
 }
+
+#[test]
+fn vue_lang_like_attributes_keep_emit_findings() {
+    for open in [
+        r#"<template xml:lang="en">"#,
+        r#"<template data-lang="x">"#,
+        r#"<template lang="">"#,
+    ] {
+        let source = format!(
+            r#"<script setup>const emit = defineEmits(['a','never'])</script>{open}<button @click="emit('a')">x</button></template>"#
+        );
+        let info = vue_emits(&source);
+        assert!(!info.has_dynamic_emit, "{open} must not abstain");
+        assert_eq!(used_emit_names(&info), vec!["a"], "{open}");
+    }
+}
