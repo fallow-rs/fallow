@@ -85,8 +85,11 @@ rule, the project-relative path and a name of the finding without its line:
   example a known provider key in place of an `entropy` test value.
 - A client-server leak: the project-relative paths of the first and the last
   trace hop, and the names of the env secrets that the server module reads
-  (for example `process.env.DATABASE_PASSWORD`). A read of a different secret
-  gives a new id.
+  (for example `process.env.DATABASE_PASSWORD`). The names are sorted and
+  deduplicated. When the client file reads the secret itself, the trace has
+  one hop, and the names are those of the client file. A read of a different
+  secret, or of one more secret, gives a new id. A `server-only-import`
+  candidate reads no secret, so only the two paths name it.
 
 Identical names in one file get the suffix `~1`, `~2` and so on, in source
 order. A sink that an inline suppression comment hides keeps its place in
