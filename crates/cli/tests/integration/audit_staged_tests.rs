@@ -18,7 +18,8 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use crate::common::{
-    CommandOutput, commit_all, fallow_bin, git, git_command, parse_json, scrub_analysis_env,
+    CommandOutput, commit_all, fallow_bin, git, git_command, parse_json, required_array,
+    scrub_analysis_env,
 };
 
 /// A repository with one commit on `main`: `src/index.ts` is the entry and
@@ -72,28 +73,24 @@ fn audit_staged_command(dir: &Path, extra: &[&str]) -> Command {
 }
 
 fn run(command: &mut Command) -> CommandOutput {
-    let output = command.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(command.output().expect("failed to run fallow binary"))
 }
 
 fn audit_staged(dir: &Path, extra: &[&str]) -> CommandOutput {
     audit_staged_with_index(dir, extra, None)
 }
 
+/// The `path` of each entry of the array at `pointer`.
+fn paths_at(json: &serde_json::Value, pointer: &str) -> Vec<String> {
+    required_array(json, pointer)
+        .iter()
+        .map(|file| file["path"].as_str().expect("path is a string").to_owned())
+        .collect()
+}
+
+/// The unused files of a `fallow audit` JSON report.
 fn unused_file_paths(json: &serde_json::Value) -> Vec<String> {
-    json["dead_code"]["unused_files"]
-        .as_array()
-        .map(|files| {
-            files
-                .iter()
-                .filter_map(|file| file["path"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+    paths_at(json, "/dead_code/unused_files")
 }
 
 #[test]
@@ -307,7 +304,7 @@ fn parse_cache_counts(stderr: &str) -> (u64, u64) {
 
 /// The unused files of a `fallow dead-code` JSON report.
 fn working_tree_unused_files(json: &serde_json::Value) -> Vec<String> {
-    unused_file_paths(&serde_json::json!({ "dead_code": json }))
+    paths_at(json, "/unused_files")
 }
 
 /// Run `fallow dead-code` on the working tree of `dir`. `cache_dir` is the
@@ -381,6 +378,7 @@ fn the_parse_cache_follows_the_staged_content_not_the_working_tree() {
     for _ in 0..2 {
         let staged = run(audit_staged_command(dir, &[]).env_remove("FALLOW_CACHE_DIR"));
         let json = parse_json(&staged);
+        assert!(staged.code <= 1, "stderr: {}", staged.stderr);
         assert!(
             unused_file_paths(&json).is_empty(),
             "the staged index imports b: {json}"
@@ -414,6 +412,7 @@ fn a_staged_run_keeps_the_graph_cache_of_the_checkout() {
     assert!(staged.code <= 1, "stderr: {}", staged.stderr);
 
     let after = dead_code(dir, &["--performance"], Some(cache.path()));
+    assert!(after.code <= 1, "stderr: {}", after.stderr);
     let perf = after
         .stderr
         .lines()
