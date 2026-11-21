@@ -73,9 +73,9 @@ impl SetupHooksOptions<'_> {
         );
         self.home
             .map(Path::to_path_buf)
-            .or_else(home_dir)
+            .or_else(|| fallow_process::HostPaths::from_env().home)
             .ok_or_else(|| {
-                "Cannot resolve user home directory; unset --user or set $HOME.".to_string()
+                "Cannot resolve user home directory; unset --user or set $HOME (or %USERPROFILE% on Windows).".to_string()
             })
     }
 }
@@ -1456,10 +1456,6 @@ fn find_tooling_insertion_point(text: &str) -> Option<usize> {
         }
     }
     None
-}
-
-pub fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, command_label: &str) {

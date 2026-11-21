@@ -838,7 +838,7 @@ fn setup_json_explain_includes_meta_without_bumping_schema_version() {
 /// that an add-on on the host does not change the result.
 fn isolated_sidecar_search(root: &Path) -> crate::health::coverage::SidecarSearch {
     crate::health::coverage::SidecarSearch {
-        home: Some(root.join("isolated-home")),
+        host: fallow_process::HostPaths::with_home(root.join("isolated-home")),
         ..crate::health::coverage::SidecarSearch::default()
     }
 }

@@ -361,7 +361,7 @@ pub async fn run_rust_call(
         Ok(call) => call,
         Err(body) => return Ok(CallToolResult::error(vec![ContentBlock::text(body)])),
     };
-    if locate(binary, std::env::var_os("PATH")).is_none() {
+    if locate(binary, fallow_process::HostPaths::from_env().search_path).is_none() {
         return Ok(CallToolResult::error(vec![ContentBlock::text(
             not_found_body(binary),
         )]));

@@ -1,27 +1,26 @@
 //! Discovery inputs of the runtime coverage sidecar.
 
-use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
+
+use fallow_process::HostPaths;
 
 use super::coverage::{discover_sidecar_in, path_binary_candidates, sidecar_missing_message};
 
 /// The process inputs that sidecar discovery reads.
 ///
-/// Discovery reads two environment overrides, the home folder (for
-/// `~/.fallow/bin/fallow-cov`) and the `PATH` search list. Production code
-/// reads them from the process with [`SidecarSearch::from_process`]. A test
-/// builds its own value, so that the add-on of the host does not change the
-/// result.
+/// Discovery reads two environment overrides, and the host paths: the home
+/// folder (for `~/.fallow/bin/fallow-cov`) and the `PATH` search list.
+/// Production code reads them from the process with
+/// [`SidecarSearch::from_process`]. A test builds its own value, so that the
+/// add-on of the host does not change the result.
 #[derive(Debug, Clone, Default)]
 pub struct SidecarSearch {
     /// The trimmed, non-empty value of `FALLOW_COV_BIN`.
     pub cov_bin: Option<String>,
     /// The trimmed, non-empty value of `FALLOW_COV_BINARY_PATH`.
     pub cov_binary_path: Option<String>,
-    /// The home folder that holds `.fallow/bin`.
-    pub home: Option<PathBuf>,
-    /// The `PATH` search list.
-    pub path: Option<OsString>,
+    /// The home folder that holds `.fallow/bin`, and the `PATH` search list.
+    pub host: HostPaths,
 }
 
 impl SidecarSearch {
@@ -31,8 +30,7 @@ impl SidecarSearch {
         Self {
             cov_bin: env_non_empty("FALLOW_COV_BIN"),
             cov_binary_path: env_non_empty("FALLOW_COV_BINARY_PATH"),
-            home: fallow_license::user_home_dir(),
-            path: std::env::var_os("PATH"),
+            host: HostPaths::from_env(),
         }
     }
 
@@ -45,7 +43,7 @@ impl SidecarSearch {
     /// Return the canonical install location, `<home>/.fallow/bin/fallow-cov`.
     #[must_use]
     pub fn canonical_sidecar_path(&self) -> PathBuf {
-        let home = self.home.clone().unwrap_or_else(|| PathBuf::from("."));
+        let home = self.host.home.clone().unwrap_or_else(|| PathBuf::from("."));
         let binary = if cfg!(windows) {
             "fallow-cov.exe"
         } else {
@@ -82,7 +80,7 @@ pub fn discover_sidecar_with(
 
     let canonical = search.canonical_sidecar_path();
     discover_sidecar_in(root, &canonical, || {
-        find_on_path("fallow-cov", search.path.as_deref())
+        find_on_path("fallow-cov", &search.host)
     })
     .ok_or_else(|| sidecar_missing_message(root, &canonical))
 }
@@ -98,8 +96,8 @@ fn env_non_empty(key: &str) -> Option<String> {
     })
 }
 
-fn find_on_path(binary: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
-    std::env::split_paths(path_var?).find_map(|dir| {
+fn find_on_path(binary: &str, host: &HostPaths) -> Option<PathBuf> {
+    host.search_dirs().find_map(|dir| {
         for candidate_name in path_binary_candidates(binary) {
             let candidate = dir.join(candidate_name);
             if candidate.is_file() {
@@ -114,12 +112,14 @@ fn find_on_path(binary: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use fallow_process::HostPaths;
+
     use super::{SidecarSearch, discover_sidecar_with, path_binary_candidates};
 
     /// Discovery inputs that point only into the temporary `root` folder.
     fn isolated_search(root: &Path) -> SidecarSearch {
         SidecarSearch {
-            home: Some(root.join("home")),
+            host: HostPaths::with_home(root.join("home")),
             ..SidecarSearch::default()
         }
     }
@@ -151,7 +151,10 @@ mod tests {
         std::fs::write(&on_path, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", on_path.display()));
         let with_path = SidecarSearch {
-            path: Some(path_dir.into_os_string()),
+            host: HostPaths {
+                search_path: Some(path_dir.into_os_string()),
+                ..search.host.clone()
+            },
             ..search.clone()
         };
         assert_eq!(discover_sidecar_with(Some(&root), &with_path), Ok(on_path));

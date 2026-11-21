@@ -53,12 +53,14 @@ pub(super) fn parse_probe(output: &[u8]) -> Result<NodeInfo, String> {
 /// Run `node` from PATH with the probe script. Relative PATH entries are
 /// dropped, so a `node` in the working directory is never started.
 pub(super) fn probe() -> Result<NodeInfo, String> {
-    let path = std::env::var_os("PATH").map(|value| {
-        let absolute = std::env::split_paths(&value)
-            .filter(|entry| entry.is_absolute())
-            .collect::<Vec<_>>();
-        std::env::join_paths(absolute).unwrap_or_default()
-    });
+    let path = fallow_process::HostPaths::from_env()
+        .search_path
+        .map(|value| {
+            let absolute = std::env::split_paths(&value)
+                .filter(|entry| entry.is_absolute())
+                .collect::<Vec<_>>();
+            std::env::join_paths(absolute).unwrap_or_default()
+        });
     let mut command = Command::new("node");
     command
         .arg("-e")

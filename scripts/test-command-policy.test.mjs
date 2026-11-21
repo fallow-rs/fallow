@@ -32,6 +32,8 @@ const ciNextestCommand =
 // CI splits the same target set over three Check jobs.
 const ciPartitionedNextestCommand = `${ciNextestCommand} --partition hash:\${{ matrix.partition }}/3`;
 const benchCompileCommand = "cargo check --workspace --benches";
+// The Check jobs run the tests with a hostile home folder.
+const HOSTILE_HOST_PREFIX = "bash scripts/hostile-host.sh -- ";
 
 const guardedToolCommand = (script, dependency, executable) => {
   const segments = script.split("&&").map((segment) => segment.trim());
@@ -130,7 +132,10 @@ const assertCiWorkspaceTestCommands = (text) => {
   );
 
   assert.notEqual(workspaceTestCommands.length, 0, "CI must execute workspace tests");
-  for (const command of workspaceTestCommands) {
+  for (const wrapped of workspaceTestCommands) {
+    const command = wrapped.startsWith(HOSTILE_HOST_PREFIX)
+      ? wrapped.slice(HOSTILE_HOST_PREFIX.length)
+      : wrapped;
     assert.ok(
       command === normalTestCommand ||
         command === ciNextestCommand ||

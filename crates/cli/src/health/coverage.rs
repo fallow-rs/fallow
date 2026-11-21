@@ -3839,7 +3839,7 @@ mod tests {
     /// Discovery inputs that point only into the temporary `root` folder.
     fn isolated_search(root: &Path) -> SidecarSearch {
         SidecarSearch {
-            home: Some(root.join("home")),
+            host: fallow_process::HostPaths::with_home(root.join("home")),
             ..SidecarSearch::default()
         }
     }
