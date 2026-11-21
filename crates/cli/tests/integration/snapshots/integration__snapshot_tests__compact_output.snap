@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
-assertion_line: 537
 expression: output
 ---
 unused-file:src/dead.ts

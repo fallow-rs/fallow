@@ -121,6 +121,7 @@ mod grouping_fallback_tests;
 mod guard_tests;
 mod harness_tests;
 mod health_baseline_tests;
+mod health_css_finding_line_tests;
 mod health_css_template_markup_tests;
 mod health_cyclomatic_policy_tests;
 mod health_diagnostic_tests;

@@ -53,6 +53,7 @@ Use this as the default map for a new finding:
 - `crates/config/src/config/rules.rs`: add the rule severity field, aliases, defaults, and unknown-key suggestions.
 - `crates/api/src/explain.rs`: add the `RuleDef`, docs path, guide text, and aliases for `fallow explain`.
 - Analyzer code: keep extraction, graph facts, and reporting changes in the narrowest crate that already owns that stage.
+- Rule example: add a project in `crates/api/rule-examples/<rule>/`. `rule_example_tests` runs it in SARIF, JSON, Code Climate and compact output, and checks that each format reports each finding in the same file and on the same line. Set `"anchor": "file-level"` in `example.json` when the finding is on a whole file. Otherwise keep the code of the finding away from line 1, column 0, because a location that a format fills in for a missing span is there.
 - Output formats: verify human, JSON, SARIF, Code Climate, compact, markdown, GitHub, and GitLab consumers when the finding is user visible.
 - Total counts: if a new serialized `AnalysisResults` array contributes to `total_issues()`, add it to `TOTAL_ISSUE_RESULT_KEYS` and set the metadata row's `counts_in_total`. If the array is advisory, keep `counts_in_total` false so schema consumers know not to gate PR summary surfaces on it.
 - Actions: add suppress, fix, trace, or config actions when agents can act on the finding safely.
