@@ -1630,7 +1630,7 @@ fn global_default_records_without_per_repo_enable() {
 }
 
 #[test]
-fn legacy_in_repo_store_is_migrated_on_first_load() {
+fn legacy_in_repo_store_is_shown_on_load_and_saved_on_first_write() {
     let (_config, dir) = test_env();
     let root = dir.path();
     // Seed a pre-relocation v3 store with a FLAT frontier in the repo.
@@ -1650,11 +1650,11 @@ fn legacy_in_repo_store_is_migrated_on_first_load() {
     assert_eq!(store.resolved_total, 2);
     // The flat frontier was wrapped under the worktree key (nested v4 shape).
     assert!(frontier_paths(&store).contains("src/a.ts"));
-    // The user store now exists, so a second load does NOT re-import (it
-    // reads the user store directly).
-    assert!(store_path(root).is_some_and(|p| p.exists()));
-    let again = load(root);
-    assert_eq!(again.records.len(), 1);
+    let user_store = store_path(root).unwrap();
+    assert!(!user_store.exists(), "a read does not save the import");
+    decline_onboarding(root).unwrap();
+    assert!(user_store.exists(), "the first write saves the import");
+    assert_eq!(load(root).records.len(), 1);
 }
 
 #[test]
@@ -3263,4 +3263,80 @@ fn usable_temp_bases_drops_a_root_and_the_home_folder() {
     let bases = record_gate::usable_temp_bases(candidates, Some(home.path()));
 
     assert_eq!(bases, vec![home_parent, other.path().to_path_buf()]);
+}
+
+// ----- strict store read and the write transaction ----------------------
+
+/// A pre-relocation v3 in-repo store with one record.
+const LEGACY: &str = r#"{"schema_version":3,"enabled":true,"explicit_decision":true,
+            "records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,
+            "counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],
+            "resolved_total":2,
+            "frontier":{"src/a.ts":{"findings":[{"id":"x","kind":"unused-export","symbol":"foo"}],"suppressions":[]}},
+            "containment":[]}"#;
+
+fn write_legacy(root: &Path) {
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::write(legacy_store_path(root), LEGACY).unwrap();
+}
+
+#[test]
+fn cross_repo_skips_and_counts_a_newer_store_that_still_parses() {
+    let _cfg = aggregate_env();
+    seed_store("good", &store_with("good", 3, 0, "2026-06-10T00:00:00Z", 1));
+    let dir = impact_config_dir().unwrap().join("impact");
+    std::fs::write(
+        dir.join("newer.json"),
+        format!(
+            r#"{{"schema_version":{},"enabled":true,"resolved_total":5}}"#,
+            STORE_SCHEMA_VERSION + 1
+        ),
+    )
+    .unwrap();
+    let report = aggregate(CrossRepoSort::Recent);
+    assert_eq!(report.project_count, 1, "a newer store is not aggregated");
+    assert_eq!(report.unreadable_count, 1, "a newer store is counted");
+}
+
+#[test]
+fn statusline_reports_newer_schema_when_a_known_field_changed_shape() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(
+        root,
+        format!(
+            r#"{{"schema_version":{},"enabled":"per-worktree"}}"#,
+            STORE_SCHEMA_VERSION + 1
+        )
+        .as_bytes(),
+    );
+    assert!(matches!(
+        load_statusline(root),
+        Err(StatuslineLoadError::NewerSchema)
+    ));
+}
+
+#[test]
+fn load_does_not_import_the_legacy_store_over_an_unreadable_store() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, &[0xff, 0xfe]);
+    write_legacy(root);
+    assert!(load(root).records.is_empty());
+    assert_eq!(
+        std::fs::read(store_path(root).unwrap()).unwrap(),
+        [0xff, 0xfe]
+    );
+}
+
+#[test]
+fn legacy_view_is_absent_when_the_marker_exists() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    let store = store_path(root).unwrap();
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(migration_marker_path(&store), b"").unwrap();
+    assert!(load(root).records.is_empty());
+    assert!(load_statusline(root).unwrap().records.is_empty());
 }

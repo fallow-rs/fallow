@@ -383,78 +383,14 @@ mod record_gate;
 use record_gate::record_gate_skips;
 #[path = "impact_store.rs"]
 mod store;
+use store::{
+    ImpactStoreLock, legacy_store_path, load_all, load_global_default, newer_schema_in, store_path,
+};
+pub use store::{
+    NewerStoreSchema, StatuslineLoadError, load, load_statusline, set_global_default, store_dir,
+};
 #[cfg(test)]
-use store::lock_path_for;
-use store::{ImpactStoreLock, legacy_store_path, load_global_default, newer_schema_in, store_path};
-pub use store::{NewerStoreSchema, set_global_default, store_dir};
-
-/// Load the store. Missing or unreadable files fall back to defaults; unreadable
-/// files are warned about rather than silently disabling tracking.
-pub fn load(root: &Path) -> ImpactStore {
-    let Some(path) = store_path(root) else {
-        return ImpactStore::default();
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => parse_store(&content, &path),
-        // No user-store file yet: attempt a one-time import of a legacy in-repo
-        // `.fallow/impact.json` (pre-relocation). Returns default if none.
-        Err(_) => migrate_legacy_store(root),
-    }
-}
-
-/// Stable failure states for status-bar callers. The statusline loader never
-/// logs the store path or substitutes corrupt/newer data with an empty report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatuslineLoadError {
-    /// The store is unreadable or corrupt.
-    DataUnavailable,
-    /// The store was written by a newer Fallow whose schema this build cannot read.
-    NewerSchema,
-}
-
-/// Load Impact state without writes, warnings, or path-bearing diagnostics.
-///
-/// Unlike [`load`], this does not persist a legacy in-repo store when the user
-/// store is missing. A corrupt, unreadable, or newer-schema store is reported
-/// as unavailable so the compact renderer cannot mislabel lost data as "off".
-pub fn load_statusline(root: &Path) -> Result<ImpactStore, StatuslineLoadError> {
-    let Some(path) = store_path(root) else {
-        return Ok(ImpactStore::default());
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => parse_statusline_store(&content),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            load_legacy_statusline_store(root)
-        }
-        Err(_) => Err(StatuslineLoadError::DataUnavailable),
-    }
-}
-
-fn parse_statusline_store(content: &str) -> Result<ImpactStore, StatuslineLoadError> {
-    let store = serde_json::from_str::<ImpactStore>(content)
-        .map_err(|_| StatuslineLoadError::DataUnavailable)?;
-    if store.schema_version > STORE_SCHEMA_VERSION {
-        return Err(StatuslineLoadError::NewerSchema);
-    }
-    Ok(store)
-}
-
-fn load_legacy_statusline_store(root: &Path) -> Result<ImpactStore, StatuslineLoadError> {
-    let legacy_path = legacy_store_path(root);
-    let content = match std::fs::read_to_string(legacy_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ImpactStore::default());
-        }
-        Err(_) => return Err(StatuslineLoadError::DataUnavailable),
-    };
-    let legacy = serde_json::from_str::<LegacyFlatStore>(&content)
-        .map_err(|_| StatuslineLoadError::DataUnavailable)?;
-    let (_, worktree, display) = project_identity(root);
-    let mut store = legacy.into_store(&worktree);
-    store.label = display;
-    Ok(store)
-}
+use store::{lock_path_for, migration_marker_path};
 
 fn parse_store(content: &str, path: &Path) -> ImpactStore {
     match serde_json::from_str::<ImpactStore>(content) {
@@ -485,7 +421,7 @@ fn parse_store(content: &str, path: &Path) -> ImpactStore {
 
 /// Load the store for a load, mutate, and save cycle. Refuses a store that a
 /// newer Fallow wrote, so the caller leaves the file unchanged. Every write
-/// path must use this instead of [`load`].
+/// path must use this instead of `load`.
 fn load_for_write(root: &Path) -> Result<ImpactStore, NewerStoreSchema> {
     let Some(path) = store_path(root) else {
         return Ok(ImpactStore::default());
@@ -1830,40 +1766,6 @@ fn latest_activity(store: &ImpactStore) -> Option<String> {
         (Some(x), Some(y)) => Some(if x >= y { x } else { y }),
         (x, y) => x.or(y),
     }
-}
-
-/// Enumerate every per-project store in `<config-dir>/fallow/impact/`, returning
-/// `(project_key, store)` pairs plus the count of files that failed to parse.
-/// Read-only; never writes. The global `impact.json` toggle is a sibling FILE of
-/// this dir (one level up), so it is naturally excluded. Corrupt/newer-schema
-/// files are skipped and counted, never substituted with a default store.
-#[must_use]
-pub fn load_all() -> (Vec<(String, ImpactStore)>, usize) {
-    let Some(dir) = impact_config_dir().map(|d| d.join("impact")) else {
-        return (Vec::new(), 0);
-    };
-    let Ok(read) = std::fs::read_dir(&dir) else {
-        return (Vec::new(), 0);
-    };
-    let mut stores = Vec::new();
-    let mut unreadable = 0usize;
-    for entry in read.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(key) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
-            continue;
-        };
-        match std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|c| serde_json::from_str::<ImpactStore>(&c).ok())
-        {
-            Some(store) => stores.push((key, store)),
-            None => unreadable += 1,
-        }
-    }
-    (stores, unreadable)
 }
 
 /// Build the cross-repo aggregate from enumerated stores. Excludes
