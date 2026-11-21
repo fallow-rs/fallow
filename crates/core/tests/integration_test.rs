@@ -823,6 +823,8 @@ mod issue_4828_svelte_markup_script_attr_gt;
 mod issue_4850_inferred_signature_backing;
 #[path = "integration_test/issue_4986_entry_star_exports.rs"]
 mod issue_4986_entry_star_exports;
+#[path = "integration_test/issue_4990_entry_file_members.rs"]
+mod issue_4990_entry_file_members;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

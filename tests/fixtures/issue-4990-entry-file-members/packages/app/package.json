@@ -1,0 +1,1 @@
+{ "name": "@p/app", "private": true, "main": "src/main.ts", "dependencies": { "@p/lib": "workspace:*", "@p/pub": "workspace:*" } }

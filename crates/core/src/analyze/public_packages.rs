@@ -81,4 +81,7 @@ pub(super) fn filter_public_workspace_results(
     results
         .unused_protected_class_members
         .retain(|e| !on_surface(&e.member.path, &e.member.parent_name));
+    results
+        .unused_namespace_members
+        .retain(|e| !on_surface(&e.member.path, &e.member.parent_name));
 }

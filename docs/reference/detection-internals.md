@@ -212,8 +212,11 @@ error by suppressing a downstream detector.
   `class Sub extends mixin(Base)` is not an escape. A class field alias (`levels = Level`) is an
   escape for a namespace but not for an enum: the fact carries
   `class_field`, and the visitor follows the reads of the field through
-  `this.levels` and the component template. A declaration file, an export of an entry point, and a
-  member of a namespace that is reported itself are never reported.
+  `this.levels` and the component template. A declaration file and a member of a
+  namespace that is reported itself are never reported. The member scan of an
+  entry point reads only store members, so its enum, class and namespace
+  members are not reported either, unless `includeEntryExports` covers the
+  file (issue #4990).
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the

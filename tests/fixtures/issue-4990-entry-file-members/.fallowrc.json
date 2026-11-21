@@ -1,0 +1,9 @@
+{
+  "publicPackages": ["@p/pub"],
+  "rules": { "unused-namespace-members": "error" },
+  "workspaces": {
+    "settings": {
+      "packages/*": { "includeEntryExports": true }
+    }
+  }
+}
