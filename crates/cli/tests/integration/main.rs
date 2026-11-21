@@ -24,6 +24,7 @@ mod advisory_component_gate_tests;
 mod agent_tests;
 mod architecture_tests;
 mod audit_analysis_selection_tests;
+mod audit_base_identity_tests;
 mod audit_cache_orphan_sweep_tests;
 mod audit_clone_containment_tests;
 mod audit_complexity_attribution_tests;

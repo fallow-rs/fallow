@@ -4,6 +4,7 @@ use crate::module_graph::StaticTestCoverage;
 
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
+use super::coverage_input::{CoverageInput, read_coverage_input};
 use super::test_reach::build_test_referenced_exports;
 use super::threshold_overrides::ThresholdOverrideResolver;
 
@@ -1727,49 +1728,6 @@ pub(super) fn load_istanbul_coverage_for_sources(
             ))
         }
     }
-}
-
-/// A `--coverage` input after format detection.
-enum CoverageInput {
-    Istanbul {
-        file_path: std::path::PathBuf,
-        json: String,
-    },
-    V8 {
-        dump_files: Vec<std::path::PathBuf>,
-    },
-}
-
-/// Detect the format of a `--coverage` path. A directory holds either an
-/// Istanbul `coverage-final.json` (preferred) or `NODE_V8_COVERAGE` dumps; a
-/// file is an Istanbul map or one V8 dump.
-fn read_coverage_input(resolved: &std::path::Path) -> Result<CoverageInput, String> {
-    if resolved.is_dir() {
-        let candidate = resolved.join("coverage-final.json");
-        if candidate.is_file() {
-            return read_coverage_file(candidate);
-        }
-        let dump_files = super::coverage_v8::dump_files_in(resolved)?;
-        if dump_files.is_empty() {
-            return Err(format!(
-                "no coverage-final.json or V8 coverage files found in {}",
-                resolved.display()
-            ));
-        }
-        return Ok(CoverageInput::V8 { dump_files });
-    }
-    read_coverage_file(resolved.to_path_buf())
-}
-
-fn read_coverage_file(file_path: std::path::PathBuf) -> Result<CoverageInput, String> {
-    let json = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("failed to read coverage file {}: {e}", file_path.display()))?;
-    if super::coverage_v8::is_v8_dump(&json) {
-        return Ok(CoverageInput::V8 {
-            dump_files: vec![file_path],
-        });
-    }
-    Ok(CoverageInput::Istanbul { file_path, json })
 }
 
 /// How the file paths of a coverage map relate to the analyzed project.

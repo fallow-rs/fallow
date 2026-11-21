@@ -28,6 +28,7 @@ mod component_rollup;
 mod contributor;
 mod core_pipeline;
 mod coverage_gaps;
+pub mod coverage_input;
 mod coverage_intelligence;
 mod coverage_settings;
 pub mod coverage_v8;

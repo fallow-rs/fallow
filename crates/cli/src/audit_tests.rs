@@ -1,3 +1,4 @@
+use super::cache::{BaseKeyRequest, config_file_fingerprint};
 use super::*;
 use std::fmt::Write as _;
 
@@ -4738,9 +4739,19 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
 
     let changed_files = fallow_engine::changed_files::get_changed_files(root, "HEAD")
         .expect("changed files should resolve");
-    let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files, &[])
-        .expect("cache key should compute")
-        .expect("cache key should exist");
+    let base_run = BaseRunInputs::resolve(&opts);
+    let head = runs::options_run(&opts).expect("head run should resolve");
+    let key = audit_base_snapshot_cache_key(&BaseKeyRequest {
+        opts: &opts,
+        base_run: &base_run,
+        base_ref: "HEAD",
+        changed_files: &changed_files,
+        workspace_patterns: &[],
+        head: &head,
+        type_aware: AuditTypeAwareOptions::default(),
+    })
+    .expect("cache key should compute")
+    .expect("cache key should exist");
     assert!(
         load_cached_base_snapshot(&opts, &key).is_some(),
         "first audit should store a reusable base snapshot"

@@ -62,25 +62,46 @@ pub struct AuditConfigFingerprint {
     pub resolved_hash: Option<String>,
 }
 
-/// Fingerprint of an optional coverage input that can affect health findings.
+/// Fingerprint of the coverage input of the base pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditCoverageFingerprint {
-    /// User-provided coverage path.
+    /// The coverage path that the base pass gets.
     pub path: String,
-    /// Actual file path hashed after directory resolution.
-    pub resolved_path: String,
-    /// Metadata freshness for the resolved coverage file, when it was readable.
+    /// Each file that the coverage reader selects for `path`, in the order
+    /// of the reader.
+    pub files: Vec<AuditCoverageFileFingerprint>,
+    /// The selection error, when the reader selects no file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Fingerprint of one selected coverage file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditCoverageFileFingerprint {
+    /// Path of the selected file.
+    pub path: String,
+    /// Metadata freshness of the file, when it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceFingerprint>,
-    /// Stable content hash for the resolved coverage file, when it was readable.
+    /// Stable content hash of the file, when it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
     /// File length in bytes, when it was readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub len: Option<usize>,
-    /// I/O error kind, when the resolved coverage file was not readable.
+    /// I/O error kind, when the file was not readable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// The type-aware selection of a base pass that runs the type-aware
+/// companion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditTypeAwareFingerprint {
+    /// The TypeScript project configs, in the order of the run.
+    pub projects: Vec<String>,
+    /// The completeness policy.
+    pub require: String,
 }
 
 /// Typed payload hashed to address an audit base-snapshot cache entry.
@@ -138,16 +159,14 @@ pub struct AuditCacheKeyPayload {
     pub css: bool,
     /// Whether audit health used deep CSS analysis for the base snapshot.
     pub css_deep: bool,
-    /// Dead-code baseline path.
-    pub dead_code_baseline: Option<String>,
-    /// Health baseline path.
-    pub health_baseline: Option<String>,
-    /// Duplication baseline path.
-    pub dupes_baseline: Option<String>,
     /// Experimental type-aware backend selection. The default backend leaves
     /// it out, so the key bytes of a default run do not change.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub type_aware_backend: Option<String>,
+    /// The effective type-aware selection. A syntactic base pass leaves
+    /// it out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_aware: Option<AuditTypeAwareFingerprint>,
 }
 
 /// Builder for audit base-snapshot cache keys.
@@ -194,10 +213,8 @@ impl AuditCacheKeyBuilder {
                 architecture: "all".to_string(),
                 css: false,
                 css_deep: false,
-                dead_code_baseline: None,
-                health_baseline: None,
-                dupes_baseline: None,
                 type_aware_backend: None,
+                type_aware: None,
             },
         }
     }
@@ -288,24 +305,17 @@ impl AuditCacheKeyBuilder {
         self
     }
 
-    /// Set baseline paths.
-    #[must_use]
-    pub fn baselines(
-        mut self,
-        dead_code: Option<String>,
-        health: Option<String>,
-        dupes: Option<String>,
-    ) -> Self {
-        self.payload.dead_code_baseline = dead_code;
-        self.payload.health_baseline = health;
-        self.payload.dupes_baseline = dupes;
-        self
-    }
-
     /// Set the type-aware backend selection.
     #[must_use]
     pub fn type_aware_backend(mut self, backend: Option<String>) -> Self {
         self.payload.type_aware_backend = backend;
+        self
+    }
+
+    /// Set the effective type-aware selection.
+    #[must_use]
+    pub fn type_aware(mut self, selection: Option<AuditTypeAwareFingerprint>) -> Self {
+        self.payload.type_aware = selection;
         self
     }
 
@@ -347,10 +357,13 @@ mod tests {
     fn audit_cache_key_builder_preserves_typed_fields() {
         let coverage = AuditCoverageFingerprint {
             path: "coverage".to_string(),
-            resolved_path: "coverage/coverage-final.json".to_string(),
-            source: Some(SourceFingerprint::new(12, 34)),
-            content_hash: Some("hash".to_string()),
-            len: Some(34),
+            files: vec![AuditCoverageFileFingerprint {
+                path: "coverage/coverage-final.json".to_string(),
+                source: Some(SourceFingerprint::new(12, 34)),
+                content_hash: Some("hash".to_string()),
+                len: Some(34),
+                error: None,
+            }],
             error: None,
         };
 
@@ -370,12 +383,7 @@ mod tests {
             true,
         )
         .health(Some(42.0), Some(coverage), Some("/workspace".to_string()))
-        .styling(true, true)
-        .baselines(
-            Some("dead.json".to_string()),
-            Some("health.json".to_string()),
-            Some("dupes.json".to_string()),
-        );
+        .styling(true, true);
 
         let payload = builder.payload();
         assert_eq!(payload.cache_version, 3);
@@ -384,8 +392,13 @@ mod tests {
         assert!(payload.include_entry_exports);
         assert!(payload.css);
         assert!(payload.css_deep);
+        assert_eq!(payload.coverage.as_ref().map(|c| c.files.len()), Some(1));
         assert_eq!(
-            payload.coverage.as_ref().and_then(|c| c.source),
+            payload
+                .coverage
+                .as_ref()
+                .and_then(|c| c.files.first())
+                .and_then(|f| f.source),
             Some(SourceFingerprint::new(12, 34))
         );
     }
@@ -451,6 +464,29 @@ mod tests {
         let default = build(None);
         assert!(!String::from_utf8_lossy(&default).contains("type_aware_backend"));
         assert_ne!(default, build(Some("tsrs")));
+    }
+
+    #[test]
+    fn audit_cache_key_bytes_include_only_an_enabled_type_aware_selection() {
+        let build = |selection: Option<AuditTypeAwareFingerprint>| {
+            AuditCacheKeyBuilder::new(1, "1.0.0", "base", config(), Vec::new(), context())
+                .type_aware(selection)
+                .to_json_bytes()
+                .expect("payload should serialize")
+        };
+        let selection = |projects: &[&str]| AuditTypeAwareFingerprint {
+            projects: projects.iter().map(|p| (*p).to_string()).collect(),
+            require: "BestEffort".to_string(),
+        };
+
+        let syntactic = build(None);
+        assert!(!String::from_utf8_lossy(&syntactic).contains("\"type_aware\""));
+        let default_projects = build(Some(selection(&[])));
+        assert_ne!(syntactic, default_projects);
+        assert_ne!(
+            default_projects,
+            build(Some(selection(&["tsconfig.app.json"])))
+        );
     }
 
     #[test]
