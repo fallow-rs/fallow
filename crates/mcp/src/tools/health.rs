@@ -397,7 +397,8 @@ pub(super) fn health_options_from_params(
             .map(ownership_email_mode_from_param),
         targets: params.targets.unwrap_or(false),
         css: params.css.unwrap_or(false),
-        css_deep: false,
+        // Same as `fallow health --css`: the project-wide stylesheet pass runs.
+        css_deep: params.css.unwrap_or(false),
         effort: target_effort_from_param(params.effort.as_deref())?,
         score: params.score.unwrap_or(false),
         since: non_empty_string(params.since.as_deref()),
@@ -522,6 +523,10 @@ mod tests {
         assert!(options.complexity_breakdown);
         assert!(options.complexity);
         assert!(options.css);
+        assert!(
+            options.css_deep,
+            "css runs the stylesheet pass of `health --css`"
+        );
         assert!(options.file_scores);
         assert!(options.hotspots);
         assert!(options.ownership);
@@ -540,6 +545,15 @@ mod tests {
         );
         assert_eq!(options.coverage_root, Some(PathBuf::from("/tmp/project")));
         assert!(matches!(options.effort, Some(TargetEffort::High)));
+    }
+
+    #[test]
+    fn api_path_skips_the_stylesheet_pass_without_css() {
+        let options =
+            health_options_from_params(&HealthParams::default(), None, EnvSnapshot::capture())
+                .expect("options");
+        assert!(!options.css);
+        assert!(!options.css_deep);
     }
 
     #[test]

@@ -13,10 +13,6 @@ const RULES_WITHOUT_EXAMPLE: &[(&str, &str)] = &[
         "unlisted-binary",
         "the rule runs only when the project has a `node_modules` directory, which git ignores",
     ),
-    (
-        "css-broken-reference",
-        "only `fallow audit` runs the stylesheet pass that reports it",
-    ),
     ("runtime-safe-to-delete", "needs production runtime data"),
     ("runtime-review-required", "needs production runtime data"),
     ("runtime-low-traffic", "needs production runtime data"),
@@ -223,6 +219,46 @@ fn table_matches_the_examples_on_disk() {
         "explain_examples_table.rs does not match crates/api/rule-examples/. \
          Run `{UPDATE_ENV}=1 cargo test -p fallow-api --lib explain_examples`."
     );
+}
+
+/// Whether `reason` has the form "only <command> runs ...", where the command
+/// is one word or a code span such as `` `fallow audit` ``.
+fn names_other_command(reason: &str) -> bool {
+    reason.match_indices("only ").any(|(start, matched)| {
+        let rest = &reason[start + matched.len()..];
+        let after_command = match rest.strip_prefix('`') {
+            Some(code) => code.split_once('`').map(|(_, after)| after),
+            None => rest.split_once(' ').map(|(_, after)| after),
+        };
+        after_command.is_some_and(|after| after.trim_start().starts_with("runs"))
+    })
+}
+
+#[test]
+fn names_other_command_matches_the_command_forms() {
+    assert!(names_other_command(
+        "only `fallow audit` runs the stylesheet pass that reports it"
+    ));
+    assert!(names_other_command("only audit runs the pass"));
+    assert!(!names_other_command("needs production runtime data"));
+    assert!(!names_other_command(
+        "the rule runs only when the project has a `node_modules` directory, which git ignores"
+    ));
+}
+
+/// A rule that only another command reports is a bug of the registry or of
+/// the command, not a reason to skip the example. The example test runs each
+/// rule with its registered command, so it finds that disagreement.
+#[test]
+fn no_rule_skips_its_example_because_another_command_reports_it() {
+    for (rule, reason) in RULES_WITHOUT_EXAMPLE {
+        assert!(
+            !names_other_command(reason),
+            "{rule}: the reason \"{reason}\" says that another command reports the rule. \
+             Make the registered command report it, or register the rule under the other \
+             command, and add an example project."
+        );
+    }
 }
 
 #[test]
