@@ -7,13 +7,13 @@
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::common::{fallow_bin, parse_json};
-use crate::http_stub::read_request;
+use crate::http_stub::{accept_expected, read_request};
 
 #[derive(Clone)]
 struct MockResponse {
@@ -32,32 +32,26 @@ fn serve_with_headers(
 ) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let url = format!("http://{}", listener.local_addr().expect("local addr"));
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let handle = {
-        let requests = Arc::clone(&requests);
-        thread::spawn(move || {
-            for (response, headers) in responses {
-                let (mut stream, _) = listener.accept().expect("accept request");
-                let request = read_request(&mut stream);
-                assert!(
-                    request.starts_with(response.method),
-                    "expected {} request, got:\n{request}",
-                    response.method
-                );
-                assert!(
-                    request.contains(response.path_contains),
-                    "expected path containing {}, got:\n{request}",
-                    response.path_contains
-                );
-                requests.lock().expect("request lock").push(request);
-                write_response(&mut stream, response.status, headers, response.body);
-            }
-            Arc::try_unwrap(requests)
-                .expect("request refs released")
-                .into_inner()
-                .expect("request lock")
-        })
-    };
+    let handle = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for (response, headers) in responses {
+            let mut stream = accept_expected(&listener, requests.len() + 1);
+            let request = read_request(&mut stream);
+            assert!(
+                request.starts_with(response.method),
+                "expected {} request, got:\n{request}",
+                response.method
+            );
+            assert!(
+                request.contains(response.path_contains),
+                "expected path containing {}, got:\n{request}",
+                response.path_contains
+            );
+            requests.push(request);
+            write_response(&mut stream, response.status, headers, response.body);
+        }
+        requests
+    });
     (url, handle)
 }
 

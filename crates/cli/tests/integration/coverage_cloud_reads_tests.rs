@@ -20,7 +20,7 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 
 use crate::common::{CommandOutput, fallow_bin, fixture_path, git, parse_json};
-use crate::http_stub::read_request;
+use crate::http_stub::{accept_expected, read_request};
 
 /// One scripted mock response.
 struct MockResponse {
@@ -65,8 +65,8 @@ fn serve(responses: Vec<MockResponse>) -> (String, Captured, thread::JoinHandle<
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&captured);
     let handle = thread::spawn(move || {
-        for response in responses {
-            let (mut stream, _) = listener.accept().expect("accept request");
+        for (index, response) in responses.into_iter().enumerate() {
+            let mut stream = accept_expected(&listener, index + 1);
             let request = read_request(&mut stream);
             sink.lock().expect("capture lock").push(request);
             write_response(&mut stream, &response);

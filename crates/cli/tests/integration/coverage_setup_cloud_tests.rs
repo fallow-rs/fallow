@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::common::{CommandOutput, fallow_bin, parse_json};
-use crate::http_stub::read_request;
+use crate::http_stub::{accept_expected, read_request};
 
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -30,8 +30,8 @@ fn serve(responses: Vec<(u16, String)>) -> (String, Captured, thread::JoinHandle
     let captured: Captured = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&captured);
     let handle = thread::spawn(move || {
-        for (status, body) in responses {
-            let (mut stream, _) = listener.accept().expect("accept request");
+        for (index, (status, body)) in responses.into_iter().enumerate() {
+            let mut stream = accept_expected(&listener, index + 1);
             let request = read_request(&mut stream);
             sink.lock().expect("capture lock").push(request);
             write_response(&mut stream, status, &body);
