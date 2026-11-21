@@ -54,7 +54,7 @@ pub(super) fn collect_template_usage(
 }
 
 #[cfg(test)]
-pub(super) fn collect_template_usage_with_bound_targets(
+fn collect_template_usage_with_bound_targets(
     source: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,

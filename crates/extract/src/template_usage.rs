@@ -176,7 +176,7 @@ pub enum TemplateSnippetKind {
 }
 
 #[cfg(test)]
-pub fn analyze_template_snippet(
+fn analyze_template_snippet(
     snippet: &str,
     kind: TemplateSnippetKind,
     imported_bindings: &FxHashSet<String>,
@@ -194,7 +194,7 @@ pub fn analyze_template_snippet(
 }
 
 #[cfg(test)]
-pub fn analyze_template_snippet_with_bound_targets(
+fn analyze_template_snippet_with_bound_targets(
     snippet: &str,
     kind: TemplateSnippetKind,
     imported_bindings: &FxHashSet<String>,
@@ -373,7 +373,7 @@ fn build_template_usage(
 /// Collect both unresolved identifier references AND static member-access chains
 /// (`obj.member`) where `obj` is unresolved.
 ///
-/// Unlike [`analyze_template_snippet`], this does NOT filter against imported bindings.
+/// Unlike `analyze_template_snippet`, this does NOT filter against imported bindings.
 /// Returns `(identifiers, member_accesses)`. Used by the Angular template scanner
 /// for external templates where unresolved identifiers are potential component
 /// class member refs and member-access chains (`dataService.getTotal()`) must
