@@ -15,10 +15,11 @@
     reason = "integration tests use expect to keep fixture setup concise"
 )]
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
 use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn_cached};
+use fallow_engine::git_fixture::{
+    FixtureIdentity, fixture_git_capture, fixture_git_command_with_identity,
+};
+use std::path::{Path, PathBuf};
 
 /// Window used by every test here: 90 days, so the cutoff is exactly
 /// `head_committer_epoch - 90 * 86400` with no calendar clamping to reason
@@ -37,9 +38,8 @@ fn window() -> SinceDuration {
 }
 
 fn git(root: &Path, args: &[&str], epoch: Option<u64>) {
-    let mut command = Command::new("git");
-    fallow_engine::changed_files::clear_ambient_git_env(&mut command);
-    command.current_dir(root).args(args);
+    let mut command = fixture_git_command_with_identity(root, FixtureIdentity::RepositoryConfig);
+    command.args(args);
     if let Some(epoch) = epoch {
         let stamp = format!("{epoch} +0000");
         command
@@ -325,17 +325,7 @@ fn commit_files(root: &Path, files: &[(&str, &str)], epoch: u64) {
 }
 
 fn head_sha(root: &Path) -> String {
-    let mut command = Command::new("git");
-    fallow_engine::changed_files::clear_ambient_git_env(&mut command);
-    let output = command
-        .args(["rev-parse", "HEAD"])
-        .current_dir(root)
-        .output()
-        .expect("rev-parse");
-    String::from_utf8(output.stdout)
-        .expect("utf8 sha")
-        .trim()
-        .to_owned()
+    fixture_git_capture(root, &["rev-parse", "HEAD"])
 }
 
 /// Commit file sets as `(sha, [relative paths])`, sorted, for comparison.

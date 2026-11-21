@@ -1561,7 +1561,7 @@ mod tests {
     use super::*;
 
     fn git(root: &Path, args: &[&str]) -> String {
-        let output = git_command(root)
+        let output = crate::git_fixture::fixture_git_command(root)
             .args(args)
             .output()
             .expect("git command starts");
@@ -1576,9 +1576,6 @@ mod tests {
     fn init_repo(root: &Path) {
         fs::create_dir_all(root).expect("create repo");
         git(root, &["init", "-b", "main"]);
-        git(root, &["config", "user.name", "Test User"]);
-        git(root, &["config", "user.email", "test@example.com"]);
-        git(root, &["config", "commit.gpgsign", "false"]);
     }
 
     fn commit_all(root: &Path, message: &str) {
@@ -2070,9 +2067,6 @@ mod tests {
         let repo = temp.path().join("repo");
         fs::create_dir_all(&repo).expect("create repo");
         git(&repo, &["init", "-b", "master"]);
-        git(&repo, &["config", "user.name", "Test User"]);
-        git(&repo, &["config", "user.email", "test@example.com"]);
-        git(&repo, &["config", "commit.gpgsign", "false"]);
         fs::write(repo.join("README.md"), "seed\n").expect("write seed");
         commit_all(&repo, "initial");
 

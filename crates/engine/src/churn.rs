@@ -1358,6 +1358,7 @@ fn split_number_unit(input: &str) -> Result<(&str, &str), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git_fixture::{FixtureIdentity, fixture_git_command_with_identity as git_in};
 
     /// Analyze git churn for the files in `root`. `None` means no git or no repository.
     #[cfg(unix)]
@@ -1729,9 +1730,8 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str]) {
-        let status = super::git_command(root)
+        let status = git_in(root, FixtureIdentity::RepositoryConfig)
             .args(args)
-            .current_dir(root)
             .status()
             .expect("run git");
         assert!(status.success(), "git {args:?} failed");

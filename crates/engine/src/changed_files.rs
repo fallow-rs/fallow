@@ -1084,7 +1084,13 @@ mod tests {
     }
 
     fn run_git(root: &Path, args: &[&str]) {
-        let output = spawn_output(&mut git_command(root, args)).expect("git command");
+        let output = crate::git_fixture::fixture_git_command_with_identity(
+            root,
+            crate::git_fixture::FixtureIdentity::RepositoryConfig,
+        )
+        .args(args)
+        .output()
+        .expect("git command");
         assert!(
             output.status.success(),
             "git {args:?} failed: {}",

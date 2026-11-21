@@ -1280,6 +1280,7 @@ dependencies = [
  "dunce",
  "fallow-config",
  "fallow-core",
+ "fallow-engine",
  "fallow-extract",
  "fallow-graph",
  "fallow-mutation",
