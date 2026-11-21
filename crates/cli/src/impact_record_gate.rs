@@ -46,9 +46,7 @@ fn record_gate_is_temp_root(root: &Path) -> bool {
 #[cfg(not(test))]
 fn system_temp_dirs() -> Vec<PathBuf> {
     let dirs = fallow_engine::write_guard::system_temp_dirs();
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
+    let home = fallow_process::HostPaths::from_env().home;
     usable_temp_bases(dirs, home.as_deref())
 }
 

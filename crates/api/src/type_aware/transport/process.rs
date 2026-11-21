@@ -148,7 +148,9 @@ fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
         .iter()
         .filter_map(|key| std::env::var_os(key).map(|value| (*key, value)))
         .collect::<Vec<_>>();
-    let path = std::env::var_os("PATH").and_then(|value| sanitize_search_path(root, &value));
+    let path = fallow_process::HostPaths::from_env()
+        .search_path
+        .and_then(|value| sanitize_search_path(root, &value));
     command.env_clear();
     command.envs(values);
     if let Ok(backend) = selected_backend() {

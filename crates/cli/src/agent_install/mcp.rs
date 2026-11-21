@@ -142,18 +142,19 @@ pub fn resolve_command_with(
 
 /// Resolve a bare command name against `PATH`, the way the agent gate does.
 pub(super) fn find_on_path(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
     let candidates: &[&str] = if cfg!(windows) {
         &["", ".exe", ".cmd"]
     } else {
         &[""]
     };
-    std::env::split_paths(&path).find_map(|dir| {
-        candidates
-            .iter()
-            .map(|ext| dir.join(format!("{name}{ext}")))
-            .find(|candidate| candidate.is_file())
-    })
+    fallow_process::HostPaths::from_env()
+        .search_dirs()
+        .find_map(|dir| {
+            candidates
+                .iter()
+                .map(|ext| dir.join(format!("{name}{ext}")))
+                .find(|candidate| candidate.is_file())
+        })
 }
 
 fn self_supports_mcp_server() -> Option<PathBuf> {
@@ -226,10 +227,9 @@ fn shared_safe(command: &McpCommand) -> Result<McpCommand, StepReport> {
     }
     let exe = Path::new(&command.command);
     let dir_on_path = exe.parent().is_some_and(|dir| {
-        std::env::var_os("PATH").is_some_and(|path| {
-            std::env::split_paths(&path)
-                .any(|entry| dunce::canonicalize(&entry).ok().as_deref() == Some(dir))
-        })
+        fallow_process::HostPaths::from_env()
+            .search_dirs()
+            .any(|entry| dunce::canonicalize(&entry).ok().as_deref() == Some(dir))
     });
     if dir_on_path && let Some(name) = exe.file_name() {
         return Ok(McpCommand {

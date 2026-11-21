@@ -2203,7 +2203,7 @@ test("the check job runs the end-to-end mutation tests instead of a skip", () =>
   // Without the env var, a missing install skips each test and CI stays green.
   assert.match(
     checkJob,
-    /FALLOW_MUTATION_E2E_REQUIRED: '1'\n\s+run: cargo nextest run --profile ci --workspace/u,
+    /FALLOW_MUTATION_E2E_REQUIRED: '1'\n\s+run: bash scripts\/hostile-host\.sh -- cargo nextest run --profile ci --workspace/u,
   );
   for (const file of [
     "tools/mutation-runner/src/companion.mjs",

@@ -51,6 +51,7 @@ const FAST_COMMANDS = [
   ["sh", ["scripts/hook-file-length.sh", "origin/main"]],
   ["node", ["--test", "scripts/workflow-policy.test.mjs"]],
   ["npm", ["run", "check:miri-fs-tests"]],
+  ["npm", ["run", "check:host-reads"]],
 ];
 
 const FULL_ONLY_COMMANDS = [

@@ -327,6 +327,43 @@ directory until their age limit. To remove them once, run
 the command removes the entries whose recorded owner directory is gone. Add
 `--dry-run` to see the decisions first.
 
+### Hostile home folder
+
+A unit test must not read the home folder, the per-user config folders or the
+`PATH` of the machine that runs it. A clean CI runner has none of the files
+that a developer machine has, so such a test passes in CI and fails locally.
+Production code reads these values through `fallow_process::HostPaths`, and
+a test passes its own value. The [host path read check](#hook-parity) keeps
+the reads in one place.
+
+The CI `Check` jobs run the suite through `scripts/hostile-host.sh`. The
+script makes a home folder that holds:
+
+- a `~/.fallow/bin/fallow-cov` binary that fails, with a `.sig` file;
+- a `~/.gitconfig` with a `core.hooksPath` whose `pre-commit` hook fails;
+- a folder at the end of `PATH` with `fallow-cov` and `git` shims that fail.
+
+It sets `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` into
+that folder and
+keeps `CARGO_HOME` and `RUSTUP_HOME`. The shim folder is the last `PATH`
+entry, so an installed `git` still runs. A test that reads the host instead
+of its own `HostPaths` value then finds these files and fails in CI. Run the
+same suite locally:
+
+```bash
+bash scripts/hostile-host.sh -- cargo nextest run --workspace --lib --bins --tests --examples
+```
+
+Without `--dir`, the script makes the folder in `$HOME/.cache` and removes it
+when the command ends. The folder must be outside the system temp folder,
+because the write guard allows writes there and the write-scope tests need a
+home folder outside every allowed folder. A cargo
+or nextest wrapper that reads its own config from `HOME`, for example a mise
+shim, fails under the script. Put the real toolchain binaries first on `PATH`
+for that run, for example `PATH="$HOME/.cargo/bin:$PATH"`.
+`scripts/test-hostile-host.sh` checks the script itself. It runs in the
+`CI runner script self-tests` step of the CI `Typos` job.
+
 ## CI placement
 
 The repository uses the GitHub free plan: 20 concurrent jobs, and 5 of them on
@@ -828,6 +865,7 @@ sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
 cargo fallow boundaries --fail-on-issues --quiet
 node scripts/check-miri-fs-tests.mjs
+node scripts/check-host-reads.mjs
 cargo fallow size --staged --fail-on-growth --quiet
 sh scripts/hook-file-length.sh HEAD
 sh scripts/hook-changelog-fragments.sh
@@ -867,6 +905,19 @@ A test under `not(miri)` or with a plain `#[ignore]` passes. The check reads
 only the body of the test. A file system call or a rayon pool start in a
 function that a test calls needs a Miri run, as the `Miri` CI item describes.
 The check runs in `verify:fast` and in the pre-commit hook.
+
+The host path read check (`npm run check:host-reads`) reads every Rust file
+under `crates/`. It fails on `std::env::var` or `std::env::var_os` with
+`HOME`, `PATH`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` or an `XDG_`
+variable, and on a `home_dir(` call. `fallow_process::HostPaths` in
+`crates/process/src/host_paths.rs` is the one reader of these values. Read
+them at a boundary with `HostPaths::from_env()` and pass the value to the
+code that needs it. A unit test then builds its own `HostPaths` and does not
+read the home folder or the tools of the machine. The check skips the owner,
+test files, `tests/` folders, and `#[cfg(test)]` modules, functions and impl
+blocks. It cannot see a read with a variable name, such as
+`std::env::var_os(key)`. The check runs in `verify:fast`, in the pre-commit
+hook, and in the CI `JS Lint and Format` job.
 
 Pre-push parity:
 

@@ -1811,18 +1811,11 @@ pub fn env_truthy(name: &str) -> bool {
 /// the per-project `impact/<key>.json` store), so both surfaces resolve the
 /// same base and never drift.
 pub fn config_dir() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join("Library").join("Application Support"))
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-    }?;
-    Some(base.join("fallow"))
+    Some(
+        fallow_process::HostPaths::from_env()
+            .platform_config_base()?
+            .join("fallow"),
+    )
 }
 
 fn config_path() -> Option<PathBuf> {

@@ -1371,6 +1371,7 @@ version = "3.46.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
+ "fallow-process",
  "serde",
  "serde_json",
 ]

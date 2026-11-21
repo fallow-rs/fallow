@@ -8,7 +8,7 @@ use serde::Serialize;
 use super::{
     Harness, NextAction, SCHEMA_VERSION, Step, display_path, hosts, mcp, resolve_root, skill,
 };
-use crate::setup_hooks::{build_hooks_status, find_managed_block_bounds, home_dir};
+use crate::setup_hooks::{build_hooks_status, find_managed_block_bounds};
 use crate::state_file::{Existing, read_optional_text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -282,7 +282,7 @@ pub fn run_agent_status(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let root = resolve_root(root, root_explicit);
-    let home = home_dir();
+    let home = fallow_process::HostPaths::from_env().home;
     let surfaces = surfaces(&root, home.as_deref());
     let next_actions = status_next_actions(&surfaces);
     let report = StatusReport {

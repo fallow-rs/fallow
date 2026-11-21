@@ -22,7 +22,6 @@ use serde::Serialize;
 
 use crate::exit_codes::exit_invalid_input;
 pub use crate::setup_hooks::Mode;
-use crate::setup_hooks::home_dir;
 
 pub use status::run_agent_status;
 
@@ -359,7 +358,7 @@ impl Ctx {
     pub fn scope_base(&self) -> Result<&Path, String> {
         if self.user {
             self.home.as_deref().ok_or_else(|| {
-                "Cannot resolve the user home directory; unset --user or set $HOME.".to_string()
+                "Cannot resolve the user home directory; unset --user or set $HOME (or %USERPROFILE% on Windows).".to_string()
             })
         } else {
             Ok(&self.root)
@@ -449,7 +448,7 @@ pub fn run_agent_install(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let root = resolve_root(opts.root, opts.root_explicit);
-    let home = home_dir();
+    let home = fallow_process::HostPaths::from_env().home;
     let (harnesses, detected, evidence) = select_harnesses(opts.harnesses, &root, home.as_deref());
     let ctx = Ctx {
         root: root.clone(),
@@ -508,7 +507,7 @@ pub fn run_agent_uninstall(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let root = resolve_root(opts.root, opts.root_explicit);
-    let home = home_dir();
+    let home = fallow_process::HostPaths::from_env().home;
     let (harnesses, detected, evidence) = select_harnesses(opts.harnesses, &root, home.as_deref());
     let ctx = Ctx {
         root: root.clone(),

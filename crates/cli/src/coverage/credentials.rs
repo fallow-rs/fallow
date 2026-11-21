@@ -229,10 +229,7 @@ pub fn remove_api_key(base_url: &str) -> Result<Removed, String> {
 /// Path of the credentials file: `$XDG_CONFIG_HOME/fallow/credentials`, else
 /// `~/.config/fallow/credentials`.
 pub fn credentials_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| fallow_license::user_home_dir().map(|home| home.join(".config")))?;
+    let base = fallow_process::HostPaths::from_env().xdg_config_base()?;
     Some(base.join("fallow").join("credentials"))
 }
 
@@ -417,9 +414,9 @@ fn keychain() -> Option<Keychain> {
 }
 
 fn secret_tool_on_path() -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| dir.join("secret-tool").is_file())
-    })
+    fallow_process::HostPaths::from_env()
+        .search_dirs()
+        .any(|dir| dir.join("secret-tool").is_file())
 }
 
 fn keychain_disabled_by_env() -> bool {

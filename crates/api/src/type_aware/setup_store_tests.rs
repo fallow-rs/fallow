@@ -49,16 +49,16 @@ fn bundle_platform_follows_the_node_platform_and_architecture() {
 #[test]
 fn store_root_uses_an_absolute_user_directory_only() {
     let env = |values: &'static [(&'static str, &'static str)]| {
-        move |key: &str| {
+        fallow_process::HostPaths::from_lookup(move |key: &str| {
             values
                 .iter()
                 .find(|(name, _)| *name == key)
-                .map(|(_, value)| PathBuf::from(value))
-        }
+                .map(|(_, value)| std::ffi::OsString::from(value))
+        })
     };
-    assert_eq!(store_root_from(&env(&[])), None);
-    assert_eq!(store_root_from(&env(&[("HOME", "relative/home")])), None);
-    let root = store_root_from(&env(&[
+    assert_eq!(store_root_in(&env(&[])), None);
+    assert_eq!(store_root_in(&env(&[("HOME", "relative/home")])), None);
+    let root = store_root_in(&env(&[
         ("HOME", "/home/user"),
         ("LOCALAPPDATA", "C:\\Users\\user\\AppData\\Local"),
     ]))
@@ -74,7 +74,7 @@ fn store_root_uses_an_absolute_user_directory_only() {
             root,
             PathBuf::from("/home/user/.local/share/fallow/fallow-type-aware")
         );
-        let xdg = store_root_from(&env(&[("HOME", "/home/user"), ("XDG_DATA_HOME", "/data")]))
+        let xdg = store_root_in(&env(&[("HOME", "/home/user"), ("XDG_DATA_HOME", "/data")]))
             .expect("XDG data directory");
         assert_eq!(xdg, PathBuf::from("/data/fallow/fallow-type-aware"));
     }

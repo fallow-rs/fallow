@@ -117,6 +117,7 @@ jobs:
               - 'scripts/select-miri-runner.mjs'
               - 'scripts/select-miri-runner.test.mjs'
               - 'scripts/workflow-policy.test.mjs'
+              - 'scripts/hostile-host.sh'
               - 'crates/**'
               - 'tests/**'
               - 'docs/output-schema.json'
@@ -206,6 +207,7 @@ jobs:
               - 'crates/process/src/scoped_child.rs'
               - 'crates/process/src/process_tree.rs'
               - 'crates/process/src/registry.rs'
+              - 'crates/process/src/host_paths.rs'
               - 'crates/cli/tests/drift/**'
               - 'crates/cli/tests/integration/audit_tests.rs'
               - 'crates/cli/tests/integration/audit_orphaned_code_tests.rs'
@@ -618,9 +620,13 @@ jobs:
         # suite, about 48 CPU-minutes.
         # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
         # the end-to-end mutation tests instead of a skip.
+        # scripts/hostile-host.sh runs the tests with a home folder that holds
+        # a fake runtime coverage add-on and a global Git hook that fails. A
+        # test that reads the host paths instead of its own then fails here,
+        # and not only on a developer machine.
         env:
           FALLOW_MUTATION_E2E_REQUIRED: '1'
-        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/3
+        run: bash scripts/hostile-host.sh -- cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/3
 
       - name: Upload test report
         if: always()
@@ -1018,6 +1024,7 @@ jobs:
         run: |
           bash scripts/test-ci-add-swap.sh
           bash scripts/test-ci-with-resource-log.sh
+          bash scripts/test-hostile-host.sh
 
   js-lint:
     name: JS Lint and Format
@@ -1062,6 +1069,8 @@ jobs:
         run: npm run fmt:js:check
       - name: Narrator comment guard
         run: node scripts/check-comment-quality.mjs --all
+      - name: Host path reads
+        run: node scripts/check-host-reads.mjs
       # check-temp-leaks.mjs fails a test step that leaves a `fallow-*`
       # folder in the system temp directory. A reused runner and a developer
       # machine keep such folders.

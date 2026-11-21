@@ -9,7 +9,7 @@ homepage.workspace = true
 documentation = "https://fallow.tools/docs/cli/"
 keywords.workspace = true
 categories.workspace = true
-description = "Shared child-process lifecycle and process-tree cleanup for fallow"
+description = "Shared child-process lifecycle, process-tree cleanup and host paths for fallow"
 readme = "../../README.md"
 
 [lib]

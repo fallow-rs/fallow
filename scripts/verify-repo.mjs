@@ -132,6 +132,13 @@ const FAST_COMMANDS = [
     command: "npm",
     args: ["run", "check:miri-fs-tests"],
   },
+  {
+    // A direct read of HOME, PATH or the XDG folders in production code
+    // makes a unit test depend on the machine. HostPaths is the one reader.
+    label: "Host path reads",
+    command: "npm",
+    args: ["run", "check:host-reads"],
+  },
 ];
 
 const FULL_ONLY_COMMANDS = [
