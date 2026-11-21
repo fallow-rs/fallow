@@ -187,13 +187,15 @@ pub struct RequestOutcome {
     /// every unapplied entry: a request that stood down narrowed nothing, so a
     /// number there would describe a scope nobody applied.
     ///
-    /// The unit belongs to the name. `diff-filter` counts added lines, which is
-    /// what its filter keeps a finding for. `changed-since` counts changed
-    /// files that the run analyzed: a changed file that discovery or an ignore
-    /// rule dropped does not count, so a change to a README only gives `0`. A
-    /// combined run counts a file that any of its analyses kept, because a
-    /// per-analysis `production` setting can give its analyses different
-    /// files. `group-filter` counts the groups that the run kept.
+    /// The unit belongs to the name. `diff-filter` counts added lines, plus one
+    /// for each touched file that adds no line (a pure rename), because its
+    /// filter keeps a finding on an added line or on a whole touched file.
+    /// `changed-since` counts changed files that the run analyzed: a changed
+    /// file that discovery or an ignore rule dropped does not count, so a
+    /// change to a README only gives `0`. A combined run counts a file that
+    /// any of its analyses kept, because a per-analysis `production` setting
+    /// can give its analyses different files. `group-filter` counts the groups
+    /// that the run kept.
     /// Read the unit off the name the entry is keyed under, never across names,
     /// and read an absent member as "not measured" rather than as zero.
     ///
@@ -202,9 +204,10 @@ pub struct RequestOutcome {
     /// cap for a larger diff, so read any non-zero value as a lower bound.
     ///
     /// `0` is the case this member exists for: a request that applied over an
-    /// empty scope. Every finding then filters out and the report reads clean,
-    /// so a consumer that sees no findings beside `scope_size: 0` learns that
-    /// nothing was analyzable rather than that the code is clean.
+    /// empty scope. Every source-anchored finding then filters out and the
+    /// report reads clean, so a consumer that sees no findings beside
+    /// `scope_size: 0` learns that nothing was analyzable rather than that
+    /// the code is clean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_size: Option<u64>,
     /// Why the request was not applied, as a kebab-case token. Present exactly
@@ -306,10 +309,10 @@ impl RequestOutcome {
 /// whole object narrows the report tells its reader an unwritten SARIF file
 /// widened the analysis, which is what `affects` exists to prevent.
 ///
-/// `scope_size` is emitted for `diff-filter`, in added lines, for
-/// `changed-since`, in changed files that the run analyzed, and for
-/// `group-filter`, in groups that the run kept. `package-baselines`
-/// and `sarif-file` measure no scope; the applied package refs travel in
+/// `scope_size` is emitted for `diff-filter`, in added lines plus touched
+/// files that add no line, for `changed-since`, in changed files that the run
+/// analyzed, and for `group-filter`, in groups that the run kept.
+/// `package-baselines` and `sarif-file` measure no scope; the applied package refs travel in
 /// `package_baselines`. A consumer reads the unit off the name, so a name that
 /// starts to measure its own scope in a later release needs no change here.
 ///

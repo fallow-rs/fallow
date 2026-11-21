@@ -289,14 +289,16 @@ pub(crate) fn init_shared_diff(
         let label = src.label();
         match place_diff(src, root, candidate_bases, quiet) {
             Ok(loaded) => {
-                // The added-line count travels as the scope the filter left,
-                // because `0` is the case a report cannot state for itself: the
-                // filter applied, every source-anchored finding dropped, and the
-                // clean document that follows covered nothing (issue #2734).
+                // The scope travels with the outcome, because `0` is the case a
+                // report cannot state for itself: the filter applied, every
+                // source-anchored finding dropped, and the clean document that
+                // follows covered nothing (issue #2734). A touched file without
+                // an added line counts, so a pure rename that keeps a
+                // file-anchored finding is not an empty scope (issue #4974).
                 request = Some(fallow_output::RequestOutcome::applied_with_scope_size(
                     fallow_output::RequestName::DiffFilter,
                     label,
-                    loaded.index.added_line_count() as u64,
+                    loaded.index.filter_scope_size() as u64,
                 ));
                 Some(loaded)
             }

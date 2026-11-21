@@ -507,12 +507,13 @@ fn load_ambient_diff_file(path: &Path, root: &Path) -> (Option<DiffIndex>, Optio
     }
 }
 
-/// An applied diff filter, sized in added lines like the CLI's.
+/// An applied diff filter, sized like the CLI's (see
+/// [`DiffIndex::filter_scope_size`]).
 fn diff_applied(label: String, index: &DiffIndex) -> RequestOutcome {
     RequestOutcome::applied_with_scope_size(
         RequestName::DiffFilter,
         label,
-        index.added_line_count() as u64,
+        index.filter_scope_size() as u64,
     )
 }
 
