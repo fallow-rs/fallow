@@ -19,8 +19,13 @@ use super::{sink_literal_value, unwrap_static_expr};
 /// The most call results that one receiver chain can hold. The visitor
 /// reads each call of a fluent chain (`a.b().c().d()`), and each read walks
 /// back through the earlier calls, so a bound keeps the work linear in the
-/// chain length. A longer chain stays an unresolved callee.
+/// chain length.
 const MAX_CALL_RESULTS: usize = 8;
+
+/// The root segment that stands for the earlier part of a chain past
+/// [`MAX_CALL_RESULTS`]. It is not an identifier, so no exact catalogue
+/// pattern names it, and a `*.` pattern still matches the tail of the chain.
+const OPAQUE_CHAIN_ROOT: &str = "<chain>()";
 
 /// The syntactic form of a call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,8 +181,9 @@ impl ModuleInfoExtractor {
     /// Accepts identifiers, `this`, static members, computed members whose
     /// key folds to a constant string (`win["ev" + "al"]`), optional chains,
     /// TypeScript wrappers (`el!`, `el as T`), call results, and the indirect
-    /// call sequence `(0, eval)` whose leading expressions are literals. A
-    /// chain with more than [`MAX_CALL_RESULTS`] call results is `None`.
+    /// call sequence `(0, eval)` whose leading expressions are literals. Past
+    /// [`MAX_CALL_RESULTS`] call results, the earlier part of the chain
+    /// becomes the opaque root [`OPAQUE_CHAIN_ROOT`].
     pub(in crate::visitor) fn receiver_path(&self, expr: &Expression<'_>) -> Option<ReceiverPath> {
         let mut segments: Vec<String> = Vec::new();
         let mut calls = 0_usize;
@@ -191,7 +197,8 @@ impl ModuleInfoExtractor {
                     calls += 1;
                     call_results += 1;
                     if call_results > MAX_CALL_RESULTS {
-                        return None;
+                        segments.push(OPAQUE_CHAIN_ROOT.to_string());
+                        break ReceiverRoot::Identifier;
                     }
                     expr = callee;
                     continue;

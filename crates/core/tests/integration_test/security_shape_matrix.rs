@@ -8,10 +8,19 @@
 //! candidate of the same category for each form that the row accepts:
 //!
 //! - the plain form and the `new` form, as the row accepts them;
-//! - a `this.field` receiver, a local alias of that receiver, and a
-//!   call-result receiver, for a pattern with a leading `*.`;
+//! - the last member written as an optional chain, a non-null assertion or a
+//!   computed key, and the callee in an indirect call sequence `(0, f)`;
+//! - a local alias and a global-object prefix of a code-executing global;
+//! - a `require()` namespace, a destructured `require()`, and a destructured
+//!   module binding, for a `node:` pattern;
+//! - a `this.field` receiver, a local alias of that receiver, a call-result
+//!   receiver, a chain with more call results than the extractor walks, and a
+//!   method that the class inherits, for a pattern with a leading `*.`;
 //! - an extra leading literal argument, for a row that admits more than one
 //!   argument position.
+//!
+//! A call of a method that the class declares itself (`this.m(x)`) must give
+//! no candidate.
 //!
 //! A pattern with no baseline must be in [`PATTERNS_WITHOUT_BASELINE`], with a
 //! reason. A candidate counts for a row only when its category and its
@@ -58,12 +67,41 @@ enum Form {
     New,
 }
 
+/// The receiver form of a generated call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Receiver {
+    /// The callee as the pattern writes it.
     Plain,
+    /// `a.b?.m(x)`.
+    Optional,
+    /// `a.b!.m(x)`.
+    NonNull,
+    /// `a.b["m"](x)`.
+    Computed,
+    /// `(0, a.b.m)(x)`.
+    Sequence,
+    /// `this.field.m(x)`.
     ThisField,
-    Alias,
+    /// `const alias = this.field; alias.m(x)`.
+    FieldAlias,
+    /// `make().m(x)`.
     CallResult,
+    /// A chain with more call results than the extractor walks.
+    LongChain,
+    /// `this.m(x)` in a class that inherits `m`.
+    InheritedMethod,
+    /// `this.m(x)` in a class that declares `m` itself. No candidate.
+    OwnMethod,
+    /// `const aliasFn = eval; aliasFn(x)`.
+    CodeExecAlias,
+    /// `window.eval(x)`.
+    GlobalPrefix,
+    /// `const nodeModule = require("node:m"); nodeModule.f(x)`.
+    RequireNamespace,
+    /// `const { f: aliasFn } = require("node:m"); aliasFn(x)`.
+    RequireDestructure,
+    /// `const nodeModule = require("node:m"); const { f: aliasFn } = nodeModule;`.
+    BindingDestructure,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -72,6 +110,22 @@ struct Case {
     receiver: Receiver,
     leading_literal: bool,
 }
+
+impl Case {
+    /// Whether the case must give the candidate of the row. Only a call of an
+    /// own method gives none.
+    fn expects_candidate(&self) -> bool {
+        self.receiver != Receiver::OwnMethod
+    }
+}
+
+/// Code-executing globals that keep their meaning behind an alias or a
+/// global-object prefix.
+const CODE_EXEC_GLOBALS: &[&str] = &["eval", "Function", "setTimeout", "setInterval"];
+
+/// Call results in a [`Receiver::LongChain`] case, more than the extractor
+/// walks one by one.
+const LONG_CHAIN_CALLS: usize = 10;
 
 /// One generated argument: statements that run before the call, and the
 /// argument text.
@@ -244,65 +298,172 @@ fn argument_list(matcher: &Matcher, argument: &Argument, leading_literal: bool) 
     args.join(", ")
 }
 
-fn case_source(matcher: &Matcher, pattern: &str, argument: &Argument, case: &Case) -> String {
+/// The callee text of a node pattern behind a `require()` binding, with the
+/// statements that bind it.
+fn node_require_callee(pattern: &str, receiver: Receiver) -> Option<(String, String)> {
+    let rest = pattern.strip_prefix("node:")?;
+    let (module, members) = rest.split_once('.')?;
+    let (first, tail) = members.split_once('.').unwrap_or((members, ""));
+    let tail = if tail.is_empty() {
+        String::new()
+    } else {
+        format!(".{tail}")
+    };
+    let require = format!("const nodeModule = require(\"node:{module}\");\n");
+    Some(match receiver {
+        Receiver::RequireNamespace => (require, format!("nodeModule.{members}")),
+        Receiver::RequireDestructure => (
+            format!("const {{ {first}: aliasFn }} = require(\"node:{module}\");\n"),
+            format!("aliasFn{tail}"),
+        ),
+        _ => (
+            format!("{require}const {{ {first}: aliasFn }} = nodeModule;\n"),
+            format!("aliasFn{tail}"),
+        ),
+    })
+}
+
+/// `callee` with its last member written in another syntax.
+fn rewrite_last_member(callee: &str, receiver: Receiver) -> String {
+    let Some((object, member)) = callee.rsplit_once('.') else {
+        return callee.to_string();
+    };
+    match receiver {
+        Receiver::Optional => format!("{object}?.{member}"),
+        Receiver::NonNull => format!("{object}!.{member}"),
+        _ => format!("{object}[\"{member}\"]"),
+    }
+}
+
+/// The statements before the call and the callee text of a function-body case.
+fn function_callee(matcher: &Matcher, pattern: &str, receiver: Receiver) -> (String, String) {
     let (import, plain) = plain_callee(matcher, pattern);
     let rest = pattern.strip_prefix("*.").unwrap_or(pattern);
-    let callee = match case.receiver {
-        Receiver::Plain => plain,
-        Receiver::ThisField => format!("this.field.{rest}"),
-        Receiver::Alias => format!("alias.{rest}"),
-        // `new make().m(x)` parses as `(new make()).m(x)`, so the `new` form
-        // wraps the callee in parentheses.
-        Receiver::CallResult if case.form == Form::New => format!("(make().{rest})"),
-        Receiver::CallResult => format!("make().{rest}"),
-    };
-    let new = if case.form == Form::New { "new " } else { "" };
+    match receiver {
+        Receiver::Optional | Receiver::NonNull | Receiver::Computed => {
+            (import, rewrite_last_member(&plain, receiver))
+        }
+        Receiver::Sequence => (import, format!("(0, {plain})")),
+        Receiver::CallResult => (import, format!("make().{rest}")),
+        Receiver::LongChain => {
+            let mut chain = String::new();
+            for step in 0..LONG_CHAIN_CALLS {
+                let _ = write!(chain, ".step{step}()");
+            }
+            (import, format!("make(){chain}.{rest}"))
+        }
+        Receiver::CodeExecAlias => (format!("const aliasFn = {pattern};\n"), "aliasFn".into()),
+        Receiver::GlobalPrefix => (import, format!("window.{pattern}")),
+        Receiver::RequireNamespace
+        | Receiver::RequireDestructure
+        | Receiver::BindingDestructure => {
+            node_require_callee(pattern, receiver).unwrap_or((import, plain))
+        }
+        _ => (import, plain),
+    }
+}
+
+fn case_source(matcher: &Matcher, pattern: &str, argument: &Argument, case: &Case) -> String {
+    let rest = pattern.strip_prefix("*.").unwrap_or(pattern);
     let args = argument_list(matcher, argument, case.leading_literal);
     let prelude = &argument.prelude;
+    let new = if case.form == Form::New { "new " } else { "" };
+    let in_class = matches!(
+        case.receiver,
+        Receiver::ThisField
+            | Receiver::FieldAlias
+            | Receiver::InheritedMethod
+            | Receiver::OwnMethod
+    );
+    if in_class {
+        let (import, _) = plain_callee(matcher, pattern);
+        let (heritage, member, callee) = match case.receiver {
+            Receiver::ThisField => ("", String::new(), format!("this.field.{rest}")),
+            Receiver::FieldAlias => ("", String::new(), format!("alias.{rest}")),
+            Receiver::InheritedMethod => (" extends Base", String::new(), format!("this.{rest}")),
+            _ => (
+                "",
+                format!("  {rest}(...values: any[]) {{ return values; }}\n"),
+                format!("this.{rest}"),
+            ),
+        };
+        let alias = if case.receiver == Receiver::FieldAlias {
+            "    const alias = this.field;\n"
+        } else {
+            ""
+        };
+        return format!(
+            "{import}declare const Base: any;\nexport class Holder{heritage} {{\n  field: any;\n{member}\
+             \x20 run(req: any) {{\n{prelude}{alias}    return {new}{callee}({args});\n  }}\n}}\n"
+        );
+    }
+    let (import, callee) = function_callee(matcher, pattern, case.receiver);
+    // `new make().m(x)` parses as `(new make()).m(x)`, so a `new` form of a
+    // call-result callee gets parentheses.
+    let callee = if case.form == Form::New && callee.contains("()") {
+        format!("({callee})")
+    } else {
+        callee
+    };
     let obj_param = if import.contains("import obj ") {
         ""
     } else {
         "obj: any, "
     };
-    match case.receiver {
-        Receiver::Plain | Receiver::CallResult => format!(
-            "{import}export function run(req: any, {obj_param}make: any) {{\n\
-             {prelude}  return {new}{callee}({args});\n}}\n"
-        ),
-        Receiver::ThisField | Receiver::Alias => {
-            let alias = if case.receiver == Receiver::Alias {
-                "  const alias = this.field;\n"
-            } else {
-                ""
-            };
-            format!(
-                "{import}export class Holder {{\n  field: any;\n  run(req: any) {{\n\
-                 {prelude}{alias}    return {new}{callee}({args});\n  }}\n}}\n"
-            )
+    format!(
+        "{import}export function run(req: any, {obj_param}make: any) {{\n\
+         {prelude}  return {new}{callee}({args});\n}}\n"
+    )
+}
+
+/// The receiver forms that apply to a pattern of a row.
+fn receivers_for(matcher: &Matcher, pattern: &str, form: Form) -> Vec<Receiver> {
+    let mut receivers = vec![Receiver::Plain, Receiver::Sequence];
+    let is_node = pattern.starts_with("node:");
+    let (_, plain) = plain_callee(matcher, pattern);
+    if plain.contains('.') {
+        receivers.extend([Receiver::NonNull, Receiver::Computed]);
+        // An optional chain cannot be the callee of `new`.
+        if form == Form::Call {
+            receivers.push(Receiver::Optional);
         }
     }
+    if CODE_EXEC_GLOBALS.contains(&pattern) {
+        receivers.extend([Receiver::CodeExecAlias, Receiver::GlobalPrefix]);
+    }
+    if is_node && pattern.matches('.').count() >= 1 && !matcher.requires_binding_trace() {
+        receivers.extend([
+            Receiver::RequireNamespace,
+            Receiver::RequireDestructure,
+            Receiver::BindingDestructure,
+        ]);
+    }
+    // A binding-trace row needs the import binding as the receiver root, so
+    // another receiver is not an equivalent form of that row.
+    if let Some(rest) = pattern.strip_prefix("*.")
+        && !matcher.requires_binding_trace()
+    {
+        receivers.extend([
+            Receiver::ThisField,
+            Receiver::FieldAlias,
+            Receiver::CallResult,
+            Receiver::LongChain,
+        ]);
+        if !rest.contains('.') && form == Form::Call {
+            receivers.extend([Receiver::InheritedMethod, Receiver::OwnMethod]);
+        }
+    }
+    receivers
 }
 
 /// The cases of a pattern beyond the plain baseline.
 fn equivalent_cases(matcher: &Matcher, pattern: &str) -> Vec<Case> {
-    // A binding-trace row needs the import binding as the receiver root, so
-    // another receiver is not an equivalent form of that row.
-    let receivers: &[Receiver] = if pattern.starts_with("*.") && !matcher.requires_binding_trace() {
-        &[
-            Receiver::Plain,
-            Receiver::ThisField,
-            Receiver::Alias,
-            Receiver::CallResult,
-        ]
-    } else {
-        &[Receiver::Plain]
-    };
     let mut cases = Vec::new();
     for form in accepted_forms(matcher) {
-        for receiver in receivers {
+        for receiver in receivers_for(matcher, pattern, form) {
             cases.push(Case {
                 form,
-                receiver: *receiver,
+                receiver,
                 leading_literal: false,
             });
         }
@@ -516,19 +677,33 @@ fn every_call_row_reports_each_equivalent_form() {
         for (case_index, case) in equivalent_cases(matcher, pattern).iter().enumerate() {
             let relative = format!("src/f{row}_p{pattern_index}_c{case_index}.ts");
             let source = case_source(matcher, pattern, argument, case);
-            expectations.push((relative.clone(), *matcher, source.clone()));
+            expectations.push((
+                relative.clone(),
+                *matcher,
+                source.clone(),
+                case.expects_candidate(),
+            ));
             form_files.push((relative, source));
         }
     }
     let forms = analyze_cases(&form_files);
     let missing: Vec<String> = expectations
         .iter()
-        .filter(|(relative, matcher, _)| !has_row_candidate(&forms, relative, matcher))
-        .map(|(_, matcher, source)| format!("{}:\n{source}", matcher.id))
+        .filter(|(relative, matcher, _, expected)| {
+            has_row_candidate(&forms, relative, matcher) != *expected
+        })
+        .map(|(_, matcher, source, expected)| {
+            let want = if *expected {
+                "a candidate"
+            } else {
+                "no candidate"
+            };
+            format!("{} (want {want}):\n{source}", matcher.id)
+        })
         .collect();
     assert!(
         missing.is_empty(),
-        "{} equivalent forms gave no candidate:\n\n{}",
+        "{} equivalent forms gave the wrong result:\n\n{}",
         missing.len(),
         missing.join("\n")
     );
@@ -657,4 +832,74 @@ fn leading_literal_does_not_move_an_index_row() {
          export const show = (body: string) => $(\"#p\").html(\"label\", body);\n",
     );
     assert!(!categories.contains("jquery-html"), "{categories:?}");
+}
+
+#[test]
+fn inherited_raw_query_of_a_client_subclass_is_a_candidate() {
+    let categories = analyze_module(
+        "\"@prisma/client\": \"^5.0.0\"",
+        "import { PrismaClient } from \"@prisma/client\";\n\
+         export class Db extends PrismaClient {\n\
+           run(req: any) { return this.$queryRawUnsafe(\"select \" + req.body.q); }\n\
+         }\n",
+    );
+    assert!(categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn inherited_markup_method_of_a_custom_element_is_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "export class Widget extends HTMLElement {\n\
+           show(req: any) { this.insertAdjacentHTML(\"beforeend\", req.body.html); }\n\
+         }\n",
+    );
+    assert!(categories.contains("dangerous-html"), "{categories:?}");
+}
+
+#[test]
+fn own_method_of_an_object_literal_is_not_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "export const repo = {\n\
+           query(text: string) { return text; },\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); },\n\
+         };\n",
+    );
+    assert!(!categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn raw_sql_at_the_end_of_a_long_builder_chain_is_a_candidate() {
+    let categories = analyze_module(
+        "\"knex\": \"^3.0.0\"",
+        "import knex from \"knex\";\n\
+         const db = knex({});\n\
+         export const q = (req: any) =>\n\
+           db(\"users\").select(\"*\").where(\"a\", 1).where(\"b\", 2).where(\"c\", 3)\n\
+             .where(\"d\", 4).where(\"e\", 5).where(\"f\", 6).where(\"g\", 7).whereRaw(req.body.q);\n",
+    );
+    assert!(categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn markup_write_at_the_end_of_a_long_chain_is_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "export const w = (req: any, a: any) => {\n\
+           a.b().c().d().e().f().g().h().i().j().innerHTML = req.body.x;\n\
+         };\n",
+    );
+    assert!(categories.contains("dangerous-html"), "{categories:?}");
+}
+
+#[test]
+fn destructured_member_of_a_required_module_binding_is_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "const cp = require(\"node:child_process\");\n\
+         const { exec } = cp;\n\
+         export const run = (req: any) => exec(req.body.cmd);\n",
+    );
+    assert!(categories.contains("command-injection"), "{categories:?}");
 }

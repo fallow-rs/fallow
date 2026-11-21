@@ -99,6 +99,9 @@ pub(in crate::visitor) struct SinkAliasState {
     /// Sink sites of calls of inert local callees, dropped after the walk
     /// when the module never writes the callee root.
     inert_callee_sinks: Vec<local_callees::InertCalleeSinks>,
+    /// Per enclosing class or object literal with a method: the names of its
+    /// declared members, so `this.<member>()` of an own member is no sink.
+    own_members: Vec<Vec<String>>,
 }
 
 /// Flatten an `Identifier` or `StaticMemberExpression` callee to a dotted path.
@@ -984,7 +987,7 @@ impl ModuleInfoExtractor {
             self.record_unresolved_call_sink(expr);
             return;
         };
-        if call.receiver.is_own_member() {
+        if self.is_own_method_call(&call) {
             return;
         }
         self.capture_security_control_call(&call.path, expr.span);
@@ -1095,7 +1098,7 @@ impl ModuleInfoExtractor {
             }
             return;
         };
-        if call.receiver.is_own_member() {
+        if self.is_own_method_call(&call) {
             return;
         }
         self.capture_canonical_call_args(&call);
@@ -1442,7 +1445,15 @@ impl ModuleInfoExtractor {
         pattern: &ObjectPattern<'_>,
         init: &Expression<'_>,
     ) {
-        let module = self.node_binding_module_of_require(init);
+        let module = self.node_binding_module_of_require(init).or_else(|| {
+            let Expression::Identifier(ident) = unwrap_static_expr(init) else {
+                return None;
+            };
+            match self.sink_binding(ident.name.as_str()) {
+                Some(SinkBinding::NodeModule(module)) => Some(module.clone()),
+                _ => None,
+            }
+        });
         for property in &pattern.properties {
             let BindingPattern::BindingIdentifier(local) = &property.value else {
                 continue;
