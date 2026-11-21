@@ -36,7 +36,7 @@ impl MarkupContext {
     }
 
     /// Whether `name` is a `createEventDispatcher()` binding of the script.
-    pub(in crate::visitor) fn is_dispatch_binding(&self, name: &str) -> bool {
+    fn is_dispatch_binding(&self, name: &str) -> bool {
         self.script_for(name)
             .is_some_and(|script| script.event_dispatch_bindings.contains(name))
     }
