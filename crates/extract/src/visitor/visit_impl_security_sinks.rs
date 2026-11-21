@@ -1322,7 +1322,7 @@ impl ModuleInfoExtractor {
     }
 
     /// Resolve a static callee path (see [`Self::security_callee_path`]).
-    pub(super) fn resolve_static_callee_path(&self, path: String) -> String {
+    fn resolve_static_callee_path(&self, path: String) -> String {
         let path = normalize_global_code_exec_path(path);
         let (root, rest) = match path.split_once('.') {
             Some((root, rest)) => (root, Some(rest)),
@@ -1399,7 +1399,7 @@ impl ModuleInfoExtractor {
     /// A computed property key that folds to a constant identifier-like string.
     /// Keys with a `.` are rejected, because they would split into two path
     /// segments.
-    pub(super) fn static_property_key(&self, expr: &Expression<'_>) -> Option<String> {
+    fn static_property_key(&self, expr: &Expression<'_>) -> Option<String> {
         let key = self.static_string_value(expr)?;
         (!key.is_empty() && !key.contains('.')).then_some(key)
     }

@@ -1968,7 +1968,7 @@ mod tests {
     }
 }
 
-pub(super) fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
+fn terminal_static_member_name<'a>(expr: &'a Expression<'_>) -> Option<&'a str> {
     match unwrap_parens(expr) {
         Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
         _ => None,

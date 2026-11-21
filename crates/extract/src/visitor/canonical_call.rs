@@ -181,71 +181,27 @@ impl ModuleInfoExtractor {
     pub(in crate::visitor) fn receiver_path(&self, expr: &Expression<'_>) -> Option<ReceiverPath> {
         let mut segments: Vec<String> = Vec::new();
         let mut calls = 0_usize;
-        let mut through_call = false;
         let mut call_results = 0_usize;
         let mut expr = expr;
         let root = loop {
             crate::cost::walk_step();
-            let (segment, next): (Cow<'_, str>, Option<&Expression<'_>>) =
-                match unwrap_static_expr(expr) {
-                    Expression::Identifier(ident) => (Cow::Borrowed(ident.name.as_str()), None),
-                    Expression::ThisExpression(_) => (Cow::Borrowed("this"), None),
-                    Expression::StaticMemberExpression(member) => (
-                        Cow::Borrowed(member.property.name.as_str()),
-                        Some(&member.object),
-                    ),
-                    Expression::ComputedMemberExpression(member) => (
-                        Cow::Owned(self.static_property_key(&member.expression)?),
-                        Some(&member.object),
-                    ),
-                    Expression::CallExpression(call) => {
-                        calls += 1;
-                        call_results += 1;
-                        if call_results > MAX_CALL_RESULTS {
-                            return None;
-                        }
-                        through_call = true;
-                        expr = &call.callee;
-                        continue;
+            let at_start = segments.is_empty() && calls == 0;
+            let (segment, next) = match self.receiver_step(expr, at_start)? {
+                ReceiverStep::Call(callee) => {
+                    calls += 1;
+                    call_results += 1;
+                    if call_results > MAX_CALL_RESULTS {
+                        return None;
                     }
-                    Expression::SequenceExpression(seq) if segments.is_empty() && calls == 0 => {
-                        let (last, leading) = seq.expressions.split_last()?;
-                        if !leading
-                            .iter()
-                            .all(|item| sink_literal_value(item).is_some())
-                        {
-                            return None;
-                        }
-                        expr = last;
-                        continue;
-                    }
-                    Expression::ChainExpression(chain) => match &chain.expression {
-                        ChainElement::StaticMemberExpression(member) => (
-                            Cow::Borrowed(member.property.name.as_str()),
-                            Some(&member.object),
-                        ),
-                        ChainElement::ComputedMemberExpression(member) => (
-                            Cow::Owned(self.static_property_key(&member.expression)?),
-                            Some(&member.object),
-                        ),
-                        ChainElement::CallExpression(call) => {
-                            calls += 1;
-                            call_results += 1;
-                            if call_results > MAX_CALL_RESULTS {
-                                return None;
-                            }
-                            through_call = true;
-                            expr = &call.callee;
-                            continue;
-                        }
-                        ChainElement::TSNonNullExpression(non_null) => {
-                            expr = &non_null.expression;
-                            continue;
-                        }
-                        ChainElement::PrivateFieldExpression(_) => return None,
-                    },
-                    _ => return None,
-                };
+                    expr = callee;
+                    continue;
+                }
+                ReceiverStep::Unwrap(inner) => {
+                    expr = inner;
+                    continue;
+                }
+                ReceiverStep::Segment(segment, next) => (segment, next),
+            };
             let this_root = matches!(unwrap_static_expr(expr), Expression::ThisExpression(_));
             let mut segment = segment.into_owned();
             for _ in 0..calls {
@@ -263,9 +219,74 @@ impl ModuleInfoExtractor {
         Some(ReceiverPath {
             path: segments.join("."),
             root,
-            through_call,
+            through_call: call_results > 0,
         })
     }
+
+    /// One step of [`Self::receiver_path`]: a path segment with the object
+    /// that follows it, a call whose callee continues the walk, or a wrapper
+    /// whose inner expression continues the walk. `None` for an expression
+    /// that has no static receiver path. `at_start` admits the indirect call
+    /// sequence `(0, eval)` only as the outermost callee.
+    fn receiver_step<'e>(
+        &self,
+        expr: &'e Expression<'e>,
+        at_start: bool,
+    ) -> Option<ReceiverStep<'e>> {
+        let step = match unwrap_static_expr(expr) {
+            Expression::Identifier(ident) => {
+                ReceiverStep::Segment(Cow::Borrowed(ident.name.as_str()), None)
+            }
+            Expression::ThisExpression(_) => ReceiverStep::Segment(Cow::Borrowed("this"), None),
+            Expression::StaticMemberExpression(member) => ReceiverStep::Segment(
+                Cow::Borrowed(member.property.name.as_str()),
+                Some(&member.object),
+            ),
+            Expression::ComputedMemberExpression(member) => ReceiverStep::Segment(
+                Cow::Owned(self.static_property_key(&member.expression)?),
+                Some(&member.object),
+            ),
+            Expression::CallExpression(call) => ReceiverStep::Call(&call.callee),
+            Expression::SequenceExpression(seq) if at_start => {
+                let (last, leading) = seq.expressions.split_last()?;
+                if !leading
+                    .iter()
+                    .all(|item| sink_literal_value(item).is_some())
+                {
+                    return None;
+                }
+                ReceiverStep::Unwrap(last)
+            }
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::StaticMemberExpression(member) => ReceiverStep::Segment(
+                    Cow::Borrowed(member.property.name.as_str()),
+                    Some(&member.object),
+                ),
+                ChainElement::ComputedMemberExpression(member) => ReceiverStep::Segment(
+                    Cow::Owned(self.static_property_key(&member.expression)?),
+                    Some(&member.object),
+                ),
+                ChainElement::CallExpression(call) => ReceiverStep::Call(&call.callee),
+                ChainElement::TSNonNullExpression(non_null) => {
+                    ReceiverStep::Unwrap(&non_null.expression)
+                }
+                ChainElement::PrivateFieldExpression(_) => return None,
+            },
+            _ => return None,
+        };
+        Some(step)
+    }
+}
+
+/// One step of the receiver walk in [`ModuleInfoExtractor::receiver_path`].
+enum ReceiverStep<'e> {
+    /// A path segment, and the object that the walk reads next (`None` at
+    /// the root).
+    Segment(Cow<'e, str>, Option<&'e Expression<'e>>),
+    /// A call; the walk continues with its callee.
+    Call(&'e Expression<'e>),
+    /// A wrapper; the walk continues with the inner expression.
+    Unwrap(&'e Expression<'e>),
 }
 
 /// Whether `expr` is itself a call (`f()` in `f()(x)`), behind parentheses,
