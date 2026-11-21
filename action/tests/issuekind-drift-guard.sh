@@ -94,13 +94,19 @@ fallow_dead_code_schema_rows() {
     return
   fi
 
-  local repo_root bin rows
+  local repo_root bin rows target_dir
   repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
   bin="${FALLOW_BIN:-}"
   if [ -z "$bin" ]; then
     # Cargo builds into $CARGO_TARGET_DIR when it is set, and into target/
-    # of the repository when it is not.
-    for cand in ${CARGO_TARGET_DIR:+"$CARGO_TARGET_DIR/debug/fallow" "$CARGO_TARGET_DIR/release/fallow"} \
+    # of the repository when it is not. A relative value is relative to the
+    # repository root, as in scripts/cargo-target.mjs.
+    target_dir="${CARGO_TARGET_DIR:-}"
+    case "$target_dir" in
+      "" | /*) ;;
+      *) target_dir="$repo_root/$target_dir" ;;
+    esac
+    for cand in ${target_dir:+"$target_dir/debug/fallow" "$target_dir/release/fallow"} \
       "$repo_root/target/debug/fallow" "$repo_root/target/release/fallow"; do
       if [ -x "$cand" ]; then bin="$cand"; break; fi
     done
