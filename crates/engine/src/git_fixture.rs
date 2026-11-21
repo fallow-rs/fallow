@@ -21,16 +21,18 @@ pub enum FixtureIdentity {
     Fixed,
     /// No identity in the environment, so the `user.name` and `user.email`
     /// of the repository config (or of a `-c` option) apply. Use it for a
-    /// fixture that commits as different authors.
+    /// fixture that commits as different authors. The fixture must set both
+    /// values, or Git guesses an identity from the host.
     RepositoryConfig,
 }
 
-/// Environment variables that carry the author and committer of a commit.
-const IDENTITY_ENV_VARS: [&str; 4] = [
-    "GIT_AUTHOR_NAME",
-    "GIT_AUTHOR_EMAIL",
-    "GIT_COMMITTER_NAME",
-    "GIT_COMMITTER_EMAIL",
+/// Environment variables that carry the author and committer of a commit,
+/// with their values for [`FixtureIdentity::Fixed`].
+const FIXED_IDENTITY_ENV: [(&str, &str); 4] = [
+    ("GIT_AUTHOR_NAME", FIXTURE_NAME),
+    ("GIT_AUTHOR_EMAIL", FIXTURE_EMAIL),
+    ("GIT_COMMITTER_NAME", FIXTURE_NAME),
+    ("GIT_COMMITTER_EMAIL", FIXTURE_EMAIL),
 ];
 
 /// Build a `git` command for a test fixture in `dir`, with the fixed
@@ -64,17 +66,12 @@ pub fn fixture_git_command_with_identity(dir: &Path, identity: FixtureIdentity) 
         .env("GIT_CONFIG_SYSTEM", NULL_CONFIG);
     match identity {
         FixtureIdentity::Fixed => {
-            for (var, value) in IDENTITY_ENV_VARS.iter().zip([
-                FIXTURE_NAME,
-                FIXTURE_EMAIL,
-                FIXTURE_NAME,
-                FIXTURE_EMAIL,
-            ]) {
+            for (var, value) in FIXED_IDENTITY_ENV {
                 command.env(var, value);
             }
         }
         FixtureIdentity::RepositoryConfig => {
-            for var in IDENTITY_ENV_VARS {
+            for (var, _) in FIXED_IDENTITY_ENV {
                 command.env_remove(var);
             }
         }
@@ -173,7 +170,7 @@ mod tests {
     fn the_repository_config_identity_removes_the_identity_variables() {
         let command =
             fixture_git_command_with_identity(Path::new("."), FixtureIdentity::RepositoryConfig);
-        for name in super::IDENTITY_ENV_VARS {
+        for (name, _) in super::FIXED_IDENTITY_ENV {
             assert_eq!(env_state(&command, name), EnvState::Removed, "{name}");
         }
         for name in ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"] {
