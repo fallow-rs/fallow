@@ -163,3 +163,30 @@ fn the_base_key_reads_the_coverage_of_the_base_options() {
         "an auto-detected coverage map must change the base key"
     );
 }
+
+#[test]
+fn a_saved_baseline_path_does_not_change_the_base_key() {
+    let tmp = repo(&[]);
+    let root = tmp.path();
+    let config_path = None;
+    let cache_dir = root.join(".fallow/cache");
+    let opts = options(root, &config_path, &cache_dir);
+    let without = key_hash(&opts);
+
+    for path in ["a.json", "b.json"] {
+        let path = Path::new(path);
+        let mut dead_code = options(root, &config_path, &cache_dir);
+        dead_code.dead_code_baseline = Some(path);
+        let mut health = options(root, &config_path, &cache_dir);
+        health.health_baseline = Some(path);
+        let mut dupes = options(root, &config_path, &cache_dir);
+        dupes.dupes_baseline = Some(path);
+        for with in [&dead_code, &health, &dupes] {
+            assert_eq!(
+                key_hash(with),
+                without,
+                "a saved-baseline path must not change the base key"
+            );
+        }
+    }
+}

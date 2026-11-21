@@ -149,12 +149,6 @@ pub struct AuditCacheKeyPayload {
     pub css: bool,
     /// Whether audit health used deep CSS analysis for the base snapshot.
     pub css_deep: bool,
-    /// Dead-code baseline path.
-    pub dead_code_baseline: Option<String>,
-    /// Health baseline path.
-    pub health_baseline: Option<String>,
-    /// Duplication baseline path.
-    pub dupes_baseline: Option<String>,
     /// Experimental type-aware backend selection. The default backend leaves
     /// it out, so the key bytes of a default run do not change.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,9 +199,6 @@ impl AuditCacheKeyBuilder {
                 architecture: "all".to_string(),
                 css: false,
                 css_deep: false,
-                dead_code_baseline: None,
-                health_baseline: None,
-                dupes_baseline: None,
                 type_aware_backend: None,
             },
         }
@@ -299,20 +290,6 @@ impl AuditCacheKeyBuilder {
         self
     }
 
-    /// Set baseline paths.
-    #[must_use]
-    pub fn baselines(
-        mut self,
-        dead_code: Option<String>,
-        health: Option<String>,
-        dupes: Option<String>,
-    ) -> Self {
-        self.payload.dead_code_baseline = dead_code;
-        self.payload.health_baseline = health;
-        self.payload.dupes_baseline = dupes;
-        self
-    }
-
     /// Set the type-aware backend selection.
     #[must_use]
     pub fn type_aware_backend(mut self, backend: Option<String>) -> Self {
@@ -384,12 +361,7 @@ mod tests {
             true,
         )
         .health(Some(42.0), Some(coverage), Some("/workspace".to_string()))
-        .styling(true, true)
-        .baselines(
-            Some("dead.json".to_string()),
-            Some("health.json".to_string()),
-            Some("dupes.json".to_string()),
-        );
+        .styling(true, true);
 
         let payload = builder.payload();
         assert_eq!(payload.cache_version, 3);

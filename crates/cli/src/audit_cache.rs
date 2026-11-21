@@ -735,40 +735,34 @@ pub(super) fn audit_base_snapshot_cache_key(
         materialized_context,
     )
     .production(
-        opts.production,
-        opts.production_dead_code,
-        opts.production_health,
-        opts.production_dupes,
+        base.production,
+        base.production_dead_code,
+        base.production_health,
+        base.production_dupes,
     )
-    .scope(
-        opts.workspace.map(<[String]>::to_vec),
-        opts.changed_workspaces.map(str::to_string),
-        opts.group_by.map(|g| format!("{g:?}")),
-        opts.include_entry_exports,
-    )
-    .show_cascade(opts.show_cascade)
-    // Only a brief base pass computes the public-export set of the snapshot,
-    // so a non-brief snapshot must never serve a brief run.
+    // The base pass reads these two from the head options: only a brief
+    // base pass computes the public-export set of the snapshot, and the
+    // workspace scope of the head run reaches the base run.
     .brief(opts.brief)
+    .scope(
+        base.workspace.map(<[String]>::to_vec),
+        opts.changed_workspaces.map(str::to_string),
+        base.group_by.map(|g| format!("{g:?}")),
+        base.include_entry_exports,
+    )
+    .show_cascade(base.show_cascade)
     .health(
         base.max_crap,
         coverage,
         base.coverage_root.map(|p| p.to_string_lossy().to_string()),
     )
     .analyses(
-        opts.analyses.dead_code,
-        opts.analyses.health,
-        opts.analyses.dupes,
-        opts.analyses.architecture_label(),
+        base.analyses.dead_code,
+        base.analyses.health,
+        base.analyses.dupes,
+        base.analyses.architecture_label(),
     )
-    .styling(opts.css, opts.css_deep)
-    .baselines(
-        opts.dead_code_baseline
-            .map(|p| p.to_string_lossy().to_string()),
-        opts.health_baseline
-            .map(|p| p.to_string_lossy().to_string()),
-        opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
-    )
+    .styling(base.css, base.css_deep)
     .type_aware_backend(
         std::env::var("FALLOW_TYPE_AWARE_BACKEND")
             .ok()
