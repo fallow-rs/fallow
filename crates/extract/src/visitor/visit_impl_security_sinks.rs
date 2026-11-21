@@ -24,6 +24,8 @@ use canonical_call::{CallArgKind, CallForm, CanonicalCall, ReceiverPath};
 pub(super) mod canonical_call;
 #[path = "visit_impl_security_local_callees.rs"]
 mod local_callees;
+#[path = "visit_impl_security_own_members.rs"]
+mod own_members;
 
 struct ArgSinkSiteInput<'site, 'ast> {
     callee_path: &'site str,
@@ -99,9 +101,11 @@ pub(in crate::visitor) struct SinkAliasState {
     /// Sink sites of calls of inert local callees, dropped after the walk
     /// when the module never writes the callee root.
     inert_callee_sinks: Vec<local_callees::InertCalleeSinks>,
-    /// Per enclosing class or object literal with a method: the names of its
-    /// declared members, so `this.<member>()` of an own member is no sink.
-    own_members: Vec<Vec<String>>,
+    /// The `this` frames of the enclosing class bodies.
+    this_classes: Vec<own_members::ThisClassFrame>,
+    /// Sink sites of `this.m(x)` calls in a class that extends another
+    /// class, decided after the walk.
+    this_member_sinks: Vec<own_members::ThisMemberSinks>,
 }
 
 /// Flatten an `Identifier` or `StaticMemberExpression` callee to a dotted path.
@@ -987,7 +991,8 @@ impl ModuleInfoExtractor {
             self.record_unresolved_call_sink(expr);
             return;
         };
-        if self.is_own_method_call(&call) {
+        let this_member = self.this_member_call(&call);
+        if this_member == own_members::ThisMemberCall::Project {
             return;
         }
         self.capture_security_control_call(&call.path, expr.span);
@@ -1019,6 +1024,10 @@ impl ModuleInfoExtractor {
         }
         if let Some(root) = inert_root {
             self.defer_inert_callee_sinks(root, sinks_before);
+        }
+        if let own_members::ThisMemberCall::InheritedCandidate(class_span) = this_member {
+            let method = call.method().unwrap_or_default().to_string();
+            self.defer_this_member_sinks(class_span, &method, sinks_before);
         }
     }
 
@@ -1098,10 +1107,16 @@ impl ModuleInfoExtractor {
             }
             return;
         };
-        if self.is_own_method_call(&call) {
+        let this_member = self.this_member_call(&call);
+        if this_member == own_members::ThisMemberCall::Project {
             return;
         }
+        let sinks_before = self.security_sinks.len();
         self.capture_canonical_call_args(&call);
+        if let own_members::ThisMemberCall::InheritedCandidate(class_span) = this_member {
+            let method = call.method().unwrap_or_default().to_string();
+            self.defer_this_member_sinks(class_span, &method, sinks_before);
+        }
     }
 
     /// The Function constructor takes its code as the last argument. When a

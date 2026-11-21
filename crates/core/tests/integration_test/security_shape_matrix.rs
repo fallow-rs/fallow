@@ -13,14 +13,16 @@
 //! - a local alias and a global-object prefix of a code-executing global;
 //! - a `require()` namespace, a destructured `require()`, and a destructured
 //!   module binding, for a `node:` pattern;
-//! - a `this.field` receiver, a local alias of that receiver, a call-result
-//!   receiver, a chain with more call results than the extractor walks, and a
-//!   method that the class inherits, for a pattern with a leading `*.`;
+//! - a `this.field` receiver, a call-result receiver, a chain with more call
+//!   results than the extractor walks, and a method that the class inherits
+//!   from a library, for a pattern with a leading `*.`;
 //! - an extra leading literal argument, for a row that admits more than one
 //!   argument position.
 //!
-//! A call of a method that the class declares itself (`this.m(x)`) must give
-//! no candidate.
+//! A `this.m(x)` call that runs code of the project must give no candidate:
+//! a method that the class declares (also from an arrow callback in an object
+//! literal), a method of a local base class, a function on a prototype, and a
+//! method of an options object.
 //!
 //! A pattern with no baseline must be in [`PATTERNS_WITHOUT_BASELINE`], with a
 //! reason. A candidate counts for a row only when its category and its
@@ -82,8 +84,6 @@ enum Receiver {
     Sequence,
     /// `this.field.m(x)`.
     ThisField,
-    /// `const alias = this.field; alias.m(x)`.
-    FieldAlias,
     /// `make().m(x)`.
     CallResult,
     /// A chain with more call results than the extractor walks.
@@ -92,6 +92,16 @@ enum Receiver {
     InheritedMethod,
     /// `this.m(x)` in a class that declares `m` itself. No candidate.
     OwnMethod,
+    /// `this.m(x)` in an arrow callback inside an object literal, in a class
+    /// that declares `m`. No candidate.
+    ObjectCallback,
+    /// `this.m(x)` in a function on a prototype. No candidate.
+    PrototypeMethod,
+    /// `this.m(x)` in a class whose base class the file declares. No
+    /// candidate.
+    LocalBase,
+    /// `this.m(x)` in a method of an options object. No candidate.
+    OptionsObject,
     /// `const aliasFn = eval; aliasFn(x)`.
     CodeExecAlias,
     /// `window.eval(x)`.
@@ -112,10 +122,17 @@ struct Case {
 }
 
 impl Case {
-    /// Whether the case must give the candidate of the row. Only a call of an
-    /// own method gives none.
+    /// Whether the case must give the candidate of the row. A `this.m(x)`
+    /// call that runs code of the project gives none.
     fn expects_candidate(&self) -> bool {
-        self.receiver != Receiver::OwnMethod
+        !matches!(
+            self.receiver,
+            Receiver::OwnMethod
+                | Receiver::ObjectCallback
+                | Receiver::PrototypeMethod
+                | Receiver::LocalBase
+                | Receiver::OptionsObject
+        )
     }
 }
 
@@ -363,39 +380,54 @@ fn function_callee(matcher: &Matcher, pattern: &str, receiver: Receiver) -> (Str
     }
 }
 
-fn case_source(matcher: &Matcher, pattern: &str, argument: &Argument, case: &Case) -> String {
+/// The source of a case whose callee is a member of `this`, or `None` for
+/// another receiver.
+fn this_member_source(
+    matcher: &Matcher,
+    pattern: &str,
+    args: &str,
+    prelude: &str,
+    case: &Case,
+) -> Option<String> {
     let rest = pattern.strip_prefix("*.").unwrap_or(pattern);
+    let (import, _) = plain_callee(matcher, pattern);
+    let new = if case.form == Form::New { "new " } else { "" };
+    let own = format!("  {rest}(...values: any[]) {{ return values; }}\n");
+    let call = format!("{new}this.{rest}({args})");
+    let class = |heritage: &str, member: &str, body: &str| {
+        format!(
+            "{import}declare const Base: any;\ndeclare const retry: any;\n\
+             export class Holder{heritage} {{\n  field: any;\n{member}\
+             \x20 run(req: any) {{\n{prelude}    return {body};\n  }}\n}}\n"
+        )
+    };
+    Some(match case.receiver {
+        Receiver::ThisField => class("", "", &format!("{new}this.field.{rest}({args})")),
+        Receiver::InheritedMethod => class(" extends Base", "", &call),
+        Receiver::OwnMethod => class("", &own, &call),
+        Receiver::ObjectCallback => class("", &own, &format!("retry({{ task: () => {call} }})")),
+        Receiver::LocalBase => format!(
+            "{}class LocalBase {{\n{own}}}\n",
+            class(" extends LocalBase", "", &call)
+        ),
+        Receiver::PrototypeMethod => format!(
+            "{import}export function Holder() {{}}\n\
+             Holder.prototype.run = function (this: any, req: any) {{\n{prelude}  return {call};\n}};\n"
+        ),
+        Receiver::OptionsObject => format!(
+            "{import}export default {{\n  methods: {{\n  {own}  }},\n\
+             \x20 run(this: any, req: any) {{\n{prelude}    return {call};\n  }},\n}};\n"
+        ),
+        _ => return None,
+    })
+}
+
+fn case_source(matcher: &Matcher, pattern: &str, argument: &Argument, case: &Case) -> String {
     let args = argument_list(matcher, argument, case.leading_literal);
     let prelude = &argument.prelude;
     let new = if case.form == Form::New { "new " } else { "" };
-    let in_class = matches!(
-        case.receiver,
-        Receiver::ThisField
-            | Receiver::FieldAlias
-            | Receiver::InheritedMethod
-            | Receiver::OwnMethod
-    );
-    if in_class {
-        let (import, _) = plain_callee(matcher, pattern);
-        let (heritage, member, callee) = match case.receiver {
-            Receiver::ThisField => ("", String::new(), format!("this.field.{rest}")),
-            Receiver::FieldAlias => ("", String::new(), format!("alias.{rest}")),
-            Receiver::InheritedMethod => (" extends Base", String::new(), format!("this.{rest}")),
-            _ => (
-                "",
-                format!("  {rest}(...values: any[]) {{ return values; }}\n"),
-                format!("this.{rest}"),
-            ),
-        };
-        let alias = if case.receiver == Receiver::FieldAlias {
-            "    const alias = this.field;\n"
-        } else {
-            ""
-        };
-        return format!(
-            "{import}declare const Base: any;\nexport class Holder{heritage} {{\n  field: any;\n{member}\
-             \x20 run(req: any) {{\n{prelude}{alias}    return {new}{callee}({args});\n  }}\n}}\n"
-        );
+    if let Some(source) = this_member_source(matcher, pattern, &args, prelude, case) {
+        return source;
     }
     let (import, callee) = function_callee(matcher, pattern, case.receiver);
     // `new make().m(x)` parses as `(new make()).m(x)`, so a `new` form of a
@@ -445,12 +477,18 @@ fn receivers_for(matcher: &Matcher, pattern: &str, form: Form) -> Vec<Receiver> 
     {
         receivers.extend([
             Receiver::ThisField,
-            Receiver::FieldAlias,
             Receiver::CallResult,
             Receiver::LongChain,
         ]);
         if !rest.contains('.') && form == Form::Call {
-            receivers.extend([Receiver::InheritedMethod, Receiver::OwnMethod]);
+            receivers.extend([
+                Receiver::InheritedMethod,
+                Receiver::OwnMethod,
+                Receiver::ObjectCallback,
+                Receiver::PrototypeMethod,
+                Receiver::LocalBase,
+                Receiver::OptionsObject,
+            ]);
         }
     }
     receivers
@@ -902,4 +940,87 @@ fn destructured_member_of_a_required_module_binding_is_a_candidate() {
          export const run = (req: any) => exec(req.body.cmd);\n",
     );
     assert!(categories.contains("command-injection"), "{categories:?}");
+}
+
+#[test]
+fn own_method_in_an_object_literal_callback_is_not_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "declare const retry: any;\n\
+         export class Repo {\n\
+           query(text: string) { return text; }\n\
+           run(req: any) {\n\
+             return retry({ attempts: 3, task: () => this.query(\"select \" + req.body.q) });\n\
+           }\n\
+         }\n",
+    );
+    assert!(!categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn own_method_beside_an_arrow_property_is_not_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "export class Repo {\n\
+           query(text: string) { return text; }\n\
+           run(req: any) { return { cb: () => {}, v: this.query(\"select \" + req.body.q) }; }\n\
+         }\n",
+    );
+    assert!(!categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn own_method_in_a_class_field_object_is_not_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "export class Repo {\n\
+           query(text: string) { return text; }\n\
+           handlers = { onQuery: (req: any) => this.query(\"select \" + req.body.q) };\n\
+         }\n",
+    );
+    assert!(!categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn this_call_in_a_prototype_function_is_not_a_candidate() {
+    let categories = analyze_module(
+        "",
+        "export function Repo() {}\n\
+         Repo.prototype.run = function (req: any) {\n\
+           return this.query(\"select \" + req.body.q);\n\
+         };\n",
+    );
+    assert!(!categories.contains("sql-injection"), "{categories:?}");
+}
+
+#[test]
+fn method_of_a_local_base_class_is_not_a_candidate() {
+    for source in [
+        "class BaseRepo { query(text: string) { return text; } }\n\
+         export class UserRepo extends BaseRepo {\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); }\n\
+         }\n",
+        "export class UserRepo extends BaseRepo {\n\
+           run(req: any) { return this.query(\"select \" + req.body.q); }\n\
+         }\n\
+         class BaseRepo { query(text: string) { return text; } }\n",
+    ] {
+        let categories = analyze_module("", source);
+        assert!(
+            !categories.contains("sql-injection"),
+            "{categories:?}\n{source}"
+        );
+    }
+}
+
+#[test]
+fn method_of_a_vue_options_object_is_not_a_candidate() {
+    let categories = analyze_module(
+        "\"vue\": \"^3.0.0\"",
+        "export default {\n\
+           methods: { query(text: string) { return text; } },\n\
+           mounted(this: any, req: any) { return this.query(\"select \" + req.body.q); },\n\
+         };\n",
+    );
+    assert!(!categories.contains("sql-injection"), "{categories:?}");
 }

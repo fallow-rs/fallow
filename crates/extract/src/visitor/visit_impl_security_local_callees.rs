@@ -30,12 +30,6 @@
 //! The module also records the names under which it exports a shallow-safe
 //! function. The analysis reads them to clear a call of that function in a
 //! module that imports it directly.
-//!
-//! A call of a member of `this` (`this.query(x)`) runs a method of the
-//! enclosing class or object literal when that body declares the member
-//! itself. Such a call is not a library sink. A member that the class only
-//! inherits (`this.$queryRawUnsafe(x)` in a subclass of a database client)
-//! keeps the name match.
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
@@ -44,7 +38,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::Cell;
 
 use super::super::super::ModuleInfoExtractor;
-use super::canonical_call::CanonicalCall;
 use super::{ReceiverPath, SinkBinding, unwrap_static_expr};
 use crate::js_text::JsText;
 use fallow_types::extract::ModuleInfo;
@@ -636,6 +629,23 @@ impl ModuleInfoExtractor {
         program: &Program<'_>,
     ) {
         walk::walk_program(self, program);
+        let mut dropped = vec![false; self.security_sinks.len()];
+        self.mark_project_this_member_sinks(program, &mut dropped);
+        self.mark_inert_callee_sinks(program, &mut dropped);
+        if !dropped.contains(&true) {
+            return;
+        }
+        let mut index = 0;
+        self.security_sinks.retain(|_| {
+            let keep = !dropped[index];
+            index += 1;
+            keep
+        });
+    }
+
+    /// Mark the deferred sink sites of the inert callees that the module
+    /// never writes, and record the inert function exports.
+    fn mark_inert_callee_sinks(&mut self, program: &Program<'_>, dropped: &mut [bool]) {
         let deferred = std::mem::take(&mut self.sink_aliases.inert_callee_sinks);
         let exports = inert_export_candidates(program);
         if deferred.is_empty() && exports.is_empty() {
@@ -655,10 +665,6 @@ impl ModuleInfoExtractor {
             })
             .map(|(exported, _)| exported)
             .collect();
-        if deferred.is_empty() {
-            return;
-        }
-        let mut dropped = vec![false; self.security_sinks.len()];
         for sinks in deferred
             .iter()
             .filter(|sinks| !written.names.contains(&sinks.root))
@@ -667,12 +673,6 @@ impl ModuleInfoExtractor {
                 *flag = true;
             }
         }
-        let mut index = 0;
-        self.security_sinks.retain(|_| {
-            let keep = !dropped[index];
-            index += 1;
-            keep
-        });
     }
 
     /// Record the inert function declarations of a statement list. A
@@ -712,84 +712,5 @@ impl ModuleInfoExtractor {
     pub(in crate::visitor) fn record_program_function_facts(&mut self, program: &Program<'_>) {
         self.record_program_sanitizer_functions(program);
         self.record_inert_function_declarations(&program.body);
-    }
-}
-
-/// The static names of the members that a class body declares.
-fn class_member_names(class: &Class<'_>) -> Vec<String> {
-    class
-        .body
-        .body
-        .iter()
-        .filter_map(|element| match element {
-            ClassElement::MethodDefinition(method) => method.key.static_name(),
-            ClassElement::PropertyDefinition(property) => property.key.static_name(),
-            ClassElement::AccessorProperty(accessor) => accessor.key.static_name(),
-            ClassElement::StaticBlock(_) | ClassElement::TSIndexSignature(_) => None,
-        })
-        .map(|name| name.text().into_owned())
-        .collect()
-}
-
-/// The static names of the properties of an object literal that has a
-/// method or a function value. `None` for an object literal without one: a
-/// `this` in it cannot name the object itself.
-fn object_member_names(obj: &ObjectExpression<'_>) -> Option<Vec<String>> {
-    let has_function = obj.properties.iter().any(|property| {
-        matches!(
-            property,
-            ObjectPropertyKind::ObjectProperty(property)
-                if property.method
-                    || matches!(
-                        unwrap_static_expr(&property.value),
-                        Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
-                    )
-        )
-    });
-    has_function.then(|| {
-        obj.properties
-            .iter()
-            .filter_map(|property| match property {
-                ObjectPropertyKind::ObjectProperty(property) => property.key.static_name(),
-                ObjectPropertyKind::SpreadProperty(_) => None,
-            })
-            .map(|name| name.text().into_owned())
-            .collect()
-    })
-}
-
-impl ModuleInfoExtractor {
-    /// Walk a class body with the names of its declared members in scope.
-    pub(in crate::visitor) fn walk_class_with_own_members(&mut self, class: &Class<'_>) {
-        self.sink_aliases
-            .own_members
-            .push(class_member_names(class));
-        walk::walk_class(self, class);
-        self.sink_aliases.own_members.pop();
-    }
-
-    /// Walk an object literal with the names of its properties in scope when
-    /// it has a method.
-    pub(in crate::visitor) fn walk_object_with_own_members(&mut self, obj: &ObjectExpression<'_>) {
-        let Some(names) = object_member_names(obj) else {
-            walk::walk_object_expression(self, obj);
-            return;
-        };
-        self.sink_aliases.own_members.push(names);
-        walk::walk_object_expression(self, obj);
-        self.sink_aliases.own_members.pop();
-    }
-
-    /// Whether the call is `this.<member>(...)` and the innermost class or
-    /// object literal declares that member itself.
-    pub(super) fn is_own_method_call(&self, call: &CanonicalCall<'_, '_>) -> bool {
-        if !call.receiver.is_own_member() {
-            return false;
-        }
-        let (Some(method), Some(names)) = (call.method(), self.sink_aliases.own_members.last())
-        else {
-            return false;
-        };
-        names.iter().any(|name| name == method)
     }
 }
