@@ -942,9 +942,10 @@ fn append_undefined_keyframe_findings(
     ctx: &StylingFindingContext<'_, '_>,
 ) {
     for candidate in &ctx.css.undefined_keyframes {
+        let line = candidate.line.max(1);
         if ctx.is_suppressed(
             &candidate.path,
-            1,
+            line,
             fallow_types::suppress::IssueKind::CssBrokenReference,
         ) {
             continue;
@@ -954,7 +955,7 @@ fn append_undefined_keyframe_findings(
             code: "css-broken-reference".to_string(),
             sub_kind: "undefined-keyframes".to_string(),
             path: candidate.path.clone(),
-            line: 1,
+            line,
             value: candidate.name.clone(),
             effective_severity: styling_finding_severity(ctx.config.rules.css_broken_reference),
             blast_radius: None,

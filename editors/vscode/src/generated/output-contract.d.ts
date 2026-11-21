@@ -12577,6 +12577,12 @@ name: string
  */
 path: string
 /**
+ * 1-based line of the first rule in `path` that references it. `0` when
+ * the line is not known, for example in a report saved before the field
+ * existed.
+ */
+line?: number
+/**
  * Read-only verification step(s) an agent can run before fixing the
  * reference. Always at least one entry, so consumers can iterate `actions`
  * uniformly across every finding type.

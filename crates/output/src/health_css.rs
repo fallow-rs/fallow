@@ -541,6 +541,11 @@ pub struct UndefinedKeyframes {
     /// Project-root-relative, forward-slash path to the first stylesheet that
     /// references it.
     pub path: String,
+    /// 1-based line of the first rule in `path` that references it. `0` when
+    /// the line is not known, for example in a report saved before the field
+    /// existed.
+    #[serde(default)]
+    pub line: u32,
     /// Read-only verification step(s) an agent can run before fixing the
     /// reference. Always at least one entry, so consumers can iterate `actions`
     /// uniformly across every finding type.

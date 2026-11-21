@@ -109,7 +109,9 @@ struct CssTokenSets {
     defined_keyframes: rustc_hash::FxHashSet<String>,
     referenced_keyframes: rustc_hash::FxHashSet<String>,
     keyframes_definers: rustc_hash::FxHashMap<String, String>,
-    keyframe_referencers: rustc_hash::FxHashMap<String, String>,
+    /// The first stylesheet that references each `@keyframes` name, with the
+    /// line of the referencing rule.
+    keyframe_referencers: rustc_hash::FxHashMap<String, (String, u32)>,
     /// `@keyframes` names that a Sass/Less source defines. Only these are
     /// skipped when an animation value that the scan cannot resolve exists.
     /// Sass can name a plain CSS `@keyframes` through a variable too, but
@@ -283,9 +285,13 @@ impl CssTokenSets {
     fn record_keyframes(&mut self, analytics: &fallow_types::extract::CssAnalytics, rel: &str) {
         for keyframes in &analytics.referenced_keyframes {
             self.referenced_keyframes.insert(keyframes.clone());
+            let line = analytics
+                .keyframe_reference_lines
+                .binary_search_by(|(name, _)| name.as_str().cmp(keyframes))
+                .map_or(0, |index| analytics.keyframe_reference_lines[index].1);
             self.keyframe_referencers
                 .entry(keyframes.clone())
-                .or_insert_with(|| rel.to_owned());
+                .or_insert_with(|| (rel.to_owned(), line));
         }
         for keyframes in &analytics.defined_keyframes {
             self.defined_keyframes.insert(keyframes.clone());
@@ -544,10 +550,11 @@ impl CssTokenSets {
             &self.keyframe_referencers,
         )
         .into_iter()
-        .map(|(name, path)| UndefinedKeyframes {
+        .map(|(name, (path, line))| UndefinedKeyframes {
             actions: vec![CssCandidateAction::verify_undefined_keyframe(&name)],
             name,
             path,
+            line,
         })
         .collect();
         (unreferenced_keyframes, undefined_keyframes)
@@ -703,15 +710,15 @@ fn classify_font_size_unit(value: &str) -> Option<&'static str> {
     }
 }
 
-/// Build the sorted `(name, path)` set difference `present - absent`, locating
-/// each surviving name via `locator` (empty path when absent). Sorted by
-/// `(path, name)` for deterministic output.
-fn locate_keyframe_diff(
+/// Build the sorted `(name, location)` set difference `present - absent`,
+/// locating each surviving name via `locator` (the default location when
+/// absent). Sorted by `(location, name)` for deterministic output.
+fn locate_keyframe_diff<L: Clone + Default + Ord>(
     present: &rustc_hash::FxHashSet<String>,
     absent: &rustc_hash::FxHashSet<String>,
-    locator: &rustc_hash::FxHashMap<String, String>,
-) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = present
+    locator: &rustc_hash::FxHashMap<String, L>,
+) -> Vec<(String, L)> {
+    let mut out: Vec<(String, L)> = present
         .difference(absent)
         .map(|name| (name.clone(), locator.get(name).cloned().unwrap_or_default()))
         .collect();

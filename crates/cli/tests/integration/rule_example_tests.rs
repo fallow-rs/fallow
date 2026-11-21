@@ -79,11 +79,6 @@ impl fmt::Display for Check {
 /// stale.
 const KNOWN_GAPS: &[(&str, Check, &str)] = &[
     (
-        "css-broken-reference",
-        Check::Anchor,
-        "the undefined-keyframes finding has no line, so it reports line 1",
-    ),
-    (
         "dev-dependency-in-production",
         Check::Output(Format::Compact),
         "the compact line names the package only, with no file and no line",

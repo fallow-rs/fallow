@@ -1374,6 +1374,9 @@ pub struct CssAnalytics {
     pub defined_keyframes: Vec<String>,
     /// Distinct `@keyframes` names referenced via `animation` / `animation-name`.
     pub referenced_keyframes: Vec<String>,
+    /// First 1-based rule line per `referenced_keyframes` name, sorted (internal staging).
+    #[serde(skip)]
+    pub keyframe_reference_lines: Vec<(String, u32)>,
     /// Distinct custom properties registered via an `@property` rule, sorted.
     pub registered_custom_properties: Vec<String>,
     /// Distinct cascade layers declared (via `@layer a, b;` statements or named
@@ -1390,12 +1393,9 @@ pub struct CssAnalytics {
     /// Distinct font families referenced via `font-family` / `font` in the
     /// stylesheet, sorted (generic keywords like `serif` excluded).
     pub referenced_font_families: Vec<String>,
-    /// Per-rule declaration-block fingerprints for rules at or above the minimum
-    /// block size, used to detect duplicate declaration blocks across the
-    /// project. Internal staging consumed by the health layer; never serialized
-    /// (the public output is the grouped `duplicate_declaration_blocks`).
+    /// Declaration-block fingerprints of rules at or above the minimum block size.
+    /// Internal staging for duplicate-block detection, never serialized.
     #[serde(skip)]
-    #[cfg_attr(feature = "schema", schemars(skip))]
     pub declaration_blocks: Vec<CssDeclarationBlock>,
 }
 

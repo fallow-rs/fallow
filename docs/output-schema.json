@@ -19343,6 +19343,10 @@
           "type": "string",
           "description": "Project-root-relative, forward-slash path to the first stylesheet that\nreferences it."
         },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the first rule in `path` that references it. `0` when\nthe line is not known, for example in a report saved before the field\nexisted."
+        },
         "actions": {
           "type": "array",
           "items": {

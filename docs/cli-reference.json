@@ -22700,7 +22700,7 @@
         "example_files": [
           {
             "path": "src/app.css",
-            "code": ".toast {\n  animation: fade-in 1s;\n}\n"
+            "code": ".page {\n  margin: 0;\n}\n\n.toast {\n  animation: fade-in 1s;\n}\n"
           },
           {
             "path": "src/index.ts",
