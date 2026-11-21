@@ -370,24 +370,27 @@ struct ParsedCommandLine {
     cli: Cli,
     /// The deprecated options that the command line sets.
     deprecated: Vec<&'static crate::schema::deprecations::Deprecation>,
-    /// The error message for a global option that the command rejects.
-    rejected_option: Option<String>,
+    /// The clap command tree and the matches with their value sources, for
+    /// the global option check after the output format is resolved.
+    root: clap::Command,
+    matches: clap::ArgMatches,
 }
 
-/// Parse argv like `Cli::try_parse`, and also read the deprecated options and
-/// the rejected global option of the command line.
+/// Parse argv like `Cli::try_parse`, and also read the deprecated options of
+/// the command line.
 fn parse_command_line() -> Result<ParsedCommandLine, clap::Error> {
     use clap::{CommandFactory, FromArgMatches};
     let root = Cli::command();
     let mut matches = root.clone().try_get_matches()?;
     let deprecated = crate::schema::deprecations::options_on_command_line(&root, &matches);
-    let rejected_option = crate::global_option_support::rejected_option(&root, &matches);
+    let checked = matches.clone();
     let cli =
         Cli::from_arg_matches_mut(&mut matches).map_err(|err| err.format(&mut root.clone()))?;
     Ok(ParsedCommandLine {
         cli,
         deprecated,
-        rejected_option,
+        root,
+        matches: checked,
     })
 }
 
@@ -409,7 +412,8 @@ pub fn parse_cli_args() -> Result<(Cli, FormatConfig, Option<String>), ExitCode>
     let ParsedCommandLine {
         mut cli,
         deprecated: deprecated_options,
-        rejected_option,
+        root,
+        matches,
     } = parse_command_line().map_err(|err| handle_cli_parse_error(&err))?;
     warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
     warn_deprecated_options(&deprecated_options, cli.quiet);
@@ -426,7 +430,46 @@ pub fn parse_cli_args() -> Result<(Cli, FormatConfig, Option<String>), ExitCode>
     }
 
     let fmt = resolve_format(&cli);
+    let rejected_option =
+        crate::global_option_support::rejected_option(&root, &matches, fmt.output);
     Ok((cli, fmt, rejected_option))
+}
+
+/// Emit the error of a global option that the command rejects. The commands
+/// that run before the telemetry run starts (the schema commands, `telemetry`,
+/// `doctor` and the Impact statusline) record no run, as for their other
+/// errors.
+pub fn reject_global_option(cli: &Cli, fmt: &FormatConfig, message: &str) -> ExitCode {
+    let records_no_run = crate::is_impact_statusline(cli)
+        || matches!(
+            cli.command,
+            Some(
+                Command::Schema(_)
+                    | Command::ConfigSchema
+                    | Command::PluginSchema
+                    | Command::RulePackSchema
+                    | Command::Telemetry { .. }
+                    | Command::Doctor
+            )
+        );
+    if records_no_run {
+        return crate::error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
+    }
+    let telemetry_run = crate::cli_telemetry::start_telemetry_run(cli, fmt);
+    let code = emit_known_failure_with_style(
+        message,
+        INVALID_INPUT,
+        fmt.output,
+        fmt.json_style,
+        telemetry::FailureReason::Validation,
+    );
+    record_run_epilogue(
+        telemetry_run,
+        code,
+        Some(telemetry::FailureReason::Validation),
+        cli.parent_run.as_deref(),
+        None,
+    )
 }
 
 /// Run the pre-dispatch validation gates (diff filter, output-gate flags, global

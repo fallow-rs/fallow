@@ -1,4 +1,4 @@
-use clap::CommandFactory;
+use clap::{CommandFactory, FromArgMatches};
 
 use super::*;
 use crate::Cli;
@@ -10,7 +10,9 @@ fn rejection(args: &[&str]) -> Option<String> {
         .clone()
         .try_get_matches_from(argv)
         .expect("the command line parses");
-    rejected_option(&root, &matches)
+    let cli = Cli::from_arg_matches(&matches).expect("the command line converts");
+    let output = crate::cli_format::resolve_format(&cli).output;
+    rejected_option(&root, &matches, output)
 }
 
 fn global_longs() -> Vec<String> {
@@ -93,10 +95,12 @@ fn every_rejected_message_uses_known_placeholders() {
                 .map(|entry| entry.support),
         );
         for support in supports {
-            if let Support::Rejected { message } = support {
+            if let Support::Rejected { message } | Support::SupportedWithFormats { message, .. } =
+                support
+            {
                 for name in placeholder(message) {
                     assert!(
-                        matches!(name.as_str(), "option" | "command" | "file"),
+                        matches!(name.as_str(), "option" | "command" | "file" | "formats"),
                         "{} has the unknown placeholder <{name}>: {message}",
                         row.option
                     );
@@ -390,13 +394,11 @@ fn the_impact_statusline_rejects_the_output_and_gate_options() {
 #[test]
 fn commands_that_print_to_stdout_reject_output_file() {
     for args in [
-        &["fix", "--dry-run"][..],
-        &["recommend"],
+        &["recommend"][..],
         &["workspaces"],
         &["suppressions"],
         &["viz"],
-        &["rule-pack", "list"],
-        &["agent", "status"],
+        &["rule-pack", "schema"],
         &["impact", "status"],
     ] {
         let mut argv = args.to_vec();
@@ -483,4 +485,38 @@ fn the_regression_options_keep_their_error_order() {
         "--save-regression-baseline"
     );
     assert_eq!(first(&["fix", "--tolerance", "2"]), "--tolerance");
+}
+
+#[test]
+fn output_file_works_with_the_formats_that_write_the_file() {
+    for (args, format) in [
+        (&["agent", "status"][..], "json"),
+        (&["agent", "install"], "json"),
+        (&["rule-pack", "list"], "json"),
+        (&["fix", "--dry-run"], "github-summary"),
+    ] {
+        let mut argv = args.to_vec();
+        argv.extend(["--output-file", "o.out", "--format", format]);
+        assert_eq!(rejection(&argv), None, "{argv:?}");
+
+        let mut argv = args.to_vec();
+        argv.extend(["--output-file", "o.out", "--format", "markdown"]);
+        let message = rejection(&argv).unwrap_or_else(|| panic!("{argv:?} is rejected"));
+        assert_eq!(
+            message,
+            format!(
+                "`fallow {}` writes the file of `--output-file` only with `--format {format}`. With another format it prints its output to stdout, so `--output-file` has no effect.",
+                if args[0] == "rule-pack" {
+                    "rule-pack list"
+                } else {
+                    args[0]
+                }
+            )
+        );
+    }
+    assert!(rejection(&["agent", "status", "--output-file", "o.out"]).is_some());
+    assert_eq!(
+        rejection(&["agent", "status", "--format", "markdown"]),
+        None
+    );
 }

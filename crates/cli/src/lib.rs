@@ -406,7 +406,7 @@ fn run_command() -> ExitCode {
         return error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
     }
     if let Some(message) = rejected_option {
-        return reject_global_option(&cli, &fmt, &message);
+        return cli_startup::reject_global_option(&cli, &fmt, &message);
     }
 
     if let Some(code) = run_schema_command_if_requested(&cli, fmt.json_style) {
@@ -901,43 +901,6 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
 /// of the bare run; [`global_option_support`] covers the global options.
 fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
     similar_code_help::first_bare_run_option(cli)
-}
-
-/// Emit the error of a global option that the command rejects. The commands
-/// that run before the telemetry run starts (the schema commands, `telemetry`,
-/// `doctor` and the Impact statusline) record no run, as for their other
-/// errors.
-fn reject_global_option(cli: &Cli, fmt: &FormatConfig, message: &str) -> ExitCode {
-    let records_no_run = is_impact_statusline(cli)
-        || matches!(
-            cli.command,
-            Some(
-                Command::Schema(_)
-                    | Command::ConfigSchema
-                    | Command::PluginSchema
-                    | Command::RulePackSchema
-                    | Command::Telemetry { .. }
-                    | Command::Doctor
-            )
-        );
-    if records_no_run {
-        return error::emit_input_error_with_style(message, fmt.output, fmt.json_style);
-    }
-    let telemetry_run = start_telemetry_run(cli, fmt);
-    let code = emit_known_failure_with_style(
-        message,
-        exit_codes::INVALID_INPUT,
-        fmt.output,
-        fmt.json_style,
-        telemetry::FailureReason::Validation,
-    );
-    record_run_epilogue(
-        telemetry_run,
-        code,
-        Some(telemetry::FailureReason::Validation),
-        cli.parent_run.as_deref(),
-        None,
-    )
 }
 
 fn run_schema_command_if_requested(
@@ -1548,7 +1511,11 @@ mod tests {
                     .clone()
                     .try_get_matches_from(argv)
                     .expect("global dupes flag parses");
-                global_option_support::rejected_option(&root, &matches)
+                global_option_support::rejected_option(
+                    &root,
+                    &matches,
+                    fallow_config::OutputFormat::Human,
+                )
             };
 
             assert_eq!(

@@ -92,6 +92,9 @@ fn command_args(command: &str, project: &Path, scratch: &Path) -> Option<Vec<Str
                 "markdown".into(),
             ]
         }
+        "agent" => vec!["agent".into(), "status".into()],
+        "fix" => vec!["fix".into(), "--dry-run".into()],
+        "rule-pack list" => vec!["rule-pack".into(), "list".into()],
         "flags" => vec!["flags".into(), "--retirement".into()],
         "list" => vec!["list".into(), "--entry-weight".into()],
         _ => return None,
@@ -112,35 +115,47 @@ fn run_quiet(project: &Path, args: &[&str]) -> Vec<u8> {
         .stdout
 }
 
-/// The status of `command` in a `command_support` value: the entry of the
+/// The support of `command` in a `command_support` value: the entry of the
 /// longest command path, else the default.
-fn status_of(support: &serde_json::Value, command: &str) -> String {
+fn support_of(support: &serde_json::Value, command: &str) -> serde_json::Value {
     let entries = support["commands"].as_array().expect("commands");
     let mut path = command;
     loop {
         if let Some(entry) = entries.iter().find(|entry| entry["command"] == path) {
-            return entry["status"].as_str().expect("status").to_owned();
+            return entry.clone();
         }
         match path.rsplit_once(' ') {
             Some((parent, _)) => path = parent,
-            None => {
-                return support["default"]["status"]
-                    .as_str()
-                    .expect("status")
-                    .to_owned();
-            }
+            None => return support["default"].clone(),
         }
     }
+}
+
+/// One supported pair of a file option and a command path.
+struct Pair {
+    option: String,
+    command: String,
+    /// The formats to run. `None` runs the format of the command line, or
+    /// JSON when the command line names none.
+    formats: Option<Vec<String>>,
+    /// The formats that the command rejects for the option.
+    rejected_formats: Vec<String>,
 }
 
 /// Each supported pair of a file option and a command path. The paths are
 /// the bare run, each top-level command and each subcommand path that a row
 /// names.
-fn supported_pairs() -> Vec<(String, String)> {
+fn supported_pairs() -> Vec<Pair> {
     let reference = run_fallow_raw(&["schema", "--cli-reference"]);
     assert_eq!(reference.code, 0, "{}", reference.stderr);
     let doc: serde_json::Value = serde_json::from_str(&reference.stdout).expect("reference JSON");
     let globals = doc["global_options"].as_array().expect("global_options");
+    let all_formats: Vec<String> = doc["output_formats"]
+        .as_array()
+        .expect("output_formats")
+        .iter()
+        .map(|format| format["name"].as_str().expect("name").to_owned())
+        .collect();
     let mut commands = vec![BARE_RUN.to_owned()];
     commands.extend(
         doc["commands"]
@@ -168,18 +183,40 @@ fn supported_pairs() -> Vec<(String, String)> {
             .find(|row| row["long"] == *option)
             .unwrap_or_else(|| panic!("{option} is a global option"));
         for command in &commands {
-            if status_of(&row["command_support"], command) == "supported" {
-                pairs.push(((*option).to_owned(), command.clone()));
-            }
+            let support = support_of(&row["command_support"], command);
+            let (formats, rejected_formats) = match support["status"].as_str() {
+                Some("supported") => (None, Vec::new()),
+                Some("supported_with_formats") => {
+                    let allowed: Vec<String> = support["formats"]
+                        .as_array()
+                        .expect("formats")
+                        .iter()
+                        .map(|format| format.as_str().expect("format").to_owned())
+                        .collect();
+                    let rejected = all_formats
+                        .iter()
+                        .filter(|format| !allowed.contains(format))
+                        .cloned()
+                        .collect();
+                    (Some(allowed), rejected)
+                }
+                _ => continue,
+            };
+            pairs.push(Pair {
+                option: (*option).to_owned(),
+                command: command.clone(),
+                formats,
+                rejected_formats,
+            });
         }
     }
     pairs
 }
 
-/// The result of one run of [`check_file`].
+/// The result of one check of a pair.
 enum FileCheck {
-    /// The command ended without an error and wrote content.
-    Written,
+    /// The pair behaves as the table states.
+    Pass,
     /// What went wrong.
     Problem(String),
 }
@@ -190,6 +227,7 @@ enum FileCheck {
 /// prints [`WATCH_READY`], and `watch` then writes the file.
 fn check_file(
     args: &[String],
+    format: Option<&str>,
     option: &str,
     project: &Path,
     home: &Path,
@@ -204,8 +242,14 @@ fn check_file(
         .env("HOME", home);
     scrub_analysis_env(&mut cmd);
     cmd.current_dir(project).args(args);
-    if !args.iter().any(|arg| arg == "--format") {
-        cmd.args(["--format", "json"]);
+    match format {
+        Some(format) => {
+            cmd.args(["--format", format]);
+        }
+        None if !args.iter().any(|arg| arg == "--format") => {
+            cmd.args(["--format", "json"]);
+        }
+        None => {}
     }
     let file_arg = file.to_str().expect("utf8 path");
     if option == "--save-regression-baseline" {
@@ -245,7 +289,7 @@ fn check_file(
         return FileCheck::Problem(format!("the command exited with {status}: {stderr}"));
     }
     if std::fs::metadata(file).is_ok_and(|meta| meta.len() > 0) {
-        FileCheck::Written
+        FileCheck::Pass
     } else {
         FileCheck::Problem(format!("no content in {}", file.display()))
     }
@@ -284,35 +328,95 @@ fn committed_fixture() -> tempfile::TempDir {
     project
 }
 
+/// Run the command with a format that it rejects for the option, and
+/// return the problem when it does not exit with code 2.
+fn check_rejected_format(
+    args: &[String],
+    format: &str,
+    option: &str,
+    project: &Path,
+    file: &Path,
+) -> FileCheck {
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    scrub_analysis_env(&mut cmd);
+    let output = cmd
+        .current_dir(project)
+        .args(args)
+        .args([
+            "--format",
+            format,
+            option,
+            file.to_str().expect("utf8 path"),
+        ])
+        .arg("--quiet")
+        .output()
+        .expect("run fallow");
+    if output.status.code() == Some(2) {
+        FileCheck::Pass
+    } else {
+        FileCheck::Problem(format!(
+            "--format {format} exited with {}, not 2",
+            output.status
+        ))
+    }
+}
+
 #[test]
 fn each_supported_file_option_writes_its_file() {
     let pairs = supported_pairs();
     assert!(
         pairs
             .iter()
-            .any(|(option, command)| option == "--save-regression-baseline"
-                && command == "dead-code"),
+            .any(|pair| pair.option == "--save-regression-baseline" && pair.command == "dead-code"),
         "the reference marks dead-code --save-regression-baseline as supported"
     );
+    assert!(
+        pairs.iter().any(|pair| pair.formats.is_some()),
+        "the reference marks some pairs as supported with some formats"
+    );
     let mut failures = Vec::new();
-    for (option, command) in &pairs {
+    for pair in &pairs {
+        let (option, command) = (&pair.option, &pair.command);
         if NOT_RUNNABLE.iter().any(|(name, _)| name == command) {
             continue;
         }
-        let project = committed_fixture();
-        let scratch = tempfile::tempdir().expect("scratch dir");
-        let home = scratch.path().join("home");
-        std::fs::create_dir_all(&home).expect("home dir");
-        let Some(args) = command_args(command, project.path(), scratch.path()) else {
-            failures.push(format!(
-                "{command} {option}: the table marks the pair as supported, but the test has no command line for {command}"
-            ));
-            continue;
-        };
-        let file = scratch.path().join("written.out");
-        if let FileCheck::Problem(problem) = check_file(&args, option, project.path(), &home, &file)
-        {
-            failures.push(format!("{command} {option}: {problem}"));
+        let formats: Vec<Option<&str>> = pair.formats.as_ref().map_or_else(
+            || vec![None],
+            |formats| formats.iter().map(|format| Some(format.as_str())).collect(),
+        );
+        for format in formats {
+            let project = committed_fixture();
+            let scratch = tempfile::tempdir().expect("scratch dir");
+            let home = scratch.path().join("home");
+            std::fs::create_dir_all(&home).expect("home dir");
+            let Some(args) = command_args(command, project.path(), scratch.path()) else {
+                failures.push(format!(
+                    "{command} {option}: the table marks the pair as supported, but the test has no command line for {command}"
+                ));
+                break;
+            };
+            let file = scratch.path().join("written.out");
+            if let FileCheck::Problem(problem) =
+                check_file(&args, format, option, project.path(), &home, &file)
+            {
+                failures.push(format!("{command} {option} {format:?}: {problem}"));
+            }
+            if format
+                == pair
+                    .formats
+                    .as_ref()
+                    .and_then(|f| f.first())
+                    .map(String::as_str)
+            {
+                for rejected in &pair.rejected_formats {
+                    if let FileCheck::Problem(problem) =
+                        check_rejected_format(&args, rejected, option, project.path(), &file)
+                    {
+                        failures.push(format!("{command} {option}: {problem}"));
+                    }
+                }
+            }
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
@@ -325,7 +429,7 @@ fn each_skipped_command_is_a_supported_pair() {
     let pairs = supported_pairs();
     for (name, reason) in NOT_RUNNABLE {
         assert!(
-            pairs.iter().any(|(_, command)| command == name),
+            pairs.iter().any(|pair| pair.command == *name),
             "{name} is skipped ({reason}) but has no supported file option"
         );
     }

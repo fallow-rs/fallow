@@ -6,7 +6,8 @@
   - `fallow telemetry` and `fallow impact statusline` with `--sarif-file`, `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `fallow schema`, `config-schema`, `plugin-schema` and `rule-pack-schema` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `fallow telemetry --output-file`.
-  - `fallow agent`, `fix`, `impact`, `recommend`, `rule-pack`, `suppressions`, `viz` and `workspaces` with `--output-file`. These commands print their output to stdout and left an empty file. In JSON format, `agent status` and `rule-pack list` wrote the file; they now also exit with code 2.
+  - `fallow impact`, `recommend`, `suppressions`, `viz`, `workspaces` and the `rule-pack` subcommands other than `list` with `--output-file`. These commands print their output to stdout and left an empty file.
+  - `fallow agent` and `fallow rule-pack list` with `--output-file` and a format other than `--format json`, and `fallow fix` with `--output-file` and a format other than `--format github-summary`. These formats left an empty file. The formats that write the file keep working, and the CLI reference lists them as `supported_with_formats`.
   - `fallow impact statusline` with `--ci` or `--fail-on-issues`.
   - `fallow workspaces` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
   - `--tolerance 0` on `fallow doctor` and on each command without a regression baseline. The earlier checks compared the value with `0` and so missed an explicit `0`.

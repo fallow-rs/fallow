@@ -1524,7 +1524,11 @@ other regression options in that order.
 
 An option that names a file is never ignored: the command writes or reads
 the file, or the command line fails. A command that prints its output to
-stdout, such as `fix`, `recommend` or `impact`, rejects `--output-file`.
+stdout, such as `recommend` or `impact`, rejects `--output-file`. A command
+that writes the file only with some output formats has the status
+`supported_with_formats`: `agent` and `rule-pack list` with `--format json`,
+and `fix` with `--format github-summary`. With another format, the command
+line fails with exit 2.
 
 The help of `fallow security` hides each global option that the table does
 not mark as supported for `security`. `fallow schema --cli-reference` exports
@@ -1570,8 +1574,9 @@ The document has these top-level fields:
   has a `command_support` object: `default` is the support of each command
   that `commands[]` does not name, and `commands[]` gives the support of the
   other commands, each with `command`. A support has a `status` of
-  `supported`, `ignored` (with a `reason`) or `rejected` (with the error
-  `message`). In a message, `<option>` stands for the long option and
+  `supported`, `supported_with_formats` (with the `formats` that the command
+  supports the option with, and the error `message` for another format),
+  `ignored` (with a `reason`) or `rejected` (with the error `message`). In a message, `<option>` stands for the long option and
   `<command>` for the command name. The command name `fallow` stands for a
   run without a subcommand.
 - `commands[]`: the top-level commands in the order and with the

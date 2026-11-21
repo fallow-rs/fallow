@@ -495,7 +495,11 @@ mod tests {
             });
         if table_rejects {
             assert_eq!(
-                crate::global_option_support::rejected_option(&root, &matches),
+                crate::global_option_support::rejected_option(
+                    &root,
+                    &matches,
+                    fallow_config::OutputFormat::Human,
+                ),
                 Some(format!(
                     "{expected} is not valid with this `fallow similar-code` command."
                 )),

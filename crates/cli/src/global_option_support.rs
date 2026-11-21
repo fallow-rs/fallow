@@ -3,9 +3,10 @@
 //! clap propagates a global option to every subcommand, so `fallow init
 //! --save-baseline x` parses. [`GLOBAL_OPTION_SUPPORT`] states for each global
 //! option what each command does with it: the command uses the
-//! option ([`Support::Supported`]), the command accepts the option and does
-//! not use it ([`Support::Ignored`]), or the command line fails with exit 2
-//! ([`Support::Rejected`]).
+//! option ([`Support::Supported`]), the command uses it only with some output
+//! formats ([`Support::SupportedWithFormats`]), the command accepts the option
+//! and does not use it ([`Support::Ignored`]), or the command line fails with
+//! exit 2 ([`Support::Rejected`]).
 //!
 //! A row names a command by its path, for example `dupes` or
 //! `impact statusline`. A subcommand without an entry of its own has the
@@ -23,9 +24,12 @@
 //! ignored or rejected only where the code is known to ignore or reject the
 //! option.
 
-use clap::ArgMatches;
 use clap::parser::ValueSource;
+use clap::{ArgMatches, ValueEnum};
+use fallow_config::OutputFormat;
 use serde_json::{Value, json};
+
+use crate::cli_format::Format;
 
 /// The command name that the table uses for a run without a subcommand.
 pub const BARE_RUN: &str = "fallow";
@@ -35,6 +39,16 @@ pub const BARE_RUN: &str = "fallow";
 pub enum Support {
     /// The command uses the option.
     Supported,
+    /// The command uses the option with the output formats in `formats`. With
+    /// another format, the command line fails with exit 2.
+    SupportedWithFormats {
+        /// The output formats with which the command uses the option.
+        formats: &'static [Format],
+        /// The error message for another format. `<formats>` stands for the
+        /// list of `formats`, and `<option>` and `<command>` as for
+        /// [`Support::Rejected`].
+        message: &'static str,
+    },
     /// The command accepts the option and does not use it.
     Ignored {
         /// Why the option has no effect on this command.
@@ -122,6 +136,11 @@ impl GlobalOptionSupport {
 fn support_json(support: Support) -> Value {
     match support {
         Support::Supported => json!({ "status": "supported" }),
+        Support::SupportedWithFormats { formats, message } => json!({
+            "status": "supported_with_formats",
+            "formats": formats.iter().map(|format| format_name(*format)).collect::<Vec<_>>(),
+            "message": message,
+        }),
         Support::Ignored { reason } => json!({ "status": "ignored", "reason": reason }),
         Support::Rejected { message } => json!({ "status": "rejected", "message": message }),
     }
@@ -131,6 +150,17 @@ const fn supported(command: &'static str) -> CommandSupport {
     CommandSupport {
         command,
         support: Support::Supported,
+    }
+}
+
+const fn supported_with_formats(
+    command: &'static str,
+    formats: &'static [Format],
+    message: &'static str,
+) -> CommandSupport {
+    CommandSupport {
+        command,
+        support: Support::SupportedWithFormats { formats, message },
     }
 }
 
@@ -158,6 +188,7 @@ const OUTPUT_GATE_MESSAGE: &str = "--ci, --fail-on-issues, --sarif-file, and --o
 const BASELINES_MESSAGE: &str = "`fallow baselines prune` does not accept `<option>`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config.";
 const SECURITY_MESSAGE: &str = "<option> is not valid with `fallow security`.";
 const SUBCOMMAND_MESSAGE: &str = "<option> is not valid with `fallow <command>`.";
+const FORMATS_OUTPUT_FILE_MESSAGE: &str = "`fallow <command>` writes the file of `--output-file` only with <formats>. With another format it prints its output to stdout, so `--output-file` has no effect.";
 const STDOUT_REPORT_MESSAGE: &str = "`fallow <command>` prints its output to stdout, so `--output-file` has no effect. Redirect stdout to a file instead.";
 const DOCTOR_MESSAGE: &str = "<option> is not valid with `fallow doctor`.";
 const DOCTOR_OUTPUT_FILE_MESSAGE: &str = "--output-file is not valid with `fallow doctor`; doctor is read-only and writes its report to stdout";
@@ -222,10 +253,15 @@ const OUTPUT_GATE_REJECTED: &[CommandSupport] = &[
 ];
 
 /// The commands that print their output to stdout and do not write the file
-/// of `--output-file`.
+/// of `--output-file`, or write it only with some output formats.
 const STDOUT_REPORT_COMMANDS: &[CommandSupport] = &[
-    rejected("agent", STDOUT_REPORT_MESSAGE),
-    rejected("fix", STDOUT_REPORT_MESSAGE),
+    supported_with_formats("agent", &[Format::Json], FORMATS_OUTPUT_FILE_MESSAGE),
+    supported_with_formats("fix", &[Format::GithubSummary], FORMATS_OUTPUT_FILE_MESSAGE),
+    supported_with_formats(
+        "rule-pack list",
+        &[Format::Json],
+        FORMATS_OUTPUT_FILE_MESSAGE,
+    ),
     rejected("impact", STDOUT_REPORT_MESSAGE),
     rejected("recommend", STDOUT_REPORT_MESSAGE),
     rejected("rule-pack", STDOUT_REPORT_MESSAGE),
@@ -514,12 +550,17 @@ pub fn option_support(option: &str) -> Option<&'static GlobalOptionSupport> {
 }
 
 /// The error message for the first global option on the command line that
-/// the command rejects, or `None` when the command accepts each one.
+/// the command rejects with the resolved output format `output`, or `None`
+/// when the command accepts each one.
 ///
 /// Call it with the matches of the root command, before `FromArgMatches`
 /// takes the values out of them.
 #[must_use]
-pub fn rejected_option(root: &clap::Command, matches: &ArgMatches) -> Option<String> {
+pub fn rejected_option(
+    root: &clap::Command,
+    matches: &ArgMatches,
+    output: OutputFormat,
+) -> Option<String> {
     let (path, leaf) = command_path(matches);
     let command = if path.is_empty() {
         BARE_RUN
@@ -527,13 +568,46 @@ pub fn rejected_option(root: &clap::Command, matches: &ArgMatches) -> Option<Str
         path.as_str()
     };
     GLOBAL_OPTION_SUPPORT.iter().find_map(|row| {
-        let (Support::Rejected { message }, decided_by) = row.lookup(command) else {
-            return None;
+        let (support, decided_by) = row.lookup(command);
+        let message = match support {
+            Support::Rejected { message } => message,
+            Support::SupportedWithFormats { formats, message }
+                if !formats.iter().any(|format| same_format(*format, output)) =>
+            {
+                message
+            }
+            _ => return None,
         };
         let id = global_arg_id(root, row.option)?;
-        (leaf.value_source(id) == Some(ValueSource::CommandLine))
-            .then(|| render(message, row.option, decided_by))
+        (leaf.value_source(id) == Some(ValueSource::CommandLine)).then(|| {
+            render(message, row.option, decided_by).replace("<formats>", &formats_text(support))
+        })
     })
+}
+
+/// Whether the `--format` value `format` selects the output format `output`.
+fn same_format(format: Format, output: OutputFormat) -> bool {
+    std::mem::discriminant(&OutputFormat::from(format)) == std::mem::discriminant(&output)
+}
+
+/// The `--format` value of `format`, for example `json`.
+fn format_name(format: Format) -> String {
+    format
+        .to_possible_value()
+        .map_or_else(String::new, |value| value.get_name().to_owned())
+}
+
+/// The formats of a [`Support::SupportedWithFormats`] as message text, for
+/// example `` `--format json` ``.
+fn formats_text(support: Support) -> String {
+    let Support::SupportedWithFormats { formats, .. } = support else {
+        return String::new();
+    };
+    formats
+        .iter()
+        .map(|format| format!("`--format {}`", format_name(*format)))
+        .collect::<Vec<_>>()
+        .join(" or ")
 }
 
 /// The subcommand path of `matches`, such as `impact statusline`, and the

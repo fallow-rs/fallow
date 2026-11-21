@@ -5,7 +5,7 @@ use super::{Cli, Command, CoverageCli, ImpactCli, RulePackCli};
 use crate::cli_hooks::HooksCli;
 use crate::json_style::{JsonStyle, LeanStyle};
 
-#[derive(Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Format {
     Human,
     Json,
