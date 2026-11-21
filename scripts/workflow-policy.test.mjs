@@ -1246,6 +1246,7 @@ test("release publication waits for the aggregate verification gate", () => {
   const gate = indentedBlock(workflow, "release-verified", 2);
   const publishCrates = indentedBlock(workflow, "publish-crates", 2);
   const releaseAssets = indentedBlock(workflow, "release-assets", 2);
+  const sbom = indentedBlock(workflow, "sbom", 2);
   const releaseReady = indentedBlock(workflow, "release-ready", 2);
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
   const vscodePrep = indentedBlock(workflow, "vscode-prep", 2);
@@ -1313,6 +1314,8 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
   assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke, sbom\]/);
+  assert.match(sbom, /sbom-attest generate --package fallow-cli --target "\$FALLOW_TARGET"/u);
+  assert.match(sbom, /sbom-attest audit "sbom\/fallow-\$\{FALLOW_TARGET\}\.cdx\.json"/u);
   assert.match(releaseAssets, /permissions:\n\s+contents: read/);
   assert.match(releaseAssets, /pattern: fallow-\*/);
   assert.match(npmPublish, /needs: \[npm-prep, release-assets\]/);
