@@ -727,9 +727,9 @@ line states exit code 0.
   - demoted: the key is new, and no instance holds an added line (#2164);
   - edited: each instance maps to a different instance of one base group,
     and each instance grows by fewer lines than `duplicates.minLines` (its
-    head line count minus the line count of its mapped base span), so the
-    added lines cannot be a clone alone. A rewrite that keeps the line count
-    does not grow;
+    head line count minus the line count of its mapped base span). The rule
+    reads the line count only: a rewrite that keeps the size of every copy
+    is an edit, also when it rewrites many lines with new identical text;
   - new: every other group.
   The mapping takes each head instance to its base path through the rename
   list and the diff renames, and to its base lines through the line changes

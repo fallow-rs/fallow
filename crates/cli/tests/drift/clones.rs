@@ -34,7 +34,10 @@ pub fn clone_spans(symbol: &str) -> Option<Vec<CloneSpan>> {
         .collect()
 }
 
-/// The clone groups of the base keys, at base paths.
+/// The clone groups of the base keys, at base paths. The harness passes no
+/// accepted groups to the edit check: no drift case sets
+/// `duplicates.ignoredClones`, and an accepted group changes only which entry
+/// accepts a region, not whether its group is an edit.
 pub fn base_clone_groups(base_keys: &[FindingKey]) -> Vec<BaseCloneGroup> {
     base_keys
         .iter()

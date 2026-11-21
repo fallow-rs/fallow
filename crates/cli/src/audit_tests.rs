@@ -2627,7 +2627,21 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         boundary_edges: std::iter::once("ui->-db".to_string()).collect(),
         cycles: std::iter::once("a.ts|b.ts".to_string()).collect(),
         public_api: std::iter::once("src/index.ts::foo".to_string()).collect(),
-        accepted_dupe_groups: Vec::new(),
+        accepted_dupe_groups: vec![fallow_api::diff_risk::clones::AcceptedCloneGroup {
+            key: "dup:0bbbe8b1:2".to_string(),
+            instances: vec![
+                fallow_api::diff_risk::clones::CloneSpan {
+                    path: "src/c.ts".to_string(),
+                    start_line: 1,
+                    end_line: 10,
+                },
+                fallow_api::diff_risk::clones::CloneSpan {
+                    path: "src/d.ts".to_string(),
+                    start_line: 4,
+                    end_line: 13,
+                },
+            ],
+        }],
         dupe_groups: vec![fallow_api::diff_risk::clones::BaseCloneGroup {
             instances: vec![
                 fallow_api::diff_risk::clones::CloneSpan {
@@ -2689,6 +2703,10 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     assert_eq!(
         decoded.dupe_groups, snapshot.dupe_groups,
         "clone instance locations survive the cache round trip"
+    );
+    assert_eq!(
+        decoded.accepted_dupe_groups, snapshot.accepted_dupe_groups,
+        "the clone groups that ignoredClones hid survive the cache round trip"
     );
     assert_eq!(decoded.health, snapshot.health);
     assert_eq!(decoded.styling, snapshot.styling);
@@ -3058,7 +3076,14 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         boundary_edges: FxHashSet::default(),
         cycles: FxHashSet::default(),
         public_api: FxHashSet::default(),
-        accepted_dupe_groups: Vec::new(),
+        accepted_dupe_groups: vec![fallow_api::diff_risk::clones::AcceptedCloneGroup {
+            key: "dup:0bbbe8b1:2".to_string(),
+            instances: vec![fallow_api::diff_risk::clones::CloneSpan {
+                path: "src/a.ts".to_string(),
+                start_line: 1,
+                end_line: 10,
+            }],
+        }],
         dupe_groups: Vec::new(),
         inherited_health: Vec::new(),
         own_config_unused_code: None,
@@ -3074,6 +3099,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
     assert_eq!(loaded.dead_code, snapshot.dead_code);
     assert_eq!(loaded.health, snapshot.health);
     assert_eq!(loaded.dupes, snapshot.dupes);
+    assert_eq!(loaded.accepted_dupe_groups, snapshot.accepted_dupe_groups);
 }
 
 #[test]

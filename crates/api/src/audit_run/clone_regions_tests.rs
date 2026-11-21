@@ -570,6 +570,27 @@ fn rewrite_without_growth_in_every_copy() -> Case {
     }
 }
 
+/// The change rewrites the whole body of both copies with the same new text
+/// and keeps their size. The growth rule reads the line count only, so this
+/// is an edit, and the region does not fail the gate.
+fn rewrite_of_the_full_body_of_both_copies() -> Case {
+    Case {
+        groups: vec![group(vec![
+            instance("src/a.js", 1, 16),
+            instance("src/b.js", 1, 16),
+        ])],
+        diff: Some(
+            [
+                replace("src/a.js", 2, 14, 14),
+                replace("src/b.js", 2, 14, 14),
+            ]
+            .concat(),
+        ),
+        base_groups: ab_base(),
+        ..Case::default()
+    }
+}
+
 /// Base copies of 30 lines each. The head parts start one line apart, the
 /// tolerance of a copy that does not grow.
 fn offset_at_the_tolerance() -> Case {
@@ -810,6 +831,11 @@ const ROWS: &[Row] = &[
     (
         "rewrite without growth in every copy",
         rewrite_without_growth_in_every_copy,
+        &[expect(InheritedEdited, false)],
+    ),
+    (
+        "rewrite of the full body of both copies",
+        rewrite_of_the_full_body_of_both_copies,
         &[expect(InheritedEdited, false)],
     ),
     (

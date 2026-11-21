@@ -200,8 +200,9 @@ pub enum CloneRegionGrade {
     Inherited,
     /// Each member group lies inside a base group, at the same place of each
     /// base copy, and the change edited one or more of its copies. Each copy
-    /// grows by fewer lines than `duplicates.minLines`, so the edit cannot
-    /// write a clone alone. The region does not fail the gate.
+    /// grows by fewer lines than `duplicates.minLines`. A rewrite that keeps
+    /// the size of every copy counts as an edit. The region does not fail the
+    /// gate.
     InheritedEdited,
 }
 

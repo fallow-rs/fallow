@@ -12,7 +12,9 @@
 //!   line of it.
 //! - `inherited-edited`: each member group lies inside a base group, and the
 //!   change edited one or more of its copies. Each copy grows by fewer lines
-//!   than `duplicates.minLines`, so the edit cannot write a clone alone.
+//!   than `duplicates.minLines`. The rule reads the line count only, so a
+//!   rewrite that keeps the size of every copy is an edit, also when it
+//!   writes many new identical lines.
 //!
 //! The `introduced-clone-group` gate counts regions, and only an
 //! `introduced` region fails it.
@@ -404,9 +406,9 @@ fn span_lines(span: &CloneSpan) -> u32 {
 /// `ignoredClones` did not hide wins.
 ///
 /// The growth of a copy is its head line count minus the line count of its
-/// mapped base span. Each copy must grow by fewer than `min_lines` lines, so
-/// the lines that the change added cannot be a clone alone. A rewrite that
-/// keeps the line count does not grow the copy. `mapped` holds the base span
+/// mapped base span. Each copy must grow by fewer than `min_lines` lines. A
+/// rewrite that keeps the line count does not grow the copy, so it is an
+/// edit, also when it rewrites the whole copy. `mapped` holds the base span
 /// of each head span, `None` for a span with no base lines.
 fn edited_fit<'a>(
     head: &[CloneSpan],
@@ -462,6 +464,8 @@ pub fn edits_base_clone(
 ) -> bool {
     let mapper = BaseMapper::new(change.root, change.diff, change.renames);
     let mapped: Vec<Option<CloneSpan>> = head.iter().map(|span| mapper.base_span(span)).collect();
+    // No accepted groups: an accepted base group changes only which entry
+    // accepts the region, not whether the group is an edit.
     edited_fit(head, &mapped, base_groups, &[], min_lines).is_some()
 }
 
