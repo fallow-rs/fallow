@@ -1298,6 +1298,38 @@ mod tests {
     }
 
     #[test]
+    fn enum_fix_folds_two_neighbour_enums_at_the_end_of_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("e.ts");
+        std::fs::write(&file, "export enum A {\n  a,\n}\nexport enum B {\n  b,\n}").unwrap();
+        let m1 = make_enum_member(&file, "A", "a", 2);
+        let m2 = make_enum_member(&file, "B", "b", 5);
+        let mut members_by_file: FxHashMap<PathBuf, Vec<&UnusedMember>> = FxHashMap::default();
+        members_by_file.insert(file.clone(), vec![&m1, &m2]);
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::for_root(root).unwrap();
+        apply_enum_member_fixes(EnumMemberFixInput {
+            root,
+            members_by_file: &members_by_file,
+            hashes: &capture_hashes(&[&file]),
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
+        assert!(plan.commit().failed.is_empty());
+
+        let mut names: Vec<&str> = fixes
+            .iter()
+            .map(|fix| fix["name"].as_str().unwrap())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, ["A", "B"]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+    }
+
+    #[test]
     fn fold_skipped_for_non_exported_enum() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

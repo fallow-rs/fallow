@@ -281,3 +281,23 @@ fn read_source_snapshot_returns_the_analysed_text() {
     assert_eq!(plan.skipped().len(), 1);
     assert_eq!(plan.skipped()[0].reason, SkipReason::ContentChanged);
 }
+
+#[test]
+fn queue_joins_deletions_that_share_a_line_ending() {
+    let path = Path::new("/project/a.ts");
+    let content = "enum A {\n  a,\n}\nenum B {\n  b,\n}";
+    let mut snapshots = snapshots_with(path, content);
+    let first = line_deletions(content, "\n", &[0, 1, 2]);
+    let second = line_deletions(content, "\n", &[3, 4, 5]);
+    assert_eq!(snapshots.queue(path, first), QueueOutcome::Queued);
+    assert_eq!(snapshots.queue(path, second), QueueOutcome::Queued);
+    let rewrites = snapshots.into_rewrites();
+    assert_eq!(rewrites[0].2, b"");
+
+    let mut snapshots = snapshots_with(path, content);
+    assert_eq!(
+        snapshots.queue(path, vec![deletion(0, 12), deletion(10, 20)]),
+        QueueOutcome::Conflict,
+        "deletions that share more than a line ending still conflict"
+    );
+}

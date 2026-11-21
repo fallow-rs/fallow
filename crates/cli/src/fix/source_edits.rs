@@ -29,6 +29,18 @@ impl SourceEdit {
     fn overlaps(&self, other: &Self) -> bool {
         self.start < other.end && other.start < self.end
     }
+
+    /// True when `self` and `other` overlap and cannot both apply. Two line
+    /// deletions may share one line ending: the deletion of the last line
+    /// starts at the line ending before it, which the deletion of the line
+    /// above also removes. The plan applies such a pair as one deletion.
+    fn conflicts_with(&self, other: &Self, content: &str, line_ending: &str) -> bool {
+        if !self.overlaps(other) {
+            return false;
+        }
+        let shared = self.start.max(other.start)..self.end.min(other.end);
+        !(self.is_deletion() && other.is_deletion() && content.get(shared) == Some(line_ending))
+    }
 }
 
 /// The result of a request to queue a group of edits for one file.
@@ -83,6 +95,7 @@ impl SourceSnapshots {
             return QueueOutcome::Conflict;
         };
         let content = snapshot.content.as_str();
+        let line_ending = snapshot.meta.line_ending;
         let valid = |edit: &SourceEdit| {
             edit.start < edit.end
                 && edit.end <= content.len()
@@ -94,7 +107,10 @@ impl SourceSnapshots {
         }
         group.sort_by_key(|edit| (edit.start, edit.end));
         group.dedup();
-        if group.windows(2).any(|pair| pair[0].overlaps(&pair[1])) {
+        if group
+            .windows(2)
+            .any(|pair| pair[0].conflicts_with(&pair[1], content, line_ending))
+        {
             return QueueOutcome::Conflict;
         }
 
@@ -108,7 +124,7 @@ impl SourceSnapshots {
                         && edit.end <= queued.end)
                 {
                     covered = true;
-                } else if edit.overlaps(queued) {
+                } else if edit.conflicts_with(queued, content, line_ending) {
                     return QueueOutcome::Conflict;
                 }
             }
@@ -128,16 +144,15 @@ impl SourceSnapshots {
     pub(super) fn into_rewrites(mut self) -> Vec<(PathBuf, Vec<u8>, Vec<u8>)> {
         let mut rewrites = Vec::new();
         for path in self.order {
-            let Some(mut snapshot) = self.by_path.remove(&path) else {
+            let Some(snapshot) = self.by_path.remove(&path) else {
                 continue;
             };
             if snapshot.edits.is_empty() {
                 continue;
             }
-            snapshot.edits.sort_by_key(|edit| edit.start);
             let line_ending = snapshot.meta.line_ending;
             let mut result = snapshot.content.clone();
-            for edit in snapshot.edits.iter().rev() {
+            for edit in merge_shared_line_endings(snapshot.edits).iter().rev() {
                 result.replace_range(edit.start..edit.end, &edit.replacement);
             }
             if snapshot.content.ends_with(line_ending) && !result.ends_with(line_ending) {
@@ -149,6 +164,25 @@ impl SourceSnapshots {
         }
         rewrites
     }
+}
+
+/// The edits sorted by start, with each pair of deletions that share a line
+/// ending joined to one deletion.
+fn merge_shared_line_endings(mut edits: Vec<SourceEdit>) -> Vec<SourceEdit> {
+    edits.sort_by_key(|edit| (edit.start, edit.end));
+    let mut merged: Vec<SourceEdit> = Vec::with_capacity(edits.len());
+    for edit in edits {
+        if let Some(last) = merged.last_mut()
+            && last.is_deletion()
+            && edit.is_deletion()
+            && edit.start < last.end
+        {
+            last.end = last.end.max(edit.end);
+            continue;
+        }
+        merged.push(edit);
+    }
+    merged
 }
 
 /// The analysed text of `path`. The first call reads the file and checks its
