@@ -21354,7 +21354,12 @@
         "summary": "Catalogue security candidate for CWE-79",
         "rationale": "The template engine skips HTML escaping for the wrapped value. If an attacker controls it, their markup and script reach the page. Check the trace before you fix.",
         "example": "`return new Handlebars.SafeString(user.bio);`",
-        "example_files": [],
+        "example_files": [
+          {
+            "path": "src/profile.ts",
+            "code": "import Handlebars from \"handlebars\";\n\ninterface Profile {\n  bio: string;\n}\n\nexport const profileBio = (profile: Profile): Handlebars.SafeString =>\n  new Handlebars.SafeString(profile.bio);\n"
+          }
+        ],
         "example_base_files": [],
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
         "docs": "https://fallow.tools/docs/rules/template-escape-bypass/"
@@ -22796,7 +22801,7 @@
         "example_files": [
           {
             "path": "src/comment-html.ts",
-            "code": "import { DomSanitizer, SafeHtml } from \"@angular/platform-browser\";\n\ninterface Comment {\n  body: string;\n}\n\nexport const trustCommentHtml = (sanitizer: DomSanitizer, comment: Comment): SafeHtml =>\n  sanitizer.bypassSecurityTrustHtml(comment.body);\n"
+            "code": "import { DomSanitizer, SafeHtml } from \"@angular/platform-browser\";\n\ninterface Comment {\n  body: string;\n}\n\nexport class CommentHtml {\n  constructor(private readonly sanitizer: DomSanitizer) {}\n\n  trust(comment: Comment): SafeHtml {\n    return this.sanitizer.bypassSecurityTrustHtml(comment.body);\n  }\n}\n"
           }
         ],
         "example_base_files": [],
@@ -22940,7 +22945,7 @@
         "example_files": [
           {
             "path": "src/preview.ts",
-            "code": "import $ from \"jquery\";\n\ninterface Comment {\n  body: string;\n}\n\nexport const showPreview = (comment: Comment): void => {\n  const preview = $(\"#preview\");\n  preview.html(comment.body);\n};\n"
+            "code": "import $ from \"jquery\";\n\ninterface Comment {\n  body: string;\n}\n\nexport const showPreview = (comment: Comment): void => {\n  $(\"#preview\").html(comment.body);\n};\n"
           }
         ],
         "example_base_files": [],
@@ -23324,7 +23329,7 @@
         "example_files": [
           {
             "path": "src/server.ts",
-            "code": "import express from \"express\";\n\nconst app = express();\napp.use(express.json());\n\napp.post(\"/login\", (req, res) => {\n  console.log(`login ${req.body.email} ${req.body.password}`);\n  res.sendStatus(204);\n});\n\napp.listen(3000);\n"
+            "code": "import express from \"express\";\n\nconst app = express();\napp.use(express.json());\n\napp.post(\"/login\", (req, res) => {\n  console.log(\"login\", req.body.email, req.body.password);\n  res.sendStatus(204);\n});\n\napp.listen(3000);\n"
           }
         ],
         "example_base_files": [],
