@@ -49,6 +49,9 @@ const FILE_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How long a read check waits. `watch` runs until it is stopped.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a child that names the path gets to end on its own, and how long
+/// a child gets to end after SIGTERM.
+const STOP_GRACE: Duration = Duration::from_secs(10);
 /// A part of the message for a format that a command does not support for
 /// `--output-file`.
 const FORMATS_MESSAGE_PART: &str = "writes the file of `--output-file` only with";
@@ -433,8 +436,7 @@ fn check_file(
             break child.wait().expect("wait for watch");
         }
         if start.elapsed() > FILE_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = stop(&mut child, Duration::ZERO);
             return FileCheck::Problem("the command did not end in time".into());
         }
         std::thread::sleep(POLL_INTERVAL);
@@ -447,6 +449,43 @@ fn check_file(
         FileCheck::Pass
     } else {
         FileCheck::Problem(format!("no content in {}", file.display()))
+    }
+}
+
+/// Stop a child that the test no longer needs, and return its exit status
+/// when it ended on its own within `grace`.
+///
+/// A coverage build of `fallow` writes its profile in `exit`. A SIGKILL in
+/// that window leaves a truncated `.profraw` file, and `cargo llvm-cov` then
+/// fails the merge with "file header is corrupt". So the child first gets
+/// `grace` to end on its own, then SIGTERM, which the signal handler of
+/// `fallow` turns into an `exit`. SIGKILL is only the last resort for a
+/// child that ignores both.
+fn stop(child: &mut std::process::Child, grace: Duration) -> Option<std::process::ExitStatus> {
+    if let Some(status) = wait_for(child, grace) {
+        return Some(status);
+    }
+    if cfg!(unix) {
+        stop_with_sigterm(child.id());
+        if wait_for(child, STOP_GRACE).is_some() {
+            return None;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    None
+}
+
+fn wait_for(child: &mut std::process::Child, limit: Duration) -> Option<std::process::ExitStatus> {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("poll fallow") {
+            return Some(status);
+        }
+        if start.elapsed() > limit {
+            return None;
+        }
+        std::thread::sleep(POLL_INTERVAL);
     }
 }
 
@@ -611,7 +650,7 @@ fn each_skipped_command_is_a_supported_pair() {
 /// config of `case`, and with the extra arguments, the option and a path
 /// that does not exist when `with_option` holds. The base run has the extra
 /// arguments too when [`ReadCase::extra_in_base`] holds. The run ends, or it
-/// is stopped after [`FILE_TIMEOUT`] or when its output names the path.
+/// is stopped after [`READ_TIMEOUT`] or when its output names the path.
 fn run_read_case(
     args: &[String],
     case: &ReadCase,
@@ -656,10 +695,11 @@ fn run_read_case(
         if let Some(status) = child.try_wait().expect("poll fallow") {
             break Some(status);
         }
-        if (with_option && names_path()) || start.elapsed() > READ_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            break None;
+        if with_option && names_path() {
+            break stop(&mut child, STOP_GRACE);
+        }
+        if start.elapsed() > READ_TIMEOUT {
+            break stop(&mut child, Duration::ZERO);
         }
         std::thread::sleep(POLL_INTERVAL);
     };
