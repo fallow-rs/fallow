@@ -461,20 +461,6 @@ pub fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<St
     dead_code_occurrence_keys(items, &IdentityPaths::new(root))
 }
 
-/// Build the set of audit attribution keys for all dead-code findings in
-/// `results`.
-///
-/// Each key is a stable string that uniquely identifies one finding across
-/// runs (e.g. `unused-file:src/dead.ts`, `unused-export:src/a.ts:Foo`).
-/// `retain_introduced_dead_code` and `annotate_dead_code_json` use the same
-/// key format to diff the current run against a base snapshot.
-///
-/// This destructure is deliberately exhaustive: adding a field to
-/// `AnalysisResults` must fail compilation here so the author decides
-/// explicitly whether the new finding type needs an audit key (add a loop)
-/// or has no key representation today (bind with underscore and document why).
-///
-/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
 /// The six dependency-related finding slices, bundled so the dependency
 /// dispatcher takes one parameter instead of six.
 #[derive(Clone, Copy)]
@@ -517,7 +503,21 @@ struct ComponentContractFindingSlices<'a> {
     unproduced_catch_tags: &'a [fallow_types::output_dead_code::UnproducedCatchTagFinding],
 }
 
-/// `dead_code_keys`, `retain_introduced_dead_code`.
+/// Build the set of audit attribution keys for all dead-code findings in
+/// `results`.
+///
+/// Each key is a stable string that uniquely identifies one finding across
+/// runs (e.g. `unused-file:src/dead.ts`, `unused-export:src/a.ts:Foo`).
+/// `retain_introduced_dead_code` and `annotate_dead_code_json` use the same
+/// key format to diff the current run against a base snapshot.
+///
+/// This destructure is deliberately exhaustive: adding a field to
+/// `AnalysisResults` must fail compilation here so the author decides
+/// explicitly whether the new finding type needs an audit key (add a loop)
+/// or has no key representation today (bind with underscore and document why).
+///
+/// Sibling exhaustive sites: `retain_in_scope` in `crates/engine/src/result_scope.rs`,
+/// `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection `off` filter branches in
@@ -1349,7 +1349,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// retain block) or has no key representation today (bind with underscore and
 /// document why).
 ///
-/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `retain_in_scope` in `crates/engine/src/result_scope.rs`,
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this

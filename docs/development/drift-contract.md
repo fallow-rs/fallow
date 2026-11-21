@@ -308,7 +308,9 @@ tests are in `crates/engine/src/changed_files.rs`,
 - **Status**: checked by the harness. The scope filters have one
   implementation each in `fallow-engine`: `dead_code::apply_scope`,
   `duplicates::apply_scope` and the diff filters in `diff_scope`. The CLI and
-  `fallow_api` call them.
+  `fallow_api` call them. The three dead-code scope filters share one
+  visitor, `retain_in_scope` in `crates/engine/src/result_scope.rs`, and each
+  scope is a `ResultScope` type.
 
 ### I9: work counters are deterministic
 

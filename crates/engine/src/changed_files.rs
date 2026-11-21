@@ -5,17 +5,13 @@ use std::process::{Command, Output};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use fallow_types::{
-    output_dead_code::{
-        CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-        PackageCycleFinding, PropDrillingChainFinding, ReExportCycleFinding,
-        UnlistedDependencyFinding,
-    },
-    results::{AnalysisResults, SecurityFinding},
-};
+use fallow_types::results::{AnalysisResults, SecurityFinding};
 use rustc_hash::FxHashSet;
 
 use crate::duplicates::{self, DuplicationReport};
+use crate::result_scope::{
+    Anchor, ComponentRule, OwnerRule, ProjectFinding, ResultScope, SiteRule,
+};
 
 pub use crate::git_env::{
     AMBIENT_GIT_ENV_VARS, clear_ambient_git_env, git_command as git_command_in,
@@ -761,378 +757,47 @@ impl ChangedPathScope for NormalizedChangedFiles {
     }
 }
 
+/// A path scope as a result scope: a finding is in scope when its file is.
+struct ChangedPaths<'a, S: ChangedPathScope>(&'a S);
+
+impl<S: ChangedPathScope> ResultScope for ChangedPaths<'_, S> {
+    fn keeps(&self, anchor: Anchor<'_>) -> bool {
+        match anchor {
+            Anchor::Line { path, .. } | Anchor::File { path } => self.0.contains(path),
+        }
+    }
+
+    fn keeps_project_finding(&self, finding: ProjectFinding<'_>) -> bool {
+        match finding {
+            ProjectFinding::ManifestDependency { .. } | ProjectFinding::CatalogEntry => true,
+            ProjectFinding::EmptyCatalogGroup { path } => self.0.contains_workspace(path),
+            ProjectFinding::CatalogReference { path }
+            | ProjectFinding::DependencyOverride { path } => self.0.contains(path),
+        }
+    }
+
+    fn keeps_security_finding(&self, finding: &SecurityFinding) -> bool {
+        security_finding_touches_changed_path(finding, self.0)
+    }
+
+    fn site_rule(&self) -> SiteRule {
+        SiteRule::AnySite
+    }
+
+    fn owner_rule(&self) -> OwnerRule {
+        OwnerRule::TrimOwners
+    }
+
+    fn component_rule(&self) -> ComponentRule {
+        ComponentRule::All
+    }
+}
+
 pub(crate) fn filter_results_by_path_scope(
     results: &mut AnalysisResults,
     scope: &impl ChangedPathScope,
 ) {
-    if let Some(inventory) = &mut results.shared_state {
-        inventory.retain_sites(|site| scope.contains(&site.path));
-    }
-    classify_changed_file_filter_fields(results);
-    retain_basic_issue_findings_by_changed_path(results, scope);
-    retain_graph_findings_by_changed_files(results, scope);
-    retain_boundary_policy_and_suppression_findings(results, scope);
-    retain_security_and_workspace_findings(results, scope);
-    retain_framework_findings_by_changed_files(results, scope);
-}
-fn classify_changed_file_filter_fields(results: &AnalysisResults) {
-    let AnalysisResults {
-        shared_state: _,
-        unused_files: _unused_files,
-        unused_exports: _unused_exports,
-        unused_types: _unused_types,
-        private_type_leaks: _private_type_leaks,
-        deprecated_exports_in_use: _deprecated_exports_in_use,
-        unused_dependencies: _unused_dependencies,
-        unused_dev_dependencies: _unused_dev_dependencies,
-        unused_optional_dependencies: _unused_optional_dependencies,
-        unused_enum_members: _unused_enum_members,
-        unused_class_members: _unused_class_members,
-        unused_namespace_members: _unused_namespace_members,
-        unused_protected_class_members: _unused_protected_class_members,
-        unused_store_members: _unused_store_members,
-        unresolved_imports: _unresolved_imports,
-        unlisted_dependencies: _unlisted_dependencies,
-        unlisted_binaries: _unlisted_binaries,
-        duplicate_exports: _duplicate_exports,
-        duplicate_export_aliases: _duplicate_export_aliases,
-        type_only_dependencies: _type_only_dependencies,
-        test_only_dependencies: _test_only_dependencies,
-        dev_dependencies_in_production: _dev_dependencies_in_production,
-        circular_dependencies: _circular_dependencies,
-        re_export_cycles: _re_export_cycles,
-        package_cycles: _package_cycles,
-        boundary_violations: _boundary_violations,
-        boundary_coverage_violations: _boundary_coverage_violations,
-        boundary_call_violations: _boundary_call_violations,
-        policy_violations: _policy_violations,
-        stale_suppressions: _stale_suppressions,
-        unused_catalog_entries: _unused_catalog_entries,
-        empty_catalog_groups: _empty_catalog_groups,
-        unresolved_catalog_references: _unresolved_catalog_references,
-        unused_dependency_overrides: _unused_dependency_overrides,
-        misconfigured_dependency_overrides: _misconfigured_dependency_overrides,
-        invalid_client_exports: _invalid_client_exports,
-        mixed_client_server_barrels: _mixed_client_server_barrels,
-        misplaced_directives: _misplaced_directives,
-        unprovided_injects: _unprovided_injects,
-        unrendered_components: _unrendered_components,
-        route_collisions: _route_collisions,
-        dynamic_segment_name_conflicts: _dynamic_segment_name_conflicts,
-        unused_component_props: _unused_component_props,
-        absent_component_props: _absent_component_props,
-        constant_parameters: _constant_parameters,
-        unused_component_emits: _unused_component_emits,
-        unused_component_inputs: _unused_component_inputs,
-        unused_component_outputs: _unused_component_outputs,
-        unused_svelte_events: _unused_svelte_events,
-        unused_effect_layers: _unused_effect_layers,
-        unused_tagged_errors: _unused_tagged_errors,
-        unproduced_catch_tags: _unproduced_catch_tags,
-        unused_server_actions: _unused_server_actions,
-        unused_load_data_keys: _unused_load_data_keys,
-        unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
-        prop_drilling_chains: _prop_drilling_chains,
-        thin_wrappers: _thin_wrappers,
-        duplicate_prop_shapes: _duplicate_prop_shapes,
-        cascade_hidden: _cascade_hidden,
-        cascade: _cascade,
-        suppression_count: _suppression_count,
-        unused_component_props_exempted: _unused_component_props_exempted,
-        active_suppressions: _active_suppressions,
-        feature_flags: _feature_flags,
-        security_findings: _security_findings,
-        suppressed_security_findings: _suppressed_security_findings,
-        security_unresolved_edge_files: _security_unresolved_edge_files,
-        security_unresolved_callee_sites: _security_unresolved_callee_sites,
-        security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-        export_usages: _export_usages,
-        entry_point_summary: _entry_point_summary,
-        render_fan_in: _render_fan_in,
-        react_component_intel: _react_component_intel,
-        semantic_reachable_files: _,
-        semantic_framework_contracts: _semantic_framework_contracts,
-        constant_parameter_candidates: _,
-    } = results;
-}
-
-fn retain_basic_issue_findings_by_changed_path(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    retain_by_changed_path(&mut results.unused_files, scope, |f| &f.file.path);
-    retain_by_changed_path(&mut results.unused_exports, scope, |e| &e.export.path);
-    retain_by_changed_path(&mut results.unused_types, scope, |e| &e.export.path);
-    retain_by_changed_path(&mut results.private_type_leaks, scope, |e| &e.leak.path);
-    retain_by_changed_path(&mut results.deprecated_exports_in_use, scope, |e| {
-        &e.export.path
-    });
-    retain_by_changed_path(&mut results.unused_enum_members, scope, |m| &m.member.path);
-    retain_by_changed_path(&mut results.unused_class_members, scope, |m| &m.member.path);
-    retain_by_changed_path(&mut results.unused_namespace_members, scope, |m| {
-        &m.member.path
-    });
-    retain_by_changed_path(&mut results.unused_protected_class_members, scope, |m| {
-        &m.member.path
-    });
-    retain_by_changed_path(&mut results.unused_store_members, scope, |m| &m.member.path);
-    retain_by_changed_path(&mut results.unresolved_imports, scope, |i| &i.import.path);
-}
-
-fn retain_graph_findings_by_changed_files(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    retain_unlisted_dependencies_by_import_site(&mut results.unlisted_dependencies, scope);
-    results.unlisted_binaries.retain(|binary| {
-        binary
-            .binary
-            .used_in
-            .iter()
-            .any(|site| scope.contains(&site.path))
-    });
-    retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, scope);
-    retain_by_changed_path(&mut results.duplicate_export_aliases, scope, |a| {
-        &a.alias.path
-    });
-    retain_circular_dependencies_by_changed_file(&mut results.circular_dependencies, scope);
-    retain_re_export_cycles_by_changed_file(&mut results.re_export_cycles, scope);
-    retain_package_cycles_by_changed_file(&mut results.package_cycles, scope);
-}
-
-fn retain_boundary_policy_and_suppression_findings(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    retain_by_changed_path(&mut results.boundary_violations, scope, |v| {
-        &v.violation.from_path
-    });
-    retain_by_changed_path(&mut results.boundary_coverage_violations, scope, |v| {
-        &v.violation.path
-    });
-    retain_by_changed_path(&mut results.boundary_call_violations, scope, |v| {
-        &v.violation.path
-    });
-    retain_by_changed_path(&mut results.policy_violations, scope, |v| &v.violation.path);
-    retain_by_changed_path(&mut results.stale_suppressions, scope, |s| &s.path);
-}
-
-fn retain_security_and_workspace_findings(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    retain_security_findings_by_changed_path(&mut results.security_findings, scope);
-    retain_by_changed_path(
-        &mut results.security_unresolved_callee_diagnostics,
-        scope,
-        |d| &d.path,
-    );
-    retain_by_changed_path(&mut results.unresolved_catalog_references, scope, |r| {
-        &r.reference.path
-    });
-    results
-        .empty_catalog_groups
-        .retain(|g| scope.contains_workspace(&g.group.path));
-    retain_by_changed_path(&mut results.unused_dependency_overrides, scope, |o| {
-        &o.entry.path
-    });
-    retain_by_changed_path(
-        &mut results.misconfigured_dependency_overrides,
-        scope,
-        |o| &o.entry.path,
-    );
-}
-
-fn retain_framework_findings_by_changed_files(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    retain_client_boundary_findings_by_changed_files(results, scope);
-    retain_component_contract_findings_by_changed_files(results, scope);
-    retain_react_health_findings_by_changed_files(results, scope);
-    retain_nextjs_findings_by_changed_files(results, scope);
-}
-
-fn retain_client_boundary_findings_by_changed_files(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    let AnalysisResults {
-        shared_state: _,
-        invalid_client_exports,
-        mixed_client_server_barrels,
-        misplaced_directives,
-        ..
-    } = results;
-
-    retain_by_changed_path(invalid_client_exports, scope, |e| &e.export.path);
-    retain_by_changed_path(mixed_client_server_barrels, scope, |b| &b.barrel.path);
-    retain_by_changed_path(misplaced_directives, scope, |d| &d.directive_site.path);
-}
-
-fn retain_component_contract_findings_by_changed_files(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    let AnalysisResults {
-        shared_state: _,
-        unprovided_injects,
-        unrendered_components,
-        unused_component_props,
-        absent_component_props,
-        constant_parameters,
-        unused_component_emits,
-        unused_component_inputs,
-        unused_component_outputs,
-        unused_svelte_events,
-        unused_effect_layers,
-        unused_tagged_errors,
-        unproduced_catch_tags,
-        unused_server_actions,
-        unused_load_data_keys,
-        ..
-    } = results;
-
-    retain_by_changed_path(unprovided_injects, scope, |i| &i.inject.path);
-    retain_by_changed_path(unrendered_components, scope, |c| &c.component.path);
-    retain_by_changed_path(unused_component_props, scope, |p| &p.prop.path);
-    retain_by_changed_path(absent_component_props, scope, |p| &p.prop.path);
-    retain_by_changed_path(constant_parameters, scope, |p| &p.parameter.path);
-    retain_by_changed_path(unused_component_emits, scope, |e| &e.emit.path);
-    retain_by_changed_path(unused_component_inputs, scope, |i| &i.input.path);
-    retain_by_changed_path(unused_component_outputs, scope, |o| &o.output.path);
-    retain_by_changed_path(unused_svelte_events, scope, |e| &e.event.path);
-    retain_by_changed_path(unused_effect_layers, scope, |e| &e.layer.path);
-    retain_by_changed_path(unused_tagged_errors, scope, |e| &e.error.path);
-    retain_by_changed_path(unproduced_catch_tags, scope, |e| &e.catch_tag.path);
-    retain_by_changed_path(unused_server_actions, scope, |a| &a.action.path);
-    retain_by_changed_path(unused_load_data_keys, scope, |k| &k.key.path);
-}
-
-fn retain_react_health_findings_by_changed_files(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    let AnalysisResults {
-        shared_state: _,
-        prop_drilling_chains,
-        thin_wrappers,
-        duplicate_prop_shapes,
-        ..
-    } = results;
-
-    retain_prop_drilling_chains_by_anchor(prop_drilling_chains, scope);
-    retain_by_changed_path(thin_wrappers, scope, |w| &w.wrapper.file);
-    retain_duplicate_prop_shapes_by_anchor(duplicate_prop_shapes, scope);
-}
-
-fn retain_nextjs_findings_by_changed_files(
-    results: &mut AnalysisResults,
-    scope: &impl ChangedPathScope,
-) {
-    let AnalysisResults {
-        shared_state: _,
-        route_collisions,
-        dynamic_segment_name_conflicts,
-        ..
-    } = results;
-
-    retain_by_changed_path(route_collisions, scope, |c| &c.collision.path);
-    retain_by_changed_path(dynamic_segment_name_conflicts, scope, |c| &c.conflict.path);
-}
-
-fn retain_unlisted_dependencies_by_import_site(
-    dependencies: &mut Vec<UnlistedDependencyFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    dependencies.retain(|dependency| {
-        dependency
-            .dep
-            .imported_from
-            .iter()
-            .any(|site| scope.contains(&site.path))
-    });
-}
-
-fn retain_duplicate_exports_by_changed_locations(
-    duplicate_exports: &mut Vec<DuplicateExportFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    for duplicate in &mut *duplicate_exports {
-        duplicate
-            .export
-            .locations
-            .retain(|location| scope.contains(&location.path));
-    }
-    duplicate_exports.retain(|duplicate| duplicate.export.locations.len() >= 2);
-}
-
-fn retain_circular_dependencies_by_changed_file(
-    cycles: &mut Vec<CircularDependencyFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    cycles.retain(|cycle| cycle.cycle.files.iter().any(|file| scope.contains(file)));
-}
-
-fn retain_re_export_cycles_by_changed_file(
-    cycles: &mut Vec<ReExportCycleFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    cycles.retain(|cycle| cycle.cycle.files.iter().any(|file| scope.contains(file)));
-}
-
-fn retain_package_cycles_by_changed_file(
-    cycles: &mut Vec<PackageCycleFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    cycles.retain(|cycle| {
-        cycle
-            .cycle
-            .edges
-            .iter()
-            .any(|edge| scope.contains(&edge.path))
-    });
-}
-
-fn retain_security_findings_by_changed_path(
-    findings: &mut Vec<SecurityFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    findings.retain(|finding| security_finding_touches_changed_path(finding, scope));
-}
-
-fn retain_prop_drilling_chains_by_anchor(
-    chains: &mut Vec<PropDrillingChainFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    chains.retain(|chain| {
-        if chain.effective_severity
-            == Some(fallow_types::output_dead_code::EffectiveSeverity::Error)
-        {
-            return chain.chain.hops.is_empty()
-                || chain.chain.hops.iter().any(|hop| scope.contains(&hop.file));
-        }
-        chain
-            .chain
-            .hops
-            .first()
-            .is_some_and(|hop| scope.contains(&hop.file))
-    });
-}
-
-fn retain_duplicate_prop_shapes_by_anchor(
-    shapes: &mut Vec<DuplicatePropShapeFinding>,
-    scope: &impl ChangedPathScope,
-) {
-    retain_by_changed_path(shapes, scope, |shape| &shape.shape.file);
-}
-
-fn retain_by_changed_path<T>(
-    items: &mut Vec<T>,
-    scope: &impl ChangedPathScope,
-    path: impl Fn(&T) -> &Path,
-) {
-    items.retain(|item| scope.contains(path(item)));
+    crate::result_scope::retain_in_scope(results, &ChangedPaths(scope));
 }
 
 fn security_finding_touches_changed_path(
