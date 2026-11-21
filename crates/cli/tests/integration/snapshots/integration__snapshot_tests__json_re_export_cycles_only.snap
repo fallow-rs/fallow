@@ -86,6 +86,8 @@ expression: redact_version(&json_str)
         "src/api/internal/index.ts"
       ],
       "kind": "multi-node",
+      "line": 1,
+      "col": 0,
       "actions": [
         {
           "type": "refactor-re-export-cycle",
@@ -106,6 +108,8 @@ expression: redact_version(&json_str)
         "src/utils/index.ts"
       ],
       "kind": "self-loop",
+      "line": 3,
+      "col": 0,
       "actions": [
         {
           "type": "refactor-re-export-cycle",

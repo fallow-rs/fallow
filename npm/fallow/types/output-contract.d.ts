@@ -5825,11 +5825,18 @@ col: number
  */
 export interface ReExportCycleFinding {
 /**
- * Files participating in the cycle, sorted lexicographically. For a
- * self-loop, exactly one entry.
+ * Member files, sorted lexicographically. A self-loop has one entry.
  */
 files: string[]
 kind: ReExportCycleKind
+/**
+ * 1-based line of the re-export in `files[0]` that closes the cycle, or `0` if unknown.
+ */
+line?: number
+/**
+ * 0-based byte column of that re-export.
+ */
+col?: number
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.

@@ -576,6 +576,8 @@ mod cycle_member_locations {
             .push(ReExportCycleFinding::with_actions(ReExportCycle {
                 files: vec![root.join("src/index.ts"), root.join("src/barrel.ts")],
                 kind: ReExportCycleKind::MultiNode,
+                line: 0,
+                col: 0,
             }));
 
         let issues = build_codeclimate(&results, &root, &RulesConfig::default());
@@ -588,5 +590,30 @@ mod cycle_member_locations {
             locations(issue_of(&issues, "fallow/re-export-cycle")),
             [("src/barrel.ts".to_owned(), 1)]
         );
+    }
+
+    #[test]
+    fn re_export_cycle_begins_at_its_anchor_line() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        for line in [0, 3] {
+            results
+                .re_export_cycles
+                .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                    files: vec![root.join(format!("src/barrel-{line}.ts"))],
+                    kind: ReExportCycleKind::SelfLoop,
+                    line,
+                    col: 2,
+                }));
+        }
+
+        let issues = build_codeclimate(&results, &root, &RulesConfig::default());
+        let begins: Vec<(&str, u32)> = issues
+            .iter()
+            .map(|issue| (issue.location.path.as_str(), issue.location.lines.begin))
+            .collect();
+
+        // A cycle without a known line keeps the file-level fallback of line 1.
+        assert_eq!(begins, [("src/barrel-0.ts", 1), ("src/barrel-3.ts", 3)]);
     }
 }

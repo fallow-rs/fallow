@@ -1123,6 +1123,8 @@ mod tests {
             .push(ReExportCycleFinding::with_actions(ReExportCycle {
                 files: vec![file_a.clone(), file_b.clone()],
                 kind: ReExportCycleKind::MultiNode,
+                line: 0,
+                col: 0,
             }));
 
         let duplication = empty_duplication();
@@ -1181,6 +1183,8 @@ mod tests {
             .push(ReExportCycleFinding::with_actions(ReExportCycle {
                 files: vec![file.clone()],
                 kind: ReExportCycleKind::SelfLoop,
+                line: 0,
+                col: 0,
             }));
 
         let duplication = empty_duplication();

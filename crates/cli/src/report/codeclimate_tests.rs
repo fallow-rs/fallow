@@ -76,6 +76,26 @@ fn stored_dead_code_envelope_renders_codeclimate_without_analysis() {
     }
 }
 
+/// A saved report reaches CodeClimate through the annotation path, which must
+/// keep the anchor line of a re-export cycle and fall back to line 1 without it.
+#[test]
+fn stored_re_export_cycle_keeps_its_anchor_line() {
+    let envelope = serde_json::json!({
+        "kind": "dead-code",
+        "re_export_cycles": [
+            { "files": ["src/a.ts", "src/b.ts"], "kind": "multi-node", "line": 3, "col": 2 },
+            { "files": ["src/self.ts"], "kind": "self-loop", "line": 0, "col": 0 },
+        ]
+    });
+
+    let issues = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, Path::new("."));
+    let begins: Vec<(&str, u32)> = issues
+        .iter()
+        .map(|issue| (issue.location.path.as_str(), issue.location.lines.begin))
+        .collect();
+    assert_eq!(begins, [("src/a.ts", 3), ("src/self.ts", 1)]);
+}
+
 #[test]
 fn malformed_current_dead_code_envelope_does_not_fall_back_to_partial_issues() {
     let envelope = serde_json::json!({
@@ -1521,6 +1541,8 @@ fn re_export_cycle_self_loop_description_contains_self_loop_tag() {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![root.join("src/index.ts")],
             kind: ReExportCycleKind::SelfLoop,
+            line: 0,
+            col: 0,
         }));
     let rules = RulesConfig::default();
     let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
@@ -1539,6 +1561,8 @@ fn re_export_cycle_multi_node_description_has_no_kind_tag() {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
     let rules = RulesConfig::default();
     let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));

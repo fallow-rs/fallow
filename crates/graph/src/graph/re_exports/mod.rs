@@ -90,6 +90,11 @@ pub struct GraphReExportCycle {
     /// `true` for single-file self-re-exports (`export * from './'`), `false`
     /// for multi-node strongly connected components.
     pub is_self_loop: bool,
+    /// Byte offset of the `export ... from` statement in `files[0]` that
+    /// re-exports from a member of the cycle. `None` when every such
+    /// statement was synthesized inside the graph layer and has no span.
+    #[serde(default)]
+    pub anchor_span_start: Option<u32>,
 }
 
 /// A single re-export edge collected from the module graph.
@@ -1165,7 +1170,30 @@ fn find_re_export_cycles(
         cycles.push(build_multi_node_cycle(scc, &nodes, modules));
     }
 
+    for cycle in &mut cycles {
+        cycle.anchor_span_start = cycle_anchor_span_start(&cycle.file_ids, modules);
+    }
+
     cycles
+}
+
+/// The byte offset of the first `export ... from` statement in the first
+/// member that re-exports from a member of the cycle. A namespace re-export
+/// (`export * as ns`) is not part of the cycle, and a re-export without a
+/// source span cannot anchor a line.
+fn cycle_anchor_span_start(
+    file_ids: &[FileId],
+    modules: &[super::types::ModuleNode],
+) -> Option<u32> {
+    let anchor = modules.get(file_ids.first()?.0 as usize)?;
+    anchor
+        .re_exports
+        .iter()
+        .filter(|re| file_ids.contains(&re.source_file))
+        .filter(|re| !is_namespace_re_export(re))
+        .filter(|re| re.span.end > re.span.start)
+        .map(|re| re.span.start)
+        .min()
 }
 
 /// Assign a dense node index to every distinct barrel / source file id.
@@ -1236,6 +1264,7 @@ fn build_self_loop_cycle(
         files: vec![path_buf],
         file_ids: vec![barrel],
         is_self_loop: true,
+        anchor_span_start: None,
     }
 }
 
@@ -1279,6 +1308,7 @@ fn build_multi_node_cycle(
         files,
         file_ids,
         is_self_loop: false,
+        anchor_span_start: None,
     }
 }
 

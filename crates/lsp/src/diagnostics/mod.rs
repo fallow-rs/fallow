@@ -1119,6 +1119,8 @@ mod severity_gate {
                             fallow_api::editor_results::ReExportCycle {
                                 files: vec![root.join("barrel.ts")],
                                 kind: fallow_api::editor_results::ReExportCycleKind::SelfLoop,
+                                line: 0,
+                                col: 0,
                             },
                         ),
                     );

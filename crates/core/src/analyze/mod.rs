@@ -596,15 +596,11 @@ fn run_boundary_aux_detectors(
 
 /// Thin wrapper around [`re_export_cycles::find_re_export_cycles`] that gates
 /// on `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
-fn run_re_export_cycle_detector(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-    suppressions: &crate::suppress::SuppressionContext<'_>,
-) -> Vec<ReExportCycleFinding> {
-    if config.rules.re_export_cycle == Severity::Off {
+fn run_re_export_cycle_detector(input: DeadCodeDetectorInput<'_>) -> Vec<ReExportCycleFinding> {
+    if input.config.rules.re_export_cycle == Severity::Off {
         return Vec::new();
     }
-    find_re_export_cycles(graph, suppressions)
+    find_re_export_cycles(input.graph, input.suppressions, input.line_offsets_by_file)
 }
 
 /// Thin wrapper around [`package_cycles::find_package_cycles`] that gates on
@@ -1852,7 +1848,7 @@ fn run_cycle_and_usage_detectors(
             rayon::join(
                 || {
                     (
-                        run_re_export_cycle_detector(input.graph, input.config, input.suppressions),
+                        run_re_export_cycle_detector(input),
                         run_package_cycle_detector(input),
                     )
                 },

@@ -304,6 +304,8 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 root.join("src/api/internal/index.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 1,
+            col: 0,
         }));
     r.unused_catalog_entries
         .push(UnusedCatalogEntryFinding::with_actions(
@@ -512,6 +514,104 @@ fn sarif_output_snapshot() {
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
 
     insta::assert_snapshot!("sarif_output", redact_sarif_version(&json_str));
+}
+
+/// Result arrays that `sample_results` holds no row for, sorted. A new kind
+/// must get a row in `sample_results` or an entry here, so the region check
+/// below cannot skip it without a visible decision.
+const RESULT_KEYS_WITHOUT_SAMPLE: &[&str] = &[
+    "absent_component_props",
+    "boundary_call_violations",
+    "boundary_coverage_violations",
+    "boundary_violations",
+    "constant_parameters",
+    "deprecated_exports_in_use",
+    "dev_dependencies_in_production",
+    "duplicate_export_aliases",
+    "duplicate_prop_shapes",
+    "dynamic_segment_name_conflicts",
+    "misplaced_directives",
+    "package_cycles",
+    "policy_violations",
+    "private_type_leaks",
+    "prop_drilling_chains",
+    "route_collisions",
+    "stale_suppressions",
+    "thin_wrappers",
+    "unlisted_binaries",
+    "unproduced_catch_tags",
+    "unrendered_components",
+    "unused_component_emits",
+    "unused_component_props",
+    "unused_effect_layers",
+    "unused_load_data_keys",
+    "unused_namespace_members",
+    "unused_protected_class_members",
+    "unused_server_actions",
+    "unused_tagged_errors",
+];
+
+/// A dead-code finding with a line keeps that line in SARIF. For each result
+/// array, the count of SARIF results with a `region` must reach the count of
+/// JSON rows with `line > 0`.
+#[test]
+fn every_sarif_result_kind_has_a_region_when_its_finding_has_a_line() {
+    use serde_json::Value;
+
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let json = serde_json::to_value(&results).expect("results should serialize");
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let sarif_results = sarif
+        .pointer("/runs/0/results")
+        .and_then(Value::as_array)
+        .expect("SARIF should have results");
+
+    let mut keys_without_sample = Vec::new();
+    let mut keys_with_line = Vec::new();
+    for contract in issue_output_contracts() {
+        let rows = json
+            .get(contract.result_key)
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice);
+        if rows.is_empty() {
+            keys_without_sample.push(contract.result_key);
+            continue;
+        }
+        let rows_with_line = rows
+            .iter()
+            .filter(|row| row.get("line").and_then(Value::as_u64).unwrap_or(0) > 0)
+            .count();
+        let results_with_region = sarif_results
+            .iter()
+            .filter(|result| {
+                result["ruleId"]
+                    .as_str()
+                    .is_some_and(|id| contract.sarif_rule_ids.iter().any(|rule| rule == id))
+            })
+            .filter(|result| {
+                result
+                    .pointer("/locations/0/physicalLocation/region/startLine")
+                    .is_some()
+            })
+            .count();
+        assert!(
+            results_with_region >= rows_with_line,
+            "{}: {rows_with_line} rows have a line, but only {results_with_region} SARIF \
+             results have a region",
+            contract.result_key,
+        );
+        if rows_with_line > 0 {
+            keys_with_line.push(contract.result_key);
+        }
+    }
+
+    keys_without_sample.sort_unstable();
+    assert_eq!(keys_without_sample, RESULT_KEYS_WITHOUT_SAMPLE);
+    assert!(
+        keys_with_line.contains(&"re_export_cycles"),
+        "the sample re-export cycle must have a line, or the check is vacuous"
+    );
 }
 
 #[test]
@@ -2372,12 +2472,16 @@ fn re_export_cycles_results(root: &Path) -> AnalysisResults {
                 root.join("src/api/internal/index.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 1,
+            col: 0,
         }));
     results
         .re_export_cycles
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![root.join("src/utils/index.ts")],
             kind: ReExportCycleKind::SelfLoop,
+            line: 3,
+            col: 0,
         }));
     results
 }

@@ -1546,6 +1546,8 @@ fn base_collection_re_export_cycle_off_clears_findings() {
                 PathBuf::from("/project/src/b.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
     let rules = RulesConfig {
         re_export_cycle: Severity::Off,
@@ -3388,6 +3390,8 @@ fn project_level_re_export_cycle_error() {
                 PathBuf::from("/project/src/b.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
     let rules = RulesConfig {
         re_export_cycle: Severity::Error,

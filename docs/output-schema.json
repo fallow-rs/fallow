@@ -14335,11 +14335,19 @@
           "items": {
             "type": "string"
           },
-          "description": "Files participating in the cycle, sorted lexicographically. For a\nself-loop, exactly one entry."
+          "description": "Member files, sorted lexicographically. A self-loop has one entry."
         },
         "kind": {
           "description": "Which structural shape this finding describes.",
           "$ref": "#/definitions/ReExportCycleKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the re-export in `files[0]` that closes the cycle, or `0` if unknown."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of that re-export."
         },
         "finding_id": {
           "type": [

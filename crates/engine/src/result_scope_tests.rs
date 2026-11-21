@@ -461,6 +461,8 @@ fn push_graph_findings(results: &mut AnalysisResults, path: &Path) {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![path.to_path_buf()],
             kind: ReExportCycleKind::SelfLoop,
+            line: 0,
+            col: 0,
         }));
     results
         .package_cycles

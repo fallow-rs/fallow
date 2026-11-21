@@ -3672,24 +3672,23 @@ pub struct CircularDependency {
     pub is_cross_package: bool,
 }
 
-/// A cycle or self-loop in the re-export edge subgraph.
-///
-/// Detected by Tarjan SCC over `(barrel, source)` re-export edges in
-/// `crates/graph/src/graph/re_exports/`. A multi-node cycle is a strongly
-/// connected component of size >= 2; a self-loop is a barrel that re-exports
-/// from itself (often a rename leftover or accidental `export * from './'`).
-/// Both are structural bugs because chain propagation through the loop is a
-/// no-op: any symbol consumers think they are re-exporting through the cycle
-/// silently fails to resolve.
+/// A cycle or self-loop in the re-export edge subgraph, found by a Tarjan SCC
+/// pass in `crates/graph/src/graph/re_exports/`. Chain propagation through the
+/// loop is a no-op, so a symbol re-exported through it does not resolve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReExportCycle {
-    /// Files participating in the cycle, sorted lexicographically. For a
-    /// self-loop, exactly one entry.
+    /// Member files, sorted lexicographically. A self-loop has one entry.
     #[serde(serialize_with = "serde_path::serialize_vec")]
     pub files: Vec<PathBuf>,
     /// Which structural shape this finding describes.
     pub kind: ReExportCycleKind,
+    /// 1-based line of the re-export in `files[0]` that closes the cycle, or `0` if unknown.
+    #[serde(default)]
+    pub line: u32,
+    /// 0-based byte column of that re-export.
+    #[serde(default)]
+    pub col: u32,
 }
 
 /// Discriminator for [`ReExportCycle`]: which structural shape was detected.

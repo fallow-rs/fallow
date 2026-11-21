@@ -3,6 +3,7 @@
 //! level suppression so any member file carrying
 //! `// fallow-ignore-file re-export-cycle` short-circuits the whole cycle.
 
+use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::graph::ModuleGraph;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::output_dead_code::ReExportCycleFinding;
@@ -18,9 +19,13 @@ use fallow_types::results::{ReExportCycle, ReExportCycleKind};
 /// The graph layer already sorts `files` lexicographically and pairs each
 /// path with its `FileId` in `file_ids`, so suppression checks are O(members)
 /// without any path-to-FileId lookup.
+///
+/// `line` and `col` locate the re-export in `files[0]` that the graph layer
+/// picked as the anchor, and stay `0` when it has no source position.
 pub fn find_re_export_cycles(
     graph: &ModuleGraph,
     suppressions: &SuppressionContext<'_>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<ReExportCycleFinding> {
     graph
         .re_export_cycles
@@ -38,9 +43,17 @@ pub fn find_re_export_cycles(
             } else {
                 ReExportCycleKind::MultiNode
             };
+            let (line, col) = match (cycle.file_ids.first(), cycle.anchor_span_start) {
+                (Some(&file_id), Some(start)) => {
+                    byte_offset_to_line_col(line_offsets_by_file, file_id, start)
+                }
+                _ => (0, 0),
+            };
             Some(ReExportCycleFinding::with_actions(ReExportCycle {
                 files: cycle.files.clone(),
                 kind,
+                line,
+                col,
             }))
         })
         .collect()
@@ -64,7 +77,7 @@ mod tests {
     fn empty_graph_returns_empty() {
         let graph = ModuleGraph::build(&[], &[], &[]);
         let suppressions = SuppressionContext::new(&[]);
-        let findings = find_re_export_cycles(&graph, &suppressions);
+        let findings = find_re_export_cycles(&graph, &suppressions, &LineOffsetsMap::default());
         assert!(findings.is_empty());
     }
 
@@ -74,9 +87,10 @@ mod tests {
             files: vec![PathBuf::from("/p/barrel.ts")],
             file_ids: vec![FileId(0)],
             is_self_loop: true,
+            anchor_span_start: None,
         }]);
         let suppressions = SuppressionContext::new(&[]);
-        let findings = find_re_export_cycles(&graph, &suppressions);
+        let findings = find_re_export_cycles(&graph, &suppressions, &LineOffsetsMap::default());
         assert_eq!(findings.len(), 1);
         assert!(matches!(
             findings[0].cycle.kind,
@@ -92,9 +106,10 @@ mod tests {
             files: vec![PathBuf::from("/p/a.ts"), PathBuf::from("/p/b.ts")],
             file_ids: vec![FileId(0), FileId(1)],
             is_self_loop: false,
+            anchor_span_start: None,
         }]);
         let suppressions = SuppressionContext::new(&[]);
-        let findings = find_re_export_cycles(&graph, &suppressions);
+        let findings = find_re_export_cycles(&graph, &suppressions, &LineOffsetsMap::default());
         assert_eq!(findings.len(), 1);
         assert!(matches!(
             findings[0].cycle.kind,
