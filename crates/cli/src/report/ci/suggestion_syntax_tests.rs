@@ -103,3 +103,18 @@ fn no_suggestion_for_one_declaration_of_an_overloaded_name() {
     let source = "export function f(a: string): void;\nexport function f(a: any) {}\n";
     assert_eq!(suggest(Provider::Github, EXPORT, source, 1), None);
 }
+
+#[test]
+fn no_suggestion_for_an_overloaded_method() {
+    let source = "class C {\n  m(a: string): void;\n  m(a: number): void;\n  m(a: any) {}\n}\n";
+    assert_eq!(suggest(Provider::Github, CLASS_MEMBER, source, 4), None);
+}
+
+#[test]
+fn a_crlf_file_gets_the_same_member_suggestion() {
+    let source = "class C {\r\n  count = 0;\r\n  legacy() {}\r\n}\r\n";
+    assert_eq!(
+        suggest(Provider::Github, CLASS_MEMBER, source, 3).as_deref(),
+        Some(DELETE_GITHUB)
+    );
+}

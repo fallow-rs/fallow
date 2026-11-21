@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use oxc_ast::ast::{
-    ClassElement, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumBody,
+    ClassBody, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumBody,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, SourceType};
@@ -91,6 +91,10 @@ pub struct MemberSpan {
     /// member: the next member has no initializer, so its value counts on
     /// from this member. Always true for a class element.
     pub deletion_keeps_values: bool,
+    /// True for a class element whose static key another element of the same
+    /// class also has, such as an overload signature, its implementation, or
+    /// one half of a getter and setter pair. Always false for an enum member.
+    pub shares_its_key: bool,
 }
 
 /// The export statements and the class and enum members of one file text.
@@ -199,7 +203,9 @@ impl SourceEditIndex {
             .filter(move |member| self.line_of(member.start) == line_idx)
     }
 
-    /// Each class element and enum member of the file, in source order.
+    /// Each class element and enum member of the file. The elements of one
+    /// class body or enum body are in source order, and each body comes
+    /// before the members nested inside it.
     #[must_use]
     pub fn members(&self) -> &[MemberSpan] {
         &self.members
@@ -317,19 +323,32 @@ struct MemberCollector {
 }
 
 impl MemberCollector {
-    fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool) {
+    fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool, shares_its_key: bool) {
         self.members.push(MemberSpan {
             start: span.start + self.offset,
             end: span.end + self.offset,
             deletion_keeps_values,
+            shares_its_key,
         });
     }
 }
 
 impl<'a> Visit<'a> for MemberCollector {
-    fn visit_class_element(&mut self, it: &ClassElement<'a>) {
-        self.push(it.span(), true);
-        oxc_ast_visit::walk::walk_class_element(self, it);
+    fn visit_class_body(&mut self, it: &ClassBody<'a>) {
+        let names: Vec<_> = it
+            .body
+            .iter()
+            .map(|element| element.static_name())
+            .collect();
+        for (position, element) in it.body.iter().enumerate() {
+            let shares_its_key = names[position].as_ref().is_some_and(|name| {
+                names.iter().enumerate().any(|(other, other_name)| {
+                    other != position && other_name.as_ref() == Some(name)
+                })
+            });
+            self.push(element.span(), true, shares_its_key);
+        }
+        oxc_ast_visit::walk::walk_class_body(self, it);
     }
 
     fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
@@ -338,7 +357,7 @@ impl<'a> Visit<'a> for MemberCollector {
                 .members
                 .get(position + 1)
                 .is_none_or(|next| next.initializer.is_some());
-            self.push(member.span, next_has_value);
+            self.push(member.span, next_has_value, false);
         }
         oxc_ast_visit::walk::walk_ts_enum_body(self, it);
     }
@@ -682,6 +701,23 @@ mod tests {
         assert_eq!(members(enumeration, 2), vec!["A"]);
         assert_eq!(members(enumeration, 3), vec!["B", "C"]);
         assert_eq!(members(enumeration, 4), vec!["D = \"x,y\""]);
+    }
+
+    #[test]
+    fn a_class_element_knows_whether_it_shares_its_key() {
+        let source = "class K {\n  m(a: string): void;\n  m(a: any) {}\n  get x() { return 1; }\n  set x(v) {}\n  only() {}\n}\n";
+        let index = index("store.ts", source);
+        let shares = |line| {
+            index
+                .members_on_line(line)
+                .map(|member| member.shares_its_key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shares(2), vec![true]);
+        assert_eq!(shares(3), vec![true]);
+        assert_eq!(shares(4), vec![true]);
+        assert_eq!(shares(5), vec![true]);
+        assert_eq!(shares(6), vec![false]);
     }
 
     #[test]

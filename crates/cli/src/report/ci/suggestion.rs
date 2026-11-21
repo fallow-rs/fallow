@@ -180,7 +180,7 @@ fn member_line_is_deletable(
         return false;
     };
     let (first, last) = index.line_range(member.start, member.end);
-    if first != last || !member.deletion_keeps_values {
+    if first != last || !member.deletion_keeps_values || member.shares_its_key {
         return false;
     }
     let Some(before) = source.get(line_start..member.start as usize) else {
@@ -269,18 +269,18 @@ fn deletion_keeps_other_members(
         }
     };
     let deleted_line = line_start..line_start + line_text.len();
-    let kept: Vec<Option<&str>> = index
+    let kept: Option<Vec<&str>> = index
         .members()
         .iter()
         .filter(|member| !deleted_line.contains(&(member.start as usize)))
         .map(|member| text_of(shift(member.start), shift(member.end)))
         .collect();
-    let now: Vec<Option<&str>> = after
+    let now: Option<Vec<&str>> = after
         .members()
         .iter()
         .map(|member| text_of(member.start, member.end))
         .collect();
-    kept == now
+    kept.is_some() && kept == now
 }
 
 /// The block that deletes the line of the finding.
