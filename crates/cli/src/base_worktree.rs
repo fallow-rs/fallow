@@ -1,10 +1,5 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-#[cfg(test)]
-use std::process::Command;
-
-#[cfg(test)]
-use fallow_engine::changed_files::clear_ambient_git_env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 

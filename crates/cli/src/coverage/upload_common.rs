@@ -1,7 +1,5 @@
 use std::fmt::Write as _;
 use std::path::Path;
-#[cfg(test)]
-use std::process::Command;
 use std::process::ExitCode;
 
 use colored::Colorize as _;
@@ -506,14 +504,7 @@ mod tests {
         dir
     }
 
-    fn run_git(root: &Path, args: &[&str]) {
-        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    use fallow_engine::git_fixture::fixture_git as run_git;
 
     #[test]
     fn resolve_git_sha_validates_explicit_value() {

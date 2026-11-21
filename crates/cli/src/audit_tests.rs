@@ -111,28 +111,9 @@ use crate::base_worktree::{
     sweep_old_reusable_caches_in, sweep_reusable_caches_with_report,
 };
 use crate::exit_codes::exit_gate_failed;
-use std::{fs, process::Command};
+use std::fs;
 
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_engine::git_fixture::fixture_git as git;
 
 #[test]
 fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
@@ -206,9 +187,8 @@ fn registered_fallow_worktree_count(repo_root: &std::path::Path) -> usize {
 /// not filter to fallow-owned entries, so it can assert a user's own worktree
 /// stays registered.
 fn git_worktree_list_contains(repo_root: &std::path::Path, path: &Path) -> bool {
-    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+    let output = fallow_engine::git_fixture::fixture_git_command(repo_root)
         .args(["worktree", "list", "--porcelain"])
-        .current_dir(repo_root)
         .output()
         .expect("git worktree list should run");
     String::from_utf8_lossy(&output.stdout)

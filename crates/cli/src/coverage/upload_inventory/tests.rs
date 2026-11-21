@@ -1,7 +1,6 @@
 use super::*;
 use crate::coverage::COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION;
 use std::path::PathBuf;
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -260,14 +259,7 @@ fn format_upload_error_message_preserves_malformed_body() {
     assert!(message.contains("malformed error envelope"));
 }
 
-fn run_git(root: &Path, args: &[&str]) {
-    let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-        .args(args)
-        .current_dir(root)
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} failed");
-}
+use fallow_engine::git_fixture::fixture_git as run_git;
 
 fn sample_entry() -> InventoryEntry {
     InventoryEntry {

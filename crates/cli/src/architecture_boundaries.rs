@@ -1028,7 +1028,6 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
 
 /// Each CLI file that spawns git, and the git fact it owns. The engine owns ref
 /// and root detection, so a CLI spawn is for work `repo_refs` does not model.
-/// Two entries are test-only helpers that build repository fixtures.
 const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     (
         "crates/cli/src/agent_install/mcp.rs",
@@ -1049,10 +1048,6 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     (
         "crates/cli/src/coverage/upload_common.rs",
         "the origin remote and working-tree state of a coverage upload",
-    ),
-    (
-        "crates/cli/src/coverage/upload_inventory/tests.rs",
-        "repository fixtures in its own tests",
     ),
     (
         "crates/cli/src/coverage/upload_source_maps.rs",
