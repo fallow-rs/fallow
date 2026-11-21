@@ -2,24 +2,23 @@
 
 use std::path::Path;
 
-use super::{ChurnEventState, SinceDuration, git_command, parse_git_log_events_z, spawn_output};
+use super::{ChurnEventState, git_command, parse_git_log_events_z, spawn_output};
 
-/// Run `git log --numstat` and return event-level churn state.
+/// Run `git log --numstat` over `revisions` and return event-level churn
+/// state. `revisions` is a commit id, or an `<old>..<new>` range of commit
+/// ids.
 ///
-/// The window is passed as an absolute `--after=@<epoch>` resolved against the
-/// run clock rather than as a phrase git re-resolves against the wall clock, so
-/// two runs over one commit see the same window boundary.
+/// The cutoff is passed as an absolute `--after=@<epoch>` and not as a
+/// phrase that git resolves against the wall clock, so two runs over one
+/// commit see the same window boundary.
 pub(super) fn analyze_churn_events(
     root: &Path,
-    since: &SinceDuration,
-    revision_range: Option<&str>,
+    cutoff_secs: Option<u64>,
+    revisions: &str,
     clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
     let mut command = git_command(root);
-    command.arg("log");
-    if let Some(range) = revision_range {
-        command.arg(range);
-    }
+    command.arg("log").arg(revisions);
     command
         .args([
             "--numstat",
@@ -30,7 +29,7 @@ pub(super) fn analyze_churn_events(
             "--format=format:%at|%ct|%H|%ae%x00",
         ])
         .current_dir(root);
-    if let Some(cutoff) = since.window.cutoff_secs(clock) {
+    if let Some(cutoff) = cutoff_secs {
         command.arg(format!("--after=@{cutoff}"));
     }
     // numstat paths are relative to the git toplevel. When the project root
@@ -56,4 +55,91 @@ pub(super) fn analyze_churn_events(
     let mut state = parse_git_log_events_z(&output.stdout, root, clock.epoch_secs());
     state.git_log_bytes = output.stdout.len() as u64;
     Some(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::super::{
+        ChurnCoverage, analyze_churn_cached, analyze_fresh_churn, extend_churn_cache, get_head_sha,
+        git_command, parse_since, read_churn_cache,
+    };
+
+    fn git(root: &Path, args: &[&str]) {
+        let status = git_command(root)
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// Commit one new file and return the commit id.
+    fn commit(root: &Path, name: &str) -> String {
+        std::fs::write(root.join(name), "export const value = 1;\n").expect("write file");
+        git(root, &["add", "."]);
+        git(root, &["commit", "--quiet", "-m", name]);
+        get_head_sha(root).expect("head sha")
+    }
+
+    fn init_repo(root: &Path) {
+        git(root, &["init", "--quiet"]);
+        git(root, &["config", "user.email", "churn@example.test"]);
+        git(root, &["config", "user.name", "Churn Test"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+    }
+
+    #[test]
+    fn fresh_walk_reads_the_recorded_revision() {
+        let repo = tempfile::tempdir().expect("create repo");
+        let root = repo.path();
+        init_repo(root);
+        let first = commit(root, "a.ts");
+        commit(root, "b.ts");
+
+        let since = parse_since("1y").expect("window");
+        let clock = crate::clock::AnalysisClock::for_repo(root);
+        let coverage = ChurnCoverage {
+            head_sha: first,
+            earliest_cutoff_secs: since.window.cutoff_secs(&clock),
+            ..ChurnCoverage::default()
+        };
+        let cache = tempfile::tempdir().expect("create cache dir");
+        let state = analyze_fresh_churn(root, &since, cache.path(), true, &coverage, &clock)
+            .expect("fresh walk");
+
+        assert!(state.files.contains_key(&root.join("a.ts")));
+        assert!(
+            !state.files.contains_key(&root.join("b.ts")),
+            "the walk must stop at the recorded revision"
+        );
+    }
+
+    #[test]
+    fn extension_walk_ends_at_the_recorded_revision() {
+        let repo = tempfile::tempdir().expect("create repo");
+        let root = repo.path();
+        init_repo(root);
+        commit(root, "a.ts");
+        let since = parse_since("1y").expect("window");
+        let cache_dir = tempfile::tempdir().expect("create cache dir");
+        analyze_churn_cached(root, &since, cache_dir.path(), false).expect("cold run");
+
+        let second = commit(root, "b.ts");
+        commit(root, "c.ts");
+        let clock = crate::clock::AnalysisClock::for_repo(root);
+        let cache = read_churn_cache(cache_dir.path()).expect("saved entry");
+        let extended = cache
+            .coverage()
+            .extended_to(&second, since.window.cutoff_secs(&clock));
+        let state = extend_churn_cache(root, &since, cache_dir.path(), &extended, cache, &clock)
+            .expect("extension");
+
+        assert!(state.files.contains_key(&root.join("b.ts")));
+        assert!(
+            !state.files.contains_key(&root.join("c.ts")),
+            "the extension must end at the recorded revision"
+        );
+    }
 }
