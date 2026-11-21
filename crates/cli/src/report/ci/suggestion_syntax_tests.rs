@@ -67,3 +67,39 @@ fn no_suggestion_for_a_line_with_two_exports() {
         );
     }
 }
+
+#[test]
+fn no_suggestion_when_the_deletion_joins_two_class_members() {
+    for source in [
+        "class C {\n  count = 0\n  legacy() {}\n  [Symbol.iterator]() {}\n}\n",
+        "class C {\n  a = 1\n  legacy() {}\n  [b] = 2\n}\n",
+    ] {
+        assert_eq!(
+            suggest(Provider::Github, CLASS_MEMBER, source, 3),
+            None,
+            "{source}"
+        );
+    }
+    let with_semicolons = "class C {\n  count = 0;\n  legacy() {}\n  [Symbol.iterator]() {}\n}\n";
+    assert_eq!(
+        suggest(Provider::Github, CLASS_MEMBER, with_semicolons, 3).as_deref(),
+        Some(DELETE_GITHUB)
+    );
+}
+
+#[test]
+fn no_suggestion_when_the_deletion_shifts_an_enum_value() {
+    let source = "enum E {\n  A,\n  Deprecated,\n  Kept,\n}\n";
+    assert_eq!(suggest(Provider::Github, ENUM_MEMBER, source, 3), None);
+    let explicit = "enum E {\n  A,\n  Deprecated,\n  Kept = 5,\n}\n";
+    assert_eq!(
+        suggest(Provider::Github, ENUM_MEMBER, explicit, 3).as_deref(),
+        Some(DELETE_GITHUB)
+    );
+}
+
+#[test]
+fn no_suggestion_for_one_declaration_of_an_overloaded_name() {
+    let source = "export function f(a: string): void;\nexport function f(a: any) {}\n";
+    assert_eq!(suggest(Provider::Github, EXPORT, source, 1), None);
+}

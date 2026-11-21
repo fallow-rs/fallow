@@ -102,8 +102,9 @@ pub fn suggestion_block_for_issue_line(
     let index = SourceEditIndex::parse(path, source)?;
     let line_start = line_start(source, line)?;
     if is_member_rule {
-        return member_line_is_deletable(&index, source, line, line_start, line_text)
-            .then(|| delete_line_suggestion(provider));
+        let deletable = member_line_is_deletable(&index, source, line, line_start, line_text)
+            && deletion_keeps_other_members(path, &index, source, line_start, line_text);
+        return deletable.then(|| delete_line_suggestion(provider));
     }
     let fixed = unused_export_line(&index, line, line_start, line_text)?;
     Some(match provider {
@@ -143,7 +144,20 @@ fn unused_export_line<'a>(
         let (first, last) = index.line_range(other.start, other.end);
         other.start != statement.start && (first..=last).contains(&line_idx)
     });
-    if covered_by_another || statement.start as usize != line_start || statement.names.len() != 1 {
+    // An overload or a merged declaration of the same name must keep its
+    // `export` together with the other declarations of the name.
+    let shares_its_name = index.statements().iter().any(|other| {
+        other.start != statement.start
+            && other
+                .names
+                .iter()
+                .any(|name| statement.names.contains(name))
+    });
+    if covered_by_another
+        || shares_its_name
+        || statement.start as usize != line_start
+        || statement.names.len() != 1
+    {
         return None;
     }
     let edit = statement.keyword_edit()?;
@@ -166,7 +180,7 @@ fn member_line_is_deletable(
         return false;
     };
     let (first, last) = index.line_range(member.start, member.end);
-    if first != last {
+    if first != last || !member.deletion_keeps_values {
         return false;
     }
     let Some(before) = source.get(line_start..member.start as usize) else {
@@ -221,6 +235,52 @@ fn withheld_suggestion_hint() -> String {
      that would credit this finding may never have been seen. Resolve the files named in \
      `workspace_diagnostics[]` and re-run, or apply the change by hand."
         .to_owned()
+}
+
+/// True when the text without the line still parses, and each other member
+/// keeps its text. Without a semicolon after the member above, the deletion
+/// can join that member with the member below, as in `count = 0` followed by
+/// `[Symbol.iterator]() {}`.
+fn deletion_keeps_other_members(
+    path: &Path,
+    index: &SourceEditIndex,
+    source: &str,
+    line_start: usize,
+    line_text: &str,
+) -> bool {
+    let line_end = source[line_start..]
+        .find('\n')
+        .map_or(source.len(), |newline| line_start + newline + 1);
+    let mut rest = String::with_capacity(source.len());
+    rest.push_str(&source[..line_start]);
+    rest.push_str(&source[line_end..]);
+    let Some(after) = SourceEditIndex::parse(path, &rest) else {
+        return false;
+    };
+    let Ok(removed) = u32::try_from(line_end - line_start) else {
+        return false;
+    };
+    let text_of = |start: u32, end: u32| rest.get(start as usize..end as usize);
+    let shift = |offset: u32| {
+        if offset as usize >= line_end {
+            offset - removed
+        } else {
+            offset
+        }
+    };
+    let deleted_line = line_start..line_start + line_text.len();
+    let kept: Vec<Option<&str>> = index
+        .members()
+        .iter()
+        .filter(|member| !deleted_line.contains(&(member.start as usize)))
+        .map(|member| text_of(shift(member.start), shift(member.end)))
+        .collect();
+    let now: Vec<Option<&str>> = after
+        .members()
+        .iter()
+        .map(|member| text_of(member.start, member.end))
+        .collect();
+    kept == now
 }
 
 /// The block that deletes the line of the finding.
@@ -437,7 +497,7 @@ mod tests {
             member_suggestion(
                 Provider::Github,
                 "fallow/unused-enum-member",
-                "enum E {\n  Deprecated,\n  Kept,\n}\n"
+                "enum E {\n  Deprecated,\n  Kept = 2,\n}\n"
             )
             .as_deref(),
             Some("\n\n```suggestion\n\n```")
@@ -446,7 +506,7 @@ mod tests {
             member_suggestion(
                 Provider::Gitlab,
                 "fallow/unused-enum-member",
-                "enum E {\n  Deprecated,\n  Kept,\n}\n"
+                "enum E {\n  Deprecated,\n  Kept = 2,\n}\n"
             )
             .as_deref(),
             Some("\n\n```suggestion:-0+0\n\n```")
@@ -549,7 +609,7 @@ mod tests {
             ),
             (
                 "fallow/unused-enum-member",
-                "enum E {\n  Deprecated,\n  Kept,\n}\n",
+                "enum E {\n  Deprecated,\n  Kept = 2,\n}\n",
                 2,
             ),
             ("fallow/unused-export", "export const value = 1;\n", 1),

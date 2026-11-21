@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use oxc_ast::ast::{
-    ClassElement, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumMember,
+    ClassElement, Declaration, ExportDefaultDeclarationKind, Program, Statement, TSEnumBody,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::{GetSpan, SourceType};
@@ -87,6 +87,10 @@ pub struct MemberSpan {
     pub start: u32,
     /// The byte offset after the last byte of the member.
     pub end: u32,
+    /// False for an enum member whose deletion changes the value of the next
+    /// member: the next member has no initializer, so its value counts on
+    /// from this member. Always true for a class element.
+    pub deletion_keeps_values: bool,
 }
 
 /// The export statements and the class and enum members of one file text.
@@ -193,6 +197,12 @@ impl SourceEditIndex {
         self.members
             .iter()
             .filter(move |member| self.line_of(member.start) == line_idx)
+    }
+
+    /// Each class element and enum member of the file, in source order.
+    #[must_use]
+    pub fn members(&self) -> &[MemberSpan] {
+        &self.members
     }
 
     /// The statement whose `export` keyword is at byte `start`.
@@ -307,23 +317,30 @@ struct MemberCollector {
 }
 
 impl MemberCollector {
-    fn push(&mut self, span: oxc_span::Span) {
+    fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool) {
         self.members.push(MemberSpan {
             start: span.start + self.offset,
             end: span.end + self.offset,
+            deletion_keeps_values,
         });
     }
 }
 
 impl<'a> Visit<'a> for MemberCollector {
     fn visit_class_element(&mut self, it: &ClassElement<'a>) {
-        self.push(it.span());
+        self.push(it.span(), true);
         oxc_ast_visit::walk::walk_class_element(self, it);
     }
 
-    fn visit_ts_enum_member(&mut self, it: &TSEnumMember<'a>) {
-        self.push(it.span);
-        oxc_ast_visit::walk::walk_ts_enum_member(self, it);
+    fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
+        for (position, member) in it.members.iter().enumerate() {
+            let next_has_value = it
+                .members
+                .get(position + 1)
+                .is_none_or(|next| next.initializer.is_some());
+            self.push(member.span, next_has_value);
+        }
+        oxc_ast_visit::walk::walk_ts_enum_body(self, it);
     }
 }
 
@@ -665,6 +682,23 @@ mod tests {
         assert_eq!(members(enumeration, 2), vec!["A"]);
         assert_eq!(members(enumeration, 3), vec!["B", "C"]);
         assert_eq!(members(enumeration, 4), vec!["D = \"x,y\""]);
+    }
+
+    #[test]
+    fn an_enum_member_knows_whether_its_deletion_shifts_a_value() {
+        let source = "enum E {\n  A,\n  B,\n  C = 5,\n  D,\n}\nclass K {\n  m() {}\n}\n";
+        let index = index("store.ts", source);
+        let keeps = |line| {
+            index
+                .members_on_line(line)
+                .map(|member| member.deletion_keeps_values)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keeps(2), vec![false], "B counts on from A");
+        assert_eq!(keeps(3), vec![true], "C has its own value");
+        assert_eq!(keeps(4), vec![false], "D counts on from C");
+        assert_eq!(keeps(5), vec![true], "D is the last member");
+        assert_eq!(keeps(8), vec![true], "a class element");
     }
 
     #[test]
