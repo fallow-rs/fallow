@@ -1124,7 +1124,7 @@ fn security_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "security/client-server-leak" => RuleGuide {
             example: "A module marked `use client` imports code that reads a non-public `process.env` or `import.meta.env` value through a static path.",
-            how_to_fix: "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix.",
+            how_to_fix: "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix. For a `server-only-import` candidate, the fix depends on the sink. For a React Router `.server` module, move the call into `loader`, `action`, `middleware` or `headers`, or move the code that the client needs out of the `.server` module. For other server-only code in Next.js, keep the import out of the `use client` cone; a module that only `next/dynamic(..., { ssr: false })` loads is a false positive.",
         },
         "security/hardcoded-secret" => RuleGuide {
             example: "A provider-prefixed token-shaped literal is assigned to a secret-shaped variable, and the hardcoded-secret category is explicitly included.",

@@ -120,10 +120,45 @@ fn a_server_module_that_a_client_export_uses_is_a_server_only_sink() {
     assert!(
         findings[0]
             .evidence
-            .contains("it is a React Router .server module"),
+            .contains("imports a React Router .server module"),
         "{}",
         findings[0].evidence
     );
+    assert!(
+        findings[0]
+            .evidence
+            .contains("React Router fails the client build"),
+        "{}",
+        findings[0].evidence
+    );
+    for next_js_advice in ["next/dynamic", "Server Action", "use server"] {
+        assert!(
+            !findings[0].evidence.contains(next_js_advice),
+            "{}",
+            findings[0].evidence
+        );
+    }
+    let step = fallow_types::security_next_step::client_server_leak_next_step(findings[0]);
+    assert!(
+        step.contains("loader, action, middleware or headers"),
+        "{step}"
+    );
+}
+
+#[test]
+fn a_node_fs_sink_of_a_route_module_keeps_the_server_only_advice() {
+    let (results, _) = analyze_fixture();
+    let findings = findings_on(&results, "app/routes/home.tsx", SERVER_ONLY);
+    assert_eq!(findings.len(), 1, "{:#?}", results.security_findings);
+    assert!(
+        !findings[0]
+            .evidence
+            .contains(fallow_types::security_next_step::REACT_ROUTER_SERVER_SINK),
+        "{}",
+        findings[0].evidence
+    );
+    let step = fallow_types::security_next_step::client_server_leak_next_step(findings[0]);
+    assert!(step.contains("next/dynamic"), "{step}");
 }
 
 #[test]

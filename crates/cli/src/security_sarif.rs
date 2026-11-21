@@ -129,7 +129,10 @@ fn sarif_rule_def_server_only_leak(rule_id: &str) -> serde_json::Value {
              \"use server\" module whose value exports are all async functions, because \
              the bundler replaces its import with action references. A \"use server\" \
              sink has a non-action export (a top-level const, a re-export, or a default \
-             value) that carries the server-only import into the client bundle." },
+             value) that carries the server-only import into the client bundle. A \
+             React Router .server module is also a sink: React Router fails the client \
+             build for it. Move the call into loader, action, middleware or headers, or \
+             move the code that the client needs out of the .server module." },
         "help": {
             "text": security_help_text(title),
             "markdown": security_help_markdown(title)
