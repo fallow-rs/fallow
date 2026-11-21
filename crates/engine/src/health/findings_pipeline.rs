@@ -23,7 +23,7 @@ use super::{HealthError, HealthOptions, scoring, sort_findings};
 
 pub(super) struct HealthFindingsData {
     pub(super) findings: Vec<ComplexityViolation>,
-    pub(super) threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    pub(super) threshold_overrides: super::threshold_overrides::ThresholdOverrideRows,
     pub(super) files_analyzed: usize,
     pub(super) total_functions: usize,
     pub(super) complexity_ms: f64,
@@ -115,7 +115,7 @@ pub(super) fn prepare_health_findings(
 
     Ok(HealthFindingsData {
         findings: collected.findings,
-        threshold_overrides: threshold_state_tracker.into_states(),
+        threshold_overrides: threshold_state_tracker.into_rows(),
         files_analyzed: collected.files_analyzed,
         total_functions: collected.total_functions,
         complexity_ms: collected.complexity_ms,
@@ -279,30 +279,38 @@ pub(super) fn annotate_outstanding_dimensions(
         ) else {
             continue;
         };
-        let Some(exceeded) = exceeded_by_unit.get(&(path, line, col, function)).copied() else {
+        if let Some(exceeded) = exceeded_by_unit.get(&(path, line, col, function)).copied() {
+            add_outstanding(&mut state.outstanding, exceeded);
+        }
+    }
+    for state in tracker.inline_states_mut() {
+        let (Some(line), Some(col), Some(function)) =
+            (state.line, state.col, state.function.as_deref())
+        else {
             continue;
         };
-        // `record_complexity` may already have seeded `Complexity` for a
-        // surviving unit-size breach, which produces no finding of its own, so
-        // the dimension is added only when it is not there yet.
-        if (exceeded.includes_cyclomatic() || exceeded.includes_cognitive())
-            && !state
-                .outstanding
-                .contains(&fallow_output::ThresholdOverrideDimension::Complexity)
-        {
-            state
-                .outstanding
-                .push(fallow_output::ThresholdOverrideDimension::Complexity);
+        let key = (state.path.as_path(), line, col, function);
+        if let Some(exceeded) = exceeded_by_unit.get(&key).copied() {
+            add_outstanding(&mut state.outstanding, exceeded);
         }
-        if exceeded.includes_crap()
-            && !state
-                .outstanding
-                .contains(&fallow_output::ThresholdOverrideDimension::Crap)
-        {
-            state
-                .outstanding
-                .push(fallow_output::ThresholdOverrideDimension::Crap);
-        }
+    }
+}
+
+/// Add the dimensions that a surviving finding breaches. A recorder may
+/// already have seeded `Complexity` for a surviving unit-size breach, which
+/// produces no finding of its own, so each dimension goes in only one time.
+fn add_outstanding(
+    outstanding: &mut Vec<fallow_output::ThresholdOverrideDimension>,
+    exceeded: fallow_output::ExceededThreshold,
+) {
+    use fallow_output::ThresholdOverrideDimension::{Complexity, Crap};
+    if (exceeded.includes_cyclomatic() || exceeded.includes_cognitive())
+        && !outstanding.contains(&Complexity)
+    {
+        outstanding.push(Complexity);
+    }
+    if exceeded.includes_crap() && !outstanding.contains(&Crap) {
+        outstanding.push(Crap);
     }
 }
 

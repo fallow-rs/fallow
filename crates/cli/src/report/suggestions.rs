@@ -506,6 +506,7 @@ mod tests {
                 contributions: Vec::new(),
                 effective_thresholds: None,
                 threshold_source: None,
+                override_comment_line: None,
                 max_file_lines: None,
             })],
             ..HealthReport::default()

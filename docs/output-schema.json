@@ -1806,6 +1806,20 @@
           },
           "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
         },
+        "inline_threshold_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideState"
+          },
+          "description": "`fallow-override-threshold-next-line` comment states, one row per\ncomment and threshold dimension. The status values are the values of\n`threshold_overrides`. Absent when the project has no such comment."
+        },
+        "inline_threshold_override_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideProblem"
+          },
+          "description": "`fallow-override-threshold-next-line` comments with a problem. Such a\ncomment has no effect."
+        },
         "vital_signs": {
           "anyOf": [
             {
@@ -3134,6 +3148,20 @@
           },
           "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
         },
+        "inline_threshold_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideState"
+          },
+          "description": "`fallow-override-threshold-next-line` comment states, one row per\ncomment and threshold dimension. The status values are the values of\n`threshold_overrides`. Absent when the project has no such comment."
+        },
+        "inline_threshold_override_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideProblem"
+          },
+          "description": "`fallow-override-threshold-next-line` comments with a problem. Such a\ncomment has no effect."
+        },
         "vital_signs": {
           "anyOf": [
             {
@@ -3934,6 +3962,13 @@
             }
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
+        },
+        "override_comment_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the `fallow-override-threshold-next-line` comment that\nset a cyclomatic, cognitive or CRAP ceiling of this finding. Absent\nwhen only config entries or the global thresholds apply."
         },
         "max_file_lines": {
           "type": [
@@ -12805,6 +12840,13 @@
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
         },
+        "override_comment_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the `fallow-override-threshold-next-line` comment that\nset a cyclomatic, cognitive or CRAP ceiling of this finding. Absent\nwhen only config entries or the global thresholds apply."
+        },
         "max_file_lines": {
           "type": [
             "integer",
@@ -17370,7 +17412,7 @@
         {
           "type": "string",
           "const": "override",
-          "description": "A `thresholdOverrides` config entry changed at least one ceiling."
+          "description": "A `thresholdOverrides` config entry or a\n`fallow-override-threshold-next-line` comment changed at least one\nceiling. `override_comment_line` is present when a comment did."
         }
       ],
       "description": "Source for a finding's effective thresholds."
@@ -39814,6 +39856,148 @@
         "code"
       ],
       "description": "One file of the example project of a rule."
+    },
+    "InlineThresholdOverrideState": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Lifecycle state of the comment.",
+          "$ref": "#/definitions/ThresholdOverrideStatus"
+        },
+        "dimension": {
+          "description": "Threshold dimension this row describes.",
+          "$ref": "#/definitions/ThresholdOverrideDimension"
+        },
+        "outstanding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThresholdOverrideDimension"
+          },
+          "description": "Dimensions the function still breaches despite this comment."
+        },
+        "path": {
+          "type": "string",
+          "description": "File that holds the comment."
+        },
+        "comment_line": {
+          "type": "integer",
+          "description": "1-based line of the comment."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the function on the next line. Absent on `no_match` rows."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the function. Absent on `no_match` rows."
+        },
+        "col": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "0-based byte column of the function. Absent on `no_match` rows."
+        },
+        "configured_thresholds": {
+          "description": "Ceilings the comment sets.",
+          "$ref": "#/definitions/HealthConfiguredThresholds"
+        },
+        "effective_thresholds": {
+          "description": "Ceilings in effect after the config and the comment apply.",
+          "$ref": "#/definitions/HealthEffectiveThresholds"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThresholdOverrideMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current metrics of the function, when the comment matched one."
+        },
+        "reason": {
+          "type": "string",
+          "description": "The reason after ` -- ` in the comment."
+        }
+      },
+      "required": [
+        "status",
+        "dimension",
+        "path",
+        "comment_line",
+        "configured_thresholds",
+        "effective_thresholds",
+        "reason"
+      ],
+      "description": "Report entry for one `fallow-override-threshold-next-line` comment and one\nthreshold dimension. The status values are the values of a\n`thresholdOverrides` row: `active`, `stale`, `insufficient` and `no_match`."
+    },
+    "InlineThresholdOverrideProblem": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that holds the comment."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the comment."
+        },
+        "problem": {
+          "description": "What is wrong with the comment.",
+          "$ref": "#/definitions/InlineThresholdProblemKind"
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The token with the problem, when one token has it."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "problem"
+      ],
+      "description": "One `fallow-override-threshold-next-line` comment with a problem. The\ncomment has no effect."
+    },
+    "InlineThresholdProblemKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "missing_reason",
+          "description": "The comment has no reason after ` -- `."
+        },
+        {
+          "type": "string",
+          "const": "missing_threshold",
+          "description": "The comment sets no threshold."
+        },
+        {
+          "type": "string",
+          "const": "invalid_key",
+          "description": "A token is not a known key, or a key occurs two times."
+        },
+        {
+          "type": "string",
+          "const": "invalid_value",
+          "description": "A value is not a valid number for its key."
+        },
+        {
+          "type": "string",
+          "const": "disabled",
+          "description": "`health.inlineThresholdOverrides` is `false`, so the comment form is off."
+        }
+      ],
+      "description": "What is wrong with one inline threshold override comment. A comment with a\nproblem has no effect."
     }
   }
 }

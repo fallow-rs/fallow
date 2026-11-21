@@ -57,6 +57,7 @@ mod health_css;
 mod health_diagnostics;
 mod health_findings;
 mod health_grouped;
+mod health_inline_thresholds;
 mod health_mutation;
 mod health_report;
 mod health_runtime_coverage;
@@ -269,6 +270,9 @@ pub use health_findings::{
 pub use health_grouped::{
     GroupTrendStatus, HealthGroup, HealthGrouping, group_score_delta_label,
     health_groups_in_display_order,
+};
+pub use health_inline_thresholds::{
+    InlineThresholdOverrideProblem, InlineThresholdOverrideState, InlineThresholdProblemKind,
 };
 pub use health_mutation::{
     HealthFindingMutation, HealthMutationStaleFile, HealthMutationStaleReason, HealthMutationState,

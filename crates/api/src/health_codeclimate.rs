@@ -441,6 +441,7 @@ mod tests {
                     contributions: Vec::new(),
                     effective_thresholds: None,
                     threshold_source: None,
+                    override_comment_line: None,
                     max_file_lines: None,
                 }
                 .into(),
@@ -532,6 +533,7 @@ mod tests {
             contributions: Vec::new(),
             threshold_source: effective_thresholds
                 .map(|_| fallow_output::ThresholdSource::Override),
+            override_comment_line: None,
             max_file_lines: None,
             effective_thresholds,
         }

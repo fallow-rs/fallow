@@ -872,6 +872,7 @@ mod tests {
             contributions: Vec::new(),
             effective_thresholds: effective,
             threshold_source: effective.map(|_| crate::ThresholdSource::Override),
+            override_comment_line: None,
             max_file_lines: None,
         }
     }

@@ -9,7 +9,7 @@ pub use crate::complexity_contribution::{
     ComplexityContribution, ComplexityContributionKind, ComplexityMetric,
 };
 use crate::discover::FileId;
-use crate::suppress::{Suppression, UnknownSuppressionKind};
+use crate::{inline_threshold::InlineThresholdOverrides, suppress::Suppression};
 #[path = "extract_playwright_facts.rs"]
 mod playwright_facts;
 use playwright_facts::{
@@ -76,13 +76,12 @@ pub struct ModuleInfo {
     pub parse_nesting_too_deep: bool,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
-    /// Suppression tokens that did not parse to any known `IssueKind`.
-    /// Surfaced as `StaleSuppression` findings via `find_stale` so users see
-    /// typos or obsolete kind names instead of having the entire marker
-    /// silently discarded. See issue #449.
-    pub unknown_suppression_kinds: Vec<UnknownSuppressionKind>,
+    /// Suppression tokens that parse to no `IssueKind`, reported as stale (issue #449).
+    pub unknown_suppression_kinds: Vec<crate::suppress::UnknownSuppressionKind>,
     /// Range suppression markers with a problem. They have no effect.
     pub range_marker_problems: Vec<crate::suppress::RangeMarkerProblem>,
+    /// `fallow-override-threshold-next-line` comments and their problems.
+    pub inline_threshold_overrides: InlineThresholdOverrides,
     /// Local names of import bindings that are never referenced in this file.
     /// Populated via `oxc_semantic` scope analysis. Used at graph-build time
     /// to skip adding references for imports whose binding is never read,
@@ -472,6 +471,7 @@ impl ModuleInfo {
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
             range_marker_problems: Vec::new(),
+            inline_threshold_overrides: InlineThresholdOverrides::default(),
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -3487,7 +3487,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1576);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1624);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]

@@ -83,6 +83,7 @@ pub mod schemas;
 pub mod security_output;
 /// Local-only advisory similar-code discovery and provider status.
 pub mod similar_code;
+mod threshold_override_output;
 mod type_aware;
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{

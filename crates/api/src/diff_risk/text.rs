@@ -58,6 +58,7 @@ const SUPPRESSION_TOKENS: &[&str] = &[
     "istanbul ignore",
     "c8 ignore",
     "v8 ignore",
+    fallow_types::inline_threshold::INLINE_THRESHOLD_MARKER,
 ];
 pub(crate) const FALLOW_IGNORE_TOKEN: &str = "fallow-ignore";
 /// Suppression tokens of the diff-risk rules. A `fallow-ignore` comment that
@@ -870,6 +871,19 @@ mod tests {
             .map(|hit| (hit.line, hit.evidence.as_str()))
             .collect();
         assert_eq!(evidence, vec![(1, "@ts-ignore"), (5, "istanbul ignore")]);
+    }
+
+    #[test]
+    fn added_threshold_override_comment_is_a_hit() {
+        let head = "// fallow-override-threshold-next-line maxCognitive=40 -- legacy
+export function f() {}
+";
+        let hits = added_suppression_hits("", head);
+        let evidence: Vec<(u32, &str)> = hits
+            .iter()
+            .map(|hit| (hit.line, hit.evidence.as_str()))
+            .collect();
+        assert_eq!(evidence, vec![(1, "fallow-override-threshold-next-line")]);
     }
 
     #[test]

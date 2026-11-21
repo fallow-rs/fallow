@@ -118,7 +118,9 @@ The rollup's `suppress-line` action uses `placement: "above-component-worst-meth
         summary: "How to read one `threshold_overrides` state row.",
         detail: r"Each state row carries a `dimension` (`complexity` or `crap`). One configured override produces one row per dimension it participates in. Group on `override_index` to count configured overrides rather than rows.
 
-A row's `outstanding[]` names every dimension on which the matched unit still produces a finding after the override applies. An override can read `active` alongside a surviving finding when it leaves that dimension's ceiling unconfigured. A row reads `insufficient` when the override raises the ceiling to a value the unit still exceeds.",
+A row's `outstanding[]` names every dimension on which the matched unit still produces a finding after the override applies. An override can read `active` alongside a surviving finding when it leaves that dimension's ceiling unconfigured. A row reads `insufficient` when the override raises the ceiling to a value the unit still exceeds.
+
+A `// fallow-override-threshold-next-line maxCognitive=40 -- <reason>` comment sets the ceilings of the function on the next line. Its rows go to `inline_threshold_overrides[]`, keyed by `path` and `comment_line`, with the same `status` values. For each ceiling that it sets, the comment wins over a config entry. A finding that a comment ceiling applies to carries `override_comment_line`. A comment with a problem has no effect and goes to `inline_threshold_override_problems[]`. Do not add such a comment only to make a gate pass: `fallow audit` reports a new one as `added-suppression`.",
     },
     ToolGuideSection {
         topic: "gate_outcomes",

@@ -95,7 +95,13 @@ pub(super) fn prepare_health_core_sections<R>(
         },
     )
     .with_cyclomatic_policy(config.health.cyclomatic_policy)
-    .with_max_file_lines(scope.max_file_lines);
+    .with_max_file_lines(scope.max_file_lines)
+    .with_inline_overrides(
+        config.health.inline_threshold_overrides,
+        modules,
+        &scope.file_paths,
+        &config.root,
+    );
 
     let HealthAnalysisPrelude {
         analysis_data,

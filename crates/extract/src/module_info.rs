@@ -23,6 +23,7 @@ pub fn non_js_module_info(input: NonJsModuleInfoInput<'_>) -> ModuleInfo {
         suppressions: input.parsed_suppressions.suppressions,
         unknown_suppression_kinds: input.parsed_suppressions.unknown_kinds,
         range_marker_problems: input.parsed_suppressions.range_problems,
+        inline_threshold_overrides: input.parsed_suppressions.inline_thresholds,
         line_offsets: fallow_types::extract::compute_line_offsets(input.source),
         ..ModuleInfo::empty(input.file_id)
     }

@@ -8,6 +8,7 @@ mod health_hotspots;
 mod health_runtime;
 mod health_status;
 mod health_targets;
+mod health_threshold_overrides;
 mod perf;
 pub(super) mod traces;
 pub(super) mod walkthrough;
