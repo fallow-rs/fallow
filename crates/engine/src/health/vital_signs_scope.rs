@@ -6,13 +6,13 @@ use crate::vital_signs;
 pub fn apply_duplication_metrics(
     vital_signs: &mut fallow_output::VitalSigns,
     counts: &mut fallow_output::VitalSignsCounts,
-    dupes_report: &crate::duplicates::DuplicationReport,
+    stats: &crate::duplicates::DuplicationStats,
 ) {
-    let pct = dupes_report.stats.duplication_percentage;
+    let pct = stats.duplication_percentage;
     vital_signs.duplication_pct = Some((pct * 10.0).round() / 10.0);
-    counts.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
+    counts.duplicated_lines = Some(stats.duplicated_lines);
     if let Some(ref mut vc) = vital_signs.counts {
-        vc.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
+        vc.duplicated_lines = Some(stats.duplicated_lines);
     }
 }
 
