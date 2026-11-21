@@ -27,7 +27,7 @@ use fallow_config::OutputFormat;
 use fallow_engine::health::{
     HealthError, HealthExecutionOptions, HealthGateOptions, HealthGroupResolver,
     HealthPipelineInputs, HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort,
-    RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
+    PathGroup, RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
 };
 use fallow_engine::resolved_run::Runnable;
 
@@ -75,12 +75,8 @@ impl HealthGroupResolver for OwnershipResolver {
         OwnershipResolver::mode_label(self)
     }
 
-    fn resolve_with_rule(&self, rel_path: &std::path::Path) -> (String, Option<String>) {
-        OwnershipResolver::resolve_with_rule(self, rel_path)
-    }
-
-    fn section_owners_of(&self, rel_path: &std::path::Path) -> Option<&[String]> {
-        OwnershipResolver::section_owners_of(self, rel_path)
+    fn group_of<'a>(&'a self, rel_path: &'a std::path::Path) -> PathGroup<'a> {
+        OwnershipResolver::group_of(self, rel_path)
     }
 }
 

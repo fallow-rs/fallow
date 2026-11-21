@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 
 pub use fallow_api::ResultGroup;
 use fallow_config::WorkspaceInfo;
+use fallow_engine::health::PathGroup;
 use fallow_types::results::AnalysisResults;
 
 use super::relative_path;
-use crate::codeowners::{self, CodeOwners, NO_SECTION_LABEL, UNOWNED_LABEL};
+use crate::codeowners::{self, CodeOwners, NO_SECTION_LABEL, RuleMatch, UNOWNED_LABEL};
 
 /// Ownership resolver for `--group-by`.
 ///
@@ -67,14 +68,34 @@ impl PackageResolver {
 impl OwnershipResolver {
     /// Resolve the group key for a file path (relative to project root).
     pub(crate) fn resolve(&self, rel_path: &Path) -> String {
+        self.group_of(rel_path).key.to_string()
+    }
+
+    /// Resolve the group key and the section owners of a path in one lookup.
+    pub(crate) fn group_of<'a>(&'a self, rel_path: &'a Path) -> PathGroup<'a> {
+        let unowned = PathGroup {
+            key: UNOWNED_LABEL,
+            section_owners: None,
+        };
         match self {
-            Self::Owner(co) => co.owner_of(rel_path).unwrap_or(UNOWNED_LABEL).to_string(),
-            Self::Directory => codeowners::directory_group(rel_path).to_string(),
-            Self::Package(pr) => pr.resolve(rel_path).to_string(),
-            Self::Section(co) => match co.section_of(rel_path) {
-                Some(Some(name)) => name.to_string(),
-                Some(None) => NO_SECTION_LABEL.to_string(),
-                None => UNOWNED_LABEL.to_string(),
+            Self::Owner(co) => co.owner_of(rel_path).map_or(unowned, |owner| PathGroup {
+                key: owner,
+                section_owners: None,
+            }),
+            Self::Directory => PathGroup {
+                key: codeowners::directory_group(rel_path),
+                section_owners: None,
+            },
+            Self::Package(pr) => PathGroup {
+                key: pr.resolve(rel_path),
+                section_owners: None,
+            },
+            Self::Section(co) => match co.match_path(rel_path) {
+                Some(m) if m.owner.is_some() => PathGroup {
+                    key: m.section.unwrap_or(NO_SECTION_LABEL),
+                    section_owners: Some(m.section_owners),
+                },
+                _ => unowned,
             },
         }
     }
@@ -87,23 +108,23 @@ impl OwnershipResolver {
     /// CODEOWNERS pattern from the last matching rule).
     pub(crate) fn resolve_with_rule(&self, rel_path: &Path) -> (String, Option<String>) {
         match self {
-            Self::Owner(co) => {
-                if let Some((owner, rule)) = co.owner_and_rule_of(rel_path) {
-                    (owner.to_string(), Some(rule.to_string()))
-                } else {
-                    (UNOWNED_LABEL.to_string(), None)
-                }
-            }
+            Self::Owner(co) => match co.match_path(rel_path) {
+                Some(RuleMatch {
+                    owner: Some(owner),
+                    pattern,
+                    ..
+                }) => (owner.to_string(), Some(pattern.to_string())),
+                _ => (UNOWNED_LABEL.to_string(), None),
+            },
             Self::Directory => (codeowners::directory_group(rel_path).to_string(), None),
             Self::Package(pr) => (pr.resolve(rel_path).to_string(), None),
-            Self::Section(co) => {
-                if let Some((section, _owners, rule)) = co.section_owners_and_rule_of(rel_path) {
-                    let key = section.map_or_else(|| NO_SECTION_LABEL.to_string(), str::to_string);
-                    (key, Some(rule.to_string()))
-                } else {
-                    (UNOWNED_LABEL.to_string(), None)
-                }
-            }
+            Self::Section(co) => match co.match_path(rel_path) {
+                Some(m) if m.owner.is_some() => (
+                    m.section.unwrap_or(NO_SECTION_LABEL).to_string(),
+                    Some(m.pattern.to_string()),
+                ),
+                _ => (UNOWNED_LABEL.to_string(), None),
+            },
         }
     }
 
@@ -122,14 +143,8 @@ impl OwnershipResolver {
     /// Returns `Some(&[...])` only in Section mode when `rel_path` resolves
     /// to a rule inside a named section. Used to emit the `owners` metadata
     /// array in grouped JSON output.
-    pub(crate) fn section_owners_of(&self, rel_path: &Path) -> Option<&[String]> {
-        if let Self::Section(co) = self
-            && let Some((_, owners)) = co.section_and_owners_of(rel_path)
-        {
-            Some(owners)
-        } else {
-            None
-        }
+    pub(crate) fn section_owners_of<'a>(&'a self, rel_path: &'a Path) -> Option<&'a [String]> {
+        self.group_of(rel_path).section_owners
     }
 }
 
@@ -300,5 +315,51 @@ mod tests {
         assert_eq!(OwnershipResolver::Package(pr).mode_label(), "package");
         let co = CodeOwners::parse("[Docs]\n/docs/ @docs\n").unwrap();
         assert_eq!(OwnershipResolver::Section(co).mode_label(), "section");
+    }
+
+    #[test]
+    fn section_group_carries_merged_owners() {
+        let resolver = OwnershipResolver::Section(
+            CodeOwners::parse("* @root\n[Team] @alice\nsrc/a/\n[Team] @bob\nsrc/b/\n!src/b/gen/\n")
+                .unwrap(),
+        );
+        let merged = ["@alice".to_string(), "@bob".to_string()];
+        for path in ["src/a/x.ts", "src/b/x.ts"] {
+            let group = resolver.group_of(Path::new(path));
+            assert_eq!(group.key, "Team", "{path}");
+            assert_eq!(group.section_owners, Some(&merged[..]), "{path}");
+        }
+        let root_rule = resolver.group_of(Path::new("README.md"));
+        assert_eq!(root_rule.key, NO_SECTION_LABEL);
+        assert_eq!(root_rule.section_owners, Some(&[][..]));
+        let excluded = resolver.group_of(Path::new("src/b/gen/x.ts"));
+        assert_eq!(excluded.key, UNOWNED_LABEL);
+        assert_eq!(excluded.section_owners, None);
+        assert_eq!(
+            resolver.resolve_with_rule(Path::new("src/b/x.ts")),
+            ("Team".to_string(), Some("src/b/".to_string()))
+        );
+    }
+
+    #[test]
+    fn group_of_matches_resolve_in_each_mode() {
+        let resolvers = [
+            OwnershipResolver::Owner(CodeOwners::parse("src/ @team\n").unwrap()),
+            OwnershipResolver::Directory,
+            OwnershipResolver::Package(PackageResolver {
+                workspaces: vec![(PathBuf::from("packages/a"), "a".to_string())],
+            }),
+        ];
+        for resolver in &resolvers {
+            for path in ["src/x.ts", "docs/readme.md", "packages/a/index.ts"] {
+                let group = resolver.group_of(Path::new(path));
+                assert_eq!(group.key, resolver.resolve(Path::new(path)), "{path}");
+                assert_eq!(group.section_owners, None, "{path}");
+            }
+        }
+        assert_eq!(
+            resolvers[0].group_of(Path::new("docs/readme.md")).key,
+            UNOWNED_LABEL
+        );
     }
 }

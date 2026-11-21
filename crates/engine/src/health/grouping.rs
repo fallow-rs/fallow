@@ -256,13 +256,21 @@ fn bucket_paths(
     let mut by_key: FxHashMap<String, GroupBucket> = FxHashMap::default();
     for path in candidate_paths {
         let rel = path.strip_prefix(project_root).unwrap_or(path);
-        let (key, _rule) = resolver.resolve_with_rule(rel);
-        let entry = by_key.entry(key.clone()).or_insert_with(|| GroupBucket {
-            key: key.clone(),
-            owners: resolver.section_owners_of(rel).map(<[_]>::to_vec),
-            paths: FxHashSet::default(),
-        });
-        entry.paths.insert(path.clone());
+        let group = resolver.group_of(rel);
+        if let Some(bucket) = by_key.get_mut(group.key) {
+            bucket.paths.insert(path.clone());
+            continue;
+        }
+        let mut paths = FxHashSet::default();
+        paths.insert(path.clone());
+        by_key.insert(
+            group.key.to_owned(),
+            GroupBucket {
+                key: group.key.to_owned(),
+                owners: group.section_owners.map(<[_]>::to_vec),
+                paths,
+            },
+        );
     }
     let mut out: Vec<GroupBucket> = by_key.into_values().collect();
     out.sort_by(|a, b| {
