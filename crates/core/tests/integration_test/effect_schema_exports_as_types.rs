@@ -11,18 +11,48 @@ const FIXTURE: &str = "effect-schema-exports-as-types";
 /// value and a re-export whose name matches a schema import are not schemas.
 /// A `pipe` whose argument is an `HttpApiSchema` member that is not a
 /// transform call (a guard, or a transform factory that is not called) is not
-/// a schema.
+/// a schema. A function that returns a schema (`makeUnusedRule`) and an alias
+/// of one (`importedHelperAlias`) are functions, not schemas. A call of a
+/// function is not a schema when a `return` of the function is not a schema,
+/// or when a path of the function ends without a `return` (#4988).
 const VALUE_EXPORTS_WITH_OPTION_ON: &[&str] = &[
     "Collided",
     "NotEffectSchema",
+    "NotSchema",
     "aliasedPlain",
     "bareHttpTransform",
     "decodeBaseRule",
     "decodeUsed",
+    "fromDecoderPipe",
+    "fromImportedPlain",
+    "fromMixedReturns",
+    "fromOpenEnd",
+    "fromPlainArg",
+    "fromPlainFn",
+    "fromPlainHelper",
+    "fromPlainLocal",
+    "fromPlainNested",
     "httpStatusProbe",
+    "importedHelperAlias",
+    "makeUnusedRule",
     "notDerived",
     "plainValue",
     "unusedHelper",
+];
+
+/// Exports whose value is a call of a function that returns a schema: a
+/// function of the same module, or an imported one (#4988).
+const HELPER_SCHEMA_EXPORTS: &[&str] = &[
+    "FromArg",
+    "FromEither",
+    "FromFn",
+    "FromHelper",
+    "FromHelperPipe",
+    "FromImportedHelper",
+    "FromImportedHelperPipe",
+    "FromLocal",
+    "FromNested",
+    "FromWrappedHelper",
 ];
 
 struct Findings {
@@ -76,7 +106,18 @@ fn option_off_reports_schemas_as_unused_exports() {
             "FormRequest",
             "ForwardedDefault",
             "ForwardedUnion",
+            "FromArg",
+            "FromEither",
+            "FromFn",
+            "FromHelper",
+            "FromHelperPipe",
+            "FromImportedHelper",
+            "FromImportedHelperPipe",
+            "FromLocal",
+            "FromNested",
+            "FromWrappedHelper",
             "NotEffectSchema",
+            "NotSchema",
             "PairedSchema",
             "ReExportedRule",
             "UnusedId",
@@ -89,7 +130,18 @@ fn option_off_reports_schemas_as_unused_exports() {
             "default",
             "default",
             "default",
+            "fromDecoderPipe",
+            "fromImportedPlain",
+            "fromMixedReturns",
+            "fromOpenEnd",
+            "fromPlainArg",
+            "fromPlainFn",
+            "fromPlainHelper",
+            "fromPlainLocal",
+            "fromPlainNested",
             "httpStatusProbe",
+            "importedHelperAlias",
+            "makeUnusedRule",
             "notDerived",
             "plainValue",
             "unusedHelper",
@@ -118,6 +170,16 @@ fn option_on_reports_schemas_as_unused_types() {
             "FormRequest",
             "ForwardedDefault",
             "ForwardedUnion",
+            "FromArg",
+            "FromEither",
+            "FromFn",
+            "FromHelper",
+            "FromHelperPipe",
+            "FromImportedHelper",
+            "FromImportedHelperPipe",
+            "FromLocal",
+            "FromNested",
+            "FromWrappedHelper",
             "PairedSchema",
             "ReExportedRule",
             "UnusedAlias",
@@ -141,4 +203,21 @@ fn option_on_with_unused_types_off_hides_schemas() {
     let findings = findings(true, Severity::Off);
     assert_eq!(findings.exports, VALUE_EXPORTS_WITH_OPTION_ON);
     assert!(findings.types.is_empty(), "{:?}", findings.types);
+}
+
+#[test]
+fn option_on_reports_a_schema_from_a_helper_call_as_an_unused_type() {
+    let findings = findings(true, Severity::Error);
+    for name in HELPER_SCHEMA_EXPORTS {
+        assert!(
+            findings.types.iter().any(|found| found == name),
+            "{name} is a schema, so it is an unused type: {:?}",
+            findings.types
+        );
+        assert!(
+            !findings.exports.iter().any(|found| found == name),
+            "{name} is a schema, so it is no unused export: {:?}",
+            findings.exports
+        );
+    }
 }
