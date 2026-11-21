@@ -186,6 +186,7 @@ jobs:
               - 'crates/core/tests/integration_test/workspaces.rs'
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
+              - 'crates/engine/src/churn_cache_path.rs'
               - 'crates/engine/src/repo_refs.rs'
               - 'crates/engine/src/repo_refs_linked_worktree.rs'
               - 'crates/engine/src/base_worktree_orphans.rs'
