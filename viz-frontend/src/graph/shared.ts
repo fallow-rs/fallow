@@ -178,8 +178,6 @@ export interface GraphViewState {
   hoveredCluster: number | null;
   /** Cluster-label hit rects (screen space), rebuilt each label pass. */
   clusterLabels: Array<{ cluster: number; x: number; y: number; w: number; h: number }>;
-  /** Selected road index (overview drill-down). */
-  selectedRoad: number | null;
   /** Path-trace mode: pending start, and the traced path. */
   pathFrom: number | null;
   path: number[] | null;
@@ -258,7 +256,6 @@ export const getGVS = (state: AppState): GraphViewState => {
       hoveredRoad: null,
       hoveredCluster: null,
       clusterLabels: [],
-      selectedRoad: null,
       pathFrom: null,
       path: null,
       pulseFile: null,

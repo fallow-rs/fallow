@@ -23,6 +23,7 @@ export {
   resetEgoTrail,
   resetGraphView,
   roadFacts,
+  selectRoad,
   setClusterMode,
   startGraphLensFade,
 } from "./interact";

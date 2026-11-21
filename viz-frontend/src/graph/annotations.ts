@@ -25,6 +25,7 @@ import {
   middleTruncate,
   roadGeometry,
   routePoint,
+  selectedRoadIndex,
   standaloneVisible,
   tailTruncate,
   panelDocksBelow,
@@ -429,7 +430,8 @@ interface RoadLabel {
 const roadLabelSpots = (state: AppState, gvs: GraphViewState): RoadLabel[] => {
   const { ctx } = state;
   const kRel = gvs.transform.k / gvs.fitK;
-  const focusedRoad = (ri: number): boolean => gvs.hoveredRoad === ri || gvs.selectedRoad === ri;
+  const selectedIndex = selectedRoadIndex(state, gvs);
+  const focusedRoad = (ri: number): boolean => gvs.hoveredRoad === ri || selectedIndex === ri;
   const order = gvs.roads
     .map((road, ri) => ({ road, ri }))
     .filter(({ road, ri }) => focusedRoad(ri) || (kRel >= 1.5 && road.count >= 2))

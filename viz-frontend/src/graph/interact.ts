@@ -63,6 +63,9 @@ export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
   gvs.clusterMode = mode;
   gvs.initialized = false;
   initGraphNodes(state);
+  reconcileGraphView(state);
+  // The road panel shows data of the previous grouping.
+  state.requestRender();
 };
 /** Seed the graph node lens-color crossfade with the pre-switch colors. */
 export const startGraphLensFade = (state: AppState, prev: Map<number, string>): void => {
@@ -187,15 +190,15 @@ export const graphPathTrace = (state: AppState, x: number, y: number): boolean =
 };
 
 /** Set or clear the selected road. The canvas derives its road index from this. */
-const selectRoad = (state: AppState, road: RoadSelection | null): void => {
+export const selectRoad = (state: AppState, road: RoadSelection | null): void => {
   state.selectedRoad = road;
 };
 
 /** Clear road selection / path trace (esc, click-away, view switches). */
 export const clearGraphFocus = (state: AppState): boolean => {
   const gvs = getGVS(state);
-  const had = gvs.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
-  gvs.selectedRoad = null;
+  const had = state.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
+  selectRoad(state, null);
   gvs.path = null;
   gvs.pathFrom = null;
   return had;
@@ -366,8 +369,9 @@ export const graphHandleClick = (state: AppState, x: number, y: number): GraphCl
   if (node !== null) return { kind: "file", fileIndex: node };
   const road = roadHitTest(state, x, y);
   if (road !== null) {
-    gvs.selectedRoad = road;
-    return { kind: "road", road: buildRoadSelection(state, road) };
+    const selection = buildRoadSelection(state, road);
+    selectRoad(state, selection);
+    return { kind: "road", road: selection };
   }
   if (clearGraphFocus(state)) return { kind: "handled" };
   return { kind: "none" };

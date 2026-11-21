@@ -37,6 +37,7 @@ import {
   roadGeometry,
   roadIsDrawn,
   roadWidth,
+  selectedRoadIndex,
   standaloneVisible,
   taperedRibbon,
   usableStageWidth,
@@ -246,7 +247,7 @@ const drawRoads = (scene: Scene): void => {
   const litCluster = gvs.hoveredCluster;
   // Census focus: a focused road keeps its weight and the others fade to
   // 18%, so its path reads end to end through the mesh.
-  const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
+  const focusRoad = gvs.hoveredRoad ?? selectedRoadIndex(state, gvs);
   for (const [roadIndex, road] of roads.entries()) {
     const lit = litCluster !== null && (road.src === litCluster || road.dst === litCluster);
     if (!roadIsDrawn(gvs, road, roadFloor)) continue;

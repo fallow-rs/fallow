@@ -34,6 +34,7 @@ import {
   resetEgoTrail,
   resetGraphView,
   roadFacts,
+  selectRoad,
   setClusterMode,
   startGraphLensFade,
 } from "./graph";
@@ -330,7 +331,6 @@ const init = (): void => {
           panel,
           (fileIndex) => selectFile(fileIndex, true),
           () => {
-            state.selectedRoad = null;
             clearGraphFocus(state);
             selectFile(null);
           },
@@ -488,16 +488,15 @@ const init = (): void => {
     if (event.shiftKey && graphPathTrace(state, x, y)) return;
     const result = graphHandleClick(state, x, y);
     if (result.kind === "file") {
-      state.selectedRoad = null;
+      selectRoad(state, null);
       hideTooltip();
       selectFile(result.fileIndex);
     } else if (result.kind === "road") {
-      state.selectedRoad = result.road;
       state.selected = null;
       hideTooltip();
       requestRender();
     } else if (result.kind === "none") {
-      state.selectedRoad = null;
+      selectRoad(state, null);
       selectFile(null);
     } else {
       requestRender();
@@ -524,8 +523,7 @@ const init = (): void => {
     } else if (state.selectedClone !== null) {
       state.selectedClone = null;
       requestRender();
-    } else if (clearGraphFocus(state) || state.selectedRoad !== null) {
-      state.selectedRoad = null;
+    } else if (clearGraphFocus(state)) {
       requestRender();
     } else if (state.search !== "" && refs) {
       refs.search.value = "";

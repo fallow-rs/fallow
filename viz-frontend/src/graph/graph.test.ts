@@ -19,7 +19,7 @@ import {
 } from "./shared";
 import type { AppState } from "../state";
 import { assignCoordinates, assignLayers, partitionEdges, tarjanSCC, type MetaEdge } from "./build";
-import { reconcileGraphView } from "./interact";
+import { graphHandleClick, reconcileGraphView } from "./interact";
 
 /** Canvas text metrics stub: every glyph is 7px wide. */
 const ctx = {
@@ -387,5 +387,18 @@ describe("graph view state", () => {
     rebuilt.data.edges.push([0, 1, 0]);
     reconcileGraphView(rebuilt);
     expect(rebuilt.selectedRoad?.pairs.length).toBe(2);
+  });
+
+  it("keeps the road panel and the road highlight in one transition", () => {
+    const state = viewState();
+    const gvs = getGVS(state);
+    expect(graphHandleClick(state, 100, 0).kind).toBe("road");
+    expect(state.selectedRoad?.srcKey).toBe("a");
+    expect(state.selectedRoad?.pairs).toEqual([[0, 1]]);
+    expect(selectedRoadIndex(state, gvs)).toBe(0);
+    expect(graphHandleClick(state, 100, 300)).toEqual({ kind: "handled" });
+    expect(state.selectedRoad).toBeNull();
+    expect(selectedRoadIndex(state, gvs)).toBeNull();
+    expect(graphHandleClick(state, 100, 300)).toEqual({ kind: "none" });
   });
 });
