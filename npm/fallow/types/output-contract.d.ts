@@ -12496,6 +12496,11 @@ export interface ScopedUnusedClasses {
  */
 path: string
 /**
+ * 1-based line of the first definition of one of the classes. A report
+ * saved before the field existed reads as `0`.
+ */
+line?: number
+/**
  * The scoped class names with no use elsewhere in the component, sorted.
  */
 classes: string[]
@@ -12571,6 +12576,12 @@ name: string
  * references it.
  */
 path: string
+/**
+ * 1-based line of the first rule in `path` that references it. `0` when
+ * the line is not known, for example in a report saved before the field
+ * existed.
+ */
+line?: number
 /**
  * Read-only verification step(s) an agent can run before fixing the
  * reference. Always at least one entry, so consumers can iterate `actions`

@@ -82,8 +82,9 @@ fn compact_re_export_cycle_line(
         fallow_types::results::ReExportCycleKind::MultiNode => "",
     };
     format!(
-        "re-export-cycle:{}:{}{}",
+        "re-export-cycle:{}:{}:{}{}",
         first_file,
+        cycle.cycle.line,
         chain.join(" <-> "),
         kind_tag
     )
@@ -1431,17 +1432,24 @@ mod tests {
                 });
             assert_eq!(build_compact_lines(&results, root), vec![expected]);
         }
-        for (files, kind, expected) in [
-            (vec![], ReExportCycleKind::MultiNode, "re-export-cycle::"),
+        for (files, kind, line, expected) in [
+            (
+                vec![],
+                ReExportCycleKind::MultiNode,
+                0,
+                "re-export-cycle::0:",
+            ),
             (
                 vec![root.join("src/a.ts")],
                 ReExportCycleKind::SelfLoop,
-                "re-export-cycle:src/a.ts:src/a.ts (self-loop)",
+                1,
+                "re-export-cycle:src/a.ts:1:src/a.ts (self-loop)",
             ),
             (
                 vec![root.join("src/a.ts"), root.join("src/b.ts")],
                 ReExportCycleKind::MultiNode,
-                "re-export-cycle:src/a.ts:src/a.ts <-> src/b.ts",
+                4,
+                "re-export-cycle:src/a.ts:4:src/a.ts <-> src/b.ts",
             ),
         ] {
             let mut results = AnalysisResults::default();
@@ -1450,7 +1458,7 @@ mod tests {
                 cycle: ReExportCycle {
                     files,
                     kind,
-                    line: 0,
+                    line,
                     col: 0,
                 },
                 actions: vec![],

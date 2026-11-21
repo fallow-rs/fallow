@@ -11,6 +11,8 @@
 //! - `example.json` is optional. `args` are the arguments after the command
 //!   that the finding needs. `hidden` lists the files that a reader does not
 //!   need to understand the finding, such as a plain `package.json`.
+//!   `anchor` is `"file-level"` for a rule whose finding is on a whole file.
+//!   Without it, the finding is on a line of the example code.
 //!
 //! `explain_examples_table.rs` embeds the files. The CLI integration test `rule_example_tests`
 //! runs fallow on each project and checks that the rule reports it, so an
@@ -32,12 +34,26 @@ pub struct ExampleFile {
     pub hidden: bool,
 }
 
+/// Where the finding of an example is in its file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExampleAnchor {
+    /// The finding is on the line of the code that causes it. The example
+    /// keeps that code away from line 1, column 0, so a location that a
+    /// format fills in for a missing span cannot pass as a real one.
+    Line,
+    /// The finding is on the whole file, such as an unused file or a route
+    /// file. A format reports no line, or line 1.
+    FileLevel,
+}
+
 /// The example project of one rule.
 pub struct RuleExample {
     /// The rule id without its namespace prefix, such as `unused-export`.
     pub rule: &'static str,
     /// The arguments after the command that the finding needs.
     pub args: &'static [&'static str],
+    /// Where the finding is in its file.
+    pub anchor: ExampleAnchor,
     /// The project before the change. Empty unless the rule reports on a change.
     pub base: &'static [ExampleFile],
     /// The project. For a rule that reports on a change, the files after it.

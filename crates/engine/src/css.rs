@@ -63,10 +63,13 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
     fallow_extract::sfc::extract_sfc_styles(source)
 }
 
-/// Return scoped classes that look unused within one SFC source.
+/// Return the scoped classes that look unused within one SFC source, with
+/// the line of the first definition. `None` when no class is unused.
 #[must_use]
-pub fn scoped_unused_classes(source: &str) -> Vec<String> {
-    fallow_extract::sfc_css::scoped_unused_classes(source)
+pub fn scoped_unused_classes_at(
+    source: &str,
+) -> Option<fallow_extract::sfc_css::ScopedUnusedClasses> {
+    fallow_extract::sfc_css::scoped_unused_classes_at(source)
 }
 
 /// Return the classes that Vue applies through `<Transition>` and
