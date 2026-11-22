@@ -521,13 +521,10 @@ fn try_nearest_tsconfig_path_alias(
         let Some(paths) = merged.paths() else {
             continue;
         };
-        // TypeScript tries `baseUrl` when `paths` resolves nothing.
-        if let Some(result) =
-            try_tsconfig_paths_from_config(ctx, &merged, &paths, specifier, style_context)
-        {
-            return Some(result);
-        }
-        break;
+        // TypeScript tries the `baseUrl` of the same config when `paths`
+        // resolves nothing.
+        return try_tsconfig_paths_from_config(ctx, &merged, &paths, specifier, style_context)
+            .or_else(|| try_tsconfig_base_url_from_config(ctx, &merged, specifier, style_context));
     }
     for tsconfig_path in chain.iter() {
         let Some(merged) = merged_tsconfig_cached(ctx, tsconfig_path) else {

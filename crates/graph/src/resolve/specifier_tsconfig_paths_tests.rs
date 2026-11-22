@@ -58,6 +58,8 @@ fn paths_use_only_the_pattern_with_the_longest_prefix() {
     fs::write(root.join("index.ts"), "").unwrap();
     fs::write(root.join("a/x.styles.ts"), "export {};").unwrap();
     fs::write(root.join("b/pp/x.styles.ts"), "export {};").unwrap();
+    fs::create_dir_all(root.join("b/pp/pp")).unwrap();
+    fs::write(root.join("b/pp/pp/x.styles.ts"), "export {};").unwrap();
     let from_file = root.join("index.ts");
     let a = root.join("a/x.styles.ts");
     let b = root.join("b/pp/x.styles.ts");
@@ -77,6 +79,7 @@ fn paths_use_only_the_pattern_with_the_longest_prefix() {
             "a miss of the selected pattern must not try another pattern, got {missing:?}"
         );
         let targets = nearest_tsconfig_alias_targets(ctx, &from_file, "@app/x.styles");
+        assert!(!targets.is_empty());
         assert!(
             targets
                 .iter()
@@ -121,4 +124,34 @@ fn select_path_alias_prefers_exact_then_longest_prefix_then_first() {
     assert_eq!(pick("@app/x"), Some(("@app/x", "")));
     assert_eq!(pick("@app/y.ts"), Some(("@app/*", "y.ts")));
     assert_eq!(pick("lodash"), Some(("*", "lodash")));
+}
+
+/// The `baseUrl` fallback after a `paths` miss reads only the config that
+/// sets `paths`, as TypeScript reads one config for a file.
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn paths_miss_without_base_url_does_not_use_another_config() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join("src/lib")).unwrap();
+    fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"paths":{"@/*":["src/*"]}},"references":[{"path":"./tsconfig.lib.json"}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("tsconfig.lib.json"),
+        r#"{"compilerOptions":{"baseUrl":"src"},"include":["*.ts"]}"#,
+    )
+    .unwrap();
+    fs::write(root.join("index.ts"), "").unwrap();
+    fs::write(root.join("src/lib/util.ts"), "export {};").unwrap();
+    let from_file = root.join("index.ts");
+    let util = root.join("src/lib/util.ts");
+    let files = [(util.as_path(), FileId(1))];
+
+    with_ctx_at_root_and_files(root, &files, |ctx| {
+        let result = super::try_nearest_tsconfig_path_alias(ctx, &from_file, "lib/util", false);
+        assert!(result.is_none(), "got {result:?}");
+    });
 }
