@@ -120,6 +120,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [M-Hassan-Raza](https://github.com/M-Hassan-Raza)
 - [madflow](https://github.com/madflow)
 - [martijnwalraven](https://github.com/martijnwalraven)
+- [Mattbusel](https://github.com/Mattbusel)
 - [mattlewis92](https://github.com/mattlewis92)
 - [michalius](https://github.com/michalius)
 - [michaljuris](https://github.com/michaljuris)
