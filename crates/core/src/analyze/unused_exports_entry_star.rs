@@ -6,6 +6,10 @@
 //! that comes through the star, so an `ignoreExports` rule, a plugin
 //! `usedExports` rule or a config-file credit on the entry file finds no
 //! export to match. This index applies those rules to the star sources.
+//!
+//! An `export * as Name` of such an entry file credits only the members that
+//! a consumer reads through `Name`. A rule that covers `Name` covers the whole
+//! namespace object, so it credits each export of the files behind `Name`.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -38,6 +42,8 @@ pub(super) struct EntryStarCredit<'a> {
     graph: Option<&'a ModuleGraph>,
     rules: Vec<EntryRules<'a>>,
     rules_by_source: FxHashMap<FileId, Vec<usize>>,
+    /// The files behind an `export * as Name` whose `Name` a rule covers.
+    namespace_object_files: FxHashSet<FileId>,
 }
 
 pub(super) struct EntryStarCreditInput<'a> {
@@ -62,7 +68,7 @@ impl<'a> EntryStarCredit<'a> {
         }
         for module in &input.graph.modules {
             if !module.is_entry_point()
-                || !has_plain_star(module)
+                || !module.re_exports.iter().any(|re| re.imported_name == "*")
                 || !input.config.include_entry_exports_for(&module.path)
             {
                 continue;
@@ -77,13 +83,23 @@ impl<'a> EntryStarCredit<'a> {
             if ignore.is_empty() && plugin.is_empty() && config.is_empty() {
                 continue;
             }
-            let index = credit.rules.len();
-            credit.rules.push(EntryRules {
+            let rules = EntryRules {
                 entry: module.file_id,
                 ignore,
                 plugin,
                 config,
-            });
+            };
+            for re_export in module.re_exports.iter().filter(|re| is_namespace(re)) {
+                if rules.credits(&re_export.exported_name) {
+                    extend_namespace_object_files(
+                        input.graph,
+                        re_export.source_file,
+                        &mut credit.namespace_object_files,
+                    );
+                }
+            }
+            let index = credit.rules.len();
+            credit.rules.push(rules);
             for source in plain_star_sources(input.graph, module) {
                 credit
                     .rules_by_source
@@ -101,6 +117,9 @@ impl<'a> EntryStarCredit<'a> {
     /// local export of the entry file with the same name hides the name of the
     /// star source, and then the rule names the local export only.
     pub(super) fn credits(&self, file: FileId, export_name: &str) -> bool {
+        if self.namespace_object_files.contains(&file) {
+            return true;
+        }
         let (Some(graph), Some(indexes)) = (self.graph, self.rules_by_source.get(&file)) else {
             return false;
         };
@@ -126,8 +145,32 @@ fn is_plain_star(re_export: &crate::graph::ReExportEdge) -> bool {
     re_export.imported_name == "*" && re_export.exported_name == "*"
 }
 
-fn has_plain_star(module: &ModuleNode) -> bool {
-    module.re_exports.iter().any(is_plain_star)
+fn is_namespace(re_export: &crate::graph::ReExportEdge) -> bool {
+    re_export.imported_name == "*" && re_export.exported_name != "*"
+}
+
+/// Add `source` and each file whose exports its namespace object shows:
+/// the sources of its `export *` and `export * as` lines, transitively.
+fn extend_namespace_object_files(
+    graph: &ModuleGraph,
+    source: FileId,
+    files: &mut FxHashSet<FileId>,
+) {
+    let mut stack = vec![source];
+    while let Some(file) = stack.pop() {
+        if !files.insert(file) {
+            continue;
+        }
+        if let Some(module) = graph.modules.get(file.0 as usize) {
+            stack.extend(
+                module
+                    .re_exports
+                    .iter()
+                    .filter(|re| re.imported_name == "*")
+                    .map(|re| re.source_file),
+            );
+        }
+    }
 }
 
 /// Every file that `entry` reaches through plain `export *` chains.

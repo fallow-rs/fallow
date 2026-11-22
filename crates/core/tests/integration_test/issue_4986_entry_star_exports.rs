@@ -68,13 +68,14 @@ fn workspace_setting_reports_unused_names_behind_an_entry_star() {
     // `pubUnused` is in `@p/pub`, which `publicPackages` names.
     // `plainUnused` is in a workspace that the `packages/*` key does not
     // select. `shared` comes from two star sources, so the entry file exports
-    // no binding under that name. `ns` has a consumer, and its members are a
-    // namespace object, not names of the entry file.
+    // no binding under that name. `nsOther` is behind `export * as ns`, and
+    // the consumer reads only `ns.nsMember` (issue #5053).
     assert_eq!(
         sorted_names(&results.unused_exports),
         [
             "chainUnused",
             "deepUnused",
+            "nsOther",
             "oneUnused",
             "shadowed",
             "shadowed",
@@ -112,6 +113,7 @@ fn root_option_reports_unused_names_behind_every_entry_star() {
         [
             "chainUnused",
             "deepUnused",
+            "nsOther",
             "oneUnused",
             "plainUnused",
             "pubUnused",
@@ -155,7 +157,13 @@ fn ignore_exports_rule_on_the_entry_file_covers_names_behind_its_star() {
     // of `a.ts` does not reach the entry file, so it stays reported.
     assert_eq!(
         sorted_names(&results.unused_exports),
-        ["chainUnused", "oneUnused", "shadowed", "subUnused"]
+        [
+            "chainUnused",
+            "nsOther",
+            "oneUnused",
+            "shadowed",
+            "subUnused"
+        ]
     );
     let shadowed = results
         .unused_exports

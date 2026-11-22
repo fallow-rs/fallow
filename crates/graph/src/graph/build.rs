@@ -14,6 +14,24 @@ use super::types::{ExportSymbol, ReExportEdge};
 use super::types::{ModuleNode, ReferencePathInterner};
 use super::{EagerPackageImport, Edge, ImportedSymbol, ModuleGraph};
 
+impl ModuleGraph {
+    /// Build the effective export index and mark the entry points that
+    /// `includeEntryExports` covers.
+    pub(super) fn index_exports(
+        &mut self,
+        resolved_modules: &[ResolvedModule],
+        consumer_checked: &FxHashSet<FileId>,
+    ) {
+        self.effective_exports =
+            super::effective_exports::EffectiveExportIndex::build(resolved_modules);
+        for file_id in consumer_checked {
+            if let Some(module) = self.modules.get_mut(file_id.0 as usize) {
+                module.set_consumer_checked();
+            }
+        }
+    }
+}
+
 pub(super) struct PopulateEdgesInput<'a> {
     pub(super) files: &'a [DiscoveredFile],
     pub(super) module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,

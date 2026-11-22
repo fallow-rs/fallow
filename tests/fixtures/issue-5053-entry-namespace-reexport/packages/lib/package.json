@@ -1,0 +1,5 @@
+{
+  "name": "@p/lib",
+  "private": true,
+  "exports": { ".": "./src/index.ts", "./self": "./src/self-consumer.ts" }
+}

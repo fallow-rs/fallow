@@ -836,7 +836,7 @@ impl ModuleGraph {
             module_count,
             total_capacity,
         });
-        graph.effective_exports = effective_exports::EffectiveExportIndex::build(resolved_modules);
+        graph.index_exports(resolved_modules, consumer_checked);
 
         let test_reachability_plan = reachability::TestReachabilityPlan::new(
             &test_entry_point_ids,
