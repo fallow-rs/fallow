@@ -368,6 +368,17 @@ describe("getInstalledBinaryPath", () => {
     expect(mockFiles[versionPath]).toBe("2.26.0");
   });
 
+  it("keeps an unverified binary while another window holds the install lock", async () => {
+    mockFiles[lspPath] = binaryBytes;
+    mockFiles[lspSigPath] = signatureBytes;
+    mockFiles[path.join(binDir, ".install.lock")] = "4242";
+    mockSignatureValid = false;
+
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(mockFiles[lspPath]).toBe(binaryBytes);
+    expect(mockFiles[lspSigPath]).toBe(signatureBytes);
+  });
+
   it("does not fall back to digest markers when a signature file is present but invalid", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
@@ -543,6 +554,15 @@ describe("sweepOrphanTempFiles", () => {
     sweepOrphanTempFiles(binDir);
 
     expect(orphanBinary in mockFiles).toBe(true);
+  });
+
+  it("treats pid 0 as an orphan, since it names no download", () => {
+    const pidZero = path.join(binDir, ".fallow.0.1.tmp");
+    mockFiles[pidZero] = binaryBytes;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(pidZero in mockFiles).toBe(false);
   });
 
   it("is a no-op when the bin directory cannot be read", () => {

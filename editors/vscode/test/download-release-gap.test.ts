@@ -29,6 +29,9 @@ vi.mock("node:fs", () => ({
   unlinkSync: (p: string) => {
     delete mockFiles[p];
   },
+  copyFileSync: (from: string, to: string) => {
+    mockFiles[to] = mockFiles[from];
+  },
   renameSync: (from: string, to: string) => {
     mockFiles[to] = mockFiles[from];
     delete mockFiles[from];

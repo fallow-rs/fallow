@@ -1109,9 +1109,15 @@ export const runInspectActiveSymbol = async (
   return runInspectActiveFile(context, outputChannel, symbol);
 };
 
+/**
+ * Run `fallow fix`. An apply run asks for confirmation and saves all editors
+ * first. `afterRun` runs once the CLI was started, also when it failed, since
+ * a failed apply run can have changed files before it stopped.
+ */
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
+  afterRun?: () => Promise<void>,
 ): Promise<FallowFixResult | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
@@ -1158,20 +1164,20 @@ export const runFix = async (
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
     return null;
+  } finally {
+    await afterRun?.();
   }
 };
 
 /**
- * Apply fixes, then call `refresh` only when the fix ran. A declined
- * confirmation, a failed save, or a failed run changes no file on disk.
+ * Apply fixes, then call `refresh` when the CLI ran. A declined confirmation
+ * or a failed save changes no file on disk, so it skips the refresh.
  */
 export const applyFixes = async (
   context: vscode.ExtensionContext,
   refresh: () => Promise<void>,
 ): Promise<void> => {
-  if (await runFix(context, false)) {
-    await refresh();
-  }
+  await runFix(context, false, refresh);
 };
 
 /**

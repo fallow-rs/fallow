@@ -2,12 +2,15 @@ import { EventEmitter } from "node:events";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// A Windows-like host: a rename onto an existing file fails, as it does when a
-// running process holds the binary open. An upgrade that cannot replace the
-// binary must leave the installed binary and its verification data intact.
+// A rename onto a locked path fails, as on Windows when a running process
+// holds the binary open. An upgrade that cannot replace the binary must leave
+// the installed binary and its verification data intact.
 
 let files: Record<string, string | Buffer> = {};
 let lockedPaths = new Set<string>();
+// Runs when a rename onto a locked path fails, to model a sibling window.
+let onLockedRename: () => void = () => {};
+let servedSignature = "";
 
 const errno = (code: string): NodeJS.ErrnoException =>
   Object.assign(new Error(code), { code }) as NodeJS.ErrnoException;
@@ -33,9 +36,15 @@ vi.mock("node:fs", () => ({
     if (!(p in files)) throw errno("ENOENT");
     delete files[p];
   },
+  copyFileSync: (from: string, to: string) => {
+    files[to] = files[from];
+  },
   renameSync: (from: string, to: string) => {
     if (!(from in files)) throw errno("ENOENT");
-    if (lockedPaths.has(to) && to in files) throw errno("EPERM");
+    if (lockedPaths.has(to)) {
+      onLockedRename();
+      throw errno("EPERM");
+    }
     files[to] = files[from];
     delete files[from];
   },
@@ -146,7 +155,7 @@ vi.mock("node:https", () => ({
         cb(respond(Buffer.from(JSON.stringify(release))));
         return;
       }
-      cb(respond(Buffer.from(url.endsWith(".sig") ? `sig:${NEW_BINARY}` : NEW_BINARY)));
+      cb(respond(Buffer.from(url.endsWith(".sig") ? servedSignature : NEW_BINARY)));
     });
     return request;
   },
@@ -196,6 +205,8 @@ const tempFiles = (): string[] =>
 beforeEach(() => {
   files = {};
   lockedPaths = new Set();
+  onLockedRename = () => {};
+  servedSignature = `sig:${NEW_BINARY}`;
   showErrorMessage.mockClear();
 });
 
@@ -211,6 +222,45 @@ describe("managed upgrade", () => {
     expect(files[`${cliPath}.sig`]).toEqual(Buffer.from(`sig:${OLD_BINARY}`));
     expect(files[`${cliPath}.target`]).toBe("linux-x64-gnu");
     expect(verifyBinarySignature(cliPath)).toBe(true);
+    expect(tempFiles()).toEqual([]);
+  });
+
+  it("removes the new sidecars when a first install cannot place the binary", async () => {
+    lockedPaths.add(cliPath);
+
+    expect(await downloadCliBinary(fakeContext)).toBeNull();
+
+    expect(cliPath in files).toBe(false);
+    expect(`${cliPath}.sig` in files).toBe(false);
+    expect(`${cliPath}.target` in files).toBe(false);
+    expect(tempFiles()).toEqual([]);
+  });
+
+  it("keeps a signature that a sibling window published during the failed upgrade", async () => {
+    installOldCli();
+    lockedPaths.add(cliPath);
+    const siblingSignature = Buffer.from("sig:fallow@2.26.0-sibling");
+    onLockedRename = () => {
+      files[`${cliPath}.sig`] = siblingSignature;
+    };
+
+    expect(await downloadCliBinary(fakeContext)).toBeNull();
+
+    expect(files[`${cliPath}.sig`]).toEqual(siblingSignature);
+    expect(files[`${cliPath}.target`]).toBe("linux-x64-gnu");
+  });
+
+  it("leaves every installed file alone when the new signature does not verify", async () => {
+    installOldCli();
+    files[`${cliPath}.sha256`] = "legacy-digest";
+    servedSignature = "sig:something-else";
+
+    expect(await downloadCliBinary(fakeContext)).toBeNull();
+
+    expect(files[cliPath]).toEqual(Buffer.from(OLD_BINARY));
+    expect(files[`${cliPath}.sig`]).toEqual(Buffer.from(`sig:${OLD_BINARY}`));
+    expect(files[`${cliPath}.target`]).toBe("linux-x64-gnu");
+    expect(files[`${cliPath}.sha256`]).toBe("legacy-digest");
     expect(tempFiles()).toEqual([]);
   });
 
