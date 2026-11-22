@@ -866,9 +866,16 @@ fn authored_rules_for_logical_groups<'a>(
         .collect()
 }
 
-/// Merge a discovered zone into `zones[]` by name.
+/// Merge a discovered zone into `zones[]` by name and root.
+///
+/// Patterns are relative to the zone root, so a same-named zone with another
+/// root stays a separate entry. Zone lookups check every entry of a name.
 fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone) {
-    if let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) {
+    let root = zone.root.as_deref().map(normalize_zone_root);
+    if let Some(existing) = expanded_zones
+        .iter_mut()
+        .find(|z| z.name == zone.name && z.root.as_deref().map(normalize_zone_root) == root)
+    {
         for glob in zone.public_files {
             if !existing.public_files.contains(&glob) {
                 existing.public_files.push(glob);

@@ -288,7 +288,7 @@ fn resolve_chain_origin(
                     type_only,
                 });
             };
-            type_only |= ctx.graph.modules[current.0 as usize]
+            let hop_type_only = ctx.graph.modules[current.0 as usize]
                 .re_exports
                 .iter()
                 .any(|re| {
@@ -297,18 +297,20 @@ fn resolve_chain_origin(
                         && re.source_file == source
                         && re.is_type_only
                 });
-            return (!is_hop_violation(current, source, type_only, zone_cache, ctx)).then_some(
+            return (!is_hop_violation(current, source, hop_type_only, zone_cache, ctx)).then_some(
                 ChainOrigin {
                     file_id: source,
-                    type_only,
+                    type_only: type_only || hop_type_only,
                 },
             );
         }
         let hop = next_chain_hop(current, &current_name, namespace, binding, ctx)?;
-        type_only |= hop.type_only;
-        if is_hop_violation(current, hop.file_id, type_only, zone_cache, ctx) {
+        // The hop is judged by its own re-export kind, as the barrel's own
+        // edge is. The kind of the consumer import does not change it.
+        if is_hop_violation(current, hop.file_id, hop.type_only, zone_cache, ctx) {
             return None;
         }
+        type_only |= hop.type_only;
         current = hop.file_id;
         current_name = hop.name;
     }

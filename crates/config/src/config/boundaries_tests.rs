@@ -2136,3 +2136,33 @@ fn auto_discover_escapes_child_directory_names() {
     assert!(matches(&plain.patterns, "app/i/page.tsx"));
     assert!(!matches(&plain.patterns, "app/[id]/page.tsx"));
 }
+
+#[test]
+fn same_named_discovered_zones_keep_each_root() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/a/src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/b/src/features/auth")).unwrap();
+
+    let declaration = |root: &str| BoundaryZone {
+        name: "features".to_string(),
+        root: Some(root.to_string()),
+        auto_discover: vec!["src/features".to_string()],
+        ..BoundaryZone::default()
+    };
+    let mut config = BoundaryConfig {
+        zones: vec![declaration("packages/a/"), declaration("packages/b/")],
+        ..BoundaryConfig::default()
+    };
+
+    config.expand_auto_discover(temp.path());
+    let resolved = config.resolve();
+
+    assert_eq!(
+        resolved.classify_zone("packages/a/src/features/auth/login.ts"),
+        Some("features/auth")
+    );
+    assert_eq!(
+        resolved.classify_zone("packages/b/src/features/auth/login.ts"),
+        Some("features/auth")
+    );
+}
