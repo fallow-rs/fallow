@@ -577,3 +577,58 @@ fn status_reports_path_drift_only_when_the_gate_runs_the_path_fallow() {
     assert!(status(), "the gate runs the fallow on PATH");
     let _ = fs::remove_dir_all(&dir);
 }
+
+fn next_action_command(json: &serde_json::Value, id: &str) -> String {
+    json["next_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["id"] == id)
+        .unwrap_or_else(|| panic!("no {id} action: {json}"))["command"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// A follow-up command runs from another shell, so it repeats the inspected
+/// root and the excluded steps of the run.
+#[test]
+fn install_approve_command_keeps_the_root_and_the_excluded_steps() {
+    let dir = agent_temp_dir("approve-scope");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let output = run_agent(
+        &dir,
+        &home,
+        &["install", "--harness", "claude", "--without", "hooks"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    let command = next_action_command(&json, "claude-approve-mcp");
+    assert!(command.contains(" --without hooks"), "{command}");
+    assert!(command.contains(" --approve"), "{command}");
+    assert!(command.contains(" --root "), "{command}");
+    let recommend = next_action_command(&json, "recommend-config");
+    assert!(recommend.contains(" --root "), "{recommend}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn status_commands_keep_the_inspected_root() {
+    let dir = agent_temp_dir("status-scope");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        dir.join(".mcp.json"),
+        r#"{"mcpServers":{"fallow":{"command":"x"}}}"#,
+    )
+    .unwrap();
+    let output = run_agent(&dir, &home, &["status"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    for id in ["agent-install", "agent-install-force"] {
+        let command = next_action_command(&json, id);
+        assert!(command.contains(" --root "), "{id}: {command}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

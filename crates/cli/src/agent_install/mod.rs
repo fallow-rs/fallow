@@ -480,7 +480,14 @@ pub fn run_agent_install(
         steps.extend(hooks::install(&ctx, &harnesses));
     }
 
-    let mut next_actions = next_actions(&ctx, &harnesses, detected, mcp_command.as_ref(), &steps);
+    let mut next_actions = next_actions(
+        &ctx,
+        FollowUp { opts, root: &root },
+        &harnesses,
+        detected,
+        mcp_command.as_ref(),
+        &steps,
+    );
     if let Some(apply) = apply_dry_run_action(opts, &root, &harnesses, &steps) {
         next_actions.insert(0, apply);
     }
@@ -602,8 +609,41 @@ fn apply_command(opts: &AgentInstallOptions<'_>, root: &Path, harnesses: &[Harne
     words.join(" ")
 }
 
+/// The options of an install run that its follow-up commands repeat, so a
+/// command that runs from another shell acts on the same project and steps.
+#[derive(Clone, Copy)]
+struct FollowUp<'a> {
+    opts: &'a AgentInstallOptions<'a>,
+    root: &'a Path,
+}
+
+impl FollowUp<'_> {
+    /// `fallow agent install --harness claude` with the scope of the run.
+    fn claude_install(self, approve: bool) -> String {
+        let opts = AgentInstallOptions {
+            approve: approve || self.opts.approve,
+            force: !approve && self.opts.force,
+            dry_run: false,
+            ..*self.opts
+        };
+        apply_command(&opts, self.root, &[Harness::Claude])
+    }
+
+    /// The ` --root <path>` suffix when the run named its root.
+    fn root_arg(self) -> String {
+        if !self.opts.root_explicit {
+            return String::new();
+        }
+        format!(
+            " --root {}",
+            fallow_engine::shell_quote::shell_quote(&self.root.to_string_lossy())
+        )
+    }
+}
+
 fn next_actions(
     ctx: &Ctx,
+    follow_up: FollowUp<'_>,
     harnesses: &[Harness],
     detected: bool,
     mcp_command: Option<&mcp::McpCommand>,
@@ -613,7 +653,7 @@ fn next_actions(
     if detected && harnesses.is_empty() {
         next.push(NextAction {
             id: "choose-harness",
-            command: "fallow agent install --harness claude".to_string(),
+            command: follow_up.claude_install(false),
             reason: "No harness was detected; pass --harness claude, codex, or cursor to wire one explicitly."
                 .to_string(),
             mutating: true,
@@ -646,7 +686,7 @@ fn next_actions(
         if approval_skipped {
             next.push(NextAction {
                 id: "claude-approve-mcp",
-                command: "fallow agent install --harness claude --approve".to_string(),
+                command: follow_up.claude_install(true),
                 reason: "Claude Code asks before starting a project-scoped MCP server; --approve records that approval for you in .claude/settings.local.json."
                     .to_string(),
                 mutating: true,
@@ -656,7 +696,7 @@ fn next_actions(
     if !has_config_file(&ctx.root) {
         next.push(NextAction {
             id: "recommend-config",
-            command: "fallow recommend --format json".to_string(),
+            command: format!("fallow recommend --format json{}", follow_up.root_arg()),
             reason: "No fallow config was found; recommend proposes one from the detected stack without writing anything."
                 .to_string(),
             mutating: false,
