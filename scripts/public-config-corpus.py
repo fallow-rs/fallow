@@ -84,8 +84,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docs/public-config-corpus.md"),
-        help="Markdown report path, use '-' for stdout",
+        help="Markdown report path, defaults to <cache-dir>/report.md, use '-' for stdout",
     )
     parser.add_argument(
         "--manifest",
@@ -124,6 +123,7 @@ def main() -> int:
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.manifest or args.cache_dir / "manifest.json"
+    output_path = args.output or args.cache_dir / "report.md"
     offline = args.offline or args.from_search_fixture is not None
     fetched_at = args.fetched_at or now_utc()
     gh_version = args.gh_version or detect_gh_version(offline)
@@ -143,8 +143,15 @@ def main() -> int:
 
     entries: list[dict[str, Any]] = []
     seen_items: set[tuple[str, str, str]] = set()
+    skipped_non_public = 0
     for query, raw_items in search_groups:
         for raw in raw_items:
+            # An authenticated code search also returns private repositories
+            # of the caller. The report is a tracked public file, so a result
+            # without an explicit public visibility leaves no trace in it.
+            if not is_public_result(raw):
+                skipped_non_public += 1
+                continue
             item = normalize_search_item(query, raw)
             if item is None:
                 entries.append(
@@ -172,12 +179,18 @@ def main() -> int:
                 )
             )
 
+    if skipped_non_public:
+        print(
+            f"note: skipped {skipped_non_public} search result(s) without public visibility",
+            file=sys.stderr,
+        )
     entries.sort(key=manifest_sort_key)
     manifest = {
         "generated_at": fetched_at,
         "gh_version": gh_version,
         "limit_per_filename": args.limit,
         "filenames": list(CONFIG_FILENAMES),
+        "skipped_non_public": skipped_non_public,
         "entries": entries,
     }
 
@@ -185,11 +198,11 @@ def main() -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     report = render_markdown(manifest, manifest_path)
-    if str(args.output) == "-":
+    if str(output_path) == "-":
         sys.stdout.write(report)
     else:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(report, encoding="utf-8")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
 
     return 0
 
@@ -264,6 +277,11 @@ def run_live_searches(limit: int, search_timeout: float) -> list[tuple[str, list
         )
         groups.append((query, json.loads(result.stdout)))
     return groups
+
+
+def is_public_result(raw: dict[str, Any]) -> bool:
+    repo = raw.get("repository")
+    return isinstance(repo, dict) and repo.get("isPrivate") is False
 
 
 def normalize_search_item(query: str, raw: dict[str, Any]) -> SearchItem | None:
@@ -769,6 +787,7 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
         "## Current Report",
         "",
         f"- Search results considered: {len(entries)}",
+        f"- Skipped results without public visibility: {manifest.get('skipped_non_public', 0)}",
         f"- Fetched configs: {len(fetched)}",
         f"- Fetch failures: {len(fetch_failures)}",
         f"- Parse failures: {len(parse_failures)}",
