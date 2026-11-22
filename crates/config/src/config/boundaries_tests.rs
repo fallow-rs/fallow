@@ -2165,4 +2165,45 @@ fn same_named_discovered_zones_keep_each_root() {
         resolved.classify_zone("packages/b/src/features/auth/login.ts"),
         Some("features/auth")
     );
+    assert_eq!(
+        resolved.classify_zone("packages/c/src/features/auth/login.ts"),
+        None
+    );
+    let entries = resolved
+        .zones
+        .iter()
+        .filter(|zone| zone.name == "features/auth")
+        .count();
+    assert_eq!(entries, 1, "one zone name gives one zone entry");
+}
+
+#[test]
+fn same_named_zones_with_equivalent_roots_merge_without_folding() {
+    let declaration = |root: Option<&str>, pattern: &str| BoundaryZone {
+        name: "app".to_string(),
+        root: root.map(str::to_string),
+        patterns: vec![pattern.to_string()],
+        ..BoundaryZone::default()
+    };
+    let mut zones = Vec::new();
+    merge_zone_by_name(&mut zones, declaration(Some("packages/a"), "src/**"));
+    merge_zone_by_name(&mut zones, declaration(Some("./packages/a/"), "lib/**"));
+    assert_eq!(zones.len(), 1);
+    assert_eq!(zones[0].root.as_deref(), Some("packages/a"));
+    assert_eq!(zones[0].patterns, ["src/**", "lib/**"]);
+
+    let mut zones = Vec::new();
+    merge_zone_by_name(&mut zones, declaration(None, "src/**"));
+    merge_zone_by_name(&mut zones, declaration(Some("."), "lib/**"));
+    assert_eq!(zones[0].root, None);
+    assert_eq!(zones[0].patterns, ["src/**", "lib/**"]);
+
+    let mut zones = Vec::new();
+    merge_zone_by_name(&mut zones, declaration(Some("packages/[a]"), "src/**"));
+    merge_zone_by_name(&mut zones, declaration(Some("packages/b"), "src/**"));
+    assert_eq!(zones[0].root, None);
+    assert_eq!(
+        zones[0].patterns,
+        ["packages/[[]a[]]/src/**", "packages/b/src/**"]
+    );
 }
