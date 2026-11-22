@@ -863,7 +863,7 @@ enum HookTarget {
     GitHooks(std::path::PathBuf),
 }
 
-fn detect_hook_target(root: &Path) -> Result<HookTarget, ExitCode> {
+fn detect_hook_target(root: &Path, removing: bool) -> Result<HookTarget, ExitCode> {
     if root.join(".husky").is_dir() {
         Ok(HookTarget::Husky(root.join(".husky/pre-commit")))
     } else if root.join(".lefthook").is_dir()
@@ -872,7 +872,7 @@ fn detect_hook_target(root: &Path) -> Result<HookTarget, ExitCode> {
     {
         Ok(HookTarget::Lefthook)
     } else {
-        git_pre_commit_target(root).map(HookTarget::GitHooks)
+        git_pre_commit_target(root, removing).map(HookTarget::GitHooks)
     }
 }
 
@@ -887,7 +887,7 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
 
     let hook_content = build_pre_commit_hook_content(opts.prune_baselines);
 
-    let target = match detect_hook_target(root) {
+    let target = match detect_hook_target(root, false) {
         Ok(target) => target,
         Err(code) => return code,
     };
@@ -987,7 +987,7 @@ fn install_hook_file(
 }
 
 pub fn run_git_hooks_uninstall(opts: &GitHooksUninstallOptions<'_>) -> ExitCode {
-    let target = match detect_hook_target(opts.root) {
+    let target = match detect_hook_target(opts.root, true) {
         Ok(target) => target,
         Err(code) => return code,
     };

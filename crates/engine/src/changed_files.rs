@@ -194,29 +194,11 @@ pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
 
 /// Resolve the canonical git common directory for `cwd`.
 pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    resolve_absolute_git_path(cwd, &["--git-common-dir"])
-}
-
-/// Resolve the folder from which Git runs the hooks of `cwd`.
-///
-/// Git reads `core.hooksPath` when it is set, and resolves a relative value
-/// against the work tree. Otherwise the folder is `hooks` in the common
-/// directory, which a linked worktree shares with the main checkout. The
-/// folder does not have to exist.
-///
-/// # Errors
-///
-/// Returns the reason when git is missing, `cwd` is not in a repository, or
-/// git prints no path.
-pub fn resolve_git_hooks_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    resolve_absolute_git_path(cwd, &["--git-path", "hooks"])
-}
-
-fn resolve_absolute_git_path(cwd: &Path, query: &[&str]) -> Result<PathBuf, ChangedFilesError> {
-    let mut args = vec!["rev-parse", "--path-format=absolute"];
-    args.extend_from_slice(query);
-    let output = spawn_output(&mut git_command(cwd, &args))
-        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+    let output = spawn_output(&mut git_command(
+        cwd,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    ))
+    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -230,14 +212,64 @@ fn resolve_absolute_git_path(cwd: &Path, query: &[&str]) -> Result<PathBuf, Chan
     let raw = String::from_utf8_lossy(&output.stdout);
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(ChangedFilesError::GitFailed(format!(
-            "git rev-parse {} returned empty output",
-            query.join(" ")
-        )));
+        return Err(ChangedFilesError::GitFailed(
+            "git rev-parse --git-common-dir returned empty output".to_owned(),
+        ));
     }
 
     let path = PathBuf::from(trimmed);
     Ok(dunce::canonicalize(&path).unwrap_or(path))
+}
+
+/// Resolve the folder from which Git runs the hooks of `cwd`.
+///
+/// Git reads `core.hooksPath` when it is set, and resolves a relative value
+/// against the work tree. Otherwise the folder is `hooks` in the common
+/// directory, which a linked worktree shares with the main checkout. The
+/// folder does not have to exist. Git prints a relative path against `cwd`,
+/// so the probe works without `--path-format`, which needs Git 2.31.
+///
+/// # Errors
+///
+/// Returns the reason when git is missing, `cwd` is not in a repository, or
+/// git prints anything other than one path.
+pub fn resolve_git_hooks_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
+    let output = spawn_output(&mut git_command(cwd, &["rev-parse", "--git-path", "hooks"]))
+        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.lines().count() != 1 {
+        return Err(ChangedFilesError::GitFailed(format!(
+            "git rev-parse --git-path hooks printed {trimmed:?}"
+        )));
+    }
+    let base = dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    Ok(normalize_lexically(&base.join(trimmed)))
+}
+
+/// Remove `.` and `..` components without touching the file system, for a
+/// path whose last folders may not exist yet.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Resolve the canonical git common directory and toplevel for `cwd` with

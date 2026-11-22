@@ -9,17 +9,18 @@
 //! worktree.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::common::{commit_all, git, parse_json, run_fallow_raw};
+use crate::common::{commit_all, git, parse_json, run_fallow_raw_with_env};
 
-fn repo(suffix: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "fallow-git-hook-location-{}-{suffix}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    let main = dir.join("main");
+/// A null Git config, so a global `core.hooksPath` of the machine does not
+/// change the result.
+const NULL_CONFIG: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// A temp folder with a committed repository in `main`.
+fn repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main");
     fs::create_dir_all(&main).unwrap();
     fs::write(main.join("package.json"), r#"{"name":"hook-test"}"#).unwrap();
     git(&main, &["init", "-q"]);
@@ -30,7 +31,13 @@ fn repo(suffix: &str) -> PathBuf {
 fn hooks(root: &Path, args: &[&str]) -> crate::common::CommandOutput {
     let mut full = vec!["--root", root.to_str().unwrap(), "hooks"];
     full.extend_from_slice(args);
-    run_fallow_raw(&full)
+    run_fallow_raw_with_env(
+        &full,
+        &[
+            ("GIT_CONFIG_GLOBAL", NULL_CONFIG),
+            ("GIT_CONFIG_SYSTEM", NULL_CONFIG),
+        ],
+    )
 }
 
 fn status_path(root: &Path) -> (bool, String) {
@@ -45,8 +52,8 @@ fn status_path(root: &Path) -> (bool, String) {
 
 #[test]
 fn install_status_and_uninstall_follow_core_hooks_path() {
-    let dir = repo("hooks-path");
-    let main = dir.join("main");
+    let dir = repo();
+    let main = dir.path().join("main");
     git(&main, &["config", "core.hooksPath", ".githooks"]);
 
     let install = hooks(&main, &["install", "--target", "git"]);
@@ -61,28 +68,26 @@ fn install_status_and_uninstall_follow_core_hooks_path() {
     let uninstall = hooks(&main, &["uninstall", "--target", "git"]);
     assert_eq!(uninstall.code, 0, "stderr: {}", uninstall.stderr);
     assert!(!main.join(".githooks/pre-commit").exists());
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn install_in_a_linked_worktree_writes_the_common_hook() {
-    let dir = repo("worktree");
-    let main = dir.join("main");
-    let linked = dir.join("linked");
+    let dir = repo();
+    let main = dir.path().join("main");
+    let linked = dir.path().join("linked");
     git(&main, &["worktree", "add", "-q", linked.to_str().unwrap()]);
 
     let install = hooks(&linked, &["install", "--target", "git"]);
     assert_eq!(install.code, 0, "stderr: {}", install.stderr);
     assert!(main.join(".git/hooks/pre-commit").is_file());
     assert!(status_path(&linked).0, "status must see the installed hook");
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn install_refuses_a_shared_hooks_folder_outside_the_repository() {
-    let dir = repo("shared");
-    let main = dir.join("main");
-    let shared = dir.join("shared-hooks");
+    let dir = repo();
+    let main = dir.path().join("main");
+    let shared = dir.path().join("shared-hooks");
     git(
         &main,
         &["config", "core.hooksPath", shared.to_str().unwrap()],
@@ -96,7 +101,6 @@ fn install_refuses_a_shared_hooks_folder_outside_the_repository() {
         install.stderr
     );
     assert!(!shared.join("pre-commit").exists());
-    let _ = fs::remove_dir_all(&dir);
 }
 
 /// A clone can commit `.githooks/pre-commit` as a link, so the hook file
@@ -104,9 +108,9 @@ fn install_refuses_a_shared_hooks_folder_outside_the_repository() {
 #[cfg(unix)]
 #[test]
 fn install_refuses_a_tracked_hook_link_that_leaves_the_repository() {
-    let dir = repo("tracked-link");
-    let main = dir.join("main");
-    let outside = dir.join("outside.sh");
+    let dir = repo();
+    let main = dir.path().join("main");
+    let outside = dir.path().join("outside.sh");
     fs::write(&outside, "keep\n").unwrap();
     fs::create_dir_all(main.join(".githooks")).unwrap();
     std::os::unix::fs::symlink(&outside, main.join(".githooks/pre-commit")).unwrap();
@@ -118,6 +122,40 @@ fn install_refuses_a_tracked_hook_link_that_leaves_the_repository() {
 
     let uninstall = hooks(&main, &["uninstall", "--target", "git", "--force"]);
     assert_eq!(uninstall.code, 2, "stderr: {}", uninstall.stderr);
-    assert!(outside.exists());
-    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        fs::symlink_metadata(main.join(".githooks/pre-commit"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
+#[test]
+fn install_from_a_package_folder_uses_the_hooks_of_the_repository() {
+    let dir = repo();
+    let main = dir.path().join("main");
+    let package = main.join("packages/web");
+    fs::create_dir_all(&package).unwrap();
+    git(&main, &["config", "core.hooksPath", ".githooks"]);
+
+    let install = hooks(&package, &["install", "--target", "git"]);
+    assert_eq!(install.code, 0, "stderr: {}", install.stderr);
+    assert!(main.join(".githooks/pre-commit").is_file());
+}
+
+#[test]
+fn uninstall_with_a_shared_hooks_folder_removes_the_old_hook() {
+    let dir = repo();
+    let main = dir.path().join("main");
+    let install = hooks(&main, &["install", "--target", "git"]);
+    assert_eq!(install.code, 0, "stderr: {}", install.stderr);
+    let shared = dir.path().join("shared-hooks");
+    git(
+        &main,
+        &["config", "core.hooksPath", shared.to_str().unwrap()],
+    );
+
+    let uninstall = hooks(&main, &["uninstall", "--target", "git"]);
+    assert_eq!(uninstall.code, 0, "stderr: {}", uninstall.stderr);
+    assert!(!main.join(".git/hooks/pre-commit").exists());
 }

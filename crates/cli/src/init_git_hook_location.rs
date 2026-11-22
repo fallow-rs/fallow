@@ -8,10 +8,15 @@ use crate::exit_codes::exit_invalid_input;
 
 /// The `pre-commit` file that Git runs for `root`. Git missing from `PATH`
 /// gives `.git/hooks/pre-commit` when that folder exists.
-pub fn git_pre_commit_target(root: &Path) -> Result<PathBuf, ExitCode> {
+///
+/// A `core.hooksPath` outside the repository can be shared by other
+/// repositories, so install refuses it. Uninstall (`removing`) then uses
+/// `.git/hooks/pre-commit` instead, where an earlier release wrote the hook.
+pub fn git_pre_commit_target(root: &Path, removing: bool) -> Result<PathBuf, ExitCode> {
+    let legacy = root.join(".git/hooks/pre-commit");
     let Ok(dir) = fallow_engine::changed_files::resolve_git_hooks_dir(root) else {
         if root.join(".git/hooks").is_dir() {
-            return Ok(root.join(".git/hooks/pre-commit"));
+            return Ok(legacy);
         }
         eprintln!(
             "Error: No .git directory found. Run `git init` first, or use --hooks \
@@ -19,8 +24,10 @@ pub fn git_pre_commit_target(root: &Path) -> Result<PathBuf, ExitCode> {
         );
         return Err(exit_invalid_input());
     };
-    let dir = rebase_on_root(root, dir);
-    if !hooks_dir_belongs_to_repository(root, &dir) {
+    let Some(top) = repository_folder_of(root, &dir) else {
+        if removing {
+            return Ok(legacy);
+        }
         eprintln!(
             "Error: Git runs the hooks of this repository from {}, which core.hooksPath \
              sets outside the repository. Other repositories can share that folder, so \
@@ -29,17 +36,17 @@ pub fn git_pre_commit_target(root: &Path) -> Result<PathBuf, ExitCode> {
             dir.display()
         );
         return Err(exit_invalid_input());
-    }
+    };
     let hook = dir.join("pre-commit");
-    super::project_files::refuse_tracked_hook_link(root, &hook)?;
-    Ok(hook)
+    super::project_files::refuse_tracked_hook_link(&top, &hook)?;
+    Ok(rebase_on_root(root, hook))
 }
 
 /// The path of the Git `pre-commit` hook of `root`, for status output.
 pub fn git_pre_commit_path(root: &Path) -> PathBuf {
     fallow_engine::changed_files::resolve_git_hooks_dir(root).map_or_else(
         |_| root.join(".git").join("hooks").join("pre-commit"),
-        |dir| rebase_on_root(root, dir).join("pre-commit"),
+        |dir| rebase_on_root(root, dir.join("pre-commit")),
     )
 }
 
@@ -53,14 +60,17 @@ fn rebase_on_root(root: &Path, path: PathBuf) -> PathBuf {
     }
 }
 
-/// Whether the hooks folder is inside the work tree or the Git directory of
-/// `root`. A linked worktree runs the hooks of its common Git directory.
-fn hooks_dir_belongs_to_repository(root: &Path, dir: &Path) -> bool {
-    if dir.starts_with(root) {
-        return true;
+/// The work tree top folder of `root` when the hooks folder is inside it, or
+/// inside the common Git directory (a linked worktree runs the hooks of that
+/// directory). `None` when the folder is outside the repository.
+fn repository_folder_of(root: &Path, dir: &Path) -> Option<PathBuf> {
+    let top = fallow_engine::changed_files::resolve_git_toplevel(root).ok()?;
+    if dir.starts_with(&top) {
+        return Some(top);
     }
     fallow_engine::changed_files::resolve_git_common_dir(root)
         .is_ok_and(|common| dir.starts_with(&common))
+        .then_some(top)
 }
 
 /// `path` relative to `root` when it is below the root, else in full.
