@@ -973,6 +973,45 @@ fn a_malformed_flag_state_exits_2_with_an_error_code() {
 }
 
 #[test]
+fn two_vendor_keys_with_one_code_name_exit_2() {
+    // With `vendorKeyPrefix` "web.", both keys name the code flag
+    // `old-banner`, so the export cannot say which state that flag has.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"launchdarkly","exported_at":"2026-09-20","flags":[{"key":"web.old-banner","state":"archived"},{"key":"old-banner","state":"on"}]}"#,
+    )
+    .expect("write");
+    let out = run_fallow(
+        "flags",
+        "flags-vendor",
+        &[
+            "--no-cache",
+            "--format",
+            "json",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--flag-state",
+            state.to_str().expect("utf-8 path"),
+        ],
+    );
+    assert_eq!(
+        out.code, 2,
+        "stdout: {}\nstderr: {}",
+        out.stdout, out.stderr
+    );
+    let error: serde_json::Value = serde_json::from_str(&out.stdout).expect("JSON error");
+    assert_eq!(error["code"], "FALLOW_FLAG_STATE_INVALID", "{error}");
+    let message = error["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("\"web.old-banner\"") && message.contains("\"old-banner\""),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_narrowed_run_adds_no_vendor_only_rows() {
     let json = vendor_json(&["--changed-since", "HEAD"]);
     let has_vendor_only = json["retirement"]["flags"]

@@ -99,6 +99,32 @@ pub struct VendorExport {
     pub flags: Vec<VendorFlag>,
 }
 
+impl VendorExport {
+    /// Check that no two keys name one code flag after `prefix`
+    /// (`flags.vendorKeyPrefix`) is removed. With the prefix `app.`, the keys
+    /// `checkout` and `app.checkout` both name the code flag `checkout`, so
+    /// the export cannot give one state for that flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error that names the two keys.
+    pub fn check_key_prefix(&self, prefix: Option<&str>) -> Result<(), FlagStateError> {
+        let mut keys_by_name: FxHashMap<&str, &str> = FxHashMap::default();
+        for flag in &self.flags {
+            let key = flag.state.key.as_str();
+            let name = code_name(key, prefix);
+            if let Some(first) = keys_by_name.insert(name, key) {
+                return Err(FlagStateError::new(format!(
+                    "{} has the keys {first:?} and {key:?}, which both name the flag {name:?} after flags.vendorKeyPrefix {:?} is removed",
+                    self.display_path,
+                    prefix.unwrap_or_default()
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Read and check the export at `path`.
 ///
 /// # Errors
@@ -772,6 +798,25 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[test]
+    fn two_keys_that_name_one_flag_after_the_prefix_are_rejected() {
+        let export = parse_flag_state(
+            br#"{"schema_version":1,"source":"x","exported_at":"2026-01-01","flags":[{"key":"checkout","state":"on"},{"key":"app.checkout","state":"off"},{"key":"app.banner","state":"on"}]}"#,
+            "state.json".to_string(),
+        )
+        .expect("valid export");
+        assert!(export.check_key_prefix(None).is_ok());
+        assert!(export.check_key_prefix(Some("web.")).is_ok());
+        let error = export
+            .check_key_prefix(Some("app."))
+            .expect_err("two keys name `checkout`");
+        assert!(
+            error.message.contains(r#""checkout" and "app.checkout""#),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

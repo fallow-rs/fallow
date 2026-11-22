@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use fallow_engine::flag_report::{RetirementRequest, build_retirement_report};
 use fallow_engine::flag_retirement::{RetirementFacts, RetirementOptions};
-use fallow_engine::flag_vendor::{VendorExport, load_flag_state};
+use fallow_engine::flag_vendor::{FlagStateError, VendorExport, load_flag_state};
 
 use fallow_config::PlannedAnalysis;
 use fallow_engine::session::AnalysisSession;
@@ -48,6 +48,11 @@ fn run_feature_flags_inner(
     let vendor_export = load_vendor_export(options, &resolved.root)?;
     resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_feature_flags_session(resolved, &options.analysis)?;
+    if let Some(export) = &vendor_export {
+        export
+            .check_key_prefix(session.config().flags.vendor_key_prefix.as_deref())
+            .map_err(flag_state_error)?;
+    }
     let scan = if options.retirement.is_some() {
         fallow_engine::flags::analyze_feature_flags_for_retirement(&session)
     } else {
@@ -201,12 +206,16 @@ fn load_vendor_export(
     else {
         return Ok(None);
     };
-    load_flag_state(path, root).map(Some).map_err(|error| {
-        ProgrammaticError::new(error.message, 2)
-            .with_code("FALLOW_FLAG_STATE_INVALID")
-            .with_help(error.help)
-            .with_context("feature-flags.retirement.flagState")
-    })
+    load_flag_state(path, root)
+        .map(Some)
+        .map_err(flag_state_error)
+}
+
+fn flag_state_error(error: FlagStateError) -> ProgrammaticError {
+    ProgrammaticError::new(error.message, 2)
+        .with_code("FALLOW_FLAG_STATE_INVALID")
+        .with_help(error.help)
+        .with_context("feature-flags.retirement.flagState")
 }
 
 fn sort_and_limit_feature_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {

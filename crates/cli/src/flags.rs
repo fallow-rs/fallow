@@ -172,6 +172,9 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    if let Err(code) = check_vendor_key_prefix(vendor_export.as_ref(), &config, opts) {
+        return code;
+    }
     let session = match crate::cli_production::open_session(run, &config) {
         Ok(session) => session,
         Err(err) => return analysis_error(&err, opts.output),
@@ -436,12 +439,31 @@ fn load_vendor_export(opts: &FlagsOptions<'_>) -> Result<Option<VendorExport>, E
     };
     fallow_engine::flag_vendor::load_flag_state(path, opts.root)
         .map(Some)
-        .map_err(|error| {
-            let error = fallow_api::ProgrammaticError::new(error.message, 2)
-                .with_code(FLAG_STATE_ERROR_CODE)
-                .with_help(error.help);
-            crate::error::emit_programmatic_error(&error, opts.output, opts.json_style)
-        })
+        .map_err(|error| emit_flag_state_error(error, opts))
+}
+
+/// Check the export keys against `flags.vendorKeyPrefix` once the config is
+/// known.
+fn check_vendor_key_prefix(
+    export: Option<&VendorExport>,
+    config: &ResolvedConfig,
+    opts: &FlagsOptions<'_>,
+) -> Result<(), ExitCode> {
+    export.map_or(Ok(()), |export| {
+        export
+            .check_key_prefix(config.flags.vendor_key_prefix.as_deref())
+            .map_err(|error| emit_flag_state_error(error, opts))
+    })
+}
+
+fn emit_flag_state_error(
+    error: fallow_engine::flag_vendor::FlagStateError,
+    opts: &FlagsOptions<'_>,
+) -> ExitCode {
+    let error = fallow_api::ProgrammaticError::new(error.message, 2)
+        .with_code(FLAG_STATE_ERROR_CODE)
+        .with_help(error.help);
+    crate::error::emit_programmatic_error(&error, opts.output, opts.json_style)
 }
 
 /// The flag sites and the scope that the retirement report reads.
