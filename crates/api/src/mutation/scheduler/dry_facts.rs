@@ -157,16 +157,18 @@ pub(super) fn covering_tests(
     tests
 }
 
-/// Copies the test files and the duplicate test id issue of the dry run.
+/// Copies the test files, the duplicate test ids and their issue of the dry
+/// run.
 pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) {
     outcome.test_files = dry
         .tests
         .iter()
         .map(|test| (test.test_id.clone(), test.file.clone()))
         .collect();
+    outcome.duplicate_test_ids = reported_duplicates(dry);
     outcome
         .issues
-        .extend(duplicate_test_ids_issue(&reported_duplicates(dry)));
+        .extend(duplicate_test_ids_issue(&outcome.duplicate_test_ids));
 }
 
 /// The duplicate test ids of the dry run, without the ids of a file that an

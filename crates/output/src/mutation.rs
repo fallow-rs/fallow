@@ -921,7 +921,9 @@ pub struct MutationTestKillRow {
     pub kills: Vec<String>,
     /// The mutant ids that no other eligible test kills, sorted.
     pub unique_kills: Vec<String>,
-    /// The tests whose kill sets contain this full kill set, sorted.
+    /// The tests whose kill sets contain this full kill set, sorted. The
+    /// full matrix leaves out the duplicate test ids of the dry run, whose
+    /// kills can belong to a twin test.
     pub subsuming_tests: Vec<String>,
     /// Conservative evidence notes, sorted.
     pub notes: Vec<String>,
@@ -994,9 +996,11 @@ pub struct MutationKillMatrix {
     /// Each eligible test with observed coverage, sorted by test id.
     pub tests: Vec<MutationTestKillRow>,
     /// Tests with nonempty kills and no unique kills, sorted by test id.
-    /// In target mode, only the tests of complete targets.
+    /// In target mode, only the tests of complete targets. The full matrix
+    /// leaves out the duplicate test ids of the dry run.
     pub candidates: Vec<String>,
-    /// Tests with coverage and no observed kills, sorted by test id.
+    /// Tests with coverage and no observed kills, sorted by test id. The full
+    /// matrix leaves out the duplicate test ids of the dry run.
     pub coverage_without_kills: Vec<String>,
     /// The `--kill-matrix-for` targets, in the given order. Absent outside
     /// target mode. In target mode, `tests` has only target tests, and

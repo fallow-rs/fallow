@@ -21948,11 +21948,13 @@ reasons: string[]
 tests: MutationTestKillRow[]
 /**
  * Tests with nonempty kills and no unique kills, sorted by test id.
- * In target mode, only the tests of complete targets.
+ * In target mode, only the tests of complete targets. The full matrix
+ * leaves out the duplicate test ids of the dry run.
  */
 candidates: string[]
 /**
- * Tests with coverage and no observed kills, sorted by test id.
+ * Tests with coverage and no observed kills, sorted by test id. The full
+ * matrix leaves out the duplicate test ids of the dry run.
  */
 coverage_without_kills: string[]
 /**
@@ -21988,7 +21990,9 @@ kills: string[]
  */
 unique_kills: string[]
 /**
- * The tests whose kill sets contain this full kill set, sorted.
+ * The tests whose kill sets contain this full kill set, sorted. The
+ * full matrix leaves out the duplicate test ids of the dry run, whose
+ * kills can belong to a twin test.
  */
 subsuming_tests: string[]
 /**

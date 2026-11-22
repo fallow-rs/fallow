@@ -36301,14 +36301,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Tests with nonempty kills and no unique kills, sorted by test id.\nIn target mode, only the tests of complete targets."
+          "description": "Tests with nonempty kills and no unique kills, sorted by test id.\nIn target mode, only the tests of complete targets. The full matrix\nleaves out the duplicate test ids of the dry run."
         },
         "coverage_without_kills": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Tests with coverage and no observed kills, sorted by test id."
+          "description": "Tests with coverage and no observed kills, sorted by test id. The full\nmatrix leaves out the duplicate test ids of the dry run."
         },
         "targets": {
           "type": [
@@ -36391,7 +36391,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The tests whose kill sets contain this full kill set, sorted."
+          "description": "The tests whose kill sets contain this full kill set, sorted. The\nfull matrix leaves out the duplicate test ids of the dry run, whose\nkills can belong to a twin test."
         },
         "notes": {
           "type": "array",

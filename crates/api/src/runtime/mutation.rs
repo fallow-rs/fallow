@@ -218,7 +218,9 @@ fn kill_matrix_mode<'a>(
         };
     }
     if options.kill_matrix {
-        Mode::Full
+        Mode::Full {
+            duplicate_ids: outcome.map_or(&[], |outcome| outcome.duplicate_test_ids.as_slice()),
+        }
     } else {
         Mode::Disabled
     }

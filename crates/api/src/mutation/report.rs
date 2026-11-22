@@ -628,6 +628,7 @@ mod tests {
     fn outcome(results: &[(&str, MutantStatus)]) -> ScheduleOutcome {
         ScheduleOutcome {
             test_files: FxHashMap::default(),
+            duplicate_test_ids: Vec::new(),
             ready: None,
             results: results
                 .iter()
