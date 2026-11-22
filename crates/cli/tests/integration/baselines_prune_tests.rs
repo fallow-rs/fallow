@@ -371,7 +371,9 @@ fn prune_rejects_a_diff_from_the_environment() {
 #[cfg(unix)]
 mod git_hook {
     use super::{project, root_arg, save_all, write};
-    use crate::common::{commit_all, fallow_bin, git, git_capture, git_command, run_fallow_raw};
+    use crate::common::{
+        commit_all, fallow_bin, git, git_capture, git_command, run_fallow_raw_with_clean_git,
+    };
     use tempfile::TempDir;
 
     /// A committed project with saved baselines and the pruning pre-commit hook,
@@ -382,7 +384,7 @@ mod git_hook {
         save_all(&dir);
         commit_all(dir.path(), "baselines");
         git(dir.path(), &["checkout", "-q", "-b", "feature"]);
-        let install = run_fallow_raw(&[
+        let install = run_fallow_raw_with_clean_git(&[
             "hooks",
             "install",
             "--target",

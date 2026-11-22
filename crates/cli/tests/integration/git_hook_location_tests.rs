@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::common::{commit_all, git, parse_json, run_fallow_raw_with_env};
+use crate::common::{commit_all, git, parse_json, run_fallow_raw_with_clean_git};
 
 /// A temp folder with a committed repository in `main`.
 fn repo() -> tempfile::TempDir {
@@ -24,17 +24,10 @@ fn repo() -> tempfile::TempDir {
     dir
 }
 
-/// Run `fallow hooks` with an empty Git config, so a global `core.hooksPath`
-/// of the machine does not change the result.
 fn hooks(root: &Path, args: &[&str]) -> crate::common::CommandOutput {
-    let empty_config = tempfile::NamedTempFile::new().unwrap();
-    let config = empty_config.path().to_str().unwrap();
     let mut full = vec!["--root", root.to_str().unwrap(), "hooks"];
     full.extend_from_slice(args);
-    run_fallow_raw_with_env(
-        &full,
-        &[("GIT_CONFIG_GLOBAL", config), ("GIT_CONFIG_SYSTEM", config)],
-    )
+    run_fallow_raw_with_clean_git(&full)
 }
 
 fn status_path(root: &Path) -> (bool, String) {
