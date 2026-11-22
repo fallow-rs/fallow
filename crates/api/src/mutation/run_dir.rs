@@ -226,7 +226,7 @@ fn publish(
             // Windows refuses to move a directory while a reader has a file
             // in it open, so the stale directory stays and the rename onto it
             // fails. The reader closes the file soon, so try again.
-            Err(_) if attempt < PUBLISH_ATTEMPTS => {
+            Err(_) if cfg!(windows) && attempt < PUBLISH_ATTEMPTS => {
                 attempt += 1;
                 std::thread::sleep(PUBLISH_RETRY_DELAY);
             }
@@ -241,7 +241,9 @@ fn publish(
     }
 }
 
-/// How often [`publish`] tries to replace a directory with other content.
+/// How often [`publish`] tries to replace a directory with other content on
+/// Windows. Other platforms move a directory with open files, so a failed
+/// rename there is a real error and is not tried again.
 const PUBLISH_ATTEMPTS: u32 = 50;
 
 /// The wait between two attempts of [`publish`].
