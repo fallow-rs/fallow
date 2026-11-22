@@ -666,8 +666,9 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
     Ok(WatchConfig { run, config })
 }
 
-/// Drain the debouncer; if a non-empty batch is ready, reload config, rebuild
-/// the event filter from it, and re-run the analysis. No-op when no batch is ready or all paths dedupe away.
+/// Drain the debouncer. When a non-empty batch is ready, reload the config,
+/// rebuild the event filter from it, and re-run the analysis. No-op when no
+/// batch is ready or all paths dedupe away.
 fn run_ready_reanalysis(
     config: &mut WatchConfig,
     filter: &Arc<Mutex<WatchFilter>>,
@@ -729,8 +730,11 @@ fn create_watcher(
 }
 
 fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &fallow_config::ResolvedConfig) {
+    // The build walks the project for gitignore files. It runs before the
+    // lock, so the notify callback does not wait for the walk.
+    let rebuilt = WatchFilter::new(config);
     if let Ok(mut guard) = filter.lock() {
-        *guard = WatchFilter::new(config);
+        *guard = rebuilt;
     }
 }
 
