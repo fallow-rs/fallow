@@ -209,7 +209,7 @@ pub(super) fn nearest_tsconfig_alias_targets(
         return Vec::new();
     }
     matches.sort_by_key(|(pattern, _, _)| std::cmp::Reverse(path_alias_specificity(pattern)));
-    matches
+    let targets: Vec<String> = matches
         .into_iter()
         .filter_map(|(_, capture, targets)| Some((capture, targets.as_array()?)))
         .flat_map(|(capture, targets)| {
@@ -218,10 +218,13 @@ pub(super) fn nearest_tsconfig_alias_targets(
                 .filter_map(Value::as_str)
                 .map(move |target| target.replacen('*', capture, 1))
         })
-        .flat_map(|target| {
-            tsconfig_paths
-                .base_dirs()
-                .filter_map(|base| merged.resolve_path(&target, base))
+        .collect();
+    tsconfig_paths
+        .base_dirs()
+        .flat_map(|base| {
+            targets
+                .iter()
+                .filter_map(|target| merged.resolve_path(target, base))
                 .collect::<Vec<_>>()
         })
         .collect()

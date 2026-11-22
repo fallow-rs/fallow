@@ -1227,7 +1227,8 @@ config contains the file, the nearest config is the fallback. Each config of
 the chain reads its own `extends` chain. A `paths` target resolves against
 `baseUrl` (TypeScript 5), then against the config that sets `paths`
 (TypeScript 7, which has no `baseUrl`), in each reader that checks that the
-target exists. Plugin path aliases use only the first folder. The orphan check keeps every file when a parent does not
+target exists. Every target of a pattern is tried against `baseUrl` before
+any target against the config folder, as TypeScript 5 orders them. Plugin path aliases use only the first folder. The orphan check keeps every file when a parent does not
 parse, and the output map maps nothing when the chain is not complete.
 `scripts/check-tsconfig-reads.mjs` fails on a `"compilerOptions"` key read
 outside the reader and test code. A read that needs the syntax tree of one

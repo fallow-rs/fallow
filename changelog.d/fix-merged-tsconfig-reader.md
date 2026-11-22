@@ -6,7 +6,7 @@
   - The `files`, `include`, `exclude` and `typeRoots` of a package config, such as one under `node_modules`, decide which module declaration files are unused. A parent that does not parse keeps every declaration file.
   - The resolver fallbacks for `paths`, `baseUrl` and `rootDirs` read the merged config. A `paths` mapping in a config that `extends` names through a package `exports` subpath now resolves.
   - Only a config that contains the importing file decides its `paths`, `baseUrl` and `rootDirs`, as in TypeScript. In an Nx-style app, the solution `tsconfig.json` (`files: []`) does not hide the `paths` of the `tsconfig.app.json` that owns the file. `files` and `include` add up, so a config that inherits `files: []` and sets its own `include` contains the files that `include` matches.
-  - A `paths` target resolves against `baseUrl` (TypeScript 5) and then against the config that sets `paths` (TypeScript 7, which has no `baseUrl`), so an alias resolves on either version.
+  - A `paths` target resolves against `baseUrl` (TypeScript 5) and then against the config that sets `paths` (TypeScript 7, which has no `baseUrl`), so an alias resolves on either version. Every target of a pattern is tried against `baseUrl` before any target against the config folder, in the order of TypeScript 5.
   - The boundary presets read an inherited `rootDir`.
   The graph cache version moves, so the first run after the upgrade resolves every import again.
   (Closes [#4980](https://github.com/fallow-rs/fallow/issues/4980))

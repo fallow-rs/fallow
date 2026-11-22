@@ -552,17 +552,15 @@ fn try_tsconfig_paths_from_config(
         .collect();
     matches.sort_by_key(|(pattern, _, _)| std::cmp::Reverse(path_alias_specificity(pattern)));
 
-    for (_, capture, targets) in matches {
-        let Some(targets) = targets.as_array() else {
-            continue;
-        };
-        for target in targets.iter().filter_map(Value::as_str) {
-            let target = if target.contains('*') {
-                target.replacen('*', capture, 1)
-            } else {
-                target.to_string()
-            };
-            for base in paths.base_dirs() {
+    // Every target against `baseUrl` first, as TypeScript 5 resolves them,
+    // then every target against the `paths` config folder.
+    for base in paths.base_dirs() {
+        let arrays = matches.iter().filter_map(|(_, capture, targets)| {
+            targets.as_array().map(|targets| (capture, targets))
+        });
+        for (capture, targets) in arrays {
+            for target in targets.iter().filter_map(Value::as_str) {
+                let target = target.replacen('*', capture, 1);
                 let Some(absolute) = merged.resolve_path(&target, base) else {
                     continue;
                 };

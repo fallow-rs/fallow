@@ -185,10 +185,9 @@ const rustFiles = (root, folder) => {
  */
 export const productionRustSources = (root, folders) => {
   const sources = new Map(
-    folders.flatMap((folder) => rustFiles(root, folder)).map((relative) => [
-      relative,
-      readFileSync(path.join(root, relative), "utf8"),
-    ]),
+    folders
+      .flatMap((folder) => rustFiles(root, folder))
+      .map((relative) => [relative, readFileSync(path.join(root, relative), "utf8")]),
   );
   const testOnly = testOnlyFiles(sources);
   for (const relative of testOnly) sources.delete(relative);

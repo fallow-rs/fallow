@@ -1,0 +1,1 @@
+{"compilerOptions":{"paths":{"@shared/*":["./libs/shared/src/*"],"~/*":["./apps/web/src/lib/*"]}}}

@@ -25,7 +25,11 @@ test("a fixture with one bad read fails with its file and line", () => {
     "crates/config/src/workspace/tsconfig_merged.rs",
     'fn read(value: &Value) { let _ = value.get("compilerOptions"); }\n',
   );
-  writeFile(root, "crates/core/tests/it.rs", 'fn t(v: &Value) { let _ = v.get("compilerOptions"); }\n');
+  writeFile(
+    root,
+    "crates/core/tests/it.rs",
+    'fn t(v: &Value) { let _ = v.get("compilerOptions"); }\n',
+  );
   assert.deepEqual(scanCrates(root), ['crates/core/src/plugins/jsx.rs:2: "compilerOptions"']);
 
   const cli = spawnSync(process.execPath, ["scripts/check-tsconfig-reads.mjs", "--root", root], {

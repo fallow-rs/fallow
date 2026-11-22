@@ -236,7 +236,9 @@ fn alias_folder(dir: &Path, alias: &str) -> Option<PathBuf> {
                     .collect::<Vec<_>>()
             })
             .collect();
-        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        // The longest prefix wins. A stable sort keeps the `baseUrl` folder
+        // before the `paths` config folder for one pattern.
+        candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
         candidates
             .into_iter()
             .map(|(_, folder)| folder)
@@ -336,6 +338,34 @@ mod tests {
         assert_eq!(
             alias_folder(dir, "@/components/ui"),
             Some(dir.join("src/components/ui"))
+        );
+    }
+
+    #[test]
+    fn an_alias_folder_under_base_url_wins_over_the_paths_config_folder() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        let app = root.join("app");
+        for folder in [
+            root.join("src/components/ui"),
+            app.join("src/components/ui"),
+        ] {
+            std::fs::create_dir_all(folder).expect("ui folder");
+        }
+        std::fs::write(
+            root.join("base.json"),
+            r#"{"compilerOptions":{"baseUrl":"."}}"#,
+        )
+        .expect("base tsconfig");
+        std::fs::write(
+            app.join("tsconfig.json"),
+            r#"{"extends":"../base.json","compilerOptions":{"paths":{"@/*":["./src/*"]}}}"#,
+        )
+        .expect("tsconfig");
+
+        assert_eq!(
+            alias_folder(&app, "@/components/ui"),
+            Some(root.join("src/components/ui"))
         );
     }
 

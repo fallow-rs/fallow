@@ -188,15 +188,14 @@ fn read_jsonc(path: &Path) -> Option<serde_json::Value> {
 fn tsconfig_target(specifier: &str, options: &TsconfigModuleOptions) -> Option<PathBuf> {
     let from_paths = options.paths.as_ref().and_then(|(paths, bases)| {
         let (targets, capture) = best_paths_match(paths, specifier)?;
-        targets
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .find_map(|target| {
-                let target = target.replacen('*', capture, 1);
-                bases
-                    .iter()
-                    .find_map(|base| probe_source_file(&base.join(&target)))
-            })
+        // Every target against `baseUrl` first, as TypeScript 5 resolves
+        // them, then every target against the `paths` config folder.
+        bases.iter().find_map(|base| {
+            targets
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .find_map(|target| probe_source_file(&base.join(target.replacen('*', capture, 1))))
+        })
     });
     from_paths.or_else(|| {
         options
@@ -357,6 +356,29 @@ mod tests {
                 shape.name()
             );
         }
+    }
+
+    #[test]
+    fn every_paths_target_tries_base_url_before_the_paths_config_folder() {
+        // TypeScript 5 tries all targets against `baseUrl` first, so the
+        // later target `b.ts` at the root wins over `app/a.ts`.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        write(
+            &root.join("base.json"),
+            r#"{"compilerOptions":{"baseUrl":"."}}"#,
+        );
+        write(
+            &root.join("app/tsconfig.json"),
+            r#"{"extends":"../base.json","compilerOptions":{"paths":{"@x":["./a.ts","./b.ts"]}}}"#,
+        );
+        write(&root.join("b.ts"), "export const b = 1;\n");
+        write(&root.join("app/a.ts"), "export const a = 1;\n");
+        let options = read_tsconfig_module_options(&root.join("app/tsconfig.json"));
+        assert_eq!(
+            tsconfig_target("@x", &options).map(|target| same_file(&target, &root.join("b.ts"))),
+            Some(true)
+        );
     }
 
     #[test]

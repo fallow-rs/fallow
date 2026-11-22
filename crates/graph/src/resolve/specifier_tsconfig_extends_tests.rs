@@ -238,3 +238,40 @@ fn paths_target_resolves_against_base_url_or_the_paths_config() {
         );
     });
 }
+
+/// TypeScript 5 tries every target of a pattern against `baseUrl` before a
+/// target against the folder of the config that sets `paths`. A later target
+/// that exists under `baseUrl` wins over an earlier target that exists only
+/// under the `paths` config folder.
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn every_paths_target_tries_base_url_before_the_paths_config_folder() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join("app")).unwrap();
+    fs::write(
+        root.join("base.json"),
+        r#"{"compilerOptions":{"baseUrl":"."}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("app/tsconfig.json"),
+        r#"{"extends":"../base.json","compilerOptions":{"paths":{"@x":["./a.ts","./b.ts"]}}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("b.ts"), "export {};").unwrap();
+    fs::write(root.join("app/a.ts"), "export {};").unwrap();
+    fs::write(root.join("app/index.ts"), "").unwrap();
+    let from_file = root.join("app/index.ts");
+    let root_b = root.join("b.ts");
+    let app_a = root.join("app/a.ts");
+    let files = [(root_b.as_path(), FileId(1)), (app_a.as_path(), FileId(2))];
+
+    with_ctx_at_root_and_files(root, &files, |ctx| {
+        let result = super::try_nearest_tsconfig_path_alias(ctx, &from_file, "@x", false);
+        assert!(
+            matches!(result, Some(ResolveResult::InternalModule(FileId(1)))),
+            "got {result:?}"
+        );
+    });
+}
