@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashSet;
+
 use super::deno_json::{dir_has_package_manifest, load_member_package_manifest};
 use super::diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
@@ -467,7 +469,11 @@ fn expand_recursive_workspace_pattern(
     if let Ok(canonical_base) = dunce::canonicalize(&base_dir)
         && canonical_base.starts_with(canonical_root)
     {
-        walk_workspace_dirs(&base_dir, &canonical_base, &mut input);
+        let mut walk = WorkspaceDirWalk {
+            canonical_base: &canonical_base,
+            visited: FxHashSet::from_iter([canonical_base.clone()]),
+        };
+        walk_workspace_dirs(&base_dir, &canonical_base, &mut walk, &mut input);
     }
     results
 }
@@ -481,14 +487,26 @@ struct WorkspaceDirWalkInput<'a> {
     results: &'a mut Vec<(PathBuf, PathBuf)>,
 }
 
+/// The folders that the recursive workspace walk has entered, by real path.
+struct WorkspaceDirWalk<'a> {
+    canonical_base: &'a Path,
+    visited: FxHashSet<PathBuf>,
+}
+
 /// Recursively walk directories, skipping `node_modules` and `.git`, collecting
 /// directories that match the glob pattern and contain a package manifest.
 ///
-/// `canonical_dir` is the real path of `dir`. The walk descends through a
-/// link only when its target is inside the project root and is not `dir` or
-/// an ancestor of it, so a link to an outside folder or a link loop does not
-/// take the walk with it.
-fn walk_workspace_dirs(dir: &Path, canonical_dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
+/// `canonical_dir` is the real path of `dir`. The walk enters each real
+/// folder once. It does not enter a link whose target is outside the project
+/// root, or inside the walked base folder (the walk reaches that target
+/// through its real path), so a link loop or a link out of the project does
+/// not take the walk with it.
+fn walk_workspace_dirs(
+    dir: &Path,
+    canonical_dir: &Path,
+    walk: &mut WorkspaceDirWalk<'_>,
+    input: &mut WorkspaceDirWalkInput<'_>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -507,7 +525,7 @@ fn walk_workspace_dirs(dir: &Path, canonical_dir: &Path, input: &mut WorkspaceDi
             match dunce::canonicalize(&path) {
                 Ok(target)
                     if target.starts_with(input.canonical_root)
-                        && !canonical_dir.starts_with(&target) =>
+                        && !target.starts_with(walk.canonical_base) =>
                 {
                     target
                 }
@@ -516,7 +534,9 @@ fn walk_workspace_dirs(dir: &Path, canonical_dir: &Path, input: &mut WorkspaceDi
         } else {
             canonical_dir.join(&name)
         };
-        walk_workspace_dirs(&path, &canonical_child, input);
+        if walk.visited.insert(canonical_child.clone()) {
+            walk_workspace_dirs(&path, &canonical_child, walk, input);
+        }
     }
 }
 
@@ -1426,8 +1446,9 @@ mod tests {
         assert_eq!(expanded_members(root, "./packages/**").len(), 3);
     }
 
-    /// A link to an ancestor folder or to a folder outside the project does
-    /// not take the recursive walk with it.
+    /// A link to an ancestor folder, a pair of links between sibling
+    /// folders, or a link to a folder outside the project does not take the
+    /// recursive walk into a loop or out of the project.
     #[cfg(unix)]
     #[test]
     fn expand_recursive_glob_does_not_descend_through_an_ancestor_or_external_link() {
@@ -1440,10 +1461,18 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), root.join("packages/outside")).unwrap();
         write_member(root, "packages/b");
         std::os::unix::fs::symlink(root.join("packages/b"), root.join("packages/b-link")).unwrap();
+        std::os::unix::fs::symlink(root.join("packages/b"), root.join("packages/a/to-b")).unwrap();
+        std::os::unix::fs::symlink(root.join("packages/a"), root.join("packages/b/to-a")).unwrap();
 
         assert_eq!(
             expanded_members(root, "packages/**"),
-            ["packages/a", "packages/b", "packages/b-link"]
+            [
+                "packages/a",
+                "packages/a/to-b",
+                "packages/b",
+                "packages/b-link",
+                "packages/b/to-a"
+            ]
         );
     }
 
