@@ -119,7 +119,7 @@ pub struct HealthParams {
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.fallow/snapshots/{timestamp}.json`).
+    /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.fallow/snapshots/{timestamp}.json`, with a `-2`, `-3` suffix when a snapshot of the same second exists).
     /// The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
     /// A relative path resolves against the working directory of the MCP
     /// server, not against `root`, so pass an absolute path.

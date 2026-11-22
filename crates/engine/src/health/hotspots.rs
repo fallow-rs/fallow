@@ -431,7 +431,8 @@ pub(super) fn compute_hotspots(
 
     let ownership_cfg = &config.health.ownership;
     let bot_globs_owned = load_ownership_bot_globs(opts, ownership_cfg);
-    let codeowners_owned = load_ownership_codeowners(opts, &config.root);
+    let codeowners_owned =
+        load_ownership_codeowners(opts, &config.root, config.codeowners.as_deref());
     // Staleness is measured against the run clock, not the system clock, so
     // `stale_days` and the thresholds it feeds (owner-active, drift minimum
     // file age) do not flip between two runs over the same commit.
@@ -569,22 +570,27 @@ fn load_ownership_bot_globs(
 }
 
 /// Load CODEOWNERS for ownership analysis, warning on a real parse error only.
+///
+/// `configured` is the `codeowners` config path. When it is unset, the
+/// standard locations are probed.
 fn load_ownership_codeowners(
     opts: &HealthOptions<'_>,
     root: &std::path::Path,
+    configured: Option<&str>,
 ) -> Option<crate::codeowners::CodeOwners> {
     opts.ownership
-        .then(|| match crate::codeowners::CodeOwners::load(root, None) {
-            Ok(co) => Some(co),
-            Err(e) => {
-                // A project with no CODEOWNERS at all never asked for declared
-                // owners, so it is not a degraded input and gets neither the
-                // note nor the diagnostic.
-                if !e.contains("no CODEOWNERS file found") {
-                    if !opts.quiet {
-                        eprintln!("Warning: failed to parse CODEOWNERS: {e}");
-                    }
-                    super::diagnostics::record_health_diagnostic(
+        .then(
+            || match crate::codeowners::CodeOwners::load(root, configured) {
+                Ok(co) => Some(co),
+                Err(e) => {
+                    // A project with no CODEOWNERS at all never asked for declared
+                    // owners, so it is not a degraded input and gets neither the
+                    // note nor the diagnostic.
+                    if !e.contains("no CODEOWNERS file found") {
+                        if !opts.quiet {
+                            eprintln!("Warning: failed to parse CODEOWNERS: {e}");
+                        }
+                        super::diagnostics::record_health_diagnostic(
                         root,
                         None,
                         fallow_types::workspace::WorkspaceDiagnosticKind::OwnershipUnavailable {
@@ -592,10 +598,11 @@ fn load_ownership_codeowners(
                             error: e,
                         },
                     );
+                    }
+                    None
                 }
-                None
-            }
-        })
+            },
+        )
         .flatten()
 }
 

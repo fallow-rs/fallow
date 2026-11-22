@@ -263,9 +263,11 @@ pub fn load_health_config_in(
 /// Run health analysis using pre-parsed modules from the dead-code pipeline.
 ///
 /// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
-/// `pre_computed_duplication` is a duplication report over the same files and
-/// duplicates config; health then skips its own duplicate detection. `run`
-/// is the health analysis of a resolved run; `None` loads the config.
+/// `pre_computed_duplication` is a duplication report over the project files
+/// with the duplicates config. Health uses it in place of its own duplicate
+/// detection when the health scope holds every file, and runs the scoped
+/// detection otherwise. `run` is the health analysis of a resolved run;
+/// `None` loads the config.
 pub fn execute_health_with_shared_parse_in(
     opts: &HealthOptions<'_>,
     shared: HealthSharedParseData,

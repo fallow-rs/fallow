@@ -11997,3 +11997,69 @@ fn health_accepts_a_negative_branch_count_and_reports_an_unreadable_auto_map() {
         unreadable.stderr
     );
 }
+
+#[test]
+fn health_hotspot_ownership_reads_the_configured_codeowners_path() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"configured-owners","type":"module"}"#,
+    );
+    write_file(
+        &dir.path().join(".fallowrc.json"),
+        r#"{"codeowners":"config/OWNERS"}"#,
+    );
+    write_file(&dir.path().join("config/OWNERS"), "* @configured-team\n");
+    write_file(
+        &dir.path().join("src/hot.ts"),
+        r#"export function classify(n: number, mode: string): string {
+  let out = "";
+  if (mode === "a") { if (n > 10) out = "big"; else if (n > 5) out = "mid"; else out = "small"; }
+  else if (mode === "b") { for (let i = 0; i < n; i++) { if (i % 2 === 0) out += "x"; else out += "y"; } }
+  else { out = n > 0 ? "pos" : "neg"; }
+  return out;
+}
+"#,
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let day = 86_400;
+    let churn = serde_json::json!({
+        "schema": "fallow-churn/v1",
+        "events": [
+            { "path": "src/hot.ts", "timestamp": now - day, "author": "alice@corp", "added": 40, "deleted": 12 },
+            { "path": "src/hot.ts", "timestamp": now - 2 * day, "author": "alice@corp", "added": 20, "deleted": 5 },
+            { "path": "src/hot.ts", "timestamp": now - 3 * day, "author": "bob@corp", "added": 15, "deleted": 8 }
+        ]
+    });
+    write_file(
+        &dir.path().join("churn.json"),
+        &serde_json::to_string(&churn).unwrap(),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--hotspots",
+            "--ownership",
+            "--churn-file",
+            "churn.json",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let ownership = &json["hotspots"][0]["ownership"];
+    assert_eq!(
+        ownership["declared_owner"].as_str(),
+        Some("@configured-team"),
+        "stdout: {}",
+        output.stdout
+    );
+    assert_eq!(ownership["unowned"].as_bool(), Some(false));
+}

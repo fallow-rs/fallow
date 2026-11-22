@@ -2,10 +2,9 @@ use std::time::Instant;
 
 use fallow_config::ResolvedConfig;
 use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary, RefactoringTarget};
-use rustc_hash::FxHashSet;
 
 use crate::baseline::{HealthBaselineData, filter_new_health_targets};
-use crate::duplicates::{DuplicationReport, DuplicationStats};
+use crate::duplicates::DuplicationReport;
 
 use super::HealthExecutionOptions;
 use super::change_coupling_section::{ChangeCouplingOutcome, compute_change_coupling};
@@ -20,9 +19,6 @@ use super::targets::{self, TargetAuxData, compute_refactoring_targets};
 pub struct HealthDerivedSectionInput<'a> {
     pub(crate) config: &'a ResolvedConfig,
     pub(crate) files: &'a [fallow_types::discover::DiscoveredFile],
-    pub(crate) modules: &'a [crate::source::ModuleInfo],
-    pub(crate) file_paths:
-        &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     pub(crate) ignore_set: &'a globset::GlobSet,
     pub(crate) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(crate) ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
@@ -130,8 +126,6 @@ fn prepare_health_section_dupes(
         opts,
         config: input.config,
         files: input.files,
-        modules: input.modules,
-        file_paths: input.file_paths,
         changed_files: input.changed_files,
         ws_roots: input.ws_roots,
         ignore_set: input.ignore_set,
@@ -359,8 +353,6 @@ struct HealthDuplicationDataInput<'a> {
     opts: &'a HealthExecutionOptions<'a>,
     config: &'a ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [crate::source::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a crate::workspace_scope::WorkspaceScope>,
     ignore_set: &'a globset::GlobSet,
@@ -386,8 +378,6 @@ fn prepare_health_duplication_data(
             opts: input.opts,
             config: input.config,
             files: input.files,
-            modules: input.modules,
-            file_paths: input.file_paths,
             candidate_paths: &candidate_paths,
             pre_computed_duplication: input.pre_computed_duplication,
         });
@@ -398,8 +388,6 @@ struct HealthDuplicationReportInput<'a> {
     opts: &'a HealthExecutionOptions<'a>,
     config: &'a ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [crate::source::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
     pre_computed_duplication: Option<DuplicationReport>,
 }
@@ -414,22 +402,15 @@ fn compute_health_duplication_report(
     // does not depend on the analyses that one run selects.
     let measures_duplication = input.config.duplicates.runs_by_default();
     let dupes_report = if measures_duplication && (input.opts.score || input.opts.targets) {
-        if let Some(report) = input.pre_computed_duplication {
-            // When every file is a candidate, the report covers the same files
-            // with the same config as the detection below, so it is already
-            // the exact result. The subset recomputes the stats from the
-            // parsed modules, which also count the lines of files that
-            // `duplicates.ignore` excludes.
-            let report = if input.candidate_paths.len() == input.files.len() {
-                report
-            } else {
-                subset_precomputed_duplication_report(
-                    report,
-                    input.modules,
-                    input.file_paths,
-                    input.candidate_paths,
-                )
-            };
+        // A report over every file is the exact result: it covers the same
+        // files with the same config as the detection below. A report over
+        // more files than the health scope cannot be cut down to the scope,
+        // because the detector drops groups below `minOccurrences` and
+        // counts its totals over the files that it reads, so the scoped
+        // detection runs instead.
+        if let Some(report) = input.pre_computed_duplication
+            && input.candidate_paths.len() == input.files.len()
+        {
             return (Some(report), t.elapsed().as_secs_f64() * 1000.0);
         }
         let scoped_files = filter_files_to_paths(input.files, input.candidate_paths);
@@ -447,89 +428,6 @@ fn compute_health_duplication_report(
         None
     };
     (dupes_report, t.elapsed().as_secs_f64() * 1000.0)
-}
-
-fn subset_precomputed_duplication_report(
-    report: DuplicationReport,
-    modules: &[crate::source::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
-    candidate_paths: &FxHashSet<std::path::PathBuf>,
-) -> DuplicationReport {
-    let DuplicationReport {
-        clone_groups,
-        stats: original_stats,
-        ..
-    } = report;
-    let clone_groups = clone_groups
-        .into_iter()
-        .filter_map(|group| {
-            let instances = group
-                .instances
-                .into_iter()
-                .filter(|instance| candidate_paths.contains(&instance.file))
-                .collect::<Vec<_>>();
-            (instances.len() > 1).then_some(fallow_types::duplicates::CloneGroup {
-                instances,
-                token_count: group.token_count,
-                line_count: group.line_count,
-                similarity: group.similarity,
-            })
-        })
-        .collect::<Vec<_>>();
-    let stats = subset_precomputed_duplication_stats(
-        &original_stats,
-        modules,
-        file_paths,
-        candidate_paths,
-        &clone_groups,
-    );
-    DuplicationReport {
-        clone_groups,
-        clone_families: Vec::new(),
-        mirrored_directories: Vec::new(),
-        range_marker_problems: Vec::new(),
-        stats,
-    }
-}
-
-fn subset_precomputed_duplication_stats(
-    original: &DuplicationStats,
-    modules: &[crate::source::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
-    candidate_paths: &FxHashSet<std::path::PathBuf>,
-    clone_groups: &[fallow_types::duplicates::CloneGroup],
-) -> DuplicationStats {
-    crate::duplicates::duplication_stats(
-        clone_groups,
-        crate::duplicates::CorpusTotals {
-            files: candidate_paths.len(),
-            lines: total_lines_for_candidate_paths(modules, file_paths, candidate_paths),
-            tokens: original.total_tokens,
-        },
-        crate::duplicates::CarriedCounters {
-            // The scoped report carries no families.
-            clone_families: 0,
-            clone_groups_below_min_occurrences: original.clone_groups_below_min_occurrences,
-            clone_groups_ignored: original.clone_groups_ignored,
-            near_candidates_skipped: original.near_candidates_skipped,
-        },
-    )
-}
-
-fn total_lines_for_candidate_paths(
-    modules: &[crate::source::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
-    candidate_paths: &FxHashSet<std::path::PathBuf>,
-) -> usize {
-    modules
-        .iter()
-        .filter_map(|module| {
-            let path = file_paths.get(&module.file_id)?;
-            candidate_paths
-                .contains(*path)
-                .then_some(module.line_offsets.len())
-        })
-        .sum()
 }
 
 /// Compute refactoring targets when requested, applying the baseline and effort
@@ -565,55 +463,4 @@ fn compute_targets(
         tgts.retain(|t| t.effort == *effort);
     }
     (tgts, Some(thresholds))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use fallow_types::duplicates::{CloneGroup, CloneInstance};
-    use rustc_hash::FxHashMap;
-
-    use super::*;
-
-    #[test]
-    fn subset_precomputed_duplication_stats_match_detector_token_model() {
-        let path_a = PathBuf::from("/repo/src/a.ts");
-        let path_b = PathBuf::from("/repo/src/b.ts");
-        let clone_groups = vec![CloneGroup {
-            instances: vec![clone_instance(&path_a), clone_instance(&path_b)],
-            token_count: 25,
-            line_count: 3,
-            similarity: None,
-        }];
-        let mut candidate_paths = FxHashSet::default();
-        candidate_paths.insert(path_a);
-        candidate_paths.insert(path_b);
-
-        let stats = subset_precomputed_duplication_stats(
-            &DuplicationStats {
-                total_tokens: 100,
-                ..DuplicationStats::default()
-            },
-            &[],
-            &FxHashMap::default(),
-            &candidate_paths,
-            &clone_groups,
-        );
-
-        assert_eq!(stats.duplicated_tokens, 25);
-        assert_eq!(stats.clone_instances, 2);
-    }
-
-    fn clone_instance(file: &std::path::Path) -> CloneInstance {
-        CloneInstance {
-            is_symlink: false,
-            file: file.to_path_buf(),
-            start_line: 1,
-            end_line: 3,
-            start_col: 0,
-            end_col: 1,
-            fragment: "const value = 1;".to_string(),
-        }
-    }
 }

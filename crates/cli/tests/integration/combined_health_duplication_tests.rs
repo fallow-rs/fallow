@@ -156,3 +156,60 @@ fn bare_command_and_api_combined_runner_report_the_same_health() {
         );
     }
 }
+
+/// Three files share one clone and `duplicates.minOccurrences` is 3. The
+/// `health.ignore` config removes one of the three from the health scope. The
+/// duplication of bare `fallow` over that scope must match the detection of
+/// standalone `fallow health` over the same files.
+#[test]
+fn bare_command_scoped_health_matches_standalone_duplication() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"combined-health-scoped-duplication","type":"module","main":"src/index.ts"}"#,
+    );
+    write_file(
+        &root.join("src/index.ts"),
+        "export { first } from './first';\nexport { second } from './second';\nexport { third } from '../legacy/third';\n",
+    );
+    write_file(&root.join("src/first.ts"), &duplicated_function("first"));
+    write_file(&root.join("src/second.ts"), &duplicated_function("second"));
+    write_file(&root.join("legacy/third.ts"), &duplicated_function("third"));
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"duplicates":{"minOccurrences":3},"health":{"ignore":["legacy/**"]}}"#,
+    );
+    let root_arg = root.to_str().unwrap();
+    let common = [
+        "--root",
+        root_arg,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ];
+
+    let mut combined_args = common.to_vec();
+    combined_args.push("--score");
+    let combined = health_section(parse_json(&run_fallow_raw(&combined_args)));
+    // The default sections of standalone `fallow health` carry the vital
+    // signs, which `--score` alone leaves out.
+    let mut standalone_args = vec!["health"];
+    standalone_args.extend(common);
+    let standalone = parse_json(&run_fallow_raw(&standalone_args));
+
+    let duplication = &standalone["vital_signs"]["duplication_pct"];
+    assert!(
+        duplication.as_f64().is_some_and(|pct| pct > 0.0),
+        "the fixture must have duplication, got {duplication}"
+    );
+    assert_eq!(
+        combined["vital_signs"]["duplication_pct"], *duplication,
+        "bare fallow must measure the scoped duplication like standalone fallow health"
+    );
+    assert_eq!(
+        combined["vital_signs"]["counts"]["duplicated_lines"],
+        standalone["vital_signs"]["counts"]["duplicated_lines"]
+    );
+}
