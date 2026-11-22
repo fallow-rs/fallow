@@ -110,8 +110,17 @@ timeout_cmd() {
 clone_project() {
     local repo="$1" tag="$2" dest="$3"
 
+    # A reused checkout must be at the pinned tag, or the run measures another
+    # revision than the one it reports.
     if [[ -d "${dest}/.git" ]]; then
-        echo "    Already cloned" >&2
+        local head pinned
+        head="$(git -C "${dest}" rev-parse -q --verify HEAD 2>/dev/null || true)"
+        pinned="$(git -C "${dest}" rev-parse -q --verify "refs/tags/${tag}^{commit}" 2>/dev/null || true)"
+        if [[ -z "${head}" || "${head}" != "${pinned}" ]]; then
+            echo "    Cached checkout ${dest} is not at ${tag}; remove it to clone again" >&2
+            return 1
+        fi
+        echo "    Already cloned at ${tag}" >&2
         return 0
     fi
 
@@ -128,9 +137,9 @@ install_deps() {
 
     echo "    Installing dependencies (${pm})..." >&2
     if [[ "${pm}" == "pnpm" ]]; then
-        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>/dev/null) || true
+        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>&1)
     else
-        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null) || true
+        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>&1)
     fi
 }
 
@@ -229,8 +238,13 @@ for entry in "${PROJECTS[@]}"; do
         continue
     fi
 
-    # Install deps
-    install_deps "${dest}" "${pm}"
+    # Both tools must analyze the same complete dependency tree.
+    if ! install_deps "${dest}" "${pm}"; then
+        echo "    SKIP: dependency install failed" >&2
+        skipped_names+=("${name}")
+        failed=$((failed + 1))
+        continue
+    fi
 
     # Run conformance
     if run_single_project "${name}" "${dest}" "${TMPDIR_CONFORM}"; then
