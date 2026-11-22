@@ -205,10 +205,12 @@ impl<'s, 'a> Collector<'s, 'a> {
             SchemaShape::Derived {
                 import_local,
                 through_call,
+                member,
             } => derived_schema_exports.push(EffectDerivedSchema {
                 export_name: exported,
                 import_local,
                 through_call,
+                member,
             }),
         };
         for (local, exported) in self.export_bindings {
@@ -349,9 +351,13 @@ impl<'s, 'a> Collector<'s, 'a> {
         known: &FxHashSet<String>,
     ) {
         for declarator in &declaration.declarations {
-            let (BindingPattern::BindingIdentifier(id), Some(init)) =
-                (&declarator.id, &declarator.init)
-            else {
+            let Some(init) = &declarator.init else {
+                continue;
+            };
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                for (symbol, name, shape) in self.schema.pattern_shapes(&declarator.id, init) {
+                    self.schema.record(symbol, &name, shape);
+                }
                 continue;
             };
             if let Some(shape) = self.schema.expression_shape(init) {

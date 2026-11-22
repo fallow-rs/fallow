@@ -716,3 +716,52 @@ export const ImportedAlias = makeRule
         facts.schema_exports
     );
 }
+
+#[test]
+fn credits_a_literal_member_only_when_no_code_can_change_it() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+const kept = { User: Schema.String }
+export const Kept = kept.User
+const shifted = [Schema.String, Schema.Number]
+shifted.shift()
+export const fromShifted = shifted[0]
+const deleted = { User: Schema.String }
+delete (deleted.User as never)
+export const fromDeleted = deleted.User
+const assigned = { User: Schema.String }
+;(assigned.User as unknown) = 1
+export const fromAssigned = assigned.User
+const chained = { User: Schema.String }
+delete chained?.User
+export const fromChained = chained.User
+export const exported = { User: Schema.String }
+export const fromExported = exported.User
+const padded = [Schema.String]
+export const fromPadded = padded["00"]
+"#,
+    );
+    assert_eq!(names, vec!["Kept"]);
+}
+
+#[test]
+fn gives_no_schema_for_a_redeclared_parameter_a_large_key_or_a_method_read() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+function id(x: unknown) { return x }
+export const Kept = id(Schema.String)
+function redeclared(x: unknown) { var x = 1; return x }
+export const fromRedeclared = redeclared(Schema.String)
+function shadowed(x: unknown) { function x() {} return x }
+export const fromShadowed = shadowed(Schema.String)
+const large = { "1000000000000000000000": Schema.String }
+export const fromLargeKey = large[1e21]
+export const methodRead = Schema.String.annotations
+const record = { User: Schema.String }
+export const recordMethodRead = record.User.annotations
+"#,
+    );
+    assert_eq!(names, vec!["Kept"]);
+}

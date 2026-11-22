@@ -15,9 +15,10 @@ use crate::results::UnusedExport;
 /// An export also counts as a schema when it forwards a schema of another
 /// module (`import { A } from "./a"; export { A }` or `export { A } from
 /// "./a"`), or when its chain starts at an imported schema
-/// (`Imported.pipe(Schema.brand("B"))`). A call of an imported function is a
-/// schema when each `return` of that function is a schema
-/// (`makeImported()`). The function export itself stays a value export, as
+/// (`Imported.pipe(Schema.brand("B"))`), or at a member of a namespace import
+/// (`Imported.User.pipe(...)`). A call of an imported function is a schema
+/// when each `return` of that function is a schema (`makeImported()`,
+/// `Imported.makeUser()`). The function export itself stays a value export, as
 /// does a forwarded non-schema value.
 pub(super) fn schema_exports_by_file(
     config: &ResolvedConfig,
@@ -123,6 +124,7 @@ enum Link {
 fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCandidate> {
     let file_id = module.file_id;
     let mut imports: FxHashMap<&str, (FileId, &str)> = FxHashMap::default();
+    let mut namespaces: FxHashMap<&str, FileId> = FxHashMap::default();
     for (target, symbols) in graph.outgoing_symbol_edges(file_id) {
         for symbol in symbols
             .iter()
@@ -131,7 +133,11 @@ fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCa
             let imported = match &symbol.imported_name {
                 ImportedName::Named(name) => name.as_str(),
                 ImportedName::Default => "default",
-                ImportedName::Namespace | ImportedName::SideEffect => continue,
+                ImportedName::Namespace => {
+                    namespaces.insert(symbol.local_name.as_str(), target);
+                    continue;
+                }
+                ImportedName::SideEffect => continue,
             };
             imports.insert(symbol.local_name.as_str(), (target, imported));
         }
@@ -160,13 +166,19 @@ fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCa
         .collect();
     if let Some(facts) = module.effect_facts.as_deref() {
         candidates.extend(facts.derived_schema_exports.iter().filter_map(|derived| {
-            candidate(
-                derived.export_name.clone(),
-                &derived.import_local,
-                Link::Chain {
-                    through_call: derived.through_call,
-                },
-            )
+            let link = Link::Chain {
+                through_call: derived.through_call,
+            };
+            let Some(member) = &derived.member else {
+                return candidate(derived.export_name.clone(), &derived.import_local, link);
+            };
+            let &target = namespaces.get(derived.import_local.as_str())?;
+            Some(ForwardCandidate {
+                file_id,
+                export_name: derived.export_name.clone(),
+                origin: declaring_origin(graph, target, member.clone()),
+                link,
+            })
         }));
     }
     if let Some(node) = graph.modules.get(file_id.0 as usize) {

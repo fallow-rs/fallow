@@ -43,6 +43,9 @@ pub struct EffectDerivedSchema {
     /// export is also a schema when the import is a function that returns a
     /// schema.
     pub through_call: bool,
+    /// The import is a namespace, and the chain starts at its export with
+    /// this name (`Imported.makeUser()`).
+    pub member: Option<String>,
 }
 
 /// A module-scope class that extends a tagged error constructor.
