@@ -284,7 +284,8 @@ pub fn run_agent_status(
     let root = resolve_root(root, root_explicit);
     let home = fallow_process::HostPaths::from_env().home;
     let surfaces = surfaces(&root, home.as_deref());
-    let next_actions = status_next_actions(&surfaces);
+    let root_arg = root_explicit.then(|| super::root_arg(&root));
+    let next_actions = status_next_actions(&surfaces, root_arg.as_deref());
     let report = StatusReport {
         kind: "agent-status",
         schema_version: SCHEMA_VERSION,
@@ -579,7 +580,8 @@ fn hook_row(
     }
 }
 
-fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
+fn status_next_actions(surfaces: &[SurfaceStatus], root_arg: Option<&str>) -> Vec<NextAction> {
+    let scope = root_arg.unwrap_or_default();
     let mut next: Vec<NextAction> = Vec::new();
     if surfaces
         .iter()
@@ -587,7 +589,7 @@ fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
     {
         next.push(NextAction {
             id: "agent-install",
-            command: "fallow agent install --dry-run".to_string(),
+            command: format!("fallow agent install --dry-run{scope}"),
             reason: "Shows what agent install would write for the absent or stale surfaces above; drop --dry-run to apply."
                 .to_string(),
             mutating: false,
@@ -634,7 +636,7 @@ fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
     {
         next.push(NextAction {
             id: "gate-script-refresh",
-            command: "fallow hooks install --target agent --force --dry-run".to_string(),
+            command: format!("fallow hooks install --target agent --force --dry-run{scope}"),
             reason: "Review the installed gate's edits and this preview before replacing it. Status does not execute modified hook scripts or verify their runtime.".to_string(),
             mutating: false,
         });
@@ -659,7 +661,7 @@ fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
     {
         next.push(NextAction {
             id: "agent-install-force",
-            command: "fallow agent install --force".to_string(),
+            command: format!("fallow agent install --force{scope}"),
             reason: "Foreign surfaces were not written by fallow; --force replaces them, otherwise they are left alone."
                 .to_string(),
             mutating: true,
@@ -836,7 +838,7 @@ mod tests {
             row.detail
         );
 
-        let actions = status_next_actions(&[row]);
+        let actions = status_next_actions(&[row], None);
         let jq = actions
             .iter()
             .find(|action| action.id == "gate-requires-jq")
@@ -872,7 +874,7 @@ mod tests {
                 assert_eq!(row.state, SurfaceState::Stale);
                 assert_eq!(row.blocker, Some(GateBlocker::JsonReaderMissing));
                 assert!(
-                    status_next_actions(&[row])
+                    status_next_actions(&[row], None)
                         .iter()
                         .any(|action| action.id == "gate-json-reader")
                 );
@@ -898,7 +900,7 @@ mod tests {
             Some(GateBlocker::PathVersion("3.17.0".to_string()))
         );
 
-        let actions = status_next_actions(&[row]);
+        let actions = status_next_actions(&[row], None);
         let drift = actions
             .iter()
             .find(|action| action.id == "gate-path-version")
@@ -920,7 +922,7 @@ mod tests {
         assert_eq!(row.state, SurfaceState::Absent);
         assert_eq!(row.blocker, None);
         assert!(
-            status_next_actions(&[row]).iter().all(|action| {
+            status_next_actions(&[row], None).iter().all(|action| {
                 action.id != "gate-requires-jq" && action.id != "gate-path-version"
             })
         );
