@@ -1939,7 +1939,12 @@ fn store_lock_acquire_drop_then_record_roundtrips() {
 fn sweep_keeps_fresh_and_self_deletes_aged_out() {
     let _cfg = aggregate_env();
     seed_store("keepme", &store_with("keep", 1, 0, "t0", 1));
-    seed_store("oldone", &store_with("old", 1, 0, "t0", 1));
+    let undecided = ImpactStore {
+        enabled: false,
+        explicit_decision: false,
+        ..store_with("old", 1, 0, "t0", 1)
+    };
+    seed_store("oldone", &undecided);
     // A `.lock` sidecar must survive the sweep (lock-lifecycle invariant).
     let lock = impact_config_dir()
         .unwrap()
@@ -1957,6 +1962,76 @@ fn sweep_keeps_fresh_and_self_deletes_aged_out() {
         "aged-out store reclaimed"
     );
     assert!(lock.exists(), "lock sidecar never deleted by the sweep");
+}
+
+/// Read a seeded store back from `<config>/impact/<key>.json`.
+fn read_seeded(key: &str) -> Option<ImpactStore> {
+    let path = impact_config_dir()?
+        .join("impact")
+        .join(format!("{key}.json"));
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+#[test]
+fn sweep_keeps_an_explicit_decision_and_drops_the_history() {
+    let _cfg = aggregate_env();
+    seed_store("keepme", &store_with("keep", 1, 0, "t0", 1));
+    let disabled = ImpactStore {
+        enabled: false,
+        ..store_with("disabled", 3, 2, "t0", 4)
+    };
+    seed_store("disabled", &disabled);
+    seed_store("enabled", &store_with("enabled", 3, 2, "t0", 4));
+    let declined = ImpactStore {
+        enabled: false,
+        explicit_decision: false,
+        onboarding_declined: true,
+        ..store_with("declined", 3, 2, "t0", 4)
+    };
+    seed_store("declined", &declined);
+
+    sweep_old_stores("keepme", std::time::Duration::ZERO);
+
+    let disabled = read_seeded("disabled").expect("an explicit disable survives the sweep");
+    assert_eq!(resolve_enabled(&disabled), (false, EnabledSource::Project));
+    assert!(disabled.records.is_empty(), "the aged history is dropped");
+    assert!(disabled.containment.is_empty());
+    assert_eq!(disabled.resolved_total, 0);
+
+    let enabled = read_seeded("enabled").expect("an explicit enable survives the sweep");
+    assert_eq!(resolve_enabled(&enabled), (true, EnabledSource::Project));
+    assert!(enabled.records.is_empty());
+    assert_eq!(enabled.label.as_deref(), Some("enabled"));
+
+    let declined = read_seeded("declined").expect("a declined opt-in survives the sweep");
+    assert!(declined.onboarding_declined);
+    assert!(declined.records.is_empty());
+}
+
+#[test]
+fn sweep_removes_a_corrupt_store_and_keeps_a_newer_one() {
+    let _cfg = aggregate_env();
+    let dir = impact_config_dir().unwrap().join("impact");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("corrupt.json"), b"{ not json").unwrap();
+    let newer = format!(
+        r#"{{"schema_version": {}, "enabled": false, "explicit_decision": true}}"#,
+        STORE_SCHEMA_VERSION + 1
+    );
+    std::fs::write(dir.join("newer.json"), &newer).unwrap();
+
+    sweep_old_stores("keepme", std::time::Duration::ZERO);
+
+    assert!(
+        !dir.join("corrupt.json").exists(),
+        "a corrupt store is reclaimed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("newer.json")).unwrap(),
+        newer,
+        "a store of a newer Fallow stays as it is"
+    );
 }
 
 #[test]

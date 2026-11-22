@@ -544,6 +544,53 @@ fn remove_store(path: &Path) -> Result<bool, StoreWriteError> {
     }
 }
 
+/// Whether the store file at `path` is at least `max_age` old, by its mtime.
+pub(super) fn is_aged_out(
+    path: &Path,
+    now: std::time::SystemTime,
+    max_age: std::time::Duration,
+) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|mtime| now.duration_since(mtime).ok())
+        .is_some_and(|age| age >= max_age)
+}
+
+/// Expire one aged store under its lock. A store without a user decision, and
+/// a store that does not read or parse, is removed. A store with a decision is
+/// rewritten with only that decision, so the project does not fall back to
+/// the user-global default. The rewrite starts like a fresh store: records,
+/// totals, frontiers and the analysis identity go. A store that a newer
+/// Fallow wrote stays as it is.
+pub(super) fn expire_store(path: &Path, now: std::time::SystemTime, max_age: std::time::Duration) {
+    let _lock = ImpactStoreLock::acquire_for_store(path);
+    if !is_aged_out(path, now, max_age) {
+        return;
+    }
+    let store = match read_store_file(path) {
+        Ok(Some(store)) => store,
+        Ok(None) | Err(StoreReadError::Newer { .. }) => return,
+        Err(StoreReadError::Unreadable { .. } | StoreReadError::Invalid { .. }) => {
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+    };
+    if !(store.enabled || store.explicit_decision || store.onboarding_declined) {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let decision = ImpactStore {
+        schema_version: store.schema_version,
+        enabled: store.enabled,
+        explicit_decision: store.explicit_decision,
+        onboarding_declined: store.onboarding_declined,
+        label: store.label,
+        ..ImpactStore::default()
+    };
+    let _ = write_store(&decision, path);
+}
+
 /// Delete THIS project's store file. Returns whether a file was removed.
 /// The import marker stays, so the legacy in-repo store is not imported
 /// again. Without a config folder there is no store, and the result is
