@@ -39,7 +39,7 @@ use fallow_types::trace_chain::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
-use crate::graph::{ExportNamespace, ModuleGraph};
+use crate::graph::{ExportNamespace, ImportedSymbol, ModuleGraph};
 use crate::trace::trace_impl::find_module;
 
 /// Trace the symbol-level call chain for `query.symbol` in `query.file`.
@@ -188,30 +188,20 @@ fn collect_callers(
         if current_depth > depth {
             continue;
         }
-        for &importer in graph.importers_of(target) {
-            for (edge_target, symbols) in graph.outgoing_symbol_edges(importer) {
-                if edge_target != target {
-                    continue;
-                }
-                for sym in symbols {
-                    if !imported_name_matches(&sym.imported_name, &symbol) {
-                        continue;
-                    }
-                    if !visited.insert((importer, sym.local_name.clone())) {
-                        continue;
-                    }
-                    hops.push(ChainHop {
-                        file: module_path(graph, importer, root),
-                        imported_as: imported_name_label(&sym.imported_name),
-                        local_name: sym.local_name.clone(),
-                        type_only: sym.is_type_only,
-                        depth: current_depth,
-                    });
-                    // The importer's local binding is the next symbol whose
-                    // callers the walk follows (a re-exported symbol).
-                    queue.push_back((importer, sym.local_name.clone(), current_depth + 1));
-                }
+        for (importer, sym) in importing_symbols(graph, target, &symbol) {
+            if !visited.insert((importer, sym.local_name.clone())) {
+                continue;
             }
+            hops.push(ChainHop {
+                file: module_path(graph, importer, root),
+                imported_as: imported_name_label(&sym.imported_name),
+                local_name: sym.local_name.clone(),
+                type_only: sym.is_type_only,
+                depth: current_depth,
+            });
+            // The importer's local binding is the next symbol whose callers
+            // the walk follows (a re-exported symbol).
+            queue.push_back((importer, sym.local_name.clone(), current_depth + 1));
         }
     }
     sort_hops(&mut hops);
@@ -268,6 +258,25 @@ fn collect_callees(
         .unwrap_or_default();
 
     (resolved, unresolved)
+}
+
+/// Each import of `symbol` from `target`, with the module that imports it.
+fn importing_symbols<'g>(
+    graph: &'g ModuleGraph,
+    target: FileId,
+    symbol: &'g str,
+) -> impl Iterator<Item = (FileId, &'g ImportedSymbol)> + 'g {
+    graph
+        .importers_of(target)
+        .iter()
+        .flat_map(move |&importer| {
+            graph
+                .outgoing_symbol_edges(importer)
+                .filter(move |(edge_target, _)| *edge_target == target)
+                .flat_map(|(_, symbols)| symbols.iter())
+                .filter(move |sym| imported_name_matches(&sym.imported_name, symbol))
+                .map(move |sym| (importer, sym))
+        })
 }
 
 fn module_path(graph: &ModuleGraph, file_id: FileId, root: &Path) -> PathBuf {
