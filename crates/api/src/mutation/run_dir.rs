@@ -155,7 +155,9 @@ fn matches(dir: &Path, expected: &[(String, Content<'_>)]) -> bool {
 }
 
 /// The lock file next to a run directory. A run holds it while it checks and
-/// replaces the directory, so two runs never replace each other's work.
+/// replaces the directory, so two runs never replace each other's work. The
+/// empty file stays after the directory is pruned: a removal could split two
+/// runs that wait on the old and the new file at that moment.
 fn publication_lock_path(dir: &Path) -> PathBuf {
     let mut name = dir.file_name().unwrap_or_default().to_os_string();
     name.push(LOCK_SUFFIX);
@@ -181,19 +183,15 @@ fn install(runs: &Path, dir: &Path, expected: &[(String, Content<'_>)]) -> std::
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
-    let lock = match fs::OpenOptions::new()
+    // The lock is best effort: a file system without lock support, such as
+    // some network mounts, publishes without it, as before the lock.
+    let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(publication_lock_path(dir))
         .and_then(|file| file.lock().map(|()| file))
-    {
-        Ok(lock) => lock,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(error);
-        }
-    };
+        .ok();
     let result = publish(runs, dir, &staging, &unique, expected);
     drop(lock);
     result
@@ -290,8 +288,8 @@ fn prune_run_dirs(runs: &Path, in_use: &Path, now: SystemTime) {
     }
     candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
     for (used, path) in candidates.into_iter().skip(RUN_DIRS_KEPT) {
-        if expired(used) && fs::remove_dir_all(&path).is_ok() {
-            let _ = fs::remove_file(publication_lock_path(&path));
+        if expired(used) {
+            let _ = fs::remove_dir_all(&path);
         }
     }
 }
@@ -613,12 +611,6 @@ mod tests {
             .flatten()
             .filter(|entry| entry.path().is_dir())
             .count();
-        let locks = fs::read_dir(cache.path().join("runs"))
-            .expect("runs")
-            .flatten()
-            .filter(|entry| entry.path().is_file())
-            .count();
-        assert_eq!(locks, remaining, "a removed run dir takes its lock file");
         assert_eq!(
             remaining,
             RUN_DIRS_KEPT + 1,

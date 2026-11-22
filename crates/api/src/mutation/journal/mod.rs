@@ -454,7 +454,9 @@ impl Journal {
     /// Removes the journal below `mutation_cache` when the run `run_id`
     /// wrote it, and returns true when it removed the journal. A journal of
     /// another run, for example a newer run of the same project that started
-    /// while this run was active, stays in place.
+    /// while this run was active, stays in place. A run that replaces the
+    /// journal between the header read and the removal still loses it; that
+    /// window is the time of one read, not the time of a run.
     ///
     /// # Errors
     ///

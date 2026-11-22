@@ -161,6 +161,7 @@ fn a_complete_run_keeps_the_journal_of_a_newer_run() {
         concurrency: 1,
         notes: Vec::new(),
     });
+    report.journal_run_id = Some("older-run".to_owned());
     let journal = project.path().join(".fallow/mutation/journal.jsonl");
     fs::create_dir_all(journal.parent().expect("parent")).expect("dir");
     let newer = "{\"journal_format\":2,\"run_id\":\"newer-run\"}\n{\"id\":\"m1\",\"key\":\"k1\",\"status\":\"killed\"}\n";
