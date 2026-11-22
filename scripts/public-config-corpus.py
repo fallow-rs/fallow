@@ -23,6 +23,8 @@ except ModuleNotFoundError:
     tomllib = None
 
 
+# The maintained runbook of this script. A generated report must not replace it.
+RUNBOOK_PATH = (Path(__file__).resolve().parent.parent / "docs" / "public-config-corpus.md").resolve()
 CONFIG_FILENAMES = (".fallowrc.json", ".fallowrc.jsonc", "fallow.toml")
 KEY_LABELS = {
     "entry": "entry",
@@ -121,9 +123,16 @@ def main() -> int:
     if args.search_timeout <= 0:
         parser.error("--search-timeout must be > 0")
 
+    output_path = args.output or args.cache_dir / "report.md"
+    if str(output_path) != "-" and output_path.resolve() == RUNBOOK_PATH:
+        print(
+            f"error: --output {output_path} is the maintained runbook; write the report elsewhere",
+            file=sys.stderr,
+        )
+        return 2
+
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.manifest or args.cache_dir / "manifest.json"
-    output_path = args.output or args.cache_dir / "report.md"
     offline = args.offline or args.from_search_fixture is not None
     fetched_at = args.fetched_at or now_utc()
     gh_version = args.gh_version or detect_gh_version(offline)
@@ -773,7 +782,7 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
         "## How To Run",
         "",
         "```bash",
-        "python3 scripts/public-config-corpus.py --limit 40 --output docs/public-config-corpus.md",
+        "python3 scripts/public-config-corpus.py --limit 40",
         "```",
         "",
         f"- Generated at: `{manifest['generated_at']}`",
