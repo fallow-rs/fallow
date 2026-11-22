@@ -17,6 +17,12 @@ use super::{EagerPackageImport, Edge, ImportedSymbol, ModuleGraph};
 impl ModuleGraph {
     /// Build the effective export index and mark the entry points that
     /// `includeEntryExports` covers.
+    ///
+    /// An entry point that a dynamic import, an import pattern or a
+    /// `require()` loads stays unmarked. The namespace re-export pass reads
+    /// only static ES import bindings, so it cannot list the member reads of
+    /// such a module object, and the entry keeps crediting its namespace
+    /// re-exports in full.
     pub(super) fn index_exports(
         &mut self,
         resolved_modules: &[ResolvedModule],
@@ -24,12 +30,39 @@ impl ModuleGraph {
     ) {
         self.effective_exports =
             super::effective_exports::EffectiveExportIndex::build(resolved_modules);
+        if consumer_checked.is_empty() {
+            return;
+        }
+        let untracked_loads = untracked_load_targets(resolved_modules);
         for file_id in consumer_checked {
+            if untracked_loads.contains(file_id) {
+                continue;
+            }
             if let Some(module) = self.modules.get_mut(file_id.0 as usize) {
                 module.set_consumer_checked();
             }
         }
     }
+}
+
+/// The files that a dynamic import, an import pattern or a `require()` loads.
+fn untracked_load_targets(resolved_modules: &[ResolvedModule]) -> FxHashSet<FileId> {
+    let mut targets = FxHashSet::default();
+    for module in resolved_modules {
+        let required = module
+            .resolved_imports
+            .iter()
+            .filter(|import| import.target.is_commonjs_require());
+        for import in module.resolved_dynamic_imports.iter().chain(required) {
+            if let Some(target) = import.target.internal_file_id() {
+                targets.insert(target);
+            }
+        }
+        for (_, files) in &module.resolved_dynamic_patterns {
+            targets.extend(files.iter().copied());
+        }
+    }
+    targets
 }
 
 pub(super) struct PopulateEdgesInput<'a> {

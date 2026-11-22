@@ -1,1 +1,1 @@
-{ "workspaces": { "settings": { "packages/lib": { "includeEntryExports": true } } } }
+{ "workspaces": { "settings": { "packages/{lib,lazy}": { "includeEntryExports": true } } } }

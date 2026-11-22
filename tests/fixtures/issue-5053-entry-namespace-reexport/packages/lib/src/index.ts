@@ -6,3 +6,4 @@ export * as Self from "./self.ts";
 export * as Escaped from "./escaped.ts";
 export * as Passed from "./passed.ts";
 export * as Unread from "./unread.ts";
+export * as Wrap from "./wrap.ts";

@@ -1,4 +1,4 @@
-import { Barrel, Escaped, Home, Outer, Passed } from "@p/lib";
+import { Barrel, Escaped, Home, Outer, Passed, Wrap } from "@p/lib";
 import * as LibRoot from "@p/lib";
 import { Handed, Local } from "./local-barrel.ts";
 
@@ -14,3 +14,9 @@ console.log(Object.keys(Escaped));
 inspect(Passed);
 console.log(Local.Deep.deepRead);
 inspect(Handed);
+inspect(Wrap);
+
+export const loadLazy = async (): Promise<number> => {
+  const lazy = await import("@p/lazy");
+  return lazy.Lazy.lazyRead;
+};

@@ -34,7 +34,7 @@
 //! (reachability) so credits attached here participate in reachability and
 //! Phase 4 chain propagation downstream. See issue #324.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::namespace_indexes::{
     NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
@@ -48,7 +48,9 @@ use super::re_exports::ExposedNamespaceTargets;
 use super::types::{ReferenceKind, ReferencePathId, ReferencePathInterner};
 use super::{EffectiveExportResolution, ExportNamespace, ModuleGraph};
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ModuleLoadMechanism, NamespaceMemberUseFact, SemanticFact};
+use fallow_types::extract::{
+    ExportName, ModuleLoadMechanism, NamespaceMemberUseFact, SemanticFact,
+};
 
 use super::namespace_indexes::ConsumerImport;
 use crate::resolve::ResolvedModule;
@@ -202,6 +204,62 @@ fn exposes_namespace_object(
         })
 }
 
+/// Credit every export of the namespace object of `module_idx`, and the
+/// exports that its `export *` and `export * as` lines expose.
+///
+/// The code that receives the object can read any of those names, also
+/// through a nested namespace (`value.Inner.member`). A plain `export *`
+/// never forwards `default`, so a module behind one exposes only its named
+/// exports, and its own `export * as default` exposes nothing. This is the
+/// exposure rule of the exposed namespace closure.
+fn credit_namespace_object(
+    graph: &ModuleGraph,
+    module_idx: usize,
+    credit: &mut impl FnMut(usize, CreditKind),
+) {
+    let mut full = FxHashSet::default();
+    let mut named_only = FxHashSet::default();
+    let mut stack = vec![(module_idx, true)];
+    while let Some((idx, whole_object)) = stack.pop() {
+        let first_visit = if whole_object {
+            full.insert(idx)
+        } else {
+            !full.contains(&idx) && named_only.insert(idx)
+        };
+        if !first_visit {
+            continue;
+        }
+        let Some(module) = graph.modules.get(idx) else {
+            continue;
+        };
+        if whole_object {
+            credit(idx, CreditKind::AllExports);
+        } else {
+            for export in &module.exports {
+                if let ExportName::Named(name) = &export.name {
+                    credit(idx, CreditKind::Member(name.clone()));
+                }
+            }
+        }
+        for re in module
+            .re_exports
+            .iter()
+            .filter(|re| re.imported_name == "*")
+        {
+            let next_whole = if re.exported_name == "*" {
+                false
+            } else if whole_object || re.exported_name != "default" {
+                true
+            } else {
+                continue;
+            };
+            if let Some(source) = module_index_for_file(graph, re.source_file) {
+                stack.push((source, next_whole));
+            }
+        }
+    }
+}
+
 /// Map a `FileId` to its index in `graph.modules`. Returns `None` if the id
 /// is out of range (defensive: should not happen for FileIds emitted by the
 /// build pipeline).
@@ -256,7 +314,7 @@ fn collect_consumer_credits(
                 .iter()
                 .any(|n| n == consumer_local);
             if whole_object {
-                credit(context.target_module_idx, CreditKind::AllExports);
+                credit_namespace_object(context.graph, context.target_module_idx, &mut credit);
                 continue;
             }
 
@@ -352,12 +410,12 @@ fn credit_chain(
     loop {
         let Some(segment) = segments.next() else {
             if whole {
-                credit(module_idx, CreditKind::AllExports);
+                credit_namespace_object(context.graph, module_idx, credit);
             }
             return;
         };
         if segment == NamespaceMemberUseFact::ANY_KEY {
-            credit(module_idx, CreditKind::AllExports);
+            credit_namespace_object(context.graph, module_idx, credit);
             return;
         }
         credit(module_idx, CreditKind::Member(segment.to_string()));

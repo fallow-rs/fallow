@@ -62,7 +62,10 @@ fn include_entry_exports_reports_unread_members_behind_an_entry_namespace() {
         fallow_core::analyze(&config_from_fixture_file()).expect("analysis should succeed");
 
     // `escaped.ts` and `passed.ts` stay credited: the consumer reads
-    // `Object.keys(Escaped)` and hands `Passed` on as a value. `plain.ts` is
+    // `Object.keys(Escaped)` and hands `Passed` on as a value. The handed-on
+    // `Wrap` also credits its nested `WrapInner`. `lazy.ts` stays credited
+    // because a dynamic import loads its entry file, and the member reads of
+    // that module object are not tracked. `plain.ts` is
     // behind an entry file that the option does not cover. `Unread` has no
     // consumer, so the entry export and the export of its module are both
     // unused. `readSelf` is an export of a covered entry file with no
