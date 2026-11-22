@@ -400,42 +400,11 @@ impl<'a> EscapeLineage<'a> {
             return Some(FxHashSet::default());
         }
         let outer_cut = std::mem::take(cut);
-        let graph = self.graph;
-        let module = graph.modules.get(barrel.0 as usize)?;
+        let module = self.graph.modules.get(barrel.0 as usize)?;
         let readers = if is_public_entry(self.config, module) {
             None
         } else {
-            let mut names = FxHashSet::default();
-            let mut open = false;
-            for &importer in graph.importers_of(barrel) {
-                if !is_reachable(graph, importer) {
-                    continue;
-                }
-                for (target, symbols) in graph.outgoing_symbol_edges(importer) {
-                    if target != barrel {
-                        continue;
-                    }
-                    for symbol in symbols {
-                        if let ImportedName::Named(imported) = &symbol.imported_name {
-                            names.insert(imported.clone());
-                        }
-                    }
-                }
-                let forwards_star = graph.modules.get(importer.0 as usize).is_some_and(|outer| {
-                    outer.re_exports.iter().any(|edge| {
-                        edge.source_file == barrel
-                            && edge.imported_name == "*"
-                            && edge.exported_name == "*"
-                    })
-                });
-                if forwards_star {
-                    match self.star_readers_of(importer, visiting, cut) {
-                        Some(outer_names) => names.extend(outer_names),
-                        None => open = true,
-                    }
-                }
-            }
-            (!open).then_some(names)
+            self.collect_star_readers(barrel, visiting, cut)
         };
         visiting.remove(&barrel);
         if !*cut {
@@ -444,4 +413,49 @@ impl<'a> EscapeLineage<'a> {
         *cut |= outer_cut;
         readers
     }
+
+    /// The names that the reachable importers of `barrel` read by name,
+    /// directly or through an outer barrel that forwards it with `export *`.
+    /// `None` when an outer barrel is public API.
+    fn collect_star_readers(
+        &mut self,
+        barrel: FileId,
+        visiting: &mut FxHashSet<FileId>,
+        cut: &mut bool,
+    ) -> Option<FxHashSet<String>> {
+        let graph = self.graph;
+        let mut names = FxHashSet::default();
+        for &importer in graph.importers_of(barrel) {
+            if !is_reachable(graph, importer) {
+                continue;
+            }
+            names.extend(named_imports_from(graph, importer, barrel));
+            if forwards_star_of(graph, importer, barrel) {
+                names.extend(self.star_readers_of(importer, visiting, cut)?);
+            }
+        }
+        Some(names)
+    }
+}
+
+/// The names that `importer` imports by name from `barrel`.
+fn named_imports_from(graph: &ModuleGraph, importer: FileId, barrel: FileId) -> Vec<String> {
+    graph
+        .outgoing_symbol_edges(importer)
+        .filter(|(target, _)| *target == barrel)
+        .flat_map(|(_, symbols)| symbols)
+        .filter_map(|symbol| match &symbol.imported_name {
+            ImportedName::Named(imported) => Some(imported.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether `importer` forwards every name of `barrel` with `export *`.
+fn forwards_star_of(graph: &ModuleGraph, importer: FileId, barrel: FileId) -> bool {
+    graph.modules.get(importer.0 as usize).is_some_and(|outer| {
+        outer.re_exports.iter().any(|edge| {
+            edge.source_file == barrel && edge.imported_name == "*" && edge.exported_name == "*"
+        })
+    })
 }

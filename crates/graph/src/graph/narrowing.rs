@@ -471,19 +471,18 @@ fn narrow_namespace_references(
     if observes_whole_module && (is_whole_object || is_re_exported || !is_alias_source()) {
         ctx.observe_whole_namespace_object(module.file_id);
     }
-    if observes_whole_module && (namespaces.0 || namespaces.1) {
-        record_namespace_escape(
-            module.file_id,
-            site,
-            sym_local_name,
-            EscapeShape {
-                is_whole_object,
-                is_re_exported,
-            },
-            &read_members,
-            ctx,
-        );
-    }
+    record_namespace_escape(
+        module.file_id,
+        site,
+        sym_local_name,
+        EscapeShape {
+            gets_full_credit: observes_whole_module && (namespaces.0 || namespaces.1),
+            is_whole_object,
+            is_re_exported,
+        },
+        &read_members,
+        ctx,
+    );
 
     for (namespace, is_used) in [
         (ExportNamespace::Type, namespaces.0),
@@ -524,6 +523,8 @@ fn narrow_namespace_references(
 /// How a namespace binding that gets the full credit is used.
 #[derive(Clone, Copy)]
 struct EscapeShape {
+    /// The site credits every export in at least one namespace lane.
+    gets_full_credit: bool,
     is_whole_object: bool,
     is_re_exported: bool,
 }
@@ -540,6 +541,9 @@ fn record_namespace_escape(
     read_members: &[String],
     ctx: &mut AttachContext<'_>,
 ) {
+    if !shape.gets_full_credit {
+        return;
+    }
     let reason = if shape.is_whole_object {
         NamespaceEscapeReason::WholeObjectUse
     } else if shape.is_re_exported {
