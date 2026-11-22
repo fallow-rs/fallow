@@ -519,6 +519,8 @@ fn tokens_equivalent_comment_markers_force_false() {
         "/** @beta */",
         "/** @alpha */",
         "/** @type {import('./types').Foo} */",
+        "/** @deprecated use y */",
+        "/** @jsxImportSource preact */",
     ] {
         let tagged = format!("{comment}\nexport const x = 1;\n");
         let plain = "/** */\nexport const x = 1;\n";
@@ -531,6 +533,27 @@ fn tokens_equivalent_comment_markers_force_false() {
             "a change to `{comment}` must force false in either direction"
         );
     }
+}
+
+/// The exported name of a namespace re-export is the export that a
+/// consumer imports. A change of it, or a change between a star re-export
+/// and a namespace re-export, changes the export graph.
+#[test]
+fn tokens_equivalent_namespace_re_export_name_change_is_not_equivalent() {
+    for (current, base) in [
+        ("export * as a from './x';", "export * as b from './x';"),
+        ("export * as a from './x';", "export * from './x';"),
+    ] {
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), current, base),
+            "a re-export change must refuse reuse: {current:?} versus {base:?}"
+        );
+    }
+    assert!(js_ts_tokens_equivalent(
+        Path::new("a.ts"),
+        "export * as a from './x';",
+        "export  *  as  a  from  './x' ;",
+    ));
 }
 
 #[test]

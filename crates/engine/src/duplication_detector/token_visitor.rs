@@ -884,6 +884,13 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
             return;
         }
         self.push_keyword(KeywordType::Export, self.word(decl.span.start));
+        // `export * as ns` exports the name `ns`, so the name is part of the
+        // statement, as the local and exported names of a specifier are.
+        if let Some(exported) = &decl.exported {
+            let span = exported.span();
+            self.push_keyword(KeywordType::As, self.prev_text(span.start, "as"));
+            self.push(TokenKind::Identifier(exported.name().to_string()), span);
+        }
         self.push_keyword(
             KeywordType::From,
             self.prev_text(decl.source.span.start, "from"),
