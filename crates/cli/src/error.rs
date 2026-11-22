@@ -105,13 +105,25 @@ pub fn emit_error_with_hint(
     ExitCode::from(exit_code)
 }
 
+pub fn emit_error_with_style(
+    message: &str,
+    exit_code: ErrorExitCode,
+    output: OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    emit_coded_error_with_style(message, None, exit_code, output, json_style)
+}
+
+/// [`emit_error_with_style`] with the stable machine-readable `code` of the
+/// error document. Human output prints only the message.
 #[expect(
     clippy::print_stdout,
     clippy::print_stderr,
     reason = "structured error emission for CLI surfaces"
 )]
-pub fn emit_error_with_style(
+pub fn emit_coded_error_with_style(
     message: &str,
+    code: Option<&str>,
     exit_code: ErrorExitCode,
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
@@ -120,7 +132,8 @@ pub fn emit_error_with_style(
         return ExitCode::from(exit_code);
     }
     if matches!(output, OutputFormat::Json) {
-        let error_obj = fallow_output::ErrorOutput::new(message, exit_code.get());
+        let error_obj = fallow_output::ErrorOutput::new(message, exit_code.get())
+            .with_code(code.map(str::to_owned));
         if let Ok(json) = json_style.serialize(&error_obj) {
             println!("{json}");
         }

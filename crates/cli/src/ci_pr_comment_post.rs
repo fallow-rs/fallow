@@ -5,7 +5,9 @@ use fallow_config::OutputFormat;
 use serde_json::Value;
 
 use crate::api::try_api_agent;
-use crate::error::{emit_error_with_style, emit_input_error_with_style};
+use crate::error::{
+    emit_coded_error_with_style, emit_error_with_style, emit_input_error_with_style,
+};
 use crate::exit_codes::NETWORK_FAILURE;
 
 use super::{
@@ -78,7 +80,13 @@ fn post_github_pr_comment(
         match find_github_sticky_comment(&agent, api, &repo, pr, &token, &input.marker_id) {
             Ok(existing) => existing,
             Err(e) => {
-                return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
+                return emit_coded_error_with_style(
+                    &e,
+                    Some(super::ProviderStateError::LOOKUP_CODE),
+                    NETWORK_FAILURE,
+                    output,
+                    json_style,
+                );
             }
         };
     let plan = fallow_output::plan_pr_comment_post(&fallow_output::PrCommentPostPlanInput {
@@ -130,7 +138,13 @@ fn post_gitlab_mr_comment(
         {
             Ok(existing) => existing,
             Err(e) => {
-                return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
+                return emit_coded_error_with_style(
+                    &e,
+                    Some(super::ProviderStateError::LOOKUP_CODE),
+                    NETWORK_FAILURE,
+                    output,
+                    json_style,
+                );
             }
         };
     let plan = fallow_output::plan_pr_comment_post(&fallow_output::PrCommentPostPlanInput {
