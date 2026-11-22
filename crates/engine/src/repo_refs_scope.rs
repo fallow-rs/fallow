@@ -22,10 +22,12 @@ use super::{git_command, run_git};
 /// the CI timeout with `git` / `git-remote-https` orphans (issue #2615).
 ///
 /// The scope restores the old working set without reintroducing checkout:
-/// - a subdirectory analysis root materializes only that subtree (plus
-///   top-level files and ancestor ignore files, so gitignore parity holds),
-/// - a repository-root run on a sparse checkout materializes the sparse cone
-///   (top-level files plus the listed cone directories),
+/// - a subdirectory analysis root materializes only that subtree, plus the
+///   files directly inside each ancestor directory (ignore files and parent
+///   configs such as a shared `tsconfig.base.json`),
+/// - a repository-root run on a sparse checkout materializes what git cone
+///   mode checks out: the listed cone directories, plus the files directly
+///   inside each ancestor of a cone directory, including the root,
 /// - otherwise everything is materialized as before.
 ///
 /// Both probes fail open to full materialization: a probe error is at worst a
@@ -48,25 +50,19 @@ impl MaterializationScope {
             if relative == prefix || relative.starts_with(&format!("{prefix}/")) {
                 return true;
             }
-            // Top-level files and ancestor ignore files shape discovery of the
-            // subtree (root `.gitignore` applies hierarchically). They are few
-            // and already present in a sparse checkout, so keeping them is
-            // free and preserves ignore parity with a full snapshot.
-            if !relative.contains('/') {
-                return true;
-            }
-            return is_ancestor_ignore_file(&relative, prefix);
+            // The files directly inside each ancestor of the subtree, such
+            // as a root `.gitignore` or a parent `tsconfig.base.json` that the
+            // subtree extends, shape the analysis of the subtree. They are few
+            // and a sparse checkout of the subtree has them too.
+            return is_in_ancestor_dir(&relative, prefix);
         }
         if let Some(dirs) = self.sparse_dirs.as_deref() {
             // Git cone mode checks out the cone directories in full and the
             // files directly inside each ancestor of a cone directory,
             // including the repository root.
-            let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
-            return parent.is_empty()
-                || dirs.iter().any(|dir| {
-                    relative.starts_with(&format!("{dir}/"))
-                        || dir.starts_with(&format!("{parent}/"))
-                });
+            return dirs.iter().any(|dir| {
+                relative.starts_with(&format!("{dir}/")) || is_in_ancestor_dir(&relative, dir)
+            }) || !relative.contains('/');
         }
         true
     }
@@ -74,7 +70,8 @@ impl MaterializationScope {
     /// A stable key of the materialized working set. Two snapshots of one
     /// commit hold the same files only when their keys are equal.
     fn key(&self) -> String {
-        let mut identity = String::new();
+        let mut identity = String::from(SCOPE_RULES_VERSION);
+        identity.push('\0');
         if let Some(prefix) = self.subdir_prefix.as_deref() {
             identity.push_str("subdir\0");
             identity.push_str(prefix);
@@ -97,6 +94,11 @@ impl MaterializationScope {
     }
 }
 
+/// The version of the rules in [`MaterializationScope::should_materialize`].
+/// A change to the rules changes the files of a snapshot with equal inputs,
+/// so it needs a new version, and the scope key then rebuilds old snapshots.
+const SCOPE_RULES_VERSION: &str = "rules-2";
+
 /// A stable key of the files that [`create_detached_base_worktree`](super::create_detached_base_worktree)
 /// materializes for `repo_root`: the analysis subdirectory and the sparse
 /// cone of the host checkout. A reusable snapshot of one commit is valid only
@@ -115,19 +117,12 @@ fn forward_slash_path(path: &Path) -> Option<String> {
     Some(raw.replace('\\', "/"))
 }
 
-/// True for an ignore/attributes file that governs `prefix` from an ancestor
-/// directory (including the repository root), e.g. `.gitignore` or
-/// `apps/.gitignore` for prefix `apps/web`.
-fn is_ancestor_ignore_file(relative: &str, prefix: &str) -> bool {
-    const IGNORE_FILES: &[&str] = &[".gitignore", ".gitattributes"];
-    let Some(file_name) = relative.rsplit('/').next() else {
-        return false;
-    };
-    if !IGNORE_FILES.contains(&file_name) {
-        return false;
-    }
+/// True for a file directly inside an ancestor directory of `dir`, including
+/// the repository root, e.g. `.gitignore` or `apps/package.json` for the
+/// directory `apps/web`.
+fn is_in_ancestor_dir(relative: &str, dir: &str) -> bool {
     let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
-    parent.is_empty() || prefix == parent || prefix.starts_with(&format!("{parent}/"))
+    parent.is_empty() || dir.starts_with(&format!("{parent}/"))
 }
 
 pub(super) fn materialization_scope(repo_root: &Path) -> MaterializationScope {
@@ -185,7 +180,9 @@ fn sparse_cone_dirs(repo_root: &Path) -> Option<Vec<String>> {
         }
         // Cone mode lists directories; a stray glob (non-cone residue) cannot
         // be matched exactly, so fail open rather than under-materialize.
-        if pattern.contains(['*', '?', '[', '!']) {
+        // Git quotes a directory name with special characters in C style,
+        // and the matcher does not unquote it, so that also fails open.
+        if pattern.contains(['*', '?', '[', '!', '"']) {
             return None;
         }
         dirs.push(pattern.replace('\\', "/"));
@@ -197,9 +194,9 @@ fn sparse_cone_dirs(repo_root: &Path) -> Option<Vec<String>> {
 mod tests {
     use super::*;
 
-    /// Pure scope unit coverage: subdir runs keep their subtree plus top-level
-    /// and ancestor ignore files; root sparse runs keep the cone; full clones
-    /// keep everything.
+    /// Pure scope unit coverage: subdir runs keep their subtree plus the files
+    /// directly inside each ancestor; root sparse runs keep the cone and the
+    /// files of its ancestors; full clones keep everything.
     #[test]
     fn materialization_scope_filters_to_the_needed_working_set() {
         let subdir = MaterializationScope {
@@ -211,7 +208,8 @@ mod tests {
         assert!(subdir.should_materialize(Path::new(".gitignore")));
         assert!(subdir.should_materialize(Path::new("apps/.gitignore")));
         assert!(!subdir.should_materialize(Path::new("apps/other/b.ts")));
-        assert!(!subdir.should_materialize(Path::new("apps/.gitignore.bak")));
+        assert!(subdir.should_materialize(Path::new("apps/tsconfig.base.json")));
+        assert!(!subdir.should_materialize(Path::new("apps/other/.gitignore")));
 
         let sparse = MaterializationScope {
             subdir_prefix: None,
@@ -223,6 +221,22 @@ mod tests {
         assert!(sparse.should_materialize(Path::new("apps/package.json")));
         assert!(!sparse.should_materialize(Path::new("apps/web-old/a.ts")));
         assert!(!sparse.should_materialize(Path::new("libs/package.json")));
+
+        let nested = MaterializationScope {
+            subdir_prefix: None,
+            sparse_dirs: Some(vec!["apps/web/sub".to_string()]),
+        };
+        assert!(nested.should_materialize(Path::new("apps/web/package.json")));
+        assert!(nested.should_materialize(Path::new("apps/package.json")));
+        assert!(!nested.should_materialize(Path::new("apps/other/x.ts")));
+        assert!(!nested.should_materialize(Path::new("apps/web/other/x.ts")));
+
+        let empty = MaterializationScope {
+            subdir_prefix: None,
+            sparse_dirs: Some(Vec::new()),
+        };
+        assert!(empty.should_materialize(Path::new("top.ts")));
+        assert!(!empty.should_materialize(Path::new("apps/package.json")));
 
         let full = MaterializationScope {
             subdir_prefix: None,

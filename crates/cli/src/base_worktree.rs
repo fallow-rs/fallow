@@ -41,7 +41,9 @@ pub use lock::ReusableWorktreeLock;
 use lock::lock_file_is_current;
 use lock::{reclaim_lock_only, remove_held_lock_file};
 pub use sha_sidecar::reusable_worktree_sha_path;
-use sha_sidecar::{read_reusable_sha, reusable_snapshot_identity, write_reusable_sha};
+use sha_sidecar::{
+    legacy_snapshot_identity, read_reusable_sha, reusable_snapshot_identity, write_reusable_sha,
+};
 
 pub struct BaseWorktree {
     path: PathBuf,
@@ -112,7 +114,7 @@ impl BaseWorktree {
 
         let identity = reusable_snapshot_identity(repo_root, base_sha);
         if reusable_audit_worktree_is_ready(&path, &identity)
-            || try_migrate_registered_current_cache(repo_root, &path, base_sha, &identity)
+            || try_migrate_registered_current_cache(repo_root, &path, base_sha)
         {
             let worktree = Self {
                 path,
@@ -1032,10 +1034,7 @@ fn legacy_registered_pass(
                 }
                 if is_current_path {
                     if let Some(head) = head {
-                        let _ = write_reusable_sha(
-                            &path,
-                            &reusable_snapshot_identity(repo_root, &head),
-                        );
+                        let _ = write_reusable_sha(&path, &legacy_snapshot_identity(&head));
                     }
                     SweepDisposition::KeptLegacyDeregistered
                 } else if let Err(error) = remove_reusable_cache_entry_locked(repo_root, &path) {
@@ -1543,13 +1542,10 @@ fn reusable_cache_directory_is_trusted(path: &Path) -> bool {
 ///
 /// This can occur during mixed-version use or after interruption between
 /// registration and deregistration. Keep the cache warm only when HEAD matches
-/// the requested full SHA and raw materialization completed.
-fn try_migrate_registered_current_cache(
-    repo_root: &Path,
-    path: &Path,
-    base_sha: &str,
-    identity: &str,
-) -> bool {
+/// the requested full SHA and raw materialization completed. The scope that
+/// built the cache is unknown, so this run reuses it once and the legacy
+/// identity makes the next run rebuild it.
+fn try_migrate_registered_current_cache(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
     if !path.exists() || !audit_worktree_is_registered(repo_root, path) {
         return false;
     }
@@ -1561,7 +1557,7 @@ fn try_migrate_registered_current_cache(
     if unregister_worktree_checked(repo_root, path).is_err() {
         return false;
     }
-    write_reusable_sha(path, identity).is_ok()
+    write_reusable_sha(path, &legacy_snapshot_identity(base_sha)).is_ok()
 }
 
 /// Remove every reusable base-snapshot cache owned by `requested_root`.

@@ -2077,6 +2077,16 @@ fn registered_current_cache_is_deregistered_and_reused_warm() {
         ".sha sidecar seeded from the legacy entry's HEAD",
     );
     drop(migrated);
+
+    // The scope that built the legacy cache is unknown, so the next run
+    // rebuilds the snapshot with the current scope.
+    let rebuilt = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("the next run should rebuild the migrated cache");
+    assert!(
+        !marker.exists(),
+        "a migrated cache is rebuilt by the next run"
+    );
+    drop(rebuilt);
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
