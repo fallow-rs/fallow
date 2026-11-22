@@ -4173,4 +4173,9 @@ test("the pull request title check lints the squash subject", () => {
   assert.ok(step, "commitlint.yml must lint the pull request title");
   assert.match(step, /PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \}\}/u);
   assert.match(step, /printf '%s \(#%s\)\\n' "\$PR_TITLE" "\$PR_NUMBER" \| npm run commitlint/u);
+  // With one commit, GitHub takes the commit subject as the squash subject.
+  assert.match(step, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
+  assert.match(step, /if \[ "\$PR_COMMITS" = "1" \]; then/u);
+  assert.match(step, /git log -1 --format=%s "\$PR_HEAD_SHA"/u);
+  assert.match(step, /printf '%s \(#%s\)\\n' "\$subject" "\$PR_NUMBER" \| npm run commitlint/u);
 });
