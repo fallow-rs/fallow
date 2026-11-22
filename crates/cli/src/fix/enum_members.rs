@@ -75,6 +75,10 @@ pub(super) struct EnumMemberFixInput<'a, 'member> {
     pub(super) root: &'a Path,
     pub(super) members_by_file:
         &'a FxHashMap<PathBuf, Vec<&'member fallow_types::results::UnusedMember>>,
+    /// True when the analysis found the enum `name` of the file at `path`
+    /// an unused export. Only such an enum may lose its whole declaration;
+    /// the other enums lose their members, and an empty enum stays.
+    pub(super) foldable: &'a dyn Fn(&Path, &str) -> bool,
     pub(super) hashes: &'a CapturedHashes,
     pub(super) plan: &'a mut FixPlan,
     pub(super) output: OutputFormat,
@@ -92,11 +96,13 @@ pub(super) struct EnumMemberFixInput<'a, 'member> {
 /// removed member gets an initializer with its old value, so no kept value
 /// changes. When that old value is not a known integer, the enum gets no
 /// edit and no record. An exported enum whose members are all unused is
-/// removed as a whole. A file that does not parse gets no edit.
+/// removed as a whole when the enum itself is an unused export. A file that
+/// does not parse gets no edit.
 pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
     let EnumMemberFixInput {
         root,
         members_by_file,
+        foldable,
         hashes,
         plan,
         output,
@@ -121,7 +127,8 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
         }
 
         let relative = path.strip_prefix(root).unwrap_or(path);
-        let folded = detect_folded_enums(&index, &lines, &member_fixes);
+        let mut folded = detect_folded_enums(&index, &lines, &member_fixes);
+        folded.retain(|fold| foldable(path, &fold.parent_name));
 
         let kept = queue_enum_edits(EnumFileEdits {
             path,
@@ -138,9 +145,11 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
                 member_fixes: &member_fixes,
                 folded: &folded,
                 kept: &kept,
+                path,
                 relative,
                 output,
                 fixes,
+                plan,
             });
         } else {
             record_applied_enum_member_fixes(&mut AppliedEnumMemberRecordInput {
@@ -151,6 +160,7 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
                 relative,
                 output,
                 fixes,
+                plan,
             });
         }
     }
@@ -301,9 +311,11 @@ struct EnumMemberDryRunInput<'a, 'b> {
     member_fixes: &'a [EnumMemberFix],
     folded: &'a [FoldedEnum],
     kept: &'a KeptEnumFixes<'a>,
+    path: &'a Path,
     relative: &'a Path,
     output: OutputFormat,
     fixes: &'b mut Vec<serde_json::Value>,
+    plan: &'b mut FixPlan,
 }
 
 fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
@@ -319,12 +331,13 @@ fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
             continue;
         }
         if !matches!(input.output, OutputFormat::Json) {
-            eprintln!(
+            let text = format!(
                 "Would remove enum member from {relative_display}:{} `{}.{}`",
                 fix.line_idx + 1,
                 fix.parent_name,
                 fix.member_name,
             );
+            input.plan.preview(input.path, fix.line_idx + 1, text);
         }
         fixes.push(serde_json::json!({
             "type": "remove_enum_member",
@@ -339,12 +352,12 @@ fn record_enum_member_dry_run(input: EnumMemberDryRunInput<'_, '_>) {
             continue;
         }
         if !matches!(input.output, OutputFormat::Json) {
-            eprintln!(
-                "Would remove enum declaration from {relative_display}:{} `{}` (every member is unused; \
-                 importers in other files will need cleanup, run your TypeScript build to find them)",
+            let text = format!(
+                "Would remove enum declaration from {relative_display}:{} `{}` (the enum and each member are unused)",
                 fold.decl_line + 1,
                 fold.parent_name,
             );
+            input.plan.preview(input.path, fold.decl_line + 1, text);
         }
         fixes.push(serde_json::json!({
             "type": "remove_export",
@@ -363,6 +376,7 @@ struct AppliedEnumMemberRecordInput<'a> {
     relative: &'a Path,
     output: OutputFormat,
     fixes: &'a mut Vec<serde_json::Value>,
+    plan: &'a mut FixPlan,
 }
 
 fn record_applied_enum_member_fixes(input: &mut AppliedEnumMemberRecordInput<'_>) {
@@ -392,10 +406,11 @@ fn record_applied_enum_member_fixes(input: &mut AppliedEnumMemberRecordInput<'_>
             continue;
         }
         if !matches!(input.output, OutputFormat::Json) {
-            eprintln!(
-                "Removed unused enum `{}` from {relative_display}; importers in other files will need cleanup, run your TypeScript build to find them.",
+            let text = format!(
+                "Removed unused enum `{}` from {relative_display}.",
                 fold.parent_name,
             );
+            input.plan.preview(input.path, fold.decl_line + 1, text);
         }
         input.fixes.push(serde_json::json!({
             "type": "remove_export",
@@ -447,6 +462,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &map,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -485,6 +501,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &map,
+            foldable: &|_, _| true,
             hashes: &capture_hashes(&file_refs),
             plan: &mut plan,
             output: OutputFormat::Json,
@@ -567,6 +584,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -598,6 +616,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -695,6 +714,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Json,
@@ -840,6 +860,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -939,6 +960,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -969,6 +991,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -999,6 +1022,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -1032,6 +1056,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -1068,6 +1093,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -1103,6 +1129,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -1140,6 +1167,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -1175,6 +1203,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,
@@ -1214,6 +1243,7 @@ mod tests {
             apply_enum_member_fixes(EnumMemberFixInput {
                 root,
                 members_by_file: &members_by_file,
+                foldable: &|_, _| true,
                 hashes: &hashes,
                 plan: &mut plan,
                 output: OutputFormat::Json,
@@ -1243,6 +1273,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &capture_hashes(&[&file]),
             plan: &mut plan,
             output: OutputFormat::Json,
@@ -1278,6 +1309,7 @@ mod tests {
         apply_enum_member_fixes(EnumMemberFixInput {
             root,
             members_by_file: &members_by_file,
+            foldable: &|_, _| true,
             hashes: &hashes,
             plan: &mut plan,
             output: OutputFormat::Human,

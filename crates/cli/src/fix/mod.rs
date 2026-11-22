@@ -277,9 +277,41 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         fixes: &mut fixes,
     });
 
+    check_source_edits(opts, (&results, &re_exports), &mut plan, &mut fixes);
+
     let exit_code = finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals);
     *fix_count = fixes.len();
     exit_code
+}
+
+/// Run the post-edit check over the queued source edits, withdraw the fix
+/// entries of each dropped edit, and print the preview lines of the kept
+/// edits.
+fn check_source_edits(
+    opts: &FixOptions<'_>,
+    (results, re_exports): (
+        &fallow_types::results::AnalysisResults,
+        &[fallow_engine::module_graph::NamedReExport],
+    ),
+    plan: &mut FixPlan,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let unused_exports = source_edits::unused_export_names(results);
+    let dropped = plan
+        .sources_mut()
+        .check_edits(&source_edits::PostEditInput {
+            unused_exports: &unused_exports,
+            re_exports,
+        });
+    source_edits::withdraw_dropped_fixes((opts.root, &mut *plan), fixes, &dropped, opts.output);
+    let previews = plan.take_previews(|path, line| {
+        dropped
+            .iter()
+            .any(|edit| edit.path == path && edit.lines.contains(&line))
+    });
+    for preview in previews {
+        eprintln!("{preview}");
+    }
 }
 
 /// Commit the plan, emit output, and compute the exit code after every fixer ran.
@@ -557,9 +589,16 @@ fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
     if enum_members_by_file.is_empty() {
         return;
     }
+    let unused_exports = source_edits::unused_export_names(input.results);
+    let foldable = |path: &Path, name: &str| {
+        unused_exports
+            .get(path)
+            .is_some_and(|names| names.contains(name))
+    };
     enum_members::apply_enum_member_fixes(enum_members::EnumMemberFixInput {
         root: input.root,
         members_by_file: &enum_members_by_file,
+        foldable: &foldable,
         hashes: input.file_hashes,
         plan: input.plan,
         output: input.output,

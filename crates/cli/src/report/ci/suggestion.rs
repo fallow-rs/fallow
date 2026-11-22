@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use fallow_engine::source_edits::SourceEditIndex;
+use fallow_engine::post_edit::{PostEditViolation, SourceFacts};
+use fallow_engine::source_edits::{SourceEditIndex, SpanEdit};
 use fallow_output::{CiIssue, CiProvider as Provider};
 use fallow_types::output_dead_code::description_carries_caveat;
 
@@ -103,10 +104,11 @@ pub fn suggestion_block_for_issue_line(
     let line_start = line_start(source, line)?;
     if is_member_rule {
         let deletable = member_line_is_deletable(&index, source, line, line_start, line_text)
-            && deletion_keeps_other_members(path, &index, source, line_start, line_text);
+            && line_deletion_keeps_meaning(path, source, line_start, line_text);
         return deletable.then(|| delete_line_suggestion(provider));
     }
-    let fixed = unused_export_line(&index, line, line_start, line_text)?;
+    let (fixed, edit, name) = unused_export_line(&index, line, line_start, line_text)?;
+    check_edits(path, source, &[edit], |removed| removed == name).ok()?;
     Some(match provider {
         Provider::Github => format!("\n\n```suggestion\n{fixed}\n```"),
         Provider::Gitlab => format!("\n\n```suggestion:-0+0\n{fixed}\n```"),
@@ -128,13 +130,14 @@ fn line_start(source: &str, line: u32) -> Option<usize> {
 /// The text of `line` without the `export` of its one statement, when the
 /// line holds one complete edit: one export statement starts at the line
 /// start, no other statement covers the line, the statement exports one
-/// name, and its keyword edit ends on the line.
-fn unused_export_line<'a>(
-    index: &SourceEditIndex,
+/// name, and its keyword edit ends on the line. Also gives the keyword edit
+/// and the exported name.
+fn unused_export_line<'a, 'i>(
+    index: &'i SourceEditIndex,
     line: u32,
     line_start: usize,
     line_text: &'a str,
-) -> Option<&'a str> {
+) -> Option<(&'a str, SpanEdit, &'i str)> {
     let mut on_line = index.export_statements_on_line(line);
     let (Some(statement), None) = (on_line.next(), on_line.next()) else {
         return None;
@@ -162,7 +165,11 @@ fn unused_export_line<'a>(
     }
     let edit = statement.keyword_edit()?;
     let removed = (edit.end as usize).checked_sub(line_start)?;
-    line_text.get(removed..)
+    Some((
+        line_text.get(removed..)?,
+        edit,
+        statement.names.first()?.as_str(),
+    ))
 }
 
 /// True when the line holds exactly one member, from its first byte to its
@@ -180,7 +187,7 @@ fn member_line_is_deletable(
         return false;
     };
     let (first, last) = index.line_range(member.start, member.end);
-    if first != last || !member.deletion_keeps_values || member.shares_its_key {
+    if first != last || member.shares_its_key {
         return false;
     }
     let Some(before) = source.get(line_start..member.start as usize) else {
@@ -237,13 +244,13 @@ fn withheld_suggestion_hint() -> String {
         .to_owned()
 }
 
-/// True when the text without the line still parses, and each other member
-/// keeps its text. Without a semicolon after the member above, the deletion
-/// can join that member with the member below, as in `count = 0` followed by
-/// `[Symbol.iterator]() {}`.
-fn deletion_keeps_other_members(
+/// True when the deletion of the line passes the post-edit check that
+/// `fallow fix` also runs: the text still parses, each other member stays,
+/// and each kept enum member keeps its value. A suggestion block can change
+/// only the line of the finding, so it cannot pin the value of the next enum
+/// member the way `fallow fix` does.
+fn line_deletion_keeps_meaning(
     path: &Path,
-    index: &SourceEditIndex,
     source: &str,
     line_start: usize,
     line_text: &str,
@@ -251,36 +258,48 @@ fn deletion_keeps_other_members(
     let line_end = source[line_start..]
         .find('\n')
         .map_or(source.len(), |newline| line_start + newline + 1);
-    let mut rest = String::with_capacity(source.len());
-    rest.push_str(&source[..line_start]);
-    rest.push_str(&source[line_end..]);
-    let Some(after) = SourceEditIndex::parse(path, &rest) else {
+    let (Ok(start), Ok(end)) = (u32::try_from(line_start), u32::try_from(line_end)) else {
         return false;
     };
-    let Ok(removed) = u32::try_from(line_end - line_start) else {
-        return false;
+    debug_assert!(line_end >= line_start + line_text.len());
+    let edit = SpanEdit {
+        start,
+        end,
+        replacement: String::new(),
     };
-    let text_of = |start: u32, end: u32| rest.get(start as usize..end as usize);
-    let shift = |offset: u32| {
-        if offset as usize >= line_end {
-            offset - removed
-        } else {
-            offset
+    check_edits(path, source, &[edit], |_| false).is_ok()
+}
+
+/// The post-edit check of `edits`, with the facts of the text before the
+/// edit kept for the next finding of the same file. The comment builders
+/// visit the findings of one file one after the other, so one entry is
+/// enough.
+fn check_edits(
+    path: &Path,
+    source: &str,
+    edits: &[SpanEdit],
+    removable: impl Fn(&str) -> bool,
+) -> Result<(), PostEditViolation> {
+    type Cached = (PathBuf, u64, std::rc::Rc<Option<SourceFacts>>);
+    thread_local! {
+        static BEFORE: std::cell::RefCell<Option<Cached>> = const { std::cell::RefCell::new(None) };
+    }
+    let hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
+    let facts = BEFORE.with_borrow_mut(|cached| match cached {
+        Some((cached_path, cached_hash, facts)) if cached_path == path && *cached_hash == hash => {
+            std::rc::Rc::clone(facts)
         }
-    };
-    let deleted_line = line_start..line_start + line_text.len();
-    let kept: Option<Vec<&str>> = index
-        .members()
-        .iter()
-        .filter(|member| !deleted_line.contains(&(member.start as usize)))
-        .map(|member| text_of(shift(member.start), shift(member.end)))
-        .collect();
-    let now: Option<Vec<&str>> = after
-        .members()
-        .iter()
-        .map(|member| text_of(member.start, member.end))
-        .collect();
-    kept.is_some() && kept == now
+        _ => {
+            let facts = std::rc::Rc::new(SourceFacts::collect(path, source));
+            *cached = Some((path.to_path_buf(), hash, std::rc::Rc::clone(&facts)));
+            facts
+        }
+    });
+    facts
+        .as_ref()
+        .as_ref()
+        .ok_or(PostEditViolation::DoesNotParse)?
+        .check_edits(path, source, edits, removable)
 }
 
 /// The block that deletes the line of the finding.

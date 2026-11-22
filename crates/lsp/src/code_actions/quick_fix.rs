@@ -17,7 +17,7 @@ use fallow_types::output_dead_code::MutationEvidence;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 use crate::position::PositionMapper;
-use fallow_api::source_edits::SourceEditIndex;
+use fallow_api::{post_edit::check_edits, source_edits::SourceEditIndex};
 
 /// Typed input for unused export quick-fix code actions.
 #[derive(Clone, Copy)]
@@ -100,10 +100,11 @@ pub fn build_remove_export_actions(input: RemoveExportActionInput<'_>) -> Vec<Co
     let Some(index) = SourceEditIndex::parse(file_path, source) else {
         return Vec::new();
     };
+    let file = (file_path, source);
     candidates
         .into_iter()
         .filter_map(|(export, msg_prefix)| {
-            remove_export_action(&index, &unused, export, msg_prefix, uri, source)
+            remove_export_action(&index, &unused, export, msg_prefix, uri, file)
         })
         .collect()
 }
@@ -136,22 +137,20 @@ fn remove_export_action(
     export: &fallow_api::editor_results::UnusedExport,
     msg_prefix: &str,
     uri: &Uri,
-    source: &str,
+    (file_path, source): (&Path, &str),
 ) -> Option<CodeActionOrCommand> {
     let statement = index
         .export_statement(&export.export_name, export.line, export.col)
         .ok()?;
     let (first, last) = index.line_range(statement.start, statement.end);
-    let every_name_unused = statement.names.iter().all(|name| {
+    let removable = |name: &str| {
         unused.iter().any(|(finding, _)| {
-            finding.export_name == *name
+            finding.export_name == name
                 && (first..=last).contains(&(finding.line.saturating_sub(1) as usize))
         })
-    });
-    if !every_name_unused {
-        return None;
-    }
+    };
     let edit = statement.keyword_edit()?;
+    check_edits(file_path, source, std::slice::from_ref(&edit), removable).ok()?;
     let mut changes = HashMap::new();
     changes.insert(
         uri.clone(),

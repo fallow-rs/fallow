@@ -86,6 +86,7 @@ pub mod module_graph;
 pub mod mutation;
 pub mod package_baselines;
 pub mod plugins;
+pub mod post_edit;
 pub mod project_analysis;
 pub mod project_config;
 mod public_api;

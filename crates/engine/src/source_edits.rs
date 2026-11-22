@@ -56,6 +56,56 @@ pub enum ExportStatementKind {
     OtherDefault,
 }
 
+/// A declaration form that TypeScript merges with other declarations of the
+/// same name. All declarations of one merge must be exported, or none
+/// (TS2383 for function overloads, TS2395 for each other merge).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MergeKind {
+    /// A function declaration or an overload signature.
+    Function,
+    /// A class declaration.
+    Class,
+    /// A namespace or module declaration with a name.
+    Namespace,
+    /// An interface declaration.
+    Interface,
+    /// An enum declaration.
+    Enum,
+}
+
+impl MergeKind {
+    /// The merge kind of `declaration`, or `None` for a form that TypeScript
+    /// does not merge under the export rule, such as a variable or a type
+    /// alias.
+    #[must_use]
+    pub(crate) fn of(declaration: &Declaration<'_>) -> Option<Self> {
+        match declaration {
+            Declaration::FunctionDeclaration(_) => Some(Self::Function),
+            Declaration::ClassDeclaration(_) => Some(Self::Class),
+            Declaration::TSNamespaceDeclaration(_) => Some(Self::Namespace),
+            Declaration::TSInterfaceDeclaration(_) => Some(Self::Interface),
+            Declaration::TSEnumDeclaration(_) => Some(Self::Enum),
+            _ => None,
+        }
+    }
+
+    /// True when TypeScript merges a declaration of `self` with one of
+    /// `other`, so that both must have the same export. A value and a type
+    /// of one name, such as `const Foo` and `type Foo`, do not merge.
+    #[must_use]
+    pub fn merges_with(self, other: Self) -> bool {
+        use MergeKind::{Class, Enum, Function, Interface, Namespace};
+        matches!(
+            (self, other),
+            (Function | Namespace, Function)
+                | (Function | Class | Namespace | Enum, Namespace)
+                | (Namespace | Interface, Class)
+                | (Class | Interface, Interface)
+                | (Namespace | Enum, Enum)
+        )
+    }
+}
+
 /// One top-level `export <declaration>` or `export default` statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportStatement {
@@ -68,6 +118,9 @@ pub struct ExportStatement {
     /// Each name that the statement exports, in source order. A default
     /// export has the one name `default`.
     pub names: Vec<String>,
+    /// The merge kind of the declaration, or `None` when TypeScript does not
+    /// merge it with other declarations of the name.
+    pub merge: Option<MergeKind>,
     /// The end of the text that the removal of the export deletes, or `None`
     /// when the statement has no safe removal.
     keyword_end: Option<u32>,
@@ -92,10 +145,6 @@ pub struct MemberSpan {
     pub start: u32,
     /// The byte offset after the last byte of the member.
     pub end: u32,
-    /// False for an enum member whose deletion changes the value of the next
-    /// member: the next member has no initializer, so its value counts on
-    /// from this member. Always true for a class element.
-    pub deletion_keeps_values: bool,
     /// True for a class element whose static key another element of the same
     /// class also has, such as an overload signature, its implementation, or
     /// one half of a getter and setter pair. Always false for an enum member.
@@ -302,14 +351,6 @@ impl SourceEditIndex {
         self.members
             .iter()
             .filter(move |member| self.line_of(member.start) == line_idx)
-    }
-
-    /// Each class element and enum member of the file. The elements of one
-    /// class body or enum body are in source order, and each body comes
-    /// before the members nested inside it.
-    #[must_use]
-    pub fn members(&self) -> &[MemberSpan] {
-        &self.members
     }
 
     /// The enum declarations named `name`, at each depth.
@@ -576,36 +617,60 @@ struct Parsed {
     enums: Vec<EnumSpans>,
 }
 
-fn parse_file(path: &Path, source: &str) -> Option<Parsed> {
-    if fallow_extract::is_sfc_file(path) {
-        let scripts = fallow_extract::extract_sfc_scripts(source);
-        return parse_blocks(source, scripts.iter().filter(|script| script.src.is_none()));
-    }
-    if path
-        .extension()
-        .is_some_and(|extension| extension == "astro")
-    {
-        let frontmatter = fallow_extract::astro::extract_astro_frontmatter(source);
-        return parse_blocks(source, frontmatter.iter());
-    }
-    let source_type = SourceType::from_path(path).ok()?;
-    parse_block(source, source, source_type, 0)
+/// One script text of a file: the whole file, an inline `<script>` block of
+/// a Vue or Svelte file, or the frontmatter block of an Astro file.
+pub(crate) struct ScriptBlock<'s> {
+    /// The script text.
+    pub(crate) text: std::borrow::Cow<'s, str>,
+    /// The dialect of the script text.
+    pub(crate) source_type: SourceType,
+    /// The byte offset of the script text in the file.
+    pub(crate) offset: u32,
 }
 
-fn parse_blocks<'a>(
-    file: &str,
-    scripts: impl Iterator<Item = &'a fallow_extract::sfc::SfcScript>,
-) -> Option<Parsed> {
-    let mut parsed = Parsed::default();
-    for script in scripts {
+/// The script blocks of the file at `path`, or `None` for a file type that
+/// the engine does not parse here.
+pub(crate) fn script_blocks<'s>(path: &Path, source: &'s str) -> Option<Vec<ScriptBlock<'s>>> {
+    let owned = |script: &fallow_extract::sfc::SfcScript| {
         let source_type = match (script.is_typescript, script.is_jsx) {
             (true, true) => SourceType::tsx(),
             (true, false) => SourceType::ts(),
             (false, true) => SourceType::jsx(),
             (false, false) => SourceType::mjs(),
         };
-        let offset = u32::try_from(script.byte_offset).ok()?;
-        let block = parse_block(file, &script.body, source_type, offset)?;
+        Some(ScriptBlock {
+            text: std::borrow::Cow::Owned(script.body.clone()),
+            source_type,
+            offset: u32::try_from(script.byte_offset).ok()?,
+        })
+    };
+    if fallow_extract::is_sfc_file(path) {
+        let scripts = fallow_extract::extract_sfc_scripts(source);
+        return scripts
+            .iter()
+            .filter(|script| script.src.is_none())
+            .map(owned)
+            .collect();
+    }
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "astro")
+    {
+        let frontmatter = fallow_extract::astro::extract_astro_frontmatter(source);
+        return frontmatter.iter().map(owned).collect();
+    }
+    let source_type = SourceType::from_path(path).ok()?;
+    Some(vec![ScriptBlock {
+        text: std::borrow::Cow::Borrowed(source),
+        source_type,
+        offset: 0,
+    }])
+}
+
+fn parse_file(path: &Path, source: &str) -> Option<Parsed> {
+    let mut parsed = Parsed::default();
+    for block in script_blocks(path, source)? {
+        let block = parse_block(source, &block.text, block.source_type, block.offset)?;
         parsed.statements.extend(block.statements);
         parsed.members.extend(block.members);
         parsed.enums.extend(block.enums);
@@ -656,11 +721,10 @@ impl MemberCollector {
         self.ambient_depth -= depth;
     }
 
-    fn push(&mut self, span: oxc_span::Span, deletion_keeps_values: bool, shares_its_key: bool) {
+    fn push(&mut self, span: oxc_span::Span, shares_its_key: bool) {
         self.members.push(MemberSpan {
             start: span.start + self.offset,
             end: span.end + self.offset,
-            deletion_keeps_values,
             shares_its_key,
         });
     }
@@ -679,7 +743,7 @@ impl<'a> Visit<'a> for MemberCollector {
                     other != position && other_name.as_ref() == Some(name)
                 })
             });
-            self.push(element.span(), true, shares_its_key);
+            self.push(element.span(), shares_its_key);
         }
         oxc_ast_visit::walk::walk_class_body(self, it);
     }
@@ -699,17 +763,11 @@ impl<'a> Visit<'a> for MemberCollector {
                 TSEnumMemberName::ComputedTemplateString(_) => continue,
             };
             values.push(all_values[position]);
-            let deletion_keeps_values = it
-                .body
-                .members
-                .get(position + 1)
-                .is_none_or(|next| next.initializer.is_some());
             members.push((
                 name,
                 MemberSpan {
                     start: member.span.start + offset,
                     end: member.span.end + offset,
-                    deletion_keeps_values,
                     shares_its_key: false,
                 },
             ));
@@ -745,12 +803,8 @@ impl<'a> Visit<'a> for MemberCollector {
     }
 
     fn visit_ts_enum_body(&mut self, it: &TSEnumBody<'a>) {
-        for (position, member) in it.members.iter().enumerate() {
-            let next_has_value = it
-                .members
-                .get(position + 1)
-                .is_none_or(|next| next.initializer.is_some());
-            self.push(member.span, next_has_value, false);
+        for member in &it.members {
+            self.push(member.span, false);
         }
         oxc_ast_visit::walk::walk_ts_enum_body(self, it);
     }
@@ -761,10 +815,15 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
         .body
         .iter()
         .filter_map(|statement| {
-            let (span, kind, names) = match statement {
+            let (span, kind, names, merge) = match statement {
                 Statement::ExportDeclaration(export) => {
                     let (kind, names) = declaration_names(&export.declaration)?;
-                    (export.span(), kind, names)
+                    (
+                        export.span(),
+                        kind,
+                        names,
+                        MergeKind::of(&export.declaration),
+                    )
                 }
                 Statement::ExportDefaultDeclaration(export) => {
                     let named = match &export.declaration {
@@ -779,7 +838,7 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
                     } else {
                         ExportStatementKind::OtherDefault
                     };
-                    (export.span(), kind, vec!["default".to_owned()])
+                    (export.span(), kind, vec!["default".to_owned()], None)
                 }
                 _ => return None,
             };
@@ -790,6 +849,7 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
                 end,
                 kind,
                 names,
+                merge,
                 keyword_end: keyword_end(file, start, kind),
             })
         })
@@ -850,7 +910,9 @@ fn neighbour_runs(positions: &[usize]) -> Vec<(usize, usize)> {
 
 /// The kind and the exported names of an `export <declaration>`, or `None`
 /// for a declaration without a name.
-fn declaration_names(declaration: &Declaration<'_>) -> Option<(ExportStatementKind, Vec<String>)> {
+pub(crate) fn declaration_names(
+    declaration: &Declaration<'_>,
+) -> Option<(ExportStatementKind, Vec<String>)> {
     let single = |name: &str| Some((ExportStatementKind::Declaration, vec![name.to_owned()]));
     match declaration {
         Declaration::VariableDeclaration(variables) => {
@@ -1163,23 +1225,6 @@ mod tests {
         assert_eq!(shares(4), vec![true]);
         assert_eq!(shares(5), vec![true]);
         assert_eq!(shares(6), vec![false]);
-    }
-
-    #[test]
-    fn an_enum_member_knows_whether_its_deletion_shifts_a_value() {
-        let source = "enum E {\n  A,\n  B,\n  C = 5,\n  D,\n}\nclass K {\n  m() {}\n}\n";
-        let index = index("store.ts", source);
-        let keeps = |line| {
-            index
-                .members_on_line(line)
-                .map(|member| member.deletion_keeps_values)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(keeps(2), vec![false], "B counts on from A");
-        assert_eq!(keeps(3), vec![true], "C has its own value");
-        assert_eq!(keeps(4), vec![false], "D counts on from C");
-        assert_eq!(keeps(5), vec![true], "D is the last member");
-        assert_eq!(keeps(8), vec![true], "a class element");
     }
 
     #[test]
