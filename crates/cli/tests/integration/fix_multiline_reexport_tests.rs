@@ -169,6 +169,7 @@ fn fix_removes_only_the_unused_names_of_a_multi_line_re_export() {
             "  Kept,\n",
             "  Dropped,\n",
             "} from './types';\n",
+            "import './more';\n",
         )
     );
     // `fix` does not remove unused type exports, so the type list and its
@@ -323,9 +324,9 @@ fn fix_reports_an_export_behind_an_ignored_re_export() {
 }
 
 #[test]
-fn fix_reports_an_export_behind_a_list_that_it_cannot_rewrite() {
-    // Other code follows the list on its last line, so no safe edit can
-    // delete the full statement.
+fn fix_keeps_the_module_load_and_the_code_after_a_removed_re_export() {
+    // The re-export loads `./mod`. Removing its last name keeps that load
+    // with a bare import, and keeps the code after it on the same line.
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write_project(
@@ -340,16 +341,12 @@ fn fix_reports_an_export_behind_a_list_that_it_cannot_rewrite() {
         ],
     );
 
-    assert_eq!(
-        kept_re_export_entries(root),
-        (vec![removal("src/mod.ts", 1, "a")], 1)
-    );
     apply(root);
-    assert_eq!(read(root, "src/mod.ts"), "export function a() {}\n");
     assert_eq!(
         read(root, "src/barrel.ts"),
-        "export {\n  a\n} from './mod'; console.log(1);\n"
+        "import './mod'; console.log(1);\n"
     );
+    assert_eq!(read(root, "src/mod.ts"), "function a() {}\n");
 }
 
 #[test]
