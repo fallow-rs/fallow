@@ -404,8 +404,11 @@ fn resolve_store_max_age() -> Option<std::time::Duration> {
     crate::base_worktree::days_to_duration(days)
 }
 
-/// Remove per-project store files older than `max_age`, reclaiming stores left
-/// behind by deleted repos. Age is the store FILE's mtime (any recorded run
+/// Expire per-project store files older than `max_age`, reclaiming stores left
+/// behind by deleted repos. A store that holds a user decision (an explicit
+/// enable or disable, or a declined opt-in) keeps that decision and loses its
+/// history. See [`store::expire_store`].
+/// Age is the store FILE's mtime (any recorded run
 /// rewrites the file via atomic replace, refreshing the mtime), so an
 /// actively-tracked repo never ages out. Best-effort and opportunistic (called
 /// after a successful record), gated entirely on [`STORE_MAX_AGE_ENV`]. Never
@@ -414,20 +417,8 @@ fn resolve_store_max_age() -> Option<std::time::Duration> {
 /// `impact/` dir). Skips `keep_key`'s own store so the just-written file is
 /// never reclaimed by a stale-mtime race in the same run.
 ///
-/// Cross-project GC race: this sweep does NOT take the per-store
-/// `ImpactStoreLock` of the OTHER projects it inspects, so in principle it
-/// could delete a store another process is mid-writing. This is a bounded,
-/// best-effort limitation rather than a corruption bug. A store becomes a
-/// deletion candidate only when its file mtime is already older than
-/// `max_age`, and any record refreshes the mtime via an atomic replace, so a
-/// repo with even occasional activity never ages out. The one genuinely lossy
-/// window is sub-millisecond: a concurrent writer that completes its atomic
-/// replace AFTER this fn's `metadata().modified()` read but BEFORE the
-/// `remove_file` would have its just-written (fresh) record deleted. That
-/// window is vanishingly small, the deletion is opt-in (gated on
-/// [`STORE_MAX_AGE_ENV`]), and the store is reconstructed on the project's
-/// next recorded run, so the worst case is the loss of a single just-written
-/// record for an otherwise-dormant project, never partial/corrupt state.
+/// The expiry takes the lock of each aged store and checks the age again under
+/// that lock, so a record that a concurrent run writes is never removed.
 fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
     let Some(dir) = store_dir() else {
         return;
@@ -446,13 +437,8 @@ fn sweep_old_stores(keep_key: &str, max_age: std::time::Duration) {
         if path.file_stem().and_then(|s| s.to_str()) == Some(keep_key) {
             continue;
         }
-        let aged_out = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|mtime| now.duration_since(mtime).ok())
-            .is_some_and(|age| age >= max_age);
-        if aged_out {
-            let _ = std::fs::remove_file(&path);
+        if store::is_aged_out(&path, now, max_age) {
+            store::expire_store(&path, now, max_age);
         }
     }
 }
