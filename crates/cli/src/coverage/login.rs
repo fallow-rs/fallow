@@ -17,8 +17,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::api::{parse_error_envelope, sanitize_network_error, try_api_agent_with_timeout};
-use crate::coverage::credentials::{self, KeySource};
-use crate::error::emit_input_error;
+use crate::coverage::credentials::{self, Deletion, KeySource};
+use crate::error::{emit_input_error, emit_input_error_with_style};
 use crate::json_style::JsonStyle;
 
 /// Connect timeout of one device flow request.
@@ -315,16 +315,24 @@ fn run_logout(api_url: Option<&str>, output: OutputFormat, json_style: JsonStyle
         Ok(removed) => removed,
         Err(message) => return emit_input_error(&message, output),
     };
+    if removed.keychain == Deletion::Failed {
+        return emit_input_error_with_style(
+            &incomplete_logout_message(&base_url, removed.file),
+            output,
+            json_style,
+        );
+    }
+    let from_keychain = removed.keychain == Deletion::Removed;
     if matches!(output, OutputFormat::Json) {
         let value = json!({
             "kind": "cloud-logout",
             "api_url": base_url,
-            "removed_from_keychain": removed.keychain,
+            "removed_from_keychain": from_keychain,
             "removed_from_credentials_file": removed.file,
         });
         return crate::report::emit_report_json(&value, "cloud-logout", json_style);
     }
-    if removed.keychain || removed.file {
+    if from_keychain || removed.file {
         eprintln!("Logged out. Removed the stored API key for {base_url}.");
         eprintln!(
             "The key stays valid until you revoke it {}.",
@@ -334,6 +342,18 @@ fn run_logout(api_url: Option<&str>, output: OutputFormat, json_style: JsonStyle
         eprintln!("No stored API key for {base_url}.");
     }
     ExitCode::SUCCESS
+}
+
+/// The error of a logout whose keychain delete did not succeed.
+fn incomplete_logout_message(base_url: &str, removed_from_file: bool) -> String {
+    let file = if removed_from_file {
+        " Fallow removed the key from the credentials file."
+    } else {
+        ""
+    };
+    format!(
+        "logout is incomplete: the keychain did not confirm the removal of the API key for {base_url}. The prompt was denied, timed out, or the keychain tool failed, so the key can still be stored.{file} Run `fallow cloud logout` again and allow the keychain prompt, or remove the `fallow-cloud` entry from the keychain by hand."
+    )
 }
 
 fn start_device_flow(
