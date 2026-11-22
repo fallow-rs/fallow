@@ -174,7 +174,7 @@ pub fn gather_pnpm_override_state(
         .unwrap_or_default();
 
     let root_pkg_path = config.root.join(ROOT_PACKAGE_JSON);
-    let root_pkg_source = std::fs::read_to_string(&root_pkg_path).ok();
+    let root_pkg_source = PackageJson::read_source(&root_pkg_path).ok();
     let root_manifest: Option<serde_json::Value> = root_pkg_source
         .as_deref()
         .and_then(|source| serde_json::from_str(source).ok());
@@ -281,7 +281,7 @@ fn collect_declared_packages(
 
     let mut set: FxHashSet<String> = FxHashSet::default();
     for pkg_path in &paths {
-        let Ok(raw_source) = std::fs::read_to_string(pkg_path) else {
+        let Ok(raw_source) = PackageJson::read_source(pkg_path) else {
             continue;
         };
         let Ok(pkg) = PackageJson::parse(&raw_source) else {

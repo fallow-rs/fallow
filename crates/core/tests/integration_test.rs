@@ -8,6 +8,8 @@
     reason = "Core-internal policy: integration tests exercise the workspace path-dep fallow_core::analyze* surface; the deprecation warning targets external crates.io consumers"
 )]
 
+#[path = "integration_test/bom_package_json.rs"]
+mod bom_package_json;
 #[path = "integration_test/command_file_references.rs"]
 mod command_file_references;
 #[path = "integration_test/common.rs"]

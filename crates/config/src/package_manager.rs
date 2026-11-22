@@ -105,7 +105,7 @@ impl PackageManager {
         if self != Self::Yarn {
             return false;
         }
-        let manifest = std::fs::read_to_string(dir.join("package.json"))
+        let manifest = crate::PackageJson::read_source(&dir.join("package.json"))
             .ok()
             .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
         let Some(manifest) = manifest else {
@@ -127,7 +127,7 @@ impl PackageManager {
     }
 
     fn from_package_json_field(root: &Path) -> Option<Self> {
-        let content = std::fs::read_to_string(root.join("package.json")).ok()?;
+        let content = crate::PackageJson::read_source(&root.join("package.json")).ok()?;
         let value: serde_json::Value = serde_json::from_str(&content).ok()?;
         let field = value.get("packageManager")?.as_str()?;
         match field.split('@').next().unwrap_or(field) {

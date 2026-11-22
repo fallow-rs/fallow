@@ -223,7 +223,7 @@ impl PathTarget {
 /// The declaration targets the package.json in `dir` names. A package.json
 /// that exists but does not parse names everything, so it never hides a file.
 fn package_type_targets(dir: &Path) -> Vec<PathTarget> {
-    let Ok(content) = std::fs::read_to_string(dir.join("package.json")) else {
+    let Ok(content) = fallow_config::PackageJson::read_source(&dir.join("package.json")) else {
         return Vec::new();
     };
     let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&content) else {

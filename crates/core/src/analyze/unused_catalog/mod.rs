@@ -259,7 +259,7 @@ fn gather_pnpm_catalog_state(
             (data, PathBuf::from(PNPM_WORKSPACE_FILE), suppressed)
         } else {
             let package_json_path = config.root.join(PACKAGE_JSON_FILE);
-            let package_json_source = std::fs::read_to_string(&package_json_path).ok()?;
+            let package_json_source = PackageJson::read_source(&package_json_path).ok()?;
             let data = parse_package_json_catalog_data(&package_json_source);
             if data.catalogs.is_empty() && data.empty_named_catalog_groups.is_empty() {
                 return None;
@@ -591,7 +591,7 @@ fn collect_catalog_consumers_from_package(
     root: &Path,
     consumers: &mut CatalogConsumers,
 ) {
-    let Ok(raw_source) = std::fs::read_to_string(pkg_path) else {
+    let Ok(raw_source) = PackageJson::read_source(pkg_path) else {
         return;
     };
     let Ok(pkg) = PackageJson::parse(&raw_source) else {
@@ -687,7 +687,7 @@ fn collect_pnpm_override_consumers(root: &Path, consumers: &mut CatalogConsumers
 fn pnpm_override_sources(root: &Path) -> Vec<(PnpmOverrideData, PathBuf)> {
     let mut sources = Vec::new();
     let package_json_path = root.join(PACKAGE_JSON_FILE);
-    let package_json_source = std::fs::read_to_string(&package_json_path).ok();
+    let package_json_source = PackageJson::read_source(&package_json_path).ok();
     let yaml_ignored = package_json_source
         .as_deref()
         .and_then(|source| serde_json::from_str::<serde_json::Value>(source).ok())

@@ -347,6 +347,21 @@ impl PackageJson {
         Self::parse(&content).map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
     }
 
+    /// Read the text of a package.json file without a leading UTF-8 byte
+    /// order mark, for a parser that reads the raw JSON. The mark sits on
+    /// line 1, so line numbers do not change.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error when the file cannot be read as UTF-8 text.
+    pub fn read_source(path: &std::path::Path) -> std::io::Result<String> {
+        let mut source = std::fs::read_to_string(path)?;
+        if source.starts_with('\u{FEFF}') {
+            source.drain(..'\u{FEFF}'.len_utf8());
+        }
+        Ok(source)
+    }
+
     /// Parse package.json source text. A leading UTF-8 byte order mark is
     /// ignored, as npm and Node.js do.
     ///
@@ -734,6 +749,17 @@ mod tests {
             serde_json::from_str(r#"{"workspaces": ["packages/*", "apps/*"]}"#).unwrap();
         let patterns = pkg.workspace_patterns();
         assert_eq!(patterns, vec!["packages/*", "apps/*"]);
+    }
+
+    #[test]
+    fn read_source_strips_a_leading_byte_order_mark() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("package.json");
+        std::fs::write(&path, "\u{FEFF}{\"name\":\"a\"}\n").expect("write");
+        assert_eq!(
+            PackageJson::read_source(&path).expect("read"),
+            "{\"name\":\"a\"}\n"
+        );
     }
 
     #[test]
