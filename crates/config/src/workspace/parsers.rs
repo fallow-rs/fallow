@@ -464,7 +464,11 @@ fn expand_recursive_workspace_pattern(
     if base_dir.is_dir() {
         collect_matched_workspace_dir(&base_dir, &mut input);
     }
-    walk_workspace_dirs(&base_dir, &mut input);
+    if let Ok(canonical_base) = dunce::canonicalize(&base_dir)
+        && canonical_base.starts_with(canonical_root)
+    {
+        walk_workspace_dirs(&base_dir, &canonical_base, &mut input);
+    }
     results
 }
 
@@ -479,7 +483,12 @@ struct WorkspaceDirWalkInput<'a> {
 
 /// Recursively walk directories, skipping `node_modules` and `.git`, collecting
 /// directories that match the glob pattern and contain a package manifest.
-fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
+///
+/// `canonical_dir` is the real path of `dir`. The walk descends through a
+/// link only when its target is inside the project root and is not `dir` or
+/// an ancestor of it, so a link to an outside folder or a link loop does not
+/// take the walk with it.
+fn walk_workspace_dirs(dir: &Path, canonical_dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -493,7 +502,21 @@ fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
             continue;
         }
         collect_matched_workspace_dir(&path, input);
-        walk_workspace_dirs(&path, input);
+        let is_link = entry.file_type().is_ok_and(|kind| kind.is_symlink());
+        let canonical_child = if is_link {
+            match dunce::canonicalize(&path) {
+                Ok(target)
+                    if target.starts_with(input.canonical_root)
+                        && !canonical_dir.starts_with(&target) =>
+                {
+                    target
+                }
+                _ => continue,
+            }
+        } else {
+            canonical_dir.join(&name)
+        };
+        walk_workspace_dirs(&path, &canonical_child, input);
     }
 }
 
@@ -1401,6 +1424,27 @@ mod tests {
             expanded_members(root, "packages/**")
         );
         assert_eq!(expanded_members(root, "./packages/**").len(), 3);
+    }
+
+    /// A link to an ancestor folder or to a folder outside the project does
+    /// not take the recursive walk with it.
+    #[cfg(unix)]
+    #[test]
+    fn expand_recursive_glob_does_not_descend_through_an_ancestor_or_external_link() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = base.path();
+        write_member(root, "packages/a");
+        write_member(outside.path(), "external");
+        std::os::unix::fs::symlink(root.join("packages"), root.join("packages/a/loop")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("packages/outside")).unwrap();
+        write_member(root, "packages/b");
+        std::os::unix::fs::symlink(root.join("packages/b"), root.join("packages/b-link")).unwrap();
+
+        assert_eq!(
+            expanded_members(root, "packages/**"),
+            ["packages/a", "packages/b", "packages/b-link"]
+        );
     }
 
     #[test]
