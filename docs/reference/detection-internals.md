@@ -513,6 +513,14 @@ error by suppressing a downstream detector.
   module, or at its first server-only import. The `secret-source` trace hop
   lists every read in `secret_reads`, and `fallow security --gate new` keeps
   the finding when one of these lines is added.
+- A non-terminal hop of a `client-server-leak` trace points at the import of
+  the next hop. `fallow security --gate new` keeps the finding when the line
+  of an `intermediate` hop is on an added line, because an added import there
+  joins the client cone to the sink. The gate has no base graph, so an edit
+  of an import line that already existed also keeps the finding. The finding
+  stays on the client boundary, so its
+  `finding_id` does not change. The `intermediate` hop of a taint trace stays
+  a pass-through hop for the gate.
 - A route module is a file that the route config names, the root route, a
   file directly in a route directory, a `route.*` file, or a deeper file
   that exports a route module export and is not in a folder with a
