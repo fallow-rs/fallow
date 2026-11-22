@@ -72,6 +72,79 @@ fn write_response(stream: &mut TcpStream, status: u16, headers: &str, body: &str
         .expect("write response");
 }
 
+/// A provider that refuses the connection, so the lookup of the existing
+/// comments fails before any post.
+const REFUSED_API: &str = "http://127.0.0.1:9";
+const DEDUP_LOOKUP_FAILED: &str = "FALLOW_CI_DEDUP_LOOKUP_FAILED";
+
+#[test]
+fn post_review_tags_a_failed_comment_lookup_with_a_stable_code() {
+    for provider_args in [
+        ["--provider", "github", "--pr", "7", "--repo", "owner/repo"].as_slice(),
+        ["--provider", "gitlab", "--mr", "7", "--project-id", "1"].as_slice(),
+    ] {
+        let envelope = write_envelope(&["abc"]);
+        let output = run_post_review(provider_args, REFUSED_API, &envelope);
+        assert_eq!(output.code, 7, "{provider_args:?}: {}", output.stderr);
+        let error = parse_json(&output);
+        assert_eq!(
+            error["code"], DEDUP_LOOKUP_FAILED,
+            "{provider_args:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn post_review_leaves_a_missing_token_without_the_lookup_code() {
+    let envelope = write_envelope(&["abc"]);
+    let output = Command::new(fallow_bin())
+        .args(["--format", "json", "--quiet", "ci", "post-review"])
+        .args(["--provider", "github", "--pr", "7", "--repo", "owner/repo"])
+        .args(["--api-url", REFUSED_API])
+        .arg("--envelope")
+        .arg(envelope.path().join("review.json"))
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
+        .output()
+        .expect("run fallow");
+    let output = crate::common::CommandOutput::from_process(output);
+    let error = parse_json(&output);
+    assert_eq!(error["error"], true, "{error}");
+    assert!(error.get("code").is_none(), "{error}");
+}
+
+#[test]
+fn post_pr_comment_tags_a_failed_comment_lookup_with_a_stable_code() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let body = dir.path().join("comment.md");
+    std::fs::write(&body, "<!-- fallow-id: fallow-results -->\nbody\n").expect("body");
+    for provider_args in [
+        ["--provider", "github", "--pr", "7", "--repo", "owner/repo"].as_slice(),
+        ["--provider", "gitlab", "--mr", "7", "--project-id", "1"].as_slice(),
+    ] {
+        let output = Command::new(fallow_bin())
+            .args(["--format", "json", "--quiet", "ci", "post-pr-comment"])
+            .args(provider_args)
+            .args(["--api-url", REFUSED_API, "--marker-id", "fallow-results"])
+            .arg("--body")
+            .arg(&body)
+            .env("GH_TOKEN", "test-token")
+            .env("GITLAB_TOKEN", "test-token")
+            .env("FALLOW_API_RETRIES", "1")
+            .env("NO_PROXY", "127.0.0.1,localhost")
+            .env("no_proxy", "127.0.0.1,localhost")
+            .output()
+            .expect("run fallow");
+        let output = crate::common::CommandOutput::from_process(output);
+        assert_eq!(output.code, 7, "{provider_args:?}: {}", output.stderr);
+        let error = parse_json(&output);
+        assert_eq!(
+            error["code"], DEDUP_LOOKUP_FAILED,
+            "{provider_args:?}: {error}"
+        );
+    }
+}
+
 fn write_envelope(fingerprints: &[&str]) -> tempfile::TempDir {
     write_envelope_with_review_id(fingerprints, None)
 }

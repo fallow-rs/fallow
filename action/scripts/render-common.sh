@@ -13,6 +13,8 @@
 
 # shellcheck source=../../ci/scripts/mutation_common.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/../../ci/scripts/mutation_common.sh"
+# shellcheck source=workflow-command.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/workflow-command.sh"
 
 artifact_path() {
   local filename=$1
@@ -23,6 +25,19 @@ artifact_path() {
     mkdir -p "$dir"
     printf '%s/%s\n' "$dir" "$filename"
   fi
+}
+
+# True when the JSON error document in the file says that fallow could not
+# read the existing comments, so a post could duplicate them. A post command
+# with `--format json` writes that document to stdout when it fails.
+is_dedup_lookup_failure() {
+  jq -e '.error == true and .code == "FALLOW_CI_DEDUP_LOOKUP_FAILED"' "$1" > /dev/null 2>&1
+}
+
+# The message of the JSON error document in the file, or a generic reason
+# when the file holds none.
+post_error_message() {
+  jq -r '.message // empty' "$1" 2> /dev/null | head -n 1 | grep . || printf 'see the job log\n'
 }
 
 MUTATION_RENDER_ARGS=()

@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::api::try_api_agent;
-use crate::error::{emit_error_with_style, emit_input_error_with_style};
+use crate::error::{emit_coded_error_with_style, emit_input_error_with_style};
 use crate::exit_codes::NETWORK_FAILURE;
 
 use super::{
@@ -79,7 +79,13 @@ pub(super) fn post_review(
     let provider_state = match load_provider_state(input.provider, input.target, opts) {
         Ok(state) => state,
         Err(e) => {
-            return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
+            return emit_coded_error_with_style(
+                e.message(),
+                e.code(),
+                NETWORK_FAILURE,
+                output,
+                json_style,
+            );
         }
     };
     let current = envelope_fingerprints(&envelope);

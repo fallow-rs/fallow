@@ -435,7 +435,7 @@ outputs:
     description: 'true when the installed fallow can render the mutation result (`fallow report --mutation-report`), so the PR comment, the review, the annotations and the job summary show it. false for an older fallow. Empty when the mutation input is false.'
     value: ${{ steps.mutation.outputs.report_rendered }}
   dedup-lookup-failed:
-    description: 'true when a dedup lookup failed on the Post PR comment or Post review comments step. Distinct from post-skipped-reason: the summary-only paths post a fresh comment anyway (potential duplicate) when their lookup fails, while the multi-comment review path aborts. Gate on this to detect either degraded state. Resolves to "true" if EITHER step reported a failure, "false" otherwise.'
+    description: 'true when fallow could not read the existing comments on the Post PR comment or Post review comments step. The step then posts nothing, so the pull request gets no duplicate comment and no update. post-skipped-reason is pagination_failure only for the review step. Resolves to "true" if EITHER step reported a failed lookup, "false" otherwise.'
     value: ${{ (steps.review.outputs.dedup_lookup_failed == 'true' || steps.comment.outputs.dedup_lookup_failed == 'true') && 'true' || 'false' }}
 
 runs:
