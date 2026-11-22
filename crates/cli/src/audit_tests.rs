@@ -1402,7 +1402,9 @@ fn reuse_or_create_stamps_sidecar_on_fresh_create() {
     assert_eq!(
         fs::read_to_string(reusable_worktree_sha_path(&cache_path))
             .expect(".sha sidecar should exist")
-            .trim(),
+            .lines()
+            .next()
+            .unwrap_or_default(),
         base_sha,
         "fresh-create must record the base SHA in the `.sha` sidecar",
     );
@@ -1533,7 +1535,11 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
         "mismatched .sha must force a rebuild (marker wiped)",
     );
     assert_eq!(
-        fs::read_to_string(&sha_path).expect("sha rewritten").trim(),
+        fs::read_to_string(&sha_path)
+            .expect("sha rewritten")
+            .lines()
+            .next()
+            .unwrap_or_default(),
         base_sha,
         "rebuild rewrites the .sha to the current base SHA",
     );
@@ -1546,6 +1552,42 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
         BaseWorktree::reuse_or_create(&repo, &base_sha, &[]).expect("missing .sha should rebuild");
     assert!(!marker.exists(), "missing .sha must force a rebuild");
     drop(rebuilt2);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// A reusable snapshot holds only the files of the sparse cone that it was
+/// built with. After a cone change at the same base SHA, a reuse would read
+/// the old working set, so a file of the new cone is missing at base and
+/// shows as added at head.
+#[test]
+fn reusable_cache_rebuilds_when_the_sparse_cone_changes_at_the_same_sha() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-sparse-cone-identity");
+    for dir in ["web", "api"] {
+        fs::create_dir_all(repo.join(dir)).expect("cone dir should be created");
+        fs::write(repo.join(dir).join("index.ts"), "export const a = 1;\n")
+            .expect("cone file should be written");
+    }
+    let base_sha = commit_file(&repo, "top.ts", "export const top = 1;\n");
+    git(&repo, &["sparse-checkout", "init", "--cone"]);
+    git(&repo, &["sparse-checkout", "set", "web"]);
+
+    let first = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("first reusable worktree should materialize");
+    let cache_path = first.path().to_path_buf();
+    assert!(cache_path.join("web/index.ts").is_file());
+    assert!(!cache_path.join("api/index.ts").exists());
+    drop(first);
+
+    git(&repo, &["sparse-checkout", "set", "web", "api"]);
+    let second = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("second reusable worktree should be ready");
+    assert_eq!(second.path(), cache_path);
+    assert!(
+        cache_path.join("api/index.ts").is_file(),
+        "a file of the new cone must be in the reused base snapshot"
+    );
+    drop(second);
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
@@ -1575,7 +1617,9 @@ fn reusable_cache_rebuilds_same_path_for_a_new_sha_and_publishes_new_content() {
     assert_eq!(
         fs::read_to_string(reusable_worktree_sha_path(&cache_path))
             .expect("readiness should exist")
-            .trim(),
+            .lines()
+            .next()
+            .unwrap_or_default(),
         second_sha,
         "readiness must publish the full replacement SHA",
     );
@@ -2026,11 +2070,23 @@ fn registered_current_cache_is_deregistered_and_reused_warm() {
     assert_eq!(
         fs::read_to_string(reusable_worktree_sha_path(&cache_path))
             .expect(".sha should be seeded")
-            .trim(),
+            .lines()
+            .next()
+            .unwrap_or_default(),
         base_sha,
         ".sha sidecar seeded from the legacy entry's HEAD",
     );
     drop(migrated);
+
+    // The scope that built the legacy cache is unknown, so the next run
+    // rebuilds the snapshot with the current scope.
+    let rebuilt = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("the next run should rebuild the migrated cache");
+    assert!(
+        !marker.exists(),
+        "a migrated cache is rebuilt by the next run"
+    );
+    drop(rebuilt);
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
