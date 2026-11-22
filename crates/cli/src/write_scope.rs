@@ -74,11 +74,49 @@ pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
         .find_map(|(flag, path, target)| match target {
             WriteTarget::DiscoveredConfig => config_scope.check(flag, path, &cwd),
             WriteTarget::Path => scope.check(flag, path, &cwd),
-        });
+        })
+        .or_else(|| overlapping_targets_error(&targets, &cwd));
     if error.is_none() {
         write_guard::confine(cwd, scope, config_scope);
     }
     error
+}
+
+/// Each save or report flag writes its own file. When two flags name one
+/// file, the later write replaces the earlier one, so one report is lost
+/// with no error. An existing device or named pipe, such as `/dev/stdout`,
+/// can take more than one write, so it is not refused.
+fn overlapping_targets_error(
+    targets: &[(&'static str, PathBuf, WriteTarget)],
+    cwd: &Path,
+) -> Option<String> {
+    let destinations: Vec<(&str, &Path, PathBuf)> = targets
+        .iter()
+        .filter(|(_, path, _)| !is_existing_special_file(&cwd.join(path)))
+        .map(|(flag, path, _)| (*flag, path.as_path(), resolve_step_by_step(&cwd.join(path))))
+        .collect();
+    destinations
+        .iter()
+        .enumerate()
+        .find_map(|(index, (flag, path, resolved))| {
+            let (other_flag, other_path, _) =
+                destinations[index + 1..]
+                    .iter()
+                    .find(|(_, _, other_resolved)| {
+                        other_resolved == resolved || same_existing_file(other_resolved, resolved)
+                    })?;
+            Some(format!(
+                "{flag} {} and {other_flag} {} name the same file. Write each report to its own file.",
+                path.display(),
+                other_path.display()
+            ))
+        })
+}
+
+/// Whether `path` is an existing file that is not a regular file, such as a
+/// character device or a named pipe.
+fn is_existing_special_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_file() && !metadata.is_dir())
 }
 
 /// `--output-file` is opened, and so truncated, before `fallow report` reads

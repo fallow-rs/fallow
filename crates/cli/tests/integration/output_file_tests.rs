@@ -161,6 +161,47 @@ fn coexists_with_sarif_file() {
     );
 }
 
+/// `--output-file` and `--sarif-file` write two reports. When both name one
+/// file, the later write replaces the earlier report, so one report is lost
+/// with no error. The run must refuse the pair before the analysis.
+#[test]
+fn refuses_one_file_for_the_primary_and_the_sarif_report() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let fixture = fixture_path(FIXTURE);
+    for (primary, sarif) in [
+        ("out.sarif", "out.sarif"),
+        ("out.sarif", "./sub/../out.sarif"),
+    ] {
+        let result = run_fallow_raw_in_dir(
+            dir.path(),
+            &[
+                "dead-code",
+                "--root",
+                fixture.to_str().expect("utf8 path"),
+                "-o",
+                primary,
+                "--sarif-file",
+                sarif,
+            ],
+        );
+
+        assert_eq!(
+            result.code, 2,
+            "{primary} and {sarif} are one file; stderr: {}",
+            result.stderr
+        );
+        assert!(
+            result.stderr.contains("--output-file") && result.stderr.contains("--sarif-file"),
+            "error should name both flags, got: {}",
+            result.stderr
+        );
+        assert!(
+            !dir.path().join("out.sarif").exists(),
+            "no report is written when the destinations overlap"
+        );
+    }
+}
+
 #[test]
 fn sarif_file_on_a_command_that_writes_no_sarif_file_exits_2() {
     // Only bare `fallow`, `dead-code`, `architecture` and `security` write the
