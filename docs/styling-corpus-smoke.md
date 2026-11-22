@@ -26,6 +26,11 @@ styled-components, Emotion, shadcn/CVA, CSS Modules, Sass, Less, Vue, Svelte,
 Astro, and template-heavy projects. Use `--list` to inspect the current
 entries.
 
+The stack coverage table lists each required stack twice. `Selected` means
+that a corpus entry of the run names the stack. `Analyzed` means that a
+project with the stack gave a usable fallow result. A clone failure or a
+timeout leaves the stack selected but not analyzed.
+
 The StyleX run has a stricter theme contract. It must finish without a clone or
 analysis error, find stable and nested variable definitions, find direct member
 and theme-call consumers in the official examples, and expose no conditional

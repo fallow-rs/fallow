@@ -23,6 +23,8 @@ except ModuleNotFoundError:
     tomllib = None
 
 
+# The maintained runbook of this script. A generated report must not replace it.
+RUNBOOK_PATH = (Path(__file__).resolve().parent.parent / "docs" / "public-config-corpus.md").resolve()
 CONFIG_FILENAMES = (".fallowrc.json", ".fallowrc.jsonc", "fallow.toml")
 KEY_LABELS = {
     "entry": "entry",
@@ -121,9 +123,17 @@ def main() -> int:
     if args.search_timeout <= 0:
         parser.error("--search-timeout must be > 0")
 
-    args.cache_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = args.manifest or args.cache_dir / "manifest.json"
     output_path = args.output or args.cache_dir / "report.md"
+    manifest_path = args.manifest or args.cache_dir / "manifest.json"
+    for flag, path in (("--output", output_path), ("--manifest", manifest_path)):
+        if str(path) != "-" and is_runbook(path):
+            print(
+                f"error: {flag} {path} is the maintained runbook; write elsewhere",
+                file=sys.stderr,
+            )
+            return 2
+
+    args.cache_dir.mkdir(parents=True, exist_ok=True)
     offline = args.offline or args.from_search_fixture is not None
     fetched_at = args.fetched_at or now_utc()
     gh_version = args.gh_version or detect_gh_version(offline)
@@ -205,6 +215,13 @@ def main() -> int:
         output_path.write_text(report, encoding="utf-8")
 
     return 0
+
+
+def is_runbook(path: Path) -> bool:
+    """True when `path` names the runbook, also through a symlink, a hard link, or other case."""
+    if path.exists() and RUNBOOK_PATH.exists():
+        return path.samefile(RUNBOOK_PATH)
+    return path.resolve() == RUNBOOK_PATH
 
 
 def now_utc() -> str:
@@ -773,7 +790,7 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
         "## How To Run",
         "",
         "```bash",
-        "python3 scripts/public-config-corpus.py --limit 40 --output docs/public-config-corpus.md",
+        "python3 scripts/public-config-corpus.py --limit 40",
         "```",
         "",
         f"- Generated at: `{manifest['generated_at']}`",

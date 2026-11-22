@@ -490,12 +490,18 @@ const styleXContractFailures = (projects) => {
   return failures;
 };
 
-const stackCoverage = (projects) => {
-  const covered = new Set();
-  for (const project of projects) {
-    for (const stack of project.stacks) covered.add(stack);
-  }
-  return REQUIRED_STACKS.map((stack) => ({ stack, covered: covered.has(stack) }));
+/**
+ * Lists each required stack as `selected` when a corpus entry names it, and as
+ * `covered` only when a project with that stack gave a usable fallow result.
+ */
+const stackCoverage = (corpus, projects) => {
+  const selected = new Set(corpus.flatMap((entry) => entry.stacks));
+  const covered = new Set(projects.filter(projectRan).flatMap((project) => project.stacks));
+  return REQUIRED_STACKS.map((stack) => ({
+    stack,
+    selected: selected.has(stack),
+    covered: covered.has(stack),
+  }));
 };
 
 const commandStatusLabel = (command) => {
@@ -552,9 +558,11 @@ const renderMarkdownHeader = (results) => [
 ];
 
 const appendStackCoverage = (lines, coverage) => {
-  lines.push("", "## Stack Coverage", "", "| Stack | Covered |", "| --- | --- |");
+  lines.push("", "## Stack Coverage", "", "| Stack | Selected | Analyzed |", "| --- | --- | --- |");
   for (const item of coverage) {
-    lines.push(`| ${item.stack} | ${item.covered ? "yes" : "no"} |`);
+    lines.push(
+      `| ${item.stack} | ${item.selected ? "yes" : "no"} | ${item.covered ? "yes" : "no"} |`,
+    );
   }
 };
 
@@ -606,7 +614,7 @@ const topGroups = (command) =>
     .join("<br>");
 
 const initialResults = (opts, fallowBin, corpus) => ({
-  schema_version: 2,
+  schema_version: 3,
   generated_at: new Date().toISOString(),
   fallow_bin: fallowBin,
   cache_dir: opts.cacheDir,
@@ -618,7 +626,7 @@ const initialResults = (opts, fallowBin, corpus) => ({
     ref: entry.ref,
     stacks: entry.stacks,
   })),
-  stack_coverage: stackCoverage(corpus),
+  stack_coverage: [],
   projects: [],
   spikes: [],
   stylex_contract_failures: [],
@@ -678,6 +686,7 @@ const main = () => {
     results.projects.push(runProject(entry, opts, fallowBin));
   }
 
+  results.stack_coverage = stackCoverage(corpus, results.projects);
   results.stylex_contract_failures = styleXContractFailures(results.projects);
   results.spikes = computeSpikes(results, baseline);
   const jsonPath = join(opts.outDir, "styling-corpus-smoke.json");
