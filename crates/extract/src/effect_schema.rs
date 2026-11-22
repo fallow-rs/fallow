@@ -17,16 +17,28 @@
 //! transform (`Schema.brand("Id")`, `Schema.minLength(1)`) or a call of an
 //! `HttpApiSchema` transform (`HttpApiSchema.asFormUrlEncoded()`). The rule is
 //! conservative: a chain that ends in `make`, `decode*`, a field read or an
-//! arrow function is not a schema. A chain on a member of a namespace import
-//! (`Imported.User.pipe(...)`) is not a schema: the root is the namespace.
+//! arrow function is not a schema.
+//!
+//! A chain can also start at a member of a namespace import
+//! (`Imported.User.pipe(...)`, `Imported.makeUser()`). The chain is then a
+//! derived schema of the export with that member name.
+//!
+//! A conditional expression is a schema when both branches are schemas
+//! (`flag ? Schema.String : Schema.Number`).
 //!
 //! A call of a function is a schema when each `return` of the function is a
-//! schema (`const makeUser = () => Schema.Struct({...})`, then `makeUser()`).
-//! `effect_schema_helpers.rs` has the rules for such a function.
+//! schema (`const makeUser = () => Schema.Struct({...})`, then `makeUser()`),
+//! or when the function returns a parameter and the argument at that position
+//! is a schema (`identity(Schema.String)`). `effect_schema_helpers.rs` has the
+//! rules for such a function.
+//!
+//! A member read of a local `const` object or array literal is a schema when
+//! the member is a schema (`tuple[0]`, `record.User`, `record.make()`).
+//! `effect_schema_containers.rs` has the rules for such a literal.
 
 use std::cell::RefCell;
 
-use oxc_ast::ast::{Argument, Class, Expression, IdentifierReference};
+use oxc_ast::ast::{Argument, CallExpression, Class, Expression, IdentifierReference};
 use oxc_semantic::{Semantic, SymbolId};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -38,6 +50,9 @@ use names::{HTTP_API_PIPE_TRANSFORMS, PIPE_TRANSFORMS, TYPE_ONLY_NAMES};
 
 #[path = "effect_schema_helpers.rs"]
 mod helpers;
+
+#[path = "effect_schema_containers.rs"]
+mod containers;
 
 /// `Schema` functions with a lowercase name that return a schema. Every
 /// other lowercase function (`decodeUnknownSync`, `is`, `isGreaterThan`)
@@ -173,11 +188,63 @@ pub enum SchemaShape {
     /// A schema only when the import with the local name `import_local` is
     /// a schema. With `through_call`, the chain calls the import itself
     /// (`makeImported()`), so the import can also be a function that returns
-    /// a schema.
+    /// a schema. With `member`, the import is a namespace and the chain starts
+    /// at its export `member` (`Imported.makeUser()`).
     Derived {
         import_local: String,
         through_call: bool,
+        member: Option<String>,
     },
+}
+
+impl SchemaShape {
+    /// The shape of a value that is one of two schemas. A known schema adds
+    /// no condition. Two different derived shapes give no shape, because one
+    /// fact names one import.
+    fn join(self, other: Self) -> Option<Self> {
+        match (self, other) {
+            (Self::Known, shape) | (shape, Self::Known) => Some(shape),
+            (left, right) => (left == right).then_some(left),
+        }
+    }
+}
+
+/// One step of a chain, from the root outward.
+enum Link<'e, 'a> {
+    /// A static member read: `.pipe`, `.User`.
+    Member(&'e str),
+    /// A computed member read with a literal key: `tuple[0]`, `record["a"]`.
+    Key(String),
+    Call(&'e CallExpression<'a>),
+}
+
+/// True when the links after the root of a chain keep a schema: each member
+/// is a call of a method that returns a schema. A method read without a call
+/// (`User.annotations`) is a function.
+fn is_schema_tail(links: &[Link<'_, '_>]) -> bool {
+    links.iter().enumerate().all(|(index, link)| match link {
+        Link::Member(name) => {
+            SCHEMA_METHODS.contains(name) && matches!(links.get(index + 1), Some(Link::Call(_)))
+        }
+        Link::Key(_) => false,
+        Link::Call(_) => true,
+    })
+}
+
+/// The key of a computed member read with a string or a non-negative integer
+/// literal.
+fn literal_key(expression: &Expression<'_>) -> Option<String> {
+    match unwrap(expression) {
+        Expression::StringLiteral(literal) => literal.value.as_str().map(str::to_string),
+        // JavaScript writes 1e21 and larger in exponent form, so the key text
+        // would differ.
+        Expression::NumericLiteral(literal)
+            if (0.0..1e21).contains(&literal.value) && literal.value.fract() == 0.0 =>
+        {
+            Some(format!("{}", literal.value))
+        }
+        _ => None,
+    }
 }
 
 /// Schema namespace bindings and the module-scope bindings found to be
@@ -189,16 +256,22 @@ pub struct SchemaShapes<'s, 'a> {
     http_api_namespaces: FxHashSet<SymbolId>,
     /// Named and default value imports that a derived chain can start at.
     imports: FxHashMap<SymbolId, String>,
+    /// Namespace value imports whose member a derived chain can start at.
+    namespace_imports: FxHashMap<SymbolId, String>,
     locals: FxHashMap<SymbolId, SchemaShape>,
     local_names: FxHashMap<String, SchemaShape>,
-    /// Functions whose each `return` is a schema, with the shape that a call
-    /// gives.
-    helpers: RefCell<FxHashMap<SymbolId, SchemaShape>>,
+    /// Functions whose each `return` is a schema or one parameter, with what
+    /// a call gives.
+    helpers: RefCell<FxHashMap<SymbolId, helpers::HelperResult>>,
     /// `const` schemas in the body of an inspected function.
     helper_locals: RefCell<FxHashMap<SymbolId, SchemaShape>>,
-    /// The functions under inspection: a function that returns a call of a
-    /// second function adds one.
-    helpers_in_progress: RefCell<FxHashSet<SymbolId>>,
+    /// The span starts of the function bodies and literal members under
+    /// inspection: a function that returns a call of a second function adds
+    /// one.
+    in_progress: RefCell<FxHashSet<u32>>,
+    /// `const` bindings checked for use as a literal container, with the
+    /// result.
+    containers: RefCell<FxHashMap<SymbolId, bool>>,
 }
 
 impl<'s, 'a> SchemaShapes<'s, 'a> {
@@ -215,6 +288,19 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
             .filter(|import| is_http_api_schema_module_import(import))
             .filter_map(|import| {
                 crate::binding_references::admitted_import_symbol(semantic, import)
+            })
+            .collect();
+        let namespace_imports = imports
+            .iter()
+            .filter(|import| {
+                !import.is_type_only
+                    && import.imported_name == ImportedName::Namespace
+                    && !is_schema_module_import(import)
+                    && !is_http_api_schema_module_import(import)
+            })
+            .filter_map(|import| {
+                crate::binding_references::admitted_import_symbol(semantic, import)
+                    .map(|symbol| (symbol, import.local_name.clone()))
             })
             .collect();
         let imports = imports
@@ -238,11 +324,13 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
             namespaces,
             http_api_namespaces,
             imports,
+            namespace_imports,
             locals: FxHashMap::default(),
             local_names: FxHashMap::default(),
             helpers: RefCell::new(FxHashMap::default()),
             helper_locals: RefCell::new(FxHashMap::default()),
-            helpers_in_progress: RefCell::new(FxHashSet::default()),
+            in_progress: RefCell::new(FxHashSet::default()),
+            containers: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -273,55 +361,41 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
 
     /// The shape when the expression evaluates to a schema.
     pub fn expression_shape(&self, expression: &Expression<'a>) -> Option<SchemaShape> {
+        if let Expression::ConditionalExpression(conditional) = unwrap(expression) {
+            let consequent = self.expression_shape(&conditional.consequent)?;
+            return consequent.join(self.expression_shape(&conditional.alternate)?);
+        }
         self.schema_chain(expression, is_schema_constructor)
     }
 
-    /// Walk a chain of calls and static members to its root identifier.
+    /// Walk a chain of calls and members to its root identifier.
     /// `accepts_head` checks the member read directly off the `Schema` binding.
     fn schema_chain(
         &self,
         expression: &Expression<'a>,
         accepts_head: fn(&str) -> bool,
     ) -> Option<SchemaShape> {
-        if self.namespaces.is_empty() && self.imports.is_empty() {
+        if self.namespaces.is_empty()
+            && self.imports.is_empty()
+            && self.namespace_imports.is_empty()
+        {
             return None;
         }
-        let mut members: Vec<&str> = Vec::new();
-        // The count of calls directly on the root: 1 for `root()` and
-        // `root().pipe(...)`, 0 for `root.pipe(...)`, 2 for `root()()`.
-        let mut root_calls = 0_u32;
-        let mut current = expression;
-        let root = loop {
-            current = match unwrap(current) {
-                Expression::CallExpression(call) => {
-                    root_calls += 1;
-                    if is_pipe_call(&call.callee)
-                        && !call
-                            .arguments
-                            .iter()
-                            .all(|argument| self.is_pipe_transform(argument))
-                    {
-                        return None;
-                    }
-                    &call.callee
-                }
-                Expression::StaticMemberExpression(member) => {
-                    members.push(member.property.name.as_str());
-                    root_calls = 0;
-                    &member.object
-                }
-                Expression::Identifier(identifier) => break identifier,
-                _ => return None,
-            };
-        };
+        let (root, links) = self.flatten(expression)?;
         let symbol = self.symbol(root)?;
         if self.namespaces.contains(&symbol) {
-            let (head, rest) = members.split_last()?;
-            return (accepts_head(head)
-                && rest.iter().all(|method| SCHEMA_METHODS.contains(method)))
-            .then_some(SchemaShape::Known);
+            let Some((Link::Member(head), rest)) = links.split_first() else {
+                return None;
+            };
+            return (accepts_head(head) && is_schema_tail(rest)).then_some(SchemaShape::Known);
         }
-        if !members.iter().all(|method| SCHEMA_METHODS.contains(method)) {
+        if let Some(local) = self.namespace_imports.get(&symbol) {
+            return namespace_member_shape(local, &links);
+        }
+        if self.is_container(symbol) {
+            return self.container_chain(symbol, &links);
+        }
+        if !is_schema_tail(&links) {
             return None;
         }
         if let Some(shape) = self.locals.get(&symbol) {
@@ -330,17 +404,63 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
         if let Some(shape) = self.helper_locals.borrow().get(&symbol) {
             return Some(shape.clone());
         }
-        let through_call = root_calls == 1;
+        // The count of calls directly on the root: 1 for `root()` and
+        // `root().pipe(...)`, 0 for `root.pipe(...)`, 2 for `root()()`.
+        let root_calls = links
+            .iter()
+            .take_while(|link| matches!(link, Link::Call(_)))
+            .count();
         if let Some(local) = self.imports.get(&symbol) {
             return Some(SchemaShape::Derived {
                 import_local: local.clone(),
-                through_call,
+                through_call: root_calls == 1,
+                member: None,
             });
         }
-        if through_call {
-            return self.helper_call_shape(symbol);
+        match links.first() {
+            Some(Link::Call(call)) if root_calls == 1 => {
+                self.helper_call_shape(symbol, &call.arguments)
+            }
+            _ => None,
         }
-        None
+    }
+
+    /// The root identifier of a chain and its links from the root outward.
+    /// A `pipe` call with an argument that is not a transform ends the walk.
+    fn flatten<'e>(
+        &self,
+        expression: &'e Expression<'a>,
+    ) -> Option<(&'e IdentifierReference<'a>, Vec<Link<'e, 'a>>)> {
+        let mut links = Vec::new();
+        let mut current = expression;
+        let root = loop {
+            current = match unwrap(current) {
+                Expression::CallExpression(call) => {
+                    if is_pipe_call(&call.callee)
+                        && !call
+                            .arguments
+                            .iter()
+                            .all(|argument| self.is_pipe_transform(argument))
+                    {
+                        return None;
+                    }
+                    links.push(Link::Call(call));
+                    &call.callee
+                }
+                Expression::StaticMemberExpression(member) => {
+                    links.push(Link::Member(member.property.name.as_str()));
+                    &member.object
+                }
+                Expression::ComputedMemberExpression(member) => {
+                    links.push(Link::Key(literal_key(&member.expression)?));
+                    &member.object
+                }
+                Expression::Identifier(identifier) => break identifier,
+                _ => return None,
+            };
+        };
+        links.reverse();
+        Some((root, links))
     }
 
     /// True when a `pipe` argument is a `Schema` transform: a call such as
@@ -374,8 +494,41 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
         known && self.namespaces.contains(&symbol)
     }
 
+    /// Run `inspect` unless the node that starts at `key` is already under
+    /// inspection, or the inspection is [`helpers::MAX_HELPER_DEPTH`] deep.
+    fn guarded<T>(&self, key: u32, inspect: impl FnOnce() -> Option<T>) -> Option<T> {
+        if self.in_progress.borrow().len() >= helpers::MAX_HELPER_DEPTH
+            || !self.in_progress.borrow_mut().insert(key)
+        {
+            return None;
+        }
+        let result = inspect();
+        self.in_progress.borrow_mut().remove(&key);
+        result
+    }
+
     fn symbol(&self, identifier: &IdentifierReference<'a>) -> Option<SymbolId> {
         let reference = identifier.reference_id.get()?;
         self.semantic.scoping().get_reference(reference).symbol_id()
     }
+}
+
+/// The shape of a chain on the namespace import `local`: its first link reads
+/// the export, and an optional call of that export follows.
+fn namespace_member_shape(local: &str, links: &[Link<'_, '_>]) -> Option<SchemaShape> {
+    let Some((Link::Member(member), rest)) = links.split_first() else {
+        return None;
+    };
+    let (through_call, rest) = match rest.split_first() {
+        Some((Link::Call(_), tail)) => (true, tail),
+        _ => (false, rest),
+    };
+    if matches!(rest.first(), Some(Link::Call(_))) || !is_schema_tail(rest) {
+        return None;
+    }
+    Some(SchemaShape::Derived {
+        import_local: local.to_string(),
+        through_call,
+        member: Some((*member).to_string()),
+    })
 }

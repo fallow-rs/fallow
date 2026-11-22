@@ -294,7 +294,11 @@ pub struct EffectConfig {
     /// `return` of the function is a schema (`const makeUser = () =>
     /// Schema.Struct({...})`, then `export const User = makeUser()`). The
     /// function can be in the same module or in an imported module. The
-    /// export of the function itself stays an unused export.
+    /// export of the function itself stays an unused export. A conditional
+    /// expression whose two branches are schemas, a member of a namespace
+    /// import, a call of a function that returns a schema argument, a member
+    /// of a local `const` object or array literal, and a destructured export
+    /// of such a member also count.
     /// `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.
     /// Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -571,7 +575,7 @@ pub struct FallowConfig {
     pub circular_dependencies: CircularDependenciesConfig,
 
     #[serde(default, skip_serializing_if = "EffectConfig::is_default")]
-    /// Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ "schemaExportsAsTypes": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand("Id"))`) as an unused type under the `unused-types` rule, not as an unused export, so `"unused-types": "off"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand("Id"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. A call of a function whose each `return` is a schema also counts (`export const User = makeUser()`), for a function of the same module or of an imported module. Default `false` leaves every report unchanged.
+    /// Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ "schemaExportsAsTypes": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand("Id"))`) as an unused type under the `unused-types` rule, not as an unused export, so `"unused-types": "off"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand("Id"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. A call of a function whose each `return` is a schema also counts (`export const User = makeUser()`), for a function of the same module or of an imported module. A conditional expression whose two branches are schemas (`flag ? Schema.String : Schema.Number`), a member of a namespace import (`Imported.makeUser()`), a call of a function that returns its schema argument (`identity(Schema.String)`), a member of a local `const` object or array literal (`schemas[0]`, `factories.make()`) and a destructured export of such a member also count. Default `false` leaves every report unchanged.
     pub effect: EffectConfig,
 
     /// Configures architecture boundary enforcement: which source directories belong to which named zone and which zones may import which others, reported as boundary-violation, boundary-coverage-violation, and boundary-call-violation findings (severity via rules.boundary-violation, default error). Set to enforce a layered/module architecture; the object holds `preset` (one of layered, hexagonal, feature-sliced, bulletproof, whose default zones/rules are merged in with the user-declared zones/rules taking precedence), `zones` (each with `name`, `patterns`, `autoDiscover`, optional `root`), `rules` (each with `from`, `allow`, `allowTypeOnly` target-zone lists), `coverage` (`requireAllFiles` plus `allowUnmatched` globs for files matching no zone), and `calls` (a `forbidden` list of `{from, callee}` banned-call rules per zone).

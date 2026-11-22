@@ -4,6 +4,7 @@ import "./collide";
 import "./default-alias";
 import "./default-derived";
 import "./default-forward";
+import "./forms";
 import "./helper-consumer";
 import "./helpers";
 import "./http-api";
