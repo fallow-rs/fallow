@@ -34,6 +34,7 @@ import {
   type ComplexityToggleTarget,
 } from "./complexityLens.js";
 import {
+  applyFixes,
   runAnalysis,
   runAudit,
   runFix,
@@ -864,16 +865,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.fix", async () => {
-      // Save dirty editors first so the fix works on up-to-date content
-      await vscode.workspace.saveAll(false);
-      await runFix(context, false);
-      // Restart LSP to force fresh analysis. The fix modified files on disk
-      // bypassing VS Code's editor, so did_save never fires for those files
-      await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
-      // Re-run CLI analysis for tree views
-      cliAnalysisRan = await triggerCliAnalysis({ force: true });
-    }),
+    vscode.commands.registerCommand("fallow.fix", () =>
+      applyFixes(context, async () => {
+        // Restart LSP to force fresh analysis. The fix modified files on disk
+        // bypassing VS Code's editor, so did_save never fires for those files
+        await restartClient(context, outputChannel, diagnosticFilter, onAnalysisComplete);
+        cliAnalysisRan = await triggerCliAnalysis({ force: true });
+      }),
+    ),
   );
 
   context.subscriptions.push(

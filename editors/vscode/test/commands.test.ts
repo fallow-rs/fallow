@@ -68,6 +68,7 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     workspaceFolders: undefined,
+    saveAll: vi.fn(async () => true),
     getWorkspaceFolder: vi.fn((uri: { readonly fsPath: string }) => {
       const workspace = mockWorkspace as {
         readonly workspaceFolders:
@@ -160,6 +161,7 @@ import {
   runAnalysis,
   runAudit,
   runFix,
+  applyFixes,
   runHealthAnalysis,
   resetHealthNoWorkspaceWarning,
   healthInputKey,
@@ -1146,6 +1148,119 @@ describe("runAudit type-aware compatibility", () => {
       setWorkspaceRoot(null);
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("applyFixes", () => {
+  const writeFixScript = async (dir: string, logPath: string): Promise<string> => {
+    const script = join(dir, "fallow-cli.js");
+    await writeFile(
+      script,
+      [
+        "#!/usr/bin/env node",
+        'const fs = require("node:fs");',
+        `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
+        "process.stdout.write(JSON.stringify({ dry_run: false, fixes: [], total_fixed: 0 }));",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(script, 0o755);
+    return script;
+  };
+
+  const withFixWorkspace = async (body: (logPath: string) => Promise<void>): Promise<void> => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-apply-fix-"));
+    const logPath = join(dir, "spawn.log");
+    try {
+      const script = await writeFixScript(dir, logPath);
+      mockPathBinary = script;
+      mockBinaryVersions = { [script]: "3.9.2" };
+      setWorkspaceRoot(dir);
+      await body(logPath);
+    } finally {
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  const spawnCount = async (logPath: string): Promise<number> =>
+    (await readFile(logPath, "utf8").catch(() => "")).split("\n").filter(Boolean).length;
+
+  beforeEach(() => {
+    mockLspPath = "";
+    mockLocalBinary = null;
+    mockPathBinary = null;
+    mockInstalledCli = null;
+    mockDownloadedCli = null;
+    mockExtensionVersion = null;
+    mockBinaryVersions = {};
+    mockAutoDownload = false;
+    resetBinarySkewToast();
+    vi.clearAllMocks();
+  });
+
+  it("saves nothing and refreshes nothing when the user declines", async () => {
+    await withFixWorkspace(async (logPath) => {
+      vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("No" as never);
+      const refresh = vi.fn(async () => undefined);
+
+      await applyFixes(workspaceContext, refresh);
+
+      expect(mockWorkspace.saveAll).not.toHaveBeenCalled();
+      expect(await spawnCount(logPath)).toBe(0);
+      expect(refresh).not.toHaveBeenCalled();
+    });
+  });
+
+  it("applies no fix and refreshes nothing when a file cannot be saved", async () => {
+    await withFixWorkspace(async (logPath) => {
+      vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("Yes" as never);
+      vi.mocked(mockWorkspace.saveAll).mockResolvedValueOnce(false);
+      const refresh = vi.fn(async () => undefined);
+
+      await applyFixes(workspaceContext, refresh);
+
+      expect(await spawnCount(logPath)).toBe(0);
+      expect(refresh).not.toHaveBeenCalled();
+      expect(mockWindow.showWarningMessage).toHaveBeenLastCalledWith(
+        "Fallow: not all files could be saved. No fixes were applied.",
+      );
+    });
+  });
+
+  it("refreshes after a fix run that failed, since it can have changed files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-apply-fix-fail-"));
+    try {
+      const script = join(dir, "fallow-cli.js");
+      await writeFile(script, "#!/usr/bin/env node\nprocess.stdout.write('not json');\n", "utf8");
+      await chmod(script, 0o755);
+      mockPathBinary = script;
+      mockBinaryVersions = { [script]: "3.9.2" };
+      setWorkspaceRoot(dir);
+      vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("Yes" as never);
+      const refresh = vi.fn(async () => undefined);
+
+      await applyFixes(workspaceContext, refresh);
+
+      expect(mockWindow.showErrorMessage).toHaveBeenCalledOnce();
+      expect(refresh).toHaveBeenCalledOnce();
+    } finally {
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("saves, applies the fix, and refreshes after the user confirms", async () => {
+    await withFixWorkspace(async (logPath) => {
+      vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("Yes" as never);
+      const refresh = vi.fn(async () => undefined);
+
+      await applyFixes(workspaceContext, refresh);
+
+      expect(mockWorkspace.saveAll).toHaveBeenCalledWith(false);
+      expect(await spawnCount(logPath)).toBe(1);
+      expect(refresh).toHaveBeenCalledOnce();
+    });
   });
 });
 

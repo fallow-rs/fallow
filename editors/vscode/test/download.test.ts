@@ -368,6 +368,17 @@ describe("getInstalledBinaryPath", () => {
     expect(mockFiles[versionPath]).toBe("2.26.0");
   });
 
+  it("keeps an unverified binary while another window holds the install lock", async () => {
+    mockFiles[lspPath] = binaryBytes;
+    mockFiles[lspSigPath] = signatureBytes;
+    mockFiles[path.join(binDir, ".install.lock")] = "4242";
+    mockSignatureValid = false;
+
+    expect(await getInstalledBinaryPath(fakeContext)).toBeNull();
+    expect(mockFiles[lspPath]).toBe(binaryBytes);
+    expect(mockFiles[lspSigPath]).toBe(signatureBytes);
+  });
+
   it("does not fall back to digest markers when a signature file is present but invalid", async () => {
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
@@ -450,7 +461,8 @@ describe("getInstalledCliPath", () => {
 });
 
 describe("sweepOrphanTempFiles", () => {
-  // A pid that is NOT this process: such temps are crash orphans, never live.
+  // A pid that is NOT this process. The tests that delete its temps stub
+  // `process.kill` to report that no such process runs.
   const orphanPid = process.pid + 1;
   const orphanBinary = path.join(binDir, `.fallow-lsp.${orphanPid}.1.tmp`);
   const orphanSig = `${orphanBinary}.sig`;
@@ -460,7 +472,16 @@ describe("sweepOrphanTempFiles", () => {
     mockFiles = {};
   });
 
-  it("unlinks orphaned temp binaries and their sidecars from a crashed download", () => {
+  it("unlinks orphaned temp binaries and their sidecars from a crashed download", ({
+    onTestFinished,
+  }) => {
+    const kill = vi.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid === orphanPid) {
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      }
+      return true;
+    });
+    onTestFinished(() => kill.mockRestore());
     mockFiles[orphanBinary] = binaryBytes;
     mockFiles[orphanSig] = signatureBytes;
     mockFiles[orphanDigest] = digestHex;
@@ -472,7 +493,13 @@ describe("sweepOrphanTempFiles", () => {
     expect(orphanDigest in mockFiles).toBe(false);
   });
 
-  it("spares installed binaries, sidecars, the version marker, and the lock", () => {
+  it("spares installed binaries, sidecars, the version marker, and the lock", ({
+    onTestFinished,
+  }) => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+    });
+    onTestFinished(() => kill.mockRestore());
     mockFiles[lspPath] = binaryBytes;
     mockFiles[lspSigPath] = signatureBytes;
     mockFiles[cliPath] = binaryBytes;
@@ -503,6 +530,39 @@ describe("sweepOrphanTempFiles", () => {
 
     expect(liveBinary in mockFiles).toBe(true);
     expect(liveSig in mockFiles).toBe(true);
+  });
+
+  it("spares the live temp files of another window", () => {
+    const siblingBinary = path.join(binDir, `.fallow.${process.ppid}.1.tmp`);
+    const siblingSig = `${siblingBinary}.sig`;
+    mockFiles[siblingBinary] = binaryBytes;
+    mockFiles[siblingSig] = signatureBytes;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(siblingBinary in mockFiles).toBe(true);
+    expect(siblingSig in mockFiles).toBe(true);
+  });
+
+  it("spares the temp files of a running process of another user", ({ onTestFinished }) => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+    onTestFinished(() => kill.mockRestore());
+    mockFiles[orphanBinary] = binaryBytes;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(orphanBinary in mockFiles).toBe(true);
+  });
+
+  it("treats pid 0 as an orphan, since it names no download", () => {
+    const pidZero = path.join(binDir, ".fallow.0.1.tmp");
+    mockFiles[pidZero] = binaryBytes;
+
+    sweepOrphanTempFiles(binDir);
+
+    expect(pidZero in mockFiles).toBe(false);
   });
 
   it("is a no-op when the bin directory cannot be read", () => {

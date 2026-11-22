@@ -643,6 +643,23 @@ const confirmApplyFixes = async (): Promise<boolean> => {
   return confirm === "Yes";
 };
 
+/**
+ * Ask for confirmation, then save all editors. The fix reads the files on
+ * disk, so it must not run over unsaved edits.
+ */
+const confirmAndSaveForFix = async (): Promise<boolean> => {
+  if (!(await confirmApplyFixes())) {
+    return false;
+  }
+  if (await vscode.workspace.saveAll(false)) {
+    return true;
+  }
+  void vscode.window.showWarningMessage(
+    "Fallow: not all files could be saved. No fixes were applied.",
+  );
+  return false;
+};
+
 const openFixLocation = async (root: string, fix: FixAction | undefined): Promise<void> => {
   if (!fix) {
     return;
@@ -1092,9 +1109,15 @@ export const runInspectActiveSymbol = async (
   return runInspectActiveFile(context, outputChannel, symbol);
 };
 
+/**
+ * Run `fallow fix`. An apply run asks for confirmation and saves all editors
+ * first. `afterRun` runs once the CLI was started, also when it failed, since
+ * a failed apply run can have changed files before it stopped.
+ */
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
+  afterRun?: () => Promise<void>,
 ): Promise<FallowFixResult | null> => {
   const root = getWorkspaceRoot();
   if (!root) {
@@ -1102,7 +1125,7 @@ export const runFix = async (
     return null;
   }
 
-  if (!dryRun && !(await confirmApplyFixes())) {
+  if (!dryRun && !(await confirmAndSaveForFix())) {
     return null;
   }
 
@@ -1141,7 +1164,20 @@ export const runFix = async (
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
     return null;
+  } finally {
+    await afterRun?.();
   }
+};
+
+/**
+ * Apply fixes, then call `refresh` when the CLI ran. A declined confirmation
+ * or a failed save changes no file on disk, so it skips the refresh.
+ */
+export const applyFixes = async (
+  context: vscode.ExtensionContext,
+  refresh: () => Promise<void>,
+): Promise<void> => {
+  await runFix(context, false, refresh);
 };
 
 /**

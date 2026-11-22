@@ -245,15 +245,33 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
 const ORPHAN_TEMP_RE = /^\..+\.(\d+)\.\d+\.tmp(?:\.sig|\.sha256|\.target)?$/;
 
 /**
+ * Whether a process with this pid runs on this host. `kill(pid, 0)` sends no
+ * signal: it fails with ESRCH for a pid that does not exist, and with EPERM for
+ * a process of another user, which still runs. Pid 0 addresses the process
+ * group, so it never names a download. The windows that share one global
+ * storage folder run on one host, so their pids are comparable.
+ */
+const isProcessRunning = (pid: number): boolean => {
+  if (pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+/**
  * Remove temp files left behind by a download that died (SIGKILL / crash /
  * reboot) between writing the temp file and renaming it into place. The
  * try/catch cleanup in `downloadAsset` only runs when the JS runtime reaches it,
- * so a hard kill leaks the temp permanently. Skip temps tagged with the current
- * pid: those may be a live in-flight download in this same process (sweeping
- * runs outside the install lock), and a running pid is never a crash orphan.
+ * so a hard kill leaks the temp permanently. The sweep runs outside the install
+ * lock, so it spares each temp whose owner pid still runs: that temp can be a
+ * live download of this window or of a sibling window.
  */
 export const sweepOrphanTempFiles = (dir: string): void => {
-  const livePid = String(process.pid);
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
@@ -263,7 +281,7 @@ export const sweepOrphanTempFiles = (dir: string): void => {
   }
   for (const entry of entries) {
     const match = ORPHAN_TEMP_RE.exec(entry);
-    if (!match || match[1] === livePid) {
+    if (!match || isProcessRunning(Number(match[1]))) {
       continue;
     }
     try {
@@ -340,6 +358,12 @@ const isInstallLockStale = (lockPath: string): boolean => {
   }
 };
 
+/** An install in this window or a sibling window holds a live lock on this folder. */
+const isInstallInProgress = (dir: string): boolean => {
+  const lockPath = getLockPath(dir);
+  return fs.existsSync(lockPath) && !isInstallLockStale(lockPath);
+};
+
 /**
  * Run `fn` while holding the cross-process install lock. Waits for a live sibling
  * to finish, steals a stale or long-overdue lock to guarantee progress, and
@@ -399,6 +423,39 @@ const publishSidecar = (tempPath: string, finalPath: string): void => {
 };
 
 /**
+ * Copy a published sidecar before an upgrade replaces it. A copy, not a move,
+ * keeps the installed binary verifiable if the process dies before the publish.
+ */
+const backUpSidecar = (finalPath: string, backupPath: string): void => {
+  if (fs.existsSync(finalPath)) {
+    fs.copyFileSync(finalPath, backupPath);
+  }
+};
+
+const readBytes = (filePath: string): Buffer => Buffer.from(fs.readFileSync(filePath));
+
+/**
+ * Undo the publish of one sidecar after the binary failed to land. Without a
+ * backup, no sidecar existed before, so the new one describes a binary that
+ * is not there. A sibling window that installs at the same time (after a
+ * stolen lock) can have published its own sidecar since; that one stays.
+ */
+const restoreSidecar = (backupPath: string, finalPath: string, published: Buffer): void => {
+  try {
+    if (fs.existsSync(finalPath) && !readBytes(finalPath).equals(published)) {
+      return;
+    }
+    if (fs.existsSync(backupPath)) {
+      publishSidecar(backupPath, finalPath);
+    } else if (fs.existsSync(finalPath)) {
+      fs.unlinkSync(finalPath);
+    }
+  } catch {
+    // Best-effort: an untrusted leftover only triggers a fresh download.
+  }
+};
+
+/**
  * Atomically move a verified temp binary onto its final path. If the rename fails
  * because the target is locked (a sibling window's running LSP on Windows) but the
  * on-disk binary is already byte-identical to what we just verified, treat it as a
@@ -426,22 +483,26 @@ const getDigestPath = (binaryPath: string): string => `${binaryPath}${SHA256_SUF
 
 const getTargetPath = (binaryPath: string): string => `${binaryPath}${TARGET_SUFFIX}`;
 
-const purgeManagedBinary = (binaryPath: string): void => {
-  for (const candidate of [
-    binaryPath,
-    getSignaturePath(binaryPath),
-    getDigestPath(binaryPath),
-    getTargetPath(binaryPath),
-  ]) {
+const removeFiles = (paths: string[]): void => {
+  for (const candidate of paths) {
     try {
       if (fs.existsSync(candidate)) {
         fs.unlinkSync(candidate);
       }
     } catch {
-      // Best-effort cleanup.
+      // Best-effort: a leftover temp file matches ORPHAN_TEMP_RE, so the next
+      // orphan cleanup removes it.
     }
   }
 };
+
+const purgeManagedBinary = (binaryPath: string): void =>
+  removeFiles([
+    binaryPath,
+    getSignaturePath(binaryPath),
+    getDigestPath(binaryPath),
+    getTargetPath(binaryPath),
+  ]);
 
 export const writeVersionMarker = (dir: string, version: string): void => {
   try {
@@ -536,7 +597,11 @@ const ensureManagedBinaryTrusted = (
     ? "failed Ed25519 signature verification"
     : "has no Ed25519 signature";
   outputChannel?.appendLine(`Fallow: installed ${label} binary ${reason}. Re-downloading.`);
-  purgeManagedBinary(binaryPath);
+  // While a sibling window installs, the binary and its signature can briefly
+  // disagree. Leave the files to that install instead of deleting its result.
+  if (!isInstallInProgress(path.dirname(binaryPath))) {
+    purgeManagedBinary(binaryPath);
+  }
   return false;
 };
 
@@ -841,9 +906,15 @@ const downloadAsset = async (
   const tempBinary = uniqueTempPath(dir, binaryName);
   const tempSignature = getSignaturePath(tempBinary);
   const tempTarget = getTargetPath(tempBinary);
-  // Track whether we replaced the final sidecars so a later failure can roll
-  // them back instead of leaving a sidecar that points at a missing binary.
-  let sidecarsPublished = false;
+  const backupBase = uniqueTempPath(dir, binaryName);
+  const sidecars = [
+    { temp: tempSignature, final: signaturePath, backup: getSignaturePath(backupBase) },
+    { temp: tempTarget, final: targetPath, backup: getTargetPath(backupBase) },
+  ];
+  // The sidecars that this attempt published, with their bytes. A failure
+  // puts the backups back, so the installed binary keeps the signature and
+  // target that verify it.
+  const replaced: Array<(typeof sidecars)[number] & { published: Buffer }> = [];
 
   try {
     await httpsDownload(asset.browser_download_url, tempBinary, signal);
@@ -863,36 +934,27 @@ const downloadAsset = async (
 
     // Publish sidecars to their final paths BEFORE the binary, then rename the
     // binary last. A reader in another window gates on the binary existing, so
-    // it never observes a binary without its signature.
-    publishSidecar(tempSignature, signaturePath);
-    if (fs.existsSync(digestPath)) {
-      fs.unlinkSync(digestPath);
-    }
+    // it never observes a binary without its signature. Each old sidecar is
+    // copied first, so a failed rename can put it back.
     fs.writeFileSync(tempTarget, target, "utf-8");
-    publishSidecar(tempTarget, targetPath);
-    sidecarsPublished = true;
+    for (const sidecar of sidecars) {
+      backUpSidecar(sidecar.final, sidecar.backup);
+      const published = readBytes(sidecar.temp);
+      replaced.push({ ...sidecar, published });
+      publishSidecar(sidecar.temp, sidecar.final);
+    }
 
     renameIntoPlace(tempBinary, destPath);
+    removeFiles([digestPath]);
   } catch (error) {
-    const candidates = [tempBinary, tempSignature, tempTarget];
-    // If we published sidecars but the binary never landed, the final sidecars
-    // now describe a missing binary; roll them back so the next activation does
-    // not reuse or trip over an orphan marker.
-    if (sidecarsPublished) {
-      candidates.push(signaturePath, targetPath);
+    for (const sidecar of replaced) {
+      restoreSidecar(sidecar.backup, sidecar.final, sidecar.published);
     }
-    for (const candidate of candidates) {
-      try {
-        if (fs.existsSync(candidate)) {
-          fs.unlinkSync(candidate);
-        }
-      } catch {
-        // Best-effort cleanup on failed downloads.
-      }
-    }
+    removeFiles([tempBinary, tempSignature, tempTarget]);
     throw error;
   }
 
+  removeFiles(sidecars.map((sidecar) => sidecar.backup));
   return destPath;
 };
 
