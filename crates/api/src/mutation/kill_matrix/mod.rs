@@ -31,7 +31,10 @@ pub enum Mode<'a> {
     /// No kill matrix: normal mode.
     Disabled,
     /// `--kill-matrix`: each covering test runs without bail.
-    Full,
+    Full {
+        /// The test ids that the dry run reports more than one time.
+        duplicate_ids: &'a [String],
+    },
     /// `--kill-matrix-for`: the given targets and the dry-run tests that
     /// they select. The selection is empty when no dry run happened.
     Targets {
@@ -54,7 +57,14 @@ pub fn build(
     let test_files = test_files.unwrap_or(&empty_files);
     match mode {
         Mode::Disabled => MutationKillMatrix::default(),
-        Mode::Full => build_full(results, baseline, completion, planned, test_files),
+        Mode::Full { duplicate_ids } => build_full(
+            results,
+            baseline,
+            completion,
+            planned,
+            test_files,
+            duplicate_ids,
+        ),
         Mode::Targets {
             requested,
             resolved,
@@ -82,6 +92,7 @@ fn build_full(
     completion: &MutationCompletion,
     planned: &[PlannedMutant],
     test_files: &FxHashMap<String, String>,
+    duplicate_ids: &[String],
 ) -> MutationKillMatrix {
     let evidence = observe(results, baseline, test_files);
     let mut reasons = BTreeSet::new();
@@ -98,10 +109,23 @@ fn build_full(
         reasons.insert("missing-test-file-metadata".to_owned());
     }
     let complete = reasons.is_empty();
-    let tests = rows(&evidence, planned, test_files, complete);
+    // The runner numbers tests that share a title in report order, so the
+    // kills of a duplicate id can belong to its twin. Such a row stays as
+    // evidence, but it never supports a redundancy claim.
+    let duplicates: BTreeSet<&str> = duplicate_ids.iter().map(String::as_str).collect();
+    let mut tests = rows(&evidence, planned, test_files, complete);
+    for row in &mut tests {
+        row.subsuming_tests
+            .retain(|test| !duplicates.contains(test.as_str()));
+    }
     let candidates = tests
         .iter()
-        .filter(|row| complete && !row.kills.is_empty() && row.unique_kills.is_empty())
+        .filter(|row| {
+            complete
+                && !row.kills.is_empty()
+                && row.unique_kills.is_empty()
+                && !duplicates.contains(row.test_id.as_str())
+        })
         .map(|row| row.test_id.clone())
         .collect();
     let coverage_without_kills = tests
@@ -302,7 +326,11 @@ mod tests {
     use fallow_output::{MutantLocation, MutantStatus};
 
     const fn mode(enabled: bool) -> Mode<'static> {
-        if enabled { Mode::Full } else { Mode::Disabled }
+        if enabled {
+            Mode::Full { duplicate_ids: &[] }
+        } else {
+            Mode::Disabled
+        }
     }
 
     fn build(
@@ -484,7 +512,7 @@ mod tests {
         ]);
         let completion = MutationCompletion::from_reasons(Vec::new());
         let valid = super::build(
-            &Mode::Full,
+            &Mode::Full { duplicate_ids: &[] },
             &[mutant.clone()],
             &[],
             &completion,
@@ -507,7 +535,7 @@ mod tests {
             mutant_ids: Vec::new(),
         };
         let excluded = super::build(
-            &Mode::Full,
+            &Mode::Full { duplicate_ids: &[] },
             &[mutant],
             &[failure],
             &completion,
@@ -539,7 +567,7 @@ mod tests {
         ]);
         let completion = MutationCompletion::from_reasons(Vec::new());
         let valid = super::build(
-            &Mode::Full,
+            &Mode::Full { duplicate_ids: &[] },
             &[mutant.clone()],
             &[],
             &completion,
@@ -547,10 +575,63 @@ mod tests {
             Some(&files),
         );
         assert_eq!(valid.candidates, [first, second]);
-        let unavailable = super::build(&Mode::Full, &[mutant], &[], &completion, &[], None);
+        let unavailable = super::build(
+            &Mode::Full { duplicate_ids: &[] },
+            &[mutant],
+            &[],
+            &completion,
+            &[],
+            None,
+        );
         assert_eq!(unavailable.status, MutationKillMatrixStatus::Incomplete);
         assert_eq!(unavailable.reasons, ["missing-test-file-metadata"]);
         assert!(unavailable.tests.is_empty());
         assert!(unavailable.candidates.is_empty());
+    }
+
+    /// The runner numbers tests that share a title in report order, so the
+    /// kills of `b` can belong to its twin. `b` is no candidate, and no other
+    /// row names it as a subsuming test.
+    #[test]
+    fn a_duplicate_test_id_is_no_candidate_and_no_subsuming_test() {
+        let duplicates = ["test/b.ts::b".to_owned()];
+        let files = FxHashMap::from_iter([
+            ("test/a.ts::a".to_owned(), "test/a.ts".to_owned()),
+            ("test/b.ts::b".to_owned(), "test/b.ts".to_owned()),
+            ("test/c.ts::c".to_owned(), "test/c.ts".to_owned()),
+        ]);
+        let matrix = super::build(
+            &Mode::Full {
+                duplicate_ids: &duplicates,
+            },
+            &[
+                result(
+                    "m1",
+                    MutantStatus::Killed,
+                    &["test/a.ts::a", "test/b.ts::b"],
+                ),
+                result(
+                    "m2",
+                    MutantStatus::Killed,
+                    &["test/b.ts::b", "test/c.ts::c"],
+                ),
+            ],
+            &[],
+            &MutationCompletion::from_reasons(Vec::new()),
+            &[],
+            Some(&files),
+        );
+        assert_eq!(matrix.status, MutationKillMatrixStatus::Complete);
+        assert_eq!(matrix.candidates, ["test/a.ts::a", "test/c.ts::c"]);
+        assert_eq!(matrix.tests[1].test_id, "test/b.ts::b");
+        assert_eq!(matrix.tests[1].kills, ["m1", "m2"]);
+        assert!(
+            matrix.tests.iter().all(|row| !row
+                .subsuming_tests
+                .iter()
+                .any(|test| duplicates.contains(test))),
+            "{:?}",
+            matrix.tests
+        );
     }
 }
