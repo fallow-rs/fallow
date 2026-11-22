@@ -410,7 +410,7 @@ impl<'a> ExposedNameSearch<'a> {
             &mut may_reach,
             modules
                 .iter()
-                .filter(|m| m.is_entry_point())
+                .filter(|m| m.exposes_entry_surface())
                 .map(|m| m.file_id)
                 .chain(whole_object_names.keys().copied()),
         );
@@ -511,7 +511,8 @@ impl<'a> ExposedNameSearch<'a> {
 /// graph cannot enumerate, with no further re-export hop needed.
 ///
 /// An entry point exposes every name it exports, `default` included: it is the
-/// public API. A closure member exposes what its own exposure allows. A name
+/// public API. An entry point that `includeEntryExports` covers exposes
+/// nothing here, because its exports need an importer in the project. A closure member exposes what its own exposure allows. A name
 /// some importer uses as a whole object is observed in full by that importer.
 fn exposes_here(
     graph: &ModuleGraph,
@@ -520,7 +521,7 @@ fn exposes_here(
     file: FileId,
     name: &str,
 ) -> bool {
-    graph.is_entry_point_file(file)
+    graph.exposes_entry_surface_file(file)
         || closure.exposes_name(file, name)
         || whole_object_names
             .get(&file)
@@ -876,11 +877,12 @@ impl ModuleGraph {
         false
     }
 
-    /// Whether the file is an entry point of this graph.
-    fn is_entry_point_file(&self, file_id: FileId) -> bool {
+    /// Whether the file is an entry point whose exports reach consumers that
+    /// the graph cannot list.
+    fn exposes_entry_surface_file(&self, file_id: FileId) -> bool {
         self.modules
             .get(file_id.0 as usize)
-            .is_some_and(super::types::ModuleNode::is_entry_point)
+            .is_some_and(super::types::ModuleNode::exposes_entry_surface)
     }
 
     /// Extend `targets` with every module its members reach through plain

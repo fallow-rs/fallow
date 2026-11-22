@@ -852,6 +852,22 @@ name behind its star, so `EntryStarCredit`
 `ignoreExports`, plugin `usedExports` and config-file credit rules of the
 entry file to the files that its plain `export *` chains reach.
 
+The same set limits Phase 2c (`namespace_re_exports.rs`) and the exposed
+namespace closure. `ModuleNode::exposes_entry_surface` is false for an entry
+point that the option covers, so its `export * as Name` lines credit only the
+members that consumers read (issue #5053). An entry point that a dynamic
+import, an import pattern or a `require()` loads stays unmarked
+(`ModuleGraph::index_exports`), because Phase 2c reads only static ES import
+bindings. Phase 2c reads the member accesses
+and the `NamespaceMemberUse` facts of each consumer binding. A nested chain
+(`Name.Inner.x`) moves to the source of the namespace object that each
+segment resolves to. A chain that `import * as Root` starts
+(`Root.Name.x`) counts when its first segment is the re-exported name. An
+escaped value or a computed key credits every export at that point and
+every export behind its `export *` and `export * as` lines.
+`EntryStarCredit` gives an `ignoreExports` rule that covers `Name` every
+export of the files behind `Name`.
+
 In production mode, a file that only user entry rules with an explicit
 `"entryPointRole": "support"` match (inline `framework[]` entries and plugin
 files) takes no part in dead-code analysis (issue #4068). A plugin that sets

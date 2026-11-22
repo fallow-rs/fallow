@@ -50,12 +50,30 @@ const FLAG_REACHABLE: u8 = 1 << 1;
 const FLAG_RUNTIME_REACHABLE: u8 = 1 << 2;
 const FLAG_TEST_REACHABLE: u8 = 1 << 3;
 const FLAG_CJS_EXPORTS: u8 = 1 << 4;
+const FLAG_CONSUMER_CHECKED: u8 = 1 << 5;
 
 impl ModuleNode {
     /// Whether this module is an entry point.
     #[inline]
     pub const fn is_entry_point(&self) -> bool {
         self.flags & FLAG_ENTRY_POINT != 0
+    }
+
+    /// Whether this module is an entry point whose exports reach consumers
+    /// that the graph cannot list, so each name it exports counts as used.
+    ///
+    /// An entry point that `includeEntryExports` covers is consumer-checked:
+    /// its exports need an importer in the project, like the exports of any
+    /// other module.
+    #[inline]
+    pub(crate) const fn exposes_entry_surface(&self) -> bool {
+        self.flags & FLAG_ENTRY_POINT != 0 && self.flags & FLAG_CONSUMER_CHECKED == 0
+    }
+
+    /// Mark this module as an entry point that `includeEntryExports` covers.
+    #[inline]
+    pub(crate) const fn set_consumer_checked(&mut self) {
+        self.flags |= FLAG_CONSUMER_CHECKED;
     }
 
     /// Whether the export `name` carries a visibility tag such as `@public`
