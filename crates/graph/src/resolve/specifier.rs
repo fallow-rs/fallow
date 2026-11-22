@@ -521,7 +521,13 @@ fn try_nearest_tsconfig_path_alias(
         let Some(paths) = merged.paths() else {
             continue;
         };
-        return try_tsconfig_paths_from_config(ctx, &merged, &paths, specifier, style_context);
+        // TypeScript tries `baseUrl` when `paths` resolves nothing.
+        if let Some(result) =
+            try_tsconfig_paths_from_config(ctx, &merged, &paths, specifier, style_context)
+        {
+            return Some(result);
+        }
+        break;
     }
     for tsconfig_path in chain.iter() {
         let Some(merged) = merged_tsconfig_cached(ctx, tsconfig_path) else {
@@ -542,42 +548,53 @@ fn try_tsconfig_paths_from_config(
     specifier: &str,
     style_context: bool,
 ) -> Option<ResolveResult> {
-    let mut matches: Vec<_> = paths
-        .patterns
-        .iter()
-        .filter_map(|(pattern, targets)| {
-            path_alias_capture(pattern, specifier)
-                .map(|capture| (pattern.as_str(), capture, targets))
-        })
-        .collect();
-    matches.sort_by_key(|(pattern, _, _)| std::cmp::Reverse(path_alias_specificity(pattern)));
+    let (_, capture, targets) = select_path_alias(paths.patterns, specifier)?;
+    let targets = targets.as_array()?;
 
     // Every target against `baseUrl` first, as TypeScript 5 resolves them,
     // then every target against the `paths` config folder.
     for base in paths.base_dirs() {
-        let arrays = matches.iter().filter_map(|(_, capture, targets)| {
-            targets.as_array().map(|targets| (capture, targets))
-        });
-        for (capture, targets) in arrays {
-            for target in targets.iter().filter_map(Value::as_str) {
-                let target = target.replacen('*', capture, 1);
-                let Some(absolute) = merged.resolve_path(&target, base) else {
-                    continue;
-                };
-                if let Some(result) = try_tsconfig_alias_target(ctx, &absolute, style_context) {
-                    return Some(result);
-                }
+        for target in targets.iter().filter_map(Value::as_str) {
+            let target = target.replacen('*', capture, 1);
+            let Some(absolute) = merged.resolve_path(&target, base) else {
+                continue;
+            };
+            if let Some(result) = try_tsconfig_alias_target(ctx, &absolute, style_context) {
+                return Some(result);
             }
         }
     }
     None
 }
 
-pub(super) fn path_alias_specificity(pattern: &str) -> usize {
-    match pattern.split_once('*') {
-        Some((prefix, suffix)) => prefix.len() + suffix.len(),
-        None => usize::MAX,
+/// The one `paths` pattern that TypeScript uses for `specifier`: an exact
+/// pattern, else the matching wildcard pattern with the longest prefix. The
+/// first pattern wins a tie. Returns the pattern, the wildcard capture and
+/// the target list.
+pub(super) fn select_path_alias<'p, 's>(
+    patterns: &'p serde_json::Map<String, Value>,
+    specifier: &'s str,
+) -> Option<(&'p str, &'s str, &'p Value)> {
+    let mut best: Option<(&'p str, &'s str, &'p Value)> = None;
+    for (pattern, targets) in patterns {
+        let Some(capture) = path_alias_capture(pattern, specifier) else {
+            continue;
+        };
+        if best.is_none_or(|(current, _, _)| {
+            path_alias_specificity(pattern) > path_alias_specificity(current)
+        }) {
+            best = Some((pattern.as_str(), capture, targets));
+        }
     }
+    best
+}
+
+/// The rank of a `paths` pattern: an exact pattern ranks first, then the
+/// length of the prefix before the wildcard, as in TypeScript.
+pub(super) fn path_alias_specificity(pattern: &str) -> usize {
+    pattern
+        .split_once('*')
+        .map_or(usize::MAX, |(prefix, _)| prefix.len())
 }
 
 fn try_tsconfig_base_url_from_config(
@@ -1734,6 +1751,10 @@ mod tsconfig_include_tests;
 mod tsconfig_extends_tests;
 
 #[cfg(test)]
+#[path = "specifier_tsconfig_paths_tests.rs"]
+mod tsconfig_paths_tests;
+
+#[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1754,8 +1775,7 @@ mod tests {
         is_js_ts_extension, is_node_modules_path, is_plain_css_file,
         is_safe_static_dir_relative_path, is_style_file, matches_nearest_tsconfig_path_alias,
         normalize_resolve_specifier, package_usage_name_for_external_bare_specifier,
-        path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
-        resolve_tsconfig_reference_path, serves_static_dir_mounts,
+        path_alias_pattern_matches, resolve_tsconfig_reference_path, serves_static_dir_mounts,
         should_preserve_node_modules_style_file, static_dir_relative_path, static_mount_url_path,
         with_appended_extension, with_exact_extension,
     };
@@ -1818,26 +1838,8 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_tsconfig_path_alias_capture_matches_middle() {
-        assert_eq!(
-            path_alias_capture("@/*", "@/components/Button"),
-            Some("components/Button")
-        );
-        assert_eq!(
-            path_alias_capture("@app/*/test", "@app/foo/bar/test"),
-            Some("foo/bar")
-        );
-        assert_eq!(path_alias_capture("@/*", "@"), None);
-    }
-
-    #[test]
     fn wildcard_only_tsconfig_path_alias_pattern_does_not_match_everything() {
         assert!(!path_alias_pattern_matches("*", "@gen/foo"));
-    }
-
-    #[test]
-    fn wildcard_only_tsconfig_path_alias_capture_can_resolve_targets() {
-        assert_eq!(path_alias_capture("*", "shared"), Some("shared"));
     }
 
     #[test]
@@ -2301,23 +2303,6 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // ---- path_alias_specificity (lines 734-738) ----
-
-    #[test]
-    fn path_alias_specificity_exact_pattern_is_max() {
-        assert_eq!(path_alias_specificity("$lib"), usize::MAX);
-    }
-
-    #[test]
-    fn path_alias_specificity_wildcard_pattern_counts_prefix_and_suffix_length() {
-        assert_eq!(path_alias_specificity("@app/*"), "@app/".len());
-    }
-
-    #[test]
-    fn path_alias_specificity_longer_prefix_is_more_specific_than_shorter() {
-        assert!(path_alias_specificity("@app/foo/*") > path_alias_specificity("@app/*"));
-    }
-
     // ---- with_appended_extension / with_exact_extension (lines 808-876) ----
 
     #[test]
@@ -2411,14 +2396,6 @@ mod tests {
         for path in ["src/main.ts", "src/App.svelte", "styles/app.css"] {
             assert!(!serves_static_dir_mounts(Path::new(path)), "{path}");
         }
-    }
-
-    // ---- path_alias_capture: exact match returns empty capture (line 615) ----
-
-    #[test]
-    fn path_alias_capture_exact_pattern_returns_empty_capture() {
-        assert_eq!(path_alias_capture("$lib", "$lib"), Some(""));
-        assert_eq!(path_alias_capture("$lib", "$lib/utils"), None);
     }
 
     // ---- path_alias_pattern_matches: bare wildcard (lines 596-599) ----
@@ -2518,13 +2495,6 @@ mod tests {
     #[test]
     fn is_bare_style_subpath_less_extension_matches() {
         assert!(is_bare_style_subpath("antd/lib/style/index.less"));
-    }
-
-    // ---- path_alias_specificity: wildcard-only pattern ----
-
-    #[test]
-    fn path_alias_specificity_pure_wildcard_has_zero_specificity() {
-        assert_eq!(path_alias_specificity("*"), 0);
     }
 
     // ---- with_exact_extension: path without extension ----

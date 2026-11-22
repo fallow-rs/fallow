@@ -11,9 +11,7 @@ use super::fallbacks::{
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
-use super::specifier::{
-    local_tsconfig_chain, merged_tsconfig_cached, path_alias_capture, path_alias_specificity,
-};
+use super::specifier::{local_tsconfig_chain, merged_tsconfig_cached, select_path_alias};
 use super::types::ResolveContext;
 use crate::read_trace::TracedPath;
 
@@ -179,8 +177,8 @@ fn declared_package_name(specifier: &str) -> Option<String> {
 }
 
 /// Expanded `paths` targets for `specifier` from the nearest tsconfig with
-/// `paths`, most specific pattern first, as `try_tsconfig_paths_from_config`
-/// tries them. The catch-all pattern `*` never counts as an alias.
+/// `paths`, from the one pattern that `try_tsconfig_paths_from_config`
+/// selects. The catch-all pattern `*` never counts as an alias.
 pub(super) fn nearest_tsconfig_alias_targets(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
@@ -197,27 +195,17 @@ pub(super) fn nearest_tsconfig_alias_targets(
     let Some(tsconfig_paths) = merged.paths() else {
         return Vec::new();
     };
-    let paths = tsconfig_paths.patterns;
-    let mut matches: Vec<_> = paths
-        .iter()
-        .filter(|(pattern, _)| pattern.as_str() != "*")
-        .filter_map(|(pattern, targets)| {
-            path_alias_capture(pattern, specifier).map(|capture| (pattern, capture, targets))
-        })
-        .collect();
-    if matches.is_empty() {
+    let Some((pattern, capture, targets)) = select_path_alias(tsconfig_paths.patterns, specifier)
+    else {
         return Vec::new();
-    }
-    matches.sort_by_key(|(pattern, _, _)| std::cmp::Reverse(path_alias_specificity(pattern)));
-    let targets: Vec<String> = matches
-        .into_iter()
-        .filter_map(|(_, capture, targets)| Some((capture, targets.as_array()?)))
-        .flat_map(|(capture, targets)| {
-            targets
-                .iter()
-                .filter_map(Value::as_str)
-                .map(move |target| target.replacen('*', capture, 1))
-        })
+    };
+    let Some(targets) = targets.as_array().filter(|_| pattern != "*") else {
+        return Vec::new();
+    };
+    let targets: Vec<String> = targets
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|target| target.replacen('*', capture, 1))
         .collect();
     tsconfig_paths
         .base_dirs()
