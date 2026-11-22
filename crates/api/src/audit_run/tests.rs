@@ -521,6 +521,10 @@ fn tokens_equivalent_comment_markers_force_false() {
         "/** @type {import('./types').Foo} */",
         "/** @deprecated use y */",
         "/** @jsxImportSource preact */",
+        "/** @jsxRuntime classic */",
+        "/** @import { Foo } from './types' */",
+        "/// <reference types=\"node\" />",
+        "// fallow-override-threshold-next-line cyclomatic 30",
     ] {
         let tagged = format!("{comment}\nexport const x = 1;\n");
         let plain = "/** */\nexport const x = 1;\n";
@@ -533,6 +537,38 @@ fn tokens_equivalent_comment_markers_force_false() {
             "a change to `{comment}` must force false in either direction"
         );
     }
+}
+
+/// The import or export form decides which exports a file credits and
+/// whether the edge is type-only, so a change of the form must refuse reuse.
+#[test]
+fn tokens_equivalent_import_and_export_form_change_is_not_equivalent() {
+    for (current, base) in [
+        ("import a from './x';", "import * as a from './x';"),
+        (
+            "import a, * as b from './x';",
+            "import a, { b } from './x';",
+        ),
+        ("import type { A } from './x';", "import { A } from './x';"),
+        ("import { type A } from './x';", "import { A } from './x';"),
+        ("export type { A } from './x';", "export { A } from './x';"),
+        ("export { type A } from './x';", "export { A } from './x';"),
+        (
+            "type A = 1;\nexport type { A };",
+            "type A = 1;\nexport { A };",
+        ),
+        ("export type * from './x';", "export * from './x';"),
+    ] {
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), current, base),
+            "a form change must refuse reuse: {current:?} versus {base:?}"
+        );
+    }
+    assert!(js_ts_tokens_equivalent(
+        Path::new("a.ts"),
+        "import type { A } from './x';\nimport * as b from './y';",
+        "import   type {A} from './x'\nimport * as   b from './y'",
+    ));
 }
 
 /// The exported name of a namespace re-export is the export that a

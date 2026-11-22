@@ -833,7 +833,11 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         if self.strip_types && decl.import_kind.is_type() {
             return;
         }
-        self.push_keyword(KeywordType::Import, self.word(decl.span.start));
+        let import = self.word(decl.span.start);
+        self.push_keyword(KeywordType::Import, import);
+        if decl.import_kind.is_type() {
+            self.push_keyword(KeywordType::Type, self.next_text(import.end, "type"));
+        }
         walk::walk_import_declaration(self, decl);
         self.push_keyword(
             KeywordType::From,
@@ -857,8 +861,36 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         if self.strip_types && decl.export_kind.is_type() {
             return;
         }
-        self.push_keyword(KeywordType::Export, self.word(decl.span.start));
+        let export = self.word(decl.span.start);
+        self.push_keyword(KeywordType::Export, export);
+        if decl.export_kind.is_type() {
+            self.push_keyword(KeywordType::Type, self.next_text(export.end, "type"));
+        }
         walk::walk_export_named_declaration(self, decl);
+    }
+
+    // A namespace import credits every export of the source and a default
+    // import credits one, and a type-only specifier makes a type-only edge,
+    // so the form is part of the statement. With `strip_types` a type-only
+    // specifier keeps its old tokens.
+
+    fn visit_import_namespace_specifier(&mut self, spec: &ImportNamespaceSpecifier<'a>) {
+        self.push_keyword(KeywordType::As, self.prev_text(spec.local.span.start, "as"));
+        walk::walk_import_namespace_specifier(self, spec);
+    }
+
+    fn visit_import_specifier(&mut self, spec: &ImportSpecifier<'a>) {
+        if !self.strip_types && spec.import_kind.is_type() {
+            self.push_keyword(KeywordType::Type, self.word(spec.span.start));
+        }
+        walk::walk_import_specifier(self, spec);
+    }
+
+    fn visit_export_specifier(&mut self, spec: &ExportSpecifier<'a>) {
+        if !self.strip_types && spec.export_kind.is_type() {
+            self.push_keyword(KeywordType::Type, self.word(spec.span.start));
+        }
+        walk::walk_export_specifier(self, spec);
     }
 
     fn visit_export_from_declaration(&mut self, decl: &ExportFromDeclaration<'a>) {
@@ -868,7 +900,11 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         if self.strip_types && decl.export_kind.is_type() {
             return;
         }
-        self.push_keyword(KeywordType::Export, self.word(decl.span.start));
+        let export = self.word(decl.span.start);
+        self.push_keyword(KeywordType::Export, export);
+        if decl.export_kind.is_type() {
+            self.push_keyword(KeywordType::Type, self.next_text(export.end, "type"));
+        }
         walk::walk_export_from_declaration(self, decl);
     }
 
@@ -883,7 +919,14 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
         if self.skip_imports {
             return;
         }
-        self.push_keyword(KeywordType::Export, self.word(decl.span.start));
+        if self.strip_types && decl.export_kind.is_type() {
+            return;
+        }
+        let export = self.word(decl.span.start);
+        self.push_keyword(KeywordType::Export, export);
+        if decl.export_kind.is_type() {
+            self.push_keyword(KeywordType::Type, self.next_text(export.end, "type"));
+        }
         // `export * as ns` exports the name `ns`, so the name is part of the
         // statement, as the local and exported names of a specifier are.
         if let Some(exported) = &decl.exported {

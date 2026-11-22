@@ -288,9 +288,10 @@ pub(super) fn is_non_behavioral_doc(path: &Path) -> bool {
 }
 
 /// Text that fallow reads outside the token stream. The token comparison
-/// skips comments, so a change to a suppression comment, a JSDoc visibility
-/// or `@deprecated` tag, a `@jsxImportSource` pragma or a JSDoc `import()`
-/// type can change the findings with no token change. Keep `import(` for
+/// skips comments, so a change to a suppression or threshold override
+/// comment, a JSDoc visibility or `@deprecated` tag, a JSX runtime pragma, a
+/// JSDoc `@import` tag or `import()` type, or a triple-slash reference can
+/// change the findings with no token change. Keep `import(` for
 /// imports in comments even though executable template literals are compared
 /// by their source spans.
 const REUSE_BLOCKING_MARKERS: &[&str] = &[
@@ -303,6 +304,10 @@ const REUSE_BLOCKING_MARKERS: &[&str] = &[
     "@api",
     "@deprecated",
     "@jsxImportSource",
+    "@jsxRuntime",
+    "@import",
+    "<reference",
+    "fallow-override-threshold",
     "import(",
 ];
 
