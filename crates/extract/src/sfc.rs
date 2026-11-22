@@ -597,6 +597,7 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
 
 #[path = "sfc_script_merge.rs"]
 mod script_merge;
+pub(crate) use script_merge::translate_script_complexity;
 use script_merge::{
     SfcScriptMergeInput, SharedScopeReferences, credit_shared_scope_references,
     merge_script_into_module,
@@ -827,32 +828,6 @@ fn apply_emits_harvest(
         emit.span_start += byte_offset;
         input.combined.component_emits.push(emit);
     }
-}
-
-/// Score the functions of an SFC `<script>` or an Astro frontmatter
-/// (cyclomatic and cognitive complexity). Each function line and column moves
-/// from the script-body coordinates to the coordinates of the full source file.
-pub(crate) fn translate_script_complexity(
-    script: &SfcScript,
-    program: &oxc_ast::ast::Program<'_>,
-    sfc_line_offsets: &[u32],
-) -> Vec<FunctionComplexity> {
-    let script_line_offsets = compute_line_offsets(&script.body);
-    let mut complexity =
-        crate::complexity::compute_complexity(program, &script.body, &script_line_offsets);
-    let (body_start_line, body_start_col) = byte_offset_to_line_col(
-        sfc_line_offsets,
-        u32::try_from(script.byte_offset).unwrap_or(u32::MAX),
-    );
-
-    for function in &mut complexity {
-        function.line = body_start_line + function.line.saturating_sub(1);
-        if function.line == body_start_line {
-            function.col += body_start_col;
-        }
-    }
-
-    complexity
 }
 
 fn add_script_src_import(module: &mut ModuleInfo, source: &str, source_span: Option<Span>) {
