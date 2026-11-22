@@ -44,8 +44,10 @@ fn strip_root_prefix_from_string(value: &mut String, prefix: &str) {
         return;
     }
 
-    let normalized = normalize_uri(value);
-    let normalized_prefix = normalize_uri(prefix);
+    // A JSON path keeps the brackets of a route such as `app/[id]/page.tsx`,
+    // so only the separators change here, not the URI escapes.
+    let normalized = value.replace('\\', "/");
+    let normalized_prefix = prefix.replace('\\', "/");
     if let Some(rest) = normalized.strip_prefix(&normalized_prefix) {
         *value = rest.to_string();
     } else if let Some(stripped) = strip_embedded_root_prefixes(&normalized, &normalized_prefix) {
@@ -140,6 +142,15 @@ mod tests {
         strip_root_prefix(&mut value, "C:/repo/");
 
         assert_eq!(value, json!("src/index.ts"));
+    }
+
+    #[test]
+    fn keeps_route_brackets_when_it_strips_a_windows_root() {
+        let mut value = json!("C:\\repo\\app\\blog\\[id]\\page.tsx");
+
+        strip_root_prefix(&mut value, "C:/repo/");
+
+        assert_eq!(value, json!("app/blog/[id]/page.tsx"));
     }
 
     #[test]

@@ -205,29 +205,47 @@ fn publish(
     unique: &str,
     expected: &[(String, Content<'_>)],
 ) -> std::io::Result<()> {
-    // A concurrent run can install the same directory while this run
-    // stages. That directory has the expected content and stays in place.
-    if matches(dir, expected) {
-        let _ = fs::remove_dir_all(staging);
-        return Ok(());
-    }
-    if dir.exists() {
-        // Move the directory with other content aside in one step, so a
-        // reader never sees a mix of old and new files.
-        let stale = runs.join(format!("{STAGING_PREFIX}stale-{unique}"));
-        if fs::rename(dir, &stale).is_ok() {
-            let _ = fs::remove_dir_all(&stale);
-        }
-    }
-    if let Err(error) = fs::rename(staging, dir) {
-        let _ = fs::remove_dir_all(staging);
+    let mut attempt = 1;
+    loop {
+        // A concurrent run can install the same directory while this run
+        // stages. That directory has the expected content and stays in place.
         if matches(dir, expected) {
+            let _ = fs::remove_dir_all(staging);
             return Ok(());
         }
-        return Err(error);
+        if dir.exists() {
+            // Move the directory with other content aside in one step, so a
+            // reader never sees a mix of old and new files.
+            let stale = runs.join(format!("{STAGING_PREFIX}stale-{unique}-{attempt}"));
+            if fs::rename(dir, &stale).is_ok() {
+                let _ = fs::remove_dir_all(&stale);
+            }
+        }
+        match fs::rename(staging, dir) {
+            Ok(()) => return Ok(()),
+            // Windows refuses to move a directory while a reader has a file
+            // in it open, so the stale directory stays and the rename onto it
+            // fails. The reader closes the file soon, so try again.
+            Err(_) if attempt < PUBLISH_ATTEMPTS => {
+                attempt += 1;
+                std::thread::sleep(PUBLISH_RETRY_DELAY);
+            }
+            Err(error) => {
+                let _ = fs::remove_dir_all(staging);
+                if matches(dir, expected) {
+                    return Ok(());
+                }
+                return Err(error);
+            }
+        }
     }
-    Ok(())
 }
+
+/// How often [`publish`] tries to replace a directory with other content.
+const PUBLISH_ATTEMPTS: u32 = 50;
+
+/// The wait between two attempts of [`publish`].
+const PUBLISH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
 
 fn write_staging(staging: &Path, expected: &[(String, Content<'_>)]) -> std::io::Result<()> {
     for (relative, content) in expected {
