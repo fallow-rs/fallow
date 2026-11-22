@@ -378,6 +378,14 @@ echo "=== Install script: type-aware sidecar ==="
 mkdir -p "$INSTALL_TMP/ta-jsonc" "$INSTALL_TMP/ta-toml" "$INSTALL_TMP/ta-off" \
   "$INSTALL_TMP/ta-audit" "$INSTALL_TMP/ta-pinned" "$INSTALL_TMP/ta-explicit"
 
+# These tests check the root config file reader. A mock CLI that cannot
+# resolve the config keeps a fallow on the PATH of the machine out of them.
+SIDECAR_SAVED_PATH="$PATH"
+mkdir -p "$INSTALL_TMP/no-resolver"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$INSTALL_TMP/no-resolver/fallow"
+chmod +x "$INSTALL_TMP/no-resolver/fallow"
+PATH="$INSTALL_TMP/no-resolver:$PATH"
+
 cat > "$INSTALL_TMP/ta-jsonc/.fallowrc.jsonc" <<'JSONC'
 {
   // semantic evidence for dead-code candidates
@@ -445,6 +453,54 @@ else
   fail "sidecar: invalid type-aware input fails" "expected non-zero exit"
 fi
 assert_contains "$OUT" "Invalid 'type-aware' input" "sidecar: invalid type-aware input explains failure"
+
+# The auto decision reads the config that the fallow CLI resolves, so a
+# typeAware setting in an `extends` base or a parent config counts. A mock CLI
+# stands in for the installed one.
+mkdir -p "$INSTALL_TMP/ta-extends" "$INSTALL_TMP/mock-enabled" \
+  "$INSTALL_TMP/mock-disabled" "$INSTALL_TMP/mock-old"
+cat > "$INSTALL_TMP/ta-extends/.fallowrc.json" <<'JSON'
+{"extends":["./base.json"]}
+JSON
+cat > "$INSTALL_TMP/ta-extends/base.json" <<'JSON'
+{"typeAware":{"enabled":true}}
+JSON
+write_mock_config_cli() {
+  local dir="$1" payload="$2"
+  cat > "$dir/fallow" <<SH
+#!/usr/bin/env bash
+[ "\${1:-}" = "config" ] || exit 2
+printf '%s\n' '$payload'
+SH
+  chmod +x "$dir/fallow"
+}
+write_mock_config_cli "$INSTALL_TMP/mock-enabled" '{"typeAware":{"enabled":true}}'
+write_mock_config_cli "$INSTALL_TMP/mock-disabled" '{"typeAware":{"enabled":false}}'
+printf '#!/usr/bin/env bash\necho "unrecognized subcommand" >&2\nexit 2\n' > "$INSTALL_TMP/mock-old/fallow"
+chmod +x "$INSTALL_TMP/mock-old/fallow"
+
+OUT=$(PATH="$INSTALL_TMP/mock-enabled:$PATH" INPUT_ROOT="$INSTALL_TMP/ta-extends" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Type-aware sidecar enabled via the project fallow config" "sidecar: auto follows typeAware from an extends base"
+
+OUT=$(PATH="$INSTALL_TMP/mock-disabled:$PATH" INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_not_contains "$OUT" "fallow-type-aware@" "sidecar: the resolved config wins over the root config file"
+
+OUT=$(PATH="$INSTALL_TMP/mock-old:$PATH" INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "fallow-type-aware@" "sidecar: a CLI that cannot resolve the config falls back to the root config file"
+
+# Windows cannot start the .mjs sidecar as a program. The CLI then starts Node
+# with the sidecar as its script.
+OUT=$(RUNNER_OS=Windows INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=true FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_BIN=$(node -p 'process.execPath')" "sidecar: Windows starts the sidecar through Node"
+assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_SCRIPT=<tool-dir>/node_modules/fallow-type-aware/fallow-type-aware.mjs" "sidecar: Windows passes the sidecar as the Node script"
+
+OUT=$(RUNNER_OS=Linux INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=true FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_BIN=<tool-dir>/node_modules/fallow-type-aware/fallow-type-aware.mjs" "sidecar: Linux starts the sidecar directly"
+assert_not_contains "$OUT" "FALLOW_TYPE_AWARE_SCRIPT" "sidecar: Linux sets no sidecar script"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "::warning::fallow config could not resolve the project config" "sidecar: a failed config resolution warns before the fallback"
+PATH="$SIDECAR_SAVED_PATH"
 
 # --- Binary verification integration ---
 #

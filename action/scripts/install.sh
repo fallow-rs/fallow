@@ -8,13 +8,14 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/workflow-command.sh"
 # sidecar when the project or the action opts into type-aware analysis.
 # Optional env: FALLOW_VERSION, INPUT_ROOT, INPUT_CONFIG, INPUT_TYPE_AWARE,
 # FALLOW_INSTALL_DRY_RUN, GITHUB_ENV, GITHUB_ACTION_PATH, GITHUB_ACTION_REF,
-# RUNNER_TEMP.
+# RUNNER_TEMP, RUNNER_OS.
 
 # Each optional variable gets its default here, so `set -u` fails on a typo in
 # a name instead of on an input that the workflow did not set.
 : "${FALLOW_VERSION:=}" "${INPUT_ROOT:=.}" "${INPUT_CONFIG:=}"
 : "${INPUT_TYPE_AWARE:=}" "${FALLOW_INSTALL_DRY_RUN:=}" "${GITHUB_ENV:=}"
 : "${GITHUB_ACTION_PATH:=}" "${GITHUB_ACTION_REF:=}" "${RUNNER_TEMP:=}"
+: "${RUNNER_OS:=}"
 
 trim() {
   local value="$1"
@@ -229,6 +230,68 @@ NODE
   esac
 }
 
+# The type-aware setting of the config that the fallow CLI resolves, with
+# `extends` and the upward discovery of the CLI. Exit 0 when the config
+# enables type-aware analysis, 1 when it does not, and 2 when no fallow CLI
+# can resolve the config, for example a CLI without `fallow config`. The file
+# reader above is then the fallback.
+resolved_type_aware_enabled() {
+  local root="$1" explicit="$2" resolved=""
+  command -v fallow > /dev/null 2>&1 || return 2
+  local args=(config --root "$root" --quiet)
+  [ -n "$explicit" ] && args+=(--config "$explicit")
+  resolved="$(fallow "${args[@]}" 2> /dev/null)" || return 2
+  printf '%s' "$resolved" | node -e '
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  let config;
+  try {
+    config = JSON.parse(input);
+  } catch {
+    process.exit(2);
+  }
+  const enabled = config?.typeAware?.enabled === true || config?.audit?.typeAware === true;
+  process.exit(enabled ? 0 : 1);
+});
+'
+}
+
+# The auto decision: the resolved config when a fallow CLI can read it, else
+# the first config file in the root.
+auto_type_aware_enabled() {
+  local root="$1" explicit="$2" status=0
+  resolved_type_aware_enabled "$root" "$explicit" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    1) return 1 ;;
+  esac
+  if command -v fallow > /dev/null 2>&1; then
+    echo "::warning::fallow config could not resolve the project config, so the type-aware decision reads only the first config file in the root"
+  fi
+  type_aware_config_enabled "$root" "$explicit"
+}
+
+# The environment lines that point the fallow CLI at the sidecar. Windows
+# cannot start the `.mjs` file as a program, so on Windows the CLI starts Node
+# with the file as its script, as the npm wrapper of fallow does.
+sidecar_env_lines() {
+  local sidecar_bin="$1"
+  if [ "$RUNNER_OS" = "Windows" ]; then
+    local node_bin script
+    node_bin="$(node -p 'process.execPath' | tr -d '\r\n')"
+    script="$(cygpath -w "$sidecar_bin" 2> /dev/null || printf '%s' "$sidecar_bin")"
+    script="$(printf '%s' "$script" | tr -d '\r\n')"
+    printf 'FALLOW_TYPE_AWARE_BIN=%s\n' "$node_bin"
+    printf 'FALLOW_TYPE_AWARE_SCRIPT=%s\n' "$script"
+  else
+    printf 'FALLOW_TYPE_AWARE_BIN=%s\n' "$sidecar_bin"
+  fi
+  # Marks the wiring as Action-provisioned so `type-aware status` reports
+  # github-action instead of environment-override.
+  printf 'FALLOW_TYPE_AWARE_BIN_SOURCE=github-action\n'
+}
+
 requested_version="$(trim "${FALLOW_VERSION:-}")"
 root="${INPUT_ROOT:-.}"
 project_spec="$(project_fallow_spec "$root" 2>/dev/null || true)"
@@ -300,7 +363,10 @@ case "$type_aware_input" in
   false)
     ;;
   auto)
-    if type_aware_config_enabled "$root" "$(trim "${INPUT_CONFIG:-}")"; then
+    # The installed CLI resolves the config after the install below. The dry
+    # run installs nothing, so it asks a fallow CLI on PATH, if any.
+    if [ "${FALLOW_INSTALL_DRY_RUN:-}" = "true" ] \
+      && auto_type_aware_enabled "$root" "$(trim "${INPUT_CONFIG:-}")"; then
       sidecar_wanted=true
       echo "::notice::Type-aware sidecar enabled via the project fallow config"
     fi
@@ -319,6 +385,8 @@ if [ "${FALLOW_INSTALL_DRY_RUN:-}" = "true" ]; then
     else
       echo "DRY RUN: npm install --prefix <tool-dir> --ignore-scripts fallow-type-aware@<resolved CLI version>"
     fi
+    sidecar_env_lines "<tool-dir>/node_modules/fallow-type-aware/fallow-type-aware.mjs" \
+      | sed 's/^/DRY RUN: env /'
   fi
   exit 0
 fi
@@ -350,7 +418,7 @@ fi
 # read from a manifest that may be tampered with (this context only renders on a
 # verification FAILURE), and an embedded newline could otherwise inject a
 # spoofed workflow command. `|| true` keeps the pipeline from tripping set -e.
-installed_fallow_version="$(node -p "require('${global_fallow_root}/package.json').version" 2>/dev/null | tr -d '\r\n' || true)"
+installed_fallow_version="$(node -p 'require(process.argv[1]).version' "${global_fallow_root}/package.json" 2>/dev/null | tr -d '\r\n' || true)"
 [ -n "$installed_fallow_version" ] || installed_fallow_version="unknown"
 
 if ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow_root" node "$verify_runner"; then
@@ -380,6 +448,12 @@ if [ -z "$requested_version" ] && [ -n "$project_spec" ] && is_exact_version "$p
   fi
 fi
 
+if [ "$type_aware_input" = "auto" ] \
+  && auto_type_aware_enabled "$root" "$(trim "${INPUT_CONFIG:-}")"; then
+  sidecar_wanted=true
+  echo "::notice::Type-aware sidecar enabled via the project fallow config"
+fi
+
 if [ "$sidecar_wanted" = "true" ]; then
   # The exact-version-match contract: the sidecar must be the SAME version as
   # the CLI the action just resolved, or the native binary rejects it.
@@ -404,17 +478,16 @@ if [ "$sidecar_wanted" = "true" ]; then
     echo "::error::fallow-type-aware@${sidecar_version} installed, but ${sidecar_bin} does not exist."
     exit 1
   fi
-  sidecar_installed_version="$(node -p "require('${tool_dir}/node_modules/fallow-type-aware/package.json').version" 2>/dev/null | tr -d '\r\n' || true)"
+  # The path goes in as an argument: a Windows path such as D:\a\_temp holds
+  # backslashes that a JavaScript string literal would read as escapes.
+  sidecar_installed_version="$(node -p 'require(process.argv[1]).version' "${tool_dir}/node_modules/fallow-type-aware/package.json" 2>/dev/null | tr -d '\r\n' || true)"
   if [ "$sidecar_installed_version" != "$sidecar_version" ]; then
     echo "::error::Installed fallow-type-aware ${sidecar_installed_version:-unknown}, expected ${sidecar_version}. The exact-version-match contract does not hold; aborting."
     exit 1
   fi
 
   if [ -n "${GITHUB_ENV:-}" ]; then
-    printf 'FALLOW_TYPE_AWARE_BIN=%s\n' "$sidecar_bin" >> "$GITHUB_ENV"
-    # Marks the wiring as Action-provisioned so `type-aware status` reports
-    # github-action instead of environment-override.
-    printf 'FALLOW_TYPE_AWARE_BIN_SOURCE=github-action\n' >> "$GITHUB_ENV"
+    sidecar_env_lines "$sidecar_bin" >> "$GITHUB_ENV"
   fi
   echo "Installed fallow-type-aware ${sidecar_version} sidecar at ${sidecar_bin}"
 fi
