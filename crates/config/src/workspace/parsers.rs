@@ -124,26 +124,38 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
     results
 }
 
-/// Parse `tsconfig.json` at the project root and extract `compilerOptions.rootDir`.
+/// Read `compilerOptions.rootDir` of the `tsconfig.json` at the project root,
+/// through its `extends` chain.
 ///
-/// Returns `None` if the file is missing, malformed, or has no `rootDir` set.
+/// A value that the root config sets is returned as written, without a
+/// leading `./` or a trailing `/`. An inherited value, and a value that
+/// starts with `${configDir}`, resolves against its config folder, and is
+/// returned relative to `root`, or as an absolute path when it is outside
+/// `root`.
+///
+/// Returns `None` if the file is missing, malformed, or no config of the
+/// chain sets `rootDir`.
 pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
-    let tsconfig_path = root.join("tsconfig.json");
-    let content = std::fs::read_to_string(&tsconfig_path).ok()?;
-    let content = content.trim_start_matches('\u{FEFF}');
-
-    let value: serde_json::Value = crate::jsonc::parse_to_value(content).ok()?;
-
-    value
-        .get("compilerOptions")
-        .and_then(|opts| opts.get("rootDir"))
-        .and_then(|v| v.as_str())
-        .map(|s| {
-            s.strip_prefix("./")
-                .unwrap_or(s)
+    let tsconfig = super::MergedTsconfig::read(&root.join("tsconfig.json"))?;
+    let option = tsconfig.compiler_option("rootDir")?;
+    let value = option.as_str()?;
+    if option.origin() == tsconfig.config_dir() && !value.starts_with("${configDir}") {
+        return Some(
+            value
+                .strip_prefix("./")
+                .unwrap_or(value)
                 .trim_end_matches('/')
-                .to_owned()
-        })
+                .to_owned(),
+        );
+    }
+    let resolved = tsconfig.resolve_path(value, option.origin())?;
+    let Ok(relative) = resolved.strip_prefix(tsconfig.config_dir()) else {
+        return Some(resolved.to_string_lossy().into_owned());
+    };
+    if relative.as_os_str().is_empty() {
+        return Some(".".to_owned());
+    }
+    Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
 /// Expand a workspace glob pattern to matching directories.
@@ -1006,6 +1018,21 @@ mod tests {
         assert!(results.is_empty());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_root_dir_with_config_dir_token() {
+        let temp = tempfile::tempdir().expect("temporary folder");
+        std::fs::write(
+            temp.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"rootDir":"${configDir}/app"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_tsconfig_root_dir(temp.path()),
+            Some("app".to_string())
+        );
     }
 
     #[test]

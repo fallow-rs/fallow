@@ -15,7 +15,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{MergedTsconfig, ResolvedConfig};
 use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, GENERATED_FILE_EXPORTS_HINT,
     IgnoreExportsRule, IssueAction, UI_FOLDER_EXPORTS_HINT,
@@ -218,26 +218,27 @@ fn ui_alias(components: &Value) -> Option<String> {
 /// folder gives way to the next pattern.
 fn alias_folder(dir: &Path, alias: &str) -> Option<PathBuf> {
     TSCONFIG_FILES.iter().find_map(|name| {
-        let tsconfig = read_jsonc(&dir.join(name))?;
-        let options = tsconfig.get("compilerOptions")?;
-        let base = options
-            .get("baseUrl")
-            .and_then(Value::as_str)
-            .map_or_else(|| dir.to_path_buf(), |base| dir.join(base));
-        let paths = options.get("paths")?.as_object()?;
+        let tsconfig = MergedTsconfig::read(&dir.join(name))?;
+        let paths = tsconfig.paths()?;
         let mut candidates: Vec<(usize, PathBuf)> = paths
+            .patterns
             .iter()
             .filter_map(|(pattern, targets)| {
                 let prefix = pattern.strip_suffix('*')?;
                 let rest = alias.strip_prefix(prefix)?;
-                let target = targets.as_array()?.first()?.as_str()?;
-                Some((
-                    prefix.len(),
-                    normalize(&base.join(target.replace('*', rest))),
-                ))
+                let target = targets.as_array()?.first()?.as_str()?.replace('*', rest);
+                Some((prefix.len(), target))
+            })
+            .flat_map(|(prefix_len, target)| {
+                paths
+                    .base_dirs()
+                    .map(move |base| (prefix_len, normalize(&base.join(&target))))
+                    .collect::<Vec<_>>()
             })
             .collect();
-        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        // The longest prefix wins. A stable sort keeps the `baseUrl` folder
+        // before the `paths` config folder for one pattern.
+        candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
         candidates
             .into_iter()
             .map(|(_, folder)| folder)
@@ -316,6 +317,56 @@ mod tests {
         );
         assert_eq!(alias_folder(dir, "@workspace/ui/components"), None);
         assert_eq!(alias_folder(dir, "@/missing"), None);
+    }
+
+    #[test]
+    fn an_alias_resolves_through_paths_that_the_tsconfig_extends() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let dir = project.path();
+        std::fs::create_dir_all(dir.join("src/components/ui")).expect("ui folder");
+        std::fs::write(
+            dir.join("tsconfig.base.json"),
+            r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}"#,
+        )
+        .expect("base tsconfig");
+        std::fs::write(
+            dir.join("tsconfig.json"),
+            r#"{"extends":"./tsconfig.base.json"}"#,
+        )
+        .expect("tsconfig");
+
+        assert_eq!(
+            alias_folder(dir, "@/components/ui"),
+            Some(dir.join("src/components/ui"))
+        );
+    }
+
+    #[test]
+    fn an_alias_folder_under_base_url_wins_over_the_paths_config_folder() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        let app = root.join("app");
+        for folder in [
+            root.join("src/components/ui"),
+            app.join("src/components/ui"),
+        ] {
+            std::fs::create_dir_all(folder).expect("ui folder");
+        }
+        std::fs::write(
+            root.join("base.json"),
+            r#"{"compilerOptions":{"baseUrl":"."}}"#,
+        )
+        .expect("base tsconfig");
+        std::fs::write(
+            app.join("tsconfig.json"),
+            r#"{"extends":"../base.json","compilerOptions":{"paths":{"@/*":["./src/*"]}}}"#,
+        )
+        .expect("tsconfig");
+
+        assert_eq!(
+            alias_folder(&app, "@/components/ui"),
+            Some(root.join("src/components/ui"))
+        );
     }
 
     fn remove_export_actions() -> Vec<IssueAction> {

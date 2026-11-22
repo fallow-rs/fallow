@@ -99,29 +99,33 @@ fn glob_values_match_treats_tsconfig_directory_as_literal() {
     for dir in ["[id]", "{a,b}", "*", "?"] {
         let base = Path::new("/repo").join(dir);
         assert!(
-            super::glob_values_match(&base, &include, &base.join("src/index.ts")),
+            super::super::tsconfig_scope::glob_values_match(
+                &base,
+                &include,
+                &base.join("src/index.ts")
+            ),
             "a file under `{dir}` must match"
         );
     }
     let base = Path::new("/repo/[id]");
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/i/src/index.ts")
     ));
     let base = Path::new("/repo/{a,b}");
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/a/src/index.ts")
     ));
     let base = Path::new("/repo/*");
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/other/src/index.ts")
     ));
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/*/src/index.js")
@@ -133,12 +137,12 @@ fn glob_values_match_treats_tsconfig_directory_as_literal() {
 fn glob_values_match_resolves_parent_segments_before_the_glob() {
     let include = [serde_json::json!("../shared/**/*.ts")];
     let base = Path::new("/repo/[id]/app");
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/[id]/shared/util.ts")
     ));
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/[id]/app/shared/util.ts")
@@ -149,7 +153,7 @@ fn glob_values_match_resolves_parent_segments_before_the_glob() {
 #[test]
 fn glob_values_match_handles_tsconfig_in_root_directory() {
     let include = [serde_json::json!("**/*")];
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         Path::new("/"),
         &include,
         Path::new("/a/b.ts")
@@ -165,22 +169,22 @@ fn glob_values_match_treats_brackets_and_braces_in_entry_as_literal() {
         serde_json::json!("lib/{a,b}/*.ts"),
     ];
     let base = Path::new("/repo");
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/app/[id]/page.ts")
     ));
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/app/i/page.ts")
     ));
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/lib/{a,b}/x.ts")
     ));
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &include,
         Path::new("/repo/lib/a/x.ts")
@@ -193,36 +197,36 @@ fn glob_values_match_treats_brackets_and_braces_in_entry_as_literal() {
 fn glob_values_match_keeps_single_star_in_one_segment() {
     let base = Path::new("/repo");
     let single = [serde_json::json!("src/*.ts")];
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &single,
         Path::new("/repo/src/a.ts")
     ));
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &single,
         Path::new("/repo/src/nested/a.ts")
     ));
 
     let recursive = [serde_json::json!("src/**/*.ts")];
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &recursive,
         Path::new("/repo/src/a.ts")
     ));
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &recursive,
         Path::new("/repo/src/nested/a.ts")
     ));
 
     let question = [serde_json::json!("src/?.ts")];
-    assert!(super::glob_values_match(
+    assert!(super::super::tsconfig_scope::glob_values_match(
         base,
         &question,
         Path::new("/repo/src/a.ts")
     ));
-    assert!(!super::glob_values_match(
+    assert!(!super::super::tsconfig_scope::glob_values_match(
         base,
         &question,
         Path::new("/repo/src/a/b.ts")

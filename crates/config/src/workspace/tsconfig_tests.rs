@@ -929,12 +929,17 @@ fn config_stopped_by_a_limit_is_not_parsed_again() {
         r#"{"extends":"./configs/hub.json"}"#,
     );
 
-    let mut walk = ExtendsWalk::new(&root);
-    assert!(walk.read(&root.join("tsconfig.a.json")).is_none());
+    let mut walk = ExtendsWalk::new();
+    let first = walk
+        .read(&root.join("tsconfig.a.json"), None)
+        .expect("the first root config parses");
+    assert!(CompilerOptions::from_merged(&first).is_none());
     // A second parse of the hub config would now fail.
     write(&root.join("configs/hub.json"), "{ not valid JSONC");
-    let options = walk
-        .read(&root.join("tsconfig.json"))
+    let second = walk
+        .read(&root.join("tsconfig.json"), None)
+        .expect("the second root config parses");
+    let options = CompilerOptions::from_merged(&second)
         .expect("the walk uses the parsed hub config of the first root");
     assert_eq!(options.root_dir, Some(root.join("code")));
 }

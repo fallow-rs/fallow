@@ -76,3 +76,24 @@ export const stripLiterals = (source) => {
   }
   return output;
 };
+
+/**
+ * Replaces comments with spaces and keeps string and char literals. The
+ * result has the same length and line breaks as the input.
+ */
+export const stripComments = (source) => {
+  let output = "";
+  let index = 0;
+  while (index < source.length) {
+    const end = literalEnd(source, index);
+    if (end === null) {
+      output += source[index];
+      index += 1;
+      continue;
+    }
+    const text = source.slice(index, end);
+    output += commentEnd(source, index) === null ? text : blank(text);
+    index = end;
+  }
+  return output;
+};

@@ -27,6 +27,7 @@
 //! A reachable import of an orphan still makes it reachable through the graph.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use globset::{GlobBuilder, GlobMatcher};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -44,9 +45,6 @@ const DECLARATION_SUFFIXES: &[&str] = &[".d.ts", ".d.mts", ".d.cts"];
 
 /// The `exclude` TypeScript applies when a config sets none.
 const DEFAULT_TSCONFIG_EXCLUDE: &[&str] = &["node_modules", "bower_components", "jspm_packages"];
-
-/// Upper bound on a local `extends` chain, a guard against cycles.
-const MAX_EXTENDS_DEPTH: usize = 16;
 
 /// Name the module declaration files that nothing points to.
 ///
@@ -150,6 +148,31 @@ fn has_same_stem_sibling(path: &Path) -> bool {
 struct DirectoryChainLookups {
     package_type_targets: FxHashMap<PathBuf, Vec<PathTarget>>,
     tsconfig_scopes: FxHashMap<PathBuf, Vec<TsconfigScope>>,
+    /// The parsed tsconfig files of the run. The configs of many folders
+    /// often extend one base config, which is then parsed once.
+    tsconfig_sources: TsconfigSources,
+}
+
+/// A parse cache of tsconfig files for [`fallow_config::MergedTsconfig`].
+#[derive(Default)]
+struct TsconfigSources(std::cell::RefCell<FxHashMap<PathBuf, Option<Arc<serde_json::Value>>>>);
+
+impl TsconfigSources {
+    fn load(&self, path: &Path) -> Option<Arc<serde_json::Value>> {
+        if let Some(source) = self.0.borrow().get(path) {
+            return source.clone();
+        }
+        let source = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| {
+                fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
+            })
+            .map(Arc::new);
+        self.0
+            .borrow_mut()
+            .insert(path.to_path_buf(), source.clone());
+        source
+    }
 }
 
 impl DirectoryChainLookups {
@@ -164,10 +187,11 @@ impl DirectoryChainLookups {
     }
 
     fn covered_by_tsconfig(&mut self, root: &Path, path: &Path) -> bool {
+        let sources = &self.tsconfig_sources;
         directory_chain(root, path).any(|dir| {
             self.tsconfig_scopes
                 .entry(dir.to_path_buf())
-                .or_insert_with(|| directory_tsconfig_scopes(dir))
+                .or_insert_with(|| directory_tsconfig_scopes(dir, sources))
                 .iter()
                 .any(|scope| scope.covers(path))
         })
@@ -277,7 +301,7 @@ fn package_target(dir: &Path, raw: &str) -> Vec<PathTarget> {
     ]
 }
 
-/// The file set of one tsconfig, after its local `extends` chain.
+/// The file set of one tsconfig, after its `extends` chain.
 struct TsconfigScope {
     files: Vec<PathBuf>,
     include: Vec<GlobMatcher>,
@@ -313,7 +337,7 @@ impl TsconfigScope {
 
 /// The scopes of every `tsconfig.json`, `tsconfig.*.json` and `jsconfig.json`
 /// in `dir`.
-fn directory_tsconfig_scopes(dir: &Path) -> Vec<TsconfigScope> {
+fn directory_tsconfig_scopes(dir: &Path, sources: &TsconfigSources) -> Vec<TsconfigScope> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -330,7 +354,7 @@ fn directory_tsconfig_scopes(dir: &Path) -> Vec<TsconfigScope> {
     configs.sort_unstable();
     configs
         .iter()
-        .map(|config| load_tsconfig_scope(config))
+        .map(|config| load_tsconfig_scope(config, sources))
         .collect()
 }
 
@@ -345,35 +369,34 @@ fn is_tsconfig_name(name: &str) -> bool {
 }
 
 /// The `files`, `include`, `exclude` and `typeRoots` fields of a config
-/// after its local `extends` chain. Each field keeps the directory of the
+/// after its `extends` chain. Each field keeps the directory of the
 /// config that set it, as TypeScript resolves them.
 #[derive(Default)]
 struct RawScope {
     files: Option<Vec<PathBuf>>,
-    include: Option<(PathBuf, Vec<String>)>,
-    exclude: Option<(PathBuf, Vec<String>)>,
+    include: Option<Vec<fallow_config::TsconfigPattern>>,
+    exclude: Option<Vec<fallow_config::TsconfigPattern>>,
     type_roots: Option<Vec<PathBuf>>,
 }
 
-fn load_tsconfig_scope(config: &Path) -> TsconfigScope {
+fn load_tsconfig_scope(config: &Path, sources: &TsconfigSources) -> TsconfigScope {
     let dir = config.parent().unwrap_or(config);
-    let mut visited = FxHashSet::default();
-    let Some(raw) = load_raw_scope(config, &mut visited, 0) else {
+    let Some(raw) = load_raw_scope(config, sources) else {
         return TsconfigScope::everything(dir);
     };
 
     let include = match (&raw.include, &raw.files) {
-        (Some((base, patterns)), _) => patterns
+        (Some(patterns), _) => patterns
             .iter()
-            .flat_map(|pattern| pattern_matchers(base, pattern))
+            .flat_map(|pattern| pattern_matchers(&pattern.base, &pattern.pattern))
             .collect(),
         (None, Some(_)) => Vec::new(),
         (None, None) => pattern_matchers(dir, "**/*"),
     };
     let exclude = match &raw.exclude {
-        Some((base, patterns)) => patterns
+        Some(patterns) => patterns
             .iter()
-            .flat_map(|pattern| pattern_matchers(base, pattern))
+            .flat_map(|pattern| pattern_matchers(&pattern.base, &pattern.pattern))
             .collect(),
         None => DEFAULT_TSCONFIG_EXCLUDE
             .iter()
@@ -388,97 +411,31 @@ fn load_tsconfig_scope(config: &Path) -> TsconfigScope {
     }
 }
 
-/// Read one config and the local configs it extends. `None` when a config in
-/// the chain exists but does not parse, so the caller can keep every file.
-/// A package `extends` (`@tsconfig/node20`) contributes no file-set fields.
-fn load_raw_scope(
-    config: &Path,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Option<RawScope> {
-    if depth > MAX_EXTENDS_DEPTH || !visited.insert(config.to_path_buf()) {
-        return Some(RawScope::default());
+/// Read the merged file set of one config. `None` when the config or a
+/// config that it extends exists but does not parse, so the caller can keep
+/// every file.
+fn load_raw_scope(config: &Path, sources: &TsconfigSources) -> Option<RawScope> {
+    let merged =
+        fallow_config::MergedTsconfig::read_with_loader(config, &|path| sources.load(path))?;
+    if merged.has_malformed_parent() {
+        return None;
     }
-    let Ok(content) = std::fs::read_to_string(config) else {
-        return Some(RawScope::default());
-    };
-    let value: serde_json::Value =
-        fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()?;
-    let dir = config.parent().unwrap_or(config);
-
-    let mut scope = RawScope::default();
-    for base in extends_paths(&value, dir) {
-        let inherited = load_raw_scope(&base, visited, depth + 1)?;
-        scope.files = inherited.files.or(scope.files);
-        scope.include = inherited.include.or(scope.include);
-        scope.exclude = inherited.exclude.or(scope.exclude);
-        scope.type_roots = inherited.type_roots.or(scope.type_roots);
-    }
-
-    if let Some(files) = string_array(&value, "files") {
-        scope.files = Some(
-            files
-                .iter()
-                .map(|file| normalize_lexically(&dir.join(file)))
-                .collect(),
-        );
-    }
-    if let Some(include) = string_array(&value, "include") {
-        scope.include = Some((dir.to_path_buf(), include));
-    }
-    if let Some(exclude) = string_array(&value, "exclude") {
-        scope.exclude = Some((dir.to_path_buf(), exclude));
-    }
-    if let Some(type_roots) = value
-        .get("compilerOptions")
-        .and_then(|options| string_array(options, "typeRoots"))
-    {
-        scope.type_roots = Some(
-            type_roots
-                .iter()
-                .map(|type_root| normalize_lexically(&dir.join(type_root)))
-                .collect(),
-        );
-    }
-    Some(scope)
-}
-
-/// The local config files an `extends` value names, in order.
-fn extends_paths(value: &serde_json::Value, dir: &Path) -> Vec<PathBuf> {
-    let entries: Vec<&str> = match value.get("extends") {
-        Some(serde_json::Value::String(entry)) => vec![entry.as_str()],
-        Some(serde_json::Value::Array(entries)) => entries
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .collect(),
-        _ => Vec::new(),
-    };
-    entries
-        .into_iter()
-        .filter(|entry| entry.starts_with('.') || Path::new(entry).is_absolute())
-        .map(|entry| {
-            let path = normalize_lexically(&dir.join(entry));
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
-                path
-            } else {
-                let mut with_json = path.into_os_string();
-                with_json.push(".json");
-                PathBuf::from(with_json)
-            }
-        })
-        .collect()
-}
-
-fn string_array(value: &serde_json::Value, key: &str) -> Option<Vec<String>> {
-    value.get(key)?.as_array().map(|items| {
-        items
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .map(str::to_owned)
-            .collect()
+    let files = merged
+        .file_set(fallow_config::TsconfigFileSet::Files)
+        .and_then(|value| {
+            let files = value.strings()?;
+            Some(
+                files
+                    .into_iter()
+                    .filter_map(|file| merged.resolve_path(file, value.origin()))
+                    .collect(),
+            )
+        });
+    Some(RawScope {
+        files,
+        include: merged.file_set_patterns(fallow_config::TsconfigFileSet::Include),
+        exclude: merged.file_set_patterns(fallow_config::TsconfigFileSet::Exclude),
+        type_roots: merged.path_list_option("typeRoots"),
     })
 }
 
@@ -802,6 +759,37 @@ mod tests {
             "types/orphan.d.ts",
             module(0, false, &[])
         ));
+    }
+
+    #[test]
+    fn every_extends_shape_gives_the_file_set_and_type_roots() {
+        for shape in fallow_config::TsconfigExtendsShape::ALL {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let root = dir.path();
+            shape.write(root);
+            for declaration in ["types/a.d.ts", "src/b.d.ts", "other/c.d.ts"] {
+                write(root, declaration, "export interface A {}\n");
+            }
+            // A parent that does not parse keeps every file, so a broken
+            // chain never reports a file as unused.
+            let other_is_orphan = shape != fallow_config::TsconfigExtendsShape::MalformedParent;
+            assert!(
+                !is_orphan(root, "types/a.d.ts", module(0, false, &[])),
+                "{}: typeRoots",
+                shape.name()
+            );
+            assert!(
+                !is_orphan(root, "src/b.d.ts", module(0, false, &[])),
+                "{}: include",
+                shape.name()
+            );
+            assert_eq!(
+                is_orphan(root, "other/c.d.ts", module(0, false, &[])),
+                other_is_orphan,
+                "{}: outside the file set",
+                shape.name()
+            );
+        }
     }
 
     #[test]

@@ -1203,6 +1203,36 @@ marks an alias to a directory that its config names as checked
 (`PluginResult::push_checked_path_alias`). An unresolved import under a checked
 prefix reports, also when a virtual module prefix such as the Nuxt `#` covers
 it.
+`fallow_config::MergedTsconfig` (`crates/config/src/workspace/tsconfig_merged.rs`)
+is the one reader of tsconfig compiler options and file sets. It follows a
+local, package, package-subpath (`exports`) and array `extends`, with the merge
+rules of TypeScript: a later array entry overrides an earlier one, a key that a
+config sets replaces the inherited value, and a relative path resolves against
+the config that sets it. `paths` resolves against `baseUrl`, else against the
+config that sets `paths`. A leading `${configDir}` in a path option or an
+`include` or `exclude` pattern names the folder of the config that the caller
+reads. A missing, unparsable or cyclic parent adds an issue and the rest of
+the chain still applies. The resolver passes its JSON cache as the loader of
+the reader, so a shared base config is parsed once per run. The TypeScript plugin (`jsx`,
+`jsxImportSource`, `types`, `paths`), the alias replacement check, the orphan
+declaration check (`files`, `include`, `exclude`, `typeRoots`), the
+`rootDir` reader of boundary presets, the tsconfig output map and the resolver
+fallbacks read through it. The resolver chain of a file holds the configs
+that contain the file, as TypeScript decides ownership: `files` and `include`
+add up, and `exclude` removes only `include` matches. The nearest tsconfig
+comes first when it contains the file. A solution-style nearest config
+(`files: []`) does not, so the referenced configs that contain the file count,
+and the `paths` that the solution config inherits do not hide theirs. When no
+config contains the file, the nearest config is the fallback. Each config of
+the chain reads its own `extends` chain. A `paths` target resolves against
+`baseUrl` (TypeScript 5), then against the config that sets `paths`
+(TypeScript 7, which has no `baseUrl`), in each reader that checks that the
+target exists. Every target of a pattern is tried against `baseUrl` before
+any target against the config folder, as TypeScript 5 orders them. Plugin path aliases use only the first folder. The orphan check keeps every file when a parent does not
+parse, and the output map maps nothing when the chain is not complete.
+`scripts/check-tsconfig-reads.mjs` fails on a `"compilerOptions"` key read
+outside the reader and test code. A read that needs the syntax tree of one
+file, for a finding span, carries a `tsconfig-reads: allow` comment.
 A bare specifier that a `paths` pattern of the nearest tsconfig matches is an
 alias, also when its scope is lowercase or a real package has the same name.
 When it resolves into `node_modules`, the package of the resolved file gets the
