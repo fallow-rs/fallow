@@ -1,0 +1,5 @@
+### Fixed
+
+- **A failed upgrade of the VS Code managed binary keeps the installed binary usable.** On Windows, a sibling window that runs the old `fallow-lsp` locks the file, so the new binary cannot replace it. The extension then deleted the signature and target marker of the old binary, and the next start removed that binary as untrusted. The extension now puts the old signature and target marker back.
+- **A second VS Code window no longer deletes the download of the first window.** Each window removes the temp files of crashed downloads when it starts. It removed the temp files of every other process, also of a window whose download still ran, and that download then failed its signature check. The extension now removes only the temp files of a process that no longer runs.
+- **`Fallow: Fix` saves and refreshes only after you confirm.** The command saved all dirty editors before it asked for confirmation, and it restarted the language server and ran a new analysis also after you answered No. The command now saves after the confirmation, applies no fix when a file cannot be saved, and refreshes only after a fix run.

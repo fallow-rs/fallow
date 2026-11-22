@@ -643,6 +643,23 @@ const confirmApplyFixes = async (): Promise<boolean> => {
   return confirm === "Yes";
 };
 
+/**
+ * Ask for confirmation, then save all editors. The fix reads the files on
+ * disk, so it must not run over unsaved edits.
+ */
+const confirmAndSaveForFix = async (): Promise<boolean> => {
+  if (!(await confirmApplyFixes())) {
+    return false;
+  }
+  if (await vscode.workspace.saveAll(false)) {
+    return true;
+  }
+  void vscode.window.showWarningMessage(
+    "Fallow: not all files could be saved. No fixes were applied.",
+  );
+  return false;
+};
+
 const openFixLocation = async (root: string, fix: FixAction | undefined): Promise<void> => {
   if (!fix) {
     return;
@@ -1102,7 +1119,7 @@ export const runFix = async (
     return null;
   }
 
-  if (!dryRun && !(await confirmApplyFixes())) {
+  if (!dryRun && !(await confirmAndSaveForFix())) {
     return null;
   }
 
@@ -1141,6 +1158,19 @@ export const runFix = async (
     const message = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
     return null;
+  }
+};
+
+/**
+ * Apply fixes, then call `refresh` only when the fix ran. A declined
+ * confirmation, a failed save, or a failed run changes no file on disk.
+ */
+export const applyFixes = async (
+  context: vscode.ExtensionContext,
+  refresh: () => Promise<void>,
+): Promise<void> => {
+  if (await runFix(context, false)) {
+    await refresh();
   }
 };
 

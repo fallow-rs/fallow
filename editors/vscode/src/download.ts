@@ -245,15 +245,28 @@ export const httpsDownload = (url: string, dest: string, signal?: AbortSignal): 
 const ORPHAN_TEMP_RE = /^\..+\.(\d+)\.\d+\.tmp(?:\.sig|\.sha256|\.target)?$/;
 
 /**
+ * Whether a process with this pid runs on this host. `kill(pid, 0)` sends no
+ * signal: it fails with ESRCH for a pid that does not exist, and with EPERM for
+ * a process of another user, which still runs.
+ */
+const isProcessRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+/**
  * Remove temp files left behind by a download that died (SIGKILL / crash /
  * reboot) between writing the temp file and renaming it into place. The
  * try/catch cleanup in `downloadAsset` only runs when the JS runtime reaches it,
- * so a hard kill leaks the temp permanently. Skip temps tagged with the current
- * pid: those may be a live in-flight download in this same process (sweeping
- * runs outside the install lock), and a running pid is never a crash orphan.
+ * so a hard kill leaks the temp permanently. The sweep runs outside the install
+ * lock, so it spares each temp whose owner pid still runs: that temp can be a
+ * live download of this window or of a sibling window.
  */
 export const sweepOrphanTempFiles = (dir: string): void => {
-  const livePid = String(process.pid);
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
@@ -263,7 +276,7 @@ export const sweepOrphanTempFiles = (dir: string): void => {
   }
   for (const entry of entries) {
     const match = ORPHAN_TEMP_RE.exec(entry);
-    if (!match || match[1] === livePid) {
+    if (!match || isProcessRunning(Number(match[1]))) {
       continue;
     }
     try {
@@ -398,6 +411,29 @@ const publishSidecar = (tempPath: string, finalPath: string): void => {
   fs.renameSync(tempPath, finalPath);
 };
 
+/** Move a published sidecar aside, so a failed upgrade can put it back. */
+const stashSidecar = (finalPath: string, backupPath: string): void => {
+  if (fs.existsSync(finalPath)) {
+    fs.renameSync(finalPath, backupPath);
+  }
+};
+
+/**
+ * Put back the sidecar that `stashSidecar` moved aside. Without a backup, no
+ * sidecar existed before, so the new one describes a binary that never landed.
+ */
+const restoreSidecar = (backupPath: string, finalPath: string): void => {
+  try {
+    if (fs.existsSync(backupPath)) {
+      publishSidecar(backupPath, finalPath);
+    } else if (fs.existsSync(finalPath)) {
+      fs.unlinkSync(finalPath);
+    }
+  } catch {
+    // Best-effort: an untrusted leftover only triggers a fresh download.
+  }
+};
+
 /**
  * Atomically move a verified temp binary onto its final path. If the rename fails
  * because the target is locked (a sibling window's running LSP on Windows) but the
@@ -425,6 +461,19 @@ const getSignaturePath = (binaryPath: string): string => `${binaryPath}${SIGNATU
 const getDigestPath = (binaryPath: string): string => `${binaryPath}${SHA256_SUFFIX}`;
 
 const getTargetPath = (binaryPath: string): string => `${binaryPath}${TARGET_SUFFIX}`;
+
+/** Best-effort removal of temp and backup files. */
+const removeFiles = (paths: string[]): void => {
+  for (const candidate of paths) {
+    try {
+      if (fs.existsSync(candidate)) {
+        fs.unlinkSync(candidate);
+      }
+    } catch {
+      // A leftover temp file matches ORPHAN_TEMP_RE, so a later sweep removes it.
+    }
+  }
+};
 
 const purgeManagedBinary = (binaryPath: string): void => {
   for (const candidate of [
@@ -841,9 +890,14 @@ const downloadAsset = async (
   const tempBinary = uniqueTempPath(dir, binaryName);
   const tempSignature = getSignaturePath(tempBinary);
   const tempTarget = getTargetPath(tempBinary);
-  // Track whether we replaced the final sidecars so a later failure can roll
-  // them back instead of leaving a sidecar that points at a missing binary.
-  let sidecarsPublished = false;
+  const backupBase = uniqueTempPath(dir, binaryName);
+  const sidecars = [
+    { temp: tempSignature, final: signaturePath, backup: getSignaturePath(backupBase) },
+    { temp: tempTarget, final: targetPath, backup: getTargetPath(backupBase) },
+  ];
+  // The sidecars that this attempt moved aside. A failure puts them back, so
+  // the installed binary keeps the signature and target that verify it.
+  const replaced: typeof sidecars = [];
 
   try {
     await httpsDownload(asset.browser_download_url, tempBinary, signal);
@@ -864,35 +918,26 @@ const downloadAsset = async (
     // Publish sidecars to their final paths BEFORE the binary, then rename the
     // binary last. A reader in another window gates on the binary existing, so
     // it never observes a binary without its signature.
-    publishSidecar(tempSignature, signaturePath);
+    fs.writeFileSync(tempTarget, target, "utf-8");
+    for (const sidecar of sidecars) {
+      stashSidecar(sidecar.final, sidecar.backup);
+      replaced.push(sidecar);
+      publishSidecar(sidecar.temp, sidecar.final);
+    }
     if (fs.existsSync(digestPath)) {
       fs.unlinkSync(digestPath);
     }
-    fs.writeFileSync(tempTarget, target, "utf-8");
-    publishSidecar(tempTarget, targetPath);
-    sidecarsPublished = true;
 
     renameIntoPlace(tempBinary, destPath);
   } catch (error) {
-    const candidates = [tempBinary, tempSignature, tempTarget];
-    // If we published sidecars but the binary never landed, the final sidecars
-    // now describe a missing binary; roll them back so the next activation does
-    // not reuse or trip over an orphan marker.
-    if (sidecarsPublished) {
-      candidates.push(signaturePath, targetPath);
+    for (const sidecar of replaced) {
+      restoreSidecar(sidecar.backup, sidecar.final);
     }
-    for (const candidate of candidates) {
-      try {
-        if (fs.existsSync(candidate)) {
-          fs.unlinkSync(candidate);
-        }
-      } catch {
-        // Best-effort cleanup on failed downloads.
-      }
-    }
+    removeFiles([tempBinary, tempSignature, tempTarget]);
     throw error;
   }
 
+  removeFiles(sidecars.map((sidecar) => sidecar.backup));
   return destPath;
 };
 
