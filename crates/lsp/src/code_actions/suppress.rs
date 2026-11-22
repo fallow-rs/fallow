@@ -426,6 +426,43 @@ mod tests {
         );
     }
 
+    fn file_action_line(first_line: &str) -> u32 {
+        let root = test_root();
+        let path = root.join("bin/cli.js");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(leak(path.clone(), 2));
+        let file_lines = vec![first_line, "export { SECRET } from './server';"];
+        let cursor = Range {
+            start: Position {
+                line: 1,
+                character: 0,
+            },
+            end: Position {
+                line: 1,
+                character: 0,
+            },
+        };
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected a CodeAction");
+        };
+        action
+            .edit
+            .as_ref()
+            .and_then(|e| e.changes.as_ref())
+            .expect("edit has changes")[&uri][0]
+            .range
+            .start
+            .line
+    }
+
+    #[test]
+    fn file_level_action_goes_above_a_first_line_that_is_not_a_hashbang() {
+        assert_eq!(file_action_line("# not a hashbang"), 0);
+    }
+
     #[test]
     fn no_actions_outside_cursor_range() {
         let root = test_root();
