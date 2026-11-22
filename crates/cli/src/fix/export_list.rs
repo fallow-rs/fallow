@@ -38,6 +38,9 @@ pub(super) struct ListRewriteOutcome {
     /// for a statement with a `from` clause, which binds no local name.
     pub(super) removed_locals: Vec<String>,
     pub(super) rewrite: ListRewrite,
+    /// The module specifier when the rewrite is a bare import that keeps the
+    /// module load of the removed re-export.
+    module_load: Option<String>,
 }
 
 /// The export list statements of one file. Each statement is joined and
@@ -96,6 +99,79 @@ impl ExportListIndex {
             .filter(|parsed| parsed.statement == statement)?;
         rewrite_parsed(parsed, names)
     }
+
+    /// Delete each bare import of a rewrite whose module the file still
+    /// loads: through a line outside the removed statements, or through an
+    /// earlier bare import of the same module. `rewrites` is keyed by the
+    /// first line of each statement.
+    pub(super) fn drop_redundant_module_loads(
+        &self,
+        lines: &[&str],
+        rewrites: &mut FxHashMap<usize, ListRewriteOutcome>,
+    ) {
+        let removed: Vec<(usize, usize)> = rewrites
+            .iter()
+            .filter(|(_, outcome)| {
+                outcome.module_load.is_some() || outcome.rewrite == ListRewrite::DeleteStatement
+            })
+            .filter_map(|(start, _)| self.statement_range(*start))
+            .collect();
+        let kept_lines: Vec<&str> = lines
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !removed.iter().any(|(s, e)| (*s..=*e).contains(idx)))
+            .map(|(_, line)| *line)
+            .collect();
+        let mut starts: Vec<usize> = rewrites.keys().copied().collect();
+        starts.sort_unstable();
+        let mut loaded: Vec<String> = Vec::new();
+        for start in starts {
+            let Some(outcome) = rewrites.get_mut(&start) else {
+                continue;
+            };
+            let Some(source) = outcome.module_load.clone() else {
+                continue;
+            };
+            let deletable = self
+                .by_start_line
+                .get(&start)
+                .and_then(Option::as_ref)
+                .is_some_and(|parsed| is_trivia_only(&parsed.text[parsed.list.end..]));
+            let already = loaded.contains(&source)
+                || kept_lines.iter().any(|line| loads_module(line, &source));
+            if already && deletable {
+                outcome.rewrite = ListRewrite::DeleteStatement;
+                outcome.module_load = None;
+            } else {
+                loaded.push(source);
+            }
+        }
+    }
+
+    fn statement_range(&self, start: usize) -> Option<(usize, usize)> {
+        let parsed = self.by_start_line.get(&start)?.as_ref()?;
+        Some((parsed.statement.start_line, parsed.statement.end_line))
+    }
+}
+
+/// Whether a source line loads `module` at run time: an `import`, a value
+/// re-export or a `require` that names it. A comment or a type-only
+/// statement loads nothing.
+fn loads_module(line: &str, module: &str) -> bool {
+    let trimmed = line.trim_start();
+    if ["//", "/*", "*", "import type ", "export type "]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+    {
+        return false;
+    }
+    let named = ['\'', '"', '`']
+        .iter()
+        .any(|quote| line.contains(&format!("{quote}{module}{quote}")));
+    named
+        && ["from", "import", "require("]
+            .iter()
+            .any(|word| line.contains(word))
 }
 
 /// Parse the list statement that starts on line `start`.
@@ -164,10 +240,17 @@ fn rewrite_parsed(parsed: &ParsedStatement, names: &[&str]) -> Option<ListRewrit
     }
 
     if matched.iter().all(|m| *m) {
-        return is_trivia_only(&text[parsed.list.end..]).then_some(ListRewriteOutcome {
+        let load = module_load(parsed);
+        let rewrite = match &load {
+            Some(line) => ListRewrite::Replace(vec![line.clone()]),
+            None if is_trivia_only(&text[parsed.list.end..]) => ListRewrite::DeleteStatement,
+            None => return None,
+        };
+        return Some(ListRewriteOutcome {
             removed,
             removed_locals,
-            rewrite: ListRewrite::DeleteStatement,
+            rewrite,
+            module_load: load.and_then(|_| parsed.list.source_name.clone()),
         });
     }
 
@@ -183,7 +266,27 @@ fn rewrite_parsed(parsed: &ParsedStatement, names: &[&str]) -> Option<ListRewrit
         removed,
         removed_locals,
         rewrite: ListRewrite::Replace(new_text.split('\n').map(str::to_owned).collect()),
+        module_load: None,
     })
+}
+
+/// The bare import that keeps the module load of a value re-export whose
+/// specifiers all go. `export { a } from './m'` loads and runs `./m`, for
+/// example a module that registers a custom element. A type-only statement
+/// loads nothing, so it needs no import.
+fn module_load(parsed: &ParsedStatement) -> Option<String> {
+    let list = &parsed.list;
+    let (start, end) = list.source?;
+    if list.type_only || list.specifiers.iter().all(|spec| spec.type_only) {
+        return None;
+    }
+    let text = parsed.text.as_str();
+    let indent = &text[..indent_len(text)];
+    let semicolon = if list.closed { ";" } else { "" };
+    let rest = &text[list.end..];
+    let code_follows = !is_trivia_only(rest);
+    (!rest.contains('\n') && (list.closed || !code_follows))
+        .then(|| format!("{indent}import {}{semicolon}{rest}", &text[start..end]))
 }
 
 /// Byte ranges of `text` to delete, sorted and merged.
@@ -344,6 +447,8 @@ struct Specifier {
     name: String,
     /// The name that the specifier reads: `a` in `a as b`.
     local: String,
+    /// True for a `type a` specifier, which loads no module.
+    type_only: bool,
 }
 
 struct ParsedList {
@@ -356,6 +461,13 @@ struct ParsedList {
     closed: bool,
     /// True when the statement has a `from` clause.
     has_source: bool,
+    /// True for `export type { ... }`, which loads no module.
+    type_only: bool,
+    /// Byte range of the module specifier and its import attributes, such
+    /// as `'./data.json' with { type: 'json' }`.
+    source: Option<(usize, usize)>,
+    /// The module specifier without its quotes.
+    source_name: Option<String>,
 }
 
 /// Parse `export [type] { ... } [from '...' [with { ... }]] [;]` at `start`.
@@ -364,7 +476,8 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
     if !c.eat_keyword("export") || !c.skip_trivia() {
         return None;
     }
-    if c.eat_keyword("type") && !c.skip_trivia() {
+    let type_only = c.eat_keyword("type");
+    if type_only && !c.skip_trivia() {
         return None;
     }
     if !c.eat('{') {
@@ -385,11 +498,14 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
         return None;
     }
     let has_source = c.eat_keyword("from");
+    let mut source = None;
+    let mut source_name = None;
     if has_source {
         if !c.skip_trivia() {
             return None;
         }
-        c.read_string()?;
+        let source_start = c.pos;
+        source_name = Some(c.read_string()?);
         let after_source = c.pos;
         if c.skip_trivia() && (c.eat_keyword("with") || c.eat_keyword("assert")) {
             if !c.skip_trivia() {
@@ -399,6 +515,7 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
         } else {
             c.pos = after_source;
         }
+        source = Some((source_start, c.pos));
     } else {
         c.pos = after_brace;
     }
@@ -413,6 +530,9 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
         end: c.pos,
         closed,
         has_source,
+        type_only,
+        source,
+        source_name,
     })
 }
 
@@ -583,6 +703,7 @@ impl Cursor<'_> {
         }
         let name = exported_name(&tokens)?;
         let local = local_name(&tokens)?;
+        let type_only = matches!(tokens.len(), 2 | 4) && tokens[0] == "type";
         let comma = if self.peek() == Some(',') {
             let comma = self.pos;
             self.pos += 1;
@@ -596,6 +717,7 @@ impl Cursor<'_> {
             comma,
             name,
             local,
+            type_only,
         })
     }
 }
@@ -673,10 +795,43 @@ mod tests {
 
     #[test]
     fn deletes_a_multi_line_statement_with_one_name() {
-        let source = "export {\n\ta\n} from './mod';\nexport { used } from './mod';\n";
+        let source = "export {\n\ta\n};\nexport { used };\n";
         assert_eq!(
             rewrite(source, 1, &["a"]).as_deref(),
-            Some("export { used } from './mod';\n")
+            Some("export { used };\n")
+        );
+    }
+
+    #[test]
+    fn keeps_the_module_load_of_a_removed_value_re_export() {
+        let source =
+            "export {\n\tWidget\n} from './widget.element';\nexport { other } from './other';\n";
+        assert_eq!(
+            rewrite(source, 1, &["Widget"]).as_deref(),
+            Some("import './widget.element';\nexport { other } from './other';\n")
+        );
+    }
+
+    #[test]
+    fn keeps_the_import_attributes_and_layout_of_the_module_load() {
+        assert_eq!(
+            rewrite(
+                "  export { data } from \"./data.json\" with { type: \"json\" } // note",
+                0,
+                &["data"]
+            )
+            .as_deref(),
+            Some("  import \"./data.json\" with { type: \"json\" } // note")
+        );
+    }
+
+    #[test]
+    fn deletes_a_type_only_re_export() {
+        let source = "export type { A } from './types';\nexport { type B, type C } from './more';\nexport { kept };\n";
+        let without_a = rewrite(source, 0, &["A"]).unwrap();
+        assert_eq!(
+            rewrite(&without_a, 0, &["B", "C"]).as_deref(),
+            Some("export { kept };\n")
         );
     }
 
@@ -782,13 +937,22 @@ mod tests {
         );
         assert_eq!(
             rewrite(source, 1, &["a", "kept"]).as_deref(),
-            Some("const x = 1;\n")
+            Some("import './data.json' with { type: 'json' }\nconst x = 1;\n")
+        );
+    }
+
+    #[test]
+    fn keeps_code_after_the_module_load_on_the_last_line() {
+        let source = "export {\n  a\n} from './mod'; const x = 1;\n";
+        assert_eq!(
+            rewrite(source, 1, &["a"]).as_deref(),
+            Some("import './mod'; const x = 1;\n")
         );
     }
 
     #[test]
     fn refuses_a_full_delete_when_code_follows_on_the_last_line() {
-        let source = "export {\n  a\n} from './mod'; const x = 1;\n";
+        let source = "export {\n  a\n}; const x = 1;\n";
         assert_eq!(rewrite(source, 1, &["a"]), None);
     }
 
@@ -836,7 +1000,7 @@ mod tests {
         let source = "export {\n  a,\n  kept\n}\nfrom './mod'\nconst x = 1;\n";
         assert_eq!(
             rewrite(source, 1, &["a", "kept"]).as_deref(),
-            Some("const x = 1;\n")
+            Some("import './mod'\nconst x = 1;\n")
         );
         assert_eq!(
             rewrite(source, 1, &["a"]).as_deref(),

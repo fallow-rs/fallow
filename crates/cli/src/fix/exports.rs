@@ -215,7 +215,11 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
         for (fix, reason) in &file_plan.withheld {
             push_withheld_export_entry(input, (file_plan.path, file_plan.relative), fix, *reason);
         }
-        let rewrites = rewrite_list_statements(&file_plan.lists, &mut file_plan.fixes);
+        let lines: Vec<&str> = file_plan
+            .content
+            .split(file_plan.meta.line_ending)
+            .collect();
+        let rewrites = rewrite_list_statements(&file_plan.lists, &lines, &mut file_plan.fixes);
         if file_plan.fixes.is_empty() {
             continue;
         }
@@ -299,8 +303,8 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
         let mut lists = ExportListIndex::default();
         let index = SourceEditIndex::parse(path, &content);
         let mut fixes = collect_export_line_fixes(&lines, file_exports, &mut lists, index.as_ref());
+        rewrite_list_statements(&lists, &lines, &mut fixes);
         drop(lines);
-        rewrite_list_statements(&lists, &mut fixes);
         if fixes.is_empty() {
             continue;
         }
@@ -427,6 +431,7 @@ fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> b
 /// Returns the rewrite of each statement, keyed by its first line.
 fn rewrite_list_statements(
     lists: &ExportListIndex,
+    lines: &[&str],
     fixes: &mut Vec<ExportFix>,
 ) -> FxHashMap<usize, ListRewriteOutcome> {
     let mut names_by_statement: FxHashMap<usize, (ExportListStatement, Vec<&str>)> =
@@ -440,7 +445,7 @@ fn rewrite_list_statements(
                 .push(fix.export_name.as_str());
         }
     }
-    let rewrites: FxHashMap<usize, ListRewriteOutcome> = names_by_statement
+    let mut rewrites: FxHashMap<usize, ListRewriteOutcome> = names_by_statement
         .into_iter()
         .filter_map(|(start, (statement, names))| {
             lists
@@ -448,6 +453,7 @@ fn rewrite_list_statements(
                 .map(|outcome| (start, outcome))
         })
         .collect();
+    lists.drop_redundant_module_loads(lines, &mut rewrites);
     fixes.retain(|fix| match fix.edit {
         ExportEdit::List(statement) => rewrites
             .get(&statement.start_line)
@@ -1264,7 +1270,7 @@ mod tests {
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export const kept = 1;\n");
+        assert_eq!(content, "import './unused';\nexport const kept = 1;\n");
     }
 
     #[test]
@@ -1482,7 +1488,7 @@ mod tests {
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export const x = 1;\n");
+        assert_eq!(content, "import \"./mod\";\nexport const x = 1;\n");
     }
 
     #[test]
@@ -1555,7 +1561,10 @@ mod tests {
         let (_, _) = fix_single(root, &file, "Foo", 1, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export { Bar } from \"./bar\";\n");
+        assert_eq!(
+            content,
+            "import \"./foo\";\nexport { Bar } from \"./bar\";\n"
+        );
     }
 
     #[test]
