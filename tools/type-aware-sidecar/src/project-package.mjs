@@ -35,3 +35,23 @@ export const packagePathTargets = (project, packageJson) => {
   if (typeof packageName !== "string") return [];
   return projectCompilerOptions(project).paths?.[packageName] ?? [];
 };
+
+/**
+ * A regular expression for the source files of a wildcard package target.
+ * Every `*` of a Node subpath pattern stands for the same substring, and that
+ * substring can contain `/`: `./src/*.ts` matches `src/nested/deep.ts`. A
+ * target with its first `*` at the package root, such as `./*.js`, keeps a
+ * capture of one path segment, so it does not make every test and config file
+ * of the package an entry.
+ */
+export const wildcardPattern = (target) => {
+  const normalized = target.replace(/^\.\//u, "").replace(/^dist\//u, "src/");
+  const sourceTarget = normalized.replace(/(?:\.d)?\.[cm]?[jt]sx?$/u, ".ts");
+  const capture = sourceTarget.startsWith("*") ? "([^/]+)" : "(.+)";
+  const escaped = sourceTarget
+    .split("*")
+    .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&"))
+    .map((part, index) => (index === 0 ? part : `${index === 1 ? capture : "\\1"}${part}`))
+    .join("");
+  return new RegExp(`^${escaped}$`, "u");
+};

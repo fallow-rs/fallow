@@ -13,6 +13,7 @@ pub trait ArtifactDownloader {
     fn open(&self, url: &str) -> Result<Box<dyn Read>, String>;
 }
 
+const INSTALL_LOCK_FILE: &str = ".install.lock";
 const DNS_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -129,6 +130,11 @@ pub fn install_with(
 
     fs::create_dir_all(&paths.directory)
         .map_err(|error| format!("failed to create the model cache: {error}"))?;
+    let _lock = lock_install(paths)?;
+    // Another setup can have installed the cache while this one waited.
+    if artifacts == ARTIFACTS && inspect_cache(paths).ready {
+        return Ok(SetupResult { downloaded: false });
+    }
     let mut network_used = false;
     for artifact in artifacts {
         network_used |= install_artifact(paths, *artifact, downloader)?;
@@ -137,6 +143,26 @@ pub fn install_with(
     Ok(SetupResult {
         downloaded: network_used,
     })
+}
+
+/// Hold an exclusive lock on the revision directory for one install. The
+/// partial, manifest and backup files have fixed names, so two setups on one
+/// cache must not write them at the same time. The operating system releases
+/// the lock when the process exits, so a crashed setup leaves no stale lock.
+fn lock_install(paths: &ModelPaths) -> Result<Option<File>, String> {
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(paths.directory.join(INSTALL_LOCK_FILE))
+        .map_err(|error| format!("failed to open the model cache lock: {error}"))?;
+    match file.lock() {
+        Ok(()) => Ok(Some(file)),
+        // Some network file systems have no file locks. Setup still installs
+        // each verified artifact with a rename, so it proceeds without one.
+        Err(error) if error.kind() == io::ErrorKind::Unsupported => Ok(None),
+        Err(error) => Err(format!("failed to lock the model cache: {error}")),
+    }
 }
 
 fn install_artifact(
@@ -206,6 +232,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{Cursor, Write};
     use std::net::TcpListener;
+    use std::sync::mpsc;
     use std::thread;
 
     use sha2::{Digest, Sha256};
@@ -309,6 +336,89 @@ mod tests {
         let error = install_with(&paths, &artifacts, &downloader).expect_err("digest mismatch");
         assert!(error.contains("SHA-256"));
         assert!(!paths.config.with_extension("download-partial").exists());
+    }
+
+    /// Yields the first byte, then waits until `resume` fires or a second
+    /// passes, so a test can start a second install while this one writes.
+    struct PausedReader {
+        bytes: Vec<u8>,
+        position: usize,
+        started: Option<mpsc::Sender<()>>,
+        resume: mpsc::Receiver<()>,
+    }
+
+    impl Read for PausedReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.position == 1 {
+                if let Some(started) = self.started.take() {
+                    let _ = started.send(());
+                }
+                let _ = self.resume.recv_timeout(Duration::from_secs(1));
+            }
+            let end = if self.position == 0 {
+                1
+            } else {
+                self.bytes.len()
+            };
+            let count = (end - self.position).min(buffer.len());
+            buffer[..count].copy_from_slice(&self.bytes[self.position..self.position + count]);
+            self.position += count;
+            Ok(count)
+        }
+    }
+
+    struct PausedDownloader(std::sync::Mutex<Option<PausedReader>>);
+
+    impl ArtifactDownloader for PausedDownloader {
+        fn open(&self, _url: &str) -> Result<Box<dyn Read>, String> {
+            let reader = self
+                .0
+                .lock()
+                .expect("downloader lock")
+                .take()
+                .ok_or_else(|| "the paused artifact was opened twice".to_string())?;
+            Ok(Box::new(reader))
+        }
+    }
+
+    #[test]
+    fn concurrent_setups_on_one_cache_both_succeed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = ModelPaths::from_cache_root(directory.path());
+        let bytes = b"config-bytes".to_vec();
+        let artifacts = [spec("config.json", &bytes)];
+        let (started_tx, started_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let paused = PausedDownloader(std::sync::Mutex::new(Some(PausedReader {
+            bytes: bytes.clone(),
+            position: 0,
+            started: Some(started_tx),
+            resume: resume_rx,
+        })));
+
+        let first = thread::scope(|scope| {
+            let first = scope.spawn(|| install_with(&paths, &artifacts, &paused));
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("first setup starts its download");
+            let second = scope.spawn(|| {
+                let memory = MemoryDownloader {
+                    files: BTreeMap::from([("config.json".to_string(), bytes.clone())]),
+                };
+                let result = install_with(&paths, &artifacts, &memory);
+                let _ = resume_tx.send(());
+                result
+            });
+            second
+                .join()
+                .expect("second setup thread")
+                .expect("second setup");
+            first.join().expect("first setup thread")
+        });
+
+        first.expect("first setup");
+        assert_eq!(fs::read(&paths.config).expect("installed config"), bytes);
+        assert!(paths.manifest.is_file());
     }
 
     #[test]

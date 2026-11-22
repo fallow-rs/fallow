@@ -995,6 +995,56 @@ incremented.value++;
   }
 });
 
+const discoveredEntryNames = (root, exportsField, files) => {
+  write(
+    root,
+    "tsconfig.json",
+    JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+  );
+  write(root, "package.json", JSON.stringify({ exports: exportsField }));
+  for (const [file, name] of Object.entries(files)) {
+    write(root, file, `export interface ${name} { value: string }\n`);
+  }
+  const request = semanticRequest(root, [
+    { id: 0, operation: "api-surface", entry_points: [], private_leak_candidates: [] },
+  ]);
+  return analyzeSemanticQueries(parseRequest(request))
+    .results[0].data.entries.map((entry) => entry.exposed.exported_name)
+    .toSorted();
+};
+
+test("package wildcard entries let one capture span directories, as Node does", () => {
+  const root = makeProject();
+  try {
+    assert.deepEqual(
+      discoveredEntryNames(
+        root,
+        { "./*": "./src/*.ts" },
+        { "src/top.ts": "Top", "src/nested/deep.ts": "Deep" },
+      ),
+      ["Deep", "Top"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("package wildcard entries give every star of a target the same capture", () => {
+  const root = makeProject();
+  try {
+    assert.deepEqual(
+      discoveredEntryNames(
+        root,
+        { "./*": "./src/*/*.ts" },
+        { "src/alpha/alpha.ts": "Same", "src/alpha/beta.ts": "Mismatched" },
+      ),
+      ["Same"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 maps public API leaks and project-local public-signature coupling", () => {
   const root = makeProject();
   try {

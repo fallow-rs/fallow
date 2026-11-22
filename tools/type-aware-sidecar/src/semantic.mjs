@@ -6,7 +6,7 @@ import { accessorPairExists, countsAsAccessorUse } from "./accessor-direction.mj
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity, resetFileIdentityCache } from "./file-identity.mjs";
-import { packagePathTargets, projectPackage } from "./project-package.mjs";
+import { packagePathTargets, projectPackage, wildcardPattern } from "./project-package.mjs";
 import { projectResult, projectState } from "./project-state.mjs";
 import {
   declarationName,
@@ -1195,16 +1195,6 @@ const sourceCandidatesForTarget = (root, target) => {
   return [normalized, extensionless, withoutDist]
     .flatMap((entry) => [entry, `${entry}.ts`, `${entry}.tsx`, `${entry}/index.ts`])
     .map((entry) => path.resolve(root, entry));
-};
-
-const wildcardPattern = (target) => {
-  const normalized = target.replace(/^\.\//u, "").replace(/^dist\//u, "src/");
-  const sourceTarget = normalized.replace(/(?:\.d)?\.[cm]?[jt]sx?$/u, ".ts");
-  const escaped = sourceTarget
-    .split("*")
-    .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&"))
-    .join("[^/]+");
-  return new RegExp(`^${escaped}$`, "u");
 };
 
 const ancestorRoots = (root, start) => {
