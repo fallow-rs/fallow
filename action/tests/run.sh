@@ -378,6 +378,14 @@ echo "=== Install script: type-aware sidecar ==="
 mkdir -p "$INSTALL_TMP/ta-jsonc" "$INSTALL_TMP/ta-toml" "$INSTALL_TMP/ta-off" \
   "$INSTALL_TMP/ta-audit" "$INSTALL_TMP/ta-pinned" "$INSTALL_TMP/ta-explicit"
 
+# These tests check the root config file reader. A mock CLI that cannot
+# resolve the config keeps a fallow on the PATH of the machine out of them.
+SIDECAR_SAVED_PATH="$PATH"
+mkdir -p "$INSTALL_TMP/no-resolver"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$INSTALL_TMP/no-resolver/fallow"
+chmod +x "$INSTALL_TMP/no-resolver/fallow"
+PATH="$INSTALL_TMP/no-resolver:$PATH"
+
 cat > "$INSTALL_TMP/ta-jsonc/.fallowrc.jsonc" <<'JSONC'
 {
   // semantic evidence for dead-code candidates
@@ -489,6 +497,10 @@ assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_SCRIPT=<tool-dir>/node_mo
 OUT=$(RUNNER_OS=Linux INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=true FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_BIN=<tool-dir>/node_modules/fallow-type-aware/fallow-type-aware.mjs" "sidecar: Linux starts the sidecar directly"
 assert_not_contains "$OUT" "FALLOW_TYPE_AWARE_SCRIPT" "sidecar: Linux sets no sidecar script"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "::warning::fallow config could not resolve the project config" "sidecar: a failed config resolution warns before the fallback"
+PATH="$SIDECAR_SAVED_PATH"
 
 # --- Binary verification integration ---
 #

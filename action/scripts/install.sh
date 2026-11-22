@@ -266,6 +266,9 @@ auto_type_aware_enabled() {
     0) return 0 ;;
     1) return 1 ;;
   esac
+  if command -v fallow > /dev/null 2>&1; then
+    echo "::warning::fallow config could not resolve the project config, so the type-aware decision reads only the first config file in the root"
+  fi
   type_aware_config_enabled "$root" "$explicit"
 }
 
@@ -278,6 +281,7 @@ sidecar_env_lines() {
     local node_bin script
     node_bin="$(node -p 'process.execPath' | tr -d '\r\n')"
     script="$(cygpath -w "$sidecar_bin" 2> /dev/null || printf '%s' "$sidecar_bin")"
+    script="$(printf '%s' "$script" | tr -d '\r\n')"
     printf 'FALLOW_TYPE_AWARE_BIN=%s\n' "$node_bin"
     printf 'FALLOW_TYPE_AWARE_SCRIPT=%s\n' "$script"
   else
@@ -414,7 +418,7 @@ fi
 # read from a manifest that may be tampered with (this context only renders on a
 # verification FAILURE), and an embedded newline could otherwise inject a
 # spoofed workflow command. `|| true` keeps the pipeline from tripping set -e.
-installed_fallow_version="$(node -p "require('${global_fallow_root}/package.json').version" 2>/dev/null | tr -d '\r\n' || true)"
+installed_fallow_version="$(node -p 'require(process.argv[1]).version' "${global_fallow_root}/package.json" 2>/dev/null | tr -d '\r\n' || true)"
 [ -n "$installed_fallow_version" ] || installed_fallow_version="unknown"
 
 if ACTION_VERIFY_SCRIPT="$verify_script" FALLOW_VERIFY_RESOLVE_FROM="$global_fallow_root" node "$verify_runner"; then
@@ -474,7 +478,9 @@ if [ "$sidecar_wanted" = "true" ]; then
     echo "::error::fallow-type-aware@${sidecar_version} installed, but ${sidecar_bin} does not exist."
     exit 1
   fi
-  sidecar_installed_version="$(node -p "require('${tool_dir}/node_modules/fallow-type-aware/package.json').version" 2>/dev/null | tr -d '\r\n' || true)"
+  # The path goes in as an argument: a Windows path such as D:\a\_temp holds
+  # backslashes that a JavaScript string literal would read as escapes.
+  sidecar_installed_version="$(node -p 'require(process.argv[1]).version' "${tool_dir}/node_modules/fallow-type-aware/package.json" 2>/dev/null | tr -d '\r\n' || true)"
   if [ "$sidecar_installed_version" != "$sidecar_version" ]; then
     echo "::error::Installed fallow-type-aware ${sidecar_installed_version:-unknown}, expected ${sidecar_version}. The exact-version-match contract does not hold; aborting."
     exit 1
