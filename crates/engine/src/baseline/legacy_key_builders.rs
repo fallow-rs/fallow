@@ -452,3 +452,21 @@ fn policy_violation_key(v: &crate::results::PolicyViolation, root: &Path) -> Str
         v.matched
     )
 }
+
+pub(super) struct BaselineGraphKeys {
+    pub(super) circular_dependencies: Vec<String>,
+    pub(super) re_export_cycles: Vec<String>,
+    pub(super) package_cycles: Vec<String>,
+    pub(super) boundary_violations: Vec<String>,
+    pub(super) boundary_coverage_violations: Vec<String>,
+    pub(super) boundary_call_violations: Vec<String>,
+    pub(super) policy_violations: Vec<String>,
+}
+
+pub(super) struct BaselineCatalogKeys {
+    pub(super) unused_catalog_entries: Vec<String>,
+    pub(super) empty_catalog_groups: Vec<String>,
+    pub(super) unresolved_catalog_references: Vec<String>,
+    pub(super) unused_dependency_overrides: Vec<String>,
+    pub(super) misconfigured_dependency_overrides: Vec<String>,
+}

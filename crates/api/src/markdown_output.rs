@@ -73,6 +73,9 @@ fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
     }
 }
 
+#[path = "markdown_members.rs"]
+mod members;
+use members::push_markdown_member_sections;
 #[path = "markdown_architecture.rs"]
 mod architecture;
 pub use architecture::build_markdown;
@@ -297,49 +300,6 @@ fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults
                 &dep.reachability_caveats,
             )
         },
-    );
-}
-
-fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
-    markdown_grouped_section(
-        out,
-        &results.unused_enum_members,
-        "Unused enum members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedEnumMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_class_members,
-        "Unused class members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedClassMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_store_members,
-        "Unused store members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedStoreMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_namespace_members,
-        "Unused namespace members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedNamespaceMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_protected_class_members,
-        "Unused protected class members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedProtectedClassMemberFinding| format_member(&m.member, &m.reachability_caveats),
     );
 }
 

@@ -23,6 +23,8 @@ mod caller_review;
 mod catalog_issues;
 #[path = "dead_code_codeclimate_component_io.rs"]
 mod component_io;
+#[path = "dead_code_codeclimate_namespace_escape.rs"]
+mod namespace_escape;
 use caller_review::{push_absent_component_prop_issues, push_constant_parameter_issues};
 use catalog_issues::{
     push_empty_catalog_group_issues, push_misconfigured_dependency_override_issues,
@@ -1704,6 +1706,12 @@ impl CodeClimateBuilder<'_> {
             "fallow/unused-protected-class-member",
             "Protected class",
             self.rules.unused_protected_class_members,
+        );
+        namespace_escape::push_namespace_escape_issues(
+            &mut self.issues,
+            &self.results.namespace_escapes,
+            self.root,
+            self.rules.namespace_escapes,
         );
     }
 

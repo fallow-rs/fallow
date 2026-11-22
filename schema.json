@@ -252,6 +252,7 @@
         "unused-class-members": "error",
         "unused-namespace-members": "warn",
         "unused-protected-class-members": "off",
+        "namespace-escapes": "off",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
@@ -1832,6 +1833,11 @@
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
+        "namespace-escapes": {
+          "description": "A namespace binding that the code uses as a whole value (a cast, a\ncall argument, a spread, a computed read, a re-export), so every\nexport of its target module gets credit and stays unchecked. The\nfinding is on the import of the binding. Defaults to `off`, so the\ndefault output does not change.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-store-members": {
           "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an open declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
           "$ref": "#/$defs/Severity",
@@ -2770,6 +2776,17 @@
         },
         "unused-protected-class-members": {
           "description": "Severity of the `unused-protected-class-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "namespace-escapes": {
+          "description": "Severity of the `namespace-escapes` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

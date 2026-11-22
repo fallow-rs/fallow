@@ -75,6 +75,7 @@ macro_rules! with_baseline_fields {
             unused_store_members,
             unused_namespace_members,
             unused_protected_class_members,
+            namespace_escapes,
             unprovided_injects,
             unrendered_components,
             unused_component_props,
@@ -633,6 +634,9 @@ pub struct BaselineData {
     /// Unused protected class members, keyed by `file:parent.member`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     unused_protected_class_members: Vec<String>,
+    /// Namespace escapes, keyed by the canonical finding identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    namespace_escapes: Vec<String>,
     /// Unprovided injects, keyed by `file:key_name`.
     #[serde(default)]
     unprovided_injects: Vec<String>,
@@ -842,6 +846,7 @@ impl BaselineData {
             unused_store_members: member_imports.unused_store_members,
             unused_namespace_members: member_imports.unused_namespace_members,
             unused_protected_class_members: member_imports.unused_protected_class_members,
+            namespace_escapes: Vec::new(),
             unprovided_injects: member_imports.unprovided_injects,
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
@@ -909,6 +914,7 @@ impl BaselineData {
             + self.unused_store_members.len()
             + self.unused_namespace_members.len()
             + self.unused_protected_class_members.len()
+            + self.namespace_escapes.len()
             + self.unprovided_injects.len()
             + self.unrendered_components.len()
             + self.unused_component_props.len()
@@ -1153,26 +1159,6 @@ struct BaselineDependencyKeys {
     type_only: Vec<String>,
     test_only: Vec<String>,
     dev_in_prod: Vec<String>,
-}
-
-#[cfg(test)]
-struct BaselineGraphKeys {
-    circular_dependencies: Vec<String>,
-    re_export_cycles: Vec<String>,
-    package_cycles: Vec<String>,
-    boundary_violations: Vec<String>,
-    boundary_coverage_violations: Vec<String>,
-    boundary_call_violations: Vec<String>,
-    policy_violations: Vec<String>,
-}
-
-#[cfg(test)]
-struct BaselineCatalogKeys {
-    unused_catalog_entries: Vec<String>,
-    empty_catalog_groups: Vec<String>,
-    unresolved_catalog_references: Vec<String>,
-    unused_dependency_overrides: Vec<String>,
-    misconfigured_dependency_overrides: Vec<String>,
 }
 
 /// Generate a stable key for a boundary violation: `from_path->to_path`.

@@ -33,6 +33,10 @@ use crate::report::{
     split_dir_filename,
 };
 
+#[path = "check_members.rs"]
+mod members;
+use members::build_unused_member_sections;
+
 #[path = "check_config_quality.rs"]
 mod config_quality;
 use config_quality::emit_config_quality_signal;
@@ -508,6 +512,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "Unused protected class members",
             "fallow/unused-protected-class-member",
         ),
+        ("Namespace escapes", "fallow/namespace-escape"),
         ("Unused store members", "fallow/unused-store-member"),
         ("Unresolved imports", "fallow/unresolved-import"),
         ("Unlisted dependencies", "fallow/unlisted-dependency"),
@@ -1046,7 +1051,8 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         || !input.results.unused_class_members.is_empty()
         || !input.results.unused_store_members.is_empty()
         || !input.results.unused_namespace_members.is_empty()
-        || !input.results.unused_protected_class_members.is_empty();
+        || !input.results.unused_protected_class_members.is_empty()
+        || !input.results.namespace_escapes.is_empty();
     if !has_unused_code {
         return;
     }
@@ -1153,93 +1159,6 @@ fn push_unused_export_sections(input: &mut UnusedCodeSectionInput<'_>) {
         max_files: input.max_grouped_files,
         get_path: |e| e.leak.path.as_path(),
         format_detail: &format_private_type_leak,
-    });
-}
-
-fn build_unused_member_sections(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-    max_grouped_files: usize,
-) {
-    let has_fixable_enum_member = results
-        .unused_enum_members
-        .iter()
-        .flat_map(|finding| &finding.actions)
-        .any(fallow_types::output::IssueAction::is_auto_fixable);
-    build_human_grouped_section_with_fixability(
-        GroupedSectionInput {
-            lines,
-            items: &results.unused_enum_members,
-            title: "Unused enum members",
-            level: severity_to_level(rules.unused_enum_members),
-            root,
-            max_files: max_grouped_files,
-            get_path: |m| m.member.path.as_path(),
-            format_detail: &|m: &UnusedEnumMemberFinding| {
-                format_unused_member(&m.member, &m.reachability_caveats)
-            },
-        },
-        has_fixable_enum_member,
-    );
-
-    let has_fixable_class_member = results
-        .unused_class_members
-        .iter()
-        .flat_map(|finding| &finding.actions)
-        .any(fallow_types::output::IssueAction::is_auto_fixable);
-    build_human_grouped_section_with_fixability(
-        GroupedSectionInput {
-            lines,
-            items: &results.unused_class_members,
-            title: "Unused class members",
-            level: severity_to_level(rules.unused_class_members),
-            root,
-            max_files: max_grouped_files,
-            get_path: |m| m.member.path.as_path(),
-            format_detail: &|m: &UnusedClassMemberFinding| {
-                format_unused_member(&m.member, &m.reachability_caveats)
-            },
-        },
-        has_fixable_class_member,
-    );
-
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_store_members,
-        title: "Unused store members",
-        level: severity_to_level(rules.unused_store_members),
-        root,
-        max_files: max_grouped_files,
-        get_path: |m| m.member.path.as_path(),
-        format_detail: &|m: &UnusedStoreMemberFinding| {
-            format_unused_member(&m.member, &m.reachability_caveats)
-        },
-    });
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_namespace_members,
-        title: "Unused namespace members",
-        level: severity_to_level(rules.unused_namespace_members),
-        root,
-        max_files: max_grouped_files,
-        get_path: |m| m.member.path.as_path(),
-        format_detail: &|m: &UnusedNamespaceMemberFinding| {
-            format_unused_member(&m.member, &m.reachability_caveats)
-        },
-    });
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.unused_protected_class_members,
-        title: "Unused protected class members",
-        level: severity_to_level(rules.unused_protected_class_members),
-        root,
-        max_files: max_grouped_files,
-        get_path: |m| m.member.path.as_path(),
-        format_detail: &|m: &UnusedProtectedClassMemberFinding| {
-            format_unused_member(&m.member, &m.reachability_caveats)
-        },
     });
 }
 
@@ -3289,6 +3208,9 @@ fn collect_dead_code_rules(
     for m in &results.unused_protected_class_members {
         insert_matching_rule(rules, &m.member.path, root, resolver);
     }
+    for e in &results.namespace_escapes {
+        insert_matching_rule(rules, &e.escape.path, root, resolver);
+    }
     for p in &results.constant_parameters {
         insert_matching_rule(rules, &p.parameter.path, root, resolver);
     }
@@ -3969,6 +3891,11 @@ fn check_summary_member_categories(
             "Unused protected class members",
             results.unused_protected_class_members.len(),
             severity_to_level(rules.unused_protected_class_members),
+        ),
+        (
+            "Namespace escapes",
+            results.namespace_escapes.len(),
+            severity_to_level(rules.namespace_escapes),
         ),
         (
             "Unresolved imports",

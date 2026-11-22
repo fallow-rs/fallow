@@ -184,6 +184,18 @@ const DEAD_CODE_WIRING = {
     category: "unused-protected-class-member",
     finding: { ...member, actions: [] },
   },
+  "namespace-escape": {
+    field: "namespace_escapes",
+    category: "namespace-escape",
+    finding: {
+      ...loc,
+      local_name: "Ns",
+      module: "src/targets.ts",
+      hidden_exports: 2,
+      reason: "whole-object-use",
+      actions: [],
+    },
+  },
   "unused-server-action": {
     field: "unused_server_actions",
     category: "unused-server-action",

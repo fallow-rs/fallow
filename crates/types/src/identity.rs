@@ -39,16 +39,16 @@ use crate::output_dead_code::{
     DevDependencyInProductionFinding, DuplicateExportAliasFinding, DuplicateExportFinding,
     DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
     InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
+    MixedClientServerBarrelFinding, NamespaceEscapeFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    TypeOnlyDependencyFinding, UnlistedBinaryFinding, UnlistedDependencyFinding,
+    UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedComponentEmitFinding, UnusedComponentInputFinding, UnusedComponentOutputFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
     UnusedProtectedClassMemberFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -456,6 +456,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unused_class_members,
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -537,6 +538,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unused_class_members);
     visitor.visit(unused_namespace_members);
     visitor.visit(unused_protected_class_members);
+    visitor.visit(namespace_escapes);
     visitor.visit(unused_store_members);
     visitor.visit(unresolved_imports);
     visitor.visit(unlisted_dependencies);
@@ -805,6 +807,17 @@ identified!(
     token: |_t| "unused-protected-class-member",
     parts: |f, p| member_parts(&f.member, p),
     position: |g| (g.member.line, g.member.col, 0),
+);
+
+identified!(
+    NamespaceEscapeFinding,
+    token: |_t| "namespace-escape",
+    parts: |f, p| vec![
+        p.key(&f.escape.path),
+        f.escape.local_name.clone(),
+        p.key(&f.escape.module),
+    ],
+    position: |g| (g.escape.line, g.escape.col, 0),
 );
 
 identified!(

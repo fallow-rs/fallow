@@ -18,6 +18,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "unused-class-members": "unused-class-member",
   "unused-namespace-member": "unused-namespace-member",
   "unused-protected-class-member": "unused-protected-class-member",
+  "namespace-escape": "namespace-escape",
   "unused-store-member": "unused-store-member",
   "unused-server-action": "unused-server-action",
   "unused-load-data-keys": "unused-load-data-key",

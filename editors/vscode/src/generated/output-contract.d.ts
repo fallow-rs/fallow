@@ -421,6 +421,10 @@ export type DependencyLocation = ("dependencies" | "devDependencies" | "optional
  */
 export type MemberKind = ("enum_member" | "class_method" | "class_property" | "namespace_member" | "store_member")
 /**
+ * Why a namespace binding gets the full export credit of its target.
+ */
+export type NamespaceEscapeReason = ("whole-object-use" | "re-exported-binding" | "no-member-read")
+/**
  * Discriminator for [`ReExportCycle`]: which structural shape was detected.
  */
 export type ReExportCycleKind = ("multi-node" | "self-loop")
@@ -3394,6 +3398,12 @@ unused_namespace_members?: UnusedNamespaceMemberFinding[]
  */
 unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
 /**
+ * Namespace bindings that the code uses as a whole value, so every
+ * export of the target module gets credit and stays unchecked. The rule
+ * is `off` by default, so this array is empty unless a config turns it on.
+ */
+namespace_escapes?: NamespaceEscapeFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -3926,6 +3936,11 @@ unused_namespace_members?: number
  * is `off` by default.
  */
 unused_protected_class_members?: number
+/**
+ * Namespace bindings that the code uses as a whole value. Omitted when
+ * zero, because the rule is `off` by default.
+ */
+namespace_escapes?: number
 /**
  * Unused store members.
  */
@@ -5221,6 +5236,64 @@ effective_severity?: (EffectiveSeverity | null)
  * only, because a protected member offers no mutation.
  */
 reachability_caveats?: ReachabilityCaveat[]
+}
+/**
+ * Wire-shape envelope for a [`NamespaceEscape`] finding consumed under the
+ * `namespace_escapes` key. Emits only a line-level suppress action: the fix
+ * is to read the members by name, which is a code change for the user.
+ */
+export interface NamespaceEscapeFinding {
+/**
+ * The file that declares the binding.
+ */
+path: string
+/**
+ * 1-based line of the import that declares the binding.
+ */
+line: number
+/**
+ * 0-based byte column of that import.
+ */
+col: number
+/**
+ * The local name of the binding.
+ */
+local_name: string
+/**
+ * The module whose exports get the full credit.
+ */
+module: string
+/**
+ * The count of exports in `module` and the modules it re-exports from
+ * that would be unused-export or unused-type findings without this credit.
+ */
+hidden_exports: number
+reason: NamespaceEscapeReason
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -16414,6 +16487,12 @@ unused_namespace_members?: UnusedNamespaceMemberFinding[]
  */
 unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
 /**
+ * Namespace bindings that the code uses as a whole value, so every
+ * export of the target module gets credit and stays unchecked. The rule
+ * is `off` by default, so this array is empty unless a config turns it on.
+ */
+namespace_escapes?: NamespaceEscapeFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -18231,6 +18310,12 @@ unused_namespace_members?: UnusedNamespaceMemberFinding[]
  * by default, so this array is empty unless a config turns it on.
  */
 unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
+/**
+ * Namespace bindings that the code uses as a whole value, so every
+ * export of the target module gets credit and stays unchecked. The rule
+ * is `off` by default, so this array is empty unless a config turns it on.
+ */
+namespace_escapes?: NamespaceEscapeFinding[]
 /**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
@@ -23779,6 +23864,16 @@ export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
  * this alias; new code should prefer `MisconfiguredDependencyOverrideFinding`.
  */
 export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `NamespaceEscape` name.
+ * The wire shape is byte-identical: `NamespaceEscapeFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `NamespaceEscape` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `NamespaceEscapeFinding`.
+ */
+export type NamespaceEscape = NamespaceEscapeFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `PackageCycle` name.

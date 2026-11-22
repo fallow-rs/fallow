@@ -31,6 +31,7 @@ impl IssueFilters {
             "unused_class_members" => self.unused_class_members,
             "unused_namespace_members" => self.unused_namespace_members,
             "unused_protected_class_members" => self.unused_protected_class_members,
+            "namespace_escapes" => self.namespace_escapes,
             "unused_store_members" => self.unused_store_members,
             "unlisted_dependencies" => self.unlisted_deps,
             "unlisted_binaries" => self.unlisted_binaries,

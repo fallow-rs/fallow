@@ -152,6 +152,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "rules/unused-protected-class-member",
     },
     RuleDef {
+        id: "fallow/namespace-escape",
+        category: "Dead code",
+        name: "Namespace Escapes",
+        short: "Namespace binding is used as a whole value, so its exports are not checked",
+        full: "A namespace import (`import * as Ns`) that the code uses as a whole value: a cast, an assignment, a call argument, a spread, a computed member read, a reflective call such as `Object.keys(Ns)`, or a re-export with `export { Ns }`. Fallow cannot see which members such a use reads, so it credits every export of the target module and of the modules that the target re-exports from. These exports are then not checked by `unused-exports` and `unused-types`. The finding is on the import and gives the count of exports that the credit hides. A binding that hides no export is not reported. Defaults to off.",
+        docs_path: "rules/namespace-escape",
+    },
+    RuleDef {
         id: "fallow/unused-namespace-member",
         category: "Dead code",
         name: "Unused Namespace Members",
@@ -890,6 +898,10 @@ fn member_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-protected-class-member" => RuleGuide {
             example: "class Shape declares protected unusedHelper(), and neither Shape nor a subclass calls this.unusedHelper() or super.unusedHelper().",
             how_to_fix: "Remove the member, or make it private when only the class reads it. If a subclass outside the project reads it, suppress the line with // fallow-ignore-next-line unused-protected-class-member.",
+        },
+        "fallow/namespace-escape" => RuleGuide {
+            example: "src/index.ts has import * as formats from \"./formats\" and spreads formats into an object, so formatDate and formatPrice are not checked.",
+            how_to_fix: "Read the members by name (formats.formatDate) or import them by name, so fallow can check the other exports. When the whole object is the intent, add // fallow-ignore-next-line namespace-escape above the import.",
         },
         "fallow/unused-namespace-member" => RuleGuide {
             example: "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",

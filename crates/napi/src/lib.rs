@@ -48,6 +48,7 @@ pub struct DeadCodeOptions {
     pub unused_class_members: Option<bool>,
     pub unused_namespace_members: Option<bool>,
     pub unused_protected_class_members: Option<bool>,
+    pub namespace_escapes: Option<bool>,
     pub unused_store_members: Option<bool>,
     pub unprovided_injects: Option<bool>,
     pub unrendered_components: Option<bool>,
@@ -458,6 +459,7 @@ impl ToApiOptions for DeadCodeOptions {
                 unused_protected_class_members: value
                     .unused_protected_class_members
                     .unwrap_or(false),
+                namespace_escapes: value.namespace_escapes.unwrap_or(false),
                 unused_store_members: value.unused_store_members.unwrap_or(false),
                 unprovided_injects: value.unprovided_injects.unwrap_or(false),
                 unrendered_components: value.unrendered_components.unwrap_or(false),
@@ -1105,6 +1107,7 @@ mod tests {
             unused_class_members: Some(true),
             unused_namespace_members: Some(true),
             unused_protected_class_members: Some(true),
+            namespace_escapes: Some(true),
             unused_store_members: Some(true),
             unprovided_injects: Some(true),
             unrendered_components: Some(true),

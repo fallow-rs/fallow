@@ -507,6 +507,9 @@ pub struct DeadCodeFilters {
     pub unused_namespace_members: bool,
     /// `protected` class members that neither the class nor a subclass reads.
     pub unused_protected_class_members: bool,
+    /// Namespace bindings that the code uses as a whole value, so their
+    /// exports are not checked.
+    pub namespace_escapes: bool,
     /// Store members (for example Pinia) never used outside the store.
     pub unused_store_members: bool,
     /// `inject` calls with no matching `provide`.
@@ -591,6 +594,7 @@ impl DeadCodeFilters {
             || self.unused_class_members
             || self.unused_namespace_members
             || self.unused_protected_class_members
+            || self.namespace_escapes
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -661,6 +665,7 @@ impl DeadCodeFilters {
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-protected-class-members" => self.unused_protected_class_members = true,
+            "--namespace-escapes" => self.namespace_escapes = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,

@@ -160,12 +160,29 @@ pub(in crate::graph) struct WholeModuleObservations {
     ambient: FxHashMap<FileId, Exposure>,
     /// Targets a consumer in this graph observes as a whole object.
     observed: FxHashSet<FileId>,
+    /// The namespace bindings that got the full credit in this pass.
+    escapes: Vec<super::namespace_escapes::NamespaceEscape>,
 }
 
 impl WholeModuleObservations {
     /// Record a whole-object observation made by a consumer in this graph.
     pub(in crate::graph) fn observe(&mut self, target: FileId) {
         self.observed.insert(target);
+    }
+
+    /// Record a namespace binding that got the full credit of its target.
+    pub(in crate::graph) fn record_escape(
+        &mut self,
+        escape: super::namespace_escapes::NamespaceEscape,
+    ) {
+        self.escapes.push(escape);
+    }
+
+    /// Move the recorded escapes out.
+    pub(in crate::graph) fn take_escapes(
+        &mut self,
+    ) -> Vec<super::namespace_escapes::NamespaceEscape> {
+        std::mem::take(&mut self.escapes)
     }
 
     /// Record the target of an ambient plain `export *`.

@@ -76,6 +76,10 @@ pub enum Command {
         #[arg(long, help_heading = "Issue types")]
         unused_protected_class_members: bool,
 
+        /// Only report namespace imports that the code uses as a whole value (enables this rule)
+        #[arg(long, help_heading = "Issue types")]
+        namespace_escapes: bool,
+
         /// Only report unprovided injects
         #[arg(long, help_heading = "Issue types")]
         unprovided_injects: bool,

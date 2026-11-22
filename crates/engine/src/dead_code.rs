@@ -839,6 +839,12 @@ fn apply_core_dead_code_override_rules(results: &mut AnalysisResults, config: &R
             .unused_protected_class_members
             != Severity::Off
     });
+    results.namespace_escapes.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.escape.path)
+            .namespace_escapes
+            != Severity::Off
+    });
     results.unprovided_injects.retain(|f| {
         config
             .resolve_rules_for_path(&f.inject.path)
@@ -1058,6 +1064,9 @@ fn clear_base_core_dead_code(results: &mut AnalysisResults, rules: &RulesConfig)
     }
     if rules.unused_protected_class_members == Severity::Off {
         results.unused_protected_class_members.clear();
+    }
+    if rules.namespace_escapes == Severity::Off {
+        results.namespace_escapes.clear();
     }
     if rules.unprovided_injects == Severity::Off {
         results.unprovided_injects.clear();

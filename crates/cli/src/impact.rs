@@ -1324,69 +1324,9 @@ fn collect_file_and_export_findings(
     }
 }
 
-/// Push unused enum/class/store member and unprovided-inject findings.
-fn collect_member_findings(
-    results: &AnalysisResults,
-    push: &mut impl FnMut(&Path, &'static str, Option<String>),
-) {
-    for f in &results.unused_enum_members {
-        push(
-            &f.member.path,
-            "unused-enum-member",
-            Some(format!(
-                "{}{ID_SEP}{}",
-                f.member.parent_name, f.member.member_name
-            )),
-        );
-    }
-    for f in &results.unused_class_members {
-        push(
-            &f.member.path,
-            "unused-class-member",
-            Some(format!(
-                "{}{ID_SEP}{}",
-                f.member.parent_name, f.member.member_name
-            )),
-        );
-    }
-    for f in &results.unused_store_members {
-        push(
-            &f.member.path,
-            "unused-store-member",
-            Some(format!(
-                "{}{ID_SEP}{}",
-                f.member.parent_name, f.member.member_name
-            )),
-        );
-    }
-    for f in &results.unused_namespace_members {
-        push(
-            &f.member.path,
-            "unused-namespace-member",
-            Some(format!(
-                "{}{ID_SEP}{}",
-                f.member.parent_name, f.member.member_name
-            )),
-        );
-    }
-    for f in &results.unused_protected_class_members {
-        push(
-            &f.member.path,
-            "unused-protected-class-member",
-            Some(format!(
-                "{}{ID_SEP}{}",
-                f.member.parent_name, f.member.member_name
-            )),
-        );
-    }
-    for f in &results.unprovided_injects {
-        push(
-            &f.inject.path,
-            "unprovided-inject",
-            Some(f.inject.key_name.clone()),
-        );
-    }
-}
+#[path = "impact_member_findings.rs"]
+mod member_findings;
+use member_findings::collect_member_findings;
 
 #[path = "impact_component_findings.rs"]
 mod component_findings;

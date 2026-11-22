@@ -647,6 +647,18 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "namespace-escape",
+        args: &[],
+        anchor: ExampleAnchor::Line,
+        base: &[],
+        files: &[
+            file!("namespace-escape", "files", ".fallowrc.json", false),
+            file!("namespace-escape", "files", "package.json", true),
+            file!("namespace-escape", "files", "src/formats.ts", false),
+            file!("namespace-escape", "files", "src/index.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "nextjs-open-redirect",
         args: &[],
         anchor: ExampleAnchor::Line,

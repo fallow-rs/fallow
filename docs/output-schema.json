@@ -724,6 +724,13 @@
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
         },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -1425,6 +1432,13 @@
             "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -6526,6 +6540,10 @@
           "type": "integer",
           "description": "Unused protected class members. Omitted when zero, because the rule\nis `off` by default."
         },
+        "namespace_escapes": {
+          "type": "integer",
+          "description": "Namespace bindings that the code uses as a whole value. Omitted when\nzero, because the rule is `off` by default."
+        },
         "unused_store_members": {
           "type": "integer",
           "description": "Unused store members."
@@ -7391,6 +7409,13 @@
             "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -31881,6 +31906,13 @@
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
         },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -40136,6 +40168,106 @@
         "end_line"
       ],
       "description": "One file span of a clone region."
+    },
+    "NamespaceEscapeFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The file that declares the binding."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the import that declares the binding."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of that import."
+        },
+        "local_name": {
+          "type": "string",
+          "description": "The local name of the binding."
+        },
+        "module": {
+          "type": "string",
+          "description": "The module whose exports get the full credit."
+        },
+        "hidden_exports": {
+          "type": "integer",
+          "description": "The count of exports in `module` and the modules it re-exports from\nthat would be unused-export or unused-type findings without this credit."
+        },
+        "reason": {
+          "description": "Why the binding gets the full credit.",
+          "$ref": "#/definitions/NamespaceEscapeReason"
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "local_name",
+        "module",
+        "hidden_exports",
+        "reason",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`NamespaceEscape`] finding consumed under the\n`namespace_escapes` key. Emits only a line-level suppress action: the fix\nis to read the members by name, which is a code change for the user."
+    },
+    "NamespaceEscapeReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "whole-object-use",
+          "description": "The code uses the binding as a value: a cast, an assignment, a call\nargument, a spread, a computed member read, or a reflective call such\nas `Object.keys(Ns)`."
+        },
+        {
+          "type": "string",
+          "const": "re-exported-binding",
+          "description": "A module that is not an entry point re-exports the binding with\n`export { Ns }`, so fallow cannot see which members its consumers read."
+        },
+        {
+          "type": "string",
+          "const": "no-member-read",
+          "description": "The code reads no member of the binding by name and does not use it\nas a value, for example only in `typeof Ns`."
+        }
+      ],
+      "description": "Why a namespace binding gets the full export credit of its target."
     }
   }
 }

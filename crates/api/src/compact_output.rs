@@ -380,6 +380,16 @@ impl<'a> CompactLineBuilder<'a> {
                 &member.reachability_caveats,
             ));
         }
+        for finding in &self.results.namespace_escapes {
+            let escape = &finding.escape;
+            self.lines.push(format!(
+                "namespace-escape:{}:{}:{}:{}",
+                self.rel(&escape.path),
+                escape.line,
+                escape.local_name,
+                escape.hidden_exports
+            ));
+        }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
                 "unresolved-import:{}:{}:{}",

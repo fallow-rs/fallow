@@ -106,6 +106,7 @@ pub fn retain_in_scope(results: &mut AnalysisResults, scope: &impl ResultScope) 
         unused_class_members,
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -198,6 +199,9 @@ pub fn retain_in_scope(results: &mut AnalysisResults, scope: &impl ResultScope) 
     });
     retain_lines(unused_protected_class_members, scope, |f| {
         (&f.member.path, f.member.line)
+    });
+    retain_lines(namespace_escapes, scope, |f| {
+        (&f.escape.path, f.escape.line)
     });
     retain_lines(unused_store_members, scope, |f| {
         (&f.member.path, f.member.line)

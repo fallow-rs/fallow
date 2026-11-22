@@ -93,4 +93,16 @@ pub(super) fn push_member_sarif_results(
             )
         },
     );
+    push_sarif_results(sarif_results, &results.namespace_escapes, snippets, |e| {
+        let escape = &e.escape;
+        SarifFields {
+            rule_id: "fallow/namespace-escape",
+            level: finding_level(e, rules.namespace_escapes),
+            message: escape.message(&relative_uri(&escape.module, root)),
+            uri: relative_uri(&escape.path, root),
+            region: Some((escape.line, escape.col + 1)),
+            source_path: Some(escape.path.clone()),
+            properties: None,
+        }
+    });
 }
