@@ -594,7 +594,7 @@ fn run_audit_base_analyses(
         run: &run,
         changed_since: None,
         changed_files: focus,
-        retain_modules_for_health: share_dead_code_parse_with_health,
+        retain_modules_for_health: share_dead_code_parse_with_health || opts.brief,
         snapshot: fallow_config::AnalysisSnapshot::Base,
     };
     let (check_res, dupes_res) = rayon::join(
@@ -603,8 +603,8 @@ fn run_audit_base_analyses(
     );
     let mut check = check_res?;
     let dupes = dupes_res?;
-    // The public-export set of the base graph is brief-only. It is taken while
-    // the check result still holds the graph, before health consumes it.
+    // The public-export set of the base graph is brief-only. The pass keeps
+    // the graph for it, as the base options turn the brief off.
     if opts.brief
         && let Some(check) = check.as_mut()
     {

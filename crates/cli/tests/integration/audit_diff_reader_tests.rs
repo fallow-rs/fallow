@@ -65,3 +65,55 @@ fn a_moved_manifest_adds_no_dependency_to_the_brief() {
         "a moved manifest adds no dependency, got {added:?}"
     );
 }
+
+/// The typed decision-surface route (the `decision_surface` MCP tool) reads
+/// the base manifest of a moved package under its pre-rename path, so the
+/// move adds no dependency decision.
+#[test]
+fn a_moved_manifest_adds_no_dependency_on_the_typed_decision_route() {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("packages/a/src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/a/package.json"),
+        r#"{"name":"pkg","main":"src/index.ts","dependencies":{"left-pad":"^1.3.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/a/src/index.ts"),
+        "import leftPad from 'left-pad';\nexport const a = () => leftPad('x', 2);\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+    git(dir, &["checkout", "-b", "head"]);
+    git(dir, &["mv", "packages/a", "packages/b"]);
+    commit_all(dir, "move package");
+
+    let output = fallow_api::run_decision_surface(&fallow_api::DecisionSurfaceOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(dir.to_path_buf()),
+            ..Default::default()
+        },
+        base: Some("main".to_string()),
+        max_decisions: None,
+    })
+    .expect("typed decision surface runs");
+
+    let keys: Vec<&str> = output
+        .surface
+        .decisions
+        .iter()
+        .filter(|d| d.category == fallow_output::DecisionCategory::Dependency)
+        .map(|d| d.signal_key.as_str())
+        .collect();
+    assert!(
+        keys.is_empty(),
+        "a moved manifest adds no dependency decision, got {keys:?}"
+    );
+}

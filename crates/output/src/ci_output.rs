@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
+use crate::json_paths::uri_to_path;
 use crate::markdown_prose::markdown_table_prose;
 use crate::review_envelopes::{default_marker_regex, default_marker_regex_flags};
 use crate::{
@@ -225,7 +226,7 @@ pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssu
 }
 
 fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
-    let path = value.pointer("/location/path")?.as_str()?.to_string();
+    let path = uri_to_path(value.pointer("/location/path")?.as_str()?);
     let line = value
         .pointer("/location/lines/begin")
         .and_then(Value::as_u64)
@@ -244,7 +245,7 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
                 .filter(|end| *end >= line)
                 .unwrap_or(line);
             Some(CiLocation {
-                path: location.get("path")?.as_str()?.to_owned(),
+                path: uri_to_path(location.get("path")?.as_str()?),
                 line,
                 end_line,
             })
@@ -286,7 +287,7 @@ fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
         .other_locations
         .iter()
         .map(|location| CiLocation {
-            path: location.path.clone(),
+            path: uri_to_path(&location.path),
             line: u64::from(location.lines.begin),
             end_line: u64::from(
                 location
@@ -302,7 +303,7 @@ fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
         rule_id: issue.check_name.clone(),
         description: issue.description.clone(),
         severity: codeclimate_severity_label(issue.severity).to_owned(),
-        path: issue.location.path.clone(),
+        path: uri_to_path(&issue.location.path),
         line: u64::from(issue.location.lines.begin),
         end_line: issue.location.lines.end.map(u64::from),
         other_locations,
@@ -1289,6 +1290,45 @@ mod tests {
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].path, "src/a.ts");
         assert_eq!(issues[0].line, 7);
+    }
+
+    #[test]
+    fn ci_issues_carry_the_filesystem_path_of_an_encoded_codeclimate_path() {
+        let typed = vec![CodeClimateIssue {
+            kind: CodeClimateIssueKind::Issue,
+            check_name: "fallow/high-complexity".to_owned(),
+            description: "Function is complex".to_owned(),
+            categories: vec!["Complexity".to_owned()],
+            severity: CodeClimateSeverity::Major,
+            fingerprint: "fp".to_owned(),
+            location: CodeClimateLocation {
+                path: "app/%5Bid%5D/page.tsx".to_owned(),
+                lines: CodeClimateLines {
+                    begin: 7,
+                    end: None,
+                },
+            },
+            other_locations: vec![CodeClimateLocation {
+                path: "app/%5Blang%5D/peer.tsx".to_owned(),
+                lines: CodeClimateLines {
+                    begin: 2,
+                    end: None,
+                },
+            }],
+            owner: None,
+            group: None,
+            legacy_fingerprint: None,
+            audit: None,
+        }];
+        let value = serde_json::to_value(&typed).expect("typed fixture serializes");
+
+        for issues in [
+            issues_from_codeclimate_issues(&typed),
+            issues_from_codeclimate(&value),
+        ] {
+            assert_eq!(issues[0].path, "app/[id]/page.tsx");
+            assert_eq!(issues[0].other_locations[0].path, "app/[lang]/peer.tsx");
+        }
     }
 
     #[test]

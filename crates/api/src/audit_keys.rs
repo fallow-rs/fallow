@@ -445,32 +445,86 @@ pub fn remap_keys_for_renames(
 }
 
 pub(crate) fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> String {
-    if !key
-        .split([':', '|'])
-        .any(|segment| renames.contains_key(segment))
-    {
+    let renamed = |segment: &str| {
+        if segment.contains('|') {
+            segment
+                .split('|')
+                .any(|piece| renamed_set_member(piece, renames).is_some())
+        } else {
+            renamed_part(segment, renames).is_some()
+        }
+    };
+    if !key.split(':').any(renamed) {
         return key.to_string();
     }
     let segments: Vec<String> = key
         .split(':')
         .map(|segment| {
             if segment.contains('|') {
-                let mut pieces: Vec<&str> = segment
+                let mut pieces: Vec<String> = segment
                     .split('|')
-                    .map(|piece| renames.get(piece).map_or(piece, String::as_str))
+                    .map(|piece| {
+                        renamed_set_member(piece, renames).unwrap_or_else(|| piece.to_string())
+                    })
                     .collect();
-                pieces.sort_unstable();
+                // The key sorts the set members before it escapes the part.
+                pieces.sort_unstable_by_key(|piece| unescape_key_part(piece));
                 pieces.dedup();
                 pieces.join("|")
             } else {
-                renames
-                    .get(segment)
-                    .cloned()
-                    .unwrap_or_else(|| segment.to_string())
+                renamed_part(segment, renames).unwrap_or_else(|| segment.to_string())
             }
         })
         .collect();
     segments.join(":")
+}
+
+/// The head path of a renamed key part, in the form of the part.
+///
+/// A dead-code key escapes `%` and `:` in each part, and the rename map holds
+/// plain paths, so an escaped part is compared and returned in the escaped
+/// form. Other keys hold the plain path.
+fn renamed_part(part: &str, renames: &FxHashMap<String, String>) -> Option<String> {
+    if let Some(renamed) = renames.get(part) {
+        return Some(renamed.clone());
+    }
+    if !part.contains('%') {
+        return None;
+    }
+    renames
+        .get(&unescape_key_part(part))
+        .map(|renamed| escape_key_part(renamed))
+}
+
+/// The head path of a renamed member of a `|`-separated path set, in the form
+/// of the member.
+///
+/// A dead-code key escapes each set member (`%` as `%25`, `|` as `%7C`) and
+/// then the whole part, so an escaped member is decoded twice and encoded
+/// twice. Other keys hold the plain path.
+fn renamed_set_member(member: &str, renames: &FxHashMap<String, String>) -> Option<String> {
+    if let Some(renamed) = renames.get(member) {
+        return Some(renamed.clone());
+    }
+    if !member.contains('%') {
+        return None;
+    }
+    let path = unescape_key_part(member)
+        .replace("%7C", "|")
+        .replace("%25", "%");
+    renames
+        .get(&path)
+        .map(|renamed| escape_key_part(&renamed.replace('%', "%25").replace('|', "%7C")))
+}
+
+/// A key part as the finding holds it: `%3A` is `:` and `%25` is `%`.
+pub(crate) fn unescape_key_part(part: &str) -> String {
+    part.replace("%3A", ":").replace("%25", "%")
+}
+
+/// A path as a dead-code key part holds it: `%` is `%25` and `:` is `%3A`.
+fn escape_key_part(path: &str) -> String {
+    path.replace('%', "%25").replace(':', "%3A")
 }
 
 /// Canonical path form used inside attribution keys. The engine owns the one

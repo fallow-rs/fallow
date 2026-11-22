@@ -2343,3 +2343,74 @@ fn a_renamed_file_keeps_its_findings_and_occurrences_inherited() {
 
     assert_eq!(base, dead_code_keys(&head, &root));
 }
+
+#[test]
+fn a_renamed_file_with_an_escaped_path_keeps_its_findings_inherited() {
+    let root = root();
+    let finding = |path: &str| {
+        let mut suppression = audit_suppression(&root, 3, None);
+        suppression.path = root.join(path);
+        suppression
+    };
+    let base_results = AnalysisResults {
+        stale_suppressions: vec![finding("src/100%old.ts")],
+        ..AnalysisResults::default()
+    };
+    let head = AnalysisResults {
+        stale_suppressions: vec![finding("src/100%new.ts")],
+        ..AnalysisResults::default()
+    };
+    let renames = rustc_hash::FxHashMap::from_iter([(
+        "src/100%old.ts".to_string(),
+        "src/100%new.ts".to_string(),
+    )]);
+
+    let base = remap_keys_for_renames(&dead_code_keys(&base_results, &root), &renames);
+
+    assert_eq!(base, dead_code_keys(&head, &root));
+}
+
+fn cycle_results(root: &Path, files: &[&str]) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: files.iter().map(|file| root.join(file)).collect(),
+                length: files.len(),
+                line: 1,
+                col: 0,
+                edges: Vec::new(),
+                is_cross_package: false,
+            },
+        ));
+    results
+}
+
+#[test]
+fn a_renamed_cycle_member_with_an_escaped_path_keeps_the_cycle_inherited() {
+    let root = root();
+    let base = cycle_results(&root, &["src/100%old.ts", "src/b.ts"]);
+    let head = cycle_results(&root, &["src/100%new.ts", "src/b.ts"]);
+    let renames = rustc_hash::FxHashMap::from_iter([(
+        "src/100%old.ts".to_string(),
+        "src/100%new.ts".to_string(),
+    )]);
+
+    let remapped = remap_keys_for_renames(&dead_code_keys(&base, &root), &renames);
+
+    assert_eq!(remapped, dead_code_keys(&head, &root));
+}
+
+#[test]
+fn a_renamed_cycle_member_sorts_like_the_head_key() {
+    let root = root();
+    let base = cycle_results(&root, &["src/a/old.ts", "src/a:x.ts"]);
+    let head = cycle_results(&root, &["src/a/y.ts", "src/a:x.ts"]);
+    let renames =
+        rustc_hash::FxHashMap::from_iter([("src/a/old.ts".to_string(), "src/a/y.ts".to_string())]);
+
+    let remapped = remap_keys_for_renames(&dead_code_keys(&base, &root), &renames);
+
+    assert_eq!(remapped, dead_code_keys(&head, &root));
+}

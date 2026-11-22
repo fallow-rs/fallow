@@ -66,6 +66,18 @@ pub fn normalize_uri(path: &str) -> String {
         .replace(']', "%5D")
 }
 
+/// The filesystem path of a [`normalize_uri`] path: the brackets decoded.
+///
+/// [`normalize_uri`] does not escape `%`, so a file name that holds a
+/// literal `%5B` or `%5D` does not round-trip. Such names are rare.
+///
+/// A diff and a review comment name the file as git does, so a CI issue
+/// carries this form.
+#[must_use]
+pub fn uri_to_path(uri: &str) -> String {
+    uri.replace("%5B", "[").replace("%5D", "]")
+}
+
 fn strip_embedded_root_prefixes(value: &str, prefix: &str) -> Option<String> {
     let mut output = String::with_capacity(value.len());
     let mut changed = false;
