@@ -219,7 +219,12 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
             .content
             .split(file_plan.meta.line_ending)
             .collect();
-        let rewrites = rewrite_list_statements(&file_plan.lists, &lines, &mut file_plan.fixes);
+        let from_declarations = declaration_only_names(input.re_exports, file_plan.path);
+        let rewrites = rewrite_list_statements(
+            &file_plan.lists,
+            (&lines, &from_declarations),
+            &mut file_plan.fixes,
+        );
         if file_plan.fixes.is_empty() {
             continue;
         }
@@ -303,7 +308,8 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
         let mut lists = ExportListIndex::default();
         let index = SourceEditIndex::parse(path, &content);
         let mut fixes = collect_export_line_fixes(&lines, file_exports, &mut lists, index.as_ref());
-        rewrite_list_statements(&lists, &lines, &mut fixes);
+        let from_declarations = declaration_only_names(input.re_exports, path);
+        rewrite_list_statements(&lists, (&lines, &from_declarations), &mut fixes);
         drop(lines);
         if fixes.is_empty() {
             continue;
@@ -422,6 +428,30 @@ fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> b
     changed
 }
 
+/// A test on the removed names of one list statement.
+type NamesFilter<'a> = dyn Fn(&[String]) -> bool + 'a;
+
+/// Whether every name that `path` re-exports comes from a declaration file
+/// (`.d.ts`, `.d.mts`, `.d.cts`), which has no module to load at run time.
+fn declaration_only_names<'a>(
+    re_exports: &'a [NamedReExport],
+    path: &'a Path,
+) -> impl Fn(&[String]) -> bool + 'a {
+    move |names| {
+        names.iter().all(|name| {
+            re_exports
+                .iter()
+                .find(|re_export| re_export.path == path && &re_export.exported_name == name)
+                .and_then(|re_export| re_export.source_path.file_name()?.to_str())
+                .is_some_and(|file| {
+                    [".d.ts", ".d.mts", ".d.cts"]
+                        .iter()
+                        .any(|ext| file.ends_with(ext))
+                })
+        })
+    }
+}
+
 /// Rewrite each list statement for the names that its fixes remove, and
 /// keep only the list fixes that the rewrite applies.
 ///
@@ -431,7 +461,7 @@ fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> b
 /// Returns the rewrite of each statement, keyed by its first line.
 fn rewrite_list_statements(
     lists: &ExportListIndex,
-    lines: &[&str],
+    (lines, declaration_only): (&[&str], &NamesFilter<'_>),
     fixes: &mut Vec<ExportFix>,
 ) -> FxHashMap<usize, ListRewriteOutcome> {
     let mut names_by_statement: FxHashMap<usize, (ExportListStatement, Vec<&str>)> =
@@ -453,7 +483,7 @@ fn rewrite_list_statements(
                 .map(|outcome| (start, outcome))
         })
         .collect();
-    lists.drop_redundant_module_loads(lines, &mut rewrites);
+    lists.drop_redundant_module_loads(lines, &mut rewrites, declaration_only);
     fixes.retain(|fix| match fix.edit {
         ExportEdit::List(statement) => rewrites
             .get(&statement.start_line)

@@ -102,12 +102,15 @@ impl ExportListIndex {
 
     /// Delete each bare import of a rewrite whose module the file still
     /// loads: through a line outside the removed statements, or through an
-    /// earlier bare import of the same module. `rewrites` is keyed by the
-    /// first line of each statement.
+    /// earlier bare import of the same module. Also delete it when
+    /// `declaration_only` says that the removed names come from a
+    /// declaration file, which has no module to load. `rewrites` is keyed by
+    /// the first line of each statement.
     pub(super) fn drop_redundant_module_loads(
         &self,
         lines: &[&str],
         rewrites: &mut FxHashMap<usize, ListRewriteOutcome>,
+        declaration_only: impl Fn(&[String]) -> bool,
     ) {
         let removed: Vec<(usize, usize)> = rewrites
             .iter()
@@ -138,6 +141,7 @@ impl ExportListIndex {
                 .and_then(Option::as_ref)
                 .is_some_and(|parsed| is_trivia_only(&parsed.text[parsed.list.end..]));
             let already = loaded.contains(&source)
+                || declaration_only(&outcome.removed)
                 || kept_lines.iter().any(|line| loads_module(line, &source));
             if already && deletable {
                 outcome.rewrite = ListRewrite::DeleteStatement;
@@ -154,24 +158,43 @@ impl ExportListIndex {
     }
 }
 
-/// Whether a source line loads `module` at run time: an `import`, a value
-/// re-export or a `require` that names it. A comment or a type-only
-/// statement loads nothing.
+/// Whether one source line is a static statement that loads `module` when
+/// the file loads: `import ... from 'm'`, `import 'm'` or a value
+/// `export ... from 'm'`, all on that line. A type-only statement, a
+/// statement whose braces hold only `type` specifiers, a dynamic `import()`
+/// and a `require` call do not count. A line that does not count keeps the
+/// bare import, which is the safe side.
 fn loads_module(line: &str, module: &str) -> bool {
     let trimmed = line.trim_start();
-    if ["//", "/*", "*", "import type ", "export type "]
-        .iter()
-        .any(|prefix| trimmed.starts_with(prefix))
-    {
+    let Some(rest) = trimmed
+        .strip_prefix("import")
+        .or_else(|| trimmed.strip_prefix("export"))
+    else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    if rest.starts_with('(') || rest.starts_with("type ") || rest.starts_with("type{") {
         return false;
     }
-    let named = ['\'', '"', '`']
+    if let (Some(open), Some(close)) = (rest.find('{'), rest.find('}'))
+        && open < close
+    {
+        let names = &rest[open + 1..close];
+        if !names.trim().is_empty()
+            && names
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .all(|name| name.starts_with("type "))
+        {
+            return false;
+        }
+    }
+    let quoted = ['\'', '"']
         .iter()
-        .any(|quote| line.contains(&format!("{quote}{module}{quote}")));
-    named
-        && ["from", "import", "require("]
-            .iter()
-            .any(|word| line.contains(word))
+        .any(|quote| rest.contains(&format!("{quote}{module}{quote}")));
+    let bare_import = trimmed.starts_with("import") && rest.starts_with(['\'', '"']);
+    quoted && (bare_import || rest.contains("from"))
 }
 
 /// Parse the list statement that starts on line `start`.
@@ -823,6 +846,79 @@ mod tests {
             .as_deref(),
             Some("  import \"./data.json\" with { type: \"json\" } // note")
         );
+    }
+
+    /// The full fix of one file: every list statement rewrite for `names`,
+    /// with the drop of redundant module loads.
+    fn rewrite_file(source: &str, names: &[&str]) -> String {
+        let lines = lines(source);
+        let mut index = ExportListIndex::default();
+        let mut rewrites: FxHashMap<usize, ListRewriteOutcome> = FxHashMap::default();
+        let mut ends: FxHashMap<usize, usize> = FxHashMap::default();
+        for idx in 0..lines.len() {
+            if let Some(statement) = index.statement_for_line(&lines, idx)
+                && statement.start_line == idx
+                && let Some(outcome) = index.rewrite(statement, names)
+            {
+                rewrites.insert(idx, outcome);
+                ends.insert(idx, statement.end_line);
+            }
+        }
+        index.drop_redundant_module_loads(&lines, &mut rewrites, |names| names == ["Types"]);
+        let mut out: Vec<String> = Vec::new();
+        let mut idx = 0;
+        while idx < lines.len() {
+            let Some(outcome) = rewrites.get(&idx) else {
+                out.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            };
+            if let ListRewrite::Replace(new_lines) = &outcome.rewrite {
+                out.extend(new_lines.iter().cloned());
+            }
+            idx = ends[&idx] + 1;
+        }
+        out.join("\n")
+    }
+
+    #[test]
+    fn deletes_a_re_export_whose_module_another_import_loads() {
+        let source = "import { setup } from './widget';\nexport { Widget } from './widget';\n";
+        assert_eq!(
+            rewrite_file(source, &["Widget"]),
+            "import { setup } from './widget';\n"
+        );
+    }
+
+    #[test]
+    fn deletes_a_re_export_from_a_declaration_file() {
+        let source = "export { Types } from './types';\n";
+        assert_eq!(rewrite_file(source, &["Types"]), "");
+    }
+
+    #[test]
+    fn keeps_one_bare_import_for_two_removed_re_exports_of_a_module() {
+        let source = "export { A } from './m';\nexport { B } from './m';\n";
+        assert_eq!(rewrite_file(source, &["A", "B"]), "import './m';\n");
+    }
+
+    #[test]
+    fn a_load_that_does_not_run_with_the_file_keeps_the_bare_import() {
+        for other in [
+            "import type {\n  Props,\n} from './widget';",
+            "import { type Props } from './widget';",
+            "export async function open() {\n  await import('./widget');\n}",
+            "const lazy = () => require('./widget');",
+            "// import './widget';",
+            "const sample = \"import './widget'\";",
+        ] {
+            let source = format!("{other}\nexport {{ Widget }} from './widget';\n");
+            assert_eq!(
+                rewrite_file(&source, &["Widget"]),
+                format!("{other}\nimport './widget';\n"),
+                "{other}"
+            );
+        }
     }
 
     #[test]

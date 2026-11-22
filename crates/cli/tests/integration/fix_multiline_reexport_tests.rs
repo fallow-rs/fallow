@@ -346,6 +346,7 @@ fn fix_keeps_the_module_load_and_the_code_after_a_removed_re_export() {
         read(root, "src/barrel.ts"),
         "import './mod'; console.log(1);\n"
     );
+    assert_eq!(read(root, "src/mod.ts"), "function a() {}\n");
 }
 
 #[test]
