@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow plugin-check` evaluates an external plugin in the package that runs it.** The analysis runs external plugins once for the root and once for each workspace, with the dependencies of that package, and resolves `manifestEntries` globs from its folder. Before, `plugin-check` pooled the dependencies of all packages and checked the manifests only at the project root. A plugin that a workspace enables then showed a false `manifests-matched-none` warning. Now `plugin-check` checks each package that activates the plugin. The JSON adds `active_in`, the packages that activate the plugin, and a `package` field on each item of `manifest_rules`.

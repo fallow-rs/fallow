@@ -8,7 +8,7 @@
 //! not match, which was previously silent), and for active plugins with
 //! `manifestEntries` the per-rule report from `check_manifest_entries`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use colored::Colorize;
@@ -84,16 +84,10 @@ fn build_plugin_check_doc(
         .ok_or_else(|| "the run skips the dead-code analysis".to_owned())?;
     let external = &dead_code.config().external_plugins;
 
-    // Activation needs the project's dependency set; the manifest walk and
-    // detection's file-existence fallback do the filesystem work, so an empty
-    // discovered-file set is passed (no full source-discovery walk).
-    let info = crate::init::detect_project(root);
-    let root_pkg = PackageJson::load(&root.join("package.json")).ok();
-    let all_deps = crate::init::collect_dependency_names(root, root_pkg.as_ref(), info.is_monorepo);
-
+    let packages = plugin_packages(root);
     let mut plugins: Vec<Value> = external
         .iter()
-        .map(|ext| plugin_value(ext, &all_deps, root))
+        .map(|ext| plugin_value(ext, &packages))
         .collect();
     plugins.sort_by(|a, b| plugin_name(a).cmp(plugin_name(b)));
 
@@ -109,23 +103,81 @@ fn plugin_name(plugin: &Value) -> &str {
     plugin.get("name").and_then(Value::as_str).unwrap_or("")
 }
 
+/// One package that runs plugins: the project root or a workspace.
+struct PluginPackage {
+    /// The package folder relative to the project root, `.` for the root.
+    label: String,
+    dir: PathBuf,
+    dependencies: Vec<String>,
+}
+
+/// The root and each workspace, each with its own dependencies. The analysis
+/// runs external plugins once per package, activates them with the
+/// dependencies of that package and resolves manifest globs from its folder,
+/// so the check evaluates each package the same way. Detection's
+/// file-existence fallback gets no discovered files, so the check needs no
+/// full discovery walk.
+fn plugin_packages(root: &Path) -> Vec<PluginPackage> {
+    let dependencies = |dir: &Path| {
+        PackageJson::load(&dir.join("package.json"))
+            .map(|pkg| pkg.all_dependency_names())
+            .unwrap_or_default()
+    };
+    let mut packages = vec![PluginPackage {
+        label: ".".to_owned(),
+        dir: root.to_path_buf(),
+        dependencies: dependencies(root),
+    }];
+    let mut workspaces = fallow_config::discover_workspaces(root);
+    workspaces.sort_by(|a, b| a.root.cmp(&b.root));
+    packages.extend(
+        workspaces
+            .into_iter()
+            .filter(|ws| ws.root != root)
+            .map(|ws| PluginPackage {
+                label: ws
+                    .root
+                    .strip_prefix(root)
+                    .unwrap_or(&ws.root)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                dependencies: dependencies(&ws.root),
+                dir: ws.root,
+            }),
+    );
+    packages
+}
+
 /// Build the JSON for one external plugin.
-fn plugin_value(ext: &ExternalPluginDef, all_deps: &[String], root: &Path) -> Value {
-    let active = is_external_plugin_active(ext, all_deps, root, &[]);
-    if !active {
+fn plugin_value(ext: &ExternalPluginDef, packages: &[PluginPackage]) -> Value {
+    let active: Vec<&PluginPackage> = packages
+        .iter()
+        .filter(|package| is_external_plugin_active(ext, &package.dependencies, &package.dir, &[]))
+        .collect();
+    if active.is_empty() {
         return json!({
             "name": ext.name,
             "active": false,
             "activation_requirement": activation_requirement(ext),
         });
     }
-    let rules: Vec<Value> = check_manifest_entries(ext, root)
+    let rules: Vec<Value> = active
         .iter()
-        .map(|report| rule_value(report, root))
+        .flat_map(|package| {
+            check_manifest_entries(ext, &package.dir)
+                .iter()
+                .map(|report| {
+                    let mut rule = rule_value(report, &package.dir);
+                    rule["package"] = json!(package.label);
+                    rule
+                })
+                .collect::<Vec<_>>()
+        })
         .collect();
     json!({
         "name": ext.name,
         "active": true,
+        "active_in": active.iter().map(|package| package.label.as_str()).collect::<Vec<_>>(),
         "manifest_rules": rules,
     })
 }
@@ -332,9 +384,10 @@ fn print_human(doc: &Value) {
             let warnings = rule.get("warnings").and_then(Value::as_array);
             let warn_count = warnings.map_or(0, Vec::len);
             total_warnings += warn_count;
+            let package = rule.get("package").and_then(Value::as_str).unwrap_or(".");
             println!(
-                "plugin '{name}': rule '{glob}' matched {matched} manifest(s), seeded {seeded} \
-                 entry pattern(s), {warn_count} warning(s)"
+                "plugin '{name}' in {package}: rule '{glob}' matched {matched} manifest(s), \
+                 seeded {seeded} entry pattern(s), {warn_count} warning(s)"
             );
             if let Some(warnings) = warnings {
                 for warning in warnings {

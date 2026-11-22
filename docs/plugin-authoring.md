@@ -504,7 +504,10 @@ fallow list --plugins
 ```
 
 `plugin-check` reports whether each external plugin activated and shows
-manifest-entry evidence. Advisory findings return success. Invalid
-configuration or serialization errors return exit code 2.
+manifest-entry evidence. Like the analysis, it evaluates the root and each
+workspace with the dependencies of that package, and resolves manifest globs
+from its folder. `active_in` lists the packages that activate the plugin, and
+each manifest rule names its `package`. Advisory findings return success.
+Invalid configuration or serialization errors return exit code 2.
 
 `list --plugins` then confirms the active plugin inventory.
