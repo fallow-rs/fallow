@@ -4,6 +4,9 @@ use std::process::ExitCode;
 use fallow_config::{ExternalPluginDef, FallowConfig, PackageJson};
 
 use crate::exit_codes::exit_invalid_input;
+#[path = "init_git_hook_location.rs"]
+pub mod git_hook_location;
+use git_hook_location::{display_hook_path, git_pre_commit_target, write_hook};
 
 #[cfg(test)]
 #[path = "init_hook_script_tests.rs"]
@@ -868,14 +871,8 @@ fn detect_hook_target(root: &Path) -> Result<HookTarget, ExitCode> {
         || root.join("lefthook.json").exists()
     {
         Ok(HookTarget::Lefthook)
-    } else if root.join(".git/hooks").is_dir() {
-        Ok(HookTarget::GitHooks(root.join(".git/hooks/pre-commit")))
     } else {
-        eprintln!(
-            "Error: No .git directory found. Run `git init` first, or use --hooks \
-             from the repository root."
-        );
-        Err(exit_invalid_input())
+        git_pre_commit_target(root).map(HookTarget::GitHooks)
     }
 }
 
@@ -911,9 +908,8 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
             return ExitCode::SUCCESS;
         }
         HookTarget::GitHooks(hook_path) => {
-            if let Err(code) =
-                install_hook_file(&hook_path, ".git/hooks/pre-commit", &hook_content, opts)
-            {
+            let label = display_hook_path(root, &hook_path);
+            if let Err(code) = install_hook_file(&hook_path, &label, &hook_content, opts) {
                 return code;
             }
         }
@@ -1054,24 +1050,6 @@ pub fn run_git_hooks_uninstall(opts: &GitHooksUninstallOptions<'_>) -> ExitCode 
 
     eprintln!("Removed {}", display_hook_path(opts.root, &hook_path));
     ExitCode::SUCCESS
-}
-
-fn display_hook_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
-}
-
-/// Write a hook file and set the executable permission on Unix.
-fn write_hook(path: &Path, content: &str) -> std::io::Result<()> {
-    std::fs::write(path, content)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(path)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(path, perms)?;
-    }
-    Ok(())
 }
 
 pub fn run_config_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {

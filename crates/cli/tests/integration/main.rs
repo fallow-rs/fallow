@@ -114,6 +114,7 @@ mod fix_tests;
 mod flags_tests;
 mod gate_outcome_tests;
 mod gate_severity_tests;
+mod git_hook_location_tests;
 mod github_format_tests;
 mod global_option_support_tests;
 mod group_by_footer_tests;
