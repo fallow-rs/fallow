@@ -74,6 +74,7 @@ fn scan_markup_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Mark
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
             input.files,
             ctx,
+            input.output_changed_files,
             input.summary,
         ),
         cva_duplicate_variant_blocks: scan_cva_duplicate_variant_blocks(input.files, ctx),
