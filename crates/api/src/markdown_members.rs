@@ -67,3 +67,29 @@ fn format_namespace_escape(escape: &NamespaceEscape, root: &Path) -> String {
         escape_markdown_inline(&escape.message(&module))
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_types::results::NamespaceEscapeReason;
+
+    /// A module path can hold markdown syntax, such as `[` in a route folder.
+    /// The line must render it as plain text.
+    #[test]
+    fn namespace_escape_line_escapes_markdown_syntax() {
+        let root = Path::new("/project");
+        let escape = NamespaceEscape {
+            path: root.join("src/app.ts"),
+            line: 3,
+            col: 0,
+            local_name: "Lib".to_string(),
+            module: root.join("src/[id]/<lib>.ts"),
+            hidden_exports: 2,
+            reason: NamespaceEscapeReason::WholeObjectUse,
+        };
+        assert_eq!(
+            format_namespace_escape(&escape, root),
+            r":3 Lib escapes as a value; 2 exports of src/%5Bid%5D/\<lib\>.ts are not checked"
+        );
+    }
+}

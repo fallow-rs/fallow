@@ -120,3 +120,48 @@ fn line_suppression_removes_only_that_binding() {
         results.stale_suppressions
     );
 }
+
+const STAR_READERS_FIXTURE: &str = "namespace-escapes-star-readers";
+
+/// `Lib` escapes, and the escape opens the `export *` surface of
+/// `lib/index.ts`. `named.ts` still reads `aUsed` and `bUsed` by name through
+/// that barrel, so the escape hides only `aUnused` and `AUnusedType`.
+/// `Root.Inner` hands on the namespace object of `export * as Inner`, so it
+/// is an escape of `lib/c.ts`.
+#[test]
+fn star_barrel_named_readers_are_not_hidden() {
+    let root = fixture_path(STAR_READERS_FIXTURE);
+    let results = analyze(&root, true);
+    assert_eq!(
+        escapes(&root, &results),
+        vec![
+            (
+                "src/chain.ts".to_string(),
+                "Root.Inner".to_string(),
+                2,
+                "whole-object-use"
+            ),
+            (
+                "src/escape.ts".to_string(),
+                "Lib".to_string(),
+                2,
+                "whole-object-use"
+            ),
+        ]
+    );
+}
+
+/// An export whose rule is off is not a finding, so the escape does not hide it.
+#[test]
+fn hidden_count_skips_exports_whose_rule_is_off() {
+    let root = fixture_path(STAR_READERS_FIXTURE);
+    let mut config = create_config(root.clone());
+    config.rules.namespace_escapes = Severity::Warn;
+    config.rules.unused_types = Severity::Off;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let lib = escapes(&root, &results)
+        .into_iter()
+        .find(|(_, name, _, _)| name == "Lib")
+        .expect("Lib escape");
+    assert_eq!(lib.2, 1, "{lib:?}");
+}
