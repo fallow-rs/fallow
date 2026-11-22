@@ -303,7 +303,7 @@ fn check_source_edits(
             unused_exports: &unused_exports,
             re_exports,
         });
-    source_edits::withdraw_dropped_fixes(opts.root, fixes, &dropped, opts.output);
+    source_edits::withdraw_dropped_fixes((opts.root, &mut *plan), fixes, &dropped, opts.output);
     let previews = plan.take_previews(|path, line| {
         dropped
             .iter()

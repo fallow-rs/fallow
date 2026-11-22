@@ -19,16 +19,17 @@
 use std::path::Path;
 
 use oxc_ast::ast::{
-    BinaryExpression, BinaryOperator, Class, ClassElement, Expression, MethodDefinitionKind,
-    Program, PropertyKey, Statement, TSEnumDeclaration, TSEnumMemberName,
-    TSExternalModuleDeclaration, TSGlobalDeclaration, TSNamespaceDeclaration, UnaryOperator,
+    BinaryExpression, BinaryOperator, Class, ClassElement, ExportDefaultDeclarationKind,
+    Expression, MethodDefinitionKind, Program, PropertyKey, Statement, TSEnumDeclaration,
+    TSEnumMemberName, TSExternalModuleDeclaration, TSGlobalDeclaration, TSNamespaceDeclaration,
+    UnaryOperator,
 };
 use oxc_ast_visit::Visit;
 use oxc_span::GetSpan;
 use oxc_syntax::symbol::SymbolFlags;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::source_edits::{SpanEdit, declaration_names, script_blocks};
+use crate::source_edits::{MergeKind, SpanEdit, declaration_names, script_blocks};
 
 /// Why the check refuses an edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,9 +68,10 @@ pub enum PostEditViolation {
         /// The exported name.
         name: String,
     },
-    /// One name has an exported declaration and a local declaration, as
-    /// after the removal of `export` from one overload signature. TypeScript
-    /// requires all declarations of one name to be exported, or none.
+    /// Declarations of one name that TypeScript merges are partly exported,
+    /// as after the removal of `export` from one overload signature, or from
+    /// a class but not from its interface. TypeScript requires all
+    /// declarations of one merge to be exported, or none.
     MixedExport {
         /// The declared name.
         name: String,
@@ -102,7 +104,7 @@ impl PostEditViolation {
                 format!("the edit removes the export `{name}`, and other code still uses it")
             }
             Self::MixedExport { name } => {
-                format!("the edit leaves `{name}` with exported and local declarations")
+                format!("the edit leaves merged declarations of `{name}` partly exported")
             }
             Self::ImportLeftBehind { name } => {
                 format!("the edit leaves the import of `{name}` with no use")
@@ -155,10 +157,11 @@ pub struct SourceFacts {
     import_uses: FxHashMap<String, usize>,
     /// The local names that an `export { ... }` list without `from` names.
     listed_locals: FxHashSet<String>,
-    /// The names of the top-level `export <declaration>` statements.
-    exported_declarations: FxHashSet<String>,
-    /// The names of the top-level declarations without `export`.
-    local_declarations: FxHashSet<String>,
+    /// The merge kinds of the exported top-level declarations of each name,
+    /// including a named `export default function` or `class`.
+    exported_declarations: FxHashMap<String, FxHashSet<MergeKind>>,
+    /// The merge kinds of the top-level declarations without `export`.
+    local_declarations: FxHashMap<String, FxHashSet<MergeKind>>,
 }
 
 impl SourceFacts {
@@ -238,13 +241,11 @@ impl SourceFacts {
                 name: (*name).clone(),
             });
         }
+        let split_before = self.split_merges();
         let mut mixed: Vec<&String> = facts
-            .exported_declarations
-            .intersection(&facts.local_declarations)
-            .filter(|name| {
-                !(self.exported_declarations.contains(*name)
-                    && self.local_declarations.contains(*name))
-            })
+            .split_merges()
+            .into_iter()
+            .filter(|name| !split_before.contains(name))
             .collect();
         mixed.sort();
         if let Some(name) = mixed.first() {
@@ -265,6 +266,22 @@ impl SourceFacts {
             }
         }
         Ok(facts)
+    }
+
+    /// The names with an exported and a local declaration that TypeScript
+    /// merges, which it rejects (TS2383, TS2395).
+    fn split_merges(&self) -> Vec<&String> {
+        self.exported_declarations
+            .iter()
+            .filter(|(name, exported)| {
+                self.local_declarations.get(*name).is_some_and(|local| {
+                    exported
+                        .iter()
+                        .any(|kind| local.iter().any(|other| kind.merges_with(*other)))
+                })
+            })
+            .map(|(name, _)| name)
+            .collect()
     }
 
     /// Check `edits` of `source`, the text that these facts describe. See
@@ -439,44 +456,83 @@ fn compare_values(
     Ok(())
 }
 
+fn add_merge(map: &mut FxHashMap<String, FxHashSet<MergeKind>>, name: &str, kind: MergeKind) {
+    map.entry(name.to_owned()).or_default().insert(kind);
+}
+
+/// Record the exports and the merge kinds of one top-level statement.
+fn record_statement(statement: &Statement<'_>, facts: &mut SourceFacts) {
+    match statement {
+        Statement::ExportDeclaration(export) => {
+            if let Some((_, names)) = declaration_names(&export.declaration) {
+                if let Some(kind) = MergeKind::of(&export.declaration) {
+                    for name in &names {
+                        add_merge(&mut facts.exported_declarations, name, kind);
+                    }
+                }
+                facts.exports.extend(names);
+            }
+        }
+        Statement::ExportDefaultDeclaration(export) => {
+            facts.exports.insert("default".to_owned());
+            if let Some((name, kind)) = named_default(&export.declaration) {
+                add_merge(&mut facts.exported_declarations, name, kind);
+            }
+        }
+        Statement::ExportNamedDeclaration(export) => {
+            for specifier in &export.specifiers {
+                facts.exports.insert(specifier.exported.name().to_string());
+                facts
+                    .listed_locals
+                    .insert(specifier.local.name().to_string());
+            }
+        }
+        Statement::ExportFromDeclaration(export) => {
+            for specifier in &export.specifiers {
+                facts.exports.insert(specifier.exported.name().to_string());
+            }
+        }
+        Statement::ExportAllDeclaration(export) => {
+            if let Some(exported) = &export.exported {
+                facts.exports.insert(exported.name().to_string());
+            }
+        }
+        other => {
+            if let Some(declaration) = other.as_declaration()
+                && let Some(kind) = MergeKind::of(declaration)
+                && let Some((_, names)) = declaration_names(declaration)
+            {
+                for name in &names {
+                    add_merge(&mut facts.local_declarations, name, kind);
+                }
+            }
+        }
+    }
+}
+
+/// The name and the merge kind of a named `export default function` or
+/// `export default class`.
+fn named_default<'a>(
+    declaration: &'a ExportDefaultDeclarationKind<'_>,
+) -> Option<(&'a str, MergeKind)> {
+    match declaration {
+        ExportDefaultDeclarationKind::FunctionDeclaration(function) => function
+            .id
+            .as_ref()
+            .map(|id| (id.name.as_str(), MergeKind::Function)),
+        ExportDefaultDeclarationKind::ClassDeclaration(class) => class
+            .id
+            .as_ref()
+            .map(|id| (id.name.as_str(), MergeKind::Class)),
+        _ => None,
+    }
+}
+
 /// Collect the exports, the unresolved references and the import uses of one
 /// parsed block.
 fn collect_module_facts(program: &Program<'_>, facts: &mut SourceFacts) {
     for statement in &program.body {
-        match statement {
-            Statement::ExportDeclaration(export) => {
-                if let Some((_, names)) = declaration_names(&export.declaration) {
-                    facts.exported_declarations.extend(names.iter().cloned());
-                    facts.exports.extend(names);
-                }
-            }
-            Statement::ExportDefaultDeclaration(_) => {
-                facts.exports.insert("default".to_owned());
-            }
-            Statement::ExportNamedDeclaration(export) => {
-                for specifier in &export.specifiers {
-                    facts.exports.insert(specifier.exported.name().to_string());
-                    facts
-                        .listed_locals
-                        .insert(specifier.local.name().to_string());
-                }
-            }
-            Statement::ExportFromDeclaration(export) => {
-                for specifier in &export.specifiers {
-                    facts.exports.insert(specifier.exported.name().to_string());
-                }
-            }
-            Statement::ExportAllDeclaration(export) => {
-                if let Some(exported) = &export.exported {
-                    facts.exports.insert(exported.name().to_string());
-                }
-            }
-            other => {
-                if let Some((_, names)) = other.as_declaration().and_then(declaration_names) {
-                    facts.local_declarations.extend(names);
-                }
-            }
-        }
+        record_statement(statement, facts);
     }
     let semantic = oxc_semantic::SemanticBuilder::new().build(program);
     let scoping = semantic.semantic.scoping();

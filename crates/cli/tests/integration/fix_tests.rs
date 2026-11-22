@@ -1620,3 +1620,109 @@ fn fix_catalog_keeps_mapping_under_commented_header() {
         "catalogs.ui must be an empty mapping:\n{after}"
     );
 }
+
+/// A value and a type of one name do not merge in TypeScript. When only the
+/// value is unused, `fix` removes the `export` of the value and keeps the
+/// export of the type that another file imports.
+#[test]
+fn fix_keeps_the_export_of_a_type_with_the_name_of_an_unused_value() {
+    for declaration in [
+        "export type Foo = number;",
+        "export interface Foo { a: number }",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"value-and-type","main":"src/index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import type { Foo } from './lib';\nexport const x: Foo | undefined = undefined;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.ts"),
+            format!("export const Foo = 1;\n{declaration}\n"),
+        )
+        .unwrap();
+        let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
+        assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/lib.ts")).unwrap(),
+            format!("const Foo = 1;\n{declaration}\n"),
+            "stderr: {}",
+            output.stderr
+        );
+    }
+}
+
+/// An overload signature and a named default export of the same function
+/// merge. When only the named export `f` is unused, removing `export` from
+/// the signature gives TS2383, so the post-edit check keeps the file.
+#[test]
+fn fix_keeps_an_overload_of_a_default_exported_function() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"default-overload","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import f from './lib';\nf('');\n",
+    )
+    .unwrap();
+    let lib = "export function f(a: string): void;\nexport default function f(a: unknown) {}\n";
+    std::fs::write(root.join("src/lib.ts"), lib).unwrap();
+    let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/lib.ts")).unwrap(),
+        lib
+    );
+    assert!(
+        output.stderr.contains("Kept src/lib.ts:1 as it is"),
+        "stderr: {}",
+        output.stderr
+    );
+}
+
+/// The human preview of one file prints its lines in line order: a
+/// `Would keep` line waits with the `Would remove` lines of the same file.
+#[test]
+fn fix_preview_prints_the_lines_of_a_file_in_line_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"preview-order","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { b } from './store';\nconsole.log(b);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/store.ts"),
+        "export const c = 1;\nconst source = { a: 1, b: 2 };\nexport const { a, b } = source;\n",
+    )
+    .unwrap();
+    let output = run_fallow_in_root("fix", root, &["--dry-run"]);
+    let remove = output
+        .stderr
+        .find("Would remove export from src/store.ts:1 `c`");
+    let keep = output
+        .stderr
+        .find("Would keep export in src/store.ts:3 `a`");
+    assert!(
+        remove.is_some() && keep.is_some() && remove < keep,
+        "stderr: {}",
+        output.stderr
+    );
+}

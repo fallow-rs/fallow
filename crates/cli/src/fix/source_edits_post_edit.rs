@@ -455,10 +455,10 @@ pub(in crate::fix) fn unused_export_names(
 const SOURCE_FIX_TYPES: [&str; 3] = ["remove_export", "remove_enum_member", "remove_class_member"];
 
 /// Remove the fix entries of each dropped group, so that the output lists
-/// only the edits that the plan writes. For a human format, print one line per
-/// dropped group on stderr.
+/// only the edits that the plan writes. For a human format, keep one stderr
+/// line per dropped group on the plan.
 pub(in crate::fix) fn withdraw_dropped_fixes(
-    root: &Path,
+    (root, plan): (&Path, &mut super::super::plan::FixPlan),
     fixes: &mut Vec<serde_json::Value>,
     dropped: &[DroppedEdit],
     output: fallow_config::OutputFormat,
@@ -472,10 +472,11 @@ pub(in crate::fix) fn withdraw_dropped_fixes(
             .replace('\\', "/");
         if !matches!(output, fallow_config::OutputFormat::Json) {
             let line = edit.lines.first().copied().unwrap_or(1);
-            eprintln!(
+            let text = format!(
                 "Kept {relative}:{line} as it is: {}. Edit the file by hand, then run `fallow fix --dry-run` again.",
                 edit.violation.describe(),
             );
+            plan.note(&edit.path, line, text);
         }
         fixes.retain(|fix| {
             let source_fix = fix
@@ -491,5 +492,59 @@ pub(in crate::fix) fn withdraw_dropped_fixes(
                     .is_some_and(|line| edit.lines.contains(&line));
             !(source_fix && in_group && fix.get("skipped").is_none())
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    /// Run the bisect over `count` candidates, where the candidates in `bad`
+    /// fail, and return the dropped positions and the number of checks.
+    fn run_bisect(count: usize, bad: &[usize]) -> (Vec<usize>, usize) {
+        let runs = Cell::new(0);
+        let run = |mask: &[bool]| {
+            runs.set(runs.get() + 1);
+            if bad.iter().any(|position| mask[*position]) {
+                Err(PostEditViolation::DoesNotParse)
+            } else {
+                Ok(SourceFacts::default())
+            }
+        };
+        let candidates: Vec<usize> = (0..count).collect();
+        let mut mask = vec![false; count];
+        let mut dropped = Vec::new();
+        let mut budget = MAX_BISECT_RUNS;
+        bisect(
+            Bisect {
+                candidates: &candidates,
+                failure: &PostEditViolation::DoesNotParse,
+            },
+            (&mut mask, &mut dropped, &mut budget),
+            &run,
+        );
+        let mut positions: Vec<usize> = dropped.into_iter().map(|(position, _)| position).collect();
+        positions.sort_unstable();
+        for position in &positions {
+            assert!(!mask[*position], "a dropped group is not accepted");
+        }
+        (positions, runs.get())
+    }
+
+    #[test]
+    fn bisect_finds_one_failing_group_in_few_checks() {
+        let (dropped, runs) = run_bisect(1000, &[637]);
+        assert_eq!(dropped, [637]);
+        assert!(runs <= 2 * 11, "{runs} checks");
+    }
+
+    #[test]
+    fn bisect_stops_after_its_budget_when_every_group_fails() {
+        let bad: Vec<usize> = (0..1000).collect();
+        let (dropped, runs) = run_bisect(1000, &bad);
+        assert_eq!(runs, MAX_BISECT_RUNS);
+        assert_eq!(dropped, bad);
     }
 }

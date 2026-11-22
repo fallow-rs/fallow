@@ -213,7 +213,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
             .withheld
             .sort_by_key(|(f, _)| std::cmp::Reverse(f.line_idx));
         for (fix, reason) in &file_plan.withheld {
-            push_withheld_export_entry(input, file_plan.relative, fix, *reason);
+            push_withheld_export_entry(input, (file_plan.path, file_plan.relative), fix, *reason);
         }
         let rewrites = rewrite_list_statements(&file_plan.lists, &mut file_plan.fixes);
         if file_plan.fixes.is_empty() {
@@ -492,7 +492,7 @@ fn preview_import_removals(
 /// per-file skip list of the plan.
 fn push_withheld_export_entry(
     input: &mut ExportFixInput<'_, '_>,
-    relative: &Path,
+    (path, relative): (&Path, &Path),
     fix: &ExportFix,
     reason: SkipReason,
 ) {
@@ -503,11 +503,12 @@ fn push_withheld_export_entry(
         } else {
             "a re-export that this run keeps still names it"
         };
-        eprintln!(
+        let text = format!(
             "Would keep export in {relative_display}:{} `{}`: {why}",
             fix.line_idx + 1,
             fix.export_name,
         );
+        input.plan.note(path, fix.line_idx + 1, text);
     }
     input.fixes.push(serde_json::json!({
         "type": "remove_export",
@@ -595,20 +596,28 @@ fn statement_edit(
 }
 
 /// `statement`, and each other statement that exports only the one name of
-/// `statement`, such as the overload signatures of a function. TypeScript
-/// requires all declarations of one name to be exported, or none, so the
-/// fixer removes the `export` of each of them.
+/// `statement` with a declaration that TypeScript merges with it, such as
+/// the overload signatures of a function or the namespace of a class.
+/// TypeScript requires all declarations of one merge to be exported, or
+/// none, so the fixer removes the `export` of each of them. A value and a
+/// type of one name, such as `const Foo` and `type Foo`, do not merge, so
+/// the type keeps its `export`.
 fn same_name_statements<'i>(
     index: &'i SourceEditIndex,
     statement: &'i ExportStatement,
 ) -> impl Iterator<Item = &'i ExportStatement> {
-    let single = match statement.names.as_slice() {
-        [name] => Some(name.as_str()),
+    let merge = match (statement.names.as_slice(), statement.merge) {
+        ([name], Some(kind)) => Some((name.as_str(), kind)),
         _ => None,
     };
     index.statements().iter().filter(move |other| {
         other.start == statement.start
-            || single.is_some_and(|name| matches!(other.names.as_slice(), [other] if other == name))
+            || merge.is_some_and(|(name, kind)| {
+                matches!(other.names.as_slice(), [other_name] if other_name == name)
+                    && other
+                        .merge
+                        .is_some_and(|other_kind| kind.merges_with(other_kind))
+            })
     })
 }
 

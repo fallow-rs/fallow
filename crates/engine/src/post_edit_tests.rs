@@ -231,3 +231,45 @@ fn refuses_an_edit_that_leaves_an_overload_half_exported() {
     let before = SourceFacts::collect(path, source).expect("parses");
     assert!(before.check(path, both, &[]).is_ok());
 }
+
+#[test]
+fn accepts_a_value_and_a_type_of_one_name_with_different_exports() {
+    let source = "export const Foo = 1;\nexport type Foo = number;\n";
+    assert_eq!(
+        check("a.ts", source, "export const Foo", "const Foo"),
+        Ok(())
+    );
+    let interface = "export interface g {}\nexport function g() {}\n";
+    assert_eq!(
+        check("a.ts", interface, "export interface g", "interface g"),
+        Ok(())
+    );
+}
+
+#[test]
+fn refuses_a_split_of_merged_declarations() {
+    let class = "export interface Box {}\nexport class Box {}\n";
+    assert!(matches!(
+        check("a.ts", class, "export class Box", "class Box"),
+        Err(PostEditViolation::MixedExport { .. })
+    ));
+    let namespace = "export function f() {}\nexport namespace f {}\n";
+    assert!(matches!(
+        check("a.ts", namespace, "export function f()", "function f()"),
+        Err(PostEditViolation::MixedExport { .. })
+    ));
+}
+
+#[test]
+fn refuses_an_overload_split_from_a_default_export() {
+    let source = "export function f(a: string): void;\nexport default function f(a: unknown) {}\n";
+    assert!(matches!(
+        check(
+            "a.ts",
+            source,
+            "export function f(a: string)",
+            "function f(a: string)"
+        ),
+        Err(PostEditViolation::MixedExport { .. })
+    ));
+}

@@ -418,7 +418,7 @@ Before `fallow fix` writes a file, it applies the planned edits to the text and 
 - each kept enum member keeps its constant value;
 - each name that the code uses still has a declaration or an import;
 - no import stays whose name only a removed export list used;
-- no name has an exported declaration and a local declaration;
+- declarations that TypeScript merges (function overloads, a class with its interface or namespace, a function with its namespace) stay all exported or all local;
 - each removed export is an unused export, and no kept re-export reads it.
 
 `fix` keeps the code of an edit that fails the check, and the JSON output lists no entry for it. The human output prints `Kept <path>:<line> as it is: <reason>` on stderr, and no `Would remove` or `Removed` line for that edit. The finding stays in the next report. The editor quick fix and the `suggestion` blocks of the GitHub and GitLab review comments use the same check.

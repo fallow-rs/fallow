@@ -180,6 +180,9 @@ struct PreviewLine {
     /// The 1-based line of the edit in the analysed text.
     line: usize,
     text: String,
+    /// True for a line about a planned edit, which goes when the post-edit
+    /// check drops that edit. False for a line about a kept text.
+    edit: bool,
 }
 
 /// Accumulator for batched writes during a `fallow fix` run.
@@ -209,17 +212,31 @@ impl FixPlan {
             path: path.to_path_buf(),
             line,
             text,
+            edit: true,
         });
     }
 
-    /// Each kept stderr line, in the order of the fixers, except the lines
-    /// of the edits that `dropped` names.
+    /// Keep `text`, a stderr line about text on the 1-based `line` of `path`
+    /// that the run keeps, such as a withheld removal.
+    pub(super) fn note(&mut self, path: &Path, line: usize, text: String) {
+        self.previews.push(PreviewLine {
+            path: path.to_path_buf(),
+            line,
+            text,
+            edit: false,
+        });
+    }
+
+    /// Each stderr line in the order of its path and line, except the edit
+    /// lines of the edits that `dropped` names. Lines of one line keep the
+    /// order of the fixers.
     pub(super) fn take_previews(&mut self, dropped: impl Fn(&Path, usize) -> bool) -> Vec<String> {
-        std::mem::take(&mut self.previews)
+        let mut previews: Vec<PreviewLine> = std::mem::take(&mut self.previews)
             .into_iter()
-            .filter(|preview| !dropped(&preview.path, preview.line))
-            .map(|preview| preview.text)
-            .collect()
+            .filter(|preview| !preview.edit || !dropped(&preview.path, preview.line))
+            .collect();
+        previews.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+        previews.into_iter().map(|preview| preview.text).collect()
     }
 
     /// The source snapshots and their queued edits.
@@ -625,9 +642,18 @@ mod tests {
         let mut plan = FixPlan::for_root(dir.path()).unwrap();
         let path = dir.path().join("a.ts");
         plan.preview(&path, 1, "Would remove export from a.ts:1 `a`".to_owned());
-        plan.preview(&path, 2, "Would remove export from a.ts:2 `b`".to_owned());
+        plan.preview(&path, 3, "Would remove export from a.ts:3 `c`".to_owned());
+        plan.note(&path, 2, "Would keep export in a.ts:2 `b`".to_owned());
+        plan.note(&path, 1, "Kept a.ts:1 as it is".to_owned());
         let kept = plan.take_previews(|dropped, line| dropped == path && line == 1);
-        assert_eq!(kept, ["Would remove export from a.ts:2 `b`"]);
+        assert_eq!(
+            kept,
+            [
+                "Kept a.ts:1 as it is",
+                "Would keep export in a.ts:2 `b`",
+                "Would remove export from a.ts:3 `c`",
+            ]
+        );
         assert!(plan.take_previews(|_, _| false).is_empty());
     }
 

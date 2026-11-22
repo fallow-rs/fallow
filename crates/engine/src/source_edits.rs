@@ -56,6 +56,56 @@ pub enum ExportStatementKind {
     OtherDefault,
 }
 
+/// A declaration form that TypeScript merges with other declarations of the
+/// same name. All declarations of one merge must be exported, or none
+/// (TS2383 for function overloads, TS2395 for each other merge).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MergeKind {
+    /// A function declaration or an overload signature.
+    Function,
+    /// A class declaration.
+    Class,
+    /// A namespace or module declaration with a name.
+    Namespace,
+    /// An interface declaration.
+    Interface,
+    /// An enum declaration.
+    Enum,
+}
+
+impl MergeKind {
+    /// The merge kind of `declaration`, or `None` for a form that TypeScript
+    /// does not merge under the export rule, such as a variable or a type
+    /// alias.
+    #[must_use]
+    pub(crate) fn of(declaration: &Declaration<'_>) -> Option<Self> {
+        match declaration {
+            Declaration::FunctionDeclaration(_) => Some(Self::Function),
+            Declaration::ClassDeclaration(_) => Some(Self::Class),
+            Declaration::TSNamespaceDeclaration(_) => Some(Self::Namespace),
+            Declaration::TSInterfaceDeclaration(_) => Some(Self::Interface),
+            Declaration::TSEnumDeclaration(_) => Some(Self::Enum),
+            _ => None,
+        }
+    }
+
+    /// True when TypeScript merges a declaration of `self` with one of
+    /// `other`, so that both must have the same export. A value and a type
+    /// of one name, such as `const Foo` and `type Foo`, do not merge.
+    #[must_use]
+    pub fn merges_with(self, other: Self) -> bool {
+        use MergeKind::{Class, Enum, Function, Interface, Namespace};
+        matches!(
+            (self, other),
+            (Function | Namespace, Function)
+                | (Function | Class | Namespace | Enum, Namespace)
+                | (Namespace | Interface, Class)
+                | (Class | Interface, Interface)
+                | (Namespace | Enum, Enum)
+        )
+    }
+}
+
 /// One top-level `export <declaration>` or `export default` statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportStatement {
@@ -68,6 +118,9 @@ pub struct ExportStatement {
     /// Each name that the statement exports, in source order. A default
     /// export has the one name `default`.
     pub names: Vec<String>,
+    /// The merge kind of the declaration, or `None` when TypeScript does not
+    /// merge it with other declarations of the name.
+    pub merge: Option<MergeKind>,
     /// The end of the text that the removal of the export deletes, or `None`
     /// when the statement has no safe removal.
     keyword_end: Option<u32>,
@@ -762,10 +815,15 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
         .body
         .iter()
         .filter_map(|statement| {
-            let (span, kind, names) = match statement {
+            let (span, kind, names, merge) = match statement {
                 Statement::ExportDeclaration(export) => {
                     let (kind, names) = declaration_names(&export.declaration)?;
-                    (export.span(), kind, names)
+                    (
+                        export.span(),
+                        kind,
+                        names,
+                        MergeKind::of(&export.declaration),
+                    )
                 }
                 Statement::ExportDefaultDeclaration(export) => {
                     let named = match &export.declaration {
@@ -780,7 +838,7 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
                     } else {
                         ExportStatementKind::OtherDefault
                     };
-                    (export.span(), kind, vec!["default".to_owned()])
+                    (export.span(), kind, vec!["default".to_owned()], None)
                 }
                 _ => return None,
             };
@@ -791,6 +849,7 @@ fn collect(program: &Program<'_>, file: &str, offset: u32) -> Vec<ExportStatemen
                 end,
                 kind,
                 names,
+                merge,
                 keyword_end: keyword_end(file, start, kind),
             })
         })
