@@ -436,7 +436,15 @@ fn a_clean_analysis_with_only_a_failed_gate_keeps_the_success_conclusion() {
         &["--mutation-report", &report.display().to_string()],
     );
     assert_eq!(joined.decision["conclusion"], "success");
-    assert_eq!(joined.envelope["is_clean"], true);
+    assert_eq!(
+        joined.envelope["is_clean"], false,
+        "the failed gate makes the comment heading say failed, so the post creates the first comment"
+    );
+    assert!(
+        joined.body.contains("Quality gate failed"),
+        "{}",
+        joined.body
+    );
     assert_eq!(
         gate(&joined.decision, "mutation-min-score")["status"],
         "failure"

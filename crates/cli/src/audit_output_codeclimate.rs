@@ -9,10 +9,13 @@ use super::AuditResult;
 use crate::report;
 
 pub(super) fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
-    let value = build_audit_codeclimate(result);
+    let mut issues = build_audit_codeclimate_issues(result);
+    report::codeclimate::rebase_codeclimate_paths(&mut issues);
+    let value = fallow_output::codeclimate_issues_to_value(&issues);
     report::emit_json(&value, "CodeClimate audit")
 }
 
+#[cfg(test)]
 pub(super) fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
     fallow_output::codeclimate_issues_to_value(&build_audit_codeclimate_issues(result))
 }

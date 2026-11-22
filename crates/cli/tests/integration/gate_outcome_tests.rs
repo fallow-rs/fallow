@@ -2765,7 +2765,8 @@ fn cycle_project_with_diff_of(diff_target: &str) -> (TempDir, std::path::PathBuf
 /// The added-line diff filter can drop every finding from the comment while
 /// the producing run failed an enforced gate on them: here the diff touches no
 /// file of the cycle. The comment heading must then say that the gate failed,
-/// because the check that the run drives is red.
+/// because the check that the run drives is red. The envelope must also mark
+/// the run as not clean, or the post plan skips the first comment.
 #[test]
 fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
     let (project, diff) = cycle_project_with_diff_of("src/index.ts");
@@ -2789,6 +2790,7 @@ fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
     std::fs::write(&saved, &produced.stdout).expect("save the envelope");
 
     for format in ["pr-comment-github", "pr-comment-gitlab"] {
+        let envelope_file = root.join(format!("{format}-envelope.json"));
         let rendered = crate::common::run_fallow_raw_with_env(
             &[
                 "report",
@@ -2803,6 +2805,10 @@ fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
             &[
                 ("FALLOW_DIFF_FILE", diff.to_str().expect("utf8")),
                 ("FALLOW_DIFF_FILTER", "added"),
+                (
+                    "FALLOW_PR_COMMENT_ENVELOPE_FILE",
+                    envelope_file.to_str().expect("utf8"),
+                ),
             ],
         );
         assert_eq!(rendered.code, 0, "the render exits 0: {}", rendered.stderr);
@@ -2815,6 +2821,14 @@ fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
             rendered.stdout.contains("Quality gate failed"),
             "{format} must not say the gate passed: {}",
             rendered.stdout
+        );
+        let written: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&envelope_file).expect("read the envelope"),
+        )
+        .expect("envelope JSON");
+        assert_eq!(
+            written["is_clean"], false,
+            "{format}: a failed gate must create the first comment"
         );
     }
 }

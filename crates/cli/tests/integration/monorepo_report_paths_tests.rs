@@ -129,6 +129,45 @@ fn report_path_prefix_overrides_the_detected_offset() {
     }
 }
 
+/// The live `audit --format codeclimate` output passes the same path boundary
+/// as the other CodeClimate emitters, so CI consumers address its files from
+/// the repo root.
+#[test]
+fn live_audit_codeclimate_paths_are_repo_root_relative_below_the_toplevel() {
+    let dir = monorepo();
+    let root = dir.path();
+    std::fs::write(
+        root.join("packages/pkg/src/complex.js"),
+        format!("{COMPLEX_JS}export const unusedAfterBase = 1\n"),
+    )
+    .expect("write");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "change"]);
+
+    let out = run(
+        root,
+        &[
+            "audit",
+            "--root",
+            "packages/pkg",
+            "--base",
+            "HEAD~1",
+            "--quiet",
+            "--format",
+            "codeclimate",
+        ],
+    );
+
+    let paths = codeclimate_paths(&out);
+    assert!(!paths.is_empty(), "expected findings, got {}", out.stdout);
+    for path in &paths {
+        assert!(
+            path.starts_with("packages/pkg/"),
+            "CI consumers address files from the repo root; got {path}"
+        );
+    }
+}
+
 #[test]
 fn saved_review_rebases_monorepo_paths_once_and_preserves_gitlab_diff_refs() {
     let dir = monorepo();
