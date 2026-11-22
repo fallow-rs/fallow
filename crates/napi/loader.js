@@ -77,7 +77,9 @@ const binding = require("./index.js");
 const nativeDetectSimilarCode = binding.detectSimilarCode;
 binding.detectSimilarCode = (options = {}) => {
   const companion = resolveSimilarCodeCompanion();
-  if (companion.error) throw similarCodeProviderError(companion.error);
+  // The binding declares a Promise, so a missing companion rejects it
+  // instead of throwing before a promise exists.
+  if (companion.error) return Promise.reject(similarCodeProviderError(companion.error));
   return nativeDetectSimilarCode({ ...options, adapterProviderPath: companion.binary });
 };
 module.exports = binding;

@@ -330,16 +330,28 @@ function runSimilarCodeVerificationFailureFixture() {
     };\n`,
   );
   const script = `
+    let result;
     try {
-      require("./loader.js").detectSimilarCode({});
-      process.exitCode = 2;
-    } catch (error) {
-      process.stdout.write(JSON.stringify({
-        name: error.name,
-        code: error.code,
-        exitCode: error.exitCode,
-        causeCode: error.cause && error.cause.code
-      }));
+      result = require("./loader.js").detectSimilarCode({});
+    } catch {
+      process.exitCode = 4;
+    }
+    if (result instanceof Promise) {
+      result.then(
+        () => {
+          process.exitCode = 2;
+        },
+        (error) => {
+          process.stdout.write(JSON.stringify({
+            name: error.name,
+            code: error.code,
+            exitCode: error.exitCode,
+            causeCode: error.cause && error.cause.code
+          }));
+        },
+      );
+    } else if (process.exitCode === undefined) {
+      process.exitCode = 3;
     }
   `;
   const child = spawnSync(process.execPath, ["-e", script], {
