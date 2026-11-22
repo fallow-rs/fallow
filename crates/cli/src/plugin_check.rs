@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 use fallow_engine::plugins::{
     CheckWarning, RuleReport, WarningKind, check_manifest_entries, is_external_plugin_active,
+    workspace_activation_dependencies,
 };
 
 use crate::error::emit_input_error;
@@ -84,7 +85,7 @@ fn build_plugin_check_doc(
         .ok_or_else(|| "the run skips the dead-code analysis".to_owned())?;
     let external = &dead_code.config().external_plugins;
 
-    let packages = plugin_packages(root);
+    let packages = plugin_packages(root, dead_code.config())?;
     let mut plugins: Vec<Value> = external
         .iter()
         .map(|ext| plugin_value(ext, &packages))
@@ -111,41 +112,97 @@ struct PluginPackage {
     dependencies: Vec<String>,
 }
 
-/// The root and each workspace, each with its own dependencies. The analysis
-/// runs external plugins once per package, activates them with the
-/// dependencies of that package and resolves manifest globs from its folder,
-/// so the check evaluates each package the same way. Detection's
-/// file-existence fallback gets no discovered files, so the check needs no
-/// full discovery walk.
-fn plugin_packages(root: &Path) -> Vec<PluginPackage> {
-    let dependencies = |dir: &Path| {
-        PackageJson::load(&dir.join("package.json"))
-            .map(|pkg| pkg.all_dependency_names())
-            .unwrap_or_default()
-    };
-    let mut packages = vec![PluginPackage {
-        label: ".".to_owned(),
-        dir: root.to_path_buf(),
-        dependencies: dependencies(root),
-    }];
-    let mut workspaces = fallow_config::discover_workspaces(root);
+/// The packages that run external plugins, each with the dependencies that
+/// activate them, in the order of the analysis: the root, then each
+/// workspace by path. The analysis skips a package whose `package.json` does
+/// not load, so the check skips it too. A workspace counts its own
+/// dependencies and each root dependency that one of its scripts calls.
+/// Detection's file-existence fallback gets no discovered files, so the
+/// check needs no full discovery walk.
+fn plugin_packages(
+    root: &Path,
+    config: &fallow_config::ResolvedConfig,
+) -> Result<Vec<PluginPackage>, String> {
+    let root_pkg = fallow_config::load_dir_package_json(root);
+    let root_dependencies = root_pkg
+        .as_ref()
+        .map(PackageJson::all_dependency_names)
+        .unwrap_or_default();
+    let mut packages: Vec<PluginPackage> = root_pkg
+        .map(|_| PluginPackage {
+            label: ".".to_owned(),
+            dir: root.to_path_buf(),
+            dependencies: root_dependencies.clone(),
+        })
+        .into_iter()
+        .collect();
+    let (mut workspaces, _) = fallow_config::discover_workspaces_with_diagnostics_and_patterns(
+        root,
+        &config.ignore_patterns,
+        &config.workspace_patterns,
+    )
+    .map_err(|error| error.to_string())?;
     workspaces.sort_by(|a, b| a.root.cmp(&b.root));
-    packages.extend(
-        workspaces
-            .into_iter()
-            .filter(|ws| ws.root != root)
-            .map(|ws| PluginPackage {
-                label: ws
-                    .root
-                    .strip_prefix(root)
-                    .unwrap_or(&ws.root)
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-                dependencies: dependencies(&ws.root),
-                dir: ws.root,
-            }),
-    );
-    packages
+    for ws in workspaces.into_iter().filter(|ws| ws.root != root) {
+        let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) else {
+            continue;
+        };
+        let dependencies = workspace_activation_dependencies(
+            &pkg,
+            &ws.root,
+            root,
+            &root_dependencies,
+            config.production,
+        );
+        packages.push(PluginPackage {
+            label: ws
+                .root
+                .strip_prefix(root)
+                .unwrap_or(&ws.root)
+                .to_string_lossy()
+                .replace('\\', "/"),
+            dir: ws.root,
+            dependencies,
+        });
+    }
+    Ok(packages)
+}
+
+/// Put `package` before each path of a rule report, so every path in the
+/// output is relative to the project root.
+fn root_relative_rule(mut rule: Value, package: &str) -> Value {
+    if package == "." {
+        return rule;
+    }
+    let join = |value: &mut Value| {
+        if let Some(path) = value.as_str() {
+            *value = json!(format!("{package}/{path}"));
+        }
+    };
+    if let Some(paths) = rule["manifests_matched"].as_array_mut() {
+        paths.iter_mut().for_each(join);
+    }
+    if let Some(matched) = rule["matched"].as_array_mut() {
+        for manifest in matched {
+            join(&mut manifest["path"]);
+            if let Some(seeded) = manifest["seeded"].as_array_mut() {
+                for entry in seeded {
+                    join(&mut entry["path"]);
+                }
+            }
+        }
+    }
+    if let Some(warnings) = rule["warnings"].as_array_mut() {
+        for warning in warnings {
+            for slot in ["manifest", "entry"] {
+                if let Some(value) = warning.get_mut(slot) {
+                    join(value);
+                }
+            }
+        }
+    }
+    rule["package"] = json!(package);
+    rule
 }
 
 /// Build the JSON for one external plugin.
@@ -166,11 +223,7 @@ fn plugin_value(ext: &ExternalPluginDef, packages: &[PluginPackage]) -> Value {
         .flat_map(|package| {
             check_manifest_entries(ext, &package.dir)
                 .iter()
-                .map(|report| {
-                    let mut rule = rule_value(report, &package.dir);
-                    rule["package"] = json!(package.label);
-                    rule
-                })
+                .map(|report| root_relative_rule(rule_value(report, &package.dir), &package.label))
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -384,7 +437,10 @@ fn print_human(doc: &Value) {
             let warnings = rule.get("warnings").and_then(Value::as_array);
             let warn_count = warnings.map_or(0, Vec::len);
             total_warnings += warn_count;
-            let package = rule.get("package").and_then(Value::as_str).unwrap_or(".");
+            let package = match rule.get("package").and_then(Value::as_str) {
+                None | Some(".") => "the root".to_owned(),
+                Some(package) => package.to_owned(),
+            };
             println!(
                 "plugin '{name}' in {package}: rule '{glob}' matched {matched} manifest(s), \
                  seeded {seeded} entry pattern(s), {warn_count} warning(s)"
