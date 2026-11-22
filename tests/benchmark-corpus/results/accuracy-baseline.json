@@ -262,14 +262,14 @@
           "type": "type-1",
           "matched": true,
           "overlap_lines": 141,
-          "notes": "Bonus (not expected but acceptable overlap)"
+          "notes": "TP"
         },
         {
           "id": "T1-cache",
           "type": "type-1",
           "matched": true,
           "overlap_lines": 132,
-          "notes": "Bonus (not expected but acceptable overlap)"
+          "notes": "TP"
         },
         {
           "id": "T2-http",
@@ -290,14 +290,14 @@
           "type": "type-3",
           "matched": true,
           "overlap_lines": 32,
-          "notes": "Bonus (not expected but acceptable overlap)"
+          "notes": "TP"
         },
         {
           "id": "T3-queue",
           "type": "type-3",
           "matched": true,
           "overlap_lines": 22,
-          "notes": "Bonus (not expected but acceptable overlap)"
+          "notes": "TP"
         },
         {
           "id": "T4-sort",
