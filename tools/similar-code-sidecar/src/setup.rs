@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::{self, File, TryLockError};
 use std::io::{self, Read};
 use std::path::Path;
 use std::time::Duration;
@@ -131,7 +131,8 @@ pub fn install_with(
     fs::create_dir_all(&paths.directory)
         .map_err(|error| format!("failed to create the model cache: {error}"))?;
     let _lock = lock_install(paths)?;
-    // Another setup can have installed the cache while this one waited.
+    // Check again under the lock, so a setup that waited for another one
+    // reuses its result instead of a second download.
     if artifacts == ARTIFACTS && inspect_cache(paths).ready {
         return Ok(SetupResult { downloaded: false });
     }
@@ -156,13 +157,18 @@ fn lock_install(paths: &ModelPaths) -> Result<Option<File>, String> {
         .write(true)
         .open(paths.directory.join(INSTALL_LOCK_FILE))
         .map_err(|error| format!("failed to open the model cache lock: {error}"))?;
-    match file.lock() {
-        Ok(()) => Ok(Some(file)),
-        // Some network file systems have no file locks. Setup still installs
-        // each verified artifact with a rename, so it proceeds without one.
-        Err(error) if error.kind() == io::ErrorKind::Unsupported => Ok(None),
-        Err(error) => Err(format!("failed to lock the model cache: {error}")),
-    }
+    let locked = match file.try_lock() {
+        Ok(()) => Ok(()),
+        Err(TryLockError::WouldBlock) => {
+            eprintln!("Waiting for another model setup on this cache to finish.");
+            file.lock()
+        }
+        Err(TryLockError::Error(error)) => Err(error),
+    };
+    // A file system without file locks (for example NFS without a lock
+    // daemon) reports an error here. Setup still installs each verified
+    // artifact with a rename, so it proceeds without the lock.
+    Ok(locked.is_ok().then_some(file))
 }
 
 fn install_artifact(
@@ -409,10 +415,11 @@ mod tests {
                 let _ = resume_tx.send(());
                 result
             });
-            second
+            let second = second
                 .join()
                 .expect("second setup thread")
                 .expect("second setup");
+            assert!(!second.downloaded);
             first.join().expect("first setup thread")
         });
 

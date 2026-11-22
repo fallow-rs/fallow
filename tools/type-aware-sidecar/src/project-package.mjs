@@ -36,22 +36,28 @@ export const packagePathTargets = (project, packageJson) => {
   return projectCompilerOptions(project).paths?.[packageName] ?? [];
 };
 
+// JavaScript output suffixes of a build, as in the core rule.
+const OUTPUT_SUFFIX = /(?:\.d\.[cm]?ts|\.[cm]?js|\.jsx)$/u;
+
 /**
  * A regular expression for the source files of a wildcard package target.
  * Every `*` of a Node subpath pattern stands for the same substring, and that
  * substring can contain `/`: `./src/*.ts` matches `src/nested/deep.ts`. A
- * target with its first `*` at the package root, such as `./*.js`, keeps a
- * capture of one path segment, so it does not make every test and config file
- * of the package an entry.
+ * build output target with a `*` in its first path segment, such as `./*.js`,
+ * keeps a capture of one path segment, so it does not make every test and
+ * config file of the package an entry.
  */
 export const wildcardPattern = (target) => {
-  const normalized = target.replace(/^\.\//u, "").replace(/^dist\//u, "src/");
-  const sourceTarget = normalized.replace(/(?:\.d)?\.[cm]?[jt]sx?$/u, ".ts");
-  const capture = sourceTarget.startsWith("*") ? "([^/]+)" : "(.+)";
+  const relative = target.replace(/^\.\//u, "");
+  const sourceTarget = relative
+    .replace(/^dist\//u, "src/")
+    .replace(/(?:\.d)?\.[cm]?[jt]sx?$/u, ".ts");
+  const rootOutput = relative.split("/")[0].includes("*") && OUTPUT_SUFFIX.test(relative);
+  const capture = rootOutput ? "([^/]+)" : "(.+)";
   const escaped = sourceTarget
     .split("*")
     .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&"))
-    .map((part, index) => (index === 0 ? part : `${index === 1 ? capture : "\\1"}${part}`))
+    .map((part, index) => (index === 0 ? part : `${index === 1 ? capture : "(?:\\1)"}${part}`))
     .join("");
   return new RegExp(`^${escaped}$`, "u");
 };

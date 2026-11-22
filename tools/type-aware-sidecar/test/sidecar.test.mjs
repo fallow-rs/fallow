@@ -1029,6 +1029,45 @@ test("package wildcard entries let one capture span directories, as Node does", 
   }
 });
 
+test("package wildcard entries accept a digit right after a repeated star", () => {
+  const root = makeProject();
+  try {
+    assert.deepEqual(
+      discoveredEntryNames(
+        root,
+        { "./*": "./src/*/*2x.ts" },
+        { "src/icon/icon2x.ts": "Icon", "src/icon/other2x.ts": "Other" },
+      ),
+      ["Icon"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("package wildcard entries keep a root output target to one segment", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["**/*.ts"] }),
+    );
+    write(root, "package.json", JSON.stringify({ exports: { "./*": "./part-*.js" } }));
+    write(root, "part-top.ts", "export interface Top { value: string }\n");
+    write(root, "part-nested/deep.ts", "export interface Deep { value: string }\n");
+    const request = semanticRequest(root, [
+      { id: 0, operation: "api-surface", entry_points: [], private_leak_candidates: [] },
+    ]);
+    const names = analyzeSemanticQueries(parseRequest(request))
+      .results[0].data.entries.map((entry) => entry.exposed.exported_name)
+      .toSorted();
+    assert.deepEqual(names, ["Top"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("package wildcard entries give every star of a target the same capture", () => {
   const root = makeProject();
   try {
