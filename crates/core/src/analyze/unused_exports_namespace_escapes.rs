@@ -13,10 +13,13 @@
 //! barrel inside the escape closure whose own export of that name is hidden
 //! (or that only exposes the name through `export *`).
 
+use fallow_config::Severity;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
 use crate::graph::types::{ReferenceKind, SymbolReference};
+use fallow_types::extract::ImportedName;
+
 use crate::graph::{ExportSymbol, ModuleGraph, NamespaceEscape, NamespaceEscapeReason};
 
 use super::{UnusedExportInput, find_unused_exports_for_module, with_unused_export_context};
@@ -53,7 +56,7 @@ pub fn find_namespace_escape_candidates(
         return Vec::new();
     }
 
-    let mut lineage = EscapeLineage::new(graph, &escapes);
+    let mut lineage = EscapeLineage::new(graph, input.config, &escapes);
     let credited = lineage.credited_exports();
     let hidden_by_module: FxHashMap<FileId, u32> = with_unused_export_context(input, true, |ctx| {
         credited
@@ -61,7 +64,18 @@ pub fn find_namespace_escape_candidates(
             .filter_map(|(&file_id, only)| {
                 let module = graph.modules.get(file_id.0 as usize)?;
                 let (exports, types, _) = find_unused_exports_for_module(module, ctx, Some(only));
-                let hidden = u32::try_from(exports.len() + types.len()).unwrap_or(u32::MAX);
+                // An export whose rule is off for its path is not a finding,
+                // so the escape does not hide it.
+                let rules = input.config.resolve_rules_for_path(&module.path);
+                let counted = [
+                    (rules.unused_exports, exports.len()),
+                    (rules.unused_types, types.len()),
+                ]
+                .into_iter()
+                .filter(|(severity, _)| *severity != Severity::Off)
+                .map(|(_, count)| count)
+                .sum::<usize>();
+                let hidden = u32::try_from(counted).unwrap_or(u32::MAX);
                 (hidden > 0).then_some((file_id, hidden))
             })
             .collect()
@@ -120,10 +134,18 @@ struct EscapeLineage<'a> {
     closure: FxHashSet<FileId>,
     memo: FxHashMap<(FileId, usize), bool>,
     on_stack: FxHashSet<(FileId, usize)>,
+    /// The names that importers read by name from each star barrel, or `None`
+    /// when the barrel is public API that credits every name.
+    star_readers: FxHashMap<FileId, Option<FxHashSet<String>>>,
+    config: &'a fallow_config::ResolvedConfig,
 }
 
 impl<'a> EscapeLineage<'a> {
-    fn new(graph: &'a ModuleGraph, escapes: &[&'a NamespaceEscape]) -> Self {
+    fn new(
+        graph: &'a ModuleGraph,
+        config: &'a fallow_config::ResolvedConfig,
+        escapes: &[&'a NamespaceEscape],
+    ) -> Self {
         let mut sites: FxHashMap<(FileId, u32, u32), FxHashSet<&'a str>> = FxHashMap::default();
         let mut closure = FxHashSet::default();
         for escape in escapes {
@@ -143,7 +165,76 @@ impl<'a> EscapeLineage<'a> {
             closure,
             memo: FxHashMap::default(),
             on_stack: FxHashSet::default(),
+            star_readers: FxHashMap::default(),
+            config,
         }
+    }
+
+    /// Whether a consumer other than an escape reads `name` through the
+    /// `export *` surface of `barrel`.
+    ///
+    /// When the escape opens a star barrel, star propagation credits each
+    /// source export with one re-export reference from the barrel and does
+    /// not copy the references of the named importers. Those importers still
+    /// read the name, so the escape does not hide it.
+    fn star_barrel_has_named_reader(&mut self, barrel: FileId, name: &str) -> bool {
+        let mut visiting = FxHashSet::default();
+        let readers = self.star_readers_of(barrel, &mut visiting);
+        readers.as_ref().is_none_or(|names| names.contains(name))
+    }
+
+    fn star_readers_of(
+        &mut self,
+        barrel: FileId,
+        visiting: &mut FxHashSet<FileId>,
+    ) -> Option<FxHashSet<String>> {
+        if let Some(known) = self.star_readers.get(&barrel) {
+            return known.clone();
+        }
+        if !visiting.insert(barrel) {
+            return Some(FxHashSet::default());
+        }
+        let graph = self.graph;
+        let module = graph.modules.get(barrel.0 as usize)?;
+        let readers = if module.is_entry_point()
+            && !self.config.include_entry_exports_for(&module.path)
+        {
+            None
+        } else {
+            let mut names = FxHashSet::default();
+            let mut open = false;
+            for &importer in graph.importers_of(barrel) {
+                if !is_reachable(graph, importer) {
+                    continue;
+                }
+                for (target, symbols) in graph.outgoing_symbol_edges(importer) {
+                    if target != barrel {
+                        continue;
+                    }
+                    for symbol in symbols {
+                        if let ImportedName::Named(imported) = &symbol.imported_name {
+                            names.insert(imported.clone());
+                        }
+                    }
+                }
+                let forwards_star = graph.modules.get(importer.0 as usize).is_some_and(|outer| {
+                    outer.re_exports.iter().any(|edge| {
+                        edge.source_file == barrel
+                            && edge.imported_name == "*"
+                            && edge.exported_name == "*"
+                    })
+                });
+                if forwards_star {
+                    match self.star_readers_of(importer, visiting) {
+                        Some(outer_names) => names.extend(outer_names),
+                        None => open = true,
+                    }
+                }
+            }
+            (!open).then_some(names)
+        };
+        self.star_readers.insert(barrel, readers.clone());
+        readers
     }
 
     /// The escape-credited export indexes of each module in the closure.
@@ -217,7 +308,10 @@ impl<'a> EscapeLineage<'a> {
                                 && candidate.name.to_string() == name
                         })
                     });
-                barrel_export.is_none_or(|index| self.is_escape_credited(barrel, index))
+                match barrel_export {
+                    Some(index) => self.is_escape_credited(barrel, index),
+                    None => !self.star_barrel_has_named_reader(barrel, &name),
+                }
             }
             _ => false,
         }

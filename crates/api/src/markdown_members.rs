@@ -64,6 +64,6 @@ fn format_namespace_escape(escape: &NamespaceEscape, root: &Path) -> String {
     format!(
         ":{} {}",
         escape.line,
-        escape_markdown_prose(&escape.message(&module))
+        escape_markdown_inline(&escape.message(&module))
     )
 }
