@@ -183,6 +183,11 @@ where
                 .unused_protected_class_members
                 .push(item.clone());
         }
+        for item in &results.namespace_escapes {
+            self.entry_for_path(&item.escape.path)
+                .namespace_escapes
+                .push(item.clone());
+        }
         for item in &results.unresolved_imports {
             self.entry_for_path(&item.import.path)
                 .unresolved_imports

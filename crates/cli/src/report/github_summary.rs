@@ -342,6 +342,7 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "unused_protected_class_members",
         "unused-protected-class-member",
     ),
+    ("Namespace escapes", "namespace_escapes", "namespace-escape"),
     (
         "Unresolved imports",
         "unresolved_imports",
@@ -775,6 +776,21 @@ fn check_sections_core() -> Vec<SectionSpec> {
             key: "unused_protected_class_members",
             header: "Protected class members that neither the class nor a subclass reads.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n",
             row: member_row,
+        },
+        SectionSpec {
+            name: "Namespace escapes",
+            key: "namespace_escapes",
+            header: "Namespace imports used as a whole value, so fallow does not check the exports of the module.\n\n| File | Line | Binding | Module | Hidden exports |\n|------|-----:|---------|--------|---------------:|\n",
+            row: |it| {
+                format!(
+                    "| {} | {} | {} | {} | {} |",
+                    code_cell(it, "path"),
+                    num(it, "line"),
+                    code_cell(it, "local_name"),
+                    code_cell(it, "module"),
+                    num(it, "hidden_exports"),
+                )
+            },
         },
         SectionSpec {
             name: "Unused namespace members",
@@ -1793,6 +1809,9 @@ const AUDIT_EXPORT_DEP_ROWS: &[AuditRowSpec] = &[
         "unused_protected_class_members",
         member_item,
     ),
+    ("Namespace escape", "namespace_escapes", |it| {
+        code_cell(it, "local_name")
+    }),
     ("Unused store member", "unused_store_members", member_item),
     ("Unresolved import", "unresolved_imports", |it| {
         code_cell(it, "specifier")
@@ -2011,67 +2030,6 @@ fn audit_rows_boundaries(dead_code: &Value, rows: &mut Vec<AuditRow>) {
                 code_cell(it, "matched"),
                 markdown_table_code_span(&format!("{}/{}", s(it, "pack"), s(it, "rule_id")))
             ),
-            it,
-        ));
-    }
-}
-
-/// jq order positions 20-25: RSC/Next.js kinds, including unused server
-/// actions between misplaced directives and route collisions.
-fn audit_rows_frameworks(dead_code: &Value, rows: &mut Vec<AuditRow>) {
-    for it in arr(dead_code, "invalid_client_exports") {
-        rows.push(audit_row(
-            "Invalid client export",
-            rel_path_line_cell(it, "path"),
-            format!(
-                "{} in {}",
-                code_cell(it, "export_name"),
-                markdown_table_code_span(&format!("\"{}\"", s(it, "directive")))
-            ),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "mixed_client_server_barrels") {
-        rows.push(audit_row(
-            "Mixed client/server barrel",
-            rel_path_line_cell(it, "path"),
-            format!(
-                "{} + {}",
-                code_cell(it, "client_origin"),
-                code_cell(it, "server_origin")
-            ),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "misplaced_directives") {
-        rows.push(audit_row(
-            "Misplaced directive",
-            rel_path_line_cell(it, "path"),
-            markdown_table_code_span(&format!("\"{}\"", s(it, "directive"))),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "unused_server_actions") {
-        rows.push(audit_row(
-            "Unused server action",
-            path_line(it),
-            code_cell(it, "action_name"),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "route_collisions") {
-        rows.push(audit_row(
-            "Route collision",
-            markdown_table_code_span(&rel_path_absolute_only(s(it, "path"))),
-            code_cell(it, "url"),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "dynamic_segment_name_conflicts") {
-        rows.push(audit_row(
-            "Dynamic segment conflict",
-            markdown_table_code_span(&rel_path_absolute_only(s(it, "path"))),
-            markdown_table_code_span(&plain_join(it, "conflicting_segments", ", ")),
             it,
         ));
     }
@@ -3070,7 +3028,7 @@ fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
 
 #[path = "github_summary_audit_rows.rs"]
 mod github_summary_audit_rows;
-use github_summary_audit_rows::audit_rows_graph;
+use github_summary_audit_rows::{audit_rows_frameworks, audit_rows_graph};
 
 #[cfg(test)]
 #[path = "github_summary_tests.rs"]

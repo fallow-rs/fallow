@@ -1,6 +1,7 @@
 pub mod absent_props;
 mod component_health;
 pub mod constant_parameters;
+pub mod namespace_escapes;
 mod quality;
 pub mod security;
 mod structural;
@@ -114,6 +115,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     unused::push_import_diagnostics(&mut map, results, &mut mapper);
     unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref(), root);
     unused::push_member_diagnostics(&mut map, results, &mut mapper);
+    namespace_escapes::push_namespace_escape_diagnostics(&mut map, results, root, &mut mapper);
     absent_props::push_absent_prop_diagnostics(&mut map, results, &mut mapper);
     constant_parameters::push_constant_parameter_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
@@ -536,6 +538,7 @@ mod severity_gate {
             unused_store_members: _,
             unused_namespace_members: _,
             unused_protected_class_members: _,
+            namespace_escapes: _,
             unresolved_imports: _,
             unlisted_dependencies: _,
             unlisted_binaries: _,
@@ -882,6 +885,25 @@ mod severity_gate {
                                 kind: fallow_api::editor_extract::MemberKind::ClassMethod,
                                 line: 10,
                                 col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "namespace-escape",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.namespace_escapes.push(
+                        fallow_api::editor_results::NamespaceEscapeFinding::with_actions(
+                            fallow_api::editor_results::NamespaceEscape {
+                                path: root.join("a.ts"),
+                                line: 11,
+                                col: 0,
+                                local_name: "Ns".to_string(),
+                                module: root.join("b.ts"),
+                                hidden_exports: 2,
+                                reason: fallow_api::editor_results::NamespaceEscapeReason::WholeObjectUse,
                             },
                         ),
                     );

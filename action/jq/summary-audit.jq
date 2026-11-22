@@ -38,6 +38,7 @@ def dead_code_rows:
    [ (.dead_code.unused_class_members // [])[] | {kind:"Unused class member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_namespace_members // [])[] | {kind:"Unused namespace member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_protected_class_members // [])[] | {kind:"Unused protected class member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.namespace_escapes // [])[] | {kind:"Namespace escape", location:path_line, item:("`\(.local_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_store_members // [])[] | {kind:"Unused store member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unresolved_imports // [])[] | {kind:"Unresolved import", location:path_line, item:("`\(.specifier)`"), introduced:.introduced} ] +
    [ (.dead_code.unlisted_dependencies // [])[] | {kind:"Unlisted dependency", location:first_import_site, item:("`\(.package_name)`"), introduced:.introduced} ] +

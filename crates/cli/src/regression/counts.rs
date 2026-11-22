@@ -78,6 +78,8 @@ pub struct CheckCounts {
     pub unused_namespace_members: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub unused_protected_class_members: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub namespace_escapes: usize,
     #[serde(default)]
     pub unused_store_members: usize,
     #[serde(default)]
@@ -156,6 +158,7 @@ impl CheckCounts {
             unused_class_members: results.unused_class_members.len(),
             unused_namespace_members: results.unused_namespace_members.len(),
             unused_protected_class_members: results.unused_protected_class_members.len(),
+            namespace_escapes: results.namespace_escapes.len(),
             unused_store_members: results.unused_store_members.len(),
             unprovided_injects: results.unprovided_injects.len(),
             unrendered_components: results.unrendered_components.len(),
@@ -206,6 +209,7 @@ impl CheckCounts {
             // field; default to 0 until the config baseline schema gains one.
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             // `fallow_config::RegressionBaseline` has no `unprovided_injects`
             // field; default to 0 until the config baseline schema gains one.
@@ -317,6 +321,7 @@ impl CheckCounts {
         push_delta!(unused_class_members);
         push_delta!(unused_namespace_members);
         push_delta!(unused_protected_class_members);
+        push_delta!(namespace_escapes);
         push_delta!(unused_store_members);
         push_delta!(unprovided_injects);
         push_delta!(unrendered_components);
@@ -491,6 +496,7 @@ mod tests {
             unused_class_members: 0,
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -554,6 +560,7 @@ mod tests {
                 unused_class_members: 1,
                 unused_namespace_members: 0,
                 unused_protected_class_members: 0,
+                namespace_escapes: 0,
                 unused_store_members: 0,
                 unprovided_injects: 0,
                 unrendered_components: 0,
@@ -613,6 +620,7 @@ mod tests {
             unused_class_members: 1,
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -677,6 +685,7 @@ mod tests {
             unused_class_members: 0,
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -728,6 +737,7 @@ mod tests {
             unused_class_members: 0,
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -777,6 +787,7 @@ mod tests {
             unused_class_members: 0,
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,
@@ -820,6 +831,7 @@ mod tests {
             unused_class_members: 1,
             unused_namespace_members: 1,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 1,
             unprovided_injects: 1,
             unrendered_components: 1,
@@ -872,6 +884,7 @@ mod tests {
             unused_class_members: 0,
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
+            namespace_escapes: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,

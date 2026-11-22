@@ -151,6 +151,10 @@ pub struct CheckSummary {
     /// is `off` by default.
     #[serde(default, skip_serializing_if = "zero_count")]
     pub unused_protected_class_members: usize,
+    /// Namespace bindings that the code uses as a whole value. Omitted when
+    /// zero, because the rule is `off` by default.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub namespace_escapes: usize,
     /// Unused store members.
     #[serde(default)]
     pub unused_store_members: usize,

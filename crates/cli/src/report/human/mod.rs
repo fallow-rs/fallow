@@ -170,6 +170,10 @@ fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static 
             "Protected class members that neither the class nor a subclass reads",
             "https://fallow.tools/docs/rules/unused-protected-class-member/",
         )),
+        "Namespace escapes" => Some((
+            "Namespace imports used as a whole value, so fallow does not check the exports of the target",
+            "https://fallow.tools/docs/rules/namespace-escape/",
+        )),
         "Unused store members" => Some((
             "Store state or actions never accessed by any consumer",
             "https://fallow.tools/docs/rules/unused-store-member/",
@@ -358,6 +362,7 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
         "Unused class members" => IssueKind::UnusedClassMember,
         "Unused namespace members" => IssueKind::UnusedNamespaceMember,
         "Unused protected class members" => IssueKind::UnusedProtectedClassMember,
+        "Namespace escapes" => IssueKind::NamespaceEscape,
         "Unused store members" => IssueKind::UnusedStoreMember,
         "Unresolved imports" => IssueKind::UnresolvedImport,
         "Unlisted dependencies" => IssueKind::UnlistedDependency,

@@ -786,6 +786,7 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
       "unused-class-member",
       "unused-namespace-member",
       "unused-protected-class-member",
+      "namespace-escape",
       "unused-store-member",
       "unused-server-action",
       "unused-load-data-key",

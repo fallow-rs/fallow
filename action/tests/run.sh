@@ -1466,6 +1466,13 @@ assert_contains "$OUT_ICE" "metadata" "ice: shows export name in section"
 OUT_ICE_ANN=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 2, "export_name": "metadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
 assert_contains "$OUT_ICE_ANN" "::warning file=src/app.ts,line=5,col=3,title=Invalid client export::" "ice: warning-severity annotation"
 
+OUT_NSE_ONE=$(jq '.namespace_escapes = [{"path": "src/app.ts", "line": 3, "col": 7, "local_name": "Formats", "module": "src/formats.ts", "hidden_exports": 1, "reason": "whole-object-use", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_NSE_ONE" "::warning file=src/app.ts,line=3,col=8,title=Namespace escape::namespace Formats is used as a whole value; 1 export of src/formats.ts is not checked." "namespace escape: singular text for one export"
+
+OUT_NSE_MANY=$(jq '.namespace_escapes = [{"path": "src/app.ts", "line": 3, "col": 7, "local_name": "Formats", "module": "src/formats.ts", "hidden_exports": 2, "reason": "re-exported-binding", "actions": []}, {"path": "src/b.ts", "line": 1, "col": 7, "local_name": "Lib", "module": "src/lib.ts", "hidden_exports": 3, "reason": "no-member-read", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_NSE_MANY" "namespace Formats is re-exported as a whole object; 2 exports of src/formats.ts are not checked." "namespace escape: re-exported binding text"
+assert_contains "$OUT_NSE_MANY" "namespace Lib has no member read by name; 3 exports of src/lib.ts are not checked." "namespace escape: no member read text"
+
 OUT_ICE_FILTERED=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/other.ts", "line": 3, "col": 0, "export_name": "generateMetadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_ICE_FILTERED" '.invalid_client_exports | length' "1" "ice: filter-changed keeps only changed-file findings"
 

@@ -551,6 +551,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.unused_protected_class_members {
             $visit(&finding.member.path, finding.member.line, &finding.actions);
         }
+        for finding in &results.namespace_escapes {
+            $visit(&finding.escape.path, finding.escape.line, &finding.actions);
+        }
         for finding in &results.unresolved_imports {
             $visit(&finding.import.path, finding.import.line, &finding.actions);
         }
@@ -790,6 +793,13 @@ macro_rules! visit_suppress_line_findings_mut {
             $visit(
                 &finding.member.path,
                 finding.member.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.namespace_escapes {
+            $visit(
+                &finding.escape.path,
+                finding.escape.line,
                 &mut finding.actions,
             );
         }
@@ -1265,6 +1275,7 @@ fn suppression_kind_rank(kind: &str) -> usize {
         "package-cycle" => 19,
         "unused-namespace-member" => 20,
         "unused-protected-class-member" => 21,
+        "namespace-escape" => 22,
         _ => usize::MAX,
     }
 }
@@ -1289,6 +1300,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unused_class_members: results.unused_class_members.len(),
         unused_namespace_members: results.unused_namespace_members.len(),
         unused_protected_class_members: results.unused_protected_class_members.len(),
+        namespace_escapes: results.namespace_escapes.len(),
         unused_store_members: results.unused_store_members.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),

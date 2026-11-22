@@ -59,6 +59,7 @@ pub struct IssueFilters {
     pub unused_class_members: bool,
     pub unused_namespace_members: bool,
     pub unused_protected_class_members: bool,
+    pub namespace_escapes: bool,
     pub unused_store_members: bool,
     pub unprovided_injects: bool,
     pub unrendered_components: bool,
@@ -155,6 +156,7 @@ impl IssueFilters {
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-protected-class-members" => self.unused_protected_class_members = true,
+            "--namespace-escapes" => self.namespace_escapes = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,
@@ -205,6 +207,7 @@ impl IssueFilters {
             || self.unused_class_members
             || self.unused_namespace_members
             || self.unused_protected_class_members
+            || self.namespace_escapes
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -273,6 +276,9 @@ impl IssueFilters {
         {
             rules.unused_protected_class_members = Severity::Warn;
         }
+        if self.namespace_escapes && rules.namespace_escapes == Severity::Off {
+            rules.namespace_escapes = Severity::Warn;
+        }
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
@@ -329,6 +335,9 @@ impl IssueFilters {
         }
         if !self.unused_protected_class_members {
             results.unused_protected_class_members.clear();
+        }
+        if !self.namespace_escapes {
+            results.namespace_escapes.clear();
         }
         if !self.unlisted_deps {
             results.unlisted_dependencies.clear();

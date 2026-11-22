@@ -886,6 +886,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--namespace-escapes",
+      "column": "Issue Type",
+      "seed": "Namespace binding is used as a whole value, so its exports are not checked"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--private-type-leaks",
       "column": "Issue Type",
       "seed": "Exported signature references a private type"
@@ -2389,6 +2395,12 @@
       "row": "mutation-survived",
       "column": "Description",
       "seed": "A small code change made no test fail"
+    },
+    {
+      "section": "issue-types",
+      "row": "namespace-escape",
+      "column": "Description",
+      "seed": "Namespace binding is used as a whole value, so its exports are not checked; Opt-in coverage check of unused exports; the rule defaults to off"
     },
     {
       "section": "issue-types",

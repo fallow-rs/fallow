@@ -434,6 +434,9 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         "deprecated-export-in-use" => {
             m.note = Some("Opt-in migration sweep; the rule defaults to off");
         }
+        "namespace-escape" => {
+            m.note = Some("Opt-in coverage check of unused exports; the rule defaults to off");
+        }
         "unused-export"
         | "unused-enum-member"
         | "unused-file"
@@ -1605,6 +1608,11 @@ mod tests {
             "unused-protected-class-member".to_string(),
             "UnusedMember".to_string(),
             "UnusedProtectedClassMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "namespace-escape".to_string(),
+            "NamespaceEscape".to_string(),
+            "NamespaceEscapeFinding".to_string()
         )));
         assert_eq!(
             expected, aliases,

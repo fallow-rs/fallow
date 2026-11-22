@@ -148,6 +148,11 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         detail: r#"Select issue_types: ["constant-parameters"] to enable this default-off rule. Each candidate carries the function, the parameter, the reason (identical-argument or never-passed), the value, the call count, the condition reads and up to 20 inspected calls. The rule abstains when any caller can be invisible. Review the calls and the intent manually; a test caller counts unless production mode is on. Its actions are not auto-fixable."#,
     },
     ToolGuideSection {
+        topic: "namespace_escapes",
+        summary: "Namespace imports that hide exports from the unused-export check.",
+        detail: r#"Select issue_types: ["namespace-escapes"] to enable this default-off rule. Each finding carries the binding, the target module, the count of hidden exports and the reason (whole-object-use, re-exported-binding or no-member-read). Fallow credits every export of the target module while the binding escapes, so it does not check those exports. Read the members by name or import them by name. When the whole object is the intent, add // fallow-ignore-next-line namespace-escape above the import. Its actions are not auto-fixable."#,
+    },
+    ToolGuideSection {
         topic: "boundary_violations",
         summary: "The alias that limits a run to architecture boundary violations.",
         detail: r#"Set boundary_violations=true to check only architecture boundary violations. It is a convenience alias for issue_types: ["boundary-violations"]. The response is the same structured JSON as a full run, with all issues found of that one type."#,

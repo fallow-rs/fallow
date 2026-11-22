@@ -769,7 +769,7 @@ fn dupes_meta_docs_url_matches_constant() {
 
 #[test]
 fn check_rules_count() {
-    assert_eq!(CHECK_RULES.len(), 57);
+    assert_eq!(CHECK_RULES.len(), 58);
 }
 
 #[test]

@@ -55,12 +55,21 @@ use fallow_types::extract::{
 use super::namespace_indexes::ConsumerImport;
 use crate::resolve::ResolvedModule;
 
+use super::namespace_escapes::{NamespaceEscape, NamespaceEscapeReason};
+
 /// Either credit a specific member on the target, or credit every export
 /// (whole-object use, or entry-point exposure where the external accesses
 /// are unknown).
 enum CreditKind {
     Member(String),
     AllExports,
+    /// Record a namespace escape for a binding that gets the full credit of
+    /// the target. Credits nothing by itself: the full credit follows as
+    /// `AllExports` entries.
+    Escape {
+        local_name: String,
+        read_members: Vec<String>,
+    },
 }
 
 struct PendingCredit {
@@ -239,6 +248,24 @@ fn credit_namespace_object(
     }
 }
 
+/// Record `value` as a namespace escape of the namespace object at
+/// `module_idx`, then credit that whole namespace object.
+fn credit_escaped_object(
+    graph: &ModuleGraph,
+    module_idx: usize,
+    value: String,
+    credit: &mut impl FnMut(usize, CreditKind),
+) {
+    credit(
+        module_idx,
+        CreditKind::Escape {
+            local_name: value,
+            read_members: Vec::new(),
+        },
+    );
+    credit_namespace_object(graph, module_idx, credit);
+}
+
 /// The modules that the namespace object walk has visited, as a whole
 /// namespace object or as the named exports behind a plain `export *`.
 #[derive(Default)]
@@ -338,7 +365,11 @@ fn collect_consumer_credits(
             for chain in chain_uses(indexed.consumer, indexed.import.info.local_name.as_str()) {
                 let (head, rest) = chain.path.split_once('.').unwrap_or((chain.path, ""));
                 if head == export.exported_name {
-                    credit_chain(context, rest, chain.whole, &mut credit);
+                    let binding = format!(
+                        "{}.{}",
+                        indexed.import.info.local_name, export.exported_name
+                    );
+                    credit_chain(context, &binding, rest, chain.whole, &mut credit);
                 }
             }
         }
@@ -376,6 +407,19 @@ fn credit_named_consumer(
     let consumer = indexed.consumer;
     let local = indexed.import.info.local_name.as_str();
     if consumer.whole_object_uses.iter().any(|name| name == local) {
+        let read_members = consumer
+            .member_accesses
+            .iter()
+            .filter(|access| access.object == local)
+            .map(|access| access.member.clone())
+            .collect();
+        credit(
+            context.target_module_idx,
+            CreditKind::Escape {
+                local_name: local.to_string(),
+                read_members,
+            },
+        );
         credit_namespace_object(context.graph, context.target_module_idx, credit);
         return;
     }
@@ -390,7 +434,7 @@ fn credit_named_consumer(
         );
     }
     for chain in chain_uses(consumer, local) {
-        credit_chain(context, chain.path, chain.whole, credit);
+        credit_chain(context, local, chain.path, chain.whole, credit);
     }
 }
 
@@ -433,26 +477,33 @@ fn chain_uses<'a>(
 /// target, directly or through re-exports) moves the rest of the chain to the
 /// source of that namespace object. A computed key, or a value that the code
 /// hands on, credits every export of the namespace object at that point.
+///
+/// `binding` names the value at the start of `path` in the consumer. A full
+/// credit records the value at that point as a namespace escape.
 fn credit_chain(
     context: &ConsumerCreditContext<'_, '_>,
+    binding: &str,
     path: &str,
     whole: bool,
     credit: &mut impl FnMut(usize, CreditKind),
 ) {
     let mut module_idx = context.target_module_idx;
+    let mut value = binding.to_string();
     let mut segments = path.split('.').filter(|segment| !segment.is_empty());
     loop {
         let Some(segment) = segments.next() else {
             if whole {
-                credit_namespace_object(context.graph, module_idx, credit);
+                credit_escaped_object(context.graph, module_idx, value, credit);
             }
             return;
         };
         if segment == NamespaceMemberUseFact::ANY_KEY {
-            credit_namespace_object(context.graph, module_idx, credit);
+            credit_escaped_object(context.graph, module_idx, value, credit);
             return;
         }
         credit(module_idx, CreditKind::Member(segment.to_string()));
+        value.push('.');
+        value.push_str(segment);
         let Some(module) = context.graph.modules.get(module_idx) else {
             return;
         };
@@ -489,7 +540,23 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
     );
 
     let mut groups: FxHashMap<GroupKey, GroupState> = FxHashMap::default();
+    let mut escapes = Vec::new();
     for credit in pending {
+        if let CreditKind::Escape {
+            local_name,
+            read_members,
+        } = &credit.kind
+        {
+            escapes.push(NamespaceEscape {
+                consumer: credit.consumer_file_id,
+                import_span: credit.import_span,
+                local_name: local_name.clone(),
+                target: FileId(credit.target_module_idx as u32),
+                reason: NamespaceEscapeReason::WholeObjectUse,
+                read_members: read_members.clone(),
+            });
+            continue;
+        }
         let key = (
             credit.target_module_idx,
             credit.consumer_file_id,
@@ -508,8 +575,11 @@ fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
                 entry.whole_object = true;
                 entry.members.clear();
             }
+            CreditKind::Escape { .. } => {}
         }
     }
+
+    graph.namespace_escapes.extend(escapes);
 
     let mut dedup = ReferenceDedup::default();
     let effective_exports = &graph.effective_exports;

@@ -65,6 +65,7 @@ pub(super) fn check_issue_filters_framework(
     let Command::Check {
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unprovided_injects,
         unrendered_components,
@@ -99,6 +100,7 @@ pub(super) fn check_issue_filters_framework(
             "--unused-protected-class-members",
             *unused_protected_class_members,
         ),
+        ("--namespace-escapes", *namespace_escapes),
         ("--unused-store-members", *unused_store_members),
         ("--unprovided-injects", *unprovided_injects),
         ("--unrendered-components", *unrendered_components),
