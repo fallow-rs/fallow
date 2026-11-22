@@ -4166,3 +4166,11 @@ test("release reads each platform package name from a path that Node resolves as
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("the pull request title check lints the squash subject", () => {
+  const workflow = readWorkflow(".github/workflows/commitlint.yml");
+  const step = workflow.split("- name: Lint pull request title")[1]?.split("\n      - ")[0];
+  assert.ok(step, "commitlint.yml must lint the pull request title");
+  assert.match(step, /PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \}\}/u);
+  assert.match(step, /printf '%s \(#%s\)\\n' "\$PR_TITLE" "\$PR_NUMBER" \| npm run commitlint/u);
+});
