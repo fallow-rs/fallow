@@ -5,7 +5,12 @@ import { strict as assert } from "node:assert";
 import { createRequire } from "node:module";
 
 import fallow, * as namespace from "@fallow-cli/fallow-node";
-import { computeHealth, detectDeadCode, detectSimilarCode } from "@fallow-cli/fallow-node";
+import {
+  computeHealth,
+  detectDeadCode,
+  detectDuplication,
+  detectSimilarCode,
+} from "@fallow-cli/fallow-node";
 
 const require = createRequire(import.meta.url);
 const required = require("@fallow-cli/fallow-node");
@@ -27,6 +32,10 @@ const namedExports = new Map(Object.entries(namespace));
 for (const name of bindingFunctions) {
   assert.equal(namedExports.get(name), required[name], `named ESM export ${name}`);
 }
+
+const invalid = detectDuplication({ root: process.cwd(), minOccurrences: 1 });
+assert.ok(invalid instanceof Promise, "an invalid option returns a promise, not a throw");
+await assert.rejects(invalid, /min_occurrences must be at least 2/);
 
 const report = await detectDeadCode({ root: process.cwd(), noCache: true });
 assert.equal(typeof report, "object");

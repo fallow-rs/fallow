@@ -72,14 +72,28 @@ const similarCodeProviderError = (cause) => {
   return error;
 };
 
+// Every export declares a Promise. The native functions convert and check
+// their options before they create the promise, so an invalid option throws.
+// This wrapper turns that throw into a rejection.
+const rejectInsteadOfThrow =
+  (fn) =>
+  (...args) => {
+    try {
+      return fn(...args);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  };
+
 configureTypeAwareCompanion();
 const binding = require("./index.js");
 const nativeDetectSimilarCode = binding.detectSimilarCode;
 binding.detectSimilarCode = (options = {}) => {
   const companion = resolveSimilarCodeCompanion();
-  // The binding declares a Promise, so a missing companion rejects it
-  // instead of throwing before a promise exists.
-  if (companion.error) return Promise.reject(similarCodeProviderError(companion.error));
+  if (companion.error) throw similarCodeProviderError(companion.error);
   return nativeDetectSimilarCode({ ...options, adapterProviderPath: companion.binary });
 };
+for (const [name, value] of Object.entries(binding)) {
+  if (typeof value === "function") binding[name] = rejectInsteadOfThrow(value);
+}
 module.exports = binding;

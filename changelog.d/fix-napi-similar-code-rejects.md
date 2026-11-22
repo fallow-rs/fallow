@@ -1,4 +1,4 @@
 ### Fixed
 
-- **`detectSimilarCode` of `@fallow-cli/fallow-node` rejects its promise when the similar-code companion is not ready.**
-  The function threw before it returned a promise, so a `.catch` handler or a `promise.then(ok, fail)` call never saw the `FALLOW_SIMILAR_CODE_PROVIDER_NOT_READY` error. The function now returns a rejected promise with the same error, as its `Promise<SimilarCodeReport>` type states. `await` in a `try` block works as before.
+- **The functions of `@fallow-cli/fallow-node` reject their promise instead of throwing.**
+  An invalid option, for example `minOccurrences: 1` for `detectDuplication`, and a similar-code companion that is not ready made the call throw before it returned a promise. A `.catch` handler or a `promise.then(ok, fail)` call then never saw the error. Each function now returns a rejected promise with the same error, as its `Promise` type states. `await` in a `try` block works as before. Code that caught the old throw without `await` must now handle the rejection.
