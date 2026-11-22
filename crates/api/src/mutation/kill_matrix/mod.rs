@@ -130,7 +130,7 @@ fn build_full(
         .collect();
     let coverage_without_kills = tests
         .iter()
-        .filter(|row| row.kills.is_empty())
+        .filter(|row| row.kills.is_empty() && !duplicates.contains(row.test_id.as_str()))
         .map(|row| row.test_id.clone())
         .collect();
     MutationKillMatrix {
@@ -587,6 +587,30 @@ mod tests {
         assert_eq!(unavailable.reasons, ["missing-test-file-metadata"]);
         assert!(unavailable.tests.is_empty());
         assert!(unavailable.candidates.is_empty());
+    }
+
+    /// A duplicate id with coverage and no kills can still own kills that the
+    /// runner put on its twin, so it is not reported as a test that detects
+    /// nothing.
+    #[test]
+    fn a_duplicate_test_id_is_not_coverage_without_kills() {
+        let duplicates = ["test/c.ts::c".to_owned()];
+        let files = FxHashMap::from_iter([
+            ("test/a.ts::a".to_owned(), "test/a.ts".to_owned()),
+            ("test/b.ts::b".to_owned(), "test/b.ts".to_owned()),
+            ("test/c.ts::c".to_owned(), "test/c.ts".to_owned()),
+        ]);
+        let matrix = super::build(
+            &Mode::Full {
+                duplicate_ids: &duplicates,
+            },
+            &[result("m1", MutantStatus::Killed, &["test/a.ts::a"])],
+            &[],
+            &MutationCompletion::from_reasons(Vec::new()),
+            &[],
+            Some(&files),
+        );
+        assert_eq!(matrix.coverage_without_kills, ["test/b.ts::b"]);
     }
 
     /// The runner numbers tests that share a title in report order, so the
