@@ -284,7 +284,7 @@ pub fn run_agent_status(
     let root = resolve_root(root, root_explicit);
     let home = fallow_process::HostPaths::from_env().home;
     let surfaces = surfaces(&root, home.as_deref());
-    let root_arg = root_explicit.then(|| root_arg(&root));
+    let root_arg = root_explicit.then(|| super::root_arg(&root));
     let next_actions = status_next_actions(&surfaces, root_arg.as_deref());
     let report = StatusReport {
         kind: "agent-status",
@@ -578,15 +578,6 @@ fn hook_row(
         detail,
         blocker,
     }
-}
-
-/// The ` --root <path>` suffix that keeps a follow-up command on the
-/// inspected project when it runs from another directory.
-fn root_arg(root: &Path) -> String {
-    format!(
-        " --root {}",
-        fallow_engine::shell_quote::shell_quote(&root.to_string_lossy())
-    )
 }
 
 fn status_next_actions(surfaces: &[SurfaceStatus], root_arg: Option<&str>) -> Vec<NextAction> {

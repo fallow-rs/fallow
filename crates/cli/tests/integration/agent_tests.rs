@@ -578,6 +578,10 @@ fn status_reports_path_drift_only_when_the_gate_runs_the_path_fallow() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+fn shell_quoted(path: &Path) -> String {
+    fallow_engine::shell_quote::shell_quote(path.to_str().unwrap())
+}
+
 fn next_action_command(json: &serde_json::Value, id: &str) -> String {
     json["next_actions"]
         .as_array()
@@ -600,16 +604,27 @@ fn install_approve_command_keeps_the_root_and_the_excluded_steps() {
     let output = run_agent(
         &dir,
         &home,
-        &["install", "--harness", "claude", "--without", "hooks"],
+        &[
+            "install",
+            "--harness",
+            "claude",
+            "--without",
+            "hooks",
+            "--force",
+        ],
     );
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     let json = crate::common::parse_json(&output);
-    let command = next_action_command(&json, "claude-approve-mcp");
-    assert!(command.contains(" --without hooks"), "{command}");
-    assert!(command.contains(" --approve"), "{command}");
-    assert!(command.contains(" --root "), "{command}");
-    let recommend = next_action_command(&json, "recommend-config");
-    assert!(recommend.contains(" --root "), "{recommend}");
+    let root = shell_quoted(&dir);
+    assert_eq!(
+        next_action_command(&json, "claude-approve-mcp"),
+        format!("fallow agent install --harness claude --without hooks --approve --root {root}"),
+        "the approve command must not repeat --force"
+    );
+    assert_eq!(
+        next_action_command(&json, "recommend-config"),
+        format!("fallow recommend --format json --root {root}")
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -626,9 +641,14 @@ fn status_commands_keep_the_inspected_root() {
     let output = run_agent(&dir, &home, &["status"]);
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     let json = crate::common::parse_json(&output);
-    for id in ["agent-install", "agent-install-force"] {
-        let command = next_action_command(&json, id);
-        assert!(command.contains(" --root "), "{id}: {command}");
-    }
+    let root = shell_quoted(&dir);
+    assert_eq!(
+        next_action_command(&json, "agent-install"),
+        format!("fallow agent install --dry-run --root {root}")
+    );
+    assert_eq!(
+        next_action_command(&json, "agent-install-force"),
+        format!("fallow agent install --force --root {root}")
+    );
     let _ = fs::remove_dir_all(&dir);
 }

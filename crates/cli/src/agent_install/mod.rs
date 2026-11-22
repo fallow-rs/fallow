@@ -600,13 +600,20 @@ fn apply_command(opts: &AgentInstallOptions<'_>, root: &Path, harnesses: &[Harne
             words.push(flag.into());
         }
     }
+    let mut command = words.join(" ");
     if opts.root_explicit {
-        words.push("--root".into());
-        words.push(fallow_engine::shell_quote::shell_quote(
-            &root.to_string_lossy(),
-        ));
+        command.push_str(&root_arg(root));
     }
-    words.join(" ")
+    command
+}
+
+/// The ` --root <path>` suffix that keeps a follow-up command on `root` when
+/// it runs from another directory.
+pub fn root_arg(root: &Path) -> String {
+    format!(
+        " --root {}",
+        fallow_engine::shell_quote::shell_quote(&root.to_string_lossy())
+    )
 }
 
 /// The options of an install run that its follow-up commands repeat, so a
@@ -631,13 +638,11 @@ impl FollowUp<'_> {
 
     /// The ` --root <path>` suffix when the run named its root.
     fn root_arg(self) -> String {
-        if !self.opts.root_explicit {
-            return String::new();
+        if self.opts.root_explicit {
+            root_arg(self.root)
+        } else {
+            String::new()
         }
-        format!(
-            " --root {}",
-            fallow_engine::shell_quote::shell_quote(&self.root.to_string_lossy())
-        )
     }
 }
 
