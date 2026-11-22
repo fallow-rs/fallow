@@ -192,7 +192,7 @@ impl<'a> CloneCoverage<'a> {
 /// Statistics of `groups`, with every instance of each group, against
 /// `totals`.
 #[must_use]
-pub(crate) fn duplication_stats(
+fn duplication_stats(
     groups: &[CloneGroup],
     totals: CorpusTotals,
     carried: CarriedCounters,

@@ -7174,7 +7174,7 @@
           "possible_values": [],
           "default": null,
           "env": null,
-          "help": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory. Forces file-scores, hotspot, and score computation for complete metrics",
+          "help": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given, with a `-2`, `-3` suffix when a snapshot of the same second exists. A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory. Forces file-scores, hotspot, and score computation for complete metrics",
           "long_help": null,
           "hidden": false,
           "hidden_in_short_help": false,

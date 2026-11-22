@@ -52,8 +52,6 @@ pub(super) fn prepare_health_runtime_sections(
         HealthDerivedSectionInput {
             config: input.config,
             files: input.files,
-            modules: input.modules,
-            file_paths: input.file_paths,
             ignore_set: input.ignore_set,
             changed_files: input.changed_files,
             ws_roots: input.ws_roots,
