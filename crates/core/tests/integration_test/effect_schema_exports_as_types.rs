@@ -21,6 +21,7 @@ const FIXTURE: &str = "effect-schema-exports-as-types";
 /// index past the end of a tuple, an index with a leading zero, a method
 /// that calls itself, and a literal that the module exports, changes with an
 /// array method, writes to, deletes from, passes on, or reads through `this`.
+/// An annotation id such as `Schema.BrandSchemaId` is not a schema (#5066).
 const VALUE_EXPORTS_WITH_OPTION_ON: &[&str] = &[
     "Collided",
     "NotEffectSchema",
@@ -63,6 +64,7 @@ const VALUE_EXPORTS_WITH_OPTION_ON: &[&str] = &[
     "httpStatusProbe",
     "importedHelperAlias",
     "makeUnusedRule",
+    "memberBrandId",
     "notDerived",
     "plainValue",
     "unusedHelper",
@@ -172,6 +174,9 @@ fn option_off_reports_schemas_as_unused_exports() {
             "FromLocal",
             "FromNested",
             "FromWrappedHelper",
+            "MemberOptional",
+            "MemberOptionalImported",
+            "MemberOptionalKey",
             "NotEffectSchema",
             "NotSchema",
             "PairedSchema",
@@ -220,6 +225,7 @@ fn option_off_reports_schemas_as_unused_exports() {
             "httpStatusProbe",
             "importedHelperAlias",
             "makeUnusedRule",
+            "memberBrandId",
             "notDerived",
             "plainValue",
             "unusedHelper",
@@ -270,6 +276,9 @@ fn option_on_reports_schemas_as_unused_types() {
             "FromLocal",
             "FromNested",
             "FromWrappedHelper",
+            "MemberOptional",
+            "MemberOptionalImported",
+            "MemberOptionalKey",
             "PairedSchema",
             "ReExportedRule",
             "UnusedAlias",

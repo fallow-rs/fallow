@@ -765,3 +765,222 @@ export const recordMethodRead = record.User.annotations
     );
     assert_eq!(names, vec!["Kept"]);
 }
+
+#[test]
+fn records_property_wrappers_and_other_lowercase_constructors() {
+    let names = schema_exports(
+        r#"
+import * as Schema from "effect/Schema"
+import { Id } from "./ids"
+export const Optional = Schema.optional(Schema.String)
+export const OptionalImported = Schema.optional(Id.annotate({ description: "x" }))
+export const OptionalKey = Schema.optionalKey(Schema.String)
+export const Mutable = Schema.mutable(Schema.Array(Schema.String))
+export const Required = Schema.required(Schema.optional(Schema.String))
+export const Tagged = Schema.tag("a")
+export const Keys = Schema.keyof(Schema.Struct({ a: Schema.String }))
+export const FromJson = Schema.fromJsonString(Schema.String)
+"#,
+    );
+    assert_eq!(
+        names,
+        vec![
+            "FromJson",
+            "Keys",
+            "Mutable",
+            "Optional",
+            "OptionalImported",
+            "OptionalKey",
+            "Required",
+            "Tagged",
+        ]
+    );
+}
+
+#[test]
+fn a_lowercase_constructor_without_a_call_or_a_non_schema_value_is_no_schema() {
+    let names = schema_exports(
+        r#"
+import * as Schema from "effect/Schema"
+export const bareOptional = Schema.optional
+export const bareSuspend = Schema.suspend
+export const decoder = Schema.decodeUnknownSync(Schema.String)
+export const encoder = Schema.encodeSync(Schema.String)
+export const guard = Schema.is(Schema.String)
+export const assertion = Schema.asserts(Schema.String)
+export const validator = Schema.validateSync(Schema.String)
+export const formatter = Schema.toFormatter(Schema.String)
+export const MarkerId = Schema.BrandSchemaId
+export const SchemaTypeId = Schema.TypeId
+export const AppConfig = Schema.Config("PORT", Schema.NumberFromString)
+export const Failure = Schema.SchemaError
+"#,
+    );
+    assert!(names.is_empty(), "no export is a schema: {names:?}");
+}
+
+/// The lowercase `Schema` members that `scripts/effect-schema-members.mjs`
+/// found to give a schema in effect 3.22.5 or effect 4.1.5, and that the
+/// constructor list missed before (#5066).
+const ADDED_LOWERCASE_CONSTRUCTORS: &[&str] = &[
+    "annotations",
+    "asSchema",
+    "attachPropertySignature",
+    "encodedBoundSchema",
+    "exitSchema",
+    "failureSchema",
+    "filterEffect",
+    "flip",
+    "fromFormData",
+    "fromJsonString",
+    "fromURLSearchParams",
+    "getNumberIndexedAccess",
+    "head",
+    "headNonEmpty",
+    "headOrElse",
+    "instanceOf",
+    "keyof",
+    "make",
+    "mutable",
+    "mutableKey",
+    "optional",
+    "optionalKey",
+    "parseNumber",
+    "partial",
+    "partialWith",
+    "pluck",
+    "readonlyKey",
+    "rename",
+    "required",
+    "requiredKey",
+    "revealBottom",
+    "revealCodec",
+    "serializableSchema",
+    "split",
+    "standardSchemaV1",
+    "successSchema",
+    "tag",
+    "tagDefaultOmit",
+    "toCodecArrayFromSingle",
+    "toCodecGoJson",
+    "toCodecIso",
+    "toCodecJson",
+    "toCodecStringTree",
+    "toStandardJSONSchemaV1",
+    "toStandardSchemaV1",
+    "transformLiteral",
+    "transformLiterals",
+];
+
+#[test]
+fn records_a_call_of_each_added_lowercase_constructor() {
+    for name in ADDED_LOWERCASE_CONSTRUCTORS {
+        let source = format!(
+            "import * as Schema from \"effect/Schema\"\nexport const Probe = Schema.{name}(Schema.String, Schema.String, Schema.String)\nexport const bare = Schema.{name}\n"
+        );
+        assert_eq!(schema_exports(&source), vec!["Probe"], "Schema.{name}");
+    }
+}
+
+/// PascalCase `Schema` values that give no schema in effect 3.22.5 and
+/// effect 4.1.5 (#5066).
+const PASCAL_CASE_NON_SCHEMAS: &[&str] = &[
+    "BetweenBigDecimalSchemaId",
+    "BetweenBigIntSchemaId",
+    "BetweenDateSchemaId",
+    "BetweenDurationSchemaId",
+    "BetweenSchemaId",
+    "BrandSchemaId",
+    "CapitalizedSchemaId",
+    "Config",
+    "DateFromSelfSchemaId",
+    "EndsWithSchemaId",
+    "FiniteSchemaId",
+    "FromPropertySignature",
+    "GreaterThanBigDecimalSchemaId",
+    "GreaterThanBigIntSchemaId",
+    "GreaterThanDateSchemaId",
+    "GreaterThanDurationSchemaId",
+    "GreaterThanOrEqualToBigDecimalSchemaId",
+    "GreaterThanOrEqualToBigIntSchemaId",
+    "GreaterThanOrEqualToDateSchemaId",
+    "GreaterThanOrEqualToDurationSchemaId",
+    "GreaterThanOrEqualToSchemaId",
+    "GreaterThanSchemaId",
+    "IncludesSchemaId",
+    "InstanceOfSchemaId",
+    "IntSchemaId",
+    "ItemsCountSchemaId",
+    "JsonNumberSchemaId",
+    "LengthSchemaId",
+    "LessThanBigDecimalSchemaId",
+    "LessThanBigIntSchemaId",
+    "LessThanDateSchemaId",
+    "LessThanDurationSchemaId",
+    "LessThanOrEqualToBigDecimalSchemaId",
+    "LessThanOrEqualToBigIntSchemaId",
+    "LessThanOrEqualToDateSchemaId",
+    "LessThanOrEqualToDurationSchemaId",
+    "LessThanOrEqualToSchemaId",
+    "LessThanSchemaId",
+    "LowercasedSchemaId",
+    "MaxItemsSchemaId",
+    "MaxLengthSchemaId",
+    "MinItemsSchemaId",
+    "MinLengthSchemaId",
+    "MultipleOfSchemaId",
+    "NegativeBigDecimalSchemaId",
+    "NonNaNSchemaId",
+    "NonNegativeBigDecimalSchemaId",
+    "NonPositiveBigDecimalSchemaId",
+    "PatternSchemaId",
+    "PositiveBigDecimalSchemaId",
+    "PropertySignatureDeclaration",
+    "PropertySignatureTransformation",
+    "PropertySignatureTypeId",
+    "RefineSchemaId",
+    "SchemaError",
+    "StartsWithSchemaId",
+    "ToPropertySignature",
+    "TrimmedSchemaId",
+    "TypeId",
+    "ULIDSchemaId",
+    "UUIDSchemaId",
+    "UncapitalizedSchemaId",
+    "UppercasedSchemaId",
+    "ValidDateSchemaId",
+];
+
+#[test]
+fn a_pascal_case_value_that_is_no_schema_gives_no_schema() {
+    for name in PASCAL_CASE_NON_SCHEMAS {
+        let source = format!(
+            "import {{ Schema }} from \"effect\"\nexport const read = Schema.{name}\nexport const called = Schema.{name}(\"x\", Schema.String)\n"
+        );
+        assert!(schema_exports(&source).is_empty(), "Schema.{name}");
+    }
+}
+
+#[test]
+fn a_data_last_call_of_a_dual_member_is_no_schema() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+const User = Schema.Struct({ a: Schema.String })
+export const withTitle = Schema.annotations({ title: "x" })
+export const pickA = Schema.pluck("a")
+export const renameA = Schema.rename({ a: "b" })
+export const extendUser = Schema.extend(User)
+export const toNumber = Schema.transform(Schema.Number, { decode: Number, encode: String })
+export const Titled = Schema.annotations(User, { title: "x" })
+export const Plucked = Schema.pluck(User, "a")
+export const Extended = Schema.extend(User, Schema.Struct({ b: Schema.Number }))
+export const Transformed = Schema.transform(Schema.String, Schema.Number, { decode: Number, encode: String })
+export const Spread = Schema.annotations(...[User, { title: "x" }])
+"#,
+    );
+    assert_eq!(
+        names,
+        vec!["Extended", "Plucked", "Spread", "Titled", "Transformed"]
+    );
+}

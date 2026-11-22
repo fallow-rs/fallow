@@ -8,6 +8,7 @@ import "./forms";
 import "./helper-consumer";
 import "./helpers";
 import "./http-api";
+import "./members";
 import { usedValue } from "./local-schema";
 import { UsedSchema } from "./schemas";
 
