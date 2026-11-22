@@ -46,30 +46,16 @@ use fallow_types::extract::{ImportInfo, ImportedName};
 
 #[path = "effect_schema_names.rs"]
 mod names;
-use names::{HTTP_API_PIPE_TRANSFORMS, PIPE_TRANSFORMS, TYPE_ONLY_NAMES};
+use names::{
+    DATA_FIRST_ARITY, HTTP_API_PIPE_TRANSFORMS, LOWERCASE_SCHEMA_CONSTRUCTORS,
+    NON_SCHEMA_VALUE_NAMES, PIPE_TRANSFORMS, TYPE_ONLY_NAMES,
+};
 
 #[path = "effect_schema_helpers.rs"]
 mod helpers;
 
 #[path = "effect_schema_containers.rs"]
 mod containers;
-
-/// `Schema` functions with a lowercase name that return a schema. Every
-/// other lowercase function (`decodeUnknownSync`, `is`, `isGreaterThan`)
-/// returns a decoder, a guard or a filter.
-const LOWERCASE_SCHEMA_CONSTRUCTORS: &[&str] = &[
-    "compose",
-    "declare",
-    "encodedSchema",
-    "extend",
-    "parseJson",
-    "suspend",
-    "toEncoded",
-    "toType",
-    "transform",
-    "transformOrFail",
-    "typeSchema",
-];
 
 /// Class factories of effect 3 (`Class`, `TaggedClass`, `TaggedError`,
 /// `TaggedRequest`) and effect 4 (also `Error` and `Opaque`).
@@ -150,9 +136,27 @@ fn is_http_api_schema_module_import(import: &ImportInfo) -> bool {
 
 fn is_schema_constructor(name: &str) -> bool {
     if name.starts_with(|c: char| c.is_ascii_uppercase()) {
-        return !TYPE_ONLY_NAMES.contains(&name);
+        return !TYPE_ONLY_NAMES.contains(&name) && !NON_SCHEMA_VALUE_NAMES.contains(&name);
     }
     LOWERCASE_SCHEMA_CONSTRUCTORS.contains(&name)
+}
+
+/// True when the link after a lowercase `Schema` member is a call that gives
+/// a schema. A lowercase member is a function, so a read without a call is
+/// not a schema. A call of a dual member with fewer arguments than its
+/// data-first form is the data-last form, which gives a function.
+fn is_schema_giving_call(member: &str, next: Option<&Link<'_, '_>>) -> bool {
+    let Some(Link::Call(call)) = next else {
+        return false;
+    };
+    let Some(&(_, arity)) = DATA_FIRST_ARITY.iter().find(|(name, _)| *name == member) else {
+        return true;
+    };
+    call.arguments.len() >= arity
+        || call
+            .arguments
+            .iter()
+            .any(|argument| matches!(argument, Argument::SpreadElement(_)))
 }
 
 fn is_class_factory(name: &str) -> bool {
@@ -387,6 +391,11 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
             let Some((Link::Member(head), rest)) = links.split_first() else {
                 return None;
             };
+            if head.starts_with(|c: char| c.is_ascii_lowercase())
+                && !is_schema_giving_call(head, rest.first())
+            {
+                return None;
+            }
             return (accepts_head(head) && is_schema_tail(rest)).then_some(SchemaShape::Known);
         }
         if let Some(local) = self.namespace_imports.get(&symbol) {
