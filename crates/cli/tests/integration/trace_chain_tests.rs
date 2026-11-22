@@ -62,3 +62,43 @@ fn missing_symbol_gives_empty_chains() {
     assert_eq!(value["symbol_found"], false, "got {value}");
     assert_eq!(hops(&value, "callees"), Vec::<String>::new());
 }
+
+/// `zed.ts` imports `leaf.ts` as a namespace, so it is a direct caller of
+/// `value`. A longer path through `echo.ts` and back into `leaf.ts` also
+/// reaches it, and must not hide the direct hop at depth 1.
+#[test]
+fn callers_keep_each_binding_at_its_shortest_depth() {
+    let value = trace("src/callers/leaf.ts:value", &["--callers", "--depth", "3"]);
+    let callers = hops(&value, "callers");
+    assert!(
+        callers.contains(&"1 src/callers/zed.ts leaf".to_string()),
+        "zed.ts imports leaf.ts directly, got {callers:?}"
+    );
+}
+
+/// A name that colliding `export *` sources swallow is not exported, so its
+/// chains are empty too.
+#[test]
+fn ambiguous_star_name_gives_empty_chains() {
+    let args = [
+        "src/barrel.ts:foo",
+        "--callers",
+        "--callees",
+        "--depth",
+        "2",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ];
+    let value = parse_json(&run_fallow(
+        "trace",
+        "effective-export-ambiguous-star",
+        &args,
+    ));
+    assert_eq!(value["symbol_found"], false, "got {value}");
+    assert!(value["star_export_ambiguity"].is_object(), "got {value}");
+    assert_eq!(hops(&value, "callers"), Vec::<String>::new());
+    assert_eq!(hops(&value, "callees"), Vec::<String>::new());
+    assert_eq!(value["unresolved_callees"], serde_json::json!([]));
+}
