@@ -1139,6 +1139,12 @@ pub struct MutationReport {
     /// `--record-args`. It holds counts and reasons, never argument values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recording: Option<MutationRecordingOutput>,
+    /// The id of the outcome journal that this run wrote. A caller passes the
+    /// report to the journal removal, which removes only this journal. It is
+    /// not part of the JSON report.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub journal_run_id: Option<String>,
 }
 
 /// How one mutant of a compare differs from the saved report.

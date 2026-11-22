@@ -832,6 +832,8 @@ struct Execution {
     runner: Option<MutationRunnerOutput>,
     cache: Option<MutationCacheOutput>,
     resume: Option<MutationResumeOutput>,
+    /// The id of the journal that the run wrote. `None` when no test ran.
+    journal_run_id: Option<String>,
     setup_ms: u64,
     /// The record pass of `--record-args`. `None` without recording.
     record: Option<RecordPass>,
@@ -1016,6 +1018,7 @@ fn open_stores(
         kill_matrix: options.kill_matrix,
         kill_matrix_targets: sorted_targets(&options.kill_matrix_targets),
         kill_matrix_full: options.kill_matrix_full,
+        run_id: String::new(),
     };
     let run_journal = start_journal(options, planned, mutation_cache, &header, keys)?;
     Ok((result_cache, run_journal))
@@ -1199,6 +1202,7 @@ fn execute(
             runner: None,
             cache: None,
             resume: unread_journal(options, planned),
+            journal_run_id: None,
             setup_ms: 0,
             record: None,
             witness: None,
@@ -1273,6 +1277,7 @@ fn execute(
     let cache = (outcome.ready.is_some())
         .then(|| result_cache.map(|result_cache| store_results(&result_cache, &mut outcome)))
         .flatten();
+    let journal_run_id = Some(run_journal.journal.run_id().to_owned());
     let resume = settle_journal(options, run_journal, &mut outcome);
     let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);
     Ok(Execution {
@@ -1282,6 +1287,7 @@ fn execute(
         runner,
         cache,
         resume,
+        journal_run_id,
         setup_ms,
     })
 }
@@ -1501,6 +1507,7 @@ pub fn run_mutation_with_progress(
         compare: None,
         gate_outcomes: None,
         recording,
+        journal_run_id: execution.journal_run_id,
     };
     report.withhold_target_first_scores();
     Ok(report)

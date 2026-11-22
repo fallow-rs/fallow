@@ -52,7 +52,8 @@ pub fn last_mutation_report_path(analysis: &AnalysisOptions) -> Result<PathBuf, 
 /// keeps the journal, so `--resume` can continue it. A run that started no
 /// test runner (`runner` is absent) did not write or check the journal, so
 /// the journal can belong to an interrupted run of another scope, and it
-/// stays.
+/// stays. The journal is removed only when this run wrote it: a newer run of
+/// the project can own the journal file by now.
 ///
 /// # Errors
 ///
@@ -67,15 +68,16 @@ pub fn remove_finished_mutation_journal(
     {
         return Ok(false);
     }
-    let path = super::journal::Journal::path(&cache_dir(analysis)?.join("mutation"));
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(cache_error(format!(
+    let Some(run_id) = report.journal_run_id.as_deref() else {
+        return Ok(false);
+    };
+    let mutation_cache = cache_dir(analysis)?.join("mutation");
+    super::journal::Journal::remove_owned(&mutation_cache, run_id).map_err(|error| {
+        cache_error(format!(
             "failed to remove {}: {error}",
-            path.display()
-        ))),
-    }
+            super::journal::Journal::path(&mutation_cache).display()
+        ))
+    })
 }
 
 /// Saves the JSON `report` of a run as the last report of the project, and
