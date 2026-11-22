@@ -34,10 +34,14 @@ use scan::{claim_full_sweep, scan_all_reusable_cache_paths, scan_cache_paths_wit
 
 #[path = "base_worktree_lock.rs"]
 mod lock;
+#[path = "base_worktree_sha_sidecar.rs"]
+mod sha_sidecar;
 pub use lock::ReusableWorktreeLock;
 #[cfg(all(test, unix))]
 use lock::lock_file_is_current;
 use lock::{reclaim_lock_only, remove_held_lock_file};
+pub use sha_sidecar::reusable_worktree_sha_path;
+use sha_sidecar::{read_reusable_sha, reusable_snapshot_identity, write_reusable_sha};
 
 pub struct BaseWorktree {
     path: PathBuf,
@@ -106,8 +110,9 @@ impl BaseWorktree {
         let reusable_lock =
             ReusableWorktreeLock::try_acquire(&path, "falling back to non-reusable worktree")?;
 
-        if reusable_audit_worktree_is_ready(&path, base_sha)
-            || try_migrate_registered_current_cache(repo_root, &path, base_sha)
+        let identity = reusable_snapshot_identity(repo_root, base_sha);
+        if reusable_audit_worktree_is_ready(&path, &identity)
+            || try_migrate_registered_current_cache(repo_root, &path, base_sha, &identity)
         {
             let worktree = Self {
                 path,
@@ -162,7 +167,7 @@ impl BaseWorktree {
         }
         guard.defuse();
         drop(guard);
-        let readiness_published = write_reusable_sha(&path, base_sha).is_ok();
+        let readiness_published = write_reusable_sha(&path, &identity).is_ok();
 
         let worktree = Self {
             path,
@@ -265,51 +270,6 @@ fn sidecar_path(reusable_path: &Path, suffix: &str) -> PathBuf {
     reusable_path
         .parent()
         .map_or_else(|| PathBuf::from(&name), |parent| parent.join(&name))
-}
-
-/// Sidecar path recording the base SHA a reusable cache entry was
-/// materialized at. Lives next to the cache directory like the `.last-used` /
-/// `.lock` sidecars, so readiness can be verified without a `git` subprocess.
-pub fn reusable_worktree_sha_path(reusable_path: &Path) -> PathBuf {
-    sidecar_path(reusable_path, REUSABLE_SHA_SUFFIX)
-}
-
-/// Record the base SHA a reusable cache holds. Failure is non-fatal: this run
-/// proceeds and the next run rebuilds (a missing `.sha` reads as not-ready).
-fn write_reusable_sha(reusable_path: &Path, base_sha: &str) -> std::io::Result<()> {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-
-    let sha_path = reusable_worktree_sha_path(reusable_path);
-    let sequence = SEQ.fetch_add(1, Ordering::Relaxed);
-    let temp_path = sidecar_path(
-        reusable_path,
-        &format!(
-            "{REUSABLE_SHA_SUFFIX}.tmp-{}-{sequence}",
-            std::process::id()
-        ),
-    );
-    let result = (|| {
-        let mut options = std::fs::OpenOptions::new();
-        options.create_new(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temp_path)?;
-        file.write_all(format!("{base_sha}\n").as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&temp_path, &sha_path)
-    })();
-    if let Err(err) = &result {
-        let _ = std::fs::remove_file(&temp_path);
-        tracing::debug!(
-            path = %sha_path.display(),
-            error = %err,
-            "failed to write reusable audit worktree .sha sidecar; next run will rebuild",
-        );
-    }
-    result
 }
 
 /// Default GC threshold for persistent reusable base-snapshot caches.
@@ -1072,7 +1032,10 @@ fn legacy_registered_pass(
                 }
                 if is_current_path {
                     if let Some(head) = head {
-                        let _ = write_reusable_sha(&path, &head);
+                        let _ = write_reusable_sha(
+                            &path,
+                            &reusable_snapshot_identity(repo_root, &head),
+                        );
                     }
                     SweepDisposition::KeptLegacyDeregistered
                 } else if let Err(error) = remove_reusable_cache_entry_locked(repo_root, &path) {
@@ -1539,7 +1502,7 @@ pub fn legacy_reusable_audit_worktree_path(
 }
 
 /// Readiness for a reusable cache HIT: the directory exists and its `.sha`
-/// sidecar records exactly `base_sha`.
+/// sidecar records exactly `identity` (see [`reusable_snapshot_identity`]).
 ///
 /// Fidelity is equivalent to the old in-worktree `git rev-parse HEAD` probe:
 /// that probe read the host admin dir's HEAD, never the snapshot's on-disk
@@ -1548,32 +1511,15 @@ pub fn legacy_reusable_audit_worktree_path(
 /// torn snapshot never presents a matching sidecar. On a hit the `.git` stub
 /// is repaired idempotently so gitignore parity holds even if the stub was
 /// removed out-of-band.
-fn reusable_audit_worktree_is_ready(path: &Path, base_sha: &str) -> bool {
+fn reusable_audit_worktree_is_ready(path: &Path, identity: &str) -> bool {
     if !reusable_cache_directory_is_trusted(path) {
         return false;
     }
     let recorded = read_reusable_sha(path);
-    if recorded.as_deref() != Some(base_sha) {
+    if recorded.as_deref() != Some(identity) {
         return false;
     }
     repair_unregistered_git_stub(path)
-}
-
-fn read_reusable_sha(path: &Path) -> Option<String> {
-    const MAX_SHA_SIDECAR_BYTES: u64 = 129;
-
-    let sidecar = reusable_worktree_sha_path(path);
-    let metadata = std::fs::symlink_metadata(&sidecar).ok()?;
-    if !metadata_is_regular_file(&metadata) || metadata.len() > MAX_SHA_SIDECAR_BYTES {
-        return None;
-    }
-    let mut contents = String::new();
-    std::fs::File::open(sidecar)
-        .ok()?
-        .take(MAX_SHA_SIDECAR_BYTES)
-        .read_to_string(&mut contents)
-        .ok()?;
-    Some(contents.trim().to_owned())
 }
 
 #[cfg(unix)]
@@ -1598,7 +1544,12 @@ fn reusable_cache_directory_is_trusted(path: &Path) -> bool {
 /// This can occur during mixed-version use or after interruption between
 /// registration and deregistration. Keep the cache warm only when HEAD matches
 /// the requested full SHA and raw materialization completed.
-fn try_migrate_registered_current_cache(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
+fn try_migrate_registered_current_cache(
+    repo_root: &Path,
+    path: &Path,
+    base_sha: &str,
+    identity: &str,
+) -> bool {
     if !path.exists() || !audit_worktree_is_registered(repo_root, path) {
         return false;
     }
@@ -1610,7 +1561,7 @@ fn try_migrate_registered_current_cache(repo_root: &Path, path: &Path, base_sha:
     if unregister_worktree_checked(repo_root, path).is_err() {
         return false;
     }
-    write_reusable_sha(path, base_sha).is_ok()
+    write_reusable_sha(path, identity).is_ok()
 }
 
 /// Remove every reusable base-snapshot cache owned by `requested_root`.
