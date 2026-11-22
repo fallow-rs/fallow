@@ -66,7 +66,7 @@ impl ModuleNode {
     /// its exports need an importer in the project, like the exports of any
     /// other module.
     #[inline]
-    pub const fn exposes_entry_surface(&self) -> bool {
+    pub(crate) const fn exposes_entry_surface(&self) -> bool {
         self.flags & FLAG_ENTRY_POINT != 0 && self.flags & FLAG_CONSUMER_CHECKED == 0
     }
 

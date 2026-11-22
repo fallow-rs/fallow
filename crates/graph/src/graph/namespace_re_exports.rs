@@ -217,16 +217,10 @@ fn credit_namespace_object(
     module_idx: usize,
     credit: &mut impl FnMut(usize, CreditKind),
 ) {
-    let mut full = FxHashSet::default();
-    let mut named_only = FxHashSet::default();
+    let mut visits = NamespaceObjectVisits::default();
     let mut stack = vec![(module_idx, true)];
     while let Some((idx, whole_object)) = stack.pop() {
-        let first_visit = if whole_object {
-            full.insert(idx)
-        } else {
-            !full.contains(&idx) && named_only.insert(idx)
-        };
-        if !first_visit {
+        if !visits.first_visit(idx, whole_object) {
             continue;
         }
         let Some(module) = graph.modules.get(idx) else {
@@ -235,29 +229,65 @@ fn credit_namespace_object(
         if whole_object {
             credit(idx, CreditKind::AllExports);
         } else {
-            for export in &module.exports {
-                if let ExportName::Named(name) = &export.name {
-                    credit(idx, CreditKind::Member(name.clone()));
-                }
-            }
+            credit_named_exports(module, idx, credit);
         }
-        for re in module
-            .re_exports
-            .iter()
-            .filter(|re| re.imported_name == "*")
-        {
-            let next_whole = if re.exported_name == "*" {
-                false
-            } else if whole_object || re.exported_name != "default" {
-                true
-            } else {
-                continue;
-            };
-            if let Some(source) = module_index_for_file(graph, re.source_file) {
-                stack.push((source, next_whole));
-            }
+        stack.extend(exposed_star_sources(module, whole_object).filter_map(
+            |(source, next_whole)| {
+                module_index_for_file(graph, source).map(|source| (source, next_whole))
+            },
+        ));
+    }
+}
+
+/// The modules that the namespace object walk has visited, as a whole
+/// namespace object or as the named exports behind a plain `export *`.
+#[derive(Default)]
+struct NamespaceObjectVisits {
+    whole: FxHashSet<usize>,
+    named_only: FxHashSet<usize>,
+}
+
+impl NamespaceObjectVisits {
+    /// Whether the walk must visit `idx` with this exposure. A whole visit
+    /// covers a later named-only visit.
+    fn first_visit(&mut self, idx: usize, whole_object: bool) -> bool {
+        if whole_object {
+            self.whole.insert(idx)
+        } else {
+            !self.whole.contains(&idx) && self.named_only.insert(idx)
         }
     }
+}
+
+fn credit_named_exports(
+    module: &super::types::ModuleNode,
+    idx: usize,
+    credit: &mut impl FnMut(usize, CreditKind),
+) {
+    for export in &module.exports {
+        if let ExportName::Named(name) = &export.name {
+            credit(idx, CreditKind::Member(name.clone()));
+        }
+    }
+}
+
+/// The sources of the `export *` and `export * as` lines of `module`, with
+/// whether each one exposes its whole namespace object. A plain `export *`
+/// exposes only named exports. An `export * as default` reaches nobody when
+/// `module` itself is only behind a plain `export *`.
+fn exposed_star_sources(
+    module: &super::types::ModuleNode,
+    whole_object: bool,
+) -> impl Iterator<Item = (FileId, bool)> + '_ {
+    module.re_exports.iter().filter_map(move |re| {
+        if re.imported_name != "*" {
+            return None;
+        }
+        if re.exported_name == "*" {
+            return Some((re.source_file, false));
+        }
+        (whole_object || re.exported_name != "default").then_some((re.source_file, true))
+    })
 }
 
 /// Map a `FileId` to its index in `graph.modules`. Returns `None` if the id
@@ -287,76 +317,80 @@ fn collect_consumer_credits(
     reference_paths: &mut ReferencePathInterner,
 ) {
     for export in reachable.iter() {
-        for indexed in context
+        let named = context
             .indexes
-            .consumers_for(export.file_id, &export.exported_name)
-        {
-            if !takes_part(context, indexed) {
-                continue;
-            }
-            let consumer = indexed.consumer;
-            let import = indexed.import;
+            .consumers_for(export.file_id, &export.exported_name);
+        for indexed in named.iter().filter(|indexed| takes_part(context, indexed)) {
             let path = routes.consumer_path(export, indexed, reference_paths);
-            let consumer_local = import.info.local_name.as_str();
-            let mut credit = |target_module_idx: usize, kind: CreditKind| {
-                pending.push(PendingCredit {
-                    target_module_idx,
-                    namespace: context.namespace,
-                    kind,
-                    consumer_file_id: consumer.file_id,
-                    import_span: import.info.span,
-                    path,
-                });
-            };
-
-            let whole_object = consumer
-                .whole_object_uses
-                .iter()
-                .any(|n| n == consumer_local);
-            if whole_object {
-                credit_namespace_object(context.graph, context.target_module_idx, &mut credit);
-                continue;
-            }
-
-            for access in consumer.member_accesses.iter() {
-                if access.object == consumer_local {
-                    credit(
-                        context.target_module_idx,
-                        CreditKind::Member(access.member.clone()),
-                    );
-                }
-            }
-            for chain in chain_uses(consumer, consumer_local) {
-                credit_chain(context, chain.path, chain.whole, &mut credit);
-            }
+            let mut credit = credit_sink(context, indexed, path, pending);
+            credit_named_consumer(context, indexed, &mut credit);
         }
 
         // `import * as Root from './barrel'` reads the namespace re-export as
         // `Root.<exported name>.<member>`.
-        for indexed in context.indexes.namespace_consumers_for(export.file_id) {
-            if !takes_part(context, indexed) {
-                continue;
-            }
-            let consumer = indexed.consumer;
-            let import = indexed.import;
+        let namespace_importers = context.indexes.namespace_consumers_for(export.file_id);
+        for indexed in namespace_importers
+            .iter()
+            .filter(|indexed| takes_part(context, indexed))
+        {
             let path = routes.consumer_path(export, indexed, reference_paths);
-            let mut credit = |target_module_idx: usize, kind: CreditKind| {
-                pending.push(PendingCredit {
-                    target_module_idx,
-                    namespace: context.namespace,
-                    kind,
-                    consumer_file_id: consumer.file_id,
-                    import_span: import.info.span,
-                    path,
-                });
-            };
-            for chain in chain_uses(consumer, import.info.local_name.as_str()) {
+            let mut credit = credit_sink(context, indexed, path, pending);
+            for chain in chain_uses(indexed.consumer, indexed.import.info.local_name.as_str()) {
                 let (head, rest) = chain.path.split_once('.').unwrap_or((chain.path, ""));
                 if head == export.exported_name {
                     credit_chain(context, rest, chain.whole, &mut credit);
                 }
             }
         }
+    }
+}
+
+/// A sink that records each credit of one consumer import as a
+/// `PendingCredit`.
+fn credit_sink<'a>(
+    context: &'a ConsumerCreditContext<'_, '_>,
+    indexed: &'a ConsumerImport<'_>,
+    path: Option<ReferencePathId>,
+    pending: &'a mut Vec<PendingCredit>,
+) -> impl FnMut(usize, CreditKind) + 'a {
+    move |target_module_idx, kind| {
+        pending.push(PendingCredit {
+            target_module_idx,
+            namespace: context.namespace,
+            kind,
+            consumer_file_id: indexed.consumer.file_id,
+            import_span: indexed.import.info.span,
+            path,
+        });
+    }
+}
+
+/// Credit the reads of a binding that imports the namespace re-export by
+/// name: each member access, each static chain, or every export when the
+/// code uses the binding as a whole object.
+fn credit_named_consumer(
+    context: &ConsumerCreditContext<'_, '_>,
+    indexed: &ConsumerImport<'_>,
+    credit: &mut impl FnMut(usize, CreditKind),
+) {
+    let consumer = indexed.consumer;
+    let local = indexed.import.info.local_name.as_str();
+    if consumer.whole_object_uses.iter().any(|name| name == local) {
+        credit_namespace_object(context.graph, context.target_module_idx, credit);
+        return;
+    }
+    for access in consumer
+        .member_accesses
+        .iter()
+        .filter(|access| access.object == local)
+    {
+        credit(
+            context.target_module_idx,
+            CreditKind::Member(access.member.clone()),
+        );
+    }
+    for chain in chain_uses(consumer, local) {
+        credit_chain(context, chain.path, chain.whole, credit);
     }
 }
 
