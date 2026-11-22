@@ -136,10 +136,16 @@ install_deps() {
     fi
 
     echo "    Installing dependencies (${pm})..." >&2
+    local status=0
     if [[ "${pm}" == "pnpm" ]]; then
-        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>&1)
+        (cd "${dir}" && pnpm install --no-frozen-lockfile --ignore-scripts >/dev/null 2>&1) || status=$?
     else
-        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>&1)
+        (cd "${dir}" && npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>&1) || status=$?
+    fi
+    # A partial tree would pass the node_modules check of the next run.
+    if [[ ${status} -ne 0 ]]; then
+        rm -rf "${dir}/node_modules"
+        return "${status}"
     fi
 }
 

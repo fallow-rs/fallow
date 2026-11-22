@@ -161,3 +161,16 @@ test("run-all.sh reuses a cached checkout at the pinned tag", () => {
     "fallow preact node_modules=yes",
   ]);
 });
+
+test("run-all.sh skips the project again after an install left a partial tree", () => {
+  const dir = makeTempDir("fallow-conformance-run-all-");
+  const failing = makeStubs(dir, { installFails: true });
+  makeCachedCheckout(join(dir, "clones"), "10.25.4");
+
+  runAll(dir, failing);
+  const second = runAll(dir, failing);
+
+  assert.equal(second.status, 1);
+  assert.match(second.stderr, /SKIP: dependency install failed/);
+  assert.doesNotMatch(readLog(failing.log), /^fallow /m);
+});
