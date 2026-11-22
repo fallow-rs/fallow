@@ -344,9 +344,17 @@ impl PackageJson {
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        let content = content.trim_start_matches('\u{FEFF}');
-        serde_json::from_str(content)
-            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+        Self::parse(&content).map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+    }
+
+    /// Parse package.json source text. A leading UTF-8 byte order mark is
+    /// ignored, as npm and Node.js do.
+    ///
+    /// # Errors
+    ///
+    /// Returns the JSON error when the text is not a valid manifest.
+    pub fn parse(source: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(source.trim_start_matches('\u{FEFF}'))
     }
 
     /// Get all dependency names (production + dev + peer + optional).
@@ -726,6 +734,13 @@ mod tests {
             serde_json::from_str(r#"{"workspaces": ["packages/*", "apps/*"]}"#).unwrap();
         let patterns = pkg.workspace_patterns();
         assert_eq!(patterns, vec!["packages/*", "apps/*"]);
+    }
+
+    #[test]
+    fn parse_ignores_a_leading_byte_order_mark() {
+        let pkg = PackageJson::parse("\u{FEFF}{\"dependencies\":{\"react\":\"^18.0.0\"}}")
+            .expect("a BOM-prefixed manifest is valid");
+        assert_eq!(pkg.all_dependency_names(), ["react"]);
     }
 
     #[test]

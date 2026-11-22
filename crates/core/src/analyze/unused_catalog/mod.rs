@@ -594,7 +594,7 @@ fn collect_catalog_consumers_from_package(
     let Ok(raw_source) = std::fs::read_to_string(pkg_path) else {
         return;
     };
-    let Ok(pkg) = serde_json::from_str::<PackageJson>(&raw_source) else {
+    let Ok(pkg) = PackageJson::parse(&raw_source) else {
         return;
     };
     let relative_path = pkg_path
@@ -1128,6 +1128,19 @@ mod tests {
         assert_eq!(
             found,
             [("tool".to_owned(), "packages/app/package.json".to_owned())]
+        );
+    }
+
+    #[test]
+    fn bom_prefixed_manifest_keeps_its_catalog_references() {
+        let found = unresolved_for(
+            r#"{"name":"root"}"#,
+            "packages:\n  - packages/*\ncatalog:\n  lodash: ^4.0.0\n",
+            "\u{FEFF}{\"name\":\"app\",\"devDependencies\":{\"vite\":\"catalog:\"}}",
+        );
+        assert_eq!(
+            found,
+            [("vite".to_owned(), "packages/app/package.json".to_owned())]
         );
     }
 

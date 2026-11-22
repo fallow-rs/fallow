@@ -284,7 +284,7 @@ fn collect_declared_packages(
         let Ok(raw_source) = std::fs::read_to_string(pkg_path) else {
             continue;
         };
-        let Ok(pkg) = serde_json::from_str::<PackageJson>(&raw_source) else {
+        let Ok(pkg) = PackageJson::parse(&raw_source) else {
             continue;
         };
         for deps in [
