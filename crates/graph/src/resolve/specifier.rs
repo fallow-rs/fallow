@@ -466,7 +466,7 @@ fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {
     path_alias_capture(pattern, specifier).is_some()
 }
 
-pub(super) fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> {
+fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> {
     match pattern.split_once('*') {
         Some((prefix, suffix)) if !prefix.is_empty() || !suffix.is_empty() => {
             if specifier.starts_with(prefix)
@@ -588,7 +588,7 @@ pub(super) fn select_path_alias<'p, 's>(
 
 /// The rank of a `paths` pattern: an exact pattern ranks first, then the
 /// length of the prefix before the wildcard, as in TypeScript.
-pub(super) fn path_alias_specificity(pattern: &str) -> usize {
+fn path_alias_specificity(pattern: &str) -> usize {
     pattern
         .split_once('*')
         .map_or(usize::MAX, |(prefix, _)| prefix.len())
