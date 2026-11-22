@@ -143,8 +143,15 @@ def main() -> int:
 
     entries: list[dict[str, Any]] = []
     seen_items: set[tuple[str, str, str]] = set()
+    skipped_non_public = 0
     for query, raw_items in search_groups:
         for raw in raw_items:
+            # An authenticated code search also returns private repositories
+            # of the caller. The report is a tracked public file, so a result
+            # without an explicit public visibility leaves no trace in it.
+            if not is_public_result(raw):
+                skipped_non_public += 1
+                continue
             item = normalize_search_item(query, raw)
             if item is None:
                 entries.append(
@@ -178,6 +185,7 @@ def main() -> int:
         "gh_version": gh_version,
         "limit_per_filename": args.limit,
         "filenames": list(CONFIG_FILENAMES),
+        "skipped_non_public": skipped_non_public,
         "entries": entries,
     }
 
@@ -264,6 +272,11 @@ def run_live_searches(limit: int, search_timeout: float) -> list[tuple[str, list
         )
         groups.append((query, json.loads(result.stdout)))
     return groups
+
+
+def is_public_result(raw: dict[str, Any]) -> bool:
+    repo = raw.get("repository")
+    return isinstance(repo, dict) and repo.get("isPrivate") is False
 
 
 def normalize_search_item(query: str, raw: dict[str, Any]) -> SearchItem | None:
@@ -769,6 +782,7 @@ def render_markdown(manifest: dict[str, Any], manifest_path: Path) -> str:
         "## Current Report",
         "",
         f"- Search results considered: {len(entries)}",
+        f"- Skipped results without public visibility: {manifest.get('skipped_non_public', 0)}",
         f"- Fetched configs: {len(fetched)}",
         f"- Fetch failures: {len(fetch_failures)}",
         f"- Parse failures: {len(parse_failures)}",

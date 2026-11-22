@@ -7,10 +7,21 @@
           "path": ".fallowrc.jsonc",
           "repository": {
             "nameWithOwner": "alpha/app",
-            "url": "https://github.com/alpha/app"
+            "url": "https://github.com/alpha/app",
+            "isPrivate": false
           },
           "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "url": "https://github.com/alpha/app/blob/1111111111111111111111111111111111111111/.fallowrc.jsonc"
+        },
+        {
+          "path": ".fallowrc.jsonc",
+          "repository": {
+            "isPrivate": true,
+            "nameWithOwner": "secret/internal",
+            "url": "https://github.com/secret/internal"
+          },
+          "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "url": "https://github.com/secret/internal/blob/5555555555555555555555555555555555555555/.fallowrc.jsonc"
         }
       ]
     },
@@ -21,10 +32,20 @@
           "path": "config/fallow.toml",
           "repository": {
             "nameWithOwner": "beta/tool",
-            "url": "https://github.com/beta/tool"
+            "url": "https://github.com/beta/tool",
+            "isPrivate": false
           },
           "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "url": "https://github.com/beta/tool/blob/2222222222222222222222222222222222222222/config/fallow.toml"
+        },
+        {
+          "path": "fallow.toml",
+          "repository": {
+            "nameWithOwner": "unknown/visibility",
+            "url": "https://github.com/unknown/visibility"
+          },
+          "sha": "ffffffffffffffffffffffffffffffffffffffff",
+          "url": "https://github.com/unknown/visibility/blob/6666666666666666666666666666666666666666/fallow.toml"
         }
       ]
     },
@@ -35,7 +56,8 @@
           "path": ".fallowrc.json",
           "repository": {
             "nameWithOwner": "bad/invalid",
-            "url": "https://github.com/bad/invalid"
+            "url": "https://github.com/bad/invalid",
+            "isPrivate": false
           },
           "sha": "cccccccccccccccccccccccccccccccccccccccc",
           "url": "https://github.com/bad/invalid/blob/3333333333333333333333333333333333333333/.fallowrc.json"
@@ -44,7 +66,8 @@
           "path": ".fallowrc.json",
           "repository": {
             "nameWithOwner": "missing/cache",
-            "url": "https://github.com/missing/cache"
+            "url": "https://github.com/missing/cache",
+            "isPrivate": false
           },
           "sha": "dddddddddddddddddddddddddddddddddddddddd",
           "url": "https://github.com/missing/cache/blob/4444444444444444444444444444444444444444/.fallowrc.json"
