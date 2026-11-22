@@ -1531,3 +1531,49 @@ fn re_export_chain_violations_name_the_barrel_in_via_path() {
 
 #[path = "boundary_public_files.rs"]
 mod public_files;
+
+/// A barrel hop is judged by its own import kind. The consumer of
+/// `src/kit/index.ts` imports `Shape` as a type, but the barrel forwards it
+/// with a value re-export that the `kit` zone does not allow. The hop gets its
+/// own finding, and the consumer does not get a second one.
+#[test]
+fn barrel_hop_uses_its_own_import_kind() {
+    let root = fixture_path("boundary-reexport-hop-kind");
+    let boundaries = BoundaryConfig {
+        zones: vec![
+            zone("ui", &["src/ui/**"]),
+            zone("kit", &["src/kit/**"]),
+            zone("core", &["src/core/**"]),
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "ui".to_string(),
+                allow: vec!["kit".to_string()],
+                allow_type_only: vec![],
+            },
+            BoundaryRule {
+                from: "kit".to_string(),
+                allow: vec![],
+                allow_type_only: vec!["core".to_string()],
+            },
+        ],
+        ..BoundaryConfig::default()
+    };
+    let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let pairs: std::collections::BTreeSet<(String, String)> = results
+        .boundary_violations
+        .iter()
+        .map(|v| {
+            (
+                relative_to(&v.violation.from_path, &root),
+                relative_to(&v.violation.to_path, &root),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        pairs,
+        pair_set(&[("src/kit/index.ts", "src/core/shape.ts")])
+    );
+}
