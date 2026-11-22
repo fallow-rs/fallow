@@ -89,7 +89,7 @@ mod tests {
         };
         assert_eq!(
             format_namespace_escape(&escape, root),
-            r":3 Lib escapes as a value; 2 exports of src/%5Bid%5D/\<lib\>.ts are not checked"
+            r":3 namespace Lib is used as a whole value; 2 exports of src/%5Bid%5D/\<lib\>.ts are not checked"
         );
     }
 }

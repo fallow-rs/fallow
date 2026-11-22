@@ -303,6 +303,24 @@ mod tests {
     }
 
     #[test]
+    fn namespace_escape_selection_matches_typed_and_fallback_paths() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["namespace-escapes".to_string()]),
+            ..AnalyzeParams::default()
+        };
+        let options =
+            dead_code_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
+        assert!(options.filters.namespace_escapes);
+        assert!(!options.filters.constant_parameters);
+        let fallback_params = AnalyzeParams {
+            group_by: Some("directory".to_string()),
+            ..params
+        };
+        let args = build_analyze_args(&fallback_params).expect("args");
+        assert!(args.iter().any(|arg| arg == "--namespace-escapes"));
+    }
+
+    #[test]
     fn absent_component_prop_selection_matches_typed_and_fallback_paths() {
         let params = AnalyzeParams {
             issue_types: Some(vec!["absent-component-props".to_string()]),

@@ -383,11 +383,10 @@ impl<'a> CompactLineBuilder<'a> {
         for finding in &self.results.namespace_escapes {
             let escape = &finding.escape;
             self.lines.push(format!(
-                "namespace-escape:{}:{}:{}:{}",
+                "namespace-escape:{}:{}:{}",
                 self.rel(&escape.path),
                 escape.line,
-                escape.local_name,
-                escape.hidden_exports
+                escape.local_name
             ));
         }
         for import in &self.results.unresolved_imports {
@@ -1818,6 +1817,30 @@ mod tests {
             vec![
                 "css-token-drift:src/app.css:6:tailwind-arbitrary-value:severity=warn,value=--color-brand rgb(240 90 41)"
             ]
+        );
+    }
+
+    #[test]
+    fn namespace_escape_compact_line_has_four_fields() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.namespace_escapes.push(
+            fallow_types::output_dead_code::NamespaceEscapeFinding::with_actions(
+                fallow_types::results::NamespaceEscape {
+                    path: root.join("src/app.ts"),
+                    line: 3,
+                    col: 7,
+                    local_name: "Formats".to_string(),
+                    module: root.join("src/formats.ts"),
+                    hidden_exports: 2,
+                    reason: fallow_types::results::NamespaceEscapeReason::WholeObjectUse,
+                },
+            ),
+        );
+
+        assert_eq!(
+            build_compact_lines(&results, &root),
+            vec!["namespace-escape:src/app.ts:3:Formats".to_owned()]
         );
     }
 }

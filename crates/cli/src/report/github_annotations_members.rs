@@ -1,6 +1,7 @@
 //! GitHub annotations for unused members and namespace escapes.
 
 use super::*;
+use fallow_types::results::NamespaceEscapeReason;
 
 pub(super) fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
@@ -86,11 +87,72 @@ pub(super) fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Namespace '{}' is used as a whole value, so {} exports of {} are not checked.\n\nRead the members by name, or suppress the import with // fallow-ignore-next-line namespace-escape.",
-                s(it, "local_name"),
-                u(it, "hidden_exports"),
-                s(it, "module"),
+                "{}.\n\nRead the members by name, or suppress the import with // fallow-ignore-next-line namespace-escape.",
+                namespace_escape_message(it)
             )
         },
     );
+}
+
+/// The text of `NamespaceEscape::message` for a JSON finding. The jq filter
+/// `annotations-check.jq` builds the same text.
+fn namespace_escape_message(it: &Value) -> String {
+    let reason = it
+        .get("reason")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<NamespaceEscapeReason>(value).ok())
+        .unwrap_or(NamespaceEscapeReason::WholeObjectUse);
+    let count = u(it, "hidden_exports");
+    let (noun, verb) = if count == 1 {
+        ("export", "is")
+    } else {
+        ("exports", "are")
+    };
+    format!(
+        "namespace {} {}; {count} {noun} of {} {verb} not checked",
+        s(it, "local_name"),
+        reason.description(),
+        s(it, "module"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message_for(reason: &str, hidden_exports: u64) -> String {
+        let env = serde_json::json!({
+            "namespace_escapes": [{
+                "path": "src/app.ts",
+                "line": 3,
+                "col": 7,
+                "local_name": "Formats",
+                "module": "src/formats.ts",
+                "hidden_exports": hidden_exports,
+                "reason": reason,
+            }]
+        });
+        let mut out = Vec::new();
+        collect_check_members(&env, &mut out);
+        out.pop().expect("one annotation").message
+    }
+
+    #[test]
+    fn namespace_escape_annotation_uses_singular_for_one_export() {
+        assert!(
+            message_for("whole-object-use", 1).starts_with(
+                "namespace Formats is used as a whole value; 1 export of src/formats.ts is not checked.\n\n"
+            )
+        );
+    }
+
+    #[test]
+    fn namespace_escape_annotation_names_the_reason() {
+        assert!(message_for("re-exported-binding", 2).starts_with(
+            "namespace Formats is re-exported as a whole object; 2 exports of src/formats.ts are not checked."
+        ));
+        assert!(message_for("no-member-read", 2).starts_with(
+            "namespace Formats has no member read by name; 2 exports of src/formats.ts are not checked."
+        ));
+    }
 }

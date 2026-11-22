@@ -1,5 +1,6 @@
 mod absent_props;
 mod constant_parameters;
+mod namespace_escapes;
 mod quick_fix;
 mod suppress;
 #[cfg(test)]
@@ -13,6 +14,7 @@ use ls_types::*;
 
 pub use absent_props::*;
 pub use constant_parameters::*;
+pub use namespace_escapes::*;
 pub use quick_fix::*;
 pub use suppress::*;
 
@@ -109,6 +111,11 @@ pub fn build_code_action_response(input: CodeActionInput<'_>) -> Option<CodeActi
         actions.extend(build_suppress_constant_parameter_actions(
             results, file_path, uri, range, source,
         ));
+        if let Some(root) = root {
+            actions.extend(build_suppress_namespace_escape_actions(
+                results, root, file_path, uri, range, source,
+            ));
+        }
     }
 
     actions.extend(build_suppress_security_actions(

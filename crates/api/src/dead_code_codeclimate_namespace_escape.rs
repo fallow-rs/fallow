@@ -27,7 +27,7 @@ pub(super) fn push_namespace_escape_issues(
                 check_name: "fallow/namespace-escape",
                 description: &escape.message(&module),
                 severity: level,
-                category: "Clarity",
+                category: "Bug Risk",
                 path: &path,
                 begin_line: Some(escape.line),
                 fingerprint: &fp,

@@ -165,3 +165,149 @@ fn hidden_count_skips_exports_whose_rule_is_off() {
         .expect("Lib escape");
     assert_eq!(lib.2, 1, "{lib:?}");
 }
+
+/// Write a small project with `src/index.ts` as its entry and return its root.
+fn write_project(dir: &tempfile::TempDir, files: &[(&str, &str)]) -> std::path::PathBuf {
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"probe","private":true,"type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    for (path, source) in files {
+        std::fs::write(root.join(path), source).expect("write source");
+    }
+    root
+}
+
+const LIB: &str = "export const libUsed = 1;\nexport const libUnused = (): number => 2;\n";
+
+/// `export { Ns }` in an entry file is public API. Without
+/// `includeEntryExports` that credit stands with or without the escape, so
+/// the binding hides nothing. With the option on, the binding hides both
+/// exports of `lib.ts`.
+#[test]
+fn entry_re_export_is_reported_only_when_entry_exports_are_checked() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = write_project(
+        &dir,
+        &[
+            ("src/lib.ts", LIB),
+            (
+                "src/index.ts",
+                "import * as Ns from \"./lib\";\n\nexport { Ns };\n",
+            ),
+        ],
+    );
+    assert!(analyze(&root, true).namespace_escapes.is_empty());
+
+    let mut config = create_config(root.clone());
+    config.rules.namespace_escapes = Severity::Warn;
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert_eq!(
+        escapes(&root, &results),
+        vec![(
+            "src/index.ts".to_string(),
+            "Ns".to_string(),
+            2,
+            "re-exported-binding"
+        )]
+    );
+}
+
+/// A reference from an unreachable file still credits an export of a
+/// reachable module, so the escape in that file is reported.
+#[test]
+fn escape_in_an_unreachable_file_is_reported() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = write_project(
+        &dir,
+        &[
+            ("src/lib.ts", LIB),
+            (
+                "src/index.ts",
+                "import { libUsed } from \"./lib\";\n\nconsole.log(libUsed);\n",
+            ),
+            (
+                "src/dead.ts",
+                "import * as N from \"./lib\";\n\nexport const keys = Object.keys(N);\n",
+            ),
+        ],
+    );
+    assert_eq!(
+        escapes(&root, &analyze(&root, true)),
+        vec![(
+            "src/dead.ts".to_string(),
+            "N".to_string(),
+            1,
+            "whole-object-use"
+        )]
+    );
+}
+
+/// Each binding counts only the hidden exports that its own credit reaches.
+/// `B` escapes a barrel that re-exports only `x`, so it does not count `y`.
+#[test]
+fn each_escape_counts_only_the_exports_that_it_credits() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = write_project(
+        &dir,
+        &[
+            ("src/a.ts", "export const x = 1;\nexport const y = 2;\n"),
+            ("src/barrel.ts", "export { x } from \"./a\";\n"),
+            (
+                "src/index.ts",
+                "import * as B from \"./barrel\";\nimport * as A from \"./a\";\n\nconsole.log(Object.keys(B), Object.keys(A));\n",
+            ),
+        ],
+    );
+    assert_eq!(
+        escapes(&root, &analyze(&root, true)),
+        vec![
+            (
+                "src/index.ts".to_string(),
+                "A".to_string(),
+                2,
+                "whole-object-use"
+            ),
+            (
+                "src/index.ts".to_string(),
+                "B".to_string(),
+                2,
+                "whole-object-use"
+            ),
+        ]
+    );
+}
+
+/// The escape of a barrel also hides the exports behind its `export * as`,
+/// which the barrel hands on as a whole namespace object.
+#[test]
+fn escape_counts_the_exports_behind_a_namespace_re_export() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = write_project(
+        &dir,
+        &[
+            (
+                "src/inner.ts",
+                "export const i1 = 1;\nexport const i2 = 2;\n",
+            ),
+            ("src/barrel.ts", "export * as Inner from \"./inner\";\n"),
+            (
+                "src/index.ts",
+                "import * as Root from \"./barrel\";\n\nconsole.log(Object.keys(Root));\n",
+            ),
+        ],
+    );
+    assert_eq!(
+        escapes(&root, &analyze(&root, true)),
+        vec![(
+            "src/index.ts".to_string(),
+            "Root".to_string(),
+            3,
+            "whole-object-use"
+        )]
+    );
+}

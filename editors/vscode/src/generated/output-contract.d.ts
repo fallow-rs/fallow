@@ -5252,7 +5252,9 @@ path: string
  */
 line: number
 /**
- * 0-based byte column of that import.
+ * 0-based byte column of the import specifier that declares the
+ * binding: the `*` of `import * as Ns`, or the specifier of a named
+ * import.
  */
 col: number
 /**

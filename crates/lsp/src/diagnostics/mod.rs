@@ -1,7 +1,7 @@
 pub mod absent_props;
 mod component_health;
 pub mod constant_parameters;
-mod namespace_escapes;
+pub mod namespace_escapes;
 mod quality;
 pub mod security;
 mod structural;

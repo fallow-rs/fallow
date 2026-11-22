@@ -416,7 +416,8 @@ fn narrow_namespace_references(
     ctx: &mut AttachContext<'_>,
 ) {
     let source_mod = ctx.module_by_id.get(&site.from_file);
-    let mut accessed_members = extract_accessed_members(source_mod, sym_local_name);
+    let read_members = extract_accessed_members(source_mod, sym_local_name);
+    let mut accessed_members = read_members.clone();
     if !accessed_members.is_empty() && module.forwards_default_as_module_object() {
         accessed_members.push("default".to_string());
     }
@@ -470,7 +471,7 @@ fn narrow_namespace_references(
     if observes_whole_module && (is_whole_object || is_re_exported || !is_alias_source()) {
         ctx.observe_whole_namespace_object(module.file_id);
     }
-    if observes_whole_module {
+    if observes_whole_module && (namespaces.0 || namespaces.1) {
         record_namespace_escape(
             module.file_id,
             site,
@@ -479,7 +480,7 @@ fn narrow_namespace_references(
                 is_whole_object,
                 is_re_exported,
             },
-            &accessed_members,
+            &read_members,
             ctx,
         );
     }
@@ -529,22 +530,19 @@ struct EscapeShape {
 
 /// Record the namespace binding of `site` as an escape of `target`.
 ///
-/// `export { Ns }` in an entry file is the public API of the package: the
-/// entry's own export carries the check, so that binding is not recorded.
+/// `read_members` holds the members that the code reads by name. The full
+/// credit does not hide them.
 fn record_namespace_escape(
     target: FileId,
     site: ReferenceSite,
     local_name: &str,
     shape: EscapeShape,
-    accessed_members: &[String],
+    read_members: &[String],
     ctx: &mut AttachContext<'_>,
 ) {
     let reason = if shape.is_whole_object {
         NamespaceEscapeReason::WholeObjectUse
     } else if shape.is_re_exported {
-        if ctx.entry_point_ids.contains(&site.from_file) {
-            return;
-        }
         NamespaceEscapeReason::ReExportedBinding
     } else {
         NamespaceEscapeReason::NoMemberRead
@@ -555,7 +553,7 @@ fn record_namespace_escape(
         local_name: local_name.to_string(),
         target,
         reason,
-        read_members: accessed_members.to_vec(),
+        read_members: read_members.to_vec(),
     });
 }
 

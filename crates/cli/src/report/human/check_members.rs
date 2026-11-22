@@ -87,36 +87,75 @@ pub(super) fn build_unused_member_sections(
             format_unused_member(&m.member, &m.reachability_caveats)
         },
     });
-    build_namespace_escapes_section(lines, results, root, rules);
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.namespace_escapes,
+        title: "Namespace escapes",
+        level: severity_to_level(rules.namespace_escapes),
+        root,
+        max_files: max_grouped_files,
+        get_path: |e| e.escape.path.as_path(),
+        format_detail: &|e: &NamespaceEscapeFinding| {
+            let escape = &e.escape;
+            let module = format_display_path(&escape.module, root);
+            format!(
+                "{} {}",
+                format!(":{}", escape.line).dimmed(),
+                escape.message(&module)
+            )
+        },
+    });
 }
 
-fn build_namespace_escapes_section(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-) {
-    let items = &results.namespace_escapes;
-    if items.is_empty() {
-        return;
+#[cfg(test)]
+mod tests {
+    use super::super::super::plain;
+    use super::*;
+    use fallow_types::results::{NamespaceEscape, NamespaceEscapeReason};
+    use std::path::PathBuf;
+
+    fn escape(root: &Path, file: &str, line: u32, hidden_exports: u32) -> NamespaceEscapeFinding {
+        NamespaceEscapeFinding::with_actions(NamespaceEscape {
+            path: root.join(file),
+            line,
+            col: 7,
+            local_name: "Formats".to_string(),
+            module: root.join("src/formats.ts"),
+            hidden_exports,
+            reason: NamespaceEscapeReason::WholeObjectUse,
+        })
     }
-    let title = "Namespace escapes";
-    let level = severity_to_level(rules.namespace_escapes);
-    lines.push(build_section_header(title, items.len(), level));
-    for finding in items {
-        let escape = &finding.escape;
-        let location = format!(
-            "{}:{}",
-            format_display_path(&escape.path, root),
-            escape.line
+
+    #[test]
+    fn namespace_escapes_group_by_file_under_the_file_cap() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .namespace_escapes
+            .push(escape(&root, "src/a.ts", 3, 1));
+        results
+            .namespace_escapes
+            .push(escape(&root, "src/a.ts", 9, 2));
+        results
+            .namespace_escapes
+            .push(escape(&root, "src/b.ts", 4, 2));
+        let rules = RulesConfig::default();
+
+        let text = plain(&build_human_lines(&results, &root, &rules, Some(1)));
+
+        assert!(text.contains("src/a.ts"), "{text}");
+        assert!(
+            text.contains(
+                ":3 namespace Formats is used as a whole value; 1 export of src/formats.ts is not checked"
+            ),
+            "{text}"
         );
-        let module = format_display_path(&escape.module, root);
-        lines.push(format!(
-            "  {} {}",
-            format_path(&location),
-            escape.message(&module)
-        ));
+        assert!(
+            text.contains(
+                ":9 namespace Formats is used as a whole value; 2 exports of src/formats.ts are not checked"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains(":4 namespace Formats"), "{text}");
     }
-    lines.push(String::new());
-    push_section_footer_with_count(lines, title, items.len());
 }
