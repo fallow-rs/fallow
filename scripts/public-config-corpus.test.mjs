@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -53,4 +53,32 @@ test("the corpus script refuses to write its report over the maintained runbook"
   assert.match(result.stderr, /maintained runbook/);
   assert.equal(readFileSync(RUNBOOK, "utf8"), runbook);
   assert.equal(existsSync(join(cacheDir, "manifest.json")), false);
+});
+
+const assertRefused = (extraArgs, flag) => {
+  const runbook = readFileSync(RUNBOOK, "utf8");
+  const { result } = runCorpus(extraArgs);
+
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, new RegExp(`${flag} .* maintained runbook`));
+  assert.equal(readFileSync(RUNBOOK, "utf8"), runbook);
+};
+
+test("the corpus script refuses a hard link to the runbook as --output", (context) => {
+  const link = join(makeTempDir("fallow-public-config-corpus-link-"), "report.md");
+  try {
+    linkSync(RUNBOOK, link);
+  } catch (error) {
+    // The temp folder can be on another file system than the checkout.
+    if (error.code === "EXDEV") return context.skip("temp folder is on another file system");
+    throw error;
+  }
+
+  assertRefused(["--output", link], "--output");
+});
+
+test("the corpus script refuses the runbook as --manifest", () => {
+  const out = join(makeTempDir("fallow-public-config-corpus-out-"), "report.md");
+
+  assertRefused(["--output", out, "--manifest", "docs/public-config-corpus.md"], "--manifest");
 });

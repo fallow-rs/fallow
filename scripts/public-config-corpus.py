@@ -124,15 +124,16 @@ def main() -> int:
         parser.error("--search-timeout must be > 0")
 
     output_path = args.output or args.cache_dir / "report.md"
-    if str(output_path) != "-" and output_path.resolve() == RUNBOOK_PATH:
-        print(
-            f"error: --output {output_path} is the maintained runbook; write the report elsewhere",
-            file=sys.stderr,
-        )
-        return 2
+    manifest_path = args.manifest or args.cache_dir / "manifest.json"
+    for flag, path in (("--output", output_path), ("--manifest", manifest_path)):
+        if str(path) != "-" and is_runbook(path):
+            print(
+                f"error: {flag} {path} is the maintained runbook; write elsewhere",
+                file=sys.stderr,
+            )
+            return 2
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = args.manifest or args.cache_dir / "manifest.json"
     offline = args.offline or args.from_search_fixture is not None
     fetched_at = args.fetched_at or now_utc()
     gh_version = args.gh_version or detect_gh_version(offline)
@@ -214,6 +215,13 @@ def main() -> int:
         output_path.write_text(report, encoding="utf-8")
 
     return 0
+
+
+def is_runbook(path: Path) -> bool:
+    """True when `path` names the runbook, also through a symlink, a hard link, or other case."""
+    if path.exists() and RUNBOOK_PATH.exists():
+        return path.samefile(RUNBOOK_PATH)
+    return path.resolve() == RUNBOOK_PATH
 
 
 def now_utc() -> str:
