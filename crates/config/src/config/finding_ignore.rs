@@ -187,6 +187,13 @@ impl FindingIgnoreMatcher {
     /// Empty when nothing was configured or when the matcher was never
     /// consulted, because a run without candidate paths says nothing about
     /// whether a pattern is a typo.
+    ///
+    /// A pattern that selects the matcher mode is never listed, because the
+    /// diagnostic advises its removal and that removal changes which paths
+    /// are hidden. These patterns are the only positive pattern beside
+    /// negated patterns (without it, every path outside the exceptions is
+    /// hidden) and the only negated pattern without a positive pattern
+    /// (without it, no path is hidden).
     #[must_use]
     pub fn unmatched_patterns(&self) -> Vec<&str> {
         let Some(usage) = self.usage.as_deref() else {
@@ -195,12 +202,22 @@ impl FindingIgnoreMatcher {
         if !usage.consulted.load(Ordering::Relaxed) {
             return Vec::new();
         }
+        let positives = usage.hidden_origins.len();
+        let negatives = usage.reported_origins.len();
+        let selects_mode = |pattern: &str| {
+            if pattern.starts_with('!') {
+                negatives == 1 && positives == 0
+            } else {
+                positives == 1 && negatives > 0
+            }
+        };
         usage
             .patterns
             .iter()
             .zip(&usage.matched)
             .filter(|(_, matched)| !matched.load(Ordering::Relaxed))
             .map(|(pattern, _)| pattern.as_str())
+            .filter(|pattern| !selects_mode(pattern))
             .collect()
     }
 }
@@ -341,6 +358,36 @@ mod tests {
 
         assert!(matcher.is_ignored("src/private/app.ts"));
         assert!(!matcher.is_ignored("src/public/app.ts"));
+        assert_eq!(matcher.unmatched_patterns(), vec!["!src/publik/**"]);
+    }
+
+    #[test]
+    fn sole_positive_pattern_beside_exceptions_is_not_reported() {
+        let matcher = matcher(&["legacy/**", "!**/*.test.ts"]);
+
+        assert!(!matcher.is_ignored("src/app.test.ts"));
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "removing the only positive pattern would hide every path outside the exceptions"
+        );
+    }
+
+    #[test]
+    fn sole_exception_without_positive_patterns_is_not_reported() {
+        let matcher = matcher(&["!src/keep.ts"]);
+
+        assert!(matcher.is_ignored("src/app.ts"));
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "removing the only exception would stop hiding every path"
+        );
+    }
+
+    #[test]
+    fn one_of_several_exceptions_without_positive_patterns_is_reported() {
+        let matcher = matcher(&["!src/keep.ts", "!src/publik/**"]);
+
+        assert!(!matcher.is_ignored("src/keep.ts"));
         assert_eq!(matcher.unmatched_patterns(), vec!["!src/publik/**"]);
     }
 
