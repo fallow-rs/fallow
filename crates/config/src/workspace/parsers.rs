@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashSet;
+
 use super::deno_json::{dir_has_package_manifest, load_member_package_manifest};
 use super::diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, is_ignored_workspace_dir, is_skip_listed_dir,
@@ -464,7 +466,15 @@ fn expand_recursive_workspace_pattern(
     if base_dir.is_dir() {
         collect_matched_workspace_dir(&base_dir, &mut input);
     }
-    walk_workspace_dirs(&base_dir, &mut input);
+    if let Ok(canonical_base) = dunce::canonicalize(&base_dir)
+        && canonical_base.starts_with(canonical_root)
+    {
+        let mut walk = WorkspaceDirWalk {
+            canonical_base: &canonical_base,
+            visited: FxHashSet::from_iter([canonical_base.clone()]),
+        };
+        walk_workspace_dirs(&base_dir, &canonical_base, &mut walk, &mut input);
+    }
     results
 }
 
@@ -477,13 +487,33 @@ struct WorkspaceDirWalkInput<'a> {
     results: &'a mut Vec<(PathBuf, PathBuf)>,
 }
 
+/// The folders that the recursive workspace walk has entered, by real path.
+struct WorkspaceDirWalk<'a> {
+    canonical_base: &'a Path,
+    visited: FxHashSet<PathBuf>,
+}
+
 /// Recursively walk directories, skipping `node_modules` and `.git`, collecting
 /// directories that match the glob pattern and contain a package manifest.
-fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
+///
+/// `canonical_dir` is the real path of `dir`. The walk enters each real
+/// folder once. It does not enter a link whose target is outside the project
+/// root, inside the walked base folder (the walk reaches that target through
+/// its real path), or the base folder or a folder above it, so a link loop or
+/// a link out of the project does not take the walk with it.
+fn walk_workspace_dirs(
+    dir: &Path,
+    canonical_dir: &Path,
+    walk: &mut WorkspaceDirWalk<'_>,
+    input: &mut WorkspaceDirWalkInput<'_>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
-    for entry in entries.flatten() {
+    // Sorted entries keep the first path to each real folder stable.
+    let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
         let path = entry.path();
         if !path.is_dir() {
             continue;
@@ -493,7 +523,24 @@ fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
             continue;
         }
         collect_matched_workspace_dir(&path, input);
-        walk_workspace_dirs(&path, input);
+        let is_link = entry.file_type().is_ok_and(|kind| kind.is_symlink());
+        let canonical_child = if is_link {
+            match dunce::canonicalize(&path) {
+                Ok(target)
+                    if target.starts_with(input.canonical_root)
+                        && !target.starts_with(walk.canonical_base)
+                        && !walk.canonical_base.starts_with(&target) =>
+                {
+                    target
+                }
+                _ => continue,
+            }
+        } else {
+            canonical_dir.join(&name)
+        };
+        if walk.visited.insert(canonical_child.clone()) {
+            walk_workspace_dirs(&path, &canonical_child, walk, input);
+        }
     }
 }
 
@@ -1401,6 +1448,39 @@ mod tests {
             expanded_members(root, "packages/**")
         );
         assert_eq!(expanded_members(root, "./packages/**").len(), 3);
+    }
+
+    /// A link to the base folder or a folder above it, a pair of links
+    /// between sibling folders, or a link to a folder outside the project
+    /// does not take the recursive walk into a loop, into an unmatched folder
+    /// such as `apps/`, or out of the project.
+    #[cfg(unix)]
+    #[test]
+    fn expand_recursive_glob_does_not_descend_through_an_ancestor_or_external_link() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = base.path();
+        write_member(root, "packages/a");
+        write_member(outside.path(), "external");
+        std::os::unix::fs::symlink(root.join("packages"), root.join("packages/a/loop")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("packages/outside")).unwrap();
+        write_member(root, "apps/web");
+        std::os::unix::fs::symlink(root, root.join("packages/a/up")).unwrap();
+        write_member(root, "packages/b");
+        std::os::unix::fs::symlink(root.join("packages/b"), root.join("packages/b-link")).unwrap();
+        std::os::unix::fs::symlink(root.join("packages/b"), root.join("packages/a/to-b")).unwrap();
+        std::os::unix::fs::symlink(root.join("packages/a"), root.join("packages/b/to-a")).unwrap();
+
+        assert_eq!(
+            expanded_members(root, "packages/**"),
+            [
+                "packages/a",
+                "packages/a/to-b",
+                "packages/b",
+                "packages/b-link",
+                "packages/b/to-a"
+            ]
+        );
     }
 
     #[test]
