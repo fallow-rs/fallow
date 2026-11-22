@@ -84,8 +84,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docs/public-config-corpus.md"),
-        help="Markdown report path, use '-' for stdout",
+        help="Markdown report path, defaults to <cache-dir>/report.md, use '-' for stdout",
     )
     parser.add_argument(
         "--manifest",
@@ -124,6 +123,7 @@ def main() -> int:
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.manifest or args.cache_dir / "manifest.json"
+    output_path = args.output or args.cache_dir / "report.md"
     offline = args.offline or args.from_search_fixture is not None
     fetched_at = args.fetched_at or now_utc()
     gh_version = args.gh_version or detect_gh_version(offline)
@@ -179,6 +179,11 @@ def main() -> int:
                 )
             )
 
+    if skipped_non_public:
+        print(
+            f"note: skipped {skipped_non_public} search result(s) without public visibility",
+            file=sys.stderr,
+        )
     entries.sort(key=manifest_sort_key)
     manifest = {
         "generated_at": fetched_at,
@@ -193,11 +198,11 @@ def main() -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     report = render_markdown(manifest, manifest_path)
-    if str(args.output) == "-":
+    if str(output_path) == "-":
         sys.stdout.write(report)
     else:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(report, encoding="utf-8")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
 
     return 0
 
