@@ -24,7 +24,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_config::Severity;
 
 use crate::audit_complexity::ChangedPaths;
-use crate::audit_keys::DeadCodeAuditLedger;
+use crate::audit_keys::{DeadCodeAuditLedger, unescape_key_part};
 
 /// Stands for the path in a key, so two keys that differ only in the path
 /// compare as equal. A key part never holds this character.
@@ -59,8 +59,8 @@ const MOVABLE_RULES: &[&str] = &[
 struct MovableKey<'a> {
     /// The key with [`PATH_SLOT`] in place of the path.
     pathless: String,
-    /// The path part.
-    path: &'a str,
+    /// The path part, unescaped, as the changed paths hold it.
+    path: String,
     /// The symbol part, as the key holds it.
     symbol: &'a str,
 }
@@ -77,10 +77,10 @@ fn movable_key<'a>(key: &'a str, changed: &FxHashSet<String>) -> Option<MovableK
         return None;
     }
     let parts: Vec<&str> = parts.collect();
-    let mut paths = parts
-        .iter()
-        .enumerate()
-        .filter(|(_, part)| changed.contains(**part));
+    let mut paths = parts.iter().enumerate().filter_map(|(index, part)| {
+        let path = unescape_key_part(part);
+        changed.contains(&path).then_some((index, path))
+    });
     let (index, path) = paths.next()?;
     if paths.next().is_some() {
         return None;
@@ -101,11 +101,6 @@ fn movable_key<'a>(key: &'a str, changed: &FxHashSet<String>) -> Option<MovableK
         path,
         symbol,
     })
-}
-
-/// A key part as the finding holds it: `%3A` is `:` and `%25` is `%`.
-fn unescape_key_part(part: &str) -> String {
-    part.replace("%3A", ":").replace("%25", "%")
 }
 
 /// A lower rank is inherited first, so the finding that gates stays
@@ -172,7 +167,7 @@ pub fn moved_dead_code_keys(
         .iter()
         .map(|(_, _, key)| key.pathless.as_str())
         .collect();
-    let mut left_behind: FxHashMap<String, Vec<&str>> = FxHashMap::default();
+    let mut left_behind: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for key in input.base {
         if ledger.keys().contains(key)
             || input
@@ -200,7 +195,7 @@ pub fn moved_dead_code_keys(
         let Some(position) = paths.iter().position(|base_path| *base_path != head.path) else {
             continue;
         };
-        if (input.added_line_names)(head.path, &unescape_key_part(head.symbol)) {
+        if (input.added_line_names)(&head.path, &unescape_key_part(head.symbol)) {
             paths.remove(position);
             moved.insert(key.to_string());
         }
@@ -286,7 +281,7 @@ mod tests {
         let paths = changed(&["src/a.ts", "src/b.ts", "package.json"]).changed;
         let key = movable_key("unused-export:src/a.ts:helper", &paths).expect("a movable key");
         assert_eq!(key.pathless, "unused-export:\0:helper");
-        assert_eq!((key.path, key.symbol), ("src/a.ts", "helper"));
+        assert_eq!((key.path.as_str(), key.symbol), ("src/a.ts", "helper"));
 
         let member =
             movable_key("unused-class-member:src/a.ts:Box:size:~1", &paths).expect("a movable key");
@@ -301,6 +296,14 @@ mod tests {
         assert!(movable_key("unused-dependency:package.json:lodash", &paths).is_none());
         assert!(movable_key("boundary-violation:src/a.ts:src/c.ts", &paths).is_none());
         assert!(movable_key("stale-suppression:src/a.ts:comment:*", &paths).is_none());
+    }
+
+    #[test]
+    fn movable_key_matches_a_changed_path_that_the_key_escapes() {
+        let paths = changed(&["src/100%.ts"]).changed;
+        let key = movable_key("unused-export:src/100%25.ts:helper", &paths).expect("a movable key");
+        assert_eq!(key.path, "src/100%.ts");
+        assert_eq!(key.symbol, "helper");
     }
 
     #[test]

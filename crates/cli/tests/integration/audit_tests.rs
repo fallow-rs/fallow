@@ -9428,3 +9428,54 @@ fn audit_css_duplicate_block_survives_rename_of_a_group_file() {
     );
     assert_eq!(json["attribution"]["styling_introduced"], 0);
 }
+
+/// With different production modes for dead code and health, the base pass
+/// does not share its parse with health. The brief still needs the base
+/// graph, or every export of a changed public file reads as newly added.
+#[test]
+fn audit_brief_with_split_production_modes_reports_only_new_public_exports() {
+    let tmp = TempDir::new().expect("temp dir should be created");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "brief-split-modes", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "export const existing = 1;\nexport const kept = 2;\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    fs::write(
+        root.join("src/index.ts"),
+        "export const existing = 1;\nexport const kept = 2;\nexport const added = 3;\n",
+    )
+    .unwrap();
+    let root_arg = root.to_str().expect("root should be utf-8");
+
+    let brief = run_fallow_raw(&[
+        "audit", "--root", root_arg, "--base", "HEAD", "--brief", "--format", "json", "--quiet",
+    ]);
+
+    assert!(brief.code <= 1, "brief audit failed: {}", brief.stderr);
+    let json = parse_json(&brief);
+    let added: Vec<&str> = json["deltas"]["public_api_added"]
+        .as_array()
+        .unwrap_or_else(|| panic!("brief must carry public_api_added: {json}"))
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(
+        added,
+        ["src/index.ts::added"],
+        "only the new export is public API growth: {json}"
+    );
+}
