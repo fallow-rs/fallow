@@ -85,7 +85,9 @@ pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
 /// Each save or report flag writes its own file. When two flags name one
 /// file, the later write replaces the earlier one, so one report is lost
 /// with no error. An existing device or named pipe, such as `/dev/stdout`,
-/// can take more than one write, so it is not refused.
+/// can take more than one write, so it is not refused. The root and the
+/// `health` form of `--save-snapshot` are one request, so one flag name is
+/// never compared with itself.
 fn overlapping_targets_error(
     targets: &[(&'static str, PathBuf, WriteTarget)],
     cwd: &Path,
@@ -102,8 +104,10 @@ fn overlapping_targets_error(
             let (other_flag, other_path, _) =
                 destinations[index + 1..]
                     .iter()
-                    .find(|(_, _, other_resolved)| {
-                        other_resolved == resolved || same_existing_file(other_resolved, resolved)
+                    .find(|(other_flag, _, other_resolved)| {
+                        other_flag != flag
+                            && (other_resolved == resolved
+                                || same_existing_file(other_resolved, resolved))
                     })?;
             Some(format!(
                 "{flag} {} and {other_flag} {} name the same file. Write each report to its own file.",
@@ -113,10 +117,13 @@ fn overlapping_targets_error(
         })
 }
 
-/// Whether `path` is an existing file that is not a regular file, such as a
-/// character device or a named pipe.
+/// Whether `path` is a device or an existing file that is not a regular
+/// file, such as a named pipe. A path below `/dev` counts as a device even
+/// when it resolves to a regular file: `/dev/stdout` resolves to the file
+/// that the shell redirects the output to.
 fn is_existing_special_file(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_file() && !metadata.is_dir())
+    path.starts_with("/dev")
+        || std::fs::metadata(path).is_ok_and(|metadata| !metadata.is_file() && !metadata.is_dir())
 }
 
 /// `--output-file` is opened, and so truncated, before `fallow report` reads

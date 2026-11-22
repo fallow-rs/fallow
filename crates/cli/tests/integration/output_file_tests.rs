@@ -202,6 +202,74 @@ fn refuses_one_file_for_the_primary_and_the_sarif_report() {
     }
 }
 
+/// The overlap check covers each save flag, not only the two report flags.
+#[test]
+fn refuses_one_file_for_a_saved_baseline_and_the_primary_report() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let fixture = fixture_path(FIXTURE);
+    let result = run_fallow_raw_in_dir(
+        dir.path(),
+        &[
+            "dead-code",
+            "--root",
+            fixture.to_str().expect("utf8 path"),
+            "--save-baseline",
+            "out.json",
+            "-o",
+            "out.json",
+        ],
+    );
+
+    assert_eq!(result.code, 2, "stderr: {}", result.stderr);
+    assert!(
+        result.stderr.contains("--save-baseline") && result.stderr.contains("--output-file"),
+        "error should name both flags, got: {}",
+        result.stderr
+    );
+}
+
+/// A device takes more than one write, and a `--sarif-file` that the command
+/// does not write is no second destination.
+#[test]
+fn allows_a_device_or_an_unwritten_sarif_file_for_two_flags() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let fixture = fixture_path(FIXTURE);
+    let fixture = fixture.to_str().expect("utf8 path");
+    #[cfg(unix)]
+    {
+        let result = run_fallow_raw_in_dir(
+            dir.path(),
+            &[
+                "dead-code",
+                "--root",
+                fixture,
+                "-o",
+                "/dev/null",
+                "--sarif-file",
+                "/dev/null",
+            ],
+        );
+        assert!(result.code <= 1, "a device is allowed: {}", result.stderr);
+    }
+    let result = run_fallow_raw_in_dir(
+        dir.path(),
+        &[
+            "health",
+            "--root",
+            fixture,
+            "-o",
+            "out.txt",
+            "--sarif-file",
+            "out.txt",
+        ],
+    );
+    assert!(
+        !result.stderr.contains("name the same file"),
+        "health writes no SARIF file, so the pair does not overlap: {}",
+        result.stderr
+    );
+}
+
 #[test]
 fn sarif_file_on_a_command_that_writes_no_sarif_file_exits_2() {
     // Only bare `fallow`, `dead-code`, `architecture` and `security` write the
