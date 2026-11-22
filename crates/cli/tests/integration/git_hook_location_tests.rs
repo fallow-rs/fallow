@@ -98,3 +98,26 @@ fn install_refuses_a_shared_hooks_folder_outside_the_repository() {
     assert!(!shared.join("pre-commit").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// A clone can commit `.githooks/pre-commit` as a link, so the hook file
+/// gets the same link guard as a Husky hook.
+#[cfg(unix)]
+#[test]
+fn install_refuses_a_tracked_hook_link_that_leaves_the_repository() {
+    let dir = repo("tracked-link");
+    let main = dir.join("main");
+    let outside = dir.join("outside.sh");
+    fs::write(&outside, "keep\n").unwrap();
+    fs::create_dir_all(main.join(".githooks")).unwrap();
+    std::os::unix::fs::symlink(&outside, main.join(".githooks/pre-commit")).unwrap();
+    git(&main, &["config", "core.hooksPath", ".githooks"]);
+
+    let install = hooks(&main, &["install", "--target", "git", "--force"]);
+    assert_eq!(install.code, 2, "stderr: {}", install.stderr);
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "keep\n");
+
+    let uninstall = hooks(&main, &["uninstall", "--target", "git", "--force"]);
+    assert_eq!(uninstall.code, 2, "stderr: {}", uninstall.stderr);
+    assert!(outside.exists());
+    let _ = fs::remove_dir_all(&dir);
+}

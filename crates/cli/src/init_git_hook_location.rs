@@ -30,7 +30,9 @@ pub fn git_pre_commit_target(root: &Path) -> Result<PathBuf, ExitCode> {
         );
         return Err(exit_invalid_input());
     }
-    Ok(dir.join("pre-commit"))
+    let hook = dir.join("pre-commit");
+    super::project_files::refuse_tracked_hook_link(root, &hook)?;
+    Ok(hook)
 }
 
 /// The path of the Git `pre-commit` hook of `root`, for status output.
