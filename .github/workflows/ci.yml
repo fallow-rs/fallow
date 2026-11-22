@@ -195,6 +195,8 @@ jobs:
               - 'crates/engine/src/write_guard.rs'
               - 'crates/graph/src/missed_probes.rs'
               - 'crates/graph/src/read_trace.rs'
+              - 'crates/api/src/mutation/run_dir.rs'
+              - 'crates/engine/tests/integration/cache_model/read_set.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/engine/src/health/scoring.rs'
               - 'crates/engine/src/health/scoring_tests.rs'

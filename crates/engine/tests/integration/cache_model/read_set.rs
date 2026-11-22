@@ -187,7 +187,7 @@ fn perturbation_for(path: &Path, kinds: &FxHashSet<ReadKind>) -> Option<Perturba
     let synthetic = path
         .components()
         .any(|component| component == Component::Normal(SELF_RESOLVE_DIR.as_ref()));
-    if synthetic || path.is_dir() {
+    if synthetic || path.is_dir() || !platform_can_hold(path) {
         return None;
     }
     if path.is_file() {
@@ -204,6 +204,23 @@ fn perturbation_for(path: &Path, kinds: &FxHashSet<ReadKind>) -> Option<Perturba
         Perturbation::CreateDir
     } else {
         Perturbation::CreateFile
+    })
+}
+
+/// Whether the file system can hold a file at `path`. Windows refuses
+/// `<>:"|?*` in a file name, so a probe of a bundler query import such as
+/// `pkg/file.mjs?url` names a file that no Windows project can contain, and
+/// the oracle cannot create it.
+fn platform_can_hold(path: &Path) -> bool {
+    if !cfg!(windows) {
+        return true;
+    }
+    path.components().all(|component| match component {
+        Component::Normal(name) => !name
+            .to_string_lossy()
+            .chars()
+            .any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')),
+        _ => true,
     })
 }
 
