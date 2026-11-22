@@ -13,6 +13,7 @@ mod nesting;
 mod object_pattern_defaults;
 mod regex_compile;
 mod sfc;
+mod sfc_complexity;
 mod store_aliases;
 mod suppress_literals;
 
