@@ -27,6 +27,7 @@
 //! with no import-symbol edge. The walk is MODULE-scoped, not per-function: a
 //! true intra-function dataflow is beyond ADR-001 syntactic scope.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use fallow_types::extract::{ImportedName, ModuleInfo};
@@ -38,7 +39,7 @@ use fallow_types::trace_chain::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
-use crate::graph::{ExportNamespace, ModuleGraph};
+use crate::graph::{ExportNamespace, ImportedSymbol, ModuleGraph};
 use crate::trace::trace_impl::find_module;
 
 /// Trace the symbol-level call chain for `query.symbol` in `query.file`.
@@ -73,12 +74,23 @@ pub fn trace_symbol_chain(
     let module_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
 
-    let callers = directions
-        .callers
-        .then(|| collect_callers(graph, root, module.file_id, symbol, depth));
-    let callees_walk = directions
-        .callees
-        .then(|| collect_callees(graph, &module_by_id, root, module.file_id, symbol, depth));
+    // A name that the file does not export has no chains. A namespace
+    // importer would otherwise match any name, and the callee walk is
+    // file-scoped, so a typo would get plausible hops.
+    let callers = directions.callers.then(|| {
+        if symbol_found {
+            collect_callers(graph, root, module.file_id, symbol, depth)
+        } else {
+            Vec::new()
+        }
+    });
+    let callees_walk = directions.callees.then(|| {
+        if symbol_found {
+            collect_callees(graph, &module_by_id, root, module.file_id, depth)
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    });
     let (callees, unresolved_callees) = match callees_walk {
         Some((resolved, unresolved)) => (Some(resolved), Some(unresolved)),
         None => (None, None),
@@ -156,15 +168,11 @@ const fn namespace_order(namespace: SemanticNamespace) -> u8 {
     }
 }
 
-/// Shared walk state, so the recursive helpers stay under the argument cap.
-struct WalkCtx<'a> {
-    graph: &'a ModuleGraph,
-    root: &'a Path,
-    max_depth: u32,
-}
-
-/// Walk UP: every module that imports `symbol` from `target`, recursed through
+/// Walk UP: every module that imports `symbol` from `target`, followed through
 /// each importer's own binding up to `depth`.
+///
+/// The walk is breadth-first, so each binding gets its shortest depth and a
+/// deeper path cannot hide a shorter one from the depth limit.
 fn collect_callers(
     graph: &ModuleGraph,
     root: &Path,
@@ -172,99 +180,77 @@ fn collect_callers(
     symbol: &str,
     depth: u32,
 ) -> Vec<ChainHop> {
-    let ctx = WalkCtx {
-        graph,
-        root,
-        max_depth: depth,
-    };
     let mut hops = Vec::new();
     let mut visited: FxHashSet<(FileId, String)> = FxHashSet::default();
-    walk_callers_recursive(&ctx, target, symbol, 1, &mut visited, &mut hops);
-    hops.sort_by(|a, b| {
-        a.depth
-            .cmp(&b.depth)
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.local_name.cmp(&b.local_name))
-    });
+    let mut queue: VecDeque<(FileId, String, u32)> = VecDeque::new();
+    queue.push_back((target, symbol.to_owned(), 1));
+    while let Some((target, symbol, current_depth)) = queue.pop_front() {
+        if current_depth > depth {
+            continue;
+        }
+        for (importer, sym) in importing_symbols(graph, target, &symbol) {
+            if !visited.insert((importer, sym.local_name.clone())) {
+                continue;
+            }
+            hops.push(ChainHop {
+                file: module_path(graph, importer, root),
+                imported_as: imported_name_label(&sym.imported_name),
+                local_name: sym.local_name.clone(),
+                type_only: sym.is_type_only,
+                depth: current_depth,
+            });
+            // The importer's local binding is the next symbol whose callers
+            // the walk follows (a re-exported symbol).
+            queue.push_back((importer, sym.local_name.clone(), current_depth + 1));
+        }
+    }
+    sort_hops(&mut hops);
     hops
 }
 
-fn walk_callers_recursive(
-    ctx: &WalkCtx<'_>,
-    target: FileId,
-    symbol: &str,
-    current_depth: u32,
-    visited: &mut FxHashSet<(FileId, String)>,
-    hops: &mut Vec<ChainHop>,
-) {
-    if current_depth > ctx.max_depth {
-        return;
-    }
-    for &importer in ctx.graph.importers_of(target) {
-        for (edge_target, symbols) in ctx.graph.outgoing_symbol_edges(importer) {
-            if edge_target != target {
-                continue;
-            }
-            for sym in symbols {
-                if !imported_name_matches(&sym.imported_name, symbol) {
-                    continue;
-                }
-                let key = (importer, sym.local_name.clone());
-                if !visited.insert(key) {
-                    continue;
-                }
-                let importer_path = ctx.graph.modules.get(importer.0 as usize).map_or_else(
-                    || PathBuf::from("<unknown>"),
-                    |m| relativize(&m.path, ctx.root),
-                );
-                hops.push(ChainHop {
-                    file: importer_path,
-                    imported_as: imported_name_label(&sym.imported_name),
-                    local_name: sym.local_name.clone(),
-                    type_only: sym.is_type_only,
-                    depth: current_depth,
-                });
-                // Recurse: the importer's local binding becomes the next symbol
-                // whose callers we walk (covers a re-exported / forwarded symbol).
-                walk_callers_recursive(
-                    ctx,
-                    importer,
-                    &sym.local_name,
-                    current_depth + 1,
-                    visited,
-                    hops,
-                );
-            }
-        }
-    }
-}
-
 /// Walk DOWN: the import-symbol edges OUT of `module_id` (resolved callees),
-/// recursed into each target module's exports up to `depth`, plus the call sites
-/// in `module_id` whose callee did not resolve to an import binding (unresolved).
+/// followed into each target module up to `depth`, plus the call sites in
+/// `module_id` whose callee did not resolve to an import binding (unresolved).
+///
+/// The walk is breadth-first, so each module is expanded at its shortest
+/// depth.
 fn collect_callees(
     graph: &ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ModuleInfo>,
     root: &Path,
     module_id: FileId,
-    _symbol: &str,
     depth: u32,
 ) -> (Vec<ChainHop>, Vec<UnresolvedCallee>) {
-    let ctx = WalkCtx {
-        graph,
-        root,
-        max_depth: depth,
-    };
     let mut resolved = Vec::new();
     let mut visited: FxHashSet<FileId> = FxHashSet::default();
     visited.insert(module_id);
-    walk_callees_recursive(&ctx, module_id, 1, &mut visited, &mut resolved);
-    resolved.sort_by(|a, b| {
-        a.depth
-            .cmp(&b.depth)
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.local_name.cmp(&b.local_name))
-    });
+    let mut queue: VecDeque<(FileId, u32)> = VecDeque::new();
+    queue.push_back((module_id, 1));
+    while let Some((module_id, current_depth)) = queue.pop_front() {
+        if current_depth > depth {
+            continue;
+        }
+        for (edge_target, symbols) in graph.outgoing_symbol_edges(module_id) {
+            let target_path = module_path(graph, edge_target, root);
+            for sym in symbols {
+                // Side-effect imports carry no value-level callee; skip them.
+                if matches!(sym.imported_name, ImportedName::SideEffect) {
+                    continue;
+                }
+                resolved.push(ChainHop {
+                    file: target_path.clone(),
+                    imported_as: imported_name_label(&sym.imported_name),
+                    local_name: sym.local_name.clone(),
+                    type_only: sym.is_type_only,
+                    depth: current_depth,
+                });
+            }
+            if visited.insert(edge_target) {
+                queue.push_back((edge_target, current_depth + 1));
+            }
+        }
+    }
+    sort_hops(&mut resolved);
 
     let unresolved = module_by_id
         .get(&module_id)
@@ -274,38 +260,39 @@ fn collect_callees(
     (resolved, unresolved)
 }
 
-fn walk_callees_recursive(
-    ctx: &WalkCtx<'_>,
-    module_id: FileId,
-    current_depth: u32,
-    visited: &mut FxHashSet<FileId>,
-    hops: &mut Vec<ChainHop>,
-) {
-    if current_depth > ctx.max_depth {
-        return;
-    }
-    for (edge_target, symbols) in ctx.graph.outgoing_symbol_edges(module_id) {
-        let target_path = ctx.graph.modules.get(edge_target.0 as usize).map_or_else(
-            || PathBuf::from("<unknown>"),
-            |m| relativize(&m.path, ctx.root),
-        );
-        for sym in symbols {
-            // Side-effect imports carry no value-level callee; skip them.
-            if matches!(sym.imported_name, ImportedName::SideEffect) {
-                continue;
-            }
-            hops.push(ChainHop {
-                file: target_path.clone(),
-                imported_as: imported_name_label(&sym.imported_name),
-                local_name: sym.local_name.clone(),
-                type_only: sym.is_type_only,
-                depth: current_depth,
-            });
-        }
-        if visited.insert(edge_target) {
-            walk_callees_recursive(ctx, edge_target, current_depth + 1, visited, hops);
-        }
-    }
+/// Each import of `symbol` from `target`, with the module that imports it.
+fn importing_symbols<'g>(
+    graph: &'g ModuleGraph,
+    target: FileId,
+    symbol: &'g str,
+) -> impl Iterator<Item = (FileId, &'g ImportedSymbol)> + 'g {
+    graph
+        .importers_of(target)
+        .iter()
+        .flat_map(move |&importer| {
+            graph
+                .outgoing_symbol_edges(importer)
+                .filter(move |(edge_target, _)| *edge_target == target)
+                .flat_map(|(_, symbols)| symbols.iter())
+                .filter(move |sym| imported_name_matches(&sym.imported_name, symbol))
+                .map(move |sym| (importer, sym))
+        })
+}
+
+fn module_path(graph: &ModuleGraph, file_id: FileId, root: &Path) -> PathBuf {
+    graph
+        .modules
+        .get(file_id.0 as usize)
+        .map_or_else(|| PathBuf::from("<unknown>"), |m| relativize(&m.path, root))
+}
+
+fn sort_hops(hops: &mut [ChainHop]) {
+    hops.sort_by(|a, b| {
+        a.depth
+            .cmp(&b.depth)
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.local_name.cmp(&b.local_name))
+    });
 }
 
 /// Build the unresolved-callee list from a module's call sites: every
@@ -362,7 +349,7 @@ fn build_reason(
         );
     }
     if !symbol_found {
-        return "symbol not found as an export of this file; chains are file-scoped best-effort and may be empty".to_string();
+        return "symbol not found as an export of this file, so the chains are empty".to_string();
     }
     let mut parts = Vec::new();
     if let Some(callers) = callers {

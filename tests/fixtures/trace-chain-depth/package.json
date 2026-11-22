@@ -1,0 +1,6 @@
+{
+  "name": "trace-chain-depth-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/start.ts"
+}
