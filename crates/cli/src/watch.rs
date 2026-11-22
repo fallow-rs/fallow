@@ -595,7 +595,7 @@ fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCo
         }
 
         if !state.detached {
-            run_ready_reanalysis(&mut state.config, opts, &mut state.debouncer);
+            run_ready_reanalysis(&mut state.config, &state.filter, opts, &mut state.debouncer);
         }
     }
 }
@@ -666,10 +666,12 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
     Ok(WatchConfig { run, config })
 }
 
-/// Drain the debouncer; if a non-empty batch is ready, reload config and
-/// re-run the analysis. No-op when no batch is ready or all paths dedupe away.
+/// Drain the debouncer. When a non-empty batch is ready, reload the config,
+/// rebuild the event filter from it, and re-run the analysis. No-op when no
+/// batch is ready or all paths dedupe away.
 fn run_ready_reanalysis(
     config: &mut WatchConfig,
+    filter: &Arc<Mutex<WatchFilter>>,
     opts: &WatchOptions<'_>,
     debouncer: &mut PathDebouncer,
 ) {
@@ -691,6 +693,7 @@ fn run_ready_reanalysis(
     eprintln!();
 
     reload_config_or_keep_previous(config, opts);
+    replace_watch_filter(filter, &config.config);
 
     let status = analyze_and_report(config, opts);
     if status != ExitCode::SUCCESS {
@@ -727,8 +730,11 @@ fn create_watcher(
 }
 
 fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &fallow_config::ResolvedConfig) {
+    // The build walks the project for gitignore files. It runs before the
+    // lock, so the notify callback does not wait for the walk.
+    let rebuilt = WatchFilter::new(config);
     if let Ok(mut guard) = filter.lock() {
-        *guard = WatchFilter::new(config);
+        *guard = rebuilt;
     }
 }
 
@@ -1368,6 +1374,31 @@ mod tests {
         let resolve = resolver(dir.path(), &[], &[("FALLOW_PRODUCTION", "false")]);
         let watch = load_watch_config(&make_watch_options(dir.path(), &resolve)).expect("config");
         assert!(!watch.config.production);
+    }
+
+    #[test]
+    fn reanalysis_after_a_config_change_applies_the_new_ignore_patterns_to_the_filter() {
+        let dir = watch_project("{}");
+        let resolve = resolver(dir.path(), &[], &[]);
+        let opts = make_watch_options(dir.path(), &resolve);
+        let mut watch = load_watch_config(&opts).expect("config");
+        let generated = watch.config.root.join("src/generated/client.ts");
+        let filter = Arc::new(Mutex::new(WatchFilter::new(&watch.config)));
+        assert!(filter.lock().expect("filter").allows(&generated));
+
+        let config_path = dir.path().join(".fallowrc.json");
+        std::fs::write(&config_path, r#"{"ignorePatterns":["src/generated/**"]}"#).expect("config");
+        let mut debouncer = PathDebouncer::default();
+        let changed_at = Instant::now()
+            .checked_sub(DEBOUNCE_WINDOW)
+            .expect("monotonic clock is past the debounce window");
+        debouncer.push_paths(vec![config_path], changed_at);
+        run_ready_reanalysis(&mut watch, &filter, &opts, &mut debouncer);
+
+        assert!(
+            !filter.lock().expect("filter").allows(&generated),
+            "the watch filter must follow the reloaded ignorePatterns"
+        );
     }
 
     #[test]
