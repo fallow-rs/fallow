@@ -27,13 +27,13 @@ pub(super) const GIT_SHA_MAX_LEN: usize = 64;
 #[derive(Debug)]
 pub(super) enum UploadError {
     /// User-fixable input error (missing key, unresolvable project-id,
-    /// analysis/config failure, ...).
+    /// analysis/config failure, a 4xx status that a retry cannot fix, ...).
     Validation(String),
     /// The payload exceeds the server cap; the user must scope the upload.
     PayloadTooLarge(String),
     /// 401 / 403: auth rejected, the user needs to rotate or scope the key.
     AuthRejected(String),
-    /// 5xx, timeout, transport failure; transient.
+    /// 5xx, 408, 429, malformed success body; transient.
     ServerError(String),
     /// Transport-level failure before response (DNS, TLS, connect).
     Network(String),
@@ -67,18 +67,51 @@ impl UploadError {
 /// Reject a dirty working tree for a git-SHA keyed upload, unless the run is
 /// a dry run or the user passed `--allow-dirty`.
 ///
+/// When `git status` fails, the state is unknown. With an explicit
+/// `--git-sha` the upload continues with a warning, because a build without a
+/// git checkout can name its commit. Without it the upload stops.
+///
 /// `working_copy_subject` completes the warning sentence, for example
 /// `"the inventory comes"`.
+/// The flags of an upload that decide how [`enforce_clean_worktree`] treats
+/// the working tree.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct WorktreeFlags {
+    pub dry_run: bool,
+    pub allow_dirty: bool,
+    pub explicit_git_sha: bool,
+}
+
 pub(super) fn enforce_clean_worktree(
     log_prefix: &str,
     command: &str,
     working_copy_subject: &str,
-    dry_run: bool,
-    allow_dirty: bool,
+    flags: WorktreeFlags,
     root: &Path,
 ) -> Result<(), UploadError> {
-    if dry_run || !dirty_worktree(root) {
+    let WorktreeFlags {
+        dry_run,
+        allow_dirty,
+        explicit_git_sha,
+    } = flags;
+    if dry_run {
         return Ok(());
+    }
+    let state = worktree_state(root);
+    if state == WorktreeState::Clean {
+        return Ok(());
+    }
+    if state == WorktreeState::Unknown {
+        if allow_dirty || explicit_git_sha {
+            eprintln!(
+                "{log_prefix}: {}: could not check the working tree with `git status`. Proceeding because --git-sha or --allow-dirty was set, but {working_copy_subject} from the working copy and may not match the uploaded git SHA.",
+                "warning".yellow().bold(),
+            );
+            return Ok(());
+        }
+        return Err(UploadError::Validation(format!(
+            "could not check the working tree with `git status`. `{command}` is keyed to a git SHA, so an unchecked working copy can drift from that commit. Check that `git status` works in the project, pass --git-sha <sha> to name the commit, or pass --allow-dirty to intentionally upload the working copy."
+        )));
     }
     if allow_dirty {
         eprintln!(
@@ -338,16 +371,36 @@ pub(super) fn resolve_git_sha(
     Ok(sha)
 }
 
-pub(super) fn dirty_worktree(root: &Path) -> bool {
+/// The state of the working tree as `git status` reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorktreeState {
+    Clean,
+    Dirty,
+    /// `git status` did not start or failed, for example outside a checkout.
+    Unknown,
+}
+
+fn worktree_state(root: &Path) -> WorktreeState {
     let mut command = fallow_engine::changed_files::git_command_in(root);
     command.args(["status", "--porcelain"]);
     let Ok(output) = command.output() else {
-        return false;
+        return WorktreeState::Unknown;
     };
     if !output.status.success() {
-        return false;
+        return WorktreeState::Unknown;
     }
-    output.stdout.iter().any(|b| !b.is_ascii_whitespace())
+    if output.stdout.iter().any(|b| !b.is_ascii_whitespace()) {
+        WorktreeState::Dirty
+    } else {
+        WorktreeState::Clean
+    }
+}
+
+/// Whether an HTTP error status can pass on a retry. Only these statuses
+/// become [`UploadError::ServerError`], which `--ignore-upload-errors` turns
+/// into a warning. Any other status is a permanent error of the request.
+pub(super) const fn is_transient_status(status: u16) -> bool {
+    status >= 500 || matches!(status, 408 | 429)
 }
 
 /// Resolves the run of an upload. The upload calls it after its own checks.
@@ -451,12 +504,24 @@ mod tests {
     }
 
     fn enforce(dry_run: bool, allow_dirty: bool, root: &Path) -> Result<(), UploadError> {
+        enforce_with_sha(dry_run, allow_dirty, false, root)
+    }
+
+    fn enforce_with_sha(
+        dry_run: bool,
+        allow_dirty: bool,
+        explicit_git_sha: bool,
+        root: &Path,
+    ) -> Result<(), UploadError> {
         enforce_clean_worktree(
             "fallow coverage upload-inventory",
             "upload-inventory",
             "the inventory comes",
-            dry_run,
-            allow_dirty,
+            WorktreeFlags {
+                dry_run,
+                allow_dirty,
+                explicit_git_sha,
+            },
             root,
         )
     }
@@ -478,6 +543,36 @@ mod tests {
     fn dirty_worktree_is_allowed_with_explicit_opt_in() {
         let repo = create_dirty_git_repo();
         assert!(enforce(false, true, repo.path()).is_ok());
+    }
+
+    #[test]
+    fn a_failed_worktree_probe_is_rejected_by_default() {
+        let dir = tempfile::tempdir().expect("create non-repo dir");
+        let err = enforce(false, false, dir.path())
+            .expect_err("a failed git status must not read as a clean checkout");
+        let UploadError::Validation(message) = err else {
+            panic!("expected validation error, got {err:?}");
+        };
+        assert!(message.contains("could not check the working tree"));
+        assert!(message.contains("--allow-dirty"));
+    }
+
+    #[test]
+    fn a_failed_worktree_probe_is_allowed_with_explicit_opt_in() {
+        let dir = tempfile::tempdir().expect("create non-repo dir");
+        assert!(enforce(false, true, dir.path()).is_ok());
+    }
+
+    #[test]
+    fn a_failed_worktree_probe_is_allowed_with_an_explicit_git_sha() {
+        let dir = tempfile::tempdir().expect("create non-repo dir");
+        assert!(enforce_with_sha(false, false, true, dir.path()).is_ok());
+    }
+
+    #[test]
+    fn an_explicit_git_sha_does_not_skip_the_dirty_check() {
+        let repo = create_dirty_git_repo();
+        assert!(enforce_with_sha(false, false, true, repo.path()).is_err());
     }
 
     #[test]

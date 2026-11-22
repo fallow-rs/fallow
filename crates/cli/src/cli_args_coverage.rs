@@ -172,7 +172,8 @@ pub enum CoverageCli {
         #[arg(long, help_heading = "Input")]
         with_callers: bool,
 
-        /// Proceed even when the working tree has uncommitted changes.
+        /// Proceed even when the working tree has uncommitted changes, or when
+        /// `git status` cannot check it.
         ///
         /// Warning: the inventory is generated from the working copy, so it
         /// may not match the uploaded git SHA. Commit or stash first if you
@@ -305,7 +306,8 @@ pub enum CoverageCli {
         #[arg(long, value_name = "SHA", help_heading = "Fallow Cloud")]
         git_sha: Option<String>,
 
-        /// Proceed even when the working tree has uncommitted changes.
+        /// Proceed even when the working tree has uncommitted changes, or when
+        /// `git status` cannot check it.
         ///
         /// Warning: findings are generated from the working copy, so they may
         /// not match the uploaded git SHA. Commit or stash first if you want a
