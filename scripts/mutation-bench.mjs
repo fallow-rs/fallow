@@ -126,10 +126,28 @@ export const parseArgs = (argv) => {
 const run = (command, args, cwd) =>
   execFileSync(command, args, { cwd, stdio: ["ignore", "ignore", "inherit"] });
 
+const gitHead = (dir, revision) => {
+  const result = spawnSync("git", ["-C", dir, "rev-parse", "--verify", "--quiet", revision], {
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
+};
+
+/**
+ * True when `dir` has its dependencies installed and its HEAD is `commit`.
+ * A checkout at another commit would measure another revision than the one
+ * that the benchmark names.
+ */
+export const isPreparedAt = (dir, commit) => {
+  if (!existsSync(join(dir, "node_modules")) || !existsSync(join(dir, ".git"))) return false;
+  const head = gitHead(dir, "HEAD");
+  return head !== null && head === gitHead(dir, `${commit}^{commit}`);
+};
+
 /** Clones a project at its commit and installs its dependencies once. */
 const prepare = (project, workdir) => {
   const dir = join(workdir, project.name);
-  if (!existsSync(join(dir, "node_modules"))) {
+  if (!isPreparedAt(dir, project.commit)) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(workdir, { recursive: true });
     run("git", ["clone", "--quiet", project.repo, dir], workdir);
