@@ -21,6 +21,7 @@
 //! package. The listing of one group of packages can stop early; each cycle
 //! in such a group has `group_truncated` set.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -593,7 +594,9 @@ fn strongly_connected_packages<'a>(
 /// `limits.max_cycles` cycles or `limits.max_steps` steps. `truncated` is
 /// true when the group has more cycles than the list holds, or when the step
 /// limit stopped the search before it explored every path. The search finds
-/// one cycle more than the cap to tell a full list from a cut one.
+/// one cycle more than the cap to tell a full list from a cut one. When the
+/// step limit stops the search before it finds a cycle, the list holds one
+/// shortest cycle through the smallest member.
 fn enumerate_cycles(
     group: &[usize],
     successors: &[Vec<usize>],
@@ -623,7 +626,43 @@ fn enumerate_cycles(
     }
     let truncated = cycles.len() > limits.max_cycles || stopped;
     cycles.truncate(limits.max_cycles);
+    // A strongly connected group always has a cycle. When the budget ran out
+    // before the search found one, a shortest cycle through the smallest
+    // member still proves the group.
+    if cycles.is_empty()
+        && let Some(witness) = shortest_cycle_through_min(&members, successors)
+    {
+        cycles.push(witness);
+    }
     GroupCycles { cycles, truncated }
+}
+
+/// A shortest cycle through the smallest member, by a breadth-first search
+/// inside the group. The cycle starts at that member.
+fn shortest_cycle_through_min(
+    members: &FxHashSet<usize>,
+    successors: &[Vec<usize>],
+) -> Option<Vec<usize>> {
+    let start = members.iter().copied().min()?;
+    let mut parent: FxHashMap<usize, usize> = FxHashMap::default();
+    let mut queue = VecDeque::from([start]);
+    while let Some(node) = queue.pop_front() {
+        for &child in &successors[node] {
+            if child == start {
+                let mut cycle = vec![node];
+                while let Some(&previous) = parent.get(cycle.last()?) {
+                    cycle.push(previous);
+                }
+                cycle.reverse();
+                return Some(cycle);
+            }
+            if members.contains(&child) && !parent.contains_key(&child) {
+                parent.insert(child, node);
+                queue.push_back(child);
+            }
+        }
+    }
+    None
 }
 
 /// How one depth-limited search ended.
@@ -758,6 +797,42 @@ mod tests {
         let listed = enumerate_cycles(&group, &succ, tight);
         assert!(listed.cycles.len() < MAX_CYCLES_PER_SCC);
         assert!(listed.truncated);
+    }
+
+    /// Layers of packages where each package imports every package of the
+    /// next layer, and the last leaf imports the first package. The only
+    /// cycle is longer than the step budget reaches, so the group keeps one
+    /// witness cycle.
+    #[test]
+    fn a_default_budget_on_a_deep_layered_group_keeps_one_witness_cycle() {
+        const LAYERS: usize = 9;
+        const WIDTH: usize = 9;
+        let count = LAYERS * WIDTH;
+        let mut edges: Vec<(usize, usize)> = Vec::new();
+        for layer in 0..LAYERS - 1 {
+            for from in 0..WIDTH {
+                for to in 0..WIDTH {
+                    edges.push((layer * WIDTH + from, (layer + 1) * WIDTH + to));
+                }
+            }
+        }
+        edges.push((count - 1, 0));
+        let succ = successors(&edges, count);
+        let group: Vec<usize> = (0..count)
+            .filter(|&node| node == 0 || node >= WIDTH)
+            .collect();
+
+        let listed = enumerate_cycles(&group, &succ, DEFAULT_LIMITS);
+
+        assert!(listed.truncated);
+        assert_eq!(listed.cycles.len(), 1, "{listed:?}");
+        let cycle = &listed.cycles[0];
+        assert_eq!(cycle.len(), LAYERS);
+        assert_eq!(cycle[0], 0, "a witness starts at its smallest member");
+        for (index, &from) in cycle.iter().enumerate() {
+            let to = cycle[(index + 1) % cycle.len()];
+            assert!(succ[from].contains(&to), "{from} -> {to} is not an edge");
+        }
     }
 
     #[test]
