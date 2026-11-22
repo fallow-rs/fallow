@@ -283,3 +283,158 @@ fn gate_drops_intermediate_hop_pass_through() {
 
     assert!(results.security_findings.is_empty());
 }
+
+fn transitive_leak(category: &str, terminal: TraceHop) -> SecurityFinding {
+    SecurityFinding {
+        kind: SecurityFindingKind::ClientServerLeak,
+        category: Some(category.into()),
+        cwe: None,
+        path: PathBuf::from("/project/app/routes/home.tsx"),
+        line: 1,
+        col: 9,
+        trace: vec![
+            TraceHop::new(
+                PathBuf::from("/project/app/routes/home.tsx"),
+                1,
+                9,
+                TraceHopRole::ClientBoundary,
+            ),
+            TraceHop::new(
+                PathBuf::from("/project/app/components/banner.tsx"),
+                1,
+                9,
+                TraceHopRole::Intermediate,
+            ),
+            terminal,
+        ],
+        ..sample_security_finding()
+    }
+}
+
+fn banner_diff(hunk: &str) -> crate::report::ci::diff_filter::DiffIndex {
+    build_diff(&format!(
+        "diff --git a/app/components/banner.tsx b/app/components/banner.tsx\n\
+         --- a/app/components/banner.tsx\n\
+         +++ b/app/components/banner.tsx\n\
+         {hunk}"
+    ))
+}
+
+#[test]
+fn gate_keeps_server_only_import_added_to_transitive_module() {
+    let diff = banner_diff(
+        "@@ -0,0 +1,2 @@\n\
+         +import { getConfig } from '../utils/config.server'\n\
+         +\n",
+    );
+    let mut results = AnalysisResults::default();
+    results.security_findings.push(transitive_leak(
+        "server-only-import",
+        TraceHop::new(
+            PathBuf::from("/project/app/utils/config.server.ts"),
+            1,
+            0,
+            TraceHopRole::Sink,
+        ),
+    ));
+
+    retain_gate_new(&mut results, &diff, Path::new("/project"));
+
+    assert_eq!(results.security_findings.len(), 1);
+}
+
+#[test]
+fn gate_keeps_secret_reader_import_added_to_transitive_module() {
+    let diff = banner_diff(
+        "@@ -0,0 +1,1 @@\n\
+         +import { key } from '../utils/keys'\n",
+    );
+    let mut results = AnalysisResults::default();
+    results.security_findings.push(transitive_leak(
+        "client-server-leak",
+        TraceHop {
+            path: PathBuf::from("/project/app/utils/keys.ts"),
+            line: 1,
+            col: 0,
+            role: TraceHopRole::SecretSource,
+            secret_reads: vec![TraceSecretRead {
+                name: "process.env.API_SECRET_KEY".to_owned(),
+                line: 1,
+                col: 0,
+            }],
+        },
+    ));
+
+    retain_gate_new(&mut results, &diff, Path::new("/project"));
+
+    assert_eq!(results.security_findings.len(), 1);
+}
+
+#[test]
+fn gate_drops_transitive_leak_when_another_line_of_the_transit_module_changes() {
+    let diff = banner_diff(
+        "@@ -4,1 +4,1 @@\n\
+         +\treturn <p>Banner text</p>\n",
+    );
+    let mut results = AnalysisResults::default();
+    results.security_findings.push(transitive_leak(
+        "server-only-import",
+        TraceHop::new(
+            PathBuf::from("/project/app/utils/config.server.ts"),
+            1,
+            0,
+            TraceHopRole::Sink,
+        ),
+    ));
+
+    retain_gate_new(&mut results, &diff, Path::new("/project"));
+
+    assert!(results.security_findings.is_empty());
+}
+
+#[test]
+fn gate_keeps_transitive_leak_when_an_existing_import_line_of_the_transit_module_changes() {
+    // The gate has no base graph, so an edited import line counts as added.
+    let diff = banner_diff(
+        "@@ -1,1 +1,1 @@\n\
+         +import { getConfig, getRegion } from '../utils/config.server'\n",
+    );
+    let mut results = AnalysisResults::default();
+    results.security_findings.push(transitive_leak(
+        "server-only-import",
+        TraceHop::new(
+            PathBuf::from("/project/app/utils/config.server.ts"),
+            1,
+            0,
+            TraceHopRole::Sink,
+        ),
+    ));
+
+    retain_gate_new(&mut results, &diff, Path::new("/project"));
+
+    assert_eq!(results.security_findings.len(), 1);
+}
+
+#[test]
+fn gate_keeps_transitive_leak_whose_intermediate_hop_is_outside_root() {
+    let diff = banner_diff(
+        "@@ -4,1 +4,1 @@\n\
+         +\treturn <p>Banner text</p>\n",
+    );
+    let mut finding = transitive_leak(
+        "server-only-import",
+        TraceHop::new(
+            PathBuf::from("/project/app/utils/config.server.ts"),
+            1,
+            0,
+            TraceHopRole::Sink,
+        ),
+    );
+    finding.trace[1].path = PathBuf::from("/elsewhere/shared/banner.tsx");
+    let mut results = AnalysisResults::default();
+    results.security_findings.push(finding);
+
+    retain_gate_new(&mut results, &diff, Path::new("/project"));
+
+    assert_eq!(results.security_findings.len(), 1);
+}

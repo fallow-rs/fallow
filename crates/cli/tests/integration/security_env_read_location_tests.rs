@@ -256,3 +256,88 @@ fn a_destructured_secret_read_in_client_code_points_at_the_key() {
     assert_eq!(finding["line"], 2);
     assert_eq!(finding["col"], 9);
 }
+
+/// A route that imports `app/components/banner.tsx`, and a change that makes
+/// the banner import `target`. The issue #5024 reproduction.
+fn transitive_import_repo(
+    target_path: &'static str,
+    target: &'static str,
+    banner_import: &'static str,
+) -> tempfile::TempDir {
+    let mut base = react_router_base(
+        "import { Banner } from '../components/banner'\n\n\
+         export default function Home() {\n\treturn <Banner />\n}\n",
+    );
+    base.push((
+        "app/components/banner.tsx",
+        "export function Banner() {\n\treturn <p>Banner</p>\n}\n",
+    ));
+    base.push((target_path, target));
+    repo(&base, &[("app/components/banner.tsx", banner_import)])
+}
+
+#[test]
+fn gate_fails_on_a_server_only_import_added_to_a_transitive_module() {
+    let dir = transitive_import_repo(
+        "app/utils/config.server.ts",
+        "export function getConfig() {\n\treturn { region: 'nz' }\n}\n",
+        "import { getConfig } from '../utils/config.server'\n\n\
+         export function Banner() {\n\treturn <p>{getConfig().region}</p>\n}\n",
+    );
+
+    let (code, json) = gate_new(dir.path());
+    assert_eq!(code, 8, "{json:#}");
+    let finding = only_finding(&json);
+    assert_eq!(finding["category"], "server-only-import");
+    assert_eq!(finding["path"], "app/routes/home.tsx");
+    assert_eq!(finding["line"], 1);
+    let hop = &finding["trace"][1];
+    assert_eq!(hop["role"], "intermediate");
+    assert_eq!(hop["path"], "app/components/banner.tsx");
+    assert_eq!(hop["line"], 1);
+}
+
+#[test]
+fn gate_fails_on_a_secret_reader_import_added_to_a_transitive_module() {
+    let dir = transitive_import_repo(
+        "app/utils/keys.ts",
+        "export const key = process.env.API_SECRET_KEY\n",
+        "import { key } from '../utils/keys'\n\n\
+         export function Banner() {\n\treturn <p>{key}</p>\n}\n",
+    );
+
+    let (code, json) = gate_new(dir.path());
+    assert_eq!(code, 8, "{json:#}");
+    let finding = only_finding(&json);
+    assert_eq!(finding["category"], "client-server-leak");
+    assert_eq!(finding["trace"][2]["role"], "secret-source");
+}
+
+#[test]
+fn gate_passes_when_a_change_leaves_an_old_transitive_import_alone() {
+    let mut base = react_router_base(
+        "import { Banner } from '../components/banner'\n\n\
+         export default function Home() {\n\treturn <Banner />\n}\n",
+    );
+    base.push((
+        "app/utils/config.server.ts",
+        "export function getConfig() {\n\treturn { region: 'nz' }\n}\n",
+    ));
+    base.push((
+        "app/components/banner.tsx",
+        "import { getConfig } from '../utils/config.server'\n\n\
+         export function Banner() {\n\treturn <p>{getConfig().region}</p>\n}\n",
+    ));
+    let dir = repo(
+        &base,
+        &[(
+            "app/components/banner.tsx",
+            "import { getConfig } from '../utils/config.server'\n\n\
+             export function Banner() {\n\treturn <p>Region {getConfig().region}</p>\n}\n",
+        )],
+    );
+
+    let (code, json) = gate_new(dir.path());
+    assert_eq!(code, 0, "{json:#}");
+    assert_eq!(json["gate"]["new_count"], 0);
+}

@@ -40,8 +40,16 @@ pub use fallow_engine::diff_scope::filter_dead_code_by_diff as filter_results_by
 ///   an untouched sink the moment any env-config file is touched). The gate
 ///   keeps a `SecretSource` hop only when a secret read of the hop
 ///   (`secret_reads`, or the hop line) is on an added line, and
-/// - the `Intermediate` / `ClientBoundary` pass-through hop lines (editing an
-///   unrelated line in a transit module is not new exposure).
+/// - the `Intermediate` / `ClientBoundary` pass-through hop lines of a taint
+///   trace (editing an unrelated line in a transit module is not new exposure).
+///
+/// A `client-server-leak` trace is different: each non-terminal hop line is the
+/// import of the next module. An added import on an `Intermediate` hop joins
+/// the client cone to the secret reader or the server-only module, so the gate
+/// keeps the candidate when that hop line is on an added line (issue #5024).
+/// The gate has no base graph, so an edit of an import line that already
+/// existed also keeps the candidate. The finding keeps its anchor on the
+/// client boundary, so its `finding_id` and suppression position stay the same.
 ///
 /// It KEEPS the sink anchor on an added line (a genuinely new sink) AND an
 /// `UntrustedSource` / `ModuleSource` / `Sink` trace hop on an added line (a
@@ -84,8 +92,16 @@ pub fn retain_gate_new(
                     .any(|read| line_in_diff(&hop.path, read.line)))
     };
 
+    let leak_edge_added = |f: &fallow_types::results::SecurityFinding| -> bool {
+        f.kind == fallow_types::results::SecurityFindingKind::ClientServerLeak
+            && f.trace.iter().any(|hop| {
+                hop.role == TraceHopRole::Intermediate && line_in_diff(&hop.path, hop.line)
+            })
+    };
+
     results.security_findings.retain(|f| {
         line_in_diff(&f.path, f.line)
+            || leak_edge_added(f)
             || f.trace
                 .iter()
                 .any(|hop| taint_hop_added(&hop.path, hop.line, hop.role) || secret_read_added(hop))
