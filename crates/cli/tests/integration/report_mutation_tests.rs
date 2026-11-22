@@ -414,7 +414,8 @@ fn pr_comments_join_the_survivors_the_section_and_the_decision_rows() {
 }
 
 #[test]
-fn a_clean_analysis_with_only_a_failed_gate_keeps_the_success_conclusion() {
+fn a_clean_analysis_with_only_a_failed_gate_keeps_the_check_conclusion_and_posts_a_failed_heading()
+{
     let fixture = Fixture::new();
     let report = mutation_report(
         fixture.root(),

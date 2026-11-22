@@ -166,6 +166,31 @@ fn live_audit_codeclimate_paths_are_repo_root_relative_below_the_toplevel() {
             "CI consumers address files from the repo root; got {path}"
         );
     }
+
+    let prefixed = run(
+        root,
+        &[
+            "audit",
+            "--root",
+            "packages/pkg",
+            "--base",
+            "HEAD~1",
+            "--quiet",
+            "--format",
+            "codeclimate",
+            "--report-path-prefix",
+            "custom/base",
+        ],
+    );
+    let paths = codeclimate_paths(&prefixed);
+    assert!(
+        !paths.is_empty(),
+        "expected findings, got {}",
+        prefixed.stdout
+    );
+    for path in &paths {
+        assert!(path.starts_with("custom/base/"), "got {path}");
+    }
 }
 
 #[test]
