@@ -342,6 +342,7 @@ mod tests {
             compare: None,
             gate_outcomes: None,
             recording: None,
+            journal_run_id: None,
         }
     }
 

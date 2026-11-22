@@ -492,6 +492,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         compare: None,
         gate_outcomes: None,
         recording: None,
+        journal_run_id: None,
     }
 }
 

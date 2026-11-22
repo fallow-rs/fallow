@@ -65,6 +65,8 @@ const RUN_DIR_GRACE: Duration = Duration::from_hours(1);
 const LAST_USED: &str = ".last-used";
 /// The name prefix of a staging directory below `runs/`.
 const STAGING_PREFIX: &str = ".staging-";
+/// The name suffix of the publication lock file of a run directory.
+const LOCK_SUFFIX: &str = ".lock";
 
 /// The source of one expected file of a run directory.
 enum Content<'a> {
@@ -152,20 +154,61 @@ fn matches(dir: &Path, expected: &[(String, Content<'_>)]) -> bool {
         })
 }
 
+/// The lock file next to a run directory. A run holds it while it checks and
+/// replaces the directory, so two runs never replace each other's work. The
+/// empty file stays after the directory is pruned: a removal could split two
+/// runs that wait on the old and the new file at that moment.
+fn publication_lock_path(dir: &Path) -> PathBuf {
+    let mut name = dir.file_name().unwrap_or_default().to_os_string();
+    name.push(LOCK_SUFFIX);
+    dir.with_file_name(name)
+}
+
 /// Writes `expected` to a staging directory below `runs` and renames it to
 /// `dir`. A directory at `dir` with other content moves aside first.
+///
+/// The check and the replacement run under the publication lock of `dir`.
+/// Without it, a second run could publish a complete directory between the
+/// check of this run and its move aside, and this run would then delete the
+/// directory that the second run reads.
 fn install(runs: &Path, dir: &Path, expected: &[(String, Content<'_>)]) -> std::io::Result<()> {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     fs::create_dir_all(runs)?;
-    let unique = format!("{}-{}", std::process::id(), now_nanos());
+    // Two threads of one process can read the same time, so a counter keeps
+    // their staging directories apart.
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let unique = format!("{}-{}-{sequence}", std::process::id(), now_nanos());
     let staging = runs.join(format!("{STAGING_PREFIX}{unique}"));
     if let Err(error) = write_staging(&staging, expected) {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
+    // The lock is best effort: a file system without lock support, such as
+    // some network mounts, publishes without it, as before the lock.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(publication_lock_path(dir))
+        .and_then(|file| file.lock().map(|()| file))
+        .ok();
+    let result = publish(runs, dir, &staging, &unique, expected);
+    drop(lock);
+    result
+}
+
+/// Moves `staging` to `dir` under the publication lock of `dir`.
+fn publish(
+    runs: &Path,
+    dir: &Path,
+    staging: &Path,
+    unique: &str,
+    expected: &[(String, Content<'_>)],
+) -> std::io::Result<()> {
     // A concurrent run can install the same directory while this run
     // stages. That directory has the expected content and stays in place.
     if matches(dir, expected) {
-        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir_all(staging);
         return Ok(());
     }
     if dir.exists() {
@@ -176,8 +219,8 @@ fn install(runs: &Path, dir: &Path, expected: &[(String, Content<'_>)]) -> std::
             let _ = fs::remove_dir_all(&stale);
         }
     }
-    if let Err(error) = fs::rename(&staging, dir) {
-        let _ = fs::remove_dir_all(&staging);
+    if let Err(error) = fs::rename(staging, dir) {
+        let _ = fs::remove_dir_all(staging);
         if matches(dir, expected) {
             return Ok(());
         }
@@ -380,10 +423,25 @@ mod tests {
         assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
+    /// Sets the stop flag when it drops, so a reader loop also ends when a
+    /// writer thread panics.
+    struct StopOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Runs on one plan start together on a cold cache, or on a cache that
+    /// holds a stale directory with the same hash. Once a complete directory
+    /// is in place, a reader must never see a partial file or a missing
+    /// file: another run may use the directory at that moment.
     #[test]
     fn concurrent_runs_on_one_plan_each_get_a_complete_run_dir() {
-        let cache = tempfile::tempdir().expect("dir");
-        let code = "x".repeat(256 * 1024);
+        const ROUNDS: usize = 40;
+        const WRITERS: usize = 4;
+        let code = "x".repeat(64 * 1024);
         let files = [
             RunFile {
                 path: "src/a.ts",
@@ -394,51 +452,66 @@ mod tests {
                 code: "b",
             },
         ];
-        let run = write_run_dir(cache.path(), &files, None).expect("run dir");
-        let instrumented = run.dir.join("files/src/a.ts");
-        let done = std::sync::atomic::AtomicBool::new(false);
-        std::thread::scope(|scope| {
-            // A run that already uses the directory reads its files while
-            // other runs on the same plan start.
-            let reader = scope.spawn(|| {
-                let mut torn = 0;
-                while !done.load(std::sync::atomic::Ordering::Relaxed) {
-                    if fs::read_to_string(&instrumented).is_ok_and(|text| text != code) {
-                        torn += 1;
-                    }
-                }
-                torn
-            });
-            let writers: Vec<_> = std::iter::repeat_with(|| {
-                scope.spawn(|| {
-                    for _ in 0..25 {
-                        write_run_dir(cache.path(), &files, None).expect("run dir");
-                    }
-                })
-            })
-            .take(4)
-            .collect();
-            for writer in writers {
-                writer.join().expect("writer");
+        for round in 0..ROUNDS {
+            let cache = tempfile::tempdir().expect("dir");
+            let dir = cache.path().join("runs").join(content_hash(&files));
+            if round % 2 == 1 {
+                fs::create_dir_all(dir.join("files/src")).expect("stale dir");
+                fs::write(dir.join("files/src/a.ts"), "stale").expect("stale file");
             }
-            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            let instrumented = dir.join("files/src/a.ts");
+            let done = std::sync::atomic::AtomicBool::new(false);
+            let start = std::sync::Barrier::new(WRITERS + 1);
+            let (torn, vanished, results) = std::thread::scope(|scope| {
+                let reader = scope.spawn(|| {
+                    start.wait();
+                    let (mut torn, mut vanished, mut complete) = (0, 0, false);
+                    while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                        match fs::read_to_string(&instrumented) {
+                            Ok(text) if text == code => complete = true,
+                            Ok(_) if complete => torn += 1,
+                            Err(_) if complete => vanished += 1,
+                            _ => {}
+                        }
+                    }
+                    (torn, vanished)
+                });
+                let stop = StopOnDrop(&done);
+                let writers: Vec<_> = std::iter::repeat_with(|| {
+                    scope.spawn(|| {
+                        start.wait();
+                        write_run_dir(cache.path(), &files, None).map(|run| run.dir)
+                    })
+                })
+                .take(WRITERS)
+                .collect();
+                let results: Vec<_> = writers.into_iter().map(|writer| writer.join()).collect();
+                drop(stop);
+                let (torn, vanished) = reader.join().expect("reader");
+                (torn, vanished, results)
+            });
+            for result in results {
+                let run = result.expect("writer").expect("run dir");
+                assert_eq!(run, dir);
+            }
+            assert_eq!(torn, 0, "round {round}: a reader never sees a partial file");
             assert_eq!(
-                reader.join().expect("reader"),
-                0,
-                "a reader never sees a partial file"
+                vanished, 0,
+                "round {round}: a complete run dir never disappears"
             );
-        });
-        assert_eq!(fs::read_to_string(&instrumented).expect("file"), code);
-        assert_eq!(
-            fs::read_to_string(run.dir.join("files/src/b.ts")).expect("file"),
-            "b"
-        );
-        let names: Vec<_> = fs::read_dir(cache.path().join("runs"))
-            .expect("runs")
-            .flatten()
-            .map(|entry| entry.file_name())
-            .collect();
-        assert_eq!(names.len(), 1, "one run dir and no staging dir: {names:?}");
+            assert_eq!(fs::read_to_string(&instrumented).expect("file"), code);
+            assert_eq!(
+                fs::read_to_string(dir.join("files/src/b.ts")).expect("file"),
+                "b"
+            );
+            let names: Vec<_> = fs::read_dir(cache.path().join("runs"))
+                .expect("runs")
+                .flatten()
+                .map(|entry| entry.file_name())
+                .filter(|name| !name.to_string_lossy().ends_with(".lock"))
+                .collect();
+            assert_eq!(names.len(), 1, "one run dir and no staging dir: {names:?}");
+        }
     }
 
     #[test]
@@ -535,6 +608,8 @@ mod tests {
         .expect("run dir");
         let remaining = fs::read_dir(cache.path().join("runs"))
             .expect("runs")
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
             .count();
         assert_eq!(
             remaining,

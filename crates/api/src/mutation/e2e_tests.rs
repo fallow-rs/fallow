@@ -136,6 +136,44 @@ fn a_resume_without_a_test_run_keeps_the_journal_of_another_scope() {
     assert_eq!(fs::read_to_string(&journal).expect("kept"), text);
 }
 
+/// Two runs of one project share the journal path. When an older run
+/// completes after a newer run started, the older run must not remove the
+/// journal of the newer run, or an interrupt of the newer run loses its
+/// final results.
+#[test]
+fn a_complete_run_keeps_the_journal_of_a_newer_run() {
+    let project = small_project();
+    commit_all(project.path());
+    let run = options(project.path(), MutationRunScope::All);
+    let mut report = run_mutation(&run).expect("run");
+    assert_eq!(
+        report.completion.status,
+        fallow_output::MutationCompletionStatus::Complete
+    );
+    report.runner = Some(fallow_output::MutationRunnerOutput {
+        name: "vitest".to_owned(),
+        version: "3.0.0".to_owned(),
+        protocol_version: 1,
+        runtime: fallow_output::MutationRuntimeOutput {
+            name: "node".to_owned(),
+            version: "24.1.0".to_owned(),
+        },
+        concurrency: 1,
+        notes: Vec::new(),
+    });
+    report.journal_run_id = Some("older-run".to_owned());
+    let journal = project.path().join(".fallow/mutation/journal.jsonl");
+    fs::create_dir_all(journal.parent().expect("parent")).expect("dir");
+    let newer = "{\"journal_format\":2,\"run_id\":\"newer-run\"}\n{\"id\":\"m1\",\"key\":\"k1\",\"status\":\"killed\"}\n";
+    fs::write(&journal, newer).expect("write");
+
+    let removed =
+        crate::mutation::remove_finished_mutation_journal(&run.analysis, &report).expect("settle");
+
+    assert!(!removed, "the journal belongs to another run");
+    assert_eq!(fs::read_to_string(&journal).expect("kept"), newer);
+}
+
 /// A `node:test` project with a Vue component. The test does not import the
 /// component, because Node cannot load it.
 fn component_project(runner: &str) -> tempfile::TempDir {

@@ -1,0 +1,4 @@
+### Fixed
+
+- **A complete `fallow mutation` run now removes only its own outcome journal.** Two runs of one project share the journal file. When an older run completed after a newer run had started, the older run removed the journal of the newer run, so `--resume` after an interrupt of the newer run lost its final results. Each run now writes an id into the journal header and removes the journal only when the id is its own.
+- **Concurrent `fallow mutation` runs on one plan no longer delete the run directory of each other.** A run that found a stale run directory replaced it without a lock. A second run could publish a complete directory in that moment, and the first run then deleted the directory that the second run used. The check and the replacement now run under a lock file per run directory when the file system supports locks, and two runs in one process get separate staging directories.
