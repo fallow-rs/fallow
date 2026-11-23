@@ -37,6 +37,7 @@ use std::path::{Component, Path, PathBuf};
 use fallow_config::{
     ConfigFixPlan as ResolvedConfigPlan, IgnoreExportRule, OutputFormat,
     add_ignore_exports_rule_to_string, classify_config_fix_plan as classify_plan,
+    render_ignore_exports_edit,
 };
 use fallow_types::output_dead_code::DuplicateExportFinding;
 use fallow_types::path_util::display_relative;
@@ -119,16 +120,6 @@ fn apply_edit(
     }
     let config_file = display_relative(root, config_path);
 
-    if write.dry_run {
-        return apply_edit_dry_run(
-            config_path,
-            &config_file,
-            &entries,
-            write.output,
-            write.fixes,
-        );
-    }
-
     let current = match std::fs::read_to_string(config_path) {
         Ok(content) => content,
         Err(error) => {
@@ -138,76 +129,60 @@ fn apply_edit(
             return true;
         }
     };
-    match add_ignore_exports_rule_to_string(config_path, &current, &entries) {
-        Ok(proposed) => {
-            write.plan.stage_existing(
-                config_path.to_path_buf(),
-                current.as_bytes(),
-                proposed.into_bytes(),
-            );
-            write.fixes.push(serde_json::json!({
-                "type": "add_ignore_exports",
-                "config_key": "ignoreExports",
-                "file": config_file,
-                "entries": entries,
-                "applied": true,
-                "__target": config_path.display().to_string(),
-            }));
-            false
-        }
-        Err(e) => {
-            eprintln!("Error: failed to add ignoreExports rules to {config_file}: {e}");
-            true
-        }
-    }
-}
-
-/// Render the dry-run preview (diff + JSON entry) for the config-edit path.
-/// Returns the orchestrator's `had_write_error` bool.
-fn apply_edit_dry_run(
-    config_path: &Path,
-    config_file: &str,
-    entries: &[IgnoreExportRule],
-    output: OutputFormat,
-    fixes: &mut Vec<serde_json::Value>,
-) -> bool {
-    let current = match std::fs::read_to_string(config_path) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error: failed to read {config_file} for dry-run preview: {e}");
+    let (proposed, added) = match render_ignore_exports_edit(config_path, &current, entries) {
+        Ok(edit) => edit,
+        Err(error) => {
+            eprintln!("Error: failed to add ignoreExports rules to {config_file}: {error}");
             return true;
         }
     };
-    let proposed = match add_ignore_exports_rule_to_string(config_path, &current, entries) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error: failed to compute proposed config edit for {config_file}: {e}");
-            return true;
-        }
-    };
-    if current == proposed {
+    if added.is_empty() {
         return false;
     }
-    let diff = render_unified_diff(config_file, &current, &proposed);
-    let mut entry = serde_json::json!({
+    if write.dry_run {
+        preview_edit(&config_file, &current, &proposed, &added, write);
+    } else {
+        write.plan.stage_existing(
+            config_path.to_path_buf(),
+            current.as_bytes(),
+            proposed.into_bytes(),
+        );
+        write.fixes.push(serde_json::json!({
+            "type": "add_ignore_exports",
+            "config_key": "ignoreExports",
+            "file": config_file,
+            "entries": added,
+            "applied": true,
+            "__target": config_path.display().to_string(),
+        }));
+    }
+    false
+}
+
+fn preview_edit(
+    config_file: &str,
+    current: &str,
+    proposed: &str,
+    entries: &[IgnoreExportRule],
+    write: &mut ConfigWriteContext<'_>,
+) {
+    let diff = render_unified_diff(config_file, current, proposed);
+    let entry = serde_json::json!({
         "type": "add_ignore_exports",
         "config_key": "ignoreExports",
         "file": config_file,
         "entries": entries,
         "proposed_diff": diff,
+        "dry_run": true,
     });
-    if !matches!(output, OutputFormat::Json) {
+    if !matches!(write.output, OutputFormat::Json) {
         eprintln!(
             "Would append {} ignoreExports rule(s) to {config_file}:",
             entries.len()
         );
         eprintln!("{diff}");
     }
-    if let Some(obj) = entry.as_object_mut() {
-        obj.insert("dry_run".to_owned(), serde_json::Value::Bool(true));
-    }
-    fixes.push(entry);
-    false
+    write.fixes.push(entry);
 }
 
 fn apply_create(
