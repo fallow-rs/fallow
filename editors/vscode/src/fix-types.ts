@@ -81,6 +81,8 @@ export interface FixAction {
    * `content_changed` / `mixed_line_endings`).
    */
   readonly skip_reason?: string;
+  /** Recovery advice for a skipped fix. */
+  readonly help?: string;
   /**
    * Reachability caveat tokens copied from the finding, present on
    * `skip_reason: "low_confidence_incomplete_analysis"` entries so a
