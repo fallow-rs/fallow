@@ -728,7 +728,8 @@ pub(crate) fn git_path_from_bytes(path: &[u8]) -> PathBuf {
 
 fn git_command(cwd: &Path, args: &[&str]) -> Command {
     let mut command = crate::git_env::git_command(cwd);
-    command.args(args);
+    // Older Git versions ignore unknown config keys and reject unknown diff options.
+    command.args(["-c", "diff.relative=false"]).args(args);
     command
 }
 
@@ -984,6 +985,14 @@ mod tests {
     }
 
     #[test]
+    fn git_diff_sets_relative_paths_through_config() {
+        let command = git_command(Path::new("."), &["diff", "--name-only"]);
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        assert!(args.ends_with(&["-c", "diff.relative=false", "diff", "--name-only"]));
+        assert!(!args.contains(&"--no-relative"));
+    }
+
+    #[test]
     fn git_command_clears_parent_git_environment() {
         let command = git_command(Path::new("."), &["status"]);
         let envs: Vec<_> = command.get_envs().collect();
@@ -1036,6 +1045,37 @@ mod tests {
             let independent = changed_files(repo.path(), reference).expect("independent changes");
             assert_eq!(batched, independent, "{reference} scope changed");
         }
+    }
+
+    #[test]
+    fn relative_diff_config_preserves_repository_paths_from_a_subdirectory() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(repo.path()).unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        run_git(&root, &["init", "--quiet"]);
+        run_git(&root, &["config", "user.email", "test@example.com"]);
+        run_git(&root, &["config", "user.name", "Test User"]);
+        run_git(&root, &["config", "diff.relative", "true"]);
+        std::fs::write(sub.join("a.ts"), "export const a = 1;").unwrap();
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-qm", "base"]);
+        run_git(&root, &["branch", "base"]);
+        run_git(&sub, &["mv", "a.ts", "b.ts"]);
+        run_git(&root, &["commit", "-qm", "rename"]);
+        run_git(&sub, &["mv", "b.ts", "c.ts"]);
+
+        let changed = changed_files(&sub, "base").unwrap();
+        for name in ["b.ts", "c.ts"] {
+            assert!(changed.contains(&sub.join(name)), "{changed:?}");
+        }
+        assert_eq!(
+            try_get_renamed_files(&sub, "base").unwrap(),
+            vec![RenamedFile {
+                from: sub.join("a.ts"),
+                to: sub.join("c.ts")
+            }]
+        );
     }
 
     #[cfg(unix)]
