@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.48.0] - 2026-11-23
+
+### Added
+
+- **`keepExportTags` selects the JSDoc tags that keep an export alive.** An export with an `@internal`, `@alpha` or `@beta` tag never got an `unused-export` finding, and no option turned this off. A common use of the tag is `/** @internal Exported for tests. */`: when the last test that used the export went away, the gate stayed silent. The new key lists the tags that keep an export. The default is all four tags (`public`, `internal`, `alpha`, `beta`), so the behavior does not change. Set `"keepExportTags": ["public"]` to check `@internal`, `@alpha` and `@beta` exports like untagged exports. A tag that is not in the list also gives no credit to the source of a tagged re-export. `fallow dead-code --trace <file>:<export>` now names the tag when a tag keeps an export with no consumer, and the JSON trace has the new field `kept_by_tag`.
+  (Closes [#5081](https://github.com/fallow-rs/fallow/issues/5081))
+
+### Changed
+
+- **Fallow reports an unused export of a fixture file that a test imports by name.** The Vitest, Jest and Playwright plugins make each file below `fixtures/` or `__fixtures__/` an entry point, so fallow never checked its exports. Now, when a module outside the fixture directories imports a name from such a file, fallow checks its exports like those of any other module, and also checks each fixture file that it imports by name. The file stays an entry point, so it is never an unused file, and its default export stays used. A fixture file that no module imports by name, that a dynamic import, an import pattern or `require()` loads, that only a side-effect import loads, whose fixture has its own `package.json`, or that another entry rule also matches keeps the old behavior. A project can get new `unused-export` and `unused-type` findings.
+  (Closes [#5082](https://github.com/fallow-rs/fallow/issues/5082))
+
+### Fixed
+
+- **`fallow hooks install --target git` writes the hook where Git runs it.** Before, the command always wrote `.git/hooks/pre-commit`. With `core.hooksPath` set, Git did not run that file, but `fallow hooks status` reported the hook as installed. In a linked worktree or a package folder of the repository, the command failed with "No .git directory found". Now install, uninstall and status use the hooks folder of Git: the `core.hooksPath` folder, or the shared hooks folder of a linked worktree. When `core.hooksPath` points outside the repository, install stops with an error, because other repositories can share that folder. Uninstall then removes a hook that fallow wrote to `.git/hooks/pre-commit` before.
+
+- **`fallow plugin-check` evaluates an external plugin in the package that runs it.** The analysis runs external plugins once for the root and once for each workspace. Each run uses the dependencies of that package, plus each root dependency that a workspace script calls, and resolves `manifestEntries` globs from its folder. Before, `plugin-check` pooled the dependencies of all packages and checked the manifests only at the project root. A plugin that a workspace enables then showed a false `manifests-matched-none` warning. Now `plugin-check` checks each package that activates the plugin, and skips a package without a `package.json`, as the analysis does. The JSON adds `active_in`, the packages that activate the plugin, and a `package` field on each item of `manifest_rules`. All paths stay relative to the project root.
+
+- **Stale baseline prune advice keeps the analysis mode.** When a health or duplication baseline becomes stale, the prune command in the warning and the gate failure now includes `--production` if the baseline was saved in production mode. The advice also includes `--root` when the project is outside the working directory.
+
+- **Regression baseline errors give the save command for the selected analysis.** The command quotes file paths and keeps the selected project, config file, production scope, issue filters and analysis mode. If the type-aware sidecar was unavailable, the error tells you to restore it before saving a baseline. For flag retirement and entry weights, the error tells you to move an incompatible file to a backup before you save a new file.
+
+- **The regression breakdown compares only counts that the baseline can store.** For example, if a Vue project adds one unused file, the breakdown for a config baseline reports that file and omits existing unused component props. The total still includes all issue kinds.
+
+- **The baseline growth gate ignores scope changes in dead-code baselines.** A workspace save now compares only the finding fields. A new occurrence of a finding still fails the gate.
+
+- **An unchanged health baseline can move from legacy finding keys to counts.** During the first comparison, the gate checks how many distinct findings each new bucket requires. A function can exceed both the complexity and CRAP thresholds. The gate reports the limits of the comparison because legacy keys omit category and severity.
+
+- **Saved health reports render Markdown, GitHub summaries and GitHub annotations outside the original checkout.** These formats use the saved report even when the new directory has no CODEOWNERS file or workspace packages.
+
+- **The health trend error gives a repair command for the current analysis mode.** The command keeps the project root and the selected snapshot path. If the path is outside the allowed write directories, the error shows how to save and compare a snapshot in the project.
+
+- **Sticky comments show errors before warnings in each category.** A row limit keeps the errors visible.
+
+- **CodeClimate clone findings show the owner of their clone group.** Separate clone regions in one file can have different owners in both live and saved reports.
+
+- **CodeClimate gives each flag read on a line its own fingerprint.** A single read keeps its existing fingerprint.
+
+- **The health badge and the terminal round the score the same way.** Both use the same grade and display precision.
+
+- **GitLab retries temporary errors when it reads merge request metadata.** The CI job uses the HTTP status to decide whether to retry.
+
+- **GitHub Enterprise Server reviews use the API endpoints of the runner.** Sticky comments and inline reviews use the REST URL of the runner. Thread lookups and resolutions use its GraphQL endpoint.
+
+- **The language server watches all source extensions that fallow analyzes.** Clients that support file watchers now report external changes to component files, stylesheets, HTML and GraphQL, so diagnostics refresh after edits and branch switches.
+
+- **A refreshed analysis session reports source skips from the latest file scan.** When a file crosses the size limit, the session adds or clears its diagnostic on the next scan.
+
+- **VS Code shows which fixes the CLI can apply.** The preview excludes skipped changes. After an apply run, the editor reports how many fixes the CLI applied and how many it skipped, also when a write fails.
+
+- **The fix confirmation describes all file changes.** It now includes enum and class member removal, dependency catalogs and fallow configuration files.
+
+- **VS Code detects a CLI upgrade at the same path.** After a managed download or a local CLI update, the next command reads the installed version and enables the options that it supports.
+
+- **Click an expanded folder heading in the import graph to collapse it.** This works for both importers and imports.
+
+- **Folder grouping in the import graph finds modules below a shared directory.** A project with large modules under `src/features` now shows each module in its own group.
+
+- **The file panel lists duplication for each file in a clone group.** The project ranking still links to the group as a whole.
+
+- **The architecture legend includes package and re-export cycles.** The legend and the badge use the same finding total.
+
+- **Escape closes the More menu and keeps the selected file open.** Browser shortcuts and text composition also leave the dashboard selection alone.
+
+- **The CLI reference keeps the capital R in "React Router".** The display label of the `react-router-open-redirect` security category is now "React Router open redirect sink". The docs page title uses this label.
+
+### Security
+
+- **The `cookie` dependency is at 0.18.3 for RUSTSEC-2026-0594.** Version 0.18.2 can repeat the nonces of private cookies in a process that forks. The release binaries now build with the fixed version.
+
 ## [3.47.0] - 2026-11-22
 
 ### Added
@@ -18615,7 +18685,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.47.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.48.0...HEAD
+[3.48.0]: https://github.com/fallow-rs/fallow/compare/v3.47.0...v3.48.0
 [3.47.0]: https://github.com/fallow-rs/fallow/compare/v3.46.0...v3.47.0
 [3.46.0]: https://github.com/fallow-rs/fallow/compare/v3.45.0...v3.46.0
 [3.45.0]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.45.0
