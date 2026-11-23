@@ -51,6 +51,7 @@ const FLAG_RUNTIME_REACHABLE: u8 = 1 << 2;
 const FLAG_TEST_REACHABLE: u8 = 1 << 3;
 const FLAG_CJS_EXPORTS: u8 = 1 << 4;
 const FLAG_CONSUMER_CHECKED: u8 = 1 << 5;
+const FLAG_FIXTURE_ENTRY: u8 = 1 << 6;
 
 impl ModuleNode {
     /// Whether this module is an entry point.
@@ -68,6 +69,27 @@ impl ModuleNode {
     #[inline]
     pub(crate) const fn exposes_entry_surface(&self) -> bool {
         self.flags & FLAG_ENTRY_POINT != 0 && self.flags & FLAG_CONSUMER_CHECKED == 0
+    }
+
+    /// Whether this module is an entry point whose exports need a consumer in
+    /// the project: `includeEntryExports` covers it, or it is a fixture file
+    /// that a module imports by name.
+    #[inline]
+    pub const fn is_consumer_checked(&self) -> bool {
+        self.flags & FLAG_ENTRY_POINT != 0 && self.flags & FLAG_CONSUMER_CHECKED != 0
+    }
+
+    /// Whether this module is a consumer-checked entry point that only a
+    /// plugin fixture pattern seeds. A tool can still load such a file by
+    /// path, so its default export counts as used.
+    #[inline]
+    pub const fn is_fixture_entry(&self) -> bool {
+        self.is_consumer_checked() && self.flags & FLAG_FIXTURE_ENTRY != 0
+    }
+
+    #[inline]
+    pub(crate) const fn set_fixture_entry(&mut self) {
+        self.flags |= FLAG_FIXTURE_ENTRY;
     }
 
     /// Mark this module as an entry point that `includeEntryExports` covers.

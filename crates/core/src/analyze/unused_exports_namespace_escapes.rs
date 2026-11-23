@@ -117,7 +117,9 @@ fn hides_from_a_check(
 
 /// An entry file whose exports are public API, so no consumer must use them.
 fn is_public_entry(config: &fallow_config::ResolvedConfig, module: &ModuleNode) -> bool {
-    module.is_entry_point() && !config.include_entry_exports_for(&module.path)
+    module.is_entry_point()
+        && !module.is_consumer_checked()
+        && !config.include_entry_exports_for(&module.path)
 }
 
 /// The escape-credited exports that the unused-export pass reports without

@@ -992,6 +992,7 @@ impl MemberReportContext<'_, '_> {
         // store members are checked, unless `includeEntryExports` says that
         // each export of the file needs a consumer in the project.
         let store_only_scan = module.is_entry_point()
+            && !module.is_consumer_checked()
             && !self
                 .input
                 .entry_exports_config
