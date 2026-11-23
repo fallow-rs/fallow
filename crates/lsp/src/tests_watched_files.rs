@@ -1,21 +1,17 @@
 use super::{Path, session_store, watched_file_globs};
 
 #[test]
-fn refreshed_discovery_watches_component_sources() {
+fn watched_file_globs_cover_every_discovered_source_extension() {
     let patterns: Vec<_> = watched_file_globs()
         .iter()
         .map(|glob| {
             fallow_config::extglob::ExtglobMatcher::new(glob, &[]).expect("valid watcher glob")
         })
         .collect();
-    for path in [
-        "src/App.vue",
-        "src/Card.svelte",
-        "pages/index.astro",
-        "docs/guide.mdx",
-    ] {
+    for extension in fallow_api::SOURCE_EXTENSIONS {
+        let path = format!("src/example.{extension}");
         assert!(
-            patterns.iter().any(|glob| glob.is_match(Path::new(path))),
+            patterns.iter().any(|glob| glob.is_match(Path::new(&path))),
             "no watcher for {path}"
         );
     }

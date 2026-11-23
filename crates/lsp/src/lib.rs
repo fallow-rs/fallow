@@ -223,11 +223,8 @@ const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
 const MAX_PENDING_TYPE_AWARE_CHANGES: usize = 2_048;
 /// How long `shutdown` waits for the kept sessions to write their parse cache.
 const SHUTDOWN_CACHE_FLUSH_GRACE: Duration = Duration::from_secs(1);
-/// Source and resolution inputs a client watches. The fixed session input
-/// names and the names the loader accepts are appended by
-/// [`watched_file_globs`].
+/// Resolution inputs with names that are not fixed session inputs.
 const WATCHED_FILE_GLOBS: &[&str] = &[
-    "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,vue,svelte,astro,mdx}",
     "**/*.d.ts",
     "**/{tsconfig*,jsconfig*}.json",
     "**/fallow-plugin-*.{toml,json,jsonc}",
@@ -236,13 +233,15 @@ const WATCHED_FILE_GLOBS: &[&str] = &[
 
 /// Glob patterns registered for `workspace/didChangeWatchedFiles`.
 ///
-/// Derived from the session input list and the loader's own config-file list,
-/// so a name added there starts being watched without a second list to keep
-/// in step.
+/// Discovery, session invalidation and the config loader own the lists of inputs.
 fn watched_file_globs() -> Vec<String> {
-    WATCHED_FILE_GLOBS
-        .iter()
-        .map(|pattern| (*pattern).to_string())
+    let sources = format!("**/*.{{{}}}", fallow_api::SOURCE_EXTENSIONS.join(","));
+    std::iter::once(sources)
+        .chain(
+            WATCHED_FILE_GLOBS
+                .iter()
+                .map(|pattern| (*pattern).to_string()),
+        )
         .chain(
             session_store::SESSION_INPUT_FILE_NAMES
                 .iter()
