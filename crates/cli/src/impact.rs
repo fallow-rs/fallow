@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 use crate::audit::{AuditSummary, AuditVerdict};
 use crate::report::format_display_path;
 
-/// Version 7 replaced the per-record `gate: bool` with `gate_source`; older
-/// stores migrate on read (see [`StoredImpactRecord`]).
-const STORE_SCHEMA_VERSION: u32 = 7;
+/// Version 8 scopes pending failures and resolution matches to their worktree
+/// and counts containment events after the history window fills.
+const STORE_SCHEMA_VERSION: u32 = 8;
 
 const MAX_RECORDS: usize = 200;
 
@@ -180,8 +180,10 @@ pub struct ImpactStore {
     pub project_records: Vec<ImpactRecord>,
     #[serde(default)]
     pub containment: Vec<ContainmentEvent>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_containment: Option<PendingContainment>,
+    #[serde(default)]
+    archived_containment_count: usize,
+    #[serde(default, skip_serializing_if = "FxHashMap::is_empty")]
+    pending_by_worktree: FxHashMap<String, PendingContainment>,
     /// Per-finding attribution baseline, namespaced by worktree key (schema v4)
     /// so two worktrees of one repo (collapsed to a single store) do not prune
     /// each other's per-file frontier. Inner map is rel-path -> findings.
@@ -196,7 +198,7 @@ pub struct ImpactStore {
     #[serde(default)]
     pub suppressed_total: usize,
     #[serde(default)]
-    pub recent_resolved: Vec<ResolutionEvent>,
+    recent_resolved: Vec<StoredResolution>,
     #[serde(default)]
     pub onboarding_declined: bool,
     /// Whether the user ever ran an explicit `impact enable` or `impact
@@ -277,12 +279,24 @@ impl LegacyFlatStore {
             records: self.records,
             project_records: self.project_records,
             containment: self.containment,
-            pending_containment: self.pending_containment,
+            archived_containment_count: 0,
+            pending_by_worktree: self
+                .pending_containment
+                .into_iter()
+                .map(|pending| (worktree_key.to_owned(), pending))
+                .collect(),
             frontier,
             clone_frontier,
             resolved_total: self.resolved_total,
             suppressed_total: self.suppressed_total,
-            recent_resolved: self.recent_resolved,
+            recent_resolved: self
+                .recent_resolved
+                .into_iter()
+                .map(|event| StoredResolution {
+                    event,
+                    worktree: Some(worktree_key.to_owned()),
+                })
+                .collect(),
             onboarding_declined: self.onboarding_declined,
             explicit_decision: self.explicit_decision,
             last_digest_epoch: self.last_digest_epoch,
@@ -378,14 +392,15 @@ fn impact_config_dir() -> Option<PathBuf> {
     }
 }
 
+#[path = "impact_history.rs"]
+mod history;
+use history::{StoredResolution, consume_appearance, uncredit_cross_run_moves};
 #[path = "impact_record_gate.rs"]
 mod record_gate;
 use record_gate::record_gate_skips;
 #[path = "impact_store.rs"]
 mod store;
-use store::{
-    Change, OnInvalid, finish_record, load_all, load_global_default, stamp_schema_version,
-};
+use store::{Change, OnInvalid, finish_record, load_all, load_global_default};
 #[cfg(test)]
 use store::{
     ImpactStoreLock, StoreReadError, legacy_store_path, lock_path_for, migration_marker_path,
@@ -456,7 +471,6 @@ pub fn enable(root: &Path) -> Result<bool, StoreWriteError> {
         let was_enabled = store.enabled;
         store.enabled = true;
         store.explicit_decision = true;
-        stamp_schema_version(store);
         Change::Write(!was_enabled)
     })
 }
@@ -475,7 +489,6 @@ pub fn disable(root: &Path) -> Result<bool, StoreWriteError> {
         let was_enabled = store.enabled;
         store.enabled = false;
         store.explicit_decision = true;
-        stamp_schema_version(store);
         Change::Write(was_enabled)
     })
 }
@@ -510,7 +523,7 @@ fn stamp_due_digest(store: &mut ImpactStore) -> Option<ImpactDigest> {
     if !resolve_enabled(store).0 {
         return None;
     }
-    let containment_count = store.containment.len();
+    let containment_count = store.containment_count();
     if containment_count == 0 && store.resolved_total == 0 {
         return None;
     }
@@ -541,7 +554,6 @@ pub fn decline_onboarding(root: &Path) -> Result<bool, StoreWriteError> {
     store::transact(root, OnInvalid::Stop, |store| {
         let was_declined = store.onboarding_declined;
         store.onboarding_declined = true;
-        stamp_schema_version(store);
         Change::Write(!was_declined)
     })
 }
@@ -626,11 +638,11 @@ fn apply_audit_record(
     if let Err(message) = validate_store_identity(store, analysis_identity) {
         return Change::Keep(Err(message));
     }
-    store.schema_version = STORE_SCHEMA_VERSION;
     store.analysis_identity = (*analysis_identity).clone();
     // Capture the repo basename for the cross-repo view (memoized; no extra git
     // probe). Refreshed each run so a renamed repo folder updates its label.
-    store.label = project_identity(root).2;
+    let (_, worktree, label) = project_identity(root);
+    store.label = label;
 
     let counts = impact_counts_from_summary(summary);
     let verdict_str = verdict_label(*verdict);
@@ -639,14 +651,9 @@ fn apply_audit_record(
         store.first_recorded = Some((*timestamp).to_owned());
     }
 
-    apply_containment(
-        store,
-        *verdict,
-        gate_source.is_some(),
-        *git_sha,
-        timestamp,
-        &counts,
-    );
+    if gate_source.is_some() {
+        store.record_gate(&worktree, *verdict, *git_sha, timestamp, &counts);
+    }
 
     store.records.push(ImpactRecord {
         timestamp: (*timestamp).to_owned(),
@@ -659,7 +666,6 @@ fn apply_audit_record(
     compact(store);
 
     if let Some(attribution) = attribution {
-        let (_, worktree, _) = project_identity(root);
         apply_attribution(store, attribution, &worktree, *git_sha, timestamp);
     }
 
@@ -718,7 +724,6 @@ fn apply_combined_record(
     if let Err(message) = validate_store_identity(store, analysis_identity) {
         return Change::Keep(Err(message));
     }
-    store.schema_version = STORE_SCHEMA_VERSION;
     store.analysis_identity = analysis_identity.clone();
     store.label = project_identity(root).2;
 
@@ -771,40 +776,6 @@ fn validate_store_identity(
         "impact history has an incompatible analysis identity ({}); run `fallow impact reset` before switching semantic analysis modes or capability sets",
         incompatible.join(", ")
     ))
-}
-
-/// Update pending/contained state from a gate run's verdict.
-fn apply_containment(
-    store: &mut ImpactStore,
-    verdict: AuditVerdict,
-    gate: bool,
-    git_sha: Option<&str>,
-    timestamp: &str,
-    counts: &ImpactCounts,
-) {
-    if !gate {
-        return;
-    }
-    if verdict == AuditVerdict::Fail {
-        if store.pending_containment.is_none() {
-            store.pending_containment = Some(PendingContainment {
-                blocked_at: timestamp.to_owned(),
-                git_sha: git_sha.map(ToOwned::to_owned),
-                blocked_counts: counts.clone(),
-            });
-        }
-    } else if let Some(pending) = store.pending_containment.take() {
-        store.containment.push(ContainmentEvent {
-            blocked_at: pending.blocked_at,
-            cleared_at: timestamp.to_owned(),
-            git_sha: pending.git_sha,
-            blocked_counts: pending.blocked_counts,
-        });
-        if store.containment.len() > MAX_CONTAINMENT {
-            let overflow = store.containment.len() - MAX_CONTAINMENT;
-            store.containment.drain(0..overflow);
-        }
-    }
 }
 
 fn compact(store: &mut ImpactStore) {
@@ -884,9 +855,9 @@ fn apply_attribution(
 
     let (current_findings, current_supps) = collect_current_state(input, &changed, root);
 
-    let appeared_move_keys = compute_appeared_move_keys(&frontier, &current_findings);
+    let mut appeared_move_keys = compute_appeared_move_keys(&frontier, &current_findings);
 
-    uncredit_cross_run_moves(store, &appeared_move_keys);
+    let prior_history_len = store.recent_resolved.len();
 
     let mut disappearance_input = FileDisappearancesInput {
         store,
@@ -894,11 +865,18 @@ fn apply_attribution(
         changed: &changed,
         current_findings: &current_findings,
         current_supps: &current_supps,
-        appeared_move_keys: &appeared_move_keys,
+        appeared_move_keys: &mut appeared_move_keys,
+        worktree_key,
         git_sha,
         timestamp,
     };
     classify_file_disappearances(&mut disappearance_input);
+    uncredit_cross_run_moves(
+        store,
+        worktree_key,
+        &mut appeared_move_keys,
+        prior_history_len,
+    );
     update_file_frontier(&mut frontier, &changed, current_findings, current_supps);
     classify_clone_disappearances(&mut CloneDisappearancesInput {
         store,
@@ -920,8 +898,8 @@ fn apply_attribution(
 fn compute_appeared_move_keys(
     frontier: &FlatFrontier,
     current_findings: &FxHashMap<String, Vec<FrontierFinding>>,
-) -> FxHashSet<String> {
-    let mut appeared_move_keys: FxHashSet<String> = FxHashSet::default();
+) -> FxHashMap<String, usize> {
+    let mut appeared_move_keys = FxHashMap::default();
     for (rel, findings) in current_findings {
         let prior_ids: FxHashSet<&str> = frontier
             .get(rel)
@@ -929,7 +907,7 @@ fn compute_appeared_move_keys(
             .unwrap_or_default();
         for ff in findings {
             if !prior_ids.contains(ff.id.as_str()) {
-                appeared_move_keys.insert(ff.move_key());
+                *appeared_move_keys.entry(ff.move_key()).or_default() += 1;
             }
         }
     }
@@ -1026,7 +1004,8 @@ struct FileDisappearancesInput<'a> {
     changed: &'a FxHashSet<String>,
     current_findings: &'a FxHashMap<String, Vec<FrontierFinding>>,
     current_supps: &'a FxHashMap<String, FxHashSet<String>>,
-    appeared_move_keys: &'a FxHashSet<String>,
+    appeared_move_keys: &'a mut FxHashMap<String, usize>,
+    worktree_key: &'a str,
     git_sha: Option<&'a str>,
     timestamp: &'a str,
 }
@@ -1037,14 +1016,17 @@ fn classify_file_disappearances(input: &mut FileDisappearancesInput<'_>) {
     let changed = input.changed;
     let current_findings = input.current_findings;
     let current_supps = input.current_supps;
-    let appeared_move_keys = input.appeared_move_keys;
     let git_sha = input.git_sha;
     let timestamp = input.timestamp;
     let empty_supps = FxHashSet::default();
-    for rel in changed {
-        let Some(prior) = frontier.get(rel) else {
-            continue;
-        };
+    // Multiple paths can lose the same symbol. Break ties by path so the
+    // credited event is stable when Git lists the files in another order.
+    let mut prior_files: Vec<_> = changed
+        .iter()
+        .filter_map(|rel| frontier.get(rel).map(|prior| (rel, prior)))
+        .collect();
+    prior_files.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    for (rel, prior) in prior_files {
         let now_ids: FxHashSet<&str> = current_findings
             .get(rel)
             .map(|fs| fs.iter().map(|f| f.id.as_str()).collect())
@@ -1063,24 +1045,24 @@ fn classify_file_disappearances(input: &mut FileDisappearancesInput<'_>) {
             if now_ids.contains(pf.id.as_str()) {
                 continue; // still present
             }
-            if appeared_move_keys.contains(&pf.move_key()) {
-                continue; // moved to another file this run
-            }
             if covered_by(&new_supp_kinds, &pf.kind) {
-                suppressed += 1; // conservative: a fresh fallow-ignore, never a win
-            } else {
+                suppressed += 1;
+            } else if !consume_appearance(input.appeared_move_keys, &pf.move_key()) {
                 resolved.push(pf.clone());
             }
         }
         store.suppressed_total += suppressed;
         for pf in resolved {
             store.resolved_total += 1;
-            store.recent_resolved.push(ResolutionEvent {
-                kind: pf.kind,
-                path: rel.clone(),
-                symbol: pf.symbol,
-                git_sha: git_sha.map(ToOwned::to_owned),
-                timestamp: timestamp.to_owned(),
+            store.recent_resolved.push(StoredResolution {
+                worktree: Some(input.worktree_key.to_owned()),
+                event: ResolutionEvent {
+                    kind: pf.kind,
+                    path: rel.clone(),
+                    symbol: pf.symbol,
+                    git_sha: git_sha.map(ToOwned::to_owned),
+                    timestamp: timestamp.to_owned(),
+                },
             });
         }
     }
@@ -1215,12 +1197,15 @@ fn credit_clone_disappearance(
     } else {
         store.resolved_total += 1;
         let path = paths.first().cloned().unwrap_or_default();
-        store.recent_resolved.push(ResolutionEvent {
-            kind: CODE_DUPLICATION_KIND.to_owned(),
-            path,
-            symbol: None,
-            git_sha: git_sha.map(ToOwned::to_owned),
-            timestamp: timestamp.to_owned(),
+        store.recent_resolved.push(StoredResolution {
+            worktree: None,
+            event: ResolutionEvent {
+                kind: CODE_DUPLICATION_KIND.to_owned(),
+                path,
+                symbol: None,
+                git_sha: git_sha.map(ToOwned::to_owned),
+                timestamp: timestamp.to_owned(),
+            },
         });
     }
 }
@@ -1234,27 +1219,6 @@ fn bound_recent_resolved(store: &mut ImpactStore) {
         let overflow = store.recent_resolved.len() - MAX_RECENT_RESOLVED;
         store.recent_resolved.drain(0..overflow);
     }
-}
-
-fn event_move_key(ev: &ResolutionEvent) -> Option<String> {
-    ev.symbol
-        .as_ref()
-        .map(|symbol| format!("{}{ID_SEP}{symbol}", ev.kind))
-}
-
-fn uncredit_cross_run_moves(store: &mut ImpactStore, appeared_move_keys: &FxHashSet<String>) {
-    if appeared_move_keys.is_empty() {
-        return;
-    }
-    let mut uncredited = 0usize;
-    store.recent_resolved.retain(|ev| match event_move_key(ev) {
-        Some(mk) if appeared_move_keys.contains(&mk) => {
-            uncredited += 1;
-            false
-        }
-        _ => true,
-    });
-    store.resolved_total = store.resolved_total.saturating_sub(uncredited);
 }
 
 #[must_use]
@@ -1560,7 +1524,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         .rev()
         .take(5)
         .rev()
-        .cloned()
+        .map(|stored| stored.event.clone())
         .collect();
     let attribution_active = !store.frontier.is_empty()
         || !store.clone_frontier.is_empty()
@@ -1581,7 +1545,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         project_surfacing,
         project_trend,
         gate_runs: gate_run_counts(&store.records),
-        containment_count: store.containment.len(),
+        containment_count: store.containment_count(),
         recent_containment,
         resolved_total: store.resolved_total,
         suppressed_total: store.suppressed_total,

@@ -508,7 +508,7 @@ fn containment_blocked_then_cleared_records_one_event() {
         "t0",
     );
     let store = load(root);
-    assert!(store.pending_containment.is_some());
+    assert!(!store.pending_by_worktree.is_empty());
     assert!(store.containment.is_empty());
 
     record_v1(
@@ -521,10 +521,74 @@ fn containment_blocked_then_cleared_records_one_event() {
         "t1",
     );
     let store = load(root);
-    assert!(store.pending_containment.is_none());
+    assert!(store.pending_by_worktree.is_empty());
     assert_eq!(store.containment.len(), 1);
     assert_eq!(store.containment[0].blocked_at, "t0");
     assert_eq!(store.containment[0].cleared_at, "t1");
+}
+
+fn linked_worktrees(dir: &Path) -> (PathBuf, PathBuf) {
+    use fallow_engine::git_fixture::fixture_git;
+    let first = dir.join("first");
+    let second = dir.join("second");
+    std::fs::create_dir(&first).unwrap();
+    fixture_git(&first, &["init", "-q"]);
+    fixture_git(&first, &["commit", "--allow-empty", "-qm", "base"]);
+    fixture_git(
+        &first,
+        &["worktree", "add", "--detach", second.to_str().unwrap()],
+    );
+    (first, second)
+}
+
+#[test]
+fn gate_pass_only_clears_the_pending_failure_in_its_worktree() {
+    let (_config, dir) = test_env();
+    let (first, second) = linked_worktrees(dir.path());
+    enable(&first).unwrap();
+    let gate = |root, verdict, timestamp| {
+        record_v1(
+            root,
+            &summary(0, 0, 0),
+            verdict,
+            true,
+            None,
+            "2.0.0",
+            timestamp,
+        );
+    };
+    gate(&first, AuditVerdict::Fail, "blocked A");
+    gate(&second, AuditVerdict::Pass, "passed B");
+    gate(&second, AuditVerdict::Fail, "blocked B");
+    gate(&first, AuditVerdict::Pass, "passed A");
+    gate(&second, AuditVerdict::Pass, "cleared B");
+    let store = load(&first);
+    let pairs: Vec<_> = store
+        .containment
+        .iter()
+        .map(|event| (event.blocked_at.as_str(), event.cleared_at.as_str()))
+        .collect();
+    assert_eq!(
+        pairs,
+        [("blocked A", "passed A"), ("blocked B", "cleared B")]
+    );
+}
+
+#[test]
+fn pending_gates_evict_the_oldest_failure_when_the_worktree_limit_is_reached() {
+    let mut store = ImpactStore::default();
+    let counts = ImpactCounts::default();
+    for i in 0..=MAX_CONTAINMENT {
+        let tree = format!("tree-{i}");
+        let timestamp = format!("{i:04}");
+        store.record_gate(&tree, AuditVerdict::Fail, None, &timestamp, &counts);
+    }
+    assert_eq!(store.pending_by_worktree.len(), MAX_CONTAINMENT);
+    for tree in ["tree-0", "tree-1"] {
+        store.record_gate(tree, AuditVerdict::Pass, None, "pass", &counts);
+    }
+    assert_eq!(store.containment_count(), 1);
+    assert_eq!(store.containment[0].blocked_at, "0001");
 }
 
 #[test]
@@ -542,7 +606,7 @@ fn non_gate_run_never_creates_containment() {
         "t0",
     );
     let store = load(root);
-    assert!(store.pending_containment.is_none());
+    assert!(store.pending_by_worktree.is_empty());
     assert!(store.containment.is_empty());
 }
 
@@ -792,9 +856,12 @@ fn removed_finding_is_credited_as_resolved() {
     assert_eq!(store.resolved_total, 1);
     assert_eq!(store.suppressed_total, 0);
     assert_eq!(store.recent_resolved.len(), 1);
-    assert_eq!(store.recent_resolved[0].kind, "unused-export");
-    assert_eq!(store.recent_resolved[0].symbol.as_deref(), Some("foo"));
-    assert_eq!(store.recent_resolved[0].path, "src/a.ts");
+    assert_eq!(store.recent_resolved[0].event.kind, "unused-export");
+    assert_eq!(
+        store.recent_resolved[0].event.symbol.as_deref(),
+        Some("foo")
+    );
+    assert_eq!(store.recent_resolved[0].event.path, "src/a.ts");
 }
 
 #[test]
@@ -915,6 +982,135 @@ fn cross_file_move_in_same_run_is_not_resolved() {
 }
 
 #[test]
+fn one_appearance_only_uncredits_one_resolution_from_its_worktree() {
+    let (_config, dir) = test_env();
+    let (first, second) = linked_worktrees(dir.path());
+    enable(&first).unwrap();
+    let a = touch(&first, "a.ts");
+    let b = touch(&first, "b.ts");
+    let c = touch(&second, "c.ts");
+    let findings = |path: &Path| fi(path, "unused-export", "default");
+    run(
+        &first,
+        &[&a, &b],
+        vec![findings(&a), findings(&b)],
+        vec![],
+        &[],
+        "found",
+    );
+    run(&second, &[&c], vec![findings(&c)], vec![], &[], "found");
+    run(&first, &[&a], vec![], vec![], &[], "removed a");
+    run(&first, &[&b], vec![], vec![], &[], "removed b");
+    run(&second, &[&c], vec![], vec![], &[], "removed c");
+    let file = touch(&first, "d.ts");
+    run(
+        &first,
+        &[&file],
+        vec![fi(&file, "unused-export", "default")],
+        vec![],
+        &[],
+        "moved",
+    );
+    let report = build_report(&load(&first));
+    assert_eq!(report.resolved_total, 2);
+    assert!(
+        report
+            .recent_resolved
+            .iter()
+            .any(|event| event.path == "c.ts")
+    );
+}
+
+#[test]
+fn same_run_move_leaves_prior_credit_and_unmatched_disappearances() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    enable(root).unwrap();
+    let [a, b, c, d] = ["a.ts", "src/f0.ts", "src/f7.ts", "new.ts"].map(|path| touch(root, path));
+    let finding = |path: &Path| fi(path, "unused-export", "default");
+    run(
+        root,
+        &[&a, &b, &c],
+        vec![finding(&a), finding(&b), finding(&c)],
+        vec![],
+        &[],
+        "found",
+    );
+    run(root, &[&a], vec![], vec![], &[], "removed a");
+    run(root, &[&c, &b, &d], vec![finding(&d)], vec![], &[], "moved");
+    let report = build_report(&load(root));
+    assert_eq!(report.resolved_total, 2);
+    let paths: Vec<_> = report
+        .recent_resolved
+        .iter()
+        .map(|event| event.path.as_str())
+        .collect();
+    assert_eq!(paths, ["a.ts", "src/f7.ts"]);
+}
+
+#[test]
+fn explicit_suppression_is_counted_when_an_identical_symbol_moves() {
+    for suppressed_name in ["a.ts", "b.ts"] {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root).unwrap();
+        let [a, b, c] = ["a.ts", "b.ts", "c.ts"].map(|name| touch(root, name));
+        let finding = |path: &Path| fi(path, "unused-export", "default");
+        run(
+            root,
+            &[&a, &b],
+            vec![finding(&a), finding(&b)],
+            vec![],
+            &[],
+            "found",
+        );
+        let suppression = supp(&root.join(suppressed_name), "unused-export");
+        run(
+            root,
+            &[&a, &b, &c],
+            vec![finding(&c)],
+            vec![],
+            &[suppression],
+            "moved",
+        );
+        let report = build_report(&load(root));
+        assert_eq!(
+            (report.resolved_total, report.suppressed_total),
+            (0, 1),
+            "{suppressed_name}"
+        );
+    }
+}
+
+#[test]
+fn legacy_shared_history_keeps_credits_with_unknown_worktrees() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    let legacy = serde_json::json!({
+        "schema_version": 7,
+        "enabled": true,
+        "explicit_decision": true,
+        "resolved_total": 1,
+        "recent_resolved": [{"kind": "unused-export", "symbol": "default", "path": "old.ts", "timestamp": "t0"}],
+        "pending_containment": {"blocked_at": "t0", "blocked_counts": ImpactCounts::default()}
+    });
+    seed_store_raw(root, &serde_json::to_vec(&legacy).unwrap());
+    let a = touch(root, "a.ts");
+    run(
+        root,
+        &[&a],
+        vec![fi(&a, "unused-export", "default")],
+        vec![],
+        &[],
+        "t1",
+    );
+    let report = build_report(&load(root));
+    assert_eq!(report.resolved_total, 1);
+    assert_eq!(report.recent_resolved[0].path, "old.ts");
+    assert_eq!(report.containment_count, 0);
+}
+
+#[test]
 fn cross_run_move_uncredits_the_prior_resolution() {
     let (_config, dir) = test_env();
     let root = dir.path();
@@ -1001,7 +1197,7 @@ fn resolved_duplication_clone_group() {
     run(root, &[&a], vec![], vec![], &[], "t1");
     let store = load(root);
     assert_eq!(store.resolved_total, 1);
-    assert_eq!(store.recent_resolved[0].kind, "code-duplication");
+    assert_eq!(store.recent_resolved[0].event.kind, "code-duplication");
 }
 
 #[test]
@@ -1170,17 +1366,20 @@ fn recent_resolved_is_bounded() {
         ..Default::default()
     };
     for i in 0..(MAX_RECENT_RESOLVED + 25) {
-        store.recent_resolved.push(ResolutionEvent {
-            kind: "unused-export".into(),
-            path: format!("src/f{i}.ts"),
-            symbol: Some(format!("s{i}")),
-            git_sha: None,
-            timestamp: format!("t{i}"),
+        store.recent_resolved.push(StoredResolution {
+            worktree: None,
+            event: ResolutionEvent {
+                kind: "unused-export".into(),
+                path: format!("src/f{i}.ts"),
+                symbol: Some(format!("s{i}")),
+                git_sha: None,
+                timestamp: format!("t{i}"),
+            },
         });
     }
     bound_recent_resolved(&mut store);
     assert_eq!(store.recent_resolved.len(), MAX_RECENT_RESOLVED);
-    assert_eq!(store.recent_resolved[0].path, "src/f25.ts");
+    assert_eq!(store.recent_resolved[0].event.path, "src/f25.ts");
 }
 
 #[test]
@@ -2252,6 +2451,15 @@ fn containment_events_are_bounded_at_max_containment() {
         store.containment.len(),
         MAX_CONTAINMENT,
         "containment must be capped at MAX_CONTAINMENT"
+    );
+    assert_eq!(build_report(&store).containment_count, MAX_CONTAINMENT + 1);
+    assert_eq!(
+        take_due_digest(root).unwrap().containment_count,
+        MAX_CONTAINMENT + 1
+    );
+    assert_eq!(
+        aggregate(CrossRepoSort::Recent).totals.containment_count,
+        MAX_CONTAINMENT + 1
     );
     // The most recent event is at the end.
     assert_eq!(
