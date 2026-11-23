@@ -360,6 +360,27 @@ fn retirement_groups_sites_into_one_row_per_flag() {
 }
 
 #[test]
+fn retirement_records_the_local_guard_of_an_unimported_vercel_flag() {
+    use std::io::Write as _;
+
+    let project = crate::common::copy_fixture("flags-retirement");
+    let mut flags = std::fs::OpenOptions::new()
+        .append(true)
+        .open(project.path().join("src/vercel.ts"))
+        .expect("open flag definitions");
+    writeln!(flags, "if (await showLegacy()) console.info('legacy');").expect("append guard");
+
+    let report = retirement_in(project.path(), &["--flag-age", "off"]);
+    let flag = retirement_row(&report, "legacy-banner");
+    assert_eq!(flag["sites"][0]["role"], "definition");
+    assert_eq!(flag["sites"][0]["line"], 4);
+    assert_eq!(flag["sites"][1]["role"], "read");
+    assert_eq!(flag["sites"][1]["line"], 5);
+    assert_eq!(flag["read_sites"], 1);
+    assert_eq!(reasons(flag), ["single-read-site"]);
+}
+
+#[test]
 fn retirement_leaves_the_rest_of_the_envelope_unchanged() {
     let plain = run_fallow(
         "flags",

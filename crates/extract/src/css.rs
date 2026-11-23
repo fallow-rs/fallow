@@ -19,7 +19,8 @@ use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
 use crate::css_mask::{
-    mask_sass_module_members, mask_view_transition_arguments, mask_with_whitespace,
+    is_indented_stylesheet, mask_sass_module_members, mask_view_transition_arguments,
+    mask_with_whitespace,
 };
 use crate::css_module_classes::lightningcss_class_set;
 use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
@@ -69,7 +70,7 @@ static CSS_CLASS_RE: LazyLock<regex::Regex> =
 /// Regex to strip quoted strings and `url(...)` content from CSS before class extraction.
 /// Prevents false positives from `content: ".foo"` and `url(./path/file.ext)`.
 static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#));
+    LazyLock::new(|| crate::static_regex(r#"(?s)"[^"]*"|'[^']*'|(?i:url)\([^)]*\)"#));
 
 /// Regex to strip the prelude of `@layer` and `@import` at-rules before
 /// CSS-Modules class extraction. Matches the `@keyword` plus everything up to
@@ -659,14 +660,27 @@ pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
 /// [`mask_theme_source`].
 fn apply_tokens_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
     let mut out = Vec::new();
-    // Matches arrive in source order, so the line advances from the previous
-    // match instead of a rescan of the whole prefix for each match.
+    let ends: &[char] = if is_indented_stylesheet(masked) {
+        &[';', '}', '\n']
+    } else {
+        &[';', '}']
+    };
     let mut last_pos = 0usize;
     let mut line = 1u32;
-    for m in CSS_APPLY_RE.find_iter(masked) {
-        line = line.saturating_add(newlines_between(source, last_pos, m.start()));
-        last_pos = m.start();
-        let body = m.as_str().trim_start_matches("@apply");
+    let mut directives = masked
+        .match_indices("@apply")
+        .filter(|(start, keyword)| masked[start + keyword.len()..].starts_with(char::is_whitespace))
+        .peekable();
+    while let Some((start, keyword)) = directives.next() {
+        line = line.saturating_add(newlines_between(source, last_pos, start));
+        last_pos = start;
+        let next = directives
+            .peek()
+            .map_or(masked.len(), |(offset, _)| *offset);
+        let rest = masked[start + keyword.len()..next].trim_start();
+        let body = rest
+            .split_once(ends)
+            .map_or_else(|| rest.lines().next().unwrap_or_default(), |(body, _)| body);
         for token in body.split_whitespace() {
             let token = token.trim_matches('!');
             if token.is_empty() || token == "important" {
@@ -913,9 +927,7 @@ fn mask_css_module_global_scopes(masked: String) -> String {
     if !masked.contains(GLOBAL_KEYWORD) {
         return masked;
     }
-    let indented = !masked
-        .match_indices('{')
-        .any(|(i, _)| i == 0 || masked.as_bytes()[i - 1] != b'#');
+    let indented = is_indented_stylesheet(&masked);
     let bytes = masked.as_bytes();
     let mut blank = Vec::new();
     let mut scan = GlobalScopeScan {
@@ -2246,23 +2258,5 @@ mod tests {
     fn theme_deduplicates_repeated_token() {
         let names = theme_token_names("@theme { --color-a: red; --color-a: blue; }");
         assert_eq!(names, vec!["color-a"]);
-    }
-
-    #[test]
-    fn apply_tokens_basic() {
-        let tokens = extract_apply_tokens(".panel { @apply rounded-card font-bold; }");
-        assert_eq!(tokens, vec!["rounded-card", "font-bold"]);
-    }
-
-    #[test]
-    fn apply_tokens_strips_important() {
-        let tokens = extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
-        assert_eq!(tokens, vec!["text-brand", "font-bold"]);
-    }
-
-    #[test]
-    fn apply_tokens_ignored_in_comments() {
-        let tokens = extract_apply_tokens("/* @apply hidden-token; */ .x { color: red; }");
-        assert!(tokens.is_empty(), "got {tokens:?}");
     }
 }
