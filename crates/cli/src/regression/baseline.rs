@@ -8,6 +8,7 @@ use super::counts::{
     CheckCounts, DupesCounts, FlagsCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline,
 };
 use super::outcome::RegressionOutcome;
+use super::recovery::BaselineCommand;
 use super::tolerance::Tolerance;
 
 use crate::error::emit_input_error;
@@ -122,7 +123,7 @@ pub fn save_flags_regression_baseline(
     flags_counts: &FlagsCounts,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
-    let existing = existing_baseline_for_merge(path, output)?;
+    let existing = existing_baseline_for_merge(path, output, BaselineCommand::Flags)?;
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -166,6 +167,7 @@ fn parse_existing_baseline(content: &str) -> Result<RegressionBaseline, String> 
 pub(super) fn existing_baseline_for_merge(
     path: &Path,
     output: OutputFormat,
+    command: BaselineCommand<'_>,
 ) -> Result<Option<RegressionBaseline>, ExitCode> {
     match load_existing(path, parse_existing_baseline) {
         Existing::Absent => Ok(None),
@@ -173,10 +175,10 @@ pub(super) fn existing_baseline_for_merge(
         Existing::Unreadable(err) => Err(unreadable_baseline_error(path, &err, output)),
         Existing::Invalid(reason) => Err(emit_input_error(
             &format!(
-                "regression baseline '{0}' is not usable: {reason}.\n\
-                 The file is unchanged. Upgrade fallow, or regenerate the file by running: \
-                 fallow dead-code --save-regression-baseline {0}",
-                path.display()
+                "regression baseline '{}' is not usable: {reason}.\n\
+                 The file is unchanged. Upgrade fallow to read it. {}",
+                path.display(),
+                command.regenerate(path)
             ),
             output,
         )),
@@ -351,21 +353,22 @@ fn format_schema_mismatch_error(
     expected: u32,
     actual: u32,
     writer_version: &str,
-    command: &str,
+    command: BaselineCommand<'_>,
 ) -> String {
     let path_display = path.display();
+    let recovery = command.regenerate(path);
     if actual == 0 {
         format!(
             "regression baseline '{path_display}' appears to predate schema versioning \
              (schema_version is 0; this fallow build expects {expected}).\n\
              The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow {command} --save-regression-baseline {path_display}"
+             {recovery}"
         )
     } else {
         format!(
             "regression baseline '{path_display}' has schema_version {actual} but this fallow build expects {expected}.\n\
              The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow {command} --save-regression-baseline {path_display}"
+             {recovery}"
         )
     }
 }
@@ -373,14 +376,15 @@ fn format_schema_mismatch_error(
 /// Build the message for a baseline missing `schema_version` entirely. Pre-versioning
 /// baselines (hand-edited or written by a very old fallow) hit this path; the raw
 /// serde error ("missing field `schema_version`") is unhelpful to a CI user.
-fn format_missing_schema_version_error(path: &Path, command: &str) -> String {
+fn format_missing_schema_version_error(path: &Path, command: BaselineCommand<'_>) -> String {
     let path_display = path.display();
+    let recovery = command.regenerate(path);
     let expected = REGRESSION_SCHEMA_VERSION;
     format!(
         "regression baseline '{path_display}' is missing the schema_version field; \
          this fallow build expects schema_version {expected}.\n\
          The baseline likely predates schema versioning or was hand-edited.\n\
-         Regenerate it by running: fallow {command} --save-regression-baseline {path_display}"
+         {recovery}"
     )
 }
 
@@ -389,43 +393,20 @@ const fn is_supported_schema_version(version: u32) -> bool {
     matches!(version, 1 | REGRESSION_SCHEMA_VERSION)
 }
 
-/// Load a regression baseline from disk.
-///
-/// Validates that `schema_version` matches `REGRESSION_SCHEMA_VERSION`. Mismatches
-/// (including baselines missing the field entirely) fail loud with an actionable
-/// regenerate hint rather than silently loading default-zero fields, which would
-/// mask real regressions.
-///
-/// # Errors
-///
-/// Returns an error if the file does not exist, cannot be read, contains invalid
-/// JSON, or has a `schema_version` that does not match the current build's
-/// `REGRESSION_SCHEMA_VERSION`.
-pub fn load_regression_baseline(
+/// Load the counts from a file with a supported schema version.
+pub(super) fn load_regression_baseline_for(
     path: &Path,
     output: OutputFormat,
-) -> Result<RegressionBaseline, ExitCode> {
-    load_regression_baseline_for(path, output, "dead-code")
-}
-
-/// Load a regression baseline from disk for `command`, the subcommand that
-/// runs. The regenerate hints name that command.
-///
-/// # Errors
-///
-/// The same errors as [`load_regression_baseline`].
-pub fn load_regression_baseline_for(
-    path: &Path,
-    output: OutputFormat,
-    command: &str,
+    command: BaselineCommand<'_>,
 ) -> Result<RegressionBaseline, ExitCode> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             emit_input_error(
                 &format!(
                     "no regression baseline found at '{}'.\n\
-                     Run with --save-regression-baseline on your main branch to create one.",
-                    path.display()
+                     Create it on your main branch with: {}",
+                    path.display(),
+                    command.save(Some(path))
                 ),
                 output,
             )
@@ -444,8 +425,9 @@ pub fn load_regression_baseline_for(
             format_missing_schema_version_error(path, command)
         } else {
             format!(
-                "failed to parse regression baseline '{}': {e}",
-                path.display()
+                "failed to parse regression baseline '{}': {e}.\n{}",
+                path.display(),
+                command.regenerate(path)
             )
         };
         emit_input_error(&message, output)
@@ -476,6 +458,7 @@ fn compare_check_regression(
         config_baseline,
         &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
         "dead-code",
+        None,
     )
 }
 
@@ -485,6 +468,7 @@ pub fn compare_check_regression_with_identity(
     config_baseline: Option<&fallow_config::RegressionBaseline>,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
     command: &str,
+    config_path: Option<&Path>,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     if !opts.fail_on_regression {
         return Ok(None);
@@ -499,20 +483,26 @@ pub fn compare_check_regression_with_identity(
         return Ok(Some(RegressionOutcome::Skipped { reason }));
     }
 
+    let command = BaselineCommand::Check {
+        name: command,
+        mode: analysis_identity.mode,
+        config: config_path,
+    };
     let baseline_counts: CheckCounts = if let Some(baseline_path) = opts.regression_baseline_file {
         let baseline = load_regression_baseline_for(baseline_path, opts.output, command)?;
         ensure_regression_identity(
             &baseline.analysis_identity,
             analysis_identity,
-            baseline_path,
+            Some(baseline_path),
             opts.output,
             command,
         )?;
         let Some(counts) = baseline.check else {
             return Err(emit_input_error(
                 &format!(
-                    "regression baseline '{}' has no check data",
-                    baseline_path.display()
+                    "regression baseline '{}' has no check data. Save the counts with: {}",
+                    baseline_path.display(),
+                    command.save(Some(baseline_path))
                 ),
                 opts.output,
             ));
@@ -522,17 +512,19 @@ pub fn compare_check_regression_with_identity(
         ensure_regression_identity(
             &config_baseline.analysis_identity,
             analysis_identity,
-            Path::new("project config"),
+            None,
             opts.output,
             command,
         )?;
         CheckCounts::from_config_baseline(config_baseline)
     } else {
         return Err(emit_input_error(
-            "no regression baseline found.\n\
-             Either add a `regression.baseline` section to your config file\n\
-             (run with --save-regression-baseline to generate it),\n\
-             or provide an explicit file via --regression-baseline <PATH>.",
+            &format!(
+                "no regression baseline found.\n\
+             Save a `regression.baseline` section in your config with: {}\n\
+             Or provide an explicit file via --regression-baseline <PATH>.",
+                command.save(None)
+            ),
             opts.output,
         ));
     };
@@ -541,7 +533,12 @@ pub fn compare_check_regression_with_identity(
     let baseline_total = baseline_counts.total_issues;
 
     if opts.tolerance.exceeded(baseline_total, current_total) {
-        let current_counts = CheckCounts::from_results(results);
+        let mut current_counts = CheckCounts::from_results(results);
+        if opts.regression_baseline_file.is_none() {
+            // Config baselines store only a subset of the per-kind counts.
+            current_counts =
+                CheckCounts::from_config_baseline(&current_counts.to_config_baseline());
+        }
         let type_deltas = baseline_counts.deltas(&current_counts);
         Ok(Some(RegressionOutcome::Exceeded {
             baseline_total,
@@ -560,28 +557,23 @@ pub fn compare_check_regression_with_identity(
 fn ensure_regression_identity(
     stored: &fallow_types::semantic::SemanticAnalysisIdentity,
     current: &fallow_types::semantic::SemanticAnalysisIdentity,
-    path: &Path,
+    file: Option<&Path>,
     output: OutputFormat,
-    command: &str,
+    command: BaselineCommand<'_>,
 ) -> Result<(), ExitCode> {
     let incompatible = stored.incompatible_fields(current);
     if incompatible.is_empty() {
         return Ok(());
     }
-    let type_aware_flag = if matches!(
-        current.mode,
-        fallow_types::semantic::SemanticAnalysisMode::TypeAware
-    ) {
-        " --type-aware"
-    } else {
-        ""
-    };
+    let source = file.map_or_else(
+        || "in the project config".to_owned(),
+        |path| format!("'{}'", path.display()),
+    );
     Err(emit_input_error(
         &format!(
-            "regression baseline '{}' has an incompatible analysis identity in: {}. Regenerate it with: fallow {command}{type_aware_flag} --save-regression-baseline {}",
-            path.display(),
+            "regression baseline {source} has an incompatible analysis identity in: {}. Regenerate it with: {}",
             incompatible.join(", "),
-            path.display(),
+            command.save(file),
         ),
         output,
     ))
@@ -617,6 +609,21 @@ mod tests {
     use fallow_types::output_dead_code::*;
     use fallow_types::results::*;
     use std::path::PathBuf;
+
+    const fn check_command(name: &str) -> BaselineCommand<'_> {
+        BaselineCommand::Check {
+            name,
+            mode: fallow_types::semantic::SemanticAnalysisMode::Syntactic,
+            config: None,
+        }
+    }
+
+    fn load_regression_baseline(
+        path: &Path,
+        output: OutputFormat,
+    ) -> Result<RegressionBaseline, ExitCode> {
+        load_regression_baseline_for(path, output, check_command("dead-code"))
+    }
 
     #[test]
     fn chrono_now_format() {
@@ -1057,9 +1064,9 @@ mod tests {
             ensure_regression_identity(
                 &loaded.analysis_identity,
                 &identity,
-                &config_path,
+                None,
                 OutputFormat::Human,
-                "dead-code",
+                check_command("dead-code"),
             )
             .is_ok()
         );
@@ -1382,7 +1389,7 @@ mod tests {
             1,
             99,
             "3.0.0",
-            "dead-code",
+            check_command("dead-code"),
         );
         assert!(msg.contains("schema_version 99"));
         assert!(msg.contains("expects 1"));
@@ -1401,19 +1408,25 @@ mod tests {
             1,
             0,
             "2.0.0",
-            "dead-code",
+            BaselineCommand::Check {
+                name: "dead-code",
+                mode: fallow_types::semantic::SemanticAnalysisMode::TypeAware,
+                config: Some(Path::new("ci.json")),
+            },
         );
         assert!(msg.contains("predate"));
         assert!(msg.contains("fallow 2.0.0"));
         assert!(
-            msg.contains("fallow dead-code --save-regression-baseline /repo/.fallow-baseline.json")
+            msg.contains("fallow dead-code --type-aware --config ci.json --save-regression-baseline /repo/.fallow-baseline.json")
         );
     }
 
     #[test]
     fn format_missing_schema_version_error_includes_regenerate_command() {
-        let msg =
-            format_missing_schema_version_error(Path::new("/repo/baseline.json"), "dead-code");
+        let msg = format_missing_schema_version_error(
+            Path::new("/repo/baseline.json"),
+            check_command("dead-code"),
+        );
         assert!(msg.contains("missing the schema_version field"));
         assert!(msg.contains("fallow dead-code --save-regression-baseline /repo/baseline.json"));
     }
@@ -1422,12 +1435,17 @@ mod tests {
     fn regenerate_hints_name_the_architecture_command() {
         let path = Path::new("/repo/baseline.json");
         let expected = "fallow architecture --save-regression-baseline /repo/baseline.json";
-        assert!(format_missing_schema_version_error(path, "architecture").contains(expected));
         assert!(
-            format_schema_mismatch_error(path, 1, 0, "2.0.0", "architecture").contains(expected)
+            format_missing_schema_version_error(path, check_command("architecture"))
+                .contains(expected)
         );
         assert!(
-            format_schema_mismatch_error(path, 1, 99, "3.0.0", "architecture").contains(expected)
+            format_schema_mismatch_error(path, 1, 0, "2.0.0", check_command("architecture"))
+                .contains(expected)
+        );
+        assert!(
+            format_schema_mismatch_error(path, 1, 99, "3.0.0", check_command("architecture"))
+                .contains(expected)
         );
     }
 

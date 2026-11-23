@@ -167,3 +167,110 @@ fn a_command_outside_the_analysis_commands_rejects_the_regression_flags() {
         "{message}"
     );
 }
+
+#[test]
+fn file_only_commands_recover_their_own_baseline() {
+    let (_dir, root) = write_project();
+    let file = "regression data.json";
+    let path = root.join(file);
+    let old = r#"{"schema_version":99,"fallow_version":"9","timestamp":"t"}"#;
+    let quoted = if cfg!(windows) {
+        r#""regression data.json""#
+    } else {
+        "'regression data.json'"
+    };
+    for (command, section) in [
+        (&["flags", "--retirement"][..], "flags"),
+        (&["list", "--entry-weight"][..], "entry_weight"),
+    ] {
+        let save = format!(
+            "fallow {} --save-regression-baseline {quoted}",
+            command.join(" ")
+        );
+        let check = ["--fail-on-regression", "--regression-baseline", file];
+        let missing = run(&root, command, &check);
+        assert_eq!(missing.code, 2);
+        assert!(
+            error_message(&missing).contains(&save),
+            "{}",
+            missing.stdout
+        );
+        std::fs::write(&path, old).unwrap();
+        for args in [&check[..], &["--save-regression-baseline", file][..]] {
+            let rejected = run(&root, command, args);
+            assert_eq!(rejected.code, 2);
+            let message = error_message(&rejected);
+            assert!(
+                message.contains(&save) && message.contains("backup"),
+                "{message}"
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), old);
+        }
+        std::fs::rename(&path, root.join(format!("{section}.bak"))).unwrap();
+        let saved = run(&root, command, &["--save-regression-baseline", file]);
+        assert_eq!(saved.code, 0, "{}", saved.stdout);
+        let baseline: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(baseline[section].is_object());
+        assert_eq!(run(&root, command, &check).code, 0);
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+#[test]
+fn embedded_identity_hint_saves_into_the_config() {
+    let (_dir, root) = write_project();
+    let save = run(&root, &["dead-code"], &["--save-regression-baseline"]);
+    assert_eq!(save.code, 0, "{}", save.stdout);
+    let path = root.join(".fallowrc.json");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    config["regression"]["baseline"]["analysisIdentity"]["mode"] = "type-aware".into();
+    std::fs::write(&path, config.to_string()).unwrap();
+    let rejected = run(&root, &["dead-code"], &["--fail-on-regression"]);
+    assert_eq!(rejected.code, 2);
+    let message = error_message(&rejected);
+    assert!(
+        message.ends_with("fallow dead-code --save-regression-baseline"),
+        "{message}"
+    );
+}
+
+#[test]
+fn regression_deltas_only_use_counts_the_baseline_can_store() {
+    let fixture = crate::common::copy_fixture("unused-component-prop");
+    let root = fixture.path();
+    let save = run(root, &["dead-code"], &["--save-regression-baseline"]);
+    assert_eq!(save.code, 0, "{}", save.stdout);
+    std::fs::write(root.join("src/orphan.ts"), "export const orphan = 1;").unwrap();
+    let check = run_fallow_raw_in_dir(root, &["dead-code", "--fail-on-regression"]);
+    assert_eq!(check.code, 1);
+    assert!(
+        check.stderr.contains("unused_files: +1"),
+        "{}",
+        check.stderr
+    );
+    assert!(
+        !check.stderr.contains("unused_component_props:"),
+        "{}",
+        check.stderr
+    );
+
+    let file = "zero.json";
+    std::fs::write(root.join(file), r#"{"schema_version":2,"fallow_version":"3","timestamp":"t","check":{"unused_component_props":0}}"#).unwrap();
+    let check = run_fallow_raw_in_dir(
+        root,
+        &[
+            "dead-code",
+            "--fail-on-regression",
+            "--regression-baseline",
+            file,
+        ],
+    );
+    assert_eq!(check.code, 1);
+    assert!(
+        check.stderr.contains("unused_component_props: +2"),
+        "{}",
+        check.stderr
+    );
+}

@@ -14,6 +14,7 @@ use fallow_output::{EntryWeightDelta, EntryWeightListing, EntryWeightRegression}
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::counts::{REGRESSION_SCHEMA_VERSION, RegressionBaseline};
+use super::recovery::BaselineCommand;
 use super::tolerance::Tolerance;
 use crate::error::emit_input_error;
 
@@ -112,14 +113,14 @@ pub fn load_entry_weight_baseline(
     path: &Path,
     output: OutputFormat,
 ) -> Result<EntryWeightCounts, ExitCode> {
-    let baseline = super::load_regression_baseline(path, output)?;
+    let baseline =
+        super::baseline::load_regression_baseline_for(path, output, BaselineCommand::EntryWeight)?;
     baseline.entry_weight.ok_or_else(|| {
         emit_input_error(
             &format!(
-                "regression baseline '{}' has no entry weight data; save one with \
-                 fallow list --entry-weight --save-regression-baseline {}",
+                "regression baseline '{}' has no entry weight data; save one with {}",
                 path.display(),
-                path.display()
+                BaselineCommand::EntryWeight.save(Some(path))
             ),
             output,
         )
@@ -221,7 +222,8 @@ pub fn save_entry_weight_baseline(
     counts: EntryWeightCounts,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
-    let existing = super::baseline::existing_baseline_for_merge(path, output)?;
+    let existing =
+        super::baseline::existing_baseline_for_merge(path, output, BaselineCommand::EntryWeight)?;
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),

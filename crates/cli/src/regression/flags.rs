@@ -11,8 +11,9 @@ use fallow_types::flag_retirement::{
     FlagRegressionMetric, FlagRegressionResult, RetirementReason, RetirementSummary,
 };
 
-use super::baseline::{RegressionOpts, load_regression_baseline};
+use super::baseline::{RegressionOpts, load_regression_baseline_for};
 use super::counts::FlagsCounts;
+use super::recovery::BaselineCommand;
 use super::tolerance::Tolerance;
 use crate::error::emit_input_error;
 
@@ -78,14 +79,14 @@ pub fn compare_flags_regression(
             opts.output,
         ));
     };
-    let baseline = load_regression_baseline(path, opts.output)?;
+    let baseline = load_regression_baseline_for(path, opts.output, BaselineCommand::Flags)?;
     let Some(stored) = baseline.flags else {
         return Err(emit_input_error(
             &format!(
                 "regression baseline '{}' has no flags data.\n\
-                 Create it with: fallow flags --retirement --save-regression-baseline {}",
+                 Create it with: {}",
                 path.display(),
-                path.display()
+                BaselineCommand::Flags.save(Some(path))
             ),
             opts.output,
         ));

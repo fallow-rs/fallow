@@ -1049,6 +1049,7 @@ fn resolve_check_regression(
         config_baseline,
         analysis_identity,
         opts.surface.command(),
+        opts.config_path.as_deref(),
     )
 }
 

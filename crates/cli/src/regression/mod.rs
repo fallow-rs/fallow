@@ -3,9 +3,9 @@ mod counts;
 mod entry_weight;
 mod flags;
 mod outcome;
+mod recovery;
 mod tolerance;
 
-pub use baseline::load_regression_baseline;
 pub use baseline::{
     RegressionOpts, SaveRegressionTarget, compare_check_regression_with_identity,
     save_baseline_to_config_with_identity, save_flags_regression_baseline,
