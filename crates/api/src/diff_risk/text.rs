@@ -6,6 +6,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+pub use super::thresholds::weakened_threshold_hits;
+
 /// One detector hit on a head line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineHit {
@@ -73,16 +75,7 @@ const DIFF_RISK_TOKENS: &[&str] = &[
 ];
 
 /// Threshold keys where a lower value is less strict.
-const MIN_THRESHOLD_KEYS: &[&str] = &[
-    "branches",
-    "functions",
-    "lines",
-    "statements",
-    "minScore",
-    "min-score",
-    "minCoverage",
-    "min-coverage",
-];
+const MIN_THRESHOLD_KEYS: &[&str] = &["minScore", "min-score", "minCoverage", "min-coverage"];
 /// Threshold keys where a higher value is less strict.
 const MAX_THRESHOLD_KEYS: &[&str] = &[
     "maxCrap",
@@ -400,10 +393,9 @@ fn only_quiets_logs(lines: &[&str], line: u32) -> bool {
     false
 }
 
-/// Threshold values in a coverage or quality config that the change made
-/// less strict. Occurrences of one key pair up in file order.
+/// Quality limits that became less strict. Occurrences of one key pair up in file order.
 #[must_use]
-pub fn weakened_threshold_hits(base: &str, head: &str) -> Vec<LineHit> {
+pub(super) fn quality_threshold_hits(base: &str, head: &str) -> Vec<LineHit> {
     let mut hits = Vec::new();
     for (keys, lower_is_weaker) in [(MIN_THRESHOLD_KEYS, true), (MAX_THRESHOLD_KEYS, false)] {
         for key in keys {
