@@ -193,7 +193,7 @@ fn collect_callers(
             }
             hops.push(ChainHop {
                 file: module_path(graph, importer, root),
-                imported_as: imported_name_label(&sym.imported_name),
+                imported_as: imported_name_label(&sym.imported_name).to_owned(),
                 local_name: sym.local_name.clone(),
                 type_only: sym.is_type_only,
                 depth: current_depth,
@@ -229,24 +229,33 @@ fn collect_callees(
         if current_depth > depth {
             continue;
         }
-        for (edge_target, symbols) in graph.outgoing_symbol_edges(module_id) {
-            let first_hop = resolved.len();
-            let target_path = module_path(graph, edge_target, root);
-            for sym in symbols {
-                // Side-effect imports carry no value-level callee; skip them.
-                if matches!(sym.imported_name, ImportedName::SideEffect) {
-                    continue;
-                }
-                resolved.push(ChainHop {
-                    file: target_path.clone(),
-                    imported_as: imported_name_label(&sym.imported_name),
-                    local_name: sym.local_name.clone(),
-                    type_only: sym.is_type_only,
-                    depth: current_depth,
-                });
-            }
-            if resolved.len() > first_hop && visited.insert(edge_target) {
-                queue.push_back((edge_target, current_depth + 1));
+        let Some(module) = graph.modules.get(module_id.0 as usize) else {
+            continue;
+        };
+        // The import edge for a re-export has no binding. Its names live on
+        // the re-export record, which a bare side-effect import does not have.
+        let forwarded = module.re_exports.iter().map(|edge| {
+            (
+                edge.source_file,
+                edge.imported_name.as_str(),
+                edge.exported_name.as_str(),
+                edge.is_type_only,
+            )
+        });
+        // Importing and re-exporting the same binding describes one hop.
+        let forwarded_bindings: FxHashSet<_> = forwarded.clone().collect();
+        let imports = direct_callee_bindings(graph, module_id)
+            .filter(|binding| !forwarded_bindings.contains(binding));
+        for (target, imported_as, local_name, type_only) in imports.chain(forwarded) {
+            resolved.push(ChainHop {
+                file: module_path(graph, target, root),
+                imported_as: imported_as.to_owned(),
+                local_name: local_name.to_owned(),
+                type_only,
+                depth: current_depth,
+            });
+            if visited.insert(target) {
+                queue.push_back((target, current_depth + 1));
             }
         }
     }
@@ -255,17 +264,37 @@ fn collect_callees(
     let unresolved = module_by_id
         .get(&module_id)
         .map(|info| {
-            let resolved_locals = graph
-                .outgoing_symbol_edges(module_id)
-                .flat_map(|(_, symbols)| symbols)
-                .filter(|sym| !matches!(sym.imported_name, ImportedName::SideEffect))
-                .map(|sym| sym.local_name.as_str())
+            let resolved_locals = direct_callee_bindings(graph, module_id)
+                .map(|(_, _, local_name, _)| local_name)
                 .collect();
             collect_unresolved_callees(info, &resolved_locals)
         })
         .unwrap_or_default();
 
     (resolved, unresolved)
+}
+
+/// Direct import bindings with an internal target. Re-exports do not introduce
+/// local bindings that can resolve a call in this module.
+fn direct_callee_bindings(
+    graph: &ModuleGraph,
+    module_id: FileId,
+) -> impl Iterator<Item = (FileId, &str, &str, bool)> {
+    graph
+        .outgoing_symbol_edges(module_id)
+        .flat_map(|(target, symbols)| {
+            symbols
+                .iter()
+                .filter(|symbol| !matches!(symbol.imported_name, ImportedName::SideEffect))
+                .map(move |symbol| {
+                    (
+                        target,
+                        imported_name_label(&symbol.imported_name),
+                        symbol.local_name.as_str(),
+                        symbol.is_type_only,
+                    )
+                })
+        })
 }
 
 /// Each import of `symbol` from `target`, with the module that imports it.
@@ -378,12 +407,12 @@ fn imported_name_matches(name: &ImportedName, symbol: &str) -> bool {
     }
 }
 
-fn imported_name_label(name: &ImportedName) -> String {
+fn imported_name_label(name: &ImportedName) -> &str {
     match name {
-        ImportedName::Named(name) => name.clone(),
-        ImportedName::Default => "default".to_string(),
-        ImportedName::Namespace => "*".to_string(),
-        ImportedName::SideEffect => "side-effect".to_string(),
+        ImportedName::Named(name) => name,
+        ImportedName::Default => "default",
+        ImportedName::Namespace => "*",
+        ImportedName::SideEffect => "side-effect",
     }
 }
 

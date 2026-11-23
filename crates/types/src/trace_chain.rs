@@ -86,7 +86,8 @@ pub struct ChainHop {
     /// The symbol name as imported across the edge (`default`, `*` for namespace,
     /// the imported name otherwise).
     pub imported_as: String,
-    /// The local binding name in the file at this hop.
+    /// The local import name, or the forwarded export name for a re-export
+    /// (`*` for an unaliased star re-export).
     pub local_name: String,
     /// Whether the import edge is type-only (`import type { ... }`).
     pub type_only: bool,

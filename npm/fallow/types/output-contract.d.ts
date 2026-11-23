@@ -14781,7 +14781,8 @@ file: string
  */
 imported_as: string
 /**
- * The local binding name in the file at this hop.
+ * The local import name, or the forwarded export name for a re-export
+ * (`*` for an unaliased star re-export).
  */
 local_name: string
 /**
