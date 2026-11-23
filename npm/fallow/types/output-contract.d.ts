@@ -13852,6 +13852,13 @@ re_export_chains: ReExportChain[]
  */
 plugin_credits?: PluginExportCredit[]
 /**
+ * The JSDoc visibility tag that keeps an export with no consumer out
+ * of `unused-export`: `public`, `internal`, `alpha` or `beta`. The
+ * `keepExportTags` config key selects the tags that do this. Absent
+ * when the export is used, or when no kept tag is on it.
+ */
+kept_by_tag?: (string | null)
+/**
  * Human-readable reason summary.
  */
 reason: string

@@ -362,7 +362,7 @@ The skip above applies only to generic `unused-class-member` detection. The dedi
 
 ## JSDoc Visibility Tags Keep Exports Alive
 
-Exports annotated with `/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`, or `/** @api public */` are never reported as unused. This is designed for library authors whose exports are consumed by external projects not visible to fallow.
+By default, exports annotated with `/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`, or `/** @api public */` are never reported as unused. This is designed for library authors whose exports are consumed by external projects not visible to fallow.
 
 ```typescript
 // NOT flagged: @public annotation
@@ -391,6 +391,16 @@ export const notProtected = () => {};
 ```
 
 Only `/** */` JSDoc block comments are recognized. Line comments (`// @public`) are ignored.
+
+The `keepExportTags` config key selects the tags that keep an export. The default is all four tags. When a project uses `@internal`, `@alpha` or `@beta` for code that no consumer outside the project uses (for example `/** @internal Exported for tests. */`), set the key to `["public"]`. fallow then checks those exports like untagged exports:
+
+```jsonc
+{
+  "keepExportTags": ["public"]
+}
+```
+
+`fallow dead-code --trace <file>:<export>` names the tag when a tag keeps an export with no consumer (`kept_by_tag` in JSON). When you remove an export that the strict setting reports, also remove its stale `@internal` comment.
 
 ---
 

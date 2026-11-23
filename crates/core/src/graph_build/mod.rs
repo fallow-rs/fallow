@@ -1,6 +1,8 @@
 //! The module graph build of an analysis run, with the entry files that
 //! `includeEntryExports` covers.
 
+mod visibility_scope;
+
 use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -136,14 +138,18 @@ fn named_import_targets(module: &ResolvedModule) -> impl Iterator<Item = FileId>
 }
 
 /// Build the module graph from the resolved modules of `project`.
+///
+/// The build first clears each JSDoc visibility tag that `keepExportTags`
+/// does not keep (see [`visibility_scope`]).
 pub fn build_module_graph(
     config: &ResolvedConfig,
-    project: &ResolvedProject,
+    project: &mut ResolvedProject,
     entry_points: &CategorizedEntryPoints,
     files: &[DiscoveredFile],
     workspaces: &[WorkspaceInfo],
     unseeded_declaration_files: &FxHashSet<FileId>,
 ) -> ModuleGraph {
+    visibility_scope::apply(&mut project.modules, &config.keep_export_tags);
     let mut consumer_checked = consumer_checked_entries(config, entry_points, files, workspaces);
     let fixtures = imported_fixture_entries(config, project, entry_points, files);
     consumer_checked.extend(fixtures.iter().copied());

@@ -44,7 +44,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dead code",
         name: "Unused Exports",
         short: "Export is never imported",
-        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file.",
+        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`.",
         docs_path: "rules/unused-export",
     },
     RuleDef {

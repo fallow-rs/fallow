@@ -9,6 +9,7 @@ mod format;
 pub mod glob_validation;
 mod health;
 mod ignore_patterns;
+mod keep_export_tags;
 mod legacy_glob;
 mod markup_extensions;
 mod mutation;
@@ -49,6 +50,7 @@ pub use health::{
     OwnershipConfig,
 };
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
+pub use keep_export_tags::{KeepExportTag, KeepExportTags};
 pub use legacy_glob::{
     LegacyGlobGroup, LegacyGlobNarrowing, find_legacy_glob_narrowings, has_single_segment_wildcard,
     suggest_cross_directory_rewrite,
@@ -520,6 +522,10 @@ pub struct FallowConfig {
     /// Controls whether an export referenced only by another symbol in the same file is treated as used (suppressed from `unused-export`) until it becomes completely unreferenced; references inside an export specifier itself (`export { foo }`, `export default foo`) do not count as same-file uses. Accepts `true`/`false` (default `false`, suppress nothing) or the knip-parity object `{ "type": true, "interface": true }`, which restricts the suppression to type-only exports; fallow groups type aliases and interfaces under one kind, so both object fields behave identically.
     #[serde(default)]
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
+
+    /// The JSDoc visibility tags that keep an export out of `unused-export`: `public` (also `@api public`), `internal`, `alpha` and `beta`, with or without a leading `@`. The default lists all four, so a tagged export never gets an `unused-export` finding and counts as public API for the re-exports that forward it. A tag that is not in the list has no effect: fallow checks the export like an untagged one. Set `["public"]` when `@internal`, `@alpha` and `@beta` mark code that no consumer outside the project uses, for example `/** @internal Exported for tests. */`. `[]` also checks `@public` exports. `@expected-unused` is not configurable.
+    #[serde(default)]
+    pub keep_export_tags: KeepExportTags,
 
     /// A list of decorator names that no longer grant a class member automatic exemption from `unused-class-member`: a member whose every decorator is in this set is checked normally, while a member carrying any decorator NOT listed here stays skipped (frameworks consume decorated members reflectively). Dotted entries match the full decorator path (`ns.foo`) and bare entries match the leftmost segment (so `"decorators"` collapses every `@decorators.*`); both `"@step"` and `"step"` are accepted (leading `@` stripped), and an unmatched entry emits a one-time warning.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
