@@ -688,6 +688,12 @@ const fixSummary = (result: FallowFixResult): string => {
   return count + skippedFixLabel(skipped);
 };
 
+// Only these skips make the CLI exit with code 2. Intentional skips also carry help text.
+const RECOVERABLE_SKIP_REASONS: ReadonlySet<string> = new Set([
+  "content_changed",
+  "mixed_line_endings",
+]);
+
 const partialFixSummary = (error: unknown): string => {
   if (!(error instanceof FallowExecError) || error.exitCode !== 2) return "";
   try {
@@ -697,7 +703,13 @@ const partialFixSummary = (error: unknown): string => {
       Number.isInteger(result.total_fixed) &&
       Array.isArray(result.fixes)
     ) {
-      const recovery = result.fixes.find((fix) => fix.skipped && fix.help);
+      const recovery = result.fixes.find(
+        (fix) =>
+          fix.skipped &&
+          fix.help &&
+          fix.skip_reason !== undefined &&
+          RECOVERABLE_SKIP_REASONS.has(fix.skip_reason),
+      );
       const advice = recovery?.help ? ` ${recovery.path ?? ""} ${recovery.help}`.trim() : "";
       return ` (${fixSummary(result)})${advice ? `. ${advice}` : ""}`;
     }

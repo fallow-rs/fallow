@@ -1261,15 +1261,21 @@ describe("applyFixes", () => {
       async () => {
         await runFix(workspaceContext, true);
         expect(mockWindow.showErrorMessage).toHaveBeenCalledWith(
-          expect.stringContaining("skipped 1"),
+          expect.stringContaining("skipped 2"),
         );
         expect(mockWindow.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining(help));
+        expect(mockWindow.showErrorMessage).not.toHaveBeenCalledWith(
+          expect.stringContaining("Intentional skip."),
+        );
         expect(mockWindow.showQuickPick).not.toHaveBeenCalled();
       },
       {
         dry_run: true,
         total_fixed: 0,
-        fixes: [{ ...skipped, skip_reason: "mixed_line_endings", help }],
+        fixes: [
+          { ...skipped, skip_reason: "low_confidence_off_graph", help: "Intentional skip." },
+          { ...skipped, skip_reason: "mixed_line_endings", help },
+        ],
       },
       2,
     );
