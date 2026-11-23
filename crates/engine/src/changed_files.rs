@@ -402,6 +402,7 @@ fn committed_changed_files(
         toplevel,
         &[
             "diff",
+            "--no-relative",
             "--name-only",
             "-z",
             "--end-of-options",
@@ -414,7 +415,11 @@ fn working_tree_changed_files(
     cwd: &Path,
     toplevel: &Path,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD"])?;
+    let mut files = collect_git_paths(
+        cwd,
+        toplevel,
+        &["diff", "--no-relative", "--name-only", "-z", "HEAD"],
+    )?;
     if untracked_files_excluded() {
         return Ok(files);
     }
@@ -464,6 +469,7 @@ pub fn try_get_renamed_files(
         &toplevel,
         &[
             "diff",
+            "--no-relative",
             "--name-status",
             "-z",
             "--find-renames",
@@ -474,7 +480,14 @@ pub fn try_get_renamed_files(
     let staged = collect_git_rename_pairs(
         root,
         &toplevel,
-        &["diff", "--name-status", "-z", "--find-renames", "HEAD"],
+        &[
+            "diff",
+            "--no-relative",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "HEAD",
+        ],
     )?;
     for pair in staged {
         if let Some(chained) = renames.iter_mut().find(|rename| rename.to == pair.from) {
@@ -1036,6 +1049,37 @@ mod tests {
             let independent = changed_files(repo.path(), reference).expect("independent changes");
             assert_eq!(batched, independent, "{reference} scope changed");
         }
+    }
+
+    #[test]
+    fn relative_diff_config_preserves_repository_paths_from_a_subdirectory() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(repo.path()).unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        run_git(&root, &["init", "--quiet"]);
+        run_git(&root, &["config", "user.email", "test@example.com"]);
+        run_git(&root, &["config", "user.name", "Test User"]);
+        run_git(&root, &["config", "diff.relative", "true"]);
+        std::fs::write(sub.join("a.ts"), "export const a = 1;").unwrap();
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-qm", "base"]);
+        run_git(&root, &["branch", "base"]);
+        run_git(&sub, &["mv", "a.ts", "b.ts"]);
+        run_git(&root, &["commit", "-qm", "rename"]);
+        run_git(&sub, &["mv", "b.ts", "c.ts"]);
+
+        let changed = changed_files(&sub, "base").unwrap();
+        for name in ["b.ts", "c.ts"] {
+            assert!(changed.contains(&sub.join(name)), "{changed:?}");
+        }
+        assert_eq!(
+            try_get_renamed_files(&sub, "base").unwrap(),
+            vec![RenamedFile {
+                from: sub.join("a.ts"),
+                to: sub.join("c.ts")
+            }]
+        );
     }
 
     #[cfg(unix)]
