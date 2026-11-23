@@ -96,8 +96,11 @@ impl EntryWeightGate<'_> {
         }
         if self.fail_on_regression && self.baseline_file.is_none() {
             return Err(emit_input_error(
-                "list --entry-weight --fail-on-regression needs --regression-baseline <PATH>; \
-                 create one with list --entry-weight --save-regression-baseline <PATH>",
+                &format!(
+                    "list --entry-weight --fail-on-regression needs --regression-baseline <PATH>.\n\
+                     Create the file with: {}",
+                    BaselineCommand::EntryWeight(self.args).save(None)
+                ),
                 output,
             ));
         }

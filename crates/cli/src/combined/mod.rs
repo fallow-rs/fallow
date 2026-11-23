@@ -385,6 +385,8 @@ fn build_combined_check_options<'a>(
     filters: &'a IssueFilters,
     trace_opts: &'a TraceOptions,
 ) -> Option<CheckOptions<'a>> {
+    let mut regression_opts = opts.regression_opts;
+    regression_opts.args.combined_health = opts.run_health;
     opts.run_check.then_some(CheckOptions {
         root: opts.root,
         config_path: opts.config_path,
@@ -428,7 +430,7 @@ fn build_combined_check_options<'a>(
         show_cascade: opts.show_cascade,
         fail_on_parse_error: opts.fail_on_parse_error,
         summary: opts.summary,
-        regression_opts: opts.regression_opts,
+        regression_opts,
         retain_modules_for_health: opts.run_health,
         defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,

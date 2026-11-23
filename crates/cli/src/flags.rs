@@ -295,10 +295,11 @@ fn run_regression_gate(
         .as_ref()
         .map(|args| args.reasons.iter().map(|&reason| reason.into()).collect())
         .unwrap_or_default();
-    let regression = RegressionOpts {
+    let mut regression = RegressionOpts {
         scoped: !scope.is_whole_project(),
         ..opts.regression
     };
+    regression.args.retirement = opts.retirement.as_ref();
     report.regression = compare_flags_regression(&regression, &counts, &reasons)?;
     match regression.save_target {
         SaveRegressionTarget::None => Ok(()),

@@ -72,22 +72,25 @@ pub fn compare_flags_regression(
             reason: Some(reason.to_string()),
         }));
     }
+    let command = BaselineCommand::Flags(opts.args);
     let Some(path) = opts.regression_baseline_file else {
         return Err(emit_input_error(
-            "fallow flags --fail-on-regression needs --regression-baseline <PATH>.\n\
-             Create the file with: fallow flags --retirement --save-regression-baseline <PATH>",
+            &format!(
+                "fallow flags --fail-on-regression needs --regression-baseline <PATH>.\n\
+                 Create the file with: {}",
+                command.save(None)
+            ),
             opts.output,
         ));
     };
-    let baseline =
-        load_regression_baseline_for(path, opts.output, BaselineCommand::Flags(opts.args))?;
+    let baseline = load_regression_baseline_for(path, opts.output, command)?;
     let Some(stored) = baseline.flags else {
         return Err(emit_input_error(
             &format!(
                 "regression baseline '{}' has no flags data.\n\
                  Create it with: {}",
                 path.display(),
-                BaselineCommand::Flags(opts.args).save(Some(path))
+                command.save(Some(path))
             ),
             opts.output,
         ));

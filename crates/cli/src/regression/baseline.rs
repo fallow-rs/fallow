@@ -405,10 +405,9 @@ pub(super) fn load_regression_baseline_for(
         if e.kind() == std::io::ErrorKind::NotFound {
             emit_input_error(
                 &format!(
-                    "no regression baseline found at '{}'.\n\
-                     Create it on your main branch with: {}",
+                    "no regression baseline found at '{}'.\n{}",
                     path.display(),
-                    command.save(Some(path))
+                    command.save_hint("Create it on your main branch with", Some(path))
                 ),
                 output,
             )
@@ -485,7 +484,11 @@ pub fn compare_check_regression_with_identity(
 
     let command = BaselineCommand::Check {
         name: command,
-        mode: analysis_identity.mode,
+        mode: if opts.args.syntactic_fallback {
+            fallow_types::semantic::SemanticAnalysisMode::TypeAware
+        } else {
+            analysis_identity.mode
+        },
         args: opts.args,
     };
     let baseline_counts: CheckCounts = if let Some(baseline_path) = opts.regression_baseline_file {
@@ -500,9 +503,9 @@ pub fn compare_check_regression_with_identity(
         let Some(counts) = baseline.check else {
             return Err(emit_input_error(
                 &format!(
-                    "regression baseline '{}' has no check data. Save the counts with: {}",
+                    "regression baseline '{}' has no check data. {}",
                     baseline_path.display(),
-                    command.save(Some(baseline_path))
+                    command.save_hint("Save the counts with", Some(baseline_path))
                 ),
                 opts.output,
             ));
@@ -521,9 +524,11 @@ pub fn compare_check_regression_with_identity(
         return Err(emit_input_error(
             &format!(
                 "no regression baseline found.\n\
-             Save a `regression.baseline` section in your config with: {}\n\
-             Or provide an explicit file via --regression-baseline <PATH>.",
-                command.save(None)
+             {}\nOr provide an explicit file via --regression-baseline <PATH>.",
+                command.save_hint(
+                    "Save a `regression.baseline` section in your config with",
+                    None
+                )
             ),
             opts.output,
         ));
@@ -571,9 +576,9 @@ fn ensure_regression_identity(
     );
     Err(emit_input_error(
         &format!(
-            "regression baseline {source} has an incompatible analysis identity in: {}. Regenerate it with: {}",
+            "regression baseline {source} has an incompatible analysis identity in: {}. {}",
             incompatible.join(", "),
-            command.save(file),
+            command.save_hint("Regenerate it with", file),
         ),
         output,
     ))
@@ -1440,6 +1445,8 @@ mod tests {
 
     #[test]
     fn format_schema_mismatch_error_actual_zero_special_case() {
+        use clap::Parser as _;
+        let cli = crate::cli_args::Cli::try_parse_from(["fallow", "--config", "ci.json"]).unwrap();
         let msg = format_schema_mismatch_error(
             Path::new("/repo/.fallow-baseline.json"),
             1,
@@ -1448,10 +1455,7 @@ mod tests {
             BaselineCommand::Check {
                 name: "dead-code",
                 mode: fallow_types::semantic::SemanticAnalysisMode::TypeAware,
-                args: RegressionArgs {
-                    config: Some(Path::new("ci.json")),
-                    ..Default::default()
-                },
+                args: RegressionArgs::from(&cli),
             },
         );
         assert!(msg.contains("predate"));
