@@ -165,6 +165,7 @@ mod parse_error_gate_tests;
 mod peer_dependency_credit_tests;
 mod permutation;
 mod platform;
+mod plugin_check_workspace_tests;
 mod plugin_diagnostic_tests;
 mod production_ignore_tests;
 mod production_override_tests;

@@ -1511,12 +1511,12 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // Plugin used-export rules have one compiler, in fallow-core, so the
         // mutation plan and the unused-export check agree on them.
         "fallow_core::plugins::UsedExportNames",
-        // The built-in plugin roster has one source, in fallow-core. The
-        // engine mirrored it by hand once and the copy drifted.
+        // The built-in plugin roster has one source, in fallow-core: a copy drifted.
         "fallow_core::plugins::registry::builtin_config_", // `_lookup`, `_patterns`
         "fallow_core::plugins::registry::builtin_always_used_patterns",
         "fallow_core::plugins::registry::builtin_plugin_names",
         "fallow_core::plugins::registry::is_external_plugin_active",
+        "fallow_core::plugins::registry::workspace_activation_dependencies",
         // The `@types/X` naming rule has one source, in fallow-core, so the
         // dependency trace and the unused devDependency check agree on it.
         "fallow_core::plugins::types_package_target",
