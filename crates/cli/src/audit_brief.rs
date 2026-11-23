@@ -1831,6 +1831,13 @@ pub fn print_walkthrough_guide_result(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
+    print_walkthrough_guide(guide, json_style)
+}
+
+fn print_walkthrough_guide(
+    guide: crate::audit_walkthrough::WalkthroughGuide,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
     if let Ok(value) = fallow_output::serialize_walkthrough_guide_json_output(
         guide,
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -1918,13 +1925,11 @@ pub fn print_walkthrough_human_result(
 ) -> ExitCode {
     use fallow_config::OutputFormat;
 
-    // JSON reuses the single guide JSON path verbatim (no second serializer).
-    if matches!(result.output, OutputFormat::Json) {
-        return print_walkthrough_guide_result(result, json_style);
-    }
-
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
-    record_walkthrough_marks(&guide, root, cache_dir, mark_viewed);
+    crate::walkthrough_state::record_guide_marks(&guide, root, cache_dir, mark_viewed);
+    if matches!(result.output, OutputFormat::Json) {
+        return print_walkthrough_guide(guide, json_style);
+    }
 
     // Load the viewed-state ledger ONCE and share it across both surfaces, so the
     // markdown render honors `--mark-viewed` the same way the human render does
@@ -1952,33 +1957,6 @@ pub fn print_walkthrough_human_result(
         eprintln!("{}", render.status);
     }
     ExitCode::SUCCESS
-}
-
-/// Record each `--mark-viewed` path as viewed against the current guide hash.
-///
-/// Paths are normalized to the guide's root-relative VIEW key, as in
-/// `direction.order`. A failed write prints a warning: the state never sets the exit code.
-fn record_walkthrough_marks(
-    guide: &crate::audit_walkthrough::WalkthroughGuide,
-    root: &std::path::Path,
-    cache_dir: &std::path::Path,
-    mark_viewed: &[std::path::PathBuf],
-) {
-    if mark_viewed.is_empty() {
-        return;
-    }
-    let keys: Vec<String> = mark_viewed
-        .iter()
-        .map(|path| walkthrough_view_key(path, root))
-        .collect();
-    crate::walkthrough_state::record_marks(root, cache_dir, &keys, &guide.graph_snapshot_hash);
-}
-
-/// Normalize a `--mark-viewed` path to the guide's root-relative, forward-slashed
-/// VIEW key, so a user can pass either an absolute or a relative path.
-fn walkthrough_view_key(path: &std::path::Path, root: &std::path::Path) -> String {
-    let rel = path.strip_prefix(root).unwrap_or(path);
-    rel.to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]

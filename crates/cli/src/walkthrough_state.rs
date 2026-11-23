@@ -162,9 +162,34 @@ fn mark_viewed(
     write_atomic(CacheTarget::new(root, cache_dir), &state)
 }
 
+/// Record absolute and root-relative paths with the same key as the guide.
+pub fn record_guide_marks(
+    guide: &crate::audit_walkthrough::WalkthroughGuide,
+    root: &Path,
+    cache_dir: &Path,
+    paths: &[std::path::PathBuf],
+) {
+    if paths.is_empty() {
+        return;
+    }
+    let keys = paths
+        .iter()
+        .map(|path| {
+            let absolute = root.join(path);
+            let relative = absolute.strip_prefix(root).unwrap_or(path);
+            relative
+                .components()
+                .collect::<std::path::PathBuf>()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect::<Vec<_>>();
+    record_marks(root, cache_dir, &keys, &guide.graph_snapshot_hash);
+}
+
 /// Record the `--mark-viewed` files. A failure prints a warning and never
 /// sets the exit code, because the ledger is a convenience.
-pub fn record_marks(root: &Path, cache_dir: &Path, files: &[String], current_hash: &str) {
+fn record_marks(root: &Path, cache_dir: &Path, files: &[String], current_hash: &str) {
     if let Err(err) = mark_viewed(root, cache_dir, files, current_hash) {
         eprintln!("Warning: --mark-viewed did not record the files: {err}");
     }
