@@ -48,6 +48,55 @@ fn indented_sass_apply_stops_at_the_next_declaration() {
 }
 
 #[test]
+fn indented_sass_apply_ends_before_a_terminated_declaration() {
+    let sass = ".row\n  @apply flex\n  color: red;\n";
+    assert_eq!(
+        crate::extract_apply_tokens_located(sass),
+        [("flex".into(), 2)]
+    );
+
+    let css = ".panel {\n  @apply grid\n  items-center;\n}";
+    assert_eq!(
+        crate::extract_apply_tokens_located(css),
+        [("grid".into(), 2), ("items-center".into(), 2)]
+    );
+}
+
+#[test]
+fn indented_sass_apply_reads_its_first_argument_on_the_next_line() {
+    let source = "@apply\n  flex";
+    assert_eq!(
+        crate::extract_apply_tokens_located(source),
+        [("flex".into(), 1)]
+    );
+}
+
+#[test]
+fn indented_sass_apply_ignores_a_brace_in_a_silent_comment() {
+    let sass = "// .old {\n.row\n  @apply flex\n  color: red;\n";
+    assert_eq!(
+        crate::extract_apply_tokens_located(sass),
+        [("flex".into(), 3)]
+    );
+}
+
+#[test]
+fn css_apply_after_double_slashes_keeps_continuation_lines() {
+    for opener in [
+        "@import url(http://example.test/base.css); .panel {",
+        "@import URL(http://example.test/base.css); .panel {",
+        ".panel[data-kind='//'] {",
+    ] {
+        let source = format!("{opener}\n  @apply flex\n  items-center;\n}}");
+        assert_eq!(
+            crate::extract_apply_tokens_located(&source),
+            [("flex".into(), 2), ("items-center".into(), 2)],
+            "{opener}",
+        );
+    }
+}
+
+#[test]
 fn extracts_css_import_quoted() {
     let info = parse_css(r#"@import "./reset.css";"#, "styles.css");
     assert_eq!(info.imports.len(), 1);

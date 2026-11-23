@@ -19,7 +19,8 @@ use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
 use crate::css_mask::{
-    mask_sass_module_members, mask_view_transition_arguments, mask_with_whitespace,
+    is_indented_stylesheet, mask_sass_module_members, mask_view_transition_arguments,
+    mask_with_whitespace,
 };
 use crate::css_module_classes::lightningcss_class_set;
 use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
@@ -69,7 +70,7 @@ static CSS_CLASS_RE: LazyLock<regex::Regex> =
 /// Regex to strip quoted strings and `url(...)` content from CSS before class extraction.
 /// Prevents false positives from `content: ".foo"` and `url(./path/file.ext)`.
 static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#));
+    LazyLock::new(|| crate::static_regex(r#"(?s)"[^"]*"|'[^']*'|(?i:url)\([^)]*\)"#));
 
 /// Regex to strip the prelude of `@layer` and `@import` at-rules before
 /// CSS-Modules class extraction. Matches the `@keyword` plus everything up to
@@ -659,8 +660,11 @@ pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
 /// [`mask_theme_source`].
 fn apply_tokens_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
     let mut out = Vec::new();
-    // Matches arrive in source order, so the line advances from the previous
-    // match instead of a rescan of the whole prefix for each match.
+    let ends: &[char] = if is_indented_stylesheet(masked) {
+        &[';', '}', '\n']
+    } else {
+        &[';', '}']
+    };
     let mut last_pos = 0usize;
     let mut line = 1u32;
     let mut directives = masked
@@ -673,11 +677,9 @@ fn apply_tokens_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
         let next = directives
             .peek()
             .map_or(masked.len(), |(offset, _)| *offset);
-        let rest = &masked[start + keyword.len()..next];
-        // A CSS terminator permits continuation lines. An unterminated
-        // directive in indented Sass ends at its own newline.
+        let rest = masked[start + keyword.len()..next].trim_start();
         let body = rest
-            .split_once([';', '}'])
+            .split_once(ends)
             .map_or_else(|| rest.lines().next().unwrap_or_default(), |(body, _)| body);
         for token in body.split_whitespace() {
             let token = token.trim_matches('!');
@@ -925,9 +927,7 @@ fn mask_css_module_global_scopes(masked: String) -> String {
     if !masked.contains(GLOBAL_KEYWORD) {
         return masked;
     }
-    let indented = !masked
-        .match_indices('{')
-        .any(|(i, _)| i == 0 || masked.as_bytes()[i - 1] != b'#');
+    let indented = is_indented_stylesheet(&masked);
     let bytes = masked.as_bytes();
     let mut blank = Vec::new();
     let mut scan = GlobalScopeScan {
