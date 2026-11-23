@@ -41,8 +41,7 @@ pub struct LoadedBaselineStaleness {
     /// predicate that produced `staleness.change_scoped`. Carried here rather
     /// than on the engine struct so the analysis keeps the one boolean it needs.
     pub scope_reasons: fallow_output::BaselineScopeReasons,
-    /// The mode the dead-code file records, for the note and the prune remedy.
-    /// Always empty for `dupes`: no gate reads the mode of that file.
+    /// The mode the file records, for the note and the prune command.
     pub saved_mode: BaselineMode,
     /// The categories of a dead-code file that an issue-type filter of this run
     /// does not report. Empty when no filter stops the comparison.
@@ -113,22 +112,13 @@ impl LoadedBaselineStaleness {
     }
 }
 
-/// What each command calls the things its baseline entries describe.
-/// Matches the noun the command's own staleness warning already uses.
-const fn entry_noun(expected: BaselineKind) -> &'static str {
-    match expected {
-        BaselineKind::DeadCode => "issue",
-        BaselineKind::Dupes => "clone group",
-        BaselineKind::Health => "finding",
-    }
-}
-
 /// Evaluate the gate for a loaded baseline, print what it decided, and report
 /// whether it fired.
 pub fn gate_failed(
     loaded: Option<&LoadedBaselineStaleness>,
     enabled: bool,
     expected: BaselineKind,
+    root: &Path,
 ) -> bool {
     if !enabled {
         return false;
@@ -143,6 +133,7 @@ pub fn gate_failed(
         unrecognised_format: loaded.unrecognised_format,
         saved_by: loaded.saved_by.map(BaselineKind::as_str),
         path: &loaded.path,
+        root,
         expected,
         scope_reasons: loaded.scope_reasons,
         saved_mode: loaded.saved_mode,
@@ -150,21 +141,17 @@ pub fn gate_failed(
     })
 }
 
-/// [`gate_failed`] for a caller that holds the published envelope object rather
-/// than a [`LoadedBaselineStaleness`], which is `health`: its load happens in the
-/// engine and the report is what comes back. The writer comes from
-/// `staleness.saved_by`, which the load note set, so the gate line names the
-/// same command as the note and the envelope.
-pub fn gate_failed_from_envelope(
-    staleness: &fallow_output::BaselineStaleness,
+/// Evaluate the health gate with the counts and saved mode from the same load.
+pub fn health_gate_failed(
+    result: &crate::health::HealthResult,
     path: Option<&Path>,
     enabled: bool,
-    expected: BaselineKind,
 ) -> bool {
     if !enabled {
         return false;
     }
-    let Some(path) = path else {
+    let (Some(path), Some(staleness)) = (path, result.report.summary.baseline_staleness.as_ref())
+    else {
         return false;
     };
     report_gate(&GateReport {
@@ -174,9 +161,10 @@ pub fn gate_failed_from_envelope(
         unrecognised_format: staleness.unrecognised_format,
         saved_by: staleness.saved_by,
         path,
-        expected,
+        root: &result.config.root,
+        expected: BaselineKind::Health,
         scope_reasons: staleness.scope_reasons,
-        saved_mode: BaselineMode::default(),
+        saved_mode: result.saved_baseline_mode,
         uncovered_categories: &[],
     })
 }
@@ -321,6 +309,7 @@ struct GateReport<'a> {
     unrecognised_format: bool,
     saved_by: Option<&'a str>,
     path: &'a Path,
+    root: &'a Path,
     expected: BaselineKind,
     scope_reasons: BaselineScopeReasons,
     saved_mode: BaselineMode,
@@ -405,7 +394,7 @@ fn report_gate(report: &GateReport<'_>) -> bool {
         saved_mode,
         ..
     } = *report;
-    let noun = entry_noun(expected);
+    let noun = expected.entry_noun();
     // A file this command cannot read as its own suppresses nothing, which the
     // counts cannot say: they are all zero, exactly as they are for a baseline
     // saved from a project that had nothing to record. A repository that armed
@@ -451,7 +440,7 @@ fn report_gate(report: &GateReport<'_>) -> bool {
         "Baseline gate failed: {stale} of {entries} entries in {} matched no current {noun}. \
          Remove only the stale entries with: {}, or re-save with: --save-baseline {}",
         path.display(),
-        expected.prune_command(path, saved_mode),
+        expected.prune_command_for_root(path, saved_mode, report.root),
         path.display(),
     );
     true

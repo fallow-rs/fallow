@@ -660,6 +660,7 @@ fn apply_duplication_baseline(
 
     let (baseline_data, saved_by, unrecognised_format) =
         read_duplication_baseline(path, opts.output)?;
+    let saved_mode = baseline_data.saved_mode();
     let baseline_entries = baseline_data.entry_count();
     let legacy_keys = baseline_data.has_unparsed_collision_keys();
     let before = report.clone_groups.len();
@@ -681,7 +682,12 @@ fn apply_duplication_baseline(
                 path.display()
             );
         }
-        warn_on_duplication_baseline_staleness(staleness, path);
+        fallow_engine::baseline::BaselineKind::Dupes.warn_on_staleness(
+            staleness,
+            path,
+            saved_mode,
+            &config.root,
+        );
     }
     crate::baseline_gate::note_unrecognised_baseline(
         Some(path),
@@ -699,7 +705,7 @@ fn apply_duplication_baseline(
         scope_reasons,
     });
     Ok(Some(crate::baseline_gate::LoadedBaselineStaleness {
-        saved_mode: fallow_output::BaselineMode::default(),
+        saved_mode,
         uncovered_categories: Vec::new(),
         staleness,
         path: path.to_path_buf(),
@@ -746,35 +752,6 @@ fn read_duplication_baseline(
     let saved_by = classified.saved_by();
     let unrecognised_format = !matches!(classified, fallow_engine::baseline::BaselineFileKind::Own);
     Ok((data, saved_by, unrecognised_format))
-}
-
-/// Warn when a loaded duplication baseline no longer describes the current
-/// project, using the same decision as `dead-code` and `health`.
-fn warn_on_duplication_baseline_staleness(
-    staleness: fallow_engine::baseline::BaselineStaleness,
-    path: &std::path::Path,
-) {
-    let baseline_entries = staleness.entries;
-    let stale_entries = staleness.stale_entries();
-    match staleness.warning() {
-        fallow_engine::baseline::BaselineStalenessWarning::None => {}
-        fallow_engine::baseline::BaselineStalenessWarning::ZeroOverlap => eprintln!(
-            "Warning: duplication baseline has {baseline_entries} entries but \
-             matched 0 current clone groups. Your paths may have changed, or \
-             the baseline was saved on a different machine. Re-save with: \
-             --save-baseline {}",
-            path.display(),
-        ),
-        fallow_engine::baseline::BaselineStalenessWarning::Partial => eprintln!(
-            "Warning: duplication baseline is partially stale: {stale_entries} \
-             of {baseline_entries} entries matched no current clone group, so \
-             the gate protects less than what was saved. Remove only the stale \
-             entries with: {}, or re-save with: --save-baseline {}",
-            fallow_engine::baseline::BaselineKind::Dupes
-                .prune_command(path, fallow_output::BaselineMode::default()),
-            path.display(),
-        ),
-    }
 }
 
 /// Resolve `--changed-since` to a concrete file set up front so the focused
@@ -1050,6 +1027,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::Dupes,
+        &result.config.root,
     );
 
     // `--fail-on-issues` and `--ci` fail on any clone group the report shows.

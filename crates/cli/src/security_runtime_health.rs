@@ -45,7 +45,7 @@ pub(super) fn analyze_security_runtime(
         config,
         config_ms,
     )?;
-    Ok(result.report.runtime_coverage)
+    Ok(result.analysis.report.runtime_coverage)
 }
 
 /// The config of the runtime coverage step of `fallow security`: the config

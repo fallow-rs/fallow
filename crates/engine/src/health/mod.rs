@@ -81,7 +81,7 @@ use derived_sections::{
     HealthDerivedSectionInput, HealthDerivedSections, prepare_health_derived_sections,
 };
 use execute::HealthOptions;
-pub use execute::execute_health_inner;
+pub use execute::{execute_health_inner, execute_health_inner_with_baseline};
 use file_scores::{
     FileScoresAndChurnInput, compute_file_scores_and_churn, health_file_scores_slice,
     print_slow_churn_note,

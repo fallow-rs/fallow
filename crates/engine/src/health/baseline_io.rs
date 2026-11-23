@@ -5,7 +5,7 @@
     reason = "health baseline save/load preserves existing human stderr notes"
 )]
 
-use crate::baseline::{BaselineStalenessWarning, HealthBaselineData, HealthBaselineMode};
+use crate::baseline::{BaselineKind, HealthBaselineData, HealthBaselineMode};
 
 use super::HealthError;
 
@@ -210,7 +210,12 @@ pub(super) fn load_health_baseline(
         ..staleness_from_counts(&counts)
     };
     if !quiet {
-        warn_on_staleness(&counts, baseline_path);
+        BaselineKind::Health.warn_on_staleness(
+            staleness_decision(&counts),
+            baseline_path,
+            baseline.saved_mode(),
+            root,
+        );
         if counts.moved_entries > 0 {
             eprintln!(
                 "Note: {} baseline entr{} matched through a followed file move.",
@@ -227,32 +232,6 @@ pub(super) fn load_health_baseline(
         data: baseline,
         staleness,
     })
-}
-
-/// Warn when the loaded baseline went stale, branching on the shared decision
-/// in [`crate::baseline::BaselineStaleness`] rather than re-deriving it.
-fn warn_on_staleness(counts: &StalenessCounts, baseline_path: &std::path::Path) {
-    let baseline_entries = counts.baseline_entries;
-    let stale_entries = baseline_entries.saturating_sub(counts.matched_entries);
-    match staleness_decision(counts).warning() {
-        BaselineStalenessWarning::None => {}
-        BaselineStalenessWarning::ZeroOverlap => eprintln!(
-            "Warning: health baseline has {baseline_entries} entries but matched \
-             0 current findings. Your paths may have changed, or the baseline \
-             was saved on a different machine. Re-save with: \
-             --save-baseline {}",
-            baseline_path.display(),
-        ),
-        BaselineStalenessWarning::Partial => eprintln!(
-            "Warning: health baseline is partially stale: {stale_entries} of \
-             {baseline_entries} entries matched no current finding, so the \
-             gate protects less than what was saved. Remove only the stale \
-             entries with: {}, or re-save with: --save-baseline {}",
-            crate::baseline::BaselineKind::Health
-                .prune_command(baseline_path, fallow_output::BaselineMode::default()),
-            baseline_path.display(),
-        ),
-    }
 }
 
 /// The shared staleness decision for this run's counts.

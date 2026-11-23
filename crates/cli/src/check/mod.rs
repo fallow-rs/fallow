@@ -1635,6 +1635,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::DeadCode,
+        &result.config.root,
     );
     let parse_error_failed = prepared
         .parse_error

@@ -99,22 +99,21 @@ fn machine_combined_code_with_stale_baseline_gate(
         check_result.and_then(|result| result.baseline_staleness.as_ref()),
         opts.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::DeadCode,
+        opts.root,
     );
     let dupes = crate::baseline_gate::gate_failed(
         dupes_result.and_then(|result| result.baseline_staleness.as_ref()),
         opts.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::Dupes,
+        opts.root,
     );
-    let health = health_result
-        .and_then(|result| result.report.summary.baseline_staleness.as_ref())
-        .is_some_and(|staleness| {
-            crate::baseline_gate::gate_failed_from_envelope(
-                staleness,
-                opts.health_baseline,
-                opts.fail_on_stale_baseline,
-                fallow_engine::baseline::BaselineKind::Health,
-            )
-        });
+    let health = health_result.is_some_and(|result| {
+        crate::baseline_gate::health_gate_failed(
+            result,
+            opts.health_baseline,
+            opts.fail_on_stale_baseline,
+        )
+    });
     code.max(crate::exit_codes::gate_failed_exit_code(
         fallow_output::GateName::StaleBaseline,
         dead_code || dupes || health,
@@ -1475,7 +1474,7 @@ mod tests {
     /// policy and holds a partial query. The resolved config keeps the
     /// default `best-effort` policy, so the two sources disagree.
     fn health_result_with_incomplete_type_aware_meta() -> crate::health::HealthResult {
-        crate::health::HealthResult {
+        let analysis = fallow_engine::health::HealthAnalysisResult {
             branching_by_file: fallow_engine::health::BranchingByFile::default(),
             report: fallow_output::HealthReport::default(),
             grouping: None,
@@ -1511,6 +1510,10 @@ mod tests {
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
             changed_files_analyzed: None,
+        };
+        crate::health::HealthResult {
+            analysis,
+            saved_baseline_mode: fallow_output::BaselineMode::default(),
         }
     }
 
