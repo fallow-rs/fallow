@@ -227,7 +227,7 @@ const SHUTDOWN_CACHE_FLUSH_GRACE: Duration = Duration::from_secs(1);
 /// names and the names the loader accepts are appended by
 /// [`watched_file_globs`].
 const WATCHED_FILE_GLOBS: &[&str] = &[
-    "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}",
+    "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,vue,svelte,astro,mdx}",
     "**/*.d.ts",
     "**/{tsconfig*,jsconfig*}.json",
     "**/fallow-plugin-*.{toml,json,jsonc}",
@@ -1549,3 +1549,7 @@ mod clone_columns_tests;
 #[cfg(test)]
 #[path = "tests_production_rules.rs"]
 mod production_rules_tests;
+
+#[cfg(test)]
+#[path = "tests_watched_files.rs"]
+mod watched_files_tests;

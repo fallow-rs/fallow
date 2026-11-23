@@ -4361,36 +4361,6 @@ fn analyze_project_root_honors_per_path_rule_overrides() {
     );
 }
 
-#[test]
-fn watched_file_globs_cover_every_config_file_name() {
-    let globs = watched_file_globs();
-
-    for name in fallow_config::CONFIG_FILE_NAMES {
-        let expected = format!("**/{name}");
-        assert!(
-            globs.contains(&expected),
-            "{name} is a config file the loader reads, so the watcher must register {expected}: {globs:?}"
-        );
-    }
-}
-
-#[test]
-fn workspace_manifests_are_watched_session_inputs() {
-    let globs = watched_file_globs();
-
-    for name in ["pnpm-workspace.yaml", "deno.json", "deno.jsonc"] {
-        let expected = format!("**/{name}");
-        assert!(
-            globs.contains(&expected),
-            "workspace discovery reads {name}, so the watcher must register {expected}: {globs:?}"
-        );
-        assert!(
-            session_store::session_input_file(Path::new(name)),
-            "an edit to {name} must load the kept sessions again"
-        );
-    }
-}
-
 /// Drain server-to-client traffic until a `publishDiagnostics` notification for
 /// `uri` carries (or no longer carries) an `unused-export` diagnostic. Returns
 /// `false` when the stream ends or goes quiet first.

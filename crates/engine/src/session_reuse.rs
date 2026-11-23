@@ -391,6 +391,32 @@ mod tests {
     }
 
     #[test]
+    fn refreshed_discovery_updates_large_file_diagnostics() {
+        let project = tempfile::tempdir().expect("project");
+        write_project(project.path());
+        let source = project.path().join("src/module1.ts");
+        let mut session = crate::session::AnalysisSession::load_default(project.path());
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .expect("source");
+        let limit = fallow_config::DEFAULT_MAX_FILE_SIZE_BYTES;
+        for size in [limit + 1, 1] {
+            file.set_len(size).expect("resize source");
+            session.refresh_discovery();
+            let diagnostics = session.current_workspace_diagnostics();
+            let skipped = diagnostics
+                .iter()
+                .any(|d| d.path.ends_with("src/module1.ts") && d.kind.id() == "skipped-large-file");
+            assert_eq!(
+                skipped,
+                size > limit,
+                "diagnostics after resize to {size}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_refreshed_session_sees_created_and_deleted_files() {
         let project = tempfile::tempdir().expect("project");
         write_project(project.path());
