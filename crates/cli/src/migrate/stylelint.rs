@@ -75,6 +75,30 @@ const UNSUPPORTED_STYLELINT_RULES: &[(&str, &str)] = &[
     ),
 ];
 
+pub(super) fn recognizes_config(value: &serde_json::Value) -> bool {
+    let Some(rules) = value.get("rules") else {
+        return false;
+    };
+    if ["extends", "plugins", "overrides", "customSyntax"]
+        .iter()
+        .any(|key| value.get(key).is_some())
+    {
+        return true;
+    }
+    // Knip also accepts ignoreFiles, but its issue types have neither
+    // hyphens (Stylelint rules) nor slashes (Stylelint plugin rules).
+    let has_ignore_files = value.get("ignoreFiles").is_some();
+    rules.as_object().is_some_and(|rules| {
+        rules.keys().any(|name| {
+            STYLELINT_SELECTOR_RULES.contains(&name.as_str())
+                || UNSUPPORTED_STYLELINT_RULES
+                    .iter()
+                    .any(|(rule, _)| rule == name)
+                || (has_ignore_files && name.contains(['-', '/']))
+        })
+    })
+}
+
 pub(super) fn migrate_stylelint(
     stylelint: &serde_json::Value,
     config: &mut serde_json::Map<String, serde_json::Value>,

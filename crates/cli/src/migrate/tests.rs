@@ -114,6 +114,74 @@ fn custom_filenames_use_tool_specific_settings() {
 }
 
 #[test]
+fn custom_filename_detects_stylelint_without_extends() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    for (key, value) in [
+        ("plugins", serde_json::json!(["./plugin.js"])),
+        ("overrides", serde_json::json!([{"files": "*.scss"}])),
+        ("customSyntax", serde_json::json!("postcss-scss")),
+        ("ignoreFiles", serde_json::json!(["build/**"])),
+    ] {
+        let rule = if key == "ignoreFiles" {
+            "plugin/custom"
+        } else {
+            "indentation"
+        };
+        let config = serde_json::json!({(key): value, "rules": {(rule): 2}});
+        std::fs::write(&path, config.to_string()).unwrap();
+        let migrated = migrate_from_file(&path).unwrap();
+        assert!(
+            migrated
+                .sources
+                .iter()
+                .any(|source| source.ends_with("(stylelint config)")),
+            "{key}"
+        );
+    }
+}
+
+#[test]
+fn custom_filename_preserves_knip_rules_with_ignore_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    std::fs::write(
+        &path,
+        r#"{"rules":{"files":"off"},"ignoreFiles":["build/**"]}"#,
+    )
+    .unwrap();
+    let migrated = migrate_from_file(&path).unwrap();
+    assert_eq!(migrated.config["rules"]["unused-files"], "off");
+}
+
+#[test]
+fn custom_filename_recognizes_a_known_stylelint_rule_on_its_own() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    std::fs::write(&path, r#"{"rules":{"selector-max-id":0}}"#).unwrap();
+    let migrated = migrate_from_file(&path).unwrap();
+    assert_eq!(migrated.config["rules"]["css-selector-complexity"], "warn");
+}
+
+#[test]
+fn custom_filename_keeps_knip_warnings_with_empty_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    std::fs::write(
+        &path,
+        r#"{"rules":{},"ignoreFiles":["build/**"],"ignoreMembers":["id"]}"#,
+    )
+    .unwrap();
+    let migrated = migrate_from_file(&path).unwrap();
+    assert!(
+        migrated
+            .warnings
+            .iter()
+            .any(|warning| warning.source == "knip" && warning.field == "ignoreMembers")
+    );
+}
+
+#[test]
 fn migrate_package_json_stylelint_key() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let tmpdir = temp.path();

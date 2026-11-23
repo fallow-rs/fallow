@@ -535,7 +535,7 @@ fn migrate_unnamed_config_file(
     {
         migrate_jscpd(&value, config, warnings);
         sources.push(format!("{} (jscpd config)", path.display()));
-    } else if value.get("rules").is_some() && value.get("extends").is_some() {
+    } else if stylelint::recognizes_config(&value) {
         migrate_stylelint(&value, config, warnings);
         sources.push(format!("{} (stylelint config)", path.display()));
     } else if value.get("entry").is_some()
