@@ -9,6 +9,7 @@ use fallow_types::extract::{
     ExportName, ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact,
 };
 
+use super::entry_marks::untracked_load_targets;
 use super::narrowing::{AttachContext, ReferenceDedup, attach_symbol_reference};
 use super::types::{ExportSymbol, ReExportEdge};
 use super::types::{ModuleNode, ReferencePathInterner};
@@ -43,26 +44,6 @@ impl ModuleGraph {
             }
         }
     }
-}
-
-/// The files that a dynamic import, an import pattern or a `require()` loads.
-fn untracked_load_targets(resolved_modules: &[ResolvedModule]) -> FxHashSet<FileId> {
-    let mut targets = FxHashSet::default();
-    for module in resolved_modules {
-        let required = module
-            .resolved_imports
-            .iter()
-            .filter(|import| import.target.is_commonjs_require());
-        for import in module.resolved_dynamic_imports.iter().chain(required) {
-            if let Some(target) = import.target.internal_file_id() {
-                targets.insert(target);
-            }
-        }
-        for (_, files) in &module.resolved_dynamic_patterns {
-            targets.extend(files.iter().copied());
-        }
-    }
-    targets
 }
 
 pub(super) struct PopulateEdgesInput<'a> {

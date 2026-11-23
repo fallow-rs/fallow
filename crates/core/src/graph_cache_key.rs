@@ -83,7 +83,9 @@ fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
 /// does not seed are reachability roots too: they depend on package.json,
 /// tsconfig and sibling files the manifest does not track.
 /// `consumer_checked` holds the entry points that `includeEntryExports`
-/// covers: their `export *` lines credit fewer names in the graph.
+/// covers: their `export *` lines credit fewer names in the graph. The
+/// fixture-only entry files are hashed too, because the graph build checks
+/// the exports of each one that a module imports.
 pub fn entry_points_hash(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
@@ -113,6 +115,11 @@ pub fn entry_points_hash(
     let excluded = entry_points.production_excluded();
     excluded.len().hash(&mut hasher);
     for path in excluded {
+        root_relative_key(root, path).hash(&mut hasher);
+    }
+    let fixtures = entry_points.fixture_only();
+    fixtures.len().hash(&mut hasher);
+    for path in fixtures {
         root_relative_key(root, path).hash(&mut hasher);
     }
     let mut unseeded: Vec<String> = files

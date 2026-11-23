@@ -556,7 +556,7 @@ fn find_unused_exports_for_module(
     if should_skip_module(
         module,
         !matching_plugin.is_empty(),
-        ctx.config.include_entry_exports_for(&module.path),
+        module.is_consumer_checked() || ctx.config.include_entry_exports_for(&module.path),
     ) {
         return (Vec::new(), Vec::new(), stale_expected_unused);
     }
@@ -694,6 +694,9 @@ fn unused_export_for_module(
 ) -> Option<UnusedExport> {
     let mut match_ctx = match_ctx;
     let export_str = export_name_str(&export.name);
+    if module.is_fixture_entry() && matches!(export.name, ExportName::Default) {
+        return None;
+    }
 
     if unused_export_candidate_is_skipped(module, export, ctx, export_str, &mut match_ctx) {
         return None;

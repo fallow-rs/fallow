@@ -217,6 +217,20 @@ error by suppressing a downstream detector.
   entry point reads only store members, so its enum, class and namespace
   members are not reported either, unless `includeEntryExports` covers the
   file (issue #4990).
+- A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
+  of Vitest, Jest and Playwright) seeds each matching file as a support entry
+  point, so the file is never an unused file. Discovery records the files that
+  only a fixture pattern seeds in `CategorizedEntryPoints::fixture_only`, and
+  drops a file when a directory between it and its outermost fixture
+  directory holds a `package.json`. The graph build (`graph_build::imported_fixture_entries`)
+  marks such a file consumer-checked, like an entry point that
+  `includeEntryExports` covers, when a module outside the fixture directories
+  imports a binding from it with a static ES import or re-exports it. A
+  fixture file that a checked fixture imports by name is checked too. A
+  side-effect import does not count. A file that a dynamic import, an import
+  pattern or `require()` loads stays unmarked, and so do the files that only
+  it imports (`graph::untracked_load_targets`). The default export of a checked fixture file stays used, because a
+  tool can also load the file by path (issue #5082).
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the
