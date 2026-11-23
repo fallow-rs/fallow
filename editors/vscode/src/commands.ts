@@ -276,23 +276,16 @@ export const execFallow = (
     });
   });
 
-/**
- * Resolved CLI versions keyed by binary path. A binary at a given path does not
- * change version within a session, so probe `--version` once instead of on
- * every sidebar analysis (config-change reanalysis can fire these frequently).
- * `undefined` = not yet probed; `null` = probed but version could not be read.
- */
-const cliVersionCache = new Map<string, Promise<string | null>>();
+// Concurrent runs can share a probe. A later run may find a replacement CLI at the same path.
+const pendingVersions = new Map<string, Promise<string | null>>();
 
 const probeCliVersion = (binaryPath: string): Promise<string | null> => {
-  // Cache the in-flight PROMISE, not the resolved value, so concurrent callers
-  // share one `--version` spawn instead of each launching its own.
-  const cached = cliVersionCache.get(binaryPath);
+  const cached = pendingVersions.get(binaryPath);
   if (cached !== undefined) {
     return cached;
   }
-  const version = getBinaryVersion(binaryPath);
-  cliVersionCache.set(binaryPath, version);
+  const version = getBinaryVersion(binaryPath).finally(() => pendingVersions.delete(binaryPath));
+  pendingVersions.set(binaryPath, version);
   return version;
 };
 
@@ -332,11 +325,12 @@ export const resolveCliForRun = async (
     const managed =
       (await getInstalledCliPath(context, outputChannel)) ??
       (await downloadCliBinary(context, outputChannel));
-    if (managed && managed !== found) {
+    if (managed) {
       const managedVersion = await probeCliVersion(managed);
-      outputChannel?.appendLine(
-        `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
-      );
+      if (managed !== found || managedVersion !== version)
+        outputChannel?.appendLine(
+          `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
+        );
       return { binary: managed, version: managedVersion };
     }
   }

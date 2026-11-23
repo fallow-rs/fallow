@@ -143,7 +143,7 @@ vi.mock("../src/binary-utils.js", async (importOriginal) => ({
 vi.mock("../src/download.js", () => ({
   getInstalledCliPath: vi.fn(() => mockInstalledCli),
   downloadCliBinary: vi.fn(async () => mockDownloadedCli),
-  getBinaryVersion: (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null,
+  getBinaryVersion: async (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null,
   getExtensionVersion: () => mockExtensionVersion,
 }));
 
@@ -468,6 +468,27 @@ describe("resolveCliForRun", () => {
     mockBinaryVersions = {};
     mockComplexityBreakdownEnabled = false;
     vi.clearAllMocks();
+  });
+
+  it("uses new CLI capabilities after a release retry replaces the same path", async () => {
+    const path = "/storage/bin/release-retry/fallow";
+    mockInstalledCli = path;
+    mockBinaryVersions = { [path]: "2.86.0" };
+    expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.86.0" });
+
+    mockBinaryVersions = { [path]: "2.88.1" };
+    expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.88.1" });
+  });
+
+  it("returns the version installed by the current download at the original path", async () => {
+    const path = "/storage/bin/upgraded/fallow";
+    mockPathBinary = path;
+    mockBinaryVersions = { [path]: "2.86.0" };
+    vi.mocked(downloadCliBinary).mockImplementationOnce(async () => {
+      mockBinaryVersions = { [path]: "2.88.1" };
+      return path;
+    });
+    expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.88.1" });
   });
 
   it("uses a resolved CLI at the extension version as-is, without downloading", async () => {
