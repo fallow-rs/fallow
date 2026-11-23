@@ -227,7 +227,10 @@ fn embedded_identity_hint_saves_into_the_config() {
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     config["regression"]["baseline"]["analysisIdentity"]["mode"] = "type-aware".into();
     std::fs::write(&path, config.to_string()).unwrap();
-    let rejected = run(&root, &["dead-code"], &["--fail-on-regression"]);
+    let rejected = run_fallow_raw_in_dir(
+        &root,
+        &["dead-code", "--fail-on-regression", "--format", "json"],
+    );
     assert_eq!(rejected.code, 2);
     let message = error_message(&rejected);
     assert!(
@@ -273,4 +276,52 @@ fn regression_deltas_only_use_counts_the_baseline_can_store() {
         "{}",
         check.stderr
     );
+}
+
+#[test]
+fn recovery_runs_from_the_original_directory_with_the_selected_project() {
+    let (_dir, root) = write_project();
+    let caller = root.parent().unwrap();
+    let config = "custom.json";
+    std::fs::write(caller.join(config), r#"{"typeAware":{"enabled":true}}"#).unwrap();
+    for command in [
+        &["dead-code", "--no-type-aware"][..],
+        &["flags", "--retirement"],
+        &["list", "--entry-weight"],
+    ] {
+        let mut args = command.to_vec();
+        args.extend([
+            "--root",
+            "project",
+            "--config",
+            config,
+            "--regression-baseline",
+            "counts.json",
+            "--fail-on-regression",
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        let error = run_fallow_raw_in_dir(caller, &args);
+        assert_eq!(error.code, 2, "{}", error.stdout);
+        let message = error_message(&error);
+        let (_, hint) = message
+            .rsplit_once(": fallow ")
+            .expect("a runnable recovery command");
+        // These fixture paths contain no shell metacharacters.
+        let mut save: Vec<_> = hint.split_whitespace().collect();
+        assert!(
+            save.contains(&"--root") && save.contains(&"--config"),
+            "{hint}"
+        );
+        if command[0] == "dead-code" {
+            assert!(save.contains(&"--no-type-aware"), "{hint}");
+        }
+        save.extend(["--format", "json", "--quiet"]);
+        let saved = run_fallow_raw_in_dir(caller, &save);
+        assert_eq!(saved.code, 0, "{}", saved.stdout);
+        assert!(caller.join("counts.json").is_file());
+        assert!(!root.join("counts.json").exists());
+        std::fs::remove_file(caller.join("counts.json")).unwrap();
+    }
 }

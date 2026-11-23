@@ -18,6 +18,7 @@ pub use entry_weight::{
 };
 pub use flags::{compare_flags_regression, print_flags_regression};
 pub use outcome::{RegressionOutcome, print_regression_outcome};
+pub use recovery::RegressionArgs;
 pub use tolerance::Tolerance;
 
 /// The config file that a flag-only `--save-regression-baseline` rewrites:

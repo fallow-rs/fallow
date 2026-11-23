@@ -79,14 +79,15 @@ pub fn compare_flags_regression(
             opts.output,
         ));
     };
-    let baseline = load_regression_baseline_for(path, opts.output, BaselineCommand::Flags)?;
+    let baseline =
+        load_regression_baseline_for(path, opts.output, BaselineCommand::Flags(opts.args))?;
     let Some(stored) = baseline.flags else {
         return Err(emit_input_error(
             &format!(
                 "regression baseline '{}' has no flags data.\n\
                  Create it with: {}",
                 path.display(),
-                BaselineCommand::Flags.save(Some(path))
+                BaselineCommand::Flags(opts.args).save(Some(path))
             ),
             opts.output,
         ));
@@ -194,6 +195,7 @@ mod tests {
         RegressionOpts {
             fail_on_regression: true,
             tolerance,
+            args: crate::regression::RegressionArgs::default(),
             regression_baseline_file: Some(path),
             save_target: SaveRegressionTarget::None,
             scoped: false,
@@ -204,8 +206,14 @@ mod tests {
 
     fn saved(dir: &std::path::Path, stored: &FlagsCounts) -> std::path::PathBuf {
         let path = dir.join("flags-baseline.json");
-        crate::regression::save_flags_regression_baseline(&path, dir, stored, OutputFormat::Json)
-            .expect("save");
+        crate::regression::save_flags_regression_baseline(
+            &path,
+            dir,
+            stored,
+            OutputFormat::Json,
+            crate::regression::RegressionArgs::default(),
+        )
+        .expect("save");
         path
     }
 

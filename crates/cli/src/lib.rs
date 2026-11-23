@@ -237,12 +237,11 @@ impl DispatchContext<'_> {
             fail_on_regression: self.cli.fail_on_regression,
             tolerance: self.tolerance,
             regression_baseline_file: self.cli.regression_baseline.as_deref(),
-            save_target: if let Some(path) = self.save_regression_file {
-                regression::SaveRegressionTarget::File(path)
-            } else if self.save_to_config {
-                regression::SaveRegressionTarget::Config
-            } else {
-                regression::SaveRegressionTarget::None
+            args: self.cli.into(),
+            save_target: match (self.save_regression_file, self.save_to_config) {
+                (Some(path), _) => regression::SaveRegressionTarget::File(path),
+                (None, true) => regression::SaveRegressionTarget::Config,
+                (None, false) => regression::SaveRegressionTarget::None,
             },
             scoped,
             quiet: self.quiet,

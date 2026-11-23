@@ -518,7 +518,7 @@ fn apply_entry_weight_gate(
 ) -> Result<bool, ExitCode> {
     let mut failed = false;
     if let Some(path) = gate.baseline_file {
-        let baseline = crate::regression::load_entry_weight_baseline(path, opts.output)?;
+        let baseline = crate::regression::load_entry_weight_baseline(path, opts.output, gate.args)?;
         let regression = crate::regression::compare_entry_weight(
             listing,
             &baseline,
@@ -539,6 +539,7 @@ fn apply_entry_weight_gate(
             opts.root,
             crate::regression::EntryWeightCounts::from_listing(listing),
             opts.output,
+            gate.args,
         )?;
     }
     Ok(failed)

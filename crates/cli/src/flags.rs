@@ -317,7 +317,7 @@ fn run_regression_gate(
             Ok(())
         }
         SaveRegressionTarget::File(path) => {
-            save_flags_regression_baseline(path, opts.root, &counts, opts.output)
+            save_flags_regression_baseline(path, opts.root, &counts, opts.output, regression.args)
         }
     }
 }
@@ -1481,6 +1481,7 @@ mod tests {
             regression: RegressionOpts {
                 fail_on_regression: false,
                 tolerance: crate::regression::Tolerance::Absolute(0),
+                args: crate::regression::RegressionArgs::default(),
                 regression_baseline_file: None,
                 save_target: SaveRegressionTarget::None,
                 scoped: false,

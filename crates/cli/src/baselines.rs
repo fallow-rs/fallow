@@ -277,6 +277,7 @@ fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<
         scope: None,
         regression_opts: crate::regression::RegressionOpts {
             fail_on_regression: false,
+            args: crate::regression::RegressionArgs::default(),
             regression_baseline_file: None,
             save_target: crate::regression::SaveRegressionTarget::None,
             scoped: true,

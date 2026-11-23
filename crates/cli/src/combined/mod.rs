@@ -1194,6 +1194,7 @@ mod tests {
             regression_opts: RegressionOpts {
                 fail_on_regression: false,
                 tolerance: Tolerance::Absolute(0),
+                args: crate::regression::RegressionArgs::default(),
                 regression_baseline_file: None,
                 save_target: SaveRegressionTarget::None,
                 scoped: false,

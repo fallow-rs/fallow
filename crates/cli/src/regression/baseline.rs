@@ -8,7 +8,7 @@ use super::counts::{
     CheckCounts, DupesCounts, FlagsCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline,
 };
 use super::outcome::RegressionOutcome;
-use super::recovery::BaselineCommand;
+use super::recovery::{BaselineCommand, RegressionArgs};
 use super::tolerance::Tolerance;
 
 use crate::error::emit_input_error;
@@ -31,6 +31,7 @@ pub enum SaveRegressionTarget<'a> {
 /// Options for regression detection.
 #[derive(Clone, Copy)]
 pub struct RegressionOpts<'a> {
+    pub args: RegressionArgs<'a>,
     pub fail_on_regression: bool,
     pub tolerance: Tolerance,
     /// Explicit regression baseline file path (overrides config).
@@ -122,8 +123,9 @@ pub fn save_flags_regression_baseline(
     root: &Path,
     flags_counts: &FlagsCounts,
     output: OutputFormat,
+    args: RegressionArgs<'_>,
 ) -> Result<(), ExitCode> {
-    let existing = existing_baseline_for_merge(path, output, BaselineCommand::Flags)?;
+    let existing = existing_baseline_for_merge(path, output, BaselineCommand::Flags(args))?;
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -458,7 +460,6 @@ fn compare_check_regression(
         config_baseline,
         &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
         "dead-code",
-        None,
     )
 }
 
@@ -468,7 +469,6 @@ pub fn compare_check_regression_with_identity(
     config_baseline: Option<&fallow_config::RegressionBaseline>,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
     command: &str,
-    config_path: Option<&Path>,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     if !opts.fail_on_regression {
         return Ok(None);
@@ -486,7 +486,7 @@ pub fn compare_check_regression_with_identity(
     let command = BaselineCommand::Check {
         name: command,
         mode: analysis_identity.mode,
-        config: config_path,
+        args: opts.args,
     };
     let baseline_counts: CheckCounts = if let Some(baseline_path) = opts.regression_baseline_file {
         let baseline = load_regression_baseline_for(baseline_path, opts.output, command)?;
@@ -610,11 +610,11 @@ mod tests {
     use fallow_types::results::*;
     use std::path::PathBuf;
 
-    const fn check_command(name: &str) -> BaselineCommand<'_> {
+    fn check_command(name: &str) -> BaselineCommand<'_> {
         BaselineCommand::Check {
             name,
             mode: fallow_types::semantic::SemanticAnalysisMode::Syntactic,
-            config: None,
+            args: RegressionArgs::default(),
         }
     }
 
@@ -779,7 +779,14 @@ mod tests {
             ..CheckCounts::from_config_baseline(&fallow_config::RegressionBaseline::default())
         };
 
-        save_flags_regression_baseline(&path, dir.path(), &flags, OutputFormat::Human).unwrap();
+        save_flags_regression_baseline(
+            &path,
+            dir.path(),
+            &flags,
+            OutputFormat::Human,
+            RegressionArgs::default(),
+        )
+        .unwrap();
         save_regression_baseline(&path, dir.path(), Some(&counts), None, OutputFormat::Human)
             .unwrap();
         let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
@@ -788,7 +795,14 @@ mod tests {
         assert_eq!(loaded.flags.expect("flag counts kept").distinct_flags, 2);
         assert!(loaded.entry_weight.is_some(), "entry weights kept");
 
-        save_flags_regression_baseline(&path, dir.path(), &flags, OutputFormat::Human).unwrap();
+        save_flags_regression_baseline(
+            &path,
+            dir.path(),
+            &flags,
+            OutputFormat::Human,
+            RegressionArgs::default(),
+        )
+        .unwrap();
         let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
         assert_eq!(loaded.check.expect("issue counts kept").total_issues, 1);
         assert!(loaded.entry_weight.is_some(), "entry weights kept");
@@ -824,8 +838,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = seed_baseline(dir.path(), CONFLICT_SEED.as_bytes());
 
-        let saved =
-            save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human);
+        let saved = save_flags_regression_baseline(
+            &path,
+            dir.path(),
+            &sample_flags(),
+            OutputFormat::Human,
+            RegressionArgs::default(),
+        );
 
         assert!(
             saved.is_err(),
@@ -839,8 +858,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = seed_baseline(dir.path(), NEWER_SCHEMA_SEED.as_bytes());
 
-        let saved =
-            save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human);
+        let saved = save_flags_regression_baseline(
+            &path,
+            dir.path(),
+            &sample_flags(),
+            OutputFormat::Human,
+            RegressionArgs::default(),
+        );
 
         assert!(saved.is_err(), "a partial save must stop on a newer schema");
         assert_eq!(std::fs::read(&path).unwrap(), NEWER_SCHEMA_SEED.as_bytes());
@@ -854,8 +878,14 @@ mod tests {
             br#"{"schema_version":1,"fallow_version":"0.0.0","timestamp":"t","check":{"total_issues":7}}"#,
         );
 
-        save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human)
-            .unwrap();
+        save_flags_regression_baseline(
+            &path,
+            dir.path(),
+            &sample_flags(),
+            OutputFormat::Human,
+            RegressionArgs::default(),
+        )
+        .unwrap();
         let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
 
         assert_eq!(loaded.schema_version, REGRESSION_SCHEMA_VERSION);
@@ -868,8 +898,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("regression-baseline.json");
 
-        save_flags_regression_baseline(&path, dir.path(), &sample_flags(), OutputFormat::Human)
-            .unwrap();
+        save_flags_regression_baseline(
+            &path,
+            dir.path(),
+            &sample_flags(),
+            OutputFormat::Human,
+            RegressionArgs::default(),
+        )
+        .unwrap();
         let loaded = load_regression_baseline(&path, OutputFormat::Human).unwrap();
 
         assert!(loaded.flags.is_some());
@@ -1081,6 +1117,7 @@ mod tests {
         RegressionOpts {
             fail_on_regression: fail,
             tolerance,
+            args: RegressionArgs::default(),
             regression_baseline_file: baseline_file,
             save_target: SaveRegressionTarget::None,
             scoped,
@@ -1411,13 +1448,16 @@ mod tests {
             BaselineCommand::Check {
                 name: "dead-code",
                 mode: fallow_types::semantic::SemanticAnalysisMode::TypeAware,
-                config: Some(Path::new("ci.json")),
+                args: RegressionArgs {
+                    config: Some(Path::new("ci.json")),
+                    ..Default::default()
+                },
             },
         );
         assert!(msg.contains("predate"));
         assert!(msg.contains("fallow 2.0.0"));
         assert!(
-            msg.contains("fallow dead-code --type-aware --config ci.json --save-regression-baseline /repo/.fallow-baseline.json")
+            msg.contains("fallow dead-code --type-aware --save-regression-baseline /repo/.fallow-baseline.json --config ci.json")
         );
     }
 
