@@ -18274,7 +18274,7 @@
     {
       "code": 13,
       "name": "coverage-upload-server-error",
-      "description": "Coverage inventory or static-findings upload failed after retries or returned another server error."
+      "description": "Coverage inventory or static-findings upload got a server error (5xx), a timeout (408), a rate limit (429), or a response that fallow cannot read."
     }
   ],
   "environment_variables": [
@@ -18462,7 +18462,7 @@
       "name": "FALLOW_IMPACT_STORE_MAX_AGE_DAYS",
       "group": "cache",
       "default": null,
-      "description": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever)."
+      "description": "Expiry threshold in days for per-project fallow impact stores; a recorded run drops the history of stores older than this and keeps an explicit enable, disable or declined opt-in (unset/0 keeps every store forever)."
     },
     {
       "name": "FALLOW_CLOCK_EPOCH",
