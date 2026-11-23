@@ -383,6 +383,59 @@ fn fix_adds_ignore_exports_config_rules_for_duplicate_exports() {
     assert_eq!(json["summary"]["duplicate_exports"].as_u64(), Some(0));
 }
 
+#[test]
+fn fix_reports_narrow_ignore_exports_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let config_path = root.join(".fallowrc.json");
+    let config = r#"{"ignoreExports":[{"file":"one.ts","exports":["Other"]},{"file":"two.ts","exports":["Other"]}]}"#;
+    std::fs::write(&config_path, config).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"dup-config","main":"index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("index.ts"),
+        "export { Button } from './one';\nexport { Button as Button2 } from './two';\n",
+    )
+    .unwrap();
+    for file in ["one.ts", "two.ts"] {
+        std::fs::write(root.join(file), "export const Button = 1;\n").unwrap();
+    }
+
+    let before = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--duplicate-exports", "--format", "json", "--quiet"],
+    );
+    assert_eq!(parse_json(&before)["summary"]["duplicate_exports"], 1);
+    for mode in ["--dry-run", "--yes"] {
+        let output = run_fallow_in_root("fix", root, &[mode, "--format", "json", "--quiet"]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        for file in ["one.ts", "two.ts"] {
+            assert!(
+                output
+                    .stderr
+                    .lines()
+                    .any(|line| line.contains(file) && line.contains("ignoreExports")),
+                "{mode} should identify the ignoreExports rule for {file}: {}",
+                output.stderr
+            );
+        }
+        assert!(
+            parse_json(&output)["fixes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|fix| fix["type"] != "add_ignore_exports"),
+            "{mode} should report no config edits: {}",
+            output.stdout
+        );
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), config);
+    }
+}
+
 /// A Windows-authored `.fallowrc.json` with a UTF-8 BOM must round-trip
 /// through `fallow fix --yes` without breaking the parse on the next run.
 /// The CST parser (jsonc-parser) rejects a leading BOM, so the writer must

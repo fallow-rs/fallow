@@ -939,7 +939,9 @@ fn build_output(checks: Vec<DoctorCheck>) -> DoctorOutput {
 
 fn relative_path(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root).ok().map(|path| {
-        let relative = path.to_string_lossy().replace('\\', "/");
+        let relative = path.to_string_lossy().into_owned();
+        #[cfg(windows)]
+        let relative = relative.replace('\\', "/");
         if relative.is_empty() {
             ".".to_string()
         } else {
@@ -1223,6 +1225,15 @@ mod tests {
                 "fallow dead-code --quiet --config=ci.json"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remediation_omits_a_config_with_a_literal_backslash() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let config = temp.path().join(r"ci\settings.json");
+        std::fs::write(&config, "{}").expect("write config");
+        assert!(remediation_with_config("fallow dead-code", temp.path(), Some(&config)).is_none());
     }
 
     #[test]

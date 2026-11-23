@@ -129,13 +129,23 @@ fn apply_edit(
             return true;
         }
     };
-    let (proposed, added) = match render_ignore_exports_edit(config_path, &current, entries) {
+    let (proposed, added) = match render_ignore_exports_edit(config_path, &current, entries.clone())
+    {
         Ok(edit) => edit,
         Err(error) => {
             eprintln!("Error: failed to add ignoreExports rules to {config_file}: {error}");
             return true;
         }
     };
+    let added_files: FxHashSet<&str> = added.iter().map(|entry| entry.file.as_str()).collect();
+    for entry in &entries {
+        if !added_files.contains(entry.file.as_str()) {
+            eprintln!(
+                "Note: {config_file} has an existing ignoreExports rule for {}. Add the duplicate export names to that rule to ignore them.",
+                entry.file
+            );
+        }
+    }
     if added.is_empty() {
         return false;
     }
