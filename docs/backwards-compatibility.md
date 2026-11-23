@@ -1166,6 +1166,14 @@ These are documented for the rare CI script that depended on the old behavior. N
   applies, so a cache minted months ago no longer reports history a fresh run
   excludes. Older caches are discarded and rebuilt on first run.
 
+- **Impact store version 8 records the worktree for pending gates and resolved findings.**
+  When Fallow imports an old in-repository store, it knows which worktree owns
+  its history. Shared stores through version 7 have no record of that worktree.
+  Fallow keeps their existing resolution credits and starts a new pending gate
+  on the next failure. The containment total starts with the events that the
+  old store retained. Each new containment adds to that total after the event
+  list fills. The public Impact report stays at schema version 2.
+
 - **`fallow impact` records which gate produced a run.** The local store keeps
   the `--gate-marker` value the installed gates pass (`agent`, `pre-commit`,
   `ci`) instead of only a boolean, so the report can say where your gate runs
