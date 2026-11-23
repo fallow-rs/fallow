@@ -6,12 +6,18 @@ use super::text::LineHit;
 
 const COVERAGE_KEYS: &[&str] = &["branches", "functions", "lines", "statements"];
 
-// A repeated path can refer to different entries of an anonymous config array.
-type Thresholds = FxHashMap<Vec<String>, Option<(f64, usize)>>;
+#[derive(Clone, Eq, Hash, PartialEq)]
+enum Scope {
+    Key(String),
+    Index(usize),
+}
 
-fn record(values: &mut Thresholds, path: Vec<String>, value: f64, offset: usize) {
+// A repeated path can still occur in separate object literals of one program.
+type Thresholds = FxHashMap<(Vec<Scope>, String), Option<(f64, usize)>>;
+
+fn record(values: &mut Thresholds, scope: &[Scope], key: &str, value: f64, offset: usize) {
     values
-        .entry(path)
+        .entry((scope.to_vec(), key.to_owned()))
         .and_modify(|entry| *entry = None)
         .or_insert(Some((value, offset)));
 }
@@ -23,13 +29,20 @@ pub fn weakened_threshold_hits(base: &str, head: &str) -> Vec<LineHit> {
 }
 
 pub(super) fn hits_for_config(path: &str, base: &str, head: &str) -> Vec<LineHit> {
-    let read = if std::path::Path::new(path)
+    let path = std::path::Path::new(path);
+    let yaml = path
         .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
-    {
-        yaml_values
-    } else {
-        object_values
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
+    let extensionless = path
+        .file_name()
+        .is_some_and(|name| name == ".nycrc" || name == ".c8rc");
+    let read = |source: &str| {
+        let mut rest = source.trim_start_matches('\u{feff}');
+        if yaml || (extensionless && !matches!(next_token(&mut rest), Some("{" | "["))) {
+            yaml_values(source)
+        } else {
+            object_values(source)
+        }
     };
     let mut hits = compare(&read(base), read(head), head);
     hits.extend(super::text::quality_threshold_hits(base, head));
@@ -43,7 +56,7 @@ fn compare(base: &Thresholds, head: Thresholds, source: &str) -> Vec<LineHit> {
         .filter_map(|(path, entry)| {
             let (after, offset) = entry?;
             let (before, _) = (*base.get(&path)?)?;
-            let key = path.last()?;
+            let (_, key) = path;
             (after < before).then(|| (offset, format!("{key}: {before} -> {after}")))
         })
         .collect();
@@ -69,22 +82,27 @@ fn yaml_values(source: &str) -> Thresholds {
     let Ok(doc) = fallow_config::yaml::parse_with_locations(source) else {
         return values;
     };
-    let mut objects = vec![(doc.root(), Vec::<String>::new())];
+    let mut objects = vec![(doc.root(), Vec::<Scope>::new())];
     while let Some((node, parents)) = objects.pop() {
         if let Some(entries) = node.as_sequence() {
-            objects.extend(entries.map(|entry| (entry, parents.clone())));
+            objects.extend(entries.enumerate().map(|(index, entry)| {
+                let mut path = parents.clone();
+                path.push(Scope::Index(index));
+                (entry, path)
+            }));
         }
         if let Some(map) = node.as_mapping() {
             for (key, value) in map.iter() {
                 let Some(name) = key.as_str() else { continue };
-                let mut path = parents.clone();
-                path.push(name.to_owned());
+
                 if COVERAGE_KEYS.contains(&name)
                     && let Some(number) = value.scalar_text().and_then(|text| text.parse().ok())
                     && let Some(range) = key.byte_range()
                 {
-                    record(&mut values, path, number, range.start);
+                    record(&mut values, &parents, name, number, range.start);
                 } else {
+                    let mut path = parents.clone();
+                    path.push(Scope::Key(name.to_owned()));
                     objects.push((value, path));
                 }
             }
@@ -96,27 +114,43 @@ fn yaml_values(source: &str) -> Thresholds {
 fn object_values(source: &str) -> Thresholds {
     let mut values = Thresholds::default();
     let mut scope = Vec::new();
+    let mut containers = Vec::new();
     let mut rest = source;
     let mut previous = ("", 0);
     let mut before_previous = ("", 0);
     while let Some(token) = next_token(&mut rest) {
         let start = source.len() - rest.len() - token.len();
         let owner = matches!(previous.0, ":" | "=").then(|| unquote(before_previous.0));
-        if matches!(token, "{" | "[") {
-            scope.push(owner.unwrap_or(""));
-        } else if matches!(token, "}" | "]") {
-            scope.pop();
-        } else if let Some(key) = owner
-            && COVERAGE_KEYS.contains(&key)
-            && let Ok(number) = unquote(token).parse()
-        {
-            let path = scope
-                .iter()
-                .copied()
-                .chain([key])
-                .map(str::to_owned)
-                .collect();
-            record(&mut values, path, number, before_previous.1);
+        match token {
+            "{" | "[" | "(" => {
+                containers.push((token, scope.len()));
+                if token != "("
+                    && let Some(key) = owner
+                {
+                    scope.push(Scope::Key(key.to_owned()));
+                }
+                if token == "[" {
+                    scope.push(Scope::Index(0));
+                }
+            }
+            "}" | "]" | ")" => {
+                if let Some((_, parent_depth)) = containers.pop() {
+                    scope.truncate(parent_depth);
+                }
+            }
+            "," if matches!(containers.last(), Some(("[", _))) => {
+                if let Some(Scope::Index(index)) = scope.last_mut() {
+                    *index += 1;
+                }
+            }
+            _ => {
+                if let Some(key) = owner
+                    && COVERAGE_KEYS.contains(&key)
+                    && let Ok(number) = unquote(token).parse()
+                {
+                    record(&mut values, &scope, key, number, before_previous.1);
+                }
+            }
         }
         before_previous = previous;
         previous = (token, start);
@@ -232,5 +266,56 @@ mod tests {
                 evidence: "lines: 65 -> 60".into()
             }]
         );
+    }
+
+    #[test]
+    fn coverage_arrays_compare_thresholds_at_the_same_index() {
+        let base = r#"{"projects":[{"lines":65},{"lines":80}]}"#;
+        let head = r#"{"projects":[{"lines":70},
+            {"lines":75}]}"#;
+        for path in ["jest.config.json", "vitest.workspace.ts"] {
+            assert_eq!(
+                hits_for_config(path, base, head),
+                vec![LineHit {
+                    line: 2,
+                    evidence: "lines: 80 -> 75".into()
+                }],
+            );
+        }
+    }
+
+    #[test]
+    fn yaml_sequences_compare_thresholds_at_the_same_index() {
+        let base = "projects:\n  - branches: 65\n  - branches: 80\n";
+        let head = "projects:\n  - branches: 70\n  - branches: 75\n";
+        assert_eq!(
+            hits_for_config(".nycrc.yml", base, head),
+            vec![LineHit {
+                line: 3,
+                evidence: "branches: 80 -> 75".into()
+            }],
+        );
+    }
+
+    #[test]
+    fn extensionless_coverage_configs_read_each_sides_format() {
+        let json = "/* tool config */\n// global and per-directory goals\n{\"global\":{\"lines\":80},\"lib\":{\"lines\":65}}";
+        let yaml = "# coverage goals\nlib:\n  lines: 60\nglobal:\n  lines: 85\n";
+        for path in ["packages/app/.nycrc", ".c8rc"] {
+            assert_eq!(
+                hits_for_config(path, json, yaml),
+                vec![LineHit {
+                    line: 3,
+                    evidence: "lines: 65 -> 60".into()
+                }],
+            );
+            assert_eq!(
+                hits_for_config(path, yaml, json),
+                vec![LineHit {
+                    line: 3,
+                    evidence: "lines: 85 -> 80".into()
+                }],
+            );
+        }
     }
 }
