@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 
 use fallow_types::extract::{ComplexityContributionKind, FunctionComplexity};
 
-use super::build_template_complexity;
+use super::build_unit_complexity;
 use super::engine::{
     ScanError, TemplateComplexity, find_tag_end, read_attribute_value, skip_whitespace,
 };
@@ -42,8 +42,8 @@ static MASK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 #[must_use]
 pub fn compute_vue_template_complexity(source: &str) -> Option<FunctionComplexity> {
     let markup = mask_non_template(source);
-    let complexity = VueScanner::new(&markup).scan().ok()?;
-    build_template_complexity(source, &complexity)
+    let (complexity, region) = VueScanner::new(&markup).scan().ok()?;
+    build_unit_complexity(source, &complexity, "<template>", region)
 }
 
 /// Replace `<script>` / `<style>` blocks and HTML comments with equal-length
@@ -65,6 +65,10 @@ struct VueScanner<'a> {
     /// `v-if` buried under plain `<div>` wrappers is not over-weighted, matching
     /// the Svelte and Angular scanners and the cognitive-complexity standard.
     tag_stack: Vec<bool>,
+    template_depth: usize,
+    template_start: Option<usize>,
+    template_end: Option<usize>,
+    multiple_roots: bool,
 }
 
 impl<'a> VueScanner<'a> {
@@ -74,19 +78,25 @@ impl<'a> VueScanner<'a> {
             complexity: TemplateComplexity::default(),
             nesting: 0,
             tag_stack: Vec::new(),
+            template_depth: 0,
+            template_start: None,
+            template_end: None,
+            multiple_roots: false,
         }
     }
 
-    fn scan(mut self) -> Result<TemplateComplexity, ScanError> {
+    fn scan(mut self) -> Result<(TemplateComplexity, Option<std::ops::Range<usize>>), ScanError> {
         let mut offset = 0;
         while offset < self.source.len() {
             if self.source[offset..].starts_with("{{") {
                 let end = self.find_required(offset + 2, "}}")?;
-                self.complexity.add_expression(
-                    &self.source[offset + 2..end],
-                    offset + 2,
-                    self.nesting,
-                )?;
+                if self.template_depth > 0 {
+                    self.complexity.add_expression(
+                        &self.source[offset + 2..end],
+                        offset + 2,
+                        self.nesting,
+                    )?;
+                }
                 offset = end + 2;
                 continue;
             }
@@ -100,7 +110,19 @@ impl<'a> VueScanner<'a> {
                 }
             }
         }
-        Ok(self.complexity)
+        let region = self.template_region();
+        Ok((self.complexity, region))
+    }
+
+    fn template_region(&self) -> Option<std::ops::Range<usize>> {
+        if !self.multiple_roots && self.template_depth == 0 {
+            if let (Some(start), Some(end)) = (self.template_start, self.template_end) {
+                if start < end {
+                    return Some(start..end);
+                }
+            }
+        }
+        None
     }
 
     fn find_required(&self, offset: usize, needle: &str) -> Result<usize, ScanError> {
@@ -114,6 +136,13 @@ impl<'a> VueScanner<'a> {
         let tag_end = find_tag_end(self.source, offset)?;
         let after = tag_end + 1;
         if self.source[offset..].starts_with("</") {
+            let close_name = read_close_tag_name(self.source, offset);
+            if close_name.eq_ignore_ascii_case("template") && self.template_depth > 0 {
+                self.template_depth -= 1;
+                if self.template_depth == 0 && !self.multiple_roots {
+                    self.template_end = Some(after);
+                }
+            }
             // Closing tag: pop the matching open element. Decrement nesting only
             // when that element was control-flow-bearing, so plain markup never
             // shifts cognitive depth. A stray close (empty stack) is a no-op.
@@ -128,11 +157,32 @@ impl<'a> VueScanner<'a> {
 
         let self_closing = self.source[..tag_end].trim_end().ends_with('/');
         let tag_name = read_tag_name(self.source, offset);
-        // Score the element's directives at the CURRENT nesting (before its own
-        // subtree deepens), and learn whether it carries control flow.
-        let has_control_flow = self.scan_attributes(offset, tag_end)?;
+        let is_template = tag_name.eq_ignore_ascii_case("template");
+        if is_template {
+            if self.template_depth == 0 {
+                if self.template_start.is_none() {
+                    self.template_start = Some(offset);
+                } else {
+                    self.multiple_roots = true;
+                }
+            }
+            if self_closing {
+                if self.template_depth == 0 && !self.multiple_roots {
+                    self.template_end = Some(after);
+                }
+            } else {
+                self.template_depth += 1;
+            }
+        }
 
-        if !self_closing && !is_void_tag(tag_name) {
+        let in_template = self.template_depth > 0 || is_template;
+        let has_control_flow = if in_template {
+            self.scan_attributes(offset, tag_end)?
+        } else {
+            false
+        };
+
+        if in_template && !self_closing && !is_void_tag(tag_name) {
             // Every open element is pushed so the stack stays paired with close
             // tags, but only a control-flow-bearing one opens a nesting level.
             self.tag_stack.push(has_control_flow);
@@ -269,6 +319,15 @@ fn read_tag_name(source: &str, tag_start: usize) -> &str {
         end += 1;
     }
     &source[tag_start + 1..end]
+}
+
+fn read_close_tag_name(source: &str, offset: usize) -> &str {
+    let rest = &source[offset + 2..];
+    let trimmed = rest.trim_start();
+    let end = trimmed
+        .find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
+        .unwrap_or(trimmed.len());
+    &trimmed[..end]
 }
 
 fn is_void_tag(tag_name: &str) -> bool {
@@ -577,6 +636,188 @@ for (const i of items) { use(i); }
         assert!(
             nested.cognitive > siblings.cognitive,
             "nested control flow must weigh more than sibling control flow: nested={nested:?} siblings={siblings:?}"
+        );
+    }
+
+    #[test]
+    fn short_template_in_long_sfc_reports_template_block_lines() {
+        let mut script_lines = Vec::new();
+        script_lines.push("<script setup lang=\"ts\">");
+        for _ in 0..80 {
+            script_lines.push("const x = 1;");
+        }
+        script_lines.push("</script>");
+        let script = script_lines.join("\n");
+        let source = format!(
+            "{script}\n\n<template>\n  <div v-if=\"ready\">\n    <p v-if=\"active\">ok</p>\n  </div>\n</template>\n"
+        );
+        let total_lines = source.lines().count();
+        assert!(total_lines > 85, "total file must exceed 85 lines");
+
+        let complexity = compute_vue_template_complexity(&source)
+            .expect("template with control flow has complexity");
+        assert_eq!(
+            complexity.line_count, 5,
+            "template unit line_count must span only the template block (5 lines)"
+        );
+        let expected_anchor = u32::try_from(script_lines.len() + 3).unwrap();
+        assert_eq!(
+            complexity.line, expected_anchor,
+            "anchor line must point at the first contributing construct"
+        );
+    }
+
+    #[test]
+    fn large_template_remains_detected_with_accurate_line_count() {
+        let mut script_lines = Vec::new();
+        script_lines.push("<script setup lang=\"ts\">");
+        for _ in 0..30 {
+            script_lines.push("const s = 'setup';");
+        }
+        script_lines.push("</script>");
+        let script = script_lines.join("\n");
+
+        let mut template_lines = Vec::new();
+        template_lines.push("<template>");
+        template_lines.push("  <div v-if=\"ready\">");
+        for _ in 0..70 {
+            template_lines.push("    <p>row</p>");
+        }
+        template_lines.push("  </div>");
+        template_lines.push("</template>");
+        let template = template_lines.join("\n");
+
+        let source = format!("{script}\n\n{template}\n");
+        let total_lines = source.lines().count();
+        let expected_lines = u32::try_from(template_lines.len()).unwrap();
+        assert!(
+            total_lines > 100,
+            "total file lines ({total_lines}) must exceed template lines ({expected_lines})"
+        );
+
+        let complexity = compute_vue_template_complexity(&source)
+            .expect("template with control flow has complexity");
+        assert_eq!(
+            complexity.line_count, expected_lines,
+            "large template line_count must accurately reflect the block span (74 lines), not total file ({total_lines})"
+        );
+        assert!(
+            complexity.line_count > 60,
+            "template must exceed the default max_unit_size ceiling of 60 LOC"
+        );
+    }
+
+    #[test]
+    fn nested_templates_and_self_closing_preserve_root_range() {
+        let source = r#"<script setup lang="ts">
+import { ref } from 'vue';
+const active = ref(true);
+</script>
+
+<template>
+  <div class="panel">
+    <template v-if="active">
+      <span>nested</span>
+    </template>
+    <template />
+  </div>
+</template>
+"#;
+        let total_lines = source.lines().count();
+        assert!(
+            total_lines > 10,
+            "total file lines ({total_lines}) must exceed template lines (8)"
+        );
+        let complexity = compute_vue_template_complexity(source)
+            .expect("template with control flow has complexity");
+        assert_eq!(
+            complexity.line_count, 8,
+            "template unit line_count must span exactly the 8 lines of the root template"
+        );
+    }
+
+    #[test]
+    fn stray_closing_template_tag_does_not_extend_region() {
+        let source = r#"<script setup lang="ts">
+const ready = true;
+</script>
+
+<template>
+  <div v-if="ready">
+    <p>content</p>
+  </div>
+</template>
+
+</template>
+
+<div class="footer">
+  <p>trailing markup</p>
+</div>
+"#;
+        let total_lines = source.lines().count();
+        assert!(total_lines > 15, "fixture must exceed template length");
+
+        let complexity = compute_vue_template_complexity(source)
+            .expect("template with control flow has complexity");
+        assert_eq!(
+            complexity.line_count, 5,
+            "stray closing template tag must not extend the template unit region"
+        );
+    }
+
+    #[test]
+    fn multiple_root_templates_falls_back_safely_without_bridging() {
+        let source = r#"<template>
+  <div v-if="a">first</div>
+</template>
+
+<script setup lang="ts">
+const mid1 = 1;
+const mid2 = 2;
+</script>
+
+<template>
+  <div v-if="b">second</div>
+</template>
+"#;
+        let total_lines = u32::try_from(source.lines().count()).unwrap();
+        let complexity = compute_vue_template_complexity(source)
+            .expect("control flow in templates produces complexity");
+        assert_eq!(
+            complexity.line_count, total_lines,
+            "multiple root templates must fall back to total file line count rather than bridging across script"
+        );
+    }
+
+    #[test]
+    fn constructs_outside_template_do_not_anchor_or_contribute_complexity() {
+        let source = r#"<custom-info v-if="admin">
+  {{ info && extra }}
+</custom-info>
+
+<script setup lang="ts">
+const ready = true;
+</script>
+
+<template>
+  <div v-if="ready">
+    <p>content</p>
+  </div>
+</template>
+"#;
+        let complexity = compute_vue_template_complexity(source)
+            .expect("template control flow produces complexity");
+        assert_eq!(
+            complexity.line_count, 5,
+            "template line_count must measure only the <template> block"
+        );
+        assert_eq!(
+            complexity.line, 11,
+            "anchor line must point to the v-if inside <template>, not the custom block outside"
+        );
+        assert_eq!(
+            complexity.cyclomatic, 2,
+            "cyclomatic complexity must score only the v-if inside template (1 base + 1 branch)"
         );
     }
 }
