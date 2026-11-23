@@ -575,6 +575,23 @@ fn gate_pass_only_clears_the_pending_failure_in_its_worktree() {
 }
 
 #[test]
+fn pending_gates_evict_the_oldest_failure_when_the_worktree_limit_is_reached() {
+    let mut store = ImpactStore::default();
+    let counts = ImpactCounts::default();
+    for i in 0..=MAX_CONTAINMENT {
+        let tree = format!("tree-{i}");
+        let timestamp = format!("{i:04}");
+        store.record_gate(&tree, AuditVerdict::Fail, None, &timestamp, &counts);
+    }
+    assert_eq!(store.pending_by_worktree.len(), MAX_CONTAINMENT);
+    for tree in ["tree-0", "tree-1"] {
+        store.record_gate(tree, AuditVerdict::Pass, None, "pass", &counts);
+    }
+    assert_eq!(store.containment_count(), 1);
+    assert_eq!(store.containment[0].blocked_at, "0001");
+}
+
+#[test]
 fn non_gate_run_never_creates_containment() {
     let (_config, dir) = test_env();
     let root = dir.path();

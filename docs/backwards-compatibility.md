@@ -1170,9 +1170,11 @@ These are documented for the rare CI script that depended on the old behavior. N
   When Fallow imports an old in-repository store, it knows which worktree owns
   its history. Shared stores through version 7 have no record of that worktree.
   Fallow keeps their existing resolution credits and starts a new pending gate
-  on the next failure. The containment total starts with the events that the
-  old store retained. Each new containment adds to that total after the event
-  list fills. The public Impact report stays at schema version 2.
+  on the next failure. A store keeps pending failures for up to 200 worktrees.
+  When a new failure fills the store beyond that limit, the oldest pending
+  failure from another worktree expires. The containment total starts with the
+  events that the old store retained. Each new containment adds to that total
+  after the event list fills. The public Impact report stays at schema version 2.
 
 - **`fallow impact` records which gate produced a run.** The local store keeps
   the `--gate-marker` value the installed gates pass (`agent`, `pre-commit`,
