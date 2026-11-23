@@ -4,13 +4,13 @@
 //! applies token-level and line-level subset removal, min_lines filter,
 //! and skip_local filter.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::FileData;
 use super::extraction::RawGroup;
-use super::utils::build_clone_instance_fast;
+use super::utils::SourcePosition;
 use crate::duplicates::types::{CloneGroup, CloneInstance};
 
 /// Sorted interval lists indexed by a numeric slot (file id or path index).
@@ -182,88 +182,76 @@ fn build_clone_group(
     min_lines: usize,
     skip_local: bool,
 ) -> Option<CloneGroup> {
-    let mut instances = collect_clone_instances(rg, files, line_tables);
-
-    if skip_local && instances.len() >= 2 {
-        let dirs: FxHashSet<_> = instances
-            .iter()
-            .filter_map(|inst| inst.file.parent().map(Path::to_path_buf))
-            .collect();
-        if dirs.len() < 2 {
-            return None;
+    let mut ranges = Vec::with_capacity(rg.instances.len());
+    for &(file_id, offset) in &rg.instances {
+        let file = &files[file_id];
+        if let Some((start, end)) = token_span_for_raw_instance(file, offset, rg.length) {
+            let source = &file.file_tokens.source;
+            ranges.push(CloneRange {
+                file,
+                start: SourcePosition::at(source, start as usize, &line_tables[file_id]),
+                end: SourcePosition::at(source, end as usize, &line_tables[file_id]),
+            });
         }
     }
-
-    if instances.len() < 2 {
-        return None;
-    }
-
-    let line_count = instances
+    let line_count = ranges
         .iter()
-        .map(|inst| inst.end_line.saturating_sub(inst.start_line) + 1)
-        .max()
-        .unwrap_or(0);
-
+        .map(|range| range.end.line - range.start.line + 1)
+        .max()?;
     if line_count < min_lines {
         return None;
     }
 
-    instances.sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
-    merge_overlapping_instances(&mut instances);
-
-    if instances.len() < 2 {
+    merge_overlapping_ranges(&mut ranges);
+    if ranges.len() < 2 {
         return None;
     }
-
+    if skip_local {
+        let dirs: FxHashSet<_> = ranges.iter().filter_map(|r| r.file.path.parent()).collect();
+        if dirs.len() < 2 {
+            return None;
+        }
+    }
     Some(CloneGroup {
-        instances,
+        instances: ranges.into_iter().map(CloneRange::into_instance).collect(),
         token_count: rg.length,
         line_count,
         similarity: None,
     })
 }
 
-/// Materialize each unique `(file_id, offset)` instance of a raw group into a
-/// [`CloneInstance`], skipping exact-position duplicates.
-fn collect_clone_instances(
-    rg: &RawGroup,
-    files: &[FileData],
-    line_tables: &[Vec<usize>],
-) -> Vec<CloneInstance> {
-    let mut seen: FxHashSet<(usize, usize)> = FxHashSet::default();
-    let mut instances: Vec<CloneInstance> = Vec::new();
-
-    for &(file_id, offset) in &rg.instances {
-        if !seen.insert((file_id, offset)) {
-            continue;
-        }
-        let file = &files[file_id];
-        if let Some(inst) =
-            build_clone_instance_fast(file, offset, rg.length, &line_tables[file_id])
-        {
-            instances.push(inst);
-        }
-    }
-    instances
+struct CloneRange<'a> {
+    file: &'a FileData,
+    start: SourcePosition,
+    end: SourcePosition,
 }
 
-/// Coalesce instances in the same file whose line ranges overlap or abut,
-/// extending the surviving entry's end position. `instances` must be sorted by
-/// `(file, start_line)`.
-fn merge_overlapping_instances(instances: &mut Vec<CloneInstance>) {
-    instances.dedup_by(|b, a| {
-        if a.file != b.file {
+impl CloneRange<'_> {
+    fn into_instance(self) -> CloneInstance {
+        CloneInstance {
+            file: self.file.path.clone(),
+            start_line: self.start.line,
+            start_col: self.start.column,
+            end_line: self.end.line,
+            end_col: self.end.column,
+            fragment: self.file.file_tokens.source[self.start.offset..self.end.offset].to_owned(),
+            is_symlink: false,
+        }
+    }
+}
+
+/// Merge occurrences that share a source line, including exact duplicates.
+fn merge_overlapping_ranges(ranges: &mut Vec<CloneRange<'_>>) {
+    ranges.sort_unstable_by_key(|range| (&range.file.path, range.start.offset));
+    ranges.dedup_by(|next, current| {
+        let shares_line = next.start.line <= current.end.line;
+        if current.file.path != next.file.path || !shares_line {
             return false;
         }
-        if b.start_line <= a.end_line {
-            if b.end_line > a.end_line {
-                a.end_line = b.end_line;
-                a.end_col = b.end_col;
-            }
-            true
-        } else {
-            false
+        if next.end.offset > current.end.offset {
+            current.end = next.end;
         }
+        true
     });
 }
 
@@ -694,6 +682,31 @@ mod tests {
             },
             atomic_invocation_spans: Vec::new(),
         }
+    }
+
+    #[test]
+    fn coalesced_clone_fragment_covers_the_full_source_range() {
+        let files = vec![
+            make_test_file_data("a.ts", "aa aa\naa aa", 4),
+            make_test_file_data("b.ts", "aa aa aa", 3),
+        ];
+        let rg = RawGroup {
+            instances: vec![(0, 1), (0, 0), (1, 0)],
+            length: 3,
+        };
+        let group = build_clone_group(&rg, &files, &build_line_tables(&files), 1, false)
+            .expect("a clone in both files");
+        let merged = &group.instances[0];
+        assert_eq!(
+            (
+                merged.start_line,
+                merged.start_col,
+                merged.end_line,
+                merged.end_col,
+                merged.fragment.as_str(),
+            ),
+            (1, 0, 2, 5, "aa aa\naa aa")
+        );
     }
 
     #[test]
