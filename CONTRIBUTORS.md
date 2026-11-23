@@ -4,6 +4,7 @@ Thank you to everyone who contributes code, bug reports and ideas.
 
 This list includes commit contributors and authors of open and closed issues and pull requests. It is updated daily. Bots and deleted accounts are excluded.
 
+- [1abdala](https://github.com/1abdala)
 - [AceCodePt](https://github.com/AceCodePt)
 - [Ados12](https://github.com/Ados12)
 - [adrianschmidt](https://github.com/adrianschmidt)
@@ -12,6 +13,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [albion9919](https://github.com/albion9919)
 - [aledebla03](https://github.com/aledebla03)
 - [aleksik](https://github.com/aleksik)
+- [aloneangel45](https://github.com/aloneangel45)
 - [AlonMiz](https://github.com/AlonMiz)
 - [AlphaLawless](https://github.com/AlphaLawless)
 - [alvis](https://github.com/alvis)
