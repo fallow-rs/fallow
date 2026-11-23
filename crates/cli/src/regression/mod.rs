@@ -3,9 +3,9 @@ mod counts;
 mod entry_weight;
 mod flags;
 mod outcome;
+mod recovery;
 mod tolerance;
 
-pub use baseline::load_regression_baseline;
 pub use baseline::{
     RegressionOpts, SaveRegressionTarget, compare_check_regression_with_identity,
     save_baseline_to_config_with_identity, save_flags_regression_baseline,
@@ -18,6 +18,7 @@ pub use entry_weight::{
 };
 pub use flags::{compare_flags_regression, print_flags_regression};
 pub use outcome::{RegressionOutcome, print_regression_outcome};
+pub use recovery::RegressionArgs;
 pub use tolerance::Tolerance;
 
 /// The config file that a flag-only `--save-regression-baseline` rewrites:

@@ -1707,12 +1707,6 @@ fn entry_weight_baseline_save_keeps_the_saved_issue_counts() {
 }
 
 #[test]
-fn entry_weight_gate_without_a_baseline_file_exits_two() {
-    let output = run_entry_weight(&["--fail-on-regression"]);
-    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
-}
-
-#[test]
 fn plain_list_ignores_an_invalid_tolerance() {
     let output = run_list(
         ENTRY_WEIGHT_FIXTURE,

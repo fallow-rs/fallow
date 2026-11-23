@@ -1142,6 +1142,55 @@ fn gate_run(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutp
 }
 
 #[test]
+fn flags_recovery_keeps_the_vendor_counts_and_age_mode() {
+    check_flags_recovery(&["--regression-baseline", "missing.json"]);
+}
+
+#[test]
+fn flags_recovery_without_a_baseline_path_keeps_the_vendor_counts_and_age_mode() {
+    check_flags_recovery(&[]);
+}
+
+fn check_flags_recovery(baseline_option: &[&str]) {
+    use crate::common::{copy_fixture, parse_json, run_fallow_raw_in_dir};
+
+    let project = copy_fixture("flags-vendor");
+    let root = project.path();
+    let mut args = vec![
+        "flags",
+        "--retirement",
+        "--flag-state",
+        "flag-state.json",
+        "--flag-age",
+        "off",
+        "--fail-on-regression",
+        "--format",
+        "json",
+    ];
+    args.extend_from_slice(baseline_option);
+    let output = run_fallow_raw_in_dir(root, &args);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    let error = parse_json(&output);
+    let (_, command) = error["message"]
+        .as_str()
+        .unwrap()
+        .rsplit_once(": fallow ")
+        .expect("recovery command");
+    let command = command.replace("<PATH>", "missing.json");
+    let mut args: Vec<_> = command.split_whitespace().collect();
+    args.extend(["--format", "json"]);
+    let replay = run_fallow_raw_in_dir(root, &args);
+    assert_eq!(replay.code, 0, "{}", replay.stderr);
+    assert_eq!(parse_json(&replay)["retirement"]["age_mode"], "off");
+    let baseline: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("missing.json")).unwrap()).unwrap();
+    assert_eq!(
+        baseline["flags"]["by_reason"]["vendor-only"], 1,
+        "{baseline}"
+    );
+}
+
+#[test]
 fn regression_gate_fails_when_a_flag_is_added() {
     let project = gate_project();
     let baseline = project.path().join("flags-baseline.json");

@@ -295,10 +295,11 @@ fn run_regression_gate(
         .as_ref()
         .map(|args| args.reasons.iter().map(|&reason| reason.into()).collect())
         .unwrap_or_default();
-    let regression = RegressionOpts {
+    let mut regression = RegressionOpts {
         scoped: !scope.is_whole_project(),
         ..opts.regression
     };
+    regression.args.retirement = opts.retirement.as_ref();
     report.regression = compare_flags_regression(&regression, &counts, &reasons)?;
     match regression.save_target {
         SaveRegressionTarget::None => Ok(()),
@@ -317,7 +318,7 @@ fn run_regression_gate(
             Ok(())
         }
         SaveRegressionTarget::File(path) => {
-            save_flags_regression_baseline(path, opts.root, &counts, opts.output)
+            save_flags_regression_baseline(path, opts.root, &counts, opts.output, regression.args)
         }
     }
 }
@@ -1481,6 +1482,7 @@ mod tests {
             regression: RegressionOpts {
                 fail_on_regression: false,
                 tolerance: crate::regression::Tolerance::Absolute(0),
+                args: crate::regression::RegressionArgs::default(),
                 regression_baseline_file: None,
                 save_target: SaveRegressionTarget::None,
                 scoped: false,

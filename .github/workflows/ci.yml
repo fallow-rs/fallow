@@ -215,6 +215,7 @@ jobs:
               - 'crates/cli/tests/integration/audit_orphaned_code_tests.rs'
               - 'crates/cli/tests/integration/exit_code_tests.rs'
               - 'crates/cli/tests/integration/global_option_support_tests.rs'
+              - 'crates/cli/tests/integration/regression_flag_scope_tests.rs'
               - 'crates/cli/src/agent_install/mcp.rs'
               - 'crates/cli/src/agent_install/mod.rs'
               - 'crates/cli/src/agent_install/status.rs'
@@ -849,6 +850,7 @@ jobs:
           -p fallow-graph -p fallow-api -p fallow-multicall
           -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests)))
           | (binary_id(fallow-cli::integration) & test(/^exit_code_tests::.*null_device/))
+          | (binary_id(fallow-cli::integration) & test(regression_flag_scope_tests::file_only_commands_recover_their_own_baseline))
           | (package(fallow-core) & test(symlink))
           | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
           | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))

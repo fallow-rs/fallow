@@ -28,9 +28,9 @@ use crate::{
     DEFAULT_MIN_INVOCATIONS_HOT, DispatchContext, audit, audit_cache_prune, base_worktree,
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
     config, coverage, dupes, explain, fix, flags, guard, health, init, json_style, license, list,
-    migrate, onboarding, plugin_check, regression, regression_save_targets, report,
-    resolve_audit_baseline_path, rule_pack, security, setup_hooks, suppressions, telemetry,
-    trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
+    migrate, onboarding, plugin_check, regression, report, resolve_audit_baseline_path, rule_pack,
+    security, setup_hooks, suppressions, telemetry, trace_chain, trace_dependency, trace_error,
+    trace_path, viz, watch,
 };
 use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
 use fallow_config::PlannedAnalysis;
@@ -1428,7 +1428,6 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
 
 fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let (save_regression_file, save_to_config) = regression_save_targets(cli);
     // Only the entry weight gate reads the global `--tolerance`, so a plain
     // listing does not fail on a value it never uses.
     let entry_weight_gate = if args.entry_weight {
@@ -1445,8 +1444,9 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
             fail_on_regression: cli.fail_on_regression,
             tolerance,
             baseline_file: cli.regression_baseline.as_deref(),
-            save_file: save_regression_file.as_deref(),
-            save_to_config,
+            save_file: dispatch.save_regression_file.map(PathBuf::as_path),
+            save_to_config: dispatch.save_to_config,
+            args: cli.into(),
         })
     } else {
         None

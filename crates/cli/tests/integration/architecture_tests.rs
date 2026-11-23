@@ -1031,6 +1031,43 @@ fn dead_code_summary_keeps_one_row_list() {
 }
 
 #[test]
+fn shared_state_regression_recovery_keeps_the_requested_architecture_checks() {
+    let project = crate::common::copy_fixture("circular-re-export");
+    for (path, cycles) in [("inventory.json", false), ("cycles.json", true)] {
+        let mut args = vec![
+            "architecture",
+            "--shared-state",
+            "--fail-on-regression",
+            "--regression-baseline",
+            path,
+            "--format",
+            "json",
+            "--quiet",
+        ];
+        if cycles {
+            args.push("--cycles");
+        }
+        let output = crate::common::run_fallow_raw_in_dir(project.path(), &args);
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        let json = parse_json(&output);
+        let (_, hint) = json["message"]
+            .as_str()
+            .expect("error message")
+            .rsplit_once(": fallow ")
+            .expect("baseline recovery command");
+        let recovery: Vec<_> = hint.split_whitespace().collect();
+        let saved = crate::common::run_fallow_raw_in_dir(project.path(), &recovery);
+        assert!(matches!(saved.code, 0 | 1), "{}", saved.stderr);
+        let baseline: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(project.path().join(path)).unwrap()).unwrap();
+        assert_eq!(
+            baseline["check"]["circular_dependencies"],
+            usize::from(cycles)
+        );
+    }
+}
+
+#[test]
 fn shared_state_inventory_selection_and_format_refusal() {
     let dir = architecture_project("");
     write(
