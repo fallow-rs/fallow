@@ -7821,7 +7821,7 @@
     "10": "Coverage inventory or static-findings upload input or project validation failed.",
     "11": "Coverage inventory or static-findings upload exceeded the server payload limit.",
     "12": "Coverage inventory or static-findings upload authentication or authorization was rejected.",
-    "13": "Coverage inventory or static-findings upload failed after retries or returned another server error."
+    "13": "Coverage inventory or static-findings upload got a server error (5xx), a timeout (408), a rate limit (429), or a response that fallow cannot read."
   },
   "environment_variables": {
     "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge/github-annotations/github-summary). CLI --format flag overrides this.",
@@ -7854,7 +7854,7 @@
     "FALLOW_TYPE_AWARE_BIN": "Trusted executable override for the type-aware companion that --type-aware runs. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
     "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep). Each cache version keeps only its 32 newest snapshot files.",
-    "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+    "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "Expiry threshold in days for per-project fallow impact stores; a recorded run drops the history of stores older than this and keeps an explicit enable, disable or declined opt-in (unset/0 keeps every store forever).",
     "FALLOW_CLOCK_EPOCH": "Reference instant in unix seconds for commit recency and ownership staleness. Default: the committer timestamp of HEAD. Set it to compare two checkouts against one fixed instant. An empty or non-numeric value is ignored with a warning.",
     "FALLOW_ROOT": "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
     "FALLOW_LICENSE": "License JWT (full string) for Fallow Cloud; intended for shared CI runners.",
