@@ -259,6 +259,7 @@ fn attach_mutation_evidence(
 
 /// Adds the mutation evidence to the report and the groups of a health run.
 pub fn attach_to_result(result: &mut super::HealthResult, evidence: &MutationEvidence) {
+    let result = &mut result.analysis;
     let root = result.config.root.clone();
     attach_mutation_evidence(
         &mut result.report,

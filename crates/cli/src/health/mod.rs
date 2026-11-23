@@ -28,7 +28,8 @@ use fallow_config::OutputFormat;
 use fallow_engine::health::{
     HealthError, HealthExecutionOptions, HealthGateOptions, HealthGroupResolver,
     HealthPipelineInputs, HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort,
-    PathGroup, RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
+    PathGroup, RuntimeCoverageSeamInput, execute_health_inner_with_baseline,
+    validate_health_churn_file,
 };
 use fallow_engine::resolved_run::Runnable;
 
@@ -297,7 +298,7 @@ pub fn execute_health_with_shared_parse_and_config(
     let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
     let workspaces = shared.workspaces;
     let seams = health_seams();
-    let result = execute_health_inner(
+    let (analysis, saved_baseline_mode) = execute_health_inner_with_baseline(
         opts,
         HealthPipelineInputs {
             config,
@@ -319,8 +320,11 @@ pub fn execute_health_with_shared_parse_and_config(
         &seams,
     )
     .map_err(|e| health_err_to_exit(e, opts.output))?;
-    record_health_telemetry(&result.report, result.coverage_gaps_has_findings);
-    Ok(result)
+    record_health_telemetry(&analysis.report, analysis.coverage_gaps_has_findings);
+    Ok(HealthResult {
+        analysis,
+        saved_baseline_mode,
+    })
 }
 
 /// Run the health analysis with the health analysis of a resolved run.
@@ -381,7 +385,7 @@ fn execute_health_with_config_and_seams(
     let parse_cpu_ms = parts.parse_cpu_ms;
 
     let scope_inputs = build_health_scope_inputs(opts, &config, &files)?;
-    execute_health_inner(
+    execute_health_inner_with_baseline(
         opts,
         HealthPipelineInputs {
             config,
@@ -402,6 +406,10 @@ fn execute_health_with_config_and_seams(
         scope_inputs,
         seams,
     )
+    .map(|(analysis, saved_baseline_mode)| HealthResult {
+        analysis,
+        saved_baseline_mode,
+    })
     .map_err(|e| health_err_to_exit(e, opts.output))
 }
 
@@ -409,7 +417,7 @@ pub fn benchmark_execute_health_with_response(
     opts: &HealthOptions<'_>,
     response_bytes: &[u8],
     request_len: &std::cell::Cell<usize>,
-) -> Result<HealthResult, ExitCode> {
+) -> Result<fallow_engine::health::HealthAnalysisResult<OwnershipResolver>, ExitCode> {
     let analyzer = |options: &fallow_engine::health::RuntimeCoverageOptions,
                     input: RuntimeCoverageSeamInput<'_>| {
         coverage::analyze_with_transport(
@@ -443,6 +451,7 @@ pub fn benchmark_execute_health_with_response(
     };
     let (config, config_ms) = load_health_config(opts)?;
     execute_health_with_config_and_seams(opts, config, None, config_ms, &seams)
+        .map(|result| result.analysis)
 }
 
 /// Run `fallow health` and print the report. `run` is the health analysis
@@ -596,8 +605,24 @@ pub fn resolve_type_aware_health_options(
 }
 
 /// Result of executing health analysis without printing.
-pub type HealthResult =
-    fallow_engine::health::HealthAnalysisResult<crate::report::OwnershipResolver>;
+pub struct HealthResult {
+    pub analysis: fallow_engine::health::HealthAnalysisResult<OwnershipResolver>,
+    pub saved_baseline_mode: fallow_output::BaselineMode,
+}
+
+impl std::ops::Deref for HealthResult {
+    type Target = fallow_engine::health::HealthAnalysisResult<OwnershipResolver>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.analysis
+    }
+}
+
+impl std::ops::DerefMut for HealthResult {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.analysis
+    }
+}
 
 /// Print health results and return appropriate exit code.
 ///
@@ -811,7 +836,11 @@ fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u
         ),
         gate_failed_exit_code(
             GateName::StaleBaseline,
-            stale_baseline_gate_failed(result, options),
+            crate::baseline_gate::health_gate_failed(
+                result,
+                options.baseline_path,
+                options.gates.fail_on_stale_baseline,
+            ),
         ),
         gate_failed_exit_code(
             GateName::HealthCoverageGaps,
@@ -927,20 +956,6 @@ fn note_stale_baseline_gate_stood_down(result: &HealthResult, options: HealthPri
         options.gates.fail_on_stale_baseline,
         "--report-only never fails a run",
     );
-}
-
-/// The opt-in `--fail-on-stale-baseline` gate. Reads the staleness the engine
-/// already put in the report, so no extra plumbing crosses the engine boundary.
-fn stale_baseline_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
-    let Some(staleness) = result.report.summary.baseline_staleness.as_ref() else {
-        return false;
-    };
-    crate::baseline_gate::gate_failed_from_envelope(
-        staleness,
-        options.baseline_path,
-        options.gates.fail_on_stale_baseline,
-        fallow_engine::baseline::BaselineKind::Health,
-    )
 }
 
 fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions<'_>) -> bool {
@@ -1160,7 +1175,7 @@ mod tests {
         findings: Vec<fallow_output::HealthFinding>,
         score: Option<fallow_output::HealthScore>,
     ) -> HealthResult {
-        HealthResult {
+        let analysis = fallow_engine::health::HealthAnalysisResult {
             branching_by_file: fallow_engine::health::BranchingByFile::default(),
             report: fallow_output::HealthReport {
                 findings,
@@ -1177,6 +1192,10 @@ mod tests {
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
             changed_files_analyzed: None,
+        };
+        HealthResult {
+            analysis,
+            saved_baseline_mode: fallow_output::BaselineMode::default(),
         }
     }
 
@@ -1329,7 +1348,7 @@ mod tests {
     }
 
     fn fx_low_traffic_runtime_result() -> HealthResult {
-        HealthResult {
+        let analysis = fallow_engine::health::HealthAnalysisResult {
             branching_by_file: fallow_engine::health::BranchingByFile::default(),
             report: fallow_output::HealthReport {
                 runtime_coverage: Some(fallow_output::RuntimeCoverageReport {
@@ -1375,6 +1394,10 @@ mod tests {
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
             changed_files_analyzed: None,
+        };
+        HealthResult {
+            analysis,
+            saved_baseline_mode: fallow_output::BaselineMode::default(),
         }
     }
 

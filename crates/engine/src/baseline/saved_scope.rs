@@ -15,6 +15,12 @@ impl BaselineData {
 }
 
 impl DuplicationBaselineData {
+    /// The analysis mode recorded by the saving run.
+    #[must_use]
+    pub fn saved_mode(&self) -> fallow_output::BaselineMode {
+        fallow_output::BaselineMode::from_saved_names(&self.scope_reasons)
+    }
+
     /// Record whether the saving run used production mode.
     #[must_use]
     pub fn with_production(mut self, production: bool) -> Self {
@@ -24,6 +30,12 @@ impl DuplicationBaselineData {
 }
 
 impl HealthBaselineData {
+    /// The analysis mode recorded by the saving run.
+    #[must_use]
+    pub(crate) fn saved_mode(&self) -> fallow_output::BaselineMode {
+        fallow_output::BaselineMode::from_saved_names(&self.scope_reasons)
+    }
+
     /// Record whether the saving run used production mode.
     #[must_use]
     pub(crate) fn with_production(mut self, production: bool) -> Self {
@@ -32,8 +44,7 @@ impl HealthBaselineData {
     }
 }
 
-/// The reasons that a health or duplication file records: production mode only,
-/// because the prune guard reads that channel and no gate reads the file.
+/// Health and duplication baselines record only production mode.
 fn production_reason(production: bool) -> Vec<String> {
     if production {
         vec![fallow_output::ScopeReason::Production.as_str().to_owned()]

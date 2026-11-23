@@ -53,6 +53,7 @@ mod bare_run_resolve_tests;
 mod baseline_cache_dir_tests;
 mod baseline_growth_tests;
 mod baseline_install_state_tests;
+mod baseline_prune_advice_tests;
 mod baseline_scope_comparison_tests;
 mod baselines_prune_tests;
 mod cache_symlink_tests;
