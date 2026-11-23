@@ -50,11 +50,17 @@ impl WatchConfig {
     fn event_filter(&self) -> WatchFilter {
         let mut filter = WatchFilter::new(&self.config);
         if let Some(path) = self.run.config_file().value() {
-            filter
-                .selected_configs
-                .push(fallow_types::path_guard::lexically_normalized(path));
+            // The resolver joins a relative --config with the invocation cwd.
+            // Keep this spelling even while an editor replaces the file.
+            let selected = &mut filter.selected_configs;
+            selected.insert(path.clone());
+            selected.extend(path_in_canonical_parent(path));
             if let Ok(target) = dunce::canonicalize(path) {
-                filter.selected_configs.push(target);
+                selected.insert(target);
+            } else if let Some(parent) = path.parent()
+                && let Ok(link) = std::fs::read_link(path)
+            {
+                selected.extend(path_in_canonical_parent(&parent.join(link)));
             }
         }
         filter
@@ -63,6 +69,16 @@ impl WatchConfig {
     fn runnable(&self) -> Option<Runnable<'_>> {
         crate::cli_production::runnable(&self.run, fallow_config::PlannedAnalysis::DeadCode)
     }
+}
+
+/// Directory watchers report the physical parent and the name of the entry,
+/// even if the entry is a symlink or an editor has temporarily removed it.
+fn path_in_canonical_parent(path: &Path) -> Option<PathBuf> {
+    Some(
+        dunce::canonicalize(path.parent()?)
+            .ok()?
+            .join(path.file_name()?),
+    )
 }
 
 fn is_relevant_source(path: &Path) -> bool {
@@ -121,7 +137,7 @@ fn build_production_glob_set(user_patterns: &[String]) -> Option<globset::GlobSe
 #[derive(Clone)]
 struct WatchFilter {
     root: PathBuf,
-    selected_configs: Vec<PathBuf>,
+    selected_configs: FxHashSet<PathBuf>,
     ignore_patterns: fallow_config::IgnorePatternSet,
     production_excludes: Option<globset::GlobSet>,
     gitignores: Vec<ignore::gitignore::Gitignore>,
@@ -141,7 +157,7 @@ impl WatchFilter {
         let gitignores = build_project_gitignores(config);
         Self {
             root: config.root.clone(),
-            selected_configs: Vec::new(),
+            selected_configs: FxHashSet::default(),
             ignore_patterns: config.ignore_patterns.clone(),
             production_excludes: config
                 .production
@@ -152,18 +168,22 @@ impl WatchFilter {
         }
     }
 
-    fn allows(&self, path: &Path) -> bool {
-        if !path.starts_with(&self.root) {
-            return false;
-        }
-        if self
-            .selected_configs
+    fn external_config_dirs(&self) -> FxHashSet<PathBuf> {
+        self.selected_configs
             .iter()
-            .any(|selected| selected == path)
-        {
+            .filter_map(|path| path.parent())
+            .map(|parent| dunce::canonicalize(parent).unwrap_or_else(|_| parent.to_owned()))
+            .filter(|parent| !parent.starts_with(&self.root))
+            .collect()
+    }
+
+    fn allows(&self, path: &Path) -> bool {
+        if self.selected_configs.contains(path) {
             return true;
         }
-        let relative = path.strip_prefix(&self.root).unwrap_or(path);
+        let Ok(relative) = path.strip_prefix(&self.root) else {
+            return false;
+        };
         // A `!` entry in `ignorePatterns` can add a file in a hidden directory
         // to discovery (issue #2452), so a change to it must trigger a rerun.
         if has_disallowed_hidden_dir(relative) && !self.ignore_patterns.is_lifted(relative) {
@@ -559,7 +579,7 @@ fn run_initial_watch_analysis(
 struct WatchLoopState {
     config: WatchConfig,
     filter: Arc<Mutex<WatchFilter>>,
-    watcher: Option<RecommendedWatcher>,
+    watcher: Option<ProjectWatcher>,
     tx: mpsc::Sender<WatchEvent>,
     rx: mpsc::Receiver<WatchEvent>,
     debouncer: PathDebouncer,
@@ -571,8 +591,10 @@ struct WatchLoopState {
 impl WatchLoopState {
     fn new(opts: &WatchOptions<'_>, config: WatchConfig) -> Result<Self, ExitCode> {
         let (tx, rx) = mpsc::channel();
-        let filter = Arc::new(Mutex::new(config.event_filter()));
-        let watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone()) {
+        let initial = config.event_filter();
+        let dirs = initial.external_config_dirs();
+        let filter = Arc::new(Mutex::new(initial));
+        let watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone(), dirs) {
             Ok(watcher) => Some(watcher),
             Err(e) => {
                 eprintln!("Failed to create file watcher: {e}");
@@ -628,7 +650,7 @@ fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCo
         }
 
         if !state.detached {
-            run_ready_reanalysis(&mut state.config, &state.filter, opts, &mut state.debouncer);
+            run_ready_reanalysis(state, opts);
         }
     }
 }
@@ -702,13 +724,8 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
 /// Drain the debouncer. When a non-empty batch is ready, reload the config,
 /// rebuild the event filter from it, and re-run the analysis. No-op when no
 /// batch is ready or all paths dedupe away.
-fn run_ready_reanalysis(
-    config: &mut WatchConfig,
-    filter: &Arc<Mutex<WatchFilter>>,
-    opts: &WatchOptions<'_>,
-    debouncer: &mut PathDebouncer,
-) {
-    let Some(paths) = debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) else {
+fn run_ready_reanalysis(state: &mut WatchLoopState, opts: &WatchOptions<'_>) {
+    let Some(paths) = state.debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) else {
         return;
     };
     let changed = display_changed_paths(paths, opts.root);
@@ -725,10 +742,18 @@ fn run_ready_reanalysis(
     }
     eprintln!();
 
-    reload_config_or_keep_previous(config, opts);
-    replace_watch_filter(filter, config);
+    reload_config_or_keep_previous(&mut state.config, opts);
+    if let Err(err) = refresh_watcher(
+        opts.root,
+        &state.config,
+        &state.filter,
+        &state.tx,
+        &mut state.watcher,
+    ) {
+        eprintln!("Failed to update watched config directories: {err}");
+    }
 
-    let status = analyze_and_report(config, opts);
+    let status = analyze_and_report(&state.config, opts);
     if status != ExitCode::SUCCESS {
         eprintln!("Watch analysis failed; continuing to watch for changes");
     }
@@ -737,11 +762,17 @@ fn run_ready_reanalysis(
 
 type WatchEvent = Result<Vec<PathBuf>, notify::Error>;
 
+struct ProjectWatcher {
+    _watcher: RecommendedWatcher,
+    config_dirs: FxHashSet<PathBuf>,
+}
+
 fn create_watcher(
     root: &Path,
     filter: Arc<Mutex<WatchFilter>>,
     tx: std::sync::mpsc::Sender<WatchEvent>,
-) -> notify::Result<RecommendedWatcher> {
+    config_dirs: FxHashSet<PathBuf>,
+) -> notify::Result<ProjectWatcher> {
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let event = match event {
             Ok(event) => event,
@@ -759,22 +790,42 @@ fn create_watcher(
         }
     })?;
     watcher.watch(root, notify::RecursiveMode::Recursive)?;
-    Ok(watcher)
+    for parent in &config_dirs {
+        watcher.watch(parent, notify::RecursiveMode::NonRecursive)?;
+    }
+    Ok(ProjectWatcher {
+        _watcher: watcher,
+        config_dirs,
+    })
 }
 
-fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &WatchConfig) {
-    // The build walks the project for gitignore files. It runs before the
-    // lock, so the notify callback does not wait for the walk.
+fn refresh_watcher(
+    root: &Path,
+    config: &WatchConfig,
+    filter: &Arc<Mutex<WatchFilter>>,
+    tx: &mpsc::Sender<WatchEvent>,
+    watcher: &mut Option<ProjectWatcher>,
+) -> notify::Result<()> {
     let rebuilt = config.event_filter();
-    if let Ok(mut guard) = filter.lock() {
-        *guard = rebuilt;
+    let dirs = rebuilt.external_config_dirs();
+    // A replaced symlink can move the config into a different directory.
+    // Attach there before releasing the previous watcher.
+    if watcher
+        .as_ref()
+        .is_none_or(|active| active.config_dirs != dirs)
+    {
+        *watcher = Some(create_watcher(root, Arc::clone(filter), tx.clone(), dirs)?);
     }
+    *filter
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = rebuilt;
+    Ok(())
 }
 
 struct RootLifecycleState<'a> {
     config: &'a mut WatchConfig,
     filter: &'a Arc<Mutex<WatchFilter>>,
-    watcher: &'a mut Option<RecommendedWatcher>,
+    watcher: &'a mut Option<ProjectWatcher>,
     tx: &'a std::sync::mpsc::Sender<WatchEvent>,
     debouncer: &'a mut PathDebouncer,
     detached: &'a mut bool,
@@ -811,10 +862,8 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
     }
 
     reload_config_or_keep_previous(config, opts);
-    replace_watch_filter(filter, config);
-    match create_watcher(opts.root, Arc::clone(filter), tx.clone()) {
-        Ok(new_watcher) => {
-            *watcher = Some(new_watcher);
+    match refresh_watcher(opts.root, config, filter, tx, watcher) {
+        Ok(()) => {
             debouncer.clear();
             *detached = false;
             *last_reattach_error = None;
@@ -1320,12 +1369,21 @@ mod tests {
         args: &[&str],
         env: &[(&str, &str)],
     ) -> impl Fn() -> Result<ResolvedRun, ExitCode> + use<> {
+        resolver_with_cwd(root, args, env, None)
+    }
+
+    fn resolver_with_cwd(
+        root: &Path,
+        args: &[&str],
+        env: &[(&str, &str)],
+        cwd: Option<&Path>,
+    ) -> impl Fn() -> Result<ResolvedRun, ExitCode> + use<> {
         use clap::Parser as _;
         let root_arg = root.display().to_string();
         let mut argv = vec!["fallow", "watch", "--root", root_arg.as_str()];
         argv.extend_from_slice(args);
         let cli = crate::cli_args::Cli::try_parse_from(argv).expect("argv parses");
-        let env = fallow_config::EnvSnapshot::from_pairs(env, None);
+        let env = fallow_config::EnvSnapshot::from_pairs(env, cwd);
         let inputs =
             crate::run_inputs::command_run_inputs(&cli, env).expect("watch resolves a run");
         move || fallow_engine::resolved_run::resolve_run(&inputs).map_err(|_| exit_invalid_input())
@@ -1379,6 +1437,130 @@ mod tests {
         )))
         .add_path(custom);
         assert!(filter_event_paths(opened, &filter).is_empty());
+    }
+
+    #[test]
+    fn watch_external_selected_config_receives_atomic_replacement() {
+        let project = watch_project("{}");
+        let root = dunce::canonicalize(project.path()).unwrap();
+        let shared = tempfile::tempdir().unwrap();
+        let parent = dunce::canonicalize(shared.path()).unwrap();
+        let path = parent.join("settings.json");
+        std::fs::write(&path, "{}").unwrap();
+        let resolve = resolver(&root, &["--config", path.to_str().unwrap()], &[]);
+        let selected = Some(path.clone());
+        let mut opts = make_watch_options(&root, &resolve);
+        opts.config_path = &selected;
+        let mut state = WatchLoopState::new(&opts, load_watch_config(&opts).unwrap()).unwrap();
+        let replacement = parent.join("next.json");
+        std::fs::write(&replacement, r#"{"production":true}"#).unwrap();
+        std::fs::rename(replacement, &path).unwrap();
+        assert_config_event(&state, &path);
+        reload_config_or_keep_previous(&mut state.config, &opts);
+        assert!(state.config.config.production);
+    }
+
+    #[test]
+    fn watch_external_selected_config_recovers_missing_cwd_relative_file() {
+        let project = watch_project("{}");
+        let root = dunce::canonicalize(project.path()).unwrap();
+        let shared = tempfile::tempdir().unwrap();
+        let cwd = dunce::canonicalize(shared.path()).unwrap();
+        let path = cwd.join("settings.json");
+        std::fs::write(&path, "{}").unwrap();
+        let resolve = resolver_with_cwd(&root, &["--config", "settings.json"], &[], Some(&cwd));
+        let selected = Some(PathBuf::from("settings.json"));
+        let mut opts = make_watch_options(&root, &resolve);
+        opts.config_path = &selected;
+        let config = load_watch_config(&opts).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let state = WatchLoopState::new(&opts, config).unwrap();
+        std::fs::write(&path, "{}").unwrap();
+        assert_config_event(&state, &path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_external_selected_config_tracks_retargeted_symlink() {
+        let project = watch_project("{}");
+        let root = dunce::canonicalize(project.path()).unwrap();
+        let shared = tempfile::tempdir().unwrap();
+        let parent = dunce::canonicalize(shared.path()).unwrap();
+        let first = parent.join("first/settings.json");
+        let second = parent.join("second/settings.json");
+        for path in [&first, &second] {
+            std::fs::create_dir(path.parent().unwrap()).unwrap();
+        }
+        std::fs::write(&first, "{}").unwrap();
+        std::fs::write(&second, r#"{"production":true}"#).unwrap();
+        let links = tempfile::tempdir().unwrap();
+        let physical = dunce::canonicalize(links.path()).unwrap().join("settings");
+        let nested = links.path().join("nested");
+        std::fs::create_dir(&physical).unwrap();
+        std::fs::create_dir(&nested).unwrap();
+        let alias = parent.join("configs");
+        std::os::unix::fs::symlink(nested, &alias).unwrap();
+        let selected = alias.join("../settings/settings.json");
+        std::os::unix::fs::symlink(&first, &selected).unwrap();
+        let resolve = resolver(&root, &["--config", selected.to_str().unwrap()], &[]);
+        let opts = make_watch_options(&root, &resolve);
+        let mut state = WatchLoopState::new(&opts, load_watch_config(&opts).unwrap()).unwrap();
+
+        let next_link = root.join("next-link");
+        std::os::unix::fs::symlink(&second, &next_link).unwrap();
+        std::fs::rename(next_link, &selected).unwrap();
+        assert_config_event(&state, &physical.join("settings.json"));
+        state.debouncer.push_paths(
+            vec![selected],
+            Instant::now().checked_sub(DEBOUNCE_WINDOW).unwrap(),
+        );
+        run_ready_reanalysis(&mut state, &opts);
+        assert!(state.config.config.production);
+
+        let replacement = second.with_extension("tmp");
+        std::fs::write(&replacement, "{}").unwrap();
+        std::fs::rename(replacement, &second).unwrap();
+        assert_config_event(&state, &second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_external_selected_config_recovers_dangling_symlink_target() {
+        let project = watch_project("{}");
+        let root = dunce::canonicalize(project.path()).unwrap();
+        let shared = tempfile::tempdir().unwrap();
+        let target = dunce::canonicalize(shared.path())
+            .unwrap()
+            .join("settings.json");
+        std::fs::write(&target, "{}").unwrap();
+        let selected = root.join("settings.json");
+        std::os::unix::fs::symlink(&target, &selected).unwrap();
+        let resolve = resolver(&root, &["--config", selected.to_str().unwrap()], &[]);
+        let opts = make_watch_options(&root, &resolve);
+        let config = load_watch_config(&opts).unwrap();
+        std::fs::remove_file(&target).unwrap();
+        let state = WatchLoopState::new(&opts, config).unwrap();
+
+        std::fs::write(&target, r#"{"production":true}"#).unwrap();
+        assert_config_event(&state, &target);
+    }
+
+    fn assert_config_event(state: &WatchLoopState, path: &Path) {
+        let parent = path.parent().unwrap();
+        assert!(
+            state.watcher.as_ref().unwrap().config_dirs.contains(parent),
+            "missing directory subscription for {path:?}",
+        );
+        let event = notify::Event::new(notify::EventKind::Any).add_path(path.to_owned());
+        let paths = filter_event_paths(event, &state.filter.lock().unwrap());
+        assert_eq!(paths, [path]);
+        assert!(
+            !state
+                .filter
+                .lock()
+                .unwrap()
+                .allows(&parent.join("unselected.ts"))
+        );
     }
 
     #[test]
@@ -1445,22 +1627,20 @@ mod tests {
         let dir = watch_project("{}");
         let resolve = resolver(dir.path(), &[], &[]);
         let opts = make_watch_options(dir.path(), &resolve);
-        let mut watch = load_watch_config(&opts).expect("config");
-        let generated = watch.config.root.join("src/generated/client.ts");
-        let filter = Arc::new(Mutex::new(WatchFilter::new(&watch.config)));
-        assert!(filter.lock().expect("filter").allows(&generated));
+        let mut state = WatchLoopState::new(&opts, load_watch_config(&opts).unwrap()).unwrap();
+        let generated = state.config.config.root.join("src/generated/client.ts");
+        assert!(state.filter.lock().expect("filter").allows(&generated));
 
         let config_path = dir.path().join(".fallowrc.json");
         std::fs::write(&config_path, r#"{"ignorePatterns":["src/generated/**"]}"#).expect("config");
-        let mut debouncer = PathDebouncer::default();
         let changed_at = Instant::now()
             .checked_sub(DEBOUNCE_WINDOW)
             .expect("monotonic clock is past the debounce window");
-        debouncer.push_paths(vec![config_path], changed_at);
-        run_ready_reanalysis(&mut watch, &filter, &opts, &mut debouncer);
+        state.debouncer.push_paths(vec![config_path], changed_at);
+        run_ready_reanalysis(&mut state, &opts);
 
         assert!(
-            !filter.lock().expect("filter").allows(&generated),
+            !state.filter.lock().expect("filter").allows(&generated),
             "the watch filter must follow the reloaded ignorePatterns"
         );
     }
