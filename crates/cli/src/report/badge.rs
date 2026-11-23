@@ -210,22 +210,13 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
 }
 
 /// Print a health score badge as shields.io-compatible SVG to stdout.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "text widths and 0-100 scores are non-negative"
-)]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "health score is 0-100, always fits in u32"
-)]
 pub fn print_health_badge(report: &HealthReport) -> ExitCode {
     let Some(ref score) = report.health_score else {
         eprintln!("Error: badge format requires --score (run `fallow health --format badge`)");
         return exit_invalid_input();
     };
 
-    let rounded = score.score as u32;
-    let message = format!("{} ({rounded})", score.grade);
+    let message = format!("{} ({:.0})", score.grade, score.score);
     let color = grade_color(score.grade);
     let svg = render_badge("fallow", &message, color);
 

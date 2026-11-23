@@ -631,6 +631,7 @@ fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
             .cmp(&b.path)
             .then(a.line.cmp(&b.line))
             .then(a.flag_name.cmp(&b.flag_name))
+            .then(a.col.cmp(&b.col))
     });
 
     if let Some(top) = top {
@@ -1328,6 +1329,7 @@ fn print_flags_codeclimate(
     config: &ResolvedConfig,
     retirement: Option<&FlagRetirementReport>,
 ) {
+    let mut previous = None;
     let mut issues: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
@@ -1345,12 +1347,19 @@ fn print_flags_codeclimate(
                     f.guarded_dead_exports.len()
                 );
             }
-            let fingerprint = codeclimate_fingerprint_hash(&[
+            let line_fingerprint = codeclimate_fingerprint_hash(&[
                 "feature-flag",
                 &path,
                 &f.line.to_string(),
                 &f.flag_name,
             ]);
+            // The first read keeps the existing CodeClimate identity for this line.
+            let key = (&f.path, f.line, &f.flag_name);
+            let fingerprint = if previous.replace(key) == Some(key) {
+                codeclimate_fingerprint_hash(&[&line_fingerprint, &f.col.to_string()])
+            } else {
+                line_fingerprint
+            };
             serde_json::json!({
                 "type": "issue",
                 "check_name": "fallow/feature-flag",

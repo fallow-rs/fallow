@@ -106,7 +106,7 @@ pub struct PrCommentRenderInput<'a> {
     pub command: &'a str,
     /// CI provider whose comment conventions apply.
     pub provider: CiProvider,
-    /// Findings to summarize, pre-sorted by severity and location.
+    /// Findings to summarize in location order.
     pub issues: &'a [CiIssue],
     /// Identity token embedded so reruns update the same sticky comment.
     pub marker_id: String,
@@ -199,8 +199,7 @@ pub const MARKER_SUFFIX_V3: &str = " -->";
 pub const MAX_COMMENT_BODY_BYTES: usize = 65_536;
 const TRUNCATION_SUFFIX: &str = "\n\n<!-- fallow-truncated -->\n> Body truncated by fallow.";
 
-/// Extract normalized CI issues from a raw CodeClimate JSON array, sorted by
-/// severity then location.
+/// Extract normalized CI issues from a raw CodeClimate JSON array in location order.
 #[must_use]
 pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
     let mut issues = value
@@ -213,8 +212,7 @@ pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
     issues
 }
 
-/// Normalize typed CodeClimate issues into CI issues, sorted by severity then
-/// location.
+/// Normalize typed CodeClimate issues into CI issues in location order.
 #[must_use]
 pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssue> {
     let mut issues = issues
@@ -401,9 +399,11 @@ pub fn render_pr_comment_with_verdict(
                 open: input.layout == crate::PrCommentLayout::Details,
                 docs_url_for_rule: input.docs_url_for_rule,
             };
-            for (category, group_issues) in &groups {
+            for (category, mut group_issues) in groups {
+                group_issues
+                    .sort_by_key(|issue| review_label_from_codeclimate(&issue.severity) != "error");
                 let label = summary_label(category, group_issues.len(), input.max_comments);
-                render_findings_table(&mut out, group_issues, &table, &label);
+                render_findings_table(&mut out, &group_issues, &table, &label);
             }
         }
     }
@@ -1732,10 +1732,12 @@ mod tests {
     }
 
     #[test]
-    fn a_capped_table_says_how_many_it_shows() {
-        let issues: Vec<CiIssue> = (0..3)
-            .map(|index| pr_comment_issue("fallow/a", &format!("x{index}"), "minor", "src/a.ts"))
-            .collect();
+    fn a_capped_table_shows_errors_before_warnings_and_reports_the_total() {
+        let issues = [
+            pr_comment_issue("fallow/a", "first warning", "minor", "src/a.ts"),
+            pr_comment_issue("fallow/a", "second warning", "minor", "src/b.ts"),
+            pr_comment_issue("fallow/a", "last error", "major", "src/c.ts"),
+        ];
         let body = render_pr_comment(&PrCommentRenderInput {
             command: "check",
             provider: CiProvider::Github,
@@ -1748,6 +1750,9 @@ mod tests {
             status_note: None,
             layout: crate::PrCommentLayout::Default,
         });
+        assert!(body.contains("last error"), "{body}");
+        assert!(body.contains("first warning"), "{body}");
+        assert!(!body.contains("second warning"), "{body}");
         assert!(
             body.contains(
                 "The table shows 2 of 3 findings. Run fallow locally to see each finding."
