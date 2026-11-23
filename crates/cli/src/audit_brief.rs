@@ -1896,9 +1896,7 @@ pub fn print_walkthrough_file_result(
 /// [`crate::audit_walkthrough::build_guide_from_result`]; this only renders it.
 ///
 /// Format dispatch on `result.output`:
-/// - `Json` delegates verbatim to [`print_walkthrough_guide_result`], so
-///   `--walkthrough --format json` is byte-identical to `--walkthrough-guide
-///   --format json` (the json-reuse seam, zero duplication).
+/// - `Json` writes the guide with the same serializer as `--walkthrough-guide`.
 /// - `Markdown` emits a paste-into-PR markdown tour to STDOUT.
 /// - every other format (Human / Compact / the CI envelopes) emits the colored
 ///   staged terminal tour: the Review Focus header + final status to stderr, the

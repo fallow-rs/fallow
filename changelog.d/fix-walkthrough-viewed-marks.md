@@ -1,3 +1,3 @@
 ### Fixed
 
-- **Walkthroughs record `--mark-viewed` in JSON output as well as in human and Markdown output.** A path such as `./src/main.ts` now marks the same file as `src/main.ts`.
+- **Walkthroughs record `--mark-viewed` in JSON output as well as in human and Markdown output.** Absolute paths and paths with `.` or `..` mark the same file as the guide path. A mark that matches no staged file prints a warning on stderr.

@@ -12,9 +12,9 @@
 //! `--mark-viewed` mutation, never as a side effect of a render.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use fallow_types::path_guard::CacheTarget;
+use fallow_types::path_guard::{CacheTarget, lexically_normalized};
 use serde::{Deserialize, Serialize};
 
 use crate::state_file::{Existing, load_existing};
@@ -167,24 +167,48 @@ pub fn record_guide_marks(
     guide: &crate::audit_walkthrough::WalkthroughGuide,
     root: &Path,
     cache_dir: &Path,
-    paths: &[std::path::PathBuf],
+    paths: &[PathBuf],
 ) {
     if paths.is_empty() {
         return;
     }
-    let keys = paths
-        .iter()
-        .map(|path| {
-            let absolute = root.join(path);
-            let relative = absolute.strip_prefix(root).unwrap_or(path);
-            relative
-                .components()
-                .collect::<std::path::PathBuf>()
-                .to_string_lossy()
-                .replace('\\', "/")
-        })
-        .collect::<Vec<_>>();
-    record_marks(root, cache_dir, &keys, &guide.graph_snapshot_hash);
+    let absolute_root = std::path::absolute(root).unwrap_or_else(|_| root.to_owned());
+    let absolute_root = lexically_normalized(&absolute_root);
+    let canonical_root = dunce::canonicalize(root).ok();
+    let files: rustc_hash::FxHashSet<_> =
+        guide.direction.order.iter().map(String::as_str).collect();
+    let mut keys = Vec::new();
+    for path in paths {
+        let relative = guide_relative_path(&absolute_root, canonical_root.as_deref(), path);
+        if let Some(key) = relative.map(|p| p.to_string_lossy().replace('\\', "/"))
+            && files.contains(key.as_str())
+        {
+            keys.push(key);
+        } else {
+            eprintln!(
+                "Warning: --mark-viewed {} matches no staged file in the walkthrough guide",
+                path.display()
+            );
+        }
+    }
+    if !keys.is_empty() {
+        record_marks(root, cache_dir, &keys, &guide.graph_snapshot_hash);
+    }
+}
+
+fn guide_relative_path(root: &Path, canonical_root: Option<&Path>, path: &Path) -> Option<PathBuf> {
+    let absolute = lexically_normalized(&root.join(path));
+    if let Ok(relative) = absolute.strip_prefix(root) {
+        return Some(relative.to_owned());
+    }
+    // Compare the root directory itself so a deleted file or a symlink below
+    // the root keeps the name that appears in the guide.
+    let canonical_root = canonical_root?;
+    let alias = absolute.ancestors().find(|ancestor| {
+        *ancestor == canonical_root
+            || dunce::canonicalize(ancestor).is_ok_and(|path| path == canonical_root)
+    })?;
+    absolute.strip_prefix(alias).ok().map(Path::to_owned)
 }
 
 /// Record the `--mark-viewed` files. A failure prints a warning and never
@@ -215,6 +239,20 @@ mod tests {
 
     fn temp_cache() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn absolute_mark_through_root_alias_preserves_the_guide_path() {
+        let dir = temp_cache();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let alias_dir = temp_cache();
+        let alias = alias_dir.path().join("project");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        assert_eq!(
+            guide_relative_path(&root, Some(&root), &alias.join("src/../lib.ts")),
+            Some(PathBuf::from("lib.ts"))
+        );
     }
 
     #[test]
