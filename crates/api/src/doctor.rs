@@ -939,9 +939,9 @@ fn build_output(checks: Vec<DoctorCheck>) -> DoctorOutput {
 
 fn relative_path(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root).ok().map(|path| {
-        let relative = path.to_string_lossy().into_owned();
-        #[cfg(windows)]
-        let relative = relative.replace('\\', "/");
+        let relative = path
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         if relative.is_empty() {
             ".".to_string()
         } else {
