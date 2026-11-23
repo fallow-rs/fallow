@@ -3,6 +3,15 @@
 use super::{BaselineData, DuplicationBaselineData, HealthBaselineData};
 
 impl BaselineData {
+    pub(crate) const FINDING_FIELDS: &'static [&'static str] = {
+        macro_rules! field_names {
+            ($($field:ident),* $(,)?) => {
+                &[$(stringify!($field)),*]
+            };
+        }
+        with_baseline_fields!(field_names)
+    };
+
     /// Record the channels that narrowed the saving run.
     #[must_use]
     pub fn with_scope_reasons(mut self, reasons: fallow_output::BaselineScopeReasons) -> Self {
@@ -46,16 +55,12 @@ fn production_reason(production: bool) -> Vec<String> {
 /// name. Empty for a file that is not a JSON object.
 #[must_use]
 pub fn saved_finding_categories(json: &str) -> Vec<String> {
-    macro_rules! field_names {
-        ($($field:ident),* $(,)?) => {
-            [$(stringify!($field)),*]
-        };
-    }
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return Vec::new();
     };
-    with_baseline_fields!(field_names)
-        .into_iter()
+    BaselineData::FINDING_FIELDS
+        .iter()
+        .copied()
         .filter(|field| {
             value
                 .get(field)

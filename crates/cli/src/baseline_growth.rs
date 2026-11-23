@@ -31,7 +31,9 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use fallow_engine::baseline::BaselineKind;
-use fallow_engine::baseline_growth::{BaseBaselineError, BaselineGrowth, baseline_growth};
+use fallow_engine::baseline_growth::{
+    BaseBaselineError, BaselineGrowth, baseline_growth, baseline_growth_note,
+};
 use fallow_output::GateOutcome;
 
 /// The command that armed the gate, so only its envelope carries the entry.
@@ -341,11 +343,11 @@ fn judge_one(target: &GrowthTarget<'_>, git_ref: &str) -> Result<Verdict, String
     };
     let head = parse(&head_text, path, "")?;
     let base = parse(&base_text, path, &format!(" at {git_ref}"))?;
-    Ok(Verdict::Compared(baseline_growth(
-        target.kind,
-        &base,
-        &head,
-    )))
+    let growth = baseline_growth(target.kind, &base, &head);
+    if let Some(note) = baseline_growth_note(target.kind, &base, &head) {
+        eprintln!("Note: {}: {note}", path.display());
+    }
+    Ok(Verdict::Compared(growth))
 }
 
 fn parse(text: &str, path: &Path, at: &str) -> Result<serde_json::Value, String> {
