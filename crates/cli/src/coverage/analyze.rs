@@ -158,10 +158,10 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         Ok(result) => result,
         Err(code) => return code,
     };
-    let Some(report) = result.report.runtime_coverage else {
+    let Some(report) = result.report.runtime_coverage.as_ref() else {
         return emit_input_error("runtime coverage report was not produced", ctx.output);
     };
-    print_runtime_report(&report, ctx, result.elapsed, args)
+    print_runtime_report(report, ctx, result.elapsed, args)
 }
 
 pub fn benchmark_local_json(
