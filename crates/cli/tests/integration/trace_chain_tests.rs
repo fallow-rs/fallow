@@ -102,3 +102,45 @@ fn ambiguous_star_name_gives_empty_chains() {
     assert_eq!(hops(&value, "callees"), Vec::<String>::new());
     assert_eq!(value["unresolved_callees"], serde_json::json!([]));
 }
+
+#[test]
+fn callees_stop_at_side_effect_only_imports() {
+    let value = parse_json(&run_fallow(
+        "trace",
+        "boundary-type-only",
+        &[
+            "src/ui/side_effect.ts:sideEffected",
+            "--callees",
+            "--depth",
+            "2",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(hops(&value, "callees"), ["1 src/shared/utils.ts helper"]);
+}
+
+#[test]
+fn callees_report_imported_calls_without_internal_edges() {
+    let value = parse_json(&run_fallow(
+        "trace",
+        "dev-dep-in-prod",
+        &[
+            "src/index.ts:load",
+            "--callees",
+            "--depth",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(hops(&value, "callees"), ["1 src/lib/pad.ts pad"]);
+    assert_eq!(
+        value["unresolved_callees"],
+        serde_json::json!([{"callee": "parse", "reason": "local-or-global"}])
+    );
+}

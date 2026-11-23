@@ -111,8 +111,8 @@ pub struct UnresolvedCallee {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum UnresolvedReason {
-    /// A bare identifier call with no matching import binding (a same-module
-    /// local function, a global, or a re-bound callee).
+    /// A call through a bare identifier with no matching import-symbol edge.
+    /// This includes local bindings imported from external packages.
     LocalOrGlobal,
     /// A computed / member-expression callee (`obj.method`, dynamic dispatch).
     MemberOrDynamic,

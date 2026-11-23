@@ -18,8 +18,7 @@
 //! - **Callees (DOWN):** the import-symbol edges OUT of `M` (resolved callees,
 //!   each a `(local, imported, target_module)` triple), recursed into the target
 //!   module's exports up to `depth`, PLUS the call sites in `M`
-//!   (`ModuleInfo.callee_uses`) whose leading identifier is bound to no import
-//!   (unresolved callees: locals, globals, dynamic dispatch, re-bound callees).
+//!   (`ModuleInfo.callee_uses`) whose leading identifier has no import-symbol edge.
 //!
 //! NOT resolved (reported as unresolved or absent, the same class of limits the
 //! security taint walk carries): computed-member calls, dynamic dispatch,
@@ -210,7 +209,7 @@ fn collect_callers(
 
 /// Walk DOWN: the import-symbol edges OUT of `module_id` (resolved callees),
 /// followed into each target module up to `depth`, plus the call sites in
-/// `module_id` whose callee did not resolve to an import binding (unresolved).
+/// `module_id` whose callee has no matching import-symbol edge.
 ///
 /// The walk is breadth-first, so each module is expanded at its shortest
 /// depth.
@@ -231,6 +230,7 @@ fn collect_callees(
             continue;
         }
         for (edge_target, symbols) in graph.outgoing_symbol_edges(module_id) {
+            let first_hop = resolved.len();
             let target_path = module_path(graph, edge_target, root);
             for sym in symbols {
                 // Side-effect imports carry no value-level callee; skip them.
@@ -245,7 +245,7 @@ fn collect_callees(
                     depth: current_depth,
                 });
             }
-            if visited.insert(edge_target) {
+            if resolved.len() > first_hop && visited.insert(edge_target) {
                 queue.push_back((edge_target, current_depth + 1));
             }
         }
@@ -254,7 +254,15 @@ fn collect_callees(
 
     let unresolved = module_by_id
         .get(&module_id)
-        .map(|info| collect_unresolved_callees(info))
+        .map(|info| {
+            let resolved_locals = graph
+                .outgoing_symbol_edges(module_id)
+                .flat_map(|(_, symbols)| symbols)
+                .filter(|sym| !matches!(sym.imported_name, ImportedName::SideEffect))
+                .map(|sym| sym.local_name.as_str())
+                .collect();
+            collect_unresolved_callees(info, &resolved_locals)
+        })
         .unwrap_or_default();
 
     (resolved, unresolved)
@@ -295,25 +303,17 @@ fn sort_hops(hops: &mut [ChainHop]) {
     });
 }
 
-/// Build the unresolved-callee list from a module's call sites: every
-/// `callee_uses` call path (not a `new` expression) whose leading identifier is bound to no import is
-/// surfaced (best-effort classification). A dotted path is `MemberOrDynamic`; a
-/// bare identifier with no import binding is `LocalOrGlobal`.
-fn collect_unresolved_callees(info: &ModuleInfo) -> Vec<UnresolvedCallee> {
-    let import_locals: FxHashSet<&str> =
-        info.imports.iter().map(|i| i.local_name.as_str()).collect();
-
+/// Report calls whose leading identifier has no resolved edge in this module.
+fn collect_unresolved_callees(
+    info: &ModuleInfo,
+    resolved_locals: &FxHashSet<&str>,
+) -> Vec<UnresolvedCallee> {
     let mut out = Vec::new();
     let mut seen: FxHashSet<&str> = FxHashSet::default();
     for callee in info.callee_uses.iter().filter(|callee| !callee.is_new) {
         let path = callee.callee_path.as_str();
         let leading = path.split('.').next().unwrap_or(path);
-        // A callee whose leading identifier is an imported binding resolves to a
-        // graph edge already (covered by the resolved callee list); skip it.
-        if import_locals.contains(leading) {
-            continue;
-        }
-        if !seen.insert(path) {
+        if resolved_locals.contains(leading) || !seen.insert(path) {
             continue;
         }
         let reason = if path.contains('.') {
@@ -429,7 +429,7 @@ mod tests {
             ],
             ..ModuleInfo::empty(FileId(1))
         };
-        let unresolved = collect_unresolved_callees(&info);
+        let unresolved = collect_unresolved_callees(&info, &FxHashSet::default());
         assert_eq!(unresolved.len(), 2);
         assert_eq!(unresolved[0].callee, "localHelper");
         assert_eq!(unresolved[0].reason, UnresolvedReason::LocalOrGlobal);
@@ -454,24 +454,14 @@ mod tests {
             ],
             ..ModuleInfo::empty(FileId(1))
         };
-        let unresolved = collect_unresolved_callees(&info);
+        let unresolved = collect_unresolved_callees(&info, &FxHashSet::default());
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].callee, "localHelper");
     }
 
     #[test]
-    fn imported_callees_are_not_listed_as_unresolved() {
+    fn resolved_callees_are_not_listed_as_unresolved() {
         let info = ModuleInfo {
-            imports: vec![fallow_types::extract::ImportInfo {
-                source: "./dep".to_string(),
-                imported_name: ImportedName::Named("dep".to_string()),
-                local_name: "dep".to_string(),
-                is_type_only: false,
-                is_type_only_star: false,
-                from_style: false,
-                span: oxc_span::Span::default(),
-                source_span: oxc_span::Span::default(),
-            }],
             callee_uses: vec![
                 fallow_types::extract::CalleeUse {
                     callee_path: "dep".to_string(),
@@ -486,9 +476,8 @@ mod tests {
             ],
             ..ModuleInfo::empty(FileId(1))
         };
-        let unresolved = collect_unresolved_callees(&info);
-        // `dep` resolves to an import (covered by resolved callees); only `ghost`
-        // is unresolved.
+        let resolved_locals = std::iter::once("dep").collect();
+        let unresolved = collect_unresolved_callees(&info, &resolved_locals);
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].callee, "ghost");
     }
