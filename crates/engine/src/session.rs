@@ -158,17 +158,8 @@ impl AnalysisSession {
         } else {
             discovery.workspaces().to_vec()
         };
-        // Analysis-stage diagnostics are owned by the analyze pass, which
-        // refreshes the registry on every run; pinning them in the session
-        // snapshot would keep a stale entry alive after the cause is fixed
-        // (issue #2366). `current_workspace_diagnostics` reads them live.
-        //
-        // Source-discovery entries come from THIS walk's return value, not from
-        // the registry: combined mode runs the dead-code and duplication walks
-        // concurrently whenever a per-analysis `production` split stops them
-        // from sharing a file list, and each walk replaces the registry's
-        // source-discovery set for the root, so a registry read here would
-        // report whichever walk happened to write last (issue #2366).
+        // Read analysis-stage entries live. Concurrent walks can have different
+        // production scopes, so keep source skips from this walk (#2366).
         let workspace_diagnostics = merge_workspace_diagnostics(
             merge_workspace_diagnostics(
                 project_config.workspace_diagnostics,
@@ -284,6 +275,16 @@ impl AnalysisSession {
         }
         if !self.preloaded_workspaces {
             self.workspaces = discovery.workspaces().to_vec();
+        }
+        if !self.discovery.source_diagnostics().is_empty()
+            || !discovery.source_diagnostics().is_empty()
+        {
+            self.workspace_diagnostics
+                .retain(|d| !d.kind.is_source_walk_recorded());
+            self.workspace_diagnostics = merge_workspace_diagnostics(
+                std::mem::take(&mut self.workspace_diagnostics),
+                discovery.source_diagnostics().to_vec(),
+            );
         }
         self.discovery = discovery;
         self.duplication.forget_files();
@@ -520,14 +521,9 @@ impl AnalysisSession {
     /// discovers and the analysis-stage entries the analyze pass records, both
     /// of which land in the registry after the session was created.
     ///
-    /// The live read goes through
-    /// [`fallow_config::registry_diagnostics_to_fold`], which drops
-    /// walk-recorded entries for the same reason the constructor does: a
-    /// concurrent walk on the same root replaces that set, so importing it here
-    /// would make this session's list depend on which walk wrote last, and the
-    /// combined root's union would come out in a different ORDER between runs
-    /// of the same command (issue #2366). This session's own walk-recorded
-    /// entries are already in the snapshot, by value, from its own walk.
+    /// [`fallow_config::registry_diagnostics_to_fold`] excludes walk-recorded
+    /// entries. This session owns its latest walk, even when another walk on
+    /// the same root writes different skips to the registry (#2366).
     #[must_use]
     pub fn current_workspace_diagnostics(&self) -> Vec<WorkspaceDiagnostic> {
         merge_workspace_diagnostics(
