@@ -118,19 +118,7 @@ fn parse_frame(trimmed: &str) -> Option<RawFrame> {
 
 /// V8 / Node: `at name (file:line:col)`, `at file:line:col`, `at name (native)`.
 fn parse_v8_frame(trimmed: &str) -> Option<RawFrame> {
-    let rest = trimmed.strip_prefix("at ")?.trim_start();
-    // The location is parenthesised whenever the runtime printed a name, and a
-    // function name may itself contain a parenthesis only in pathological
-    // cases, so the LAST opening parenthesis of a parenthesised tail is the
-    // separator.
-    let (name_part, location_part) = match rest.strip_suffix(')') {
-        Some(head) => match head.rfind(" (") {
-            Some(index) => (&head[..index], &head[index + 2..]),
-            None => ("", rest),
-        },
-        None => ("", rest),
-    };
-
+    let (name_part, location_part) = v8_frame_parts(trimmed)?;
     let mut name = name_part.trim();
     let mut is_async = false;
     let mut is_constructor = false;
@@ -155,12 +143,34 @@ fn parse_v8_frame(trimmed: &str) -> Option<RawFrame> {
     })
 }
 
+fn v8_frame_parts(trimmed: &str) -> Option<(&str, &str)> {
+    let rest = trimmed.strip_prefix("at ")?.trim_start();
+    Some(
+        rest.strip_suffix(')')
+            .and_then(|head| head.rsplit_once(" ("))
+            .unwrap_or(("", rest)),
+    )
+}
+
+fn at_sign_frame_parts(trimmed: &str) -> Option<(&str, &str)> {
+    // At-signs can occur in the function name and in subsequent path segments.
+    let first = trimmed.find('@')?;
+    let tail = &trimmed[first + 1..];
+    let head = tail.split(['/', '\\']).next()?;
+    let separator = head.rfind('@').map_or(first, |i| first + 1 + i);
+    Some((&trimmed[..separator], &trimmed[separator + 1..]))
+}
+
+fn is_web_location(location: &str) -> bool {
+    location.starts_with("http://") || location.starts_with("https://")
+}
+
 /// SpiderMonkey / JavaScriptCore: `name@file:line:col`, `@file:line:col`.
 ///
 /// A location without a line number is rejected rather than accepted, so an
 /// ordinary line that happens to contain an `@` does not become a frame.
 fn parse_at_sign_frame(trimmed: &str) -> Option<RawFrame> {
-    let (name_part, location_part) = trimmed.rsplit_once('@')?;
+    let (name_part, location_part) = at_sign_frame_parts(trimmed)?;
     let (file, line, column) = parse_location(location_part);
     let file = file?;
     line?;
@@ -231,25 +241,25 @@ fn normalize_frame_path(path: &str) -> Option<String> {
     if path.is_empty() {
         return None;
     }
-    if let Some(rest) = path.strip_prefix("file://") {
-        // `file:///C:/src/a.ts` carries a leading slash before the drive
-        // letter that is not part of the filesystem path.
-        let rest = rest
-            .strip_prefix('/')
-            .filter(|tail| is_windows_drive_prefixed(tail))
-            .unwrap_or(rest);
-        return (!rest.is_empty()).then(|| rest.to_string());
+    if !is_web_location(&path) && !path.starts_with("file://") {
+        return Some(path);
     }
-    for scheme in ["https://", "http://"] {
-        if let Some(rest) = path.strip_prefix(scheme) {
-            // Drop the authority; the path component is the only part that can
-            // correspond to a file in the project.
-            let authority_end = rest.find('/')?;
-            let remainder = &rest[authority_end..];
-            return (remainder.len() > 1).then(|| remainder.to_string());
+    let Ok(url) = url::Url::parse(&path) else {
+        return Some(path);
+    };
+    let decoded = crate::url_path::decode_path(url.path()).unwrap_or_else(|| url.path().to_owned());
+    if url.scheme() == "file" {
+        if let Some(host) = url.host_str() {
+            return Some(format!("//{host}{decoded}"));
+        }
+        if let Some(drive_path) = decoded
+            .strip_prefix('/')
+            .filter(|p| is_windows_drive_prefixed(p))
+        {
+            return Some(drive_path.to_owned());
         }
     }
-    Some(path)
+    Some(decoded)
 }
 
 /// Whether a path begins with a `C:/`-style Windows drive prefix.
@@ -603,7 +613,19 @@ fn classify_and_look_up(
     // and only once, so a symlinked project root does not make every frame
     // look out of corpus and so the resolution costs one stat rather than one
     // per module.
-    let resolved = context.root_relative(path);
+    let resolved = context.root_relative(path).or_else(|| {
+        let (_, location) =
+            v8_frame_parts(&frame.raw).or_else(|| at_sign_frame_parts(&frame.raw))?;
+        if !is_web_location(location) {
+            return None;
+        }
+        // A dev server serves /src/... from the project root.
+        let local = context
+            .canonical_root
+            .as_ref()?
+            .join(path.trim_start_matches('/'));
+        context.root_relative(local.to_str()?)
+    });
     let match_path = resolved.as_deref().unwrap_or(path);
     let root = context.root;
     let module_indexes = matching_module_indexes(graph, root, match_path);
