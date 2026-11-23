@@ -311,6 +311,15 @@ fn assert_saved_report_parity(root: &Path, command: Option<&str>) {
 }
 
 fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extra: &[&str]) {
+    assert_saved_report_parity_from(root, command, extra, root);
+}
+
+fn assert_saved_report_parity_from(
+    root: &Path,
+    command: Option<&str>,
+    extra: &[&str],
+    text_report_root: &Path,
+) {
     let json = run(root, &analysis_args(command, root, "json", extra));
     assert!(
         matches!(json.status.code(), Some(0 | 1)),
@@ -365,15 +374,9 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
             String::from_utf8_lossy(&direct.stderr)
         );
 
-        let replay_root = if command == Some("health")
-            && extra.contains(&"--group-by")
-            && matches!(
-                *format,
-                "markdown" | "github-summary" | "github-annotations"
-            ) {
-            saved_dir.path()
-        } else {
-            root
+        let replay_root = match *format {
+            "markdown" | "github-summary" | "github-annotations" => text_report_root,
+            _ => root,
         };
         let saved = run(
             replay_root,
@@ -1613,10 +1616,12 @@ fn owned_complexity_project() -> tempfile::TempDir {
 #[test]
 fn saved_owner_grouped_health_markdown_matches_direct_rendering() {
     let project = owned_complexity_project();
-    assert_saved_report_parity_with_args(
+    let empty_checkout = tempfile::tempdir().expect("checkout without CODEOWNERS");
+    assert_saved_report_parity_from(
         project.path(),
         Some("health"),
         &["--group-by", "owner", "--score"],
+        empty_checkout.path(),
     );
 }
 
