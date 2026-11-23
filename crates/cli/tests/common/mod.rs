@@ -277,6 +277,18 @@ pub fn run_fallow_raw_in_dir_with_env(
 }
 
 /// Run fallow with raw args and string environment variables.
+/// Run fallow with an empty global and system Git config, for a command
+/// that reads Git settings such as `core.hooksPath`. A developer machine and
+/// the hostile-home CI job can set such a setting.
+pub fn run_fallow_raw_with_clean_git(args: &[&str]) -> CommandOutput {
+    let config = tempfile::NamedTempFile::new().expect("create an empty Git config");
+    let path = config.path().to_str().expect("UTF-8 temp path");
+    run_fallow_raw_with_env(
+        args,
+        &[("GIT_CONFIG_GLOBAL", path), ("GIT_CONFIG_SYSTEM", path)],
+    )
+}
+
 pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
     let mut cmd = fallow_command();
     cmd.envs(env.iter().copied()).args(args);

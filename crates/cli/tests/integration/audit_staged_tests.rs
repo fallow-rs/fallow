@@ -248,7 +248,7 @@ fn commit_through_hook(dir: &Path, bin: &Path, message: &str) -> std::process::O
 fn the_generated_hook_audits_the_staged_index() {
     let tmp = fixture();
     let dir = tmp.path();
-    let install = crate::common::run_fallow_raw(&[
+    let install = crate::common::run_fallow_raw_with_clean_git(&[
         "--root",
         dir.to_str().unwrap(),
         "hooks",
