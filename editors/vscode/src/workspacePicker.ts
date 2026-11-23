@@ -36,7 +36,6 @@ let lastWorkspacesOutput: WorkspacesOutput | null = null;
  * Per-session cache of `fallow workspaces` output keyed by binary path. The
  * package list does not change within a session for a given binary, so probe
  * once on first picker open and reuse; a "Refresh" QuickPick entry busts it.
- * Mirrors `cliVersionCache` in `commands.ts`.
  */
 const workspacesCache = new Map<string, WorkspacesOutput>();
 
