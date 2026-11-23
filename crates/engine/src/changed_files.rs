@@ -402,7 +402,6 @@ fn committed_changed_files(
         toplevel,
         &[
             "diff",
-            "--no-relative",
             "--name-only",
             "-z",
             "--end-of-options",
@@ -415,11 +414,7 @@ fn working_tree_changed_files(
     cwd: &Path,
     toplevel: &Path,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    let mut files = collect_git_paths(
-        cwd,
-        toplevel,
-        &["diff", "--no-relative", "--name-only", "-z", "HEAD"],
-    )?;
+    let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD"])?;
     if untracked_files_excluded() {
         return Ok(files);
     }
@@ -469,7 +464,6 @@ pub fn try_get_renamed_files(
         &toplevel,
         &[
             "diff",
-            "--no-relative",
             "--name-status",
             "-z",
             "--find-renames",
@@ -480,14 +474,7 @@ pub fn try_get_renamed_files(
     let staged = collect_git_rename_pairs(
         root,
         &toplevel,
-        &[
-            "diff",
-            "--no-relative",
-            "--name-status",
-            "-z",
-            "--find-renames",
-            "HEAD",
-        ],
+        &["diff", "--name-status", "-z", "--find-renames", "HEAD"],
     )?;
     for pair in staged {
         if let Some(chained) = renames.iter_mut().find(|rename| rename.to == pair.from) {
@@ -741,7 +728,8 @@ pub(crate) fn git_path_from_bytes(path: &[u8]) -> PathBuf {
 
 fn git_command(cwd: &Path, args: &[&str]) -> Command {
     let mut command = crate::git_env::git_command(cwd);
-    command.args(args);
+    // Older Git versions ignore unknown config keys and reject unknown diff options.
+    command.args(["-c", "diff.relative=false"]).args(args);
     command
 }
 
@@ -994,6 +982,14 @@ mod tests {
             message.contains("ambiguous argument 'x' Use '--'"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn git_diff_sets_relative_paths_through_config() {
+        let command = git_command(Path::new("."), &["diff", "--name-only"]);
+        let args: Vec<_> = command.get_args().filter_map(|arg| arg.to_str()).collect();
+        assert!(args.ends_with(&["-c", "diff.relative=false", "diff", "--name-only"]));
+        assert!(!args.contains(&"--no-relative"));
     }
 
     #[test]
