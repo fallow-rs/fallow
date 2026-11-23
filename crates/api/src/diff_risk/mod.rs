@@ -22,6 +22,7 @@ mod config_chain;
 mod config_change;
 pub mod rule_severity;
 pub mod text;
+mod thresholds;
 
 use std::path::{Path, PathBuf};
 
@@ -421,7 +422,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
             }
         }
         if text::is_coverage_config_path(rel) {
-            for hit in text::weakened_threshold_hits(base, head) {
+            for hit in thresholds::hits_for_config(rel, base, head) {
                 raw.push(RawFinding {
                     rule: DiffRiskRule::WeakenedTests,
                     kind: Some(WeakenedTestsKind::CoverageThreshold),
