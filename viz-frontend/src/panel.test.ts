@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_RENDERED_RANK_ROWS,
   filePanelModel,
+  fileFindingRows,
   panelRenderKey,
   rankRowsFor,
   rankRowsForRender,
@@ -480,6 +481,37 @@ describe("rankRowsFor", () => {
       }),
     ).rows;
     expect(rows[0]).toMatchObject({ label: "Policy violation", fileIndex: null });
+  });
+
+  it("shows Duplication for each file in a clone group", () => {
+    const state = stateFor(
+      "overview",
+      [
+        file("src/first.ts", { clone_groups: [0] }),
+        file("src/second.ts", { clone_groups: [0] }),
+        file("src/other.ts"),
+      ],
+      {
+        clones: [
+          {
+            lines: 12,
+            tokens: 80,
+            instances: [
+              { file: 0, start_line: 1, end_line: 12 },
+              { file: 1, start_line: 4, end_line: 15 },
+            ],
+            preview: "",
+            highlight_start: 0,
+            highlight_lines: 0,
+          },
+        ],
+      },
+    );
+    const lensNames = (index: number): string[] =>
+      fileFindingRows(state, index).map(({ lens }) => lens.name);
+    expect(lensNames(0)).toEqual(["Duplication"]);
+    expect(lensNames(1)).toEqual(["Duplication"]);
+    expect(lensNames(2)).toEqual([]);
   });
 
   it("carries the clone group index so rows open the clone panel", () => {
