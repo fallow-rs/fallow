@@ -854,7 +854,7 @@ global list did not hide.
 `includeEntryExports` also changes the graph. A plain `export *` of an entry
 point credits every named export of its source, because the consumers of an
 entry point are not in the graph. `consumer_checked_entries`
-(`crates/core/src/graph_build.rs`) gives the graph build the entry points
+(`crates/core/src/graph_build/mod.rs`) gives the graph build the entry points
 that the option covers. `collect_open_star_barrels` leaves those out, so their
 `export *` lines credit only the names that an importer uses, like the
 `export *` of any other module, and the unused names are reported at their
@@ -1318,7 +1318,11 @@ each reason:
 - `parse-incomplete`: a module of the project has a parse error or a panic.
 - `open-contract`: the contract has an `incomplete` reason.
 - `public-api`: the value surface of a package entry point, or an export with
-  a visibility tag such as `@public`.
+  a visibility tag that `keepExportTags` keeps, such as `@public`. The rule
+  reads the extraction results, which hold each tag as written, so it applies
+  the key itself. The graph build clears the other tags before it runs
+  (`crates/core/src/graph_build/visibility_scope.rs`), so the unused-export
+  check, the re-export credit and the trace see only the kept tags.
 - `entry-export`: the value surface of an entry point (this covers
   `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
   or a side-effect registration.
