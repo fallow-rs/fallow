@@ -32,7 +32,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "Export is never imported"
               },
               "fullDescription": {
-                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file."
+                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`."
               },
               "helpUri": "https://fallow.tools/docs/rules/unused-export/",
               "defaultConfiguration": {

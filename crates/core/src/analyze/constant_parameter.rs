@@ -212,6 +212,9 @@ struct ConstantParameterInput<'a> {
     /// exported classes, and the rule collects the candidates that need
     /// type evidence.
     type_aware: bool,
+    /// The JSDoc visibility tags that mark an export as public API. The
+    /// extraction results hold each tag as written, so the rule filters them.
+    keep_export_tags: &'a fallow_config::KeepExportTags,
 }
 
 /// One parameter, or one option key of an object-pattern parameter, that
@@ -837,7 +840,9 @@ impl<'a> Gate<'a> {
             };
             if plugin || export.is_side_effect_used {
                 self.block((file, contract), Abstain::EntryExport);
-            } else if export.visibility != VisibilityTag::None {
+            } else if export.visibility != VisibilityTag::None
+                && self.input.keep_export_tags.retains(export.visibility)
+            {
                 self.block((file, contract), Abstain::PublicApi);
             }
         }
@@ -1574,6 +1579,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         is_suppressed: &is_suppressed,
         excluded: input.excluded,
         type_aware: config.type_aware.enabled,
+        keep_export_tags: &config.keep_export_tags,
     });
     #[cfg(test)]
     tests::record(

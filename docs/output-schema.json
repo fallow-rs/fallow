@@ -25764,6 +25764,13 @@
           },
           "description": "The framework plugin rules that mark this export as used. The\nframework calls or reads the export, so no import is necessary. A\ncredit sets `is_used` when the file is reachable. Absent when no\nplugin credits the export."
         },
+        "kept_by_tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The JSDoc visibility tag that keeps an export with no consumer out\nof `unused-export`: `public`, `internal`, `alpha` or `beta`. The\n`keepExportTags` config key selects the tags that do this. Absent\nwhen the export is used, or when no kept tag is on it."
+        },
         "reason": {
           "type": "string",
           "description": "Human-readable reason summary."

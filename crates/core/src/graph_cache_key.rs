@@ -50,6 +50,8 @@ pub fn plugin_resolve_input<'a>(
 /// instead.
 ///
 /// `cache_config_hash` covers external plugin names and custom flag settings.
+/// `keepExportTags` keys the mode too: the graph build credits re-exports
+/// through the visibility tags that the key keeps.
 /// [`plugin_config_hash`] includes tsconfig-derived aliases through [`hash_path_aliases`].
 ///
 /// `production` and `ignore_patterns` intentionally stay out of this hash:
@@ -64,6 +66,7 @@ pub fn resolver_options_hash(
     let mut hasher = rustc_hash::FxHasher::default();
     config.cache_config_hash.hash(&mut hasher);
     config.resolve.conditions.hash(&mut hasher);
+    config.keep_export_tags.canonical().hash(&mut hasher);
     resolution_inputs::resolution_inputs_hash(&config.root, workspaces, files).hash(&mut hasher);
     hasher.finish()
 }

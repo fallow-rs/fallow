@@ -243,38 +243,6 @@ fn collect_re_export_chains(
         .collect()
 }
 
-/// Build the human-readable reason string explaining an export's used/unused state.
-fn export_trace_reason(
-    module: &crate::graph::ModuleNode,
-    reference_count: usize,
-    is_used: bool,
-    re_export_chains: &[ReExportChain],
-) -> String {
-    if !module.is_reachable() {
-        "File is unreachable from any entry point".to_string()
-    } else if is_used {
-        format!(
-            "Used by {} file(s){}",
-            reference_count,
-            if re_export_chains.is_empty() {
-                String::new()
-            } else {
-                format!(", re-exported through {} barrel(s)", re_export_chains.len())
-            }
-        )
-    } else if module.is_entry_point() {
-        "No internal references, but file is an entry point (export is externally accessible)"
-            .to_string()
-    } else if !re_export_chains.is_empty() {
-        format!(
-            "Re-exported through {} barrel(s) but no consumer imports it through the barrel",
-            re_export_chains.len()
-        )
-    } else {
-        "No references found, export is unused".to_string()
-    }
-}
-
 /// Trace why an export is considered used or unused.
 #[must_use]
 pub fn trace_export(
@@ -302,6 +270,7 @@ pub fn trace_export(
             star_export_ambiguity: Some(ambiguity),
             re_export_chains: Vec::new(),
             plugin_credits: Vec::new(),
+            kept_by_tag: None,
             reason: "Star re-export collision makes this name ambiguous".to_string(),
             semantic: None,
         });
@@ -314,11 +283,13 @@ pub fn trace_export(
 
     let reference_count = direct_references.len();
     let is_used = module.is_reachable() && reference_count > 0;
-    let reason = if star_export_ambiguity.is_some() {
-        "Star re-export collision prevents consumers from resolving this declaration".to_string()
-    } else {
-        export_trace_reason(module, reference_count, is_used, &re_export_chains)
-    };
+    let (kept_by_tag, reason) = super::trace_export_reason::export_verdict(
+        module,
+        (export_name, namespace),
+        reference_count,
+        &re_export_chains,
+        star_export_ambiguity.is_some(),
+    );
 
     Some(ExportTrace {
         file: relative_module_path(&module.path, root),
@@ -335,6 +306,7 @@ pub fn trace_export(
         star_export_ambiguity,
         re_export_chains,
         plugin_credits: Vec::new(),
+        kept_by_tag: kept_by_tag.map(str::to_owned),
         reason,
         semantic: None,
     })
@@ -3434,6 +3406,7 @@ mod tests {
                 reference_count: 1,
             }],
             plugin_credits: Vec::new(),
+            kept_by_tag: None,
             reason: "ok".to_string(),
             semantic: None,
         };

@@ -261,6 +261,8 @@ pub struct ResolvedConfig {
     pub compiled_ignore_dependency_overrides: Vec<CompiledIgnoreDependencyOverrideRule>,
     /// Same-file-use suppression setting for `unused-export`.
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
+    /// JSDoc visibility tags that keep an export out of `unused-export`.
+    pub keep_export_tags: super::KeepExportTags,
     /// Class-member names, globs, or heritage-scoped rules treated as
     /// framework-used and exempt from `unused-class-member`.
     pub used_class_members: Vec<UsedClassMemberRule>,
@@ -1086,6 +1088,7 @@ impl FallowConfig {
             compiled_ignore_catalog_references: compiled_ignores.catalog_references,
             compiled_ignore_dependency_overrides: compiled_ignores.dependency_overrides,
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
+            keep_export_tags: self.keep_export_tags,
             used_class_members: self.used_class_members,
             ignore_decorators: self.ignore_decorators,
             unused_component_props_ignore: compile_unused_component_props_ignore(
