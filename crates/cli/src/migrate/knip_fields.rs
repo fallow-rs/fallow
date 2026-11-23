@@ -205,7 +205,11 @@ pub(super) fn migrate_rules(
     }
 
     if !fallow_rules.is_empty() {
-        config.insert("rules".to_string(), Value::Object(fallow_rules));
+        if let Some(Value::Object(rules)) = config.get_mut("rules") {
+            rules.extend(fallow_rules);
+        } else {
+            config.insert("rules".to_string(), Value::Object(fallow_rules));
+        }
     }
 }
 

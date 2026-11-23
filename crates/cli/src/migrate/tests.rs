@@ -96,6 +96,24 @@ fn auto_detect_stylelintrc_json() {
 }
 
 #[test]
+fn custom_filenames_use_tool_specific_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let style = temp.path().join("style.json");
+    std::fs::write(
+        &style,
+        r#"{"extends":"stylelint-config-standard","rules":{"selector-max-combinators":3}}"#,
+    )
+    .unwrap();
+    let css = migrate_from_file(&style).unwrap();
+    assert_eq!(css.config["rules"]["css-selector-complexity"], "warn");
+
+    let cpd = temp.path().join("cpd.json");
+    std::fs::write(&cpd, r#"{"minTokens":80,"ignore":["build/**"]}"#).unwrap();
+    let duplication = migrate_from_file(&cpd).unwrap();
+    assert_eq!(duplication.config["duplicates"]["minTokens"], 80);
+}
+
+#[test]
 fn migrate_package_json_stylelint_key() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let tmpdir = temp.path();
@@ -346,6 +364,42 @@ fn jsonc_comments_stripped() {
     let value = load_json_or_jsonc(&path).unwrap();
     assert_eq!(value["entry"], serde_json::json!(["src/index.ts"]));
     assert_eq!(value["ignore"], serde_json::json!(["dist/**"]));
+}
+
+#[test]
+fn package_knip_and_standalone_stylelint_keep_both_rule_sets() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::write(
+        root.join(".stylelintrc.json"),
+        r#"{"rules":{"selector-max-combinators":3}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"knip":{"rules":{"files":"off"}}}"#,
+    )
+    .unwrap();
+
+    let result = migrate_auto_detect(root).unwrap();
+    assert_eq!(result.config["rules"]["unused-files"], "off");
+    assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
+}
+
+#[test]
+fn standalone_jscpd_preserves_package_knip_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::write(root.join(".jscpd.json"), r#"{"minTokens":80}"#).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"knip":{"entry":["src/main.ts"]},"jscpd":{"minTokens":10}}"#,
+    )
+    .unwrap();
+
+    let result = migrate_auto_detect(root).unwrap();
+    assert_eq!(result.config["entry"], serde_json::json!(["src/main.ts"]));
+    assert_eq!(result.config["duplicates"]["minTokens"], 80);
 }
 
 #[test]
