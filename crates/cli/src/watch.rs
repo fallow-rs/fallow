@@ -47,6 +47,19 @@ struct WatchConfig {
 }
 
 impl WatchConfig {
+    fn event_filter(&self) -> WatchFilter {
+        let mut filter = WatchFilter::new(&self.config);
+        if let Some(path) = self.run.config_file().value() {
+            filter
+                .selected_configs
+                .push(fallow_types::path_guard::lexically_normalized(path));
+            if let Ok(target) = dunce::canonicalize(path) {
+                filter.selected_configs.push(target);
+            }
+        }
+        filter
+    }
+
     fn runnable(&self) -> Option<Runnable<'_>> {
         crate::cli_production::runnable(&self.run, fallow_config::PlannedAnalysis::DeadCode)
     }
@@ -65,6 +78,9 @@ fn is_relevant_config(path: &Path) -> bool {
             matches!(
                 name,
                 "package.json"
+                    | "pnpm-workspace.yaml"
+                    | "deno.json"
+                    | "deno.jsonc"
                     | ".fallowrc.json"
                     | ".fallowrc.jsonc"
                     | "fallow.toml"
@@ -105,6 +121,7 @@ fn build_production_glob_set(user_patterns: &[String]) -> Option<globset::GlobSe
 #[derive(Clone)]
 struct WatchFilter {
     root: PathBuf,
+    selected_configs: Vec<PathBuf>,
     ignore_patterns: fallow_config::IgnorePatternSet,
     production_excludes: Option<globset::GlobSet>,
     gitignores: Vec<ignore::gitignore::Gitignore>,
@@ -124,6 +141,7 @@ impl WatchFilter {
         let gitignores = build_project_gitignores(config);
         Self {
             root: config.root.clone(),
+            selected_configs: Vec::new(),
             ignore_patterns: config.ignore_patterns.clone(),
             production_excludes: config
                 .production
@@ -137,6 +155,13 @@ impl WatchFilter {
     fn allows(&self, path: &Path) -> bool {
         if !path.starts_with(&self.root) {
             return false;
+        }
+        if self
+            .selected_configs
+            .iter()
+            .any(|selected| selected == path)
+        {
+            return true;
         }
         let relative = path.strip_prefix(&self.root).unwrap_or(path);
         // A `!` entry in `ignorePatterns` can add a file in a hidden directory
@@ -279,6 +304,14 @@ fn discover_project_gitignores(
 }
 
 fn filter_event_paths(event: notify::Event, filter: &WatchFilter) -> Vec<PathBuf> {
+    if let notify::EventKind::Access(access) = event.kind
+        && !matches!(
+            access,
+            notify::event::AccessKind::Close(notify::event::AccessMode::Write)
+        )
+    {
+        return Vec::new();
+    }
     let mut seen = FxHashSet::default();
     let mut paths = Vec::new();
     for path in event.paths {
@@ -538,7 +571,7 @@ struct WatchLoopState {
 impl WatchLoopState {
     fn new(opts: &WatchOptions<'_>, config: WatchConfig) -> Result<Self, ExitCode> {
         let (tx, rx) = mpsc::channel();
-        let filter = Arc::new(Mutex::new(WatchFilter::new(&config.config)));
+        let filter = Arc::new(Mutex::new(config.event_filter()));
         let watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone()) {
             Ok(watcher) => Some(watcher),
             Err(e) => {
@@ -693,7 +726,7 @@ fn run_ready_reanalysis(
     eprintln!();
 
     reload_config_or_keep_previous(config, opts);
-    replace_watch_filter(filter, &config.config);
+    replace_watch_filter(filter, config);
 
     let status = analyze_and_report(config, opts);
     if status != ExitCode::SUCCESS {
@@ -729,10 +762,10 @@ fn create_watcher(
     Ok(watcher)
 }
 
-fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &fallow_config::ResolvedConfig) {
+fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &WatchConfig) {
     // The build walks the project for gitignore files. It runs before the
     // lock, so the notify callback does not wait for the walk.
-    let rebuilt = WatchFilter::new(config);
+    let rebuilt = config.event_filter();
     if let Ok(mut guard) = filter.lock() {
         *guard = rebuilt;
     }
@@ -778,7 +811,7 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
     }
 
     reload_config_or_keep_previous(config, opts);
-    replace_watch_filter(filter, &config.config);
+    replace_watch_filter(filter, config);
     match create_watcher(opts.root, Arc::clone(filter), tx.clone()) {
         Ok(new_watcher) => {
             *watcher = Some(new_watcher);
@@ -1159,7 +1192,7 @@ mod tests {
         let resolve = resolver(&root, &[], &[]);
         let opts = make_watch_options(&root, &resolve);
         let mut config = load_watch_config(&opts).expect("config");
-        let filter = Arc::new(Mutex::new(WatchFilter::new(&config.config)));
+        let filter = Arc::new(Mutex::new(config.event_filter()));
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut watcher = None;
         let mut debouncer = PathDebouncer::default();
@@ -1316,6 +1349,36 @@ mod tests {
             type_aware_projects: &[],
             type_aware_require: None,
         }
+    }
+
+    #[test]
+    fn watch_accepts_workspace_manifests_and_selected_config() {
+        let dir = watch_project("{}");
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../tests/fixtures/pnpm-nested-workspace-members/pnpm-workspace.yaml");
+        std::fs::copy(manifest, root.join("pnpm-workspace.yaml")).unwrap();
+        let custom = root.join("ci/settings.json");
+        std::fs::create_dir(root.join("ci")).unwrap();
+        std::fs::write(&custom, "{}").unwrap();
+        let spelled = root.join("ci/../ci/settings.json");
+        let resolve = resolver(&root, &["--config", spelled.to_str().unwrap()], &[]);
+        let opts = make_watch_options(&root, &resolve);
+        let filter = load_watch_config(&opts).unwrap().event_filter();
+        for path in [
+            "pnpm-workspace.yaml",
+            "deno.json",
+            "deno.jsonc",
+            "ci/settings.json",
+        ] {
+            assert!(filter.allows(&root.join(path)), "{path}");
+        }
+        assert!(!filter.allows(&root.join("other/settings.json")));
+        let opened = notify::Event::new(EventKind::Access(notify::event::AccessKind::Open(
+            notify::event::AccessMode::Read,
+        )))
+        .add_path(custom);
+        assert!(filter_event_paths(opened, &filter).is_empty());
     }
 
     #[test]
