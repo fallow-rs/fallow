@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow security --gate new` fails when a change adds an import that makes client code reach a server-only module or a secret reader.** Before, the gate passed when a change added a `.server` import or the import of a module that reads a secret to an existing module that a route or a `"use client"` file imports. The gate now keeps a `client-server-leak` candidate when the import line of an `intermediate` trace hop is on an added line. An edit of such an import line, for example a new imported name, also keeps the candidate. The candidate still points at the client boundary. No `finding_id`, `stable_finding_id`, JSON field, SARIF field or suppression position changes. ([#5024](https://github.com/fallow-rs/fallow/issues/5024))

@@ -1,3 +1,0 @@
-### Fixed
-
-- **A `package.json` that starts with a byte order mark is read by every dependency check.** npm and Node.js accept a leading UTF-8 byte order mark, but several checks did not read such a manifest. `fallow dead-code` then did not report an unused dependency of that workspace or an unused override, lost the `catalog:` references and overrides of that manifest, and reported a tool such as Prettier as unused when the manifest held its config key. The package manager detection, the orphan declaration check and an `extends` of a package config also skipped such a manifest. Now all of them ignore the mark.
