@@ -332,7 +332,7 @@ fn read_jwt(args: &ActivateArgs) -> Result<String, String> {
         return Ok(normalize_jwt(&buf));
     }
     Err(
-        "no JWT provided. Pass it as a positional argument, --from-file <path>, or pipe via stdin (`-`).".to_owned(),
+        "no JWT provided. Pass it as a positional argument, --from-file <path>, or pipe it to `fallow license activate --stdin`.".to_owned(),
     )
 }
 
@@ -1086,7 +1086,11 @@ mod tests {
     #[test]
     fn read_jwt_errors_when_no_source() {
         let args = ActivateArgs::default();
-        assert!(read_jwt(&args).is_err());
+        assert!(
+            read_jwt(&args)
+                .unwrap_err()
+                .contains("fallow license activate --stdin")
+        );
     }
 
     #[test]

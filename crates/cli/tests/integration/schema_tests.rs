@@ -42,6 +42,17 @@ fn explain_outputs_rule_guidance_as_json() {
 }
 
 #[test]
+fn explain_shared_state_in_each_supported_format() {
+    for token in ["shared-state", "fallow/shared-state"] {
+        for format in ["json", "human", "compact", "markdown"] {
+            let output = run_fallow_raw(&["explain", token, "--format", format]);
+            assert_eq!(output.code, 0, "{token} {format}: {}", output.stderr);
+            assert!(output.stdout.contains("fallow/shared-state"), "{format}");
+        }
+    }
+}
+
+#[test]
 fn explain_accepts_issue_labels_with_spaces() {
     let output = run_fallow_raw(&["explain", "unused", "files", "--format", "json", "--quiet"]);
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);

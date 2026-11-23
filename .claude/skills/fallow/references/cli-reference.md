@@ -1802,7 +1802,7 @@ fallow license deactivate
 
 | Subcommand | Purpose |
 |------------|---------|
-| `activate` | Install a JWT or start a 30-day trial. JWT input precedence: positional arg > `--from-file` > `--stdin`. |
+| `activate` | Install a JWT or start a 30-day trial. Pass a JWT as an argument, read it with `--from-file`, or pipe it to `fallow license activate --stdin`. |
 | `status`   | Print tier, seats, features, days-until-expiry, and (when `refresh_after` has passed) a proactive refresh hint. |
 | `refresh`  | Fetch a fresh JWT using the currently stored one as identity proof, falling back to a full-access API key when that token is missing or too stale. Exit 7 on network failure. |
 | `deactivate` | Remove the local license file. |

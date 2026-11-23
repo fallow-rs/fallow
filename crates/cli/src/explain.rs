@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
+use fallow_output::{ExplainExampleFile, ExplainOutput};
 
 use crate::report::sink::outln;
 
@@ -24,25 +25,26 @@ pub(crate) fn run_explain(
     output: OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    let Some(rule) = rule_by_token(issue_type) else {
-        return crate::error::emit_programmatic_error(
-            &fallow_api::unknown_explain_error(issue_type),
-            output,
-            json_style,
-        );
+    let resolved = if matches!(output, OutputFormat::Json) {
+        fallow_api::explain_issue_type(issue_type)
+    } else {
+        fallow_api::explain::explain_issue_type_for_display(issue_type)
     };
-    let guide = rule_guide(rule);
+    let explanation = match resolved {
+        Ok(explanation) => explanation,
+        Err(error) => return crate::error::emit_programmatic_error(&error, output, json_style),
+    };
     match output {
-        OutputFormat::Json => match render_explain_json(issue_type, json_style) {
+        OutputFormat::Json => match render_explain_json(explanation, json_style) {
             Ok(json) => {
                 outln!("{json}");
                 ExitCode::SUCCESS
             }
             Err(error) => crate::error::emit_programmatic_error(&error, output, json_style),
         },
-        OutputFormat::Human => print_explain_human(rule, &guide),
-        OutputFormat::Compact => print_explain_compact(rule),
-        OutputFormat::Markdown => print_explain_markdown(rule, &guide),
+        OutputFormat::Human => print_explain_human(&explanation),
+        OutputFormat::Compact => print_explain_compact(&explanation),
+        OutputFormat::Markdown => print_explain_markdown(&explanation),
         OutputFormat::Sarif
         | OutputFormat::CodeClimate
         | OutputFormat::PrCommentGithub
@@ -59,60 +61,63 @@ pub(crate) fn run_explain(
 }
 
 fn render_explain_json(
-    issue_type: &str,
+    explanation: ExplainOutput,
     json_style: crate::json_style::JsonStyle,
 ) -> Result<String, fallow_api::ProgrammaticError> {
-    let value = serialize_explain_programmatic_json(
-        issue_type,
+    fallow_output::serialize_explain_json_output(
+        explanation,
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )?;
-    json_style.serialize(&value).map_err(|error| {
+    )
+    .and_then(|value| json_style.serialize(&value))
+    .map_err(|error| {
         fallow_api::ProgrammaticError::new(format!("JSON serialization error: {error}"), 2)
             .with_code("json_serialization")
     })
 }
 
-fn print_explain_human(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
-    println!("{}", rule.name.bold());
-    println!("{}", rule.id.dimmed());
+fn print_explain_human(explanation: &ExplainOutput) -> ExitCode {
+    println!("{}", explanation.name.bold());
+    println!("{}", explanation.id.dimmed());
     println!();
-    println!("{}", rule.short);
+    println!("{}", explanation.summary);
     println!();
     println!("{}", "Why it matters".bold());
-    println!("{}", rule_rationale(rule));
+    println!("{}", explanation.rationale);
     println!();
     println!("{}", "Example".bold());
-    println!("{}", guide.example);
+    println!("{}", explanation.example);
     println!();
-    if let Some(example) = rule_example(rule) {
-        print_example_human(example);
-    }
+    print_example_human(explanation);
     println!("{}", "How to fix".bold());
-    println!("{}", guide.how_to_fix);
+    println!("{}", explanation.how_to_fix);
     println!();
-    println!("{} {}", "Docs:".dimmed(), rule_docs_url(rule).dimmed());
+    println!("{} {}", "Docs:".dimmed(), explanation.docs.dimmed());
     ExitCode::SUCCESS
 }
 
 const BEFORE_CHANGE: &str = "Before the change";
 const AFTER_CHANGE: &str = "After the change";
 
-/// The visible files of `example` in groups: one group with no title, or
-/// the files before the change and the files after it.
-fn example_groups(example: &RuleExample) -> Vec<(Option<&'static str>, Vec<&ExampleFile>)> {
-    let visible =
-        |files: &'static [ExampleFile]| files.iter().filter(|file| !file.hidden).collect();
-    if example.base.is_empty() {
-        return vec![(None, visible(example.files))];
-    }
-    vec![
-        (Some(BEFORE_CHANGE), visible(example.base)),
-        (Some(AFTER_CHANGE), visible(example.files)),
+fn example_groups(
+    explanation: &ExplainOutput,
+) -> impl Iterator<Item = (Option<&'static str>, &[ExplainExampleFile])> {
+    let has_base = !explanation.example_base_files.is_empty();
+    [
+        (
+            Some(BEFORE_CHANGE),
+            explanation.example_base_files.as_slice(),
+        ),
+        (
+            has_base.then_some(AFTER_CHANGE),
+            explanation.example_files.as_slice(),
+        ),
     ]
+    .into_iter()
+    .filter(|(_, files)| !files.is_empty())
 }
 
-fn print_example_human(example: &RuleExample) {
-    for (title, files) in example_groups(example) {
+fn print_example_human(explanation: &ExplainOutput) {
+    for (title, files) in example_groups(explanation) {
         if let Some(title) = title {
             println!("{title}:");
             println!();
@@ -133,8 +138,8 @@ fn fence_language(path: &str) -> &str {
     name.rsplit_once('.').map_or("", |(_, extension)| extension)
 }
 
-fn print_example_markdown(example: &RuleExample) {
-    for (title, files) in example_groups(example) {
+fn print_example_markdown(explanation: &ExplainOutput) {
+    for (title, files) in example_groups(explanation) {
         if let Some(title) = title {
             println!("**{title}**");
             println!();
@@ -142,7 +147,7 @@ fn print_example_markdown(example: &RuleExample) {
         for file in files {
             println!("`{}`", file.path);
             println!();
-            println!("```{}", fence_language(file.path));
+            println!("```{}", fence_language(&file.path));
             println!("{}", file.code.trim_end());
             println!("```");
             println!();
@@ -150,34 +155,35 @@ fn print_example_markdown(example: &RuleExample) {
     }
 }
 
-fn print_explain_compact(rule: &RuleDef) -> ExitCode {
-    println!("explain:{}:{}:{}", rule.id, rule.short, rule_docs_url(rule));
+fn print_explain_compact(explanation: &ExplainOutput) -> ExitCode {
+    println!(
+        "explain:{}:{}:{}",
+        explanation.id, explanation.summary, explanation.docs
+    );
     ExitCode::SUCCESS
 }
 
-fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
-    println!("# {}", rule.name);
+fn print_explain_markdown(explanation: &ExplainOutput) -> ExitCode {
+    println!("# {}", explanation.name);
     println!();
-    println!("`{}`", rule.id);
+    println!("`{}`", explanation.id);
     println!();
-    println!("{}", rule.short);
+    println!("{}", explanation.summary);
     println!();
     println!("## Why it matters");
     println!();
-    println!("{}", rule_rationale(rule));
+    println!("{}", explanation.rationale);
     println!();
     println!("## Example");
     println!();
-    println!("{}", guide.example);
+    println!("{}", explanation.example);
     println!();
-    if let Some(example) = rule_example(rule) {
-        print_example_markdown(example);
-    }
+    print_example_markdown(explanation);
     println!("## How to fix");
     println!();
-    println!("{}", guide.how_to_fix);
+    println!("{}", explanation.how_to_fix);
     println!();
-    println!("[Docs]({})", rule_docs_url(rule));
+    println!("[Docs]({})", explanation.docs);
     ExitCode::SUCCESS
 }
 
@@ -187,9 +193,11 @@ mod tests {
 
     #[test]
     fn explain_json_respects_explicit_style() {
-        let compact = render_explain_json("unused-export", crate::json_style::JsonStyle::Compact)
-            .expect("compact explain JSON should serialize");
-        let pretty = render_explain_json("unused-export", crate::json_style::JsonStyle::Pretty)
+        let explanation = fallow_api::explain_issue_type("unused-export").unwrap();
+        let compact =
+            render_explain_json(explanation.clone(), crate::json_style::JsonStyle::Compact)
+                .expect("compact explain JSON should serialize");
+        let pretty = render_explain_json(explanation, crate::json_style::JsonStyle::Pretty)
             .expect("pretty explain JSON should serialize");
 
         assert!(
