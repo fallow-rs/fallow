@@ -20,7 +20,10 @@ use serde_json::{Map, Value};
 
 use fallow_types::identity::{IdentityPaths, dead_code_canonical_key};
 
-use crate::baseline::BaselineKind;
+use crate::baseline::{BaselineData, BaselineKind};
+
+#[path = "baseline_growth_legacy_health.rs"]
+mod legacy_health;
 
 /// The keys that a baseline has and its version at the base ref does not have.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -57,7 +60,7 @@ impl BaselineGrowth {
 /// Both values are the parsed JSON files. `kind` selects the categories that
 /// the format of the command writes:
 ///
-/// - `dead-code`: every top-level array of keys. When both files carry the
+/// - `dead-code`: the finding fields of a dead-code baseline. When both files carry the
 ///   same `identity`, each extra occurrence of a key is growth. When the change
 ///   rewrote a legacy baseline, each legacy key is translated to its canonical
 ///   key and compared the same way. A category that holds a legacy key with no
@@ -69,7 +72,9 @@ impl BaselineGrowth {
 /// - `health`: the legacy `findings` keys, the finding counts per file and
 ///   category (a higher count is growth), the runtime-coverage finding IDs and
 ///   the refactoring target keys. When both files carry per-function counts,
-///   those counts replace the per-file counts.
+///   those counts replace the per-file counts. On a save from legacy keys to
+///   counts, each bucket can use only the old findings that could match it.
+///   One function can account for both a complexity count and a CRAP count.
 #[must_use]
 pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> BaselineGrowth {
     let empty = Map::new();
@@ -80,8 +85,8 @@ pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> Baseli
         BaselineKind::DeadCode => {
             let base_scheme = base.get(DEAD_CODE_IDENTITY);
             let head_scheme = head.get(DEAD_CODE_IDENTITY);
-            for (category, value) in head {
-                if !value.is_array() {
+            for &category in BaselineData::FINDING_FIELDS {
+                if !head.contains_key(category) {
                     continue;
                 }
                 if base_scheme.is_none() && head_scheme.is_some() {
@@ -114,7 +119,11 @@ pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> Baseli
             } else {
                 HEALTH_FILE_COUNTS
             };
-            add_grown_counts(&mut grown, counts, base, head);
+            if let Some(migration) = legacy_health::Migration::from_maps(base, head) {
+                migration.compare(&mut grown);
+            } else {
+                add_grown_counts(&mut grown, counts, base, head);
+            }
         }
     }
     BaselineGrowth {
@@ -124,6 +133,22 @@ pub fn baseline_growth(kind: BaselineKind, base: &Value, head: &Value) -> Baseli
             .map(|(category, keys)| GrownCategory { category, keys })
             .collect(),
     }
+}
+
+/// Explain how the growth gate matched a legacy health save to count buckets.
+#[must_use]
+pub fn baseline_growth_note(
+    kind: BaselineKind,
+    base: &Value,
+    head: &Value,
+) -> Option<&'static str> {
+    if kind != BaselineKind::Health {
+        return None;
+    }
+    legacy_health::Migration::from_maps(base.as_object()?, head.as_object()?)?;
+    Some(
+        "The old health baseline has no categories or severities. The gate reports count growth only where the new buckets require more findings than the old keys can cover.",
+    )
 }
 
 const DEAD_CODE_IDENTITY: &str = "identity";
@@ -572,6 +597,7 @@ mod tests {
         });
         let head = json!({
             "kind": "dead-code",
+            "scope_reasons": ["workspace"],
             "unused_files": ["src/a.ts", "src/b.ts"],
             "boundary_violations": [
                 "src/ui/a.ts->src/core/x.ts",
@@ -747,6 +773,47 @@ mod tests {
             "normalized_clone_fingerprints": ["n1"],
         });
         assert!(baseline_growth(BaselineKind::Dupes, &base, &head).is_empty());
+    }
+
+    #[test]
+    fn legacy_health_findings_allow_only_the_known_file_counts_on_upgrade() {
+        let base = json!({"findings": ["src/a.ts:parse:42"]});
+        let head = json!({
+            "finding_counts": {
+                "src/a.ts": {"complexity_high": {"count": 1}, "crap_high": {"count": 1}},
+                "src/b.ts": {"complexity_high": {"count": 1}},
+            },
+            "target_keys": ["src/b.ts:split"]
+        });
+        assert_eq!(
+            keys(&baseline_growth(BaselineKind::Health, &base, &head)),
+            vec![
+                (
+                    "finding_counts".to_owned(),
+                    vec!["src/b.ts (at least 1 needed, 0 covered by old keys)".to_owned()]
+                ),
+                ("target_keys".to_owned(), vec!["src/b.ts:split".to_owned()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_health_findings_allow_only_matching_names_in_identity_buckets() {
+        let base = json!({"findings": ["src/a.ts:parse:42", "src/a.ts:old:8"]});
+        let head = json!({
+            "finding_counts": {"src/a.ts": {"complexity_high": {"count": 2}}},
+            "identity_finding_counts": {
+                "src/a.ts\u{0}parse": {"complexity_high": {"count": 1}},
+                "src/a.ts\u{0}new": {"complexity_high": {"count": 1}},
+            }
+        });
+        assert_eq!(
+            keys(&baseline_growth(BaselineKind::Health, &base, &head)),
+            vec![(
+                "identity_finding_counts".to_owned(),
+                vec!["src/a.ts:new (at least 1 needed, 0 covered by old keys)".to_owned()]
+            )]
+        );
     }
 
     #[test]
