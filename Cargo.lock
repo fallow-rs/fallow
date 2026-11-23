@@ -1090,7 +1090,7 @@ checksum = "f0440157235aa4badd45ea073af8de2ba44ffead74bf8a7833b215533c36f08e"
 
 [[package]]
 name = "fallow-api"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "dunce",
  "ed25519-dalek",
@@ -1115,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-benchmarks"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "codspeed-criterion-compat",
  "fallow-api",
@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "base64",
  "bitcode",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "deser-core",
  "deser-value",
@@ -1232,7 +1232,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "codspeed-criterion-compat",
  "dunce",
@@ -1278,7 +1278,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-engine"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "bitcode",
  "codspeed-criterion-compat",
@@ -1325,7 +1325,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "dashmap",
  "dunce",
@@ -1374,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-license"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1385,7 +1385,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "dunce",
  "fallow-api",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "fallow-api",
  "fallow-output",
@@ -1433,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-multicall"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "fallow-cli",
  "fallow-lsp",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mutation"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "insta",
  "oxc_allocator",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-node"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "fallow-api",
  "fallow-types",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-output"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "fallow-config",
  "fallow-report-protocol",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-process"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "libc",
  "rustc-hash",
@@ -1499,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-report-protocol"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "schemars",
  "serde",
@@ -1508,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1521,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -1535,7 +1535,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-v8-coverage"
-version = "3.47.0"
+version = "3.48.0"
 dependencies = [
  "proptest",
  "serde",

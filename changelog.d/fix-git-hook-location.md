@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow hooks install --target git` writes the hook where Git runs it.** Before, the command always wrote `.git/hooks/pre-commit`. With `core.hooksPath` set, Git did not run that file, but `fallow hooks status` reported the hook as installed. In a linked worktree or a package folder of the repository, the command failed with "No .git directory found". Now install, uninstall and status use the hooks folder of Git: the `core.hooksPath` folder, or the shared hooks folder of a linked worktree. When `core.hooksPath` points outside the repository, install stops with an error, because other repositories can share that folder. Uninstall then removes a hook that fallow wrote to `.git/hooks/pre-commit` before.
