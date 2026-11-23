@@ -84,7 +84,7 @@ pub(super) const EXIT_CODES: &[ExitCodeDef] = &[
     ExitCodeDef {
         code: COVERAGE_UPLOAD_SERVER_ERROR_EXIT_CODE,
         name: "coverage-upload-server-error",
-        description: "Coverage inventory or static-findings upload failed after retries or returned another server error.",
+        description: "Coverage inventory or static-findings upload got a server error (5xx), a timeout (408), a rate limit (429), or a response that fallow cannot read.",
     },
 ];
 
