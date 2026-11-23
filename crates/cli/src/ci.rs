@@ -22,7 +22,7 @@ mod review_post;
 
 use check_run::{PostCheckRunInput, post_check_run};
 use pr_comment_post::{PostPrCommentInput, post_pr_comment};
-use provider_state::{ProviderStateError, load_provider_state};
+use provider_state::{ProviderStateError, github_graphql_url, load_provider_state};
 use review_post::{PostReviewInput, post_review};
 
 pub enum CiCommand {
@@ -900,7 +900,7 @@ fn load_github_review_threads(
                 "cursor": cursor,
             }
         });
-        let value = github_post_json(agent, &format!("{api}/graphql"), token, &payload)?;
+        let value = github_post_json(agent, &github_graphql_url(api), token, &payload)?;
         if value.get("errors").is_some() {
             return Err(format!(
                 "GitHub GraphQL reviewThreads query failed: {value}"
@@ -1272,7 +1272,7 @@ fn preflight_github_operations(
             "variables": { "threadId": thread_id },
         });
         let value =
-            github_post_json(agent, &format!("{api}/graphql"), token, &payload).map_err(|err| {
+            github_post_json(agent, &github_graphql_url(api), token, &payload).map_err(|err| {
                 ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitHub preflight failed for review thread {thread_id}: {err}"),
@@ -1348,7 +1348,7 @@ fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), Ap
             });
             let value = github_post_json(
                 input.agent,
-                &format!("{}/graphql", input.api),
+                &github_graphql_url(input.api),
                 input.token,
                 &payload,
             )

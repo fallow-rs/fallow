@@ -103,23 +103,20 @@ curl_retry() {
   out=$(mktemp)
   _FALLOW_TMPS+=("$out")
   while true; do
-    if curl -sf "$@" >"$out" 2>"$err"; then
+    if curl -fsS --write-out '%{stderr}\n%{http_code}\n' "$@" >"$out" 2>"$err"; then
       cat "$out"
       rm -f "$err" "$out"
       return 0
     fi
-    # Match the Rust `with_rate_limit_retry` decision: 429 + 502/503/504 are
-    # transient and worth retrying; persistent 5xx (500, 501, 505) and all
-    # other 4xx surface immediately. curl -sf emits stderr like
-    # `curl: (22) The requested URL returned error: 502 Bad Gateway`, so we
-    # match either the explicit code or the rate-limit / Retry-After hints.
-    if [ "$attempt" -ge "$attempts" ] \
-        || ! grep -Eqi 'error: (429|502|503|504)|rate limit|Retry-After' "$err"; then
+    # curl writes the HTTP status on the last line, after any diagnostic.
+    local status
+    status=$(tail -n 1 "$err")
+    if [ "$attempt" -ge "$attempts" ] || [[ ! "$status" =~ ^(429|502|503|504)$ ]]; then
       cat "$err" >&2
       rm -f "$err" "$out"
       return 1
     fi
-    echo "WARNING: GitLab API rate limit response; retrying (${attempt}/${attempts})" >&2
+    echo "WARNING: GitLab API HTTP $status; retrying (${attempt}/${attempts})" >&2
     sleep "$delay"
     attempt=$((attempt + 1))
   done

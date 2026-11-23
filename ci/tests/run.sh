@@ -1574,7 +1574,11 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--envelope" "comment.sh pass
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
 assert_contains "$GITLAB_COMMON" "curl_retry" "wraps GitLab API calls with retry"
 assert_not_contains "$GITLAB_COMMON" "source fallow-analysis-args" "legacy render fallback does not source workspace shell"
-assert_contains "$GITLAB_COMMON" "rate limit response; retrying" "retries GitLab rate-limit responses"
+if node "$DIR/gitlab-retry.mjs"; then
+  pass "GitLab retries transient HTTP errors and returns the successful response"
+else
+  fail "GitLab HTTP retry policy" "see the HTTP fixture output"
+fi
 
 TMP_CLEANUP_WORK=$(mktemp -d)
 TMP_CLEANUP_REGISTRY="$TMP_CLEANUP_WORK/registry"
