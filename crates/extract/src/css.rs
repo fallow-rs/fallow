@@ -663,10 +663,22 @@ fn apply_tokens_from_masked(source: &str, masked: &str) -> Vec<(String, u32)> {
     // match instead of a rescan of the whole prefix for each match.
     let mut last_pos = 0usize;
     let mut line = 1u32;
-    for m in CSS_APPLY_RE.find_iter(masked) {
-        line = line.saturating_add(newlines_between(source, last_pos, m.start()));
-        last_pos = m.start();
-        let body = m.as_str().trim_start_matches("@apply");
+    let mut directives = masked
+        .match_indices("@apply")
+        .filter(|(start, keyword)| masked[start + keyword.len()..].starts_with(char::is_whitespace))
+        .peekable();
+    while let Some((start, keyword)) = directives.next() {
+        line = line.saturating_add(newlines_between(source, last_pos, start));
+        last_pos = start;
+        let next = directives
+            .peek()
+            .map_or(masked.len(), |(offset, _)| *offset);
+        let rest = &masked[start + keyword.len()..next];
+        // A CSS terminator permits continuation lines. An unterminated
+        // directive in indented Sass ends at its own newline.
+        let body = rest
+            .split_once([';', '}'])
+            .map_or_else(|| rest.lines().next().unwrap_or_default(), |(body, _)| body);
         for token in body.split_whitespace() {
             let token = token.trim_matches('!');
             if token.is_empty() || token == "important" {
@@ -2246,23 +2258,5 @@ mod tests {
     fn theme_deduplicates_repeated_token() {
         let names = theme_token_names("@theme { --color-a: red; --color-a: blue; }");
         assert_eq!(names, vec!["color-a"]);
-    }
-
-    #[test]
-    fn apply_tokens_basic() {
-        let tokens = extract_apply_tokens(".panel { @apply rounded-card font-bold; }");
-        assert_eq!(tokens, vec!["rounded-card", "font-bold"]);
-    }
-
-    #[test]
-    fn apply_tokens_strips_important() {
-        let tokens = extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
-        assert_eq!(tokens, vec!["text-brand", "font-bold"]);
-    }
-
-    #[test]
-    fn apply_tokens_ignored_in_comments() {
-        let tokens = extract_apply_tokens("/* @apply hidden-token; */ .x { color: red; }");
-        assert!(tokens.is_empty(), "got {tokens:?}");
     }
 }

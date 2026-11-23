@@ -7572,7 +7572,7 @@ fn health_css_theme_token_credited_by_apply_and_var() {
     // is genuinely dead.
     write_file(
         &root.join("src/theme.css"),
-        "@theme {\n  --radius-card: 12px;\n  --color-brand: #f05a28;\n  --color-button: var(--color-brand);\n  --font-x: \"X\";\n}\n.panel { @apply rounded-card; }\n.btn { background: var(--color-button); }\n",
+        "@theme {\n  --radius-card: 12px;\n  --color-brand: #f05a28;\n  --color-button: var(--color-brand);\n  --font-x: \"X\";\n}\n.panel { @apply flex\n  rounded-card; }\n.btn { background: var(--color-button); }\n",
     );
     write_file(&root.join("src/App.tsx"), "export const C = () => null;\n");
 

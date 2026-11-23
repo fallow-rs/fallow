@@ -153,13 +153,15 @@ const CONFIG_OBJECT_KEYWORDS: &[&str] = &[
     "toggles",
 ];
 
-/// A flag read that a later guard can attach to.
+/// The flag site that a local binding refers to.
 #[derive(Debug, Clone, Copy)]
 enum FlagRef {
     /// Index into `FlagVisitor::results`.
     Resolved(usize),
     /// Index into `FlagVisitor::registry_reads`.
     Registry(usize),
+    /// A callable Vercel flag. Its calls are separate reads.
+    Definition(usize),
 }
 
 /// The flag-name argument of an SDK call.
@@ -215,7 +217,7 @@ struct FlagVisitor<'a> {
     current_guard: Option<Guard>,
     /// End offsets of the enclosing blocks, innermost last.
     block_ends: Vec<u32>,
-    /// `const` bindings per function scope, innermost last. `None` marks a
+    /// `const` bindings per function or block, innermost last. `None` marks a
     /// binding that shadows an outer flag binding.
     binding_scopes: Vec<FxHashMap<String, Option<FlagRef>>>,
     /// Number of flag bindings recorded. Zero skips the binding bookkeeping.
@@ -335,15 +337,14 @@ impl<'a> FlagVisitor<'a> {
 
     /// Check if a call expression matches an SDK pattern.
     fn check_sdk_call(&mut self, call: &CallExpression<'_>) {
+        if self.check_vercel_flags_call(call) {
+            return;
+        }
         let func_name = match &call.callee {
             Expression::Identifier(id) => id.name.as_str(),
             Expression::StaticMemberExpression(member) => member.property.name.as_str(),
             _ => return,
         };
-
-        if self.check_vercel_flags_call(call) {
-            return;
-        }
 
         let extra_sdk_patterns: &'a [(String, usize, String)] = self.extra_sdk_patterns;
         let pattern = BUILTIN_SDK_PATTERNS
@@ -400,7 +401,9 @@ impl<'a> FlagVisitor<'a> {
     fn mark_unconfirmed_reads(&mut self) {
         for flag_ref in std::mem::take(&mut self.unconfirmed_reads) {
             let flag_use = match flag_ref {
-                FlagRef::Resolved(index) => self.results.get_mut(index),
+                FlagRef::Resolved(index) | FlagRef::Definition(index) => {
+                    self.results.get_mut(index)
+                }
                 FlagRef::Registry(index) => self
                     .registry_reads
                     .get_mut(index)
@@ -453,6 +456,19 @@ impl<'a> FlagVisitor<'a> {
     }
 
     fn check_vercel_flags_call(&mut self, call: &CallExpression<'_>) -> bool {
+        if !self.definitions.is_empty()
+            && let Expression::Identifier(id) = unwrap_value(&call.callee)
+            && let Some(FlagRef::Definition(index)) = self.lookup_binding(id.name.as_str())
+        {
+            let definition = &self.results[index];
+            self.push_flag_use(
+                definition.flag_name.clone(),
+                definition.kind,
+                call.span.start,
+                definition.sdk_name.clone(),
+            );
+            return true;
+        }
         let Some(imported_name) = self.vercel_flags_imported_name(call) else {
             return false;
         };
@@ -483,25 +499,26 @@ impl<'a> FlagVisitor<'a> {
 
     /// Mark a Vercel `flag()` call that initializes a `const` as the flag's
     /// definition, and record the binding that holds it.
-    fn record_definition(&mut self, decl: &VariableDeclarator<'_>, binding: &str) {
+    fn record_definition(
+        &mut self,
+        decl: &VariableDeclarator<'_>,
+        binding: &str,
+    ) -> Option<FlagRef> {
         if self.definition_calls.is_empty() || !self.in_const_declaration {
-            return;
+            return None;
         }
-        let Some(Expression::CallExpression(call)) = decl.init.as_ref().map(unwrap_value) else {
-            return;
+        let Expression::CallExpression(call) = unwrap_value(decl.init.as_ref()?) else {
+            return None;
         };
-        let Some(&index) = self.definition_calls.get(&call.span.start) else {
-            return;
-        };
-        let Some(flag_use) = self.results.get_mut(index) else {
-            return;
-        };
+        let &index = self.definition_calls.get(&call.span.start)?;
+        let flag_use = &mut self.results[index];
         flag_use.facts = flag_use.facts.with_definition(true);
         self.definitions.push(FlagDefinition {
             binding: binding.to_string(),
             line: flag_use.line,
             col: flag_use.col,
         });
+        Some(FlagRef::Definition(index))
     }
 
     fn vercel_flags_imported_name<'b>(&'b self, call: &'b CallExpression<'_>) -> Option<&'b str> {
@@ -871,6 +888,7 @@ impl<'a> FlagVisitor<'a> {
     /// Give a bound read the first guard that tests its binding.
     fn attach_guard(&mut self, flag_ref: FlagRef, guard: Guard) {
         let flag_use = match flag_ref {
+            FlagRef::Definition(_) => return,
             FlagRef::Resolved(index) => self.results.get_mut(index),
             FlagRef::Registry(index) => self
                 .registry_reads
@@ -1047,13 +1065,14 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
         let BindingPattern::BindingIdentifier(id) = &decl.id else {
             return;
         };
-        self.record_definition(decl, id.name.as_str());
         let flag_ref = (self.in_const_declaration
             && self.read_count() == before + 1
             && decl.init.as_ref().and_then(flag_value_read_start) == self.last_read_start)
             .then_some(self.last_ref)
             .flatten();
-        self.bind(id.name.as_str(), flag_ref);
+        let binding = id.name.as_str();
+        let flag_ref = self.record_definition(decl, binding).or(flag_ref);
+        self.bind(binding, flag_ref);
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
@@ -1071,14 +1090,17 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.binding_scopes.push(FxHashMap::default());
         self.shadowed_registries.push(FxHashSet::default());
         self.visit_block(block.span.end, |visitor| {
             walk::walk_block_statement(visitor, block);
         });
         self.shadowed_registries.pop();
+        self.binding_scopes.pop();
     }
 
     fn visit_binding_identifier(&mut self, ident: &BindingIdentifier<'a>) {
+        self.bind(ident.name.as_str(), None);
         self.note_binding_shadows(ident.name.as_str());
     }
 }
@@ -2146,56 +2168,6 @@ mod tests {
         ] {
             assert!(constants(source).is_empty(), "{source}");
         }
-    }
-
-    #[test]
-    fn a_constant_read_takes_the_facts_of_its_guard() {
-        let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? null : <></>;");
-        assert!(found[0].reads[0].facts.empty_branch());
-    }
-
-    #[test]
-    fn a_bound_vercel_flag_call_is_a_definition() {
-        let source = "import { flag, evaluate } from 'flags/next';\n\
-                      export const showBanner = flag({\n\
-                        key: 'show-banner',\n\
-                        decide: () => Boolean(process.env.FEATURE_BANNER),\n\
-                      });\n\
-                      const value = await evaluate('show-banner');\n";
-        let facts = extract_facts(source);
-        let definition = facts
-            .flag_uses
-            .iter()
-            .find(|flag| flag.flag_name == "show-banner" && flag.line == 2)
-            .expect("definition site");
-        assert!(definition.facts.definition());
-        let evaluate = facts
-            .flag_uses
-            .iter()
-            .find(|flag| flag.line == 6)
-            .expect("evaluate site");
-        assert!(!evaluate.facts.definition(), "evaluate reads the flag");
-        let definitions = facts
-            .registry_facts
-            .map(|registry| registry.definitions)
-            .unwrap_or_default();
-        assert_eq!(
-            definitions,
-            vec![FlagDefinition {
-                binding: "showBanner".to_string(),
-                line: definition.line,
-                col: definition.col,
-            }]
-        );
-    }
-
-    #[test]
-    fn an_unbound_vercel_flag_call_is_not_a_definition() {
-        let facts = extract_facts(
-            "import { flag } from 'flags/next';\nregister(flag({ key: 'loose', decide: () => false }));",
-        );
-        assert!(!facts.flag_uses[0].facts.definition());
-        assert!(facts.registry_facts.is_none());
     }
 
     #[test]

@@ -24,6 +24,30 @@ fn parse_css_non_module(source: &str) -> ModuleInfo {
 }
 
 #[test]
+fn multiline_apply_tokens_keep_the_directive_line() {
+    let tokens = crate::extract_apply_tokens_located(
+        ".panel {\n  @apply flex\n    rounded-card;\n  @apply font-bold\n}",
+    );
+    assert_eq!(
+        tokens,
+        [
+            ("flex".into(), 2),
+            ("rounded-card".into(), 2),
+            ("font-bold".into(), 4),
+        ]
+    );
+}
+
+#[test]
+fn indented_sass_apply_stops_at_the_next_declaration() {
+    let sheet = ".row\n  @apply flex\n  font-family: font-brand\n.next\n  @apply rounded-card\n";
+    assert_eq!(
+        crate::css::scan_stylesheet_tokens(sheet).apply_tokens_located,
+        [("flex".into(), 2), ("rounded-card".into(), 5)]
+    );
+}
+
+#[test]
 fn extracts_css_import_quoted() {
     let info = parse_css(r#"@import "./reset.css";"#, "styles.css");
     assert_eq!(info.imports.len(), 1);
@@ -629,4 +653,22 @@ fn sass_module_include_shorthand_is_not_a_class() {
 fn scss_module_adjacent_sibling_class_stays_a_class() {
     let named = module_class_names("Component.module.scss", "h1\n+p.intro { color: red; }\n");
     assert_eq!(named, vec!["intro".to_string()]);
+}
+
+#[test]
+fn apply_tokens_basic() {
+    let tokens = crate::extract_apply_tokens(".panel { @apply rounded-card font-bold; }");
+    assert_eq!(tokens, vec!["rounded-card", "font-bold"]);
+}
+
+#[test]
+fn apply_tokens_strips_important() {
+    let tokens = crate::extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
+    assert_eq!(tokens, vec!["text-brand", "font-bold"]);
+}
+
+#[test]
+fn apply_tokens_ignored_in_comments() {
+    let tokens = crate::extract_apply_tokens("/* @apply hidden-token; */ .x { color: red; }");
+    assert!(tokens.is_empty(), "got {tokens:?}");
 }
