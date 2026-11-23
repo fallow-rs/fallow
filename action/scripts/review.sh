@@ -74,6 +74,7 @@ if render_review "$REVIEW_FILE"; then
       --provider github \
       --pr "$PR_NUMBER" \
       --repo "$GH_REPO" \
+      --api-url "${GITHUB_API_URL:-https://api.github.com}" \
       --envelope "$REVIEW_FILE" --format json > "$POST_FILE" 2> "$POST_STDERR_FILE"; then
     if jq -e '((.apply_errors // []) | length > 0) or ((.post_errors // []) | length > 0)' "$POST_FILE" > /dev/null 2>&1; then
       HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' "$POST_FILE")

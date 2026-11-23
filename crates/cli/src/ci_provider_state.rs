@@ -5,6 +5,21 @@ use fallow_output::ReviewId;
 
 use super::*;
 
+/// The runner can name a separate GraphQL endpoint. An explicit REST override
+/// for a different server must keep the requests on that server.
+pub(super) fn github_graphql_url(api: &str) -> String {
+    if std::env::var("GITHUB_API_URL").is_ok_and(|runner| runner.trim_end_matches('/') == api)
+        && let Ok(url) = std::env::var("GITHUB_GRAPHQL_URL")
+        && !url.is_empty()
+    {
+        return url;
+    }
+    if let Some(server) = api.strip_suffix("/api/v3") {
+        return format!("{server}/api/graphql");
+    }
+    format!("{api}/graphql")
+}
+
 /// Why the provider review state did not load.
 #[derive(Debug)]
 pub(super) enum ProviderStateError {
