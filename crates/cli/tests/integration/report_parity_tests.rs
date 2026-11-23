@@ -366,6 +366,7 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
         );
 
         let replay_root = if command == Some("health")
+            && extra.contains(&"--group-by")
             && matches!(
                 *format,
                 "markdown" | "github-summary" | "github-annotations"
