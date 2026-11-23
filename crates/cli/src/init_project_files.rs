@@ -11,9 +11,19 @@ use crate::setup_hooks::symlink_guard::{
 };
 use crate::state_file::read_optional_bytes;
 
+/// [`refuse_outside_link`] for a Git hook in the work tree, such as a
+/// `core.hooksPath` of `.githooks`. A hook under `.git`, or in the common
+/// Git directory of a linked worktree, skips this check: a clone cannot
+/// commit files there, and users link `.git/hooks` on purpose.
+pub(super) fn refuse_tracked_hook_link(root: &Path, path: &Path) -> Result<(), ExitCode> {
+    if !path.starts_with(root) || path.starts_with(root.join(".git")) {
+        return Ok(());
+    }
+    refuse_outside_link(root, path)
+}
+
 /// Print an error and fail when `path` goes through a symlink that resolves
-/// outside `root`. The `.git/hooks` target skips this check: a clone cannot
-/// commit files under `.git`, and users link `.git/hooks` on purpose.
+/// outside `root`.
 pub(super) fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), ExitCode> {
     let Some(link) = symlinked_component(root, path) else {
         return Ok(());

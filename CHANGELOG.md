@@ -7,6 +7,229 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.47.0] - 2026-11-22
+
+### Added
+
+- **`fallow security` reports a non-literal target of React Router `redirect`, `redirectDocument` and `replace`.** The new `react-router-open-redirect` category (CWE-601) works like `nextjs-open-redirect`. It is active when the project declares `react-router` or `@react-router/dev`. The callee must be the binding of an import from `react-router`, so a local function named `redirect` or `replace` gives no candidate. Thanks to @cr101 for the report and the reproduction.
+  (Closes [#4951](https://github.com/fallow-rs/fallow/issues/4951))
+
+- **New rule `namespace-escapes` reports namespace imports that hide exports from the unused-export check.** When the code uses `import * as Ns` as a whole value, fallow cannot see which members it reads. Examples are a cast, an assignment, a call argument, a spread, a computed member read, `Object.keys(Ns)`, and a re-export with `export { Ns }`. Fallow then credits every export of the target module and of the modules that it re-exports from, so `unused-exports` and `unused-types` do not check them. The new rule reports each such binding on its import, with the target module and the count of exports that the credit hides. A binding that hides no export is not reported. The rule is `off` by default, so the default output does not change. Turn the rule on in `rules`, select it with `--namespace-escapes`, and suppress one finding with `// fallow-ignore-next-line namespace-escape`. The findings go to the new `namespace_escapes` array in JSON and reach SARIF, CodeClimate, the compact, markdown and human reports, the GitHub and GitLab integrations, the LSP and `fallow explain`. To fix a finding, read the members by name or import them by name.
+  (Closes [#5054](https://github.com/fallow-rs/fallow/issues/5054))
+
+### Changed
+
+- **One table decides each global option per command.** A new table states for each global option whether each command uses it, ignores it or rejects it. The startup check reads this table and exits with code 2 for a rejected pair. The baseline, regression, output, gate, `--lean`, `--group`, `--fail-on-parse-error` and `--sarif-file` checks, and the option lists of `security`, `doctor` and `similar-code`, now read it. The error messages are the same. `fallow schema --cli-reference` exports the table as the additive `command_support` field of each global option. These command lines accepted the option with no effect and now exit with code 2:
+  - `fallow schema`, `config-schema`, `plugin-schema` and `rule-pack-schema` with `--ci`, `--fail-on-issues`, `--sarif-file` or `--output-file`.
+  - `fallow schema`, `config-schema`, `plugin-schema`, `rule-pack-schema` and `telemetry` with `--group`.
+  - `fallow telemetry` and `fallow impact statusline` with `--sarif-file`, `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
+  - `fallow schema`, `config-schema`, `plugin-schema` and `rule-pack-schema` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
+  - `fallow telemetry --output-file`.
+  - `fallow impact`, `recommend`, `suppressions`, `workspaces` and the `rule-pack` subcommands other than `list` with `--output-file`. These commands print their output to stdout and left an empty file.
+  - `fallow viz --output-file`. `viz` writes the map to the path of its own `--out` option, so `--output-file` left an empty file and the map went to `fallow-viz.html`. The message names `fallow viz --out <PATH>`. (Closes [#5007](https://github.com/fallow-rs/fallow/issues/5007))
+  - `fallow agent` and `fallow rule-pack list` with `--output-file` and a format other than `--format json`, and `fallow fix` with `--output-file` and a format other than `--format github-summary`. These formats left an empty file. The formats that write the file keep working, and the CLI reference lists them as `supported_with_formats`.
+  - `fallow impact statusline` with `--ci` or `--fail-on-issues`.
+  - The global duplication options `--dupes-mode`, `--dupes-near`, `--dupes-threshold`, `--dupes-min-tokens`, `--dupes-min-lines`, `--dupes-min-occurrences`, `--dupes-skip-local`, `--dupes-cross-language`, `--dupes-ignore-imports`, `--dupes-no-ignore-imports`, `--dupes-ignore-symlinks` and `--dupes-no-ignore-symlinks` on each command other than bare `fallow`. Only the bare run reads them. `fallow audit`, `health`, `dead-code`, `fix` and `watch` read the `duplicates` section of the config, and the message names the config key, for example `duplicates.minLines`. `fallow dupes` reads its own options, and the message names the option, for example `fallow dupes --min-lines`.
+  - A bare run without the duplication analysis (for example `fallow --only dead-code` or `fallow --skip dupes`) with a global `--dupes-*` option, and a bare run without the health analysis with `--churn-file`. With `duplicates.enabled: false` in the config, a global `--dupes-*` option on the bare run keeps the exit code and gives an inert-flag notice that names the option and the config key, as `--dupes-baseline` does. Health has no config switch that turns the analysis off, so `--churn-file` needs only the `--only` and `--skip` check.
+  - `--churn-file` on each command other than `fallow health` and bare `fallow`.
+  - `--type-aware-project` on each command other than bare `fallow`, `dead-code`, `architecture`, `health`, `audit`, `fix`, `inspect` and `watch`, and on a bare run without the dead-code and the health analysis (for example `fallow --only dupes`). With `--type-aware` on the command line, a `--type-aware-project` path that does not exist fails at startup, as before. When `FALLOW_TYPE_AWARE` or `typeAware.enabled` turns type-aware analysis on, the path that does not exist now fails too, on each command that reads the project. When type-aware analysis is off for the run, `--type-aware-project` now fails with "has no effect" on each command that reads the project. The type-aware run skipped such a project in silence.
+  - `--config` on `fallow agent`, `ci`, `ci-template`, `cloud`, `explain`, `hooks`, `impact`, `init`, `license`, `migrate`, `recommend`, `rule-pack schema`, `security survivors`, `setup-hooks`, `type-aware` and the schema commands.
+  - `--diff-file` on `fallow schema`, `config-schema`, `plugin-schema`, `rule-pack-schema`, `telemetry`, `impact statusline`, `ci-template` and `migrate`. The schema commands and `telemetry` still accept `--root`, because a caller can pass it to each command.
+  - `fallow workspaces` with `--fail-on-regression`, `--regression-baseline`, `--save-regression-baseline` or `--tolerance`.
+  - `--tolerance 0` on `fallow doctor` and on each command without a regression baseline. The earlier checks compared the value with `0` and so missed an explicit `0`.
+
+  A test now fails when a command ignores an option that names a file, such as `--save-regression-baseline` on `fallow dupes` (issue #4931).
+
+  The check runs before the root, git ref and diff validation, and it reads the options in the order of their definition, with `--tolerance` after the other regression options. When a command line has more than one problem, the first error can be a different one. A rejected option now records a `Validation` failure in the telemetry of the run. The help of `fallow security` now also hides `--tolerance`, which `security` ignores.
+
+- **An empty `HOME`, `XDG_CONFIG_HOME` or `PATH` now counts as unset in every command.**
+  Before, some commands used an empty `HOME` as a relative folder, for example
+  a hook install with `--user` and the telemetry config on macOS. They now fall
+  back to `USERPROFILE`, as `fallow license` already did, or report that no home
+  folder is set. The same `USERPROFILE` fallback now applies to the store of
+  `fallow type-aware setup`. An empty `PATH` no longer makes a tool lookup search
+  the working directory. Paths for a normal environment do not change.
+- **`fallow agent install`, `agent uninstall`, `agent status` and `setup-hooks --user` use `USERPROFILE` when `HOME` is not set.**
+  Before, these commands found no home folder in that case. On native Windows,
+  where `HOME` is usually not set, they now find the user-level harness files
+  under `%USERPROFILE%`.
+- **A `HOME` value that is not valid UTF-8 now resolves.** The license path,
+  the credentials file and the runtime coverage add-on path use it. Before,
+  these paths treated such a `HOME` as unset.
+
+- **The duplication token cache is rebuilt once.** The tokens of `export * as name from '...'`, of a namespace import and of a type-only import or export now include the name or the `type` keyword, so the cache version changes. A clone group that holds one of these statements can change once.
+
+### Fixed
+
+- **`fallow audit` counts one paste as one clone finding.** The detector can report one pasted block as a long clone group and a shorter group inside it with one more copy. The audit now groups the clone groups whose instances overlap into one clone region, and the `introduced-clone-group` gate and the `duplication_*` attribution counts count regions. `--format json` adds `duplication.clone_regions[]` and a `region` index on each clone group. One `duplicates.ignoredClones` entry for the long group now also accepts the short group, when its other copy was in the base. (#4967)
+
+- **An edit in every copy of an old clone no longer fails the audit.** A clone region whose copies all map to one base clone group, with a small edit in one or more copies (each copy grows by fewer lines than `duplicates.minLines`), gets the grade `inherited-edited`, and the `introduced-clone-group` gate does not fail on it. A new copy of an old clone, and an edit that grows every copy by `minLines` or more lines, stay `introduced`. When `duplicates.ignoredClones` accepted the base clone, the audit keeps the region accepted (`accepted_by`), and the output prints the new key to put in the config (`ignore_hint`). (#4968)
+
+- **An expression in markup gives the same facts as the same expression in a script.** A `dispatch("save")` call in the markup of a Svelte component now counts for `unused-svelte-event`, and the finding points at the markup tag. A Vue template call of `emit` or `$emit` now marks the event as used through the template parse, so `bus.emit("close")` no longer marks a declared `close` event as used. A component whose root `<template>` uses another language, such as `lang="pug"`, reports no `unused-component-emit` finding, because fallow parses only HTML templates. Before, fallow read the raw text of such a template, and it could report an unused emit there. A dynamic import, a call or a security sink in a Vue or Svelte template expression, an Astro template region or an inline HTML script now goes to the graph and to `fallow security` like the same code in a script. The extraction cache version moves, so the first run after the upgrade parses every file again.
+  (Closes [#4942](https://github.com/fallow-rs/fallow/issues/4942))
+
+- **Compact output gives the line of a re-export cycle.** A `re-export-cycle:` line now has a line field after the path, as a `circular-dependency:` line has. An example is `re-export-cycle:src/a.ts:4:src/a.ts <-> src/b.ts`. The line is `0` when it is not known. A script that splits the line on `:` must read one more field.
+
+- **A `css-dead-surface` finding for unused scoped classes points at the class.** Before, the `scoped-unused-class` finding of a Vue or Svelte component was on line 1. Now it is on the line of the first definition of an unused class in the `<style scoped>` block. Put a `fallow-ignore-next-line css-dead-surface` comment above that line to suppress the finding. A file has one such finding for all its unused scoped classes, so this one comment suppresses the finding for each class in the file. `fallow health --css --format json` adds the field `line` to `css_analytics.scoped_unused[]`.
+
+- **A `css-broken-reference` finding for an undefined `@keyframes` points at the rule.** Before, the `undefined-keyframes` finding was on line 1 of the stylesheet. Now it is on the line of the first rule that references the name. Put a `fallow-ignore-next-line css-broken-reference` comment above that rule to suppress the finding. `fallow health --css --format json` adds the field `line` to `css_analytics.undefined_keyframes[]`. In one stylesheet, the entries are now in line order, then in name order.
+
+- **The CodeClimate fingerprint of the two CSS findings changes.** The fingerprint uses the line. A CI system that tracks findings by fingerprint shows each of these findings as new one time. Styling findings have no `finding_id`, so no `finding_id` changes.
+
+- **`fallow fix` checks each edit before it writes it.** `fix` now applies its planned source edits to the text and compares the result with the original. It drops an edit when the file no longer parses, when a kept class or enum member is lost, when a kept enum member gets another value, when a name that the code uses loses its declaration, when an import stays after its name left an export list, or when the edit removes an export that other code still uses. The human output prints one `Kept <path>:<line>` line for each dropped edit, and the JSON output lists no entry for it. The editor quick fix and the review comment `suggestion` blocks use the same check. An exported enum whose members are all unused loses its whole declaration only when the enum itself is unused; an imported enum keeps an empty body, so the import still resolves. The human output prints no `Would remove` or `Removed` line for a dropped edit. (#4963, #4833, #4659)
+
+- **`fallow fix` removes `export` from each overload signature.** For `export function f(a: string): void;` and its implementation with `f` unused, `fix` removed `export` from the implementation only, and the type check failed (TS2383). It now removes `export` from each declaration that merges with it. A type alias or an interface with the name of an unused value keeps its `export`, because a value and a type of one name do not merge.
+
+- **Settings that a tsconfig inherits through `extends` now count everywhere.** fallow reads tsconfig compiler options through one reader that follows a local, package, package subpath and array `extends` with the merge rules of TypeScript. A later entry of an array `extends` overrides an earlier one, and a relative path resolves against the config that sets it. These results change:
+  - `jsx` and `jsxImportSource` from an extended config credit the JSX runtime package, so `react` is no longer an unused dependency when only a base config sets `"jsx": "react-jsx"`.
+  - `types` and `paths` from an extended config credit their packages and register their aliases. `paths` targets resolve against `baseUrl` when a config of the chain sets it.
+  - The `files`, `include`, `exclude` and `typeRoots` of a package config, such as one under `node_modules`, decide which module declaration files are unused. A parent that does not parse keeps every declaration file.
+  - The resolver fallbacks for `paths`, `baseUrl` and `rootDirs` read the merged config. A `paths` mapping in a config that `extends` names through a package `exports` subpath now resolves.
+  - Only a config that contains the importing file decides its `paths`, `baseUrl` and `rootDirs`, as in TypeScript. In an Nx-style app, the solution `tsconfig.json` (`files: []`) does not hide the `paths` of the `tsconfig.app.json` that owns the file. `files` and `include` add up, so a config that inherits `files: []` and sets its own `include` contains the files that `include` matches.
+  - A `paths` target resolves against `baseUrl` (TypeScript 5) and then against the config that sets `paths` (TypeScript 7, which has no `baseUrl`), so an alias resolves on either version. Every target of a pattern is tried against `baseUrl` before any target against the config folder, in the order of TypeScript 5.
+  - The boundary presets read an inherited `rootDir`.
+  The graph cache version moves, so the first run after the upgrade resolves every import again.
+  (Closes [#4980](https://github.com/fallow-rs/fallow/issues/4980))
+
+- **`fallow mutation --verdicts` updates the function of the judged mutant.** Two callbacks on one line give two `functions[]` entries with the same file, name and first line. An equivalent verdict for a mutant of the second callback changed the counts of the first one. The join now finds a survivor by the `survived` list of its function. For another status it prefers the function whose line range holds the mutant. Two callbacks that start and end on the same line still share one key, because the report has no column range for a function.
+
+- **`fallow mutation --kill-matrix` no longer calls a test with a duplicate id redundant.** The runner numbers tests that share a title in report order, so the kills of such a test can belong to its twin. The full kill matrix still lists the row, but `kill_matrix.candidates`, `coverage_without_kills` and `subsuming_tests` leave out the duplicate ids that the dry run reports. `--kill-matrix-for` already left them out.
+
+- **`fallow watch` applies a changed `ignorePatterns` or root `.gitignore` to the events it watches.**
+  Before, a config change reloaded the analysis config but kept the old event
+  filter. A path that the new config ignores still started a new analysis, and
+  a path that the old config ignored did not. The filter now follows each
+  reload.
+
+- **A sticky PR or MR comment is created when only an enforced gate fails.**
+  Before, the comment envelope marked such a run as clean when the diff filter
+  dropped every finding. The post step then skipped the first comment, while
+  the heading of the comment said that the gate failed. `is_clean` in the
+  envelope now follows the gate verdict of the heading.
+- **`fallow audit --format codeclimate` applies the report path prefix.**
+  Before, the live audit output kept analysis-root-relative paths when `--root`
+  was below the repository root or `--report-path-prefix` was set. The paths
+  now match the CodeClimate output of the other commands and of
+  `fallow report`.
+
+- **The GitHub Action finds a type-aware config through `extends` and parent folders.**
+  With `type-aware: auto`, the Action installed the sidecar only when the first config file in the root enabled `typeAware`. It now asks the installed fallow CLI for the resolved config, so a setting in an `extends` base or in a parent config also counts. A fallow version that cannot print the resolved config falls back to the old file check.
+- **The GitHub Action starts the type-aware sidecar on Windows.**
+  The Action set `FALLOW_TYPE_AWARE_BIN` to the `.mjs` file of the sidecar, which Windows cannot start as a program. On Windows it now sets `FALLOW_TYPE_AWARE_BIN` to Node and `FALLOW_TYPE_AWARE_SCRIPT` to the sidecar file, as the npm package of fallow does. The version check of the installed sidecar also reads a Windows path such as `D:\a\_temp` correctly now.
+
+- **`fallow audit` on a sparse checkout now builds the base snapshot from the same files as the checkout.** Git cone mode also checks out the files directly inside each parent directory of a cone, such as `apps/package.json` for the cone `apps/web`. The base snapshot now keeps these files too, so a parent manifest or config no longer shows as present at head and missing at base. A run with a subdirectory `--root` keeps the files of each parent directory in the same way, for example a shared `tsconfig.base.json` that the subdirectory extends.
+- **`fallow audit` rebuilds the reusable base snapshot after a sparse cone change.** The snapshot was reused when only the cone changed at the same base commit, so the base held the old set of files. The snapshot identity now includes the sparse cone and the analysis subdirectory.
+
+- **`fallow health --save-snapshot` keeps each snapshot of one second.** The default file name has whole seconds, so a second save in the same second replaced the first snapshot. A later save now gets a numeric suffix, for example `2026-01-01T00-00-00Z-2.json`.
+
+- **`fallow health --hotspots --ownership` reads the configured `codeowners` path.** The hotspot ownership probed only the standard CODEOWNERS locations, so `declared_owner` and `unowned` ignored a file at a custom path. `--group-by owner` and the review brief already read that path.
+
+- **Bare `fallow` measures scoped health duplication like `fallow health`.** When `health.ignore`, a workspace or a changed-files scope narrowed the health files, the combined run cut the project duplication report down to the scope. That kept clone pairs that `duplicates.minOccurrences` drops and counted the totals over other files, so `duplication_pct` and the score differed from standalone `fallow health`. The combined run now runs the scoped detection in that case.
+
+- **Review comments land on files with brackets in their path.** The CodeClimate path of a finding encodes `[` and `]` as `%5B` and `%5D`. The review envelope and the PR comment used that encoded path, so the diff filter dropped findings in a route such as `app/[id]/page.tsx` and a review comment could not anchor. CI issues now carry the plain file path.
+
+- **`fallow audit` inherits the findings of a renamed file whose path holds `%` or `:`.** A dead-code key escapes these characters, and the rename map holds plain paths, so the remap and the moved-export match missed such a file and reported its findings as introduced.
+
+- **`fallow audit --brief` reports only new public exports when dead code and health use different production modes.** The base pass then kept no module graph, so every export of a changed public file read as added in `deltas.public_api_added`.
+
+- **The typed decision surface reads a moved `package.json` under its base path.** `fallow_api::run_decision_surface` and the `decision_surface` MCP tool compared a moved manifest with nothing, so every dependency of the moved package read as a new dependency decision. The decision ids of a renamed file now also carry the previous signal id, as the CLI brief does.
+
+- **A barrel hop in a boundary chain is judged by its own re-export kind.** When a file imports a type through a barrel, and the barrel forwards it with a value re-export that its zone does not allow, the barrel gets the finding and the importer no longer gets a second one.
+
+- **Same-named `autoDiscover` zones with different `root` values keep each root.** Two zones with one name, for example `features` under `packages/a` and under `packages/b`, now both classify their discovered child folders. Before, the files under the second root had no zone.
+
+- **A tsconfig `paths` alias resolves with the one pattern that TypeScript selects.** fallow now uses an exact pattern, else the matching wildcard pattern with the longest prefix, and tries only the targets of that pattern. Before, a pattern with a shorter prefix but a longer suffix could win, and a miss tried the targets of every other matching pattern. The dependency credit of an alias uses the same pattern.
+
+- **`baseUrl` resolves an import that `paths` does not resolve.** A tsconfig with both `baseUrl` and `paths` now tries `baseUrl` when no `paths` pattern resolves the specifier, as TypeScript does. Before, any `paths` map stopped the lookup, so for example `@use "styles/vars"` in a Sass file stayed unresolved.
+
+- **`fallow trace <file>:<symbol>` keeps every hop inside `--depth`.** The caller and callee walks now visit each module at its shortest depth. Before, a module that the walk first reached through a longer path hid its own imports, even when a direct import put them inside the depth limit.
+
+- **`fallow trace` gives empty chains for a name that the file does not export.** `callers`, `callees` and `unresolved_callees` are now empty when `symbol_found` is `false`, as the output contract says. Before, a typo listed the callees of the whole file, and a namespace importer counted as a caller.
+
+- **A recursive workspace pattern no longer follows a link out of the project or into a loop.** With a pattern such as `packages/**`, a link to a folder outside the project, to a parent folder, or two links between sibling folders made the workspace walk descend through them. A loop listed the same packages again under ever longer paths until the path got too long. The walk now enters each real folder once, and it does not enter a link whose target is outside the project or inside the folder that it walks. A link to a package is still listed.
+
+- **A deep package cycle always gets a `package-cycle` finding.** The cycle listing of a group of packages that import each other has a step budget. On a large layered group, the budget could run out before the search found one cycle, and the group then had no finding. The group now gets one shortest cycle through its first package, marked as truncated.
+
+- **The `dedup-lookup-failed` output of the GitHub Action and the `fallow-dedup-lookup-failed.txt` marker of the GitLab template report a failed lookup again.**
+  `fallow ci post-pr-comment` and `fallow ci post-review` stop without a post when they cannot read the existing comments. The scripts then still wrote `false`, so a gate on these outputs never fired. The commands now give the error code `FALLOW_CI_DEDUP_LOOKUP_FAILED` in their JSON error document, and the scripts set `dedup-lookup-failed` to `true`. The review step also sets `post-skipped-reason` to `pagination_failure`. A failed lookup never posts a duplicate comment. A pinned fallow version without this code keeps the outputs at `false`. The warning of a failed post now names the reason.
+
+- **Fallow now refuses two save or report flags that name one file.** A run with `--output-file out.sarif --sarif-file out.sarif`, or with another spelling of one path such as `./sub/../out.sarif`, wrote both reports to the file, and the later write replaced the earlier report with no error. The run now exits with code 2 before the analysis and names both flags. The check covers each file that a save or report flag writes. A device or a named pipe, such as `/dev/null` or `/dev/stdout`, is still allowed for more than one flag.
+
+- **A complete `fallow mutation` run now removes only its own outcome journal.** Two runs of one project share the journal file. When an older run completed after a newer run had started, the older run removed the journal of the newer run, so `--resume` after an interrupt of the newer run lost its final results. Each run now writes an id into the journal header and removes the journal only when the id is its own.
+- **Concurrent `fallow mutation` runs on one plan no longer delete the run directory of each other.** A run that found a stale run directory replaced it without a lock. A second run could publish a complete directory in that moment, and the first run then deleted the directory that the second run used. The check and the replacement now run under a lock file per run directory when the file system supports locks, and two runs in one process get separate staging directories.
+
+- **`fallow health --complexity-breakdown` gives Vue, Svelte and Astro contributions the lines of the file.** Each contribution of a function in a `<script>` block or in Astro frontmatter now has the line and column of the full file, as the function itself does. Before, the contributions kept the lines of the script body. The extraction cache version moves, so the first run after the upgrade parses every file again.
+
+- **`fallow audit` no longer reuses the head analysis as the base when a change can alter the findings.** The audit skips the base analysis when every changed file has the same tokens at base and head. A new or removed `@deprecated` tag or `@jsxImportSource` pragma changes the findings with no token change, so a new `deprecated-export-in-use` finding showed as inherited and the gate passed. A JSDoc `@import` tag, a `@jsxRuntime` pragma, a triple-slash reference and a `fallow-override-threshold` comment had the same problem. A changed `export * as name`, a default import against a namespace import, and a type-only import or export against a value one also compared as equal, because the tokens did not include the name or the form. These changes now run the base analysis.
+
+- **A failed upgrade of the VS Code managed binary keeps the installed binary usable.** On Windows, a sibling window that runs the old `fallow-lsp` locks the file, so the new binary cannot replace it. The extension then deleted the signature and target marker of the old binary, and the next start removed that binary as untrusted. The extension now puts the old signature and target marker back.
+- **A second VS Code window no longer deletes the download of the first window.** Each window removes the temp files of crashed downloads when it starts. It removed the temp files of every other process, also of a window whose download still ran, and that download then failed its signature check. The extension now removes only the temp files of a process that no longer runs.
+- **`Fallow: Fix` saves and refreshes only after you confirm.** The command saved all dirty editors before it asked for confirmation, and it restarted the language server and ran a new analysis also after you answered No. The command now saves after the confirmation, applies no fix when a file cannot be saved, and refreshes only after a fix run.
+
+- **The functions of `@fallow-cli/fallow-node` reject their promise instead of throwing.**
+  An invalid option, for example `minOccurrences: 1` for `detectDuplication`, and a similar-code companion that is not ready made the call throw before it returned a promise. A `.catch` handler or a `promise.then(ok, fail)` call then never saw the error. Each function now returns a rejected promise with the same error, as its `Promise` type states. `await` in a `try` block works as before. Code that caught the old throw without `await` must now handle the rejection.
+
+- **`fallow flags --flag-state` rejects two keys that name one flag.**
+  With `flags.vendorKeyPrefix` set to `app.`, the keys `checkout` and `app.checkout` both name the flag `checkout`. The report then used the state of the last key and dropped the other. The command now exits with code 2 and `FALLOW_FLAG_STATE_INVALID`, and the message names the two keys.
+- **A ternary arm with `void <call>` is not an empty flag branch.**
+  `flag ? void track() : null` runs `track()` when the flag is on, so the flag does something. Only `void` of a literal or of `undefined`, such as `void 0`, now counts as an empty arm. The parse cache version changes, so the first run after the upgrade parses each file again.
+
+- **`fallow audit` keeps the styling findings of changed files.**
+  The deep CSS pass of `fallow audit` (on by default, `audit.cssDeep`) scans the whole project but reports only the changed files. A Tailwind arbitrary value that an unchanged file used first was dropped, also when a changed file used it too. The report now points at the first use in a changed file. Raw style values of unchanged files also filled the limit of 200 reported values, so the values of changed files did not show. Now only the values of changed files count toward the limit. The values of unchanged files still count as the project vocabulary for the nearest-token match.
+- **An `@plugin` inside a `/* */` comment or a string no longer stops the theme token checks.**
+  fallow found `@plugin` anywhere in a stylesheet, also in a comment or a string. The checks for unused, near-duplicate and consumed theme tokens then stopped for the whole project. Now only a real `@plugin` at-rule stops them.
+
+- **`fallow security --gate new` fails when a change adds an import that makes client code reach a server-only module or a secret reader.** Before, the gate passed when a change added a `.server` import or the import of a module that reads a secret to an existing module that a route or a `"use client"` file imports. The gate now keeps a `client-server-leak` candidate when the import line of an `intermediate` trace hop is on an added line. An edit of such an import line, for example a new imported name, also keeps the candidate. The candidate still points at the client boundary. No `finding_id`, `stable_finding_id`, JSON field, SARIF field or suppression position changes. (Closes [#5024](https://github.com/fallow-rs/fallow/issues/5024))
+
+- **Two `fallow similar-code setup --local` runs on one model cache no longer break each other.** Both runs wrote the same partial, manifest and backup files, so one run removed the download of the other, and that run failed. Setup now holds a lock on the cache folder of the model revision. The second run prints that it waits, then finds the installed model and downloads nothing. On a file system without file locks, setup runs without the lock, as before.
+- **The type-aware sidecar reads wildcard package exports as Node does.** When fallow sent no entry points, the sidecar read the entry points from `package.json`. A target such as `./src/*.ts` then matched only files directly in `src`, and a target with two `*` accepted two different values. Each `*` of a target now stands for the same value, and that value can contain `/`. A build output target with a `*` in its first path segment, such as `./*.js`, still matches one path segment.
+
+- **`fallow coverage upload-inventory` and `upload-static-findings` fail on a permanent HTTP error, also with `--ignore-upload-errors`.**
+  A 404, 409, 410 or 422 response went to the transient server error class, so `--ignore-upload-errors` changed a wrong project ID or endpoint into a warning with exit 0. These statuses now exit with the validation code. A 5xx, 408 or 429 response stays transient. A 413 response to `upload-inventory` now exits with the payload-too-large code, as it does for `upload-static-findings`.
+- **A git-SHA keyed upload no longer treats a failed `git status` as a clean checkout.**
+  When `git status` did not start or failed, the upload continued as if the working tree was clean. Without `--git-sha`, the upload now stops with a validation error. With `--git-sha`, for example in a build without a git checkout, the upload continues and prints a warning. `--allow-dirty` also lets the upload continue.
+
+- **The Impact store expiry keeps the decision of a project.**
+  With `FALLOW_IMPACT_STORE_MAX_AGE_DAYS` set, the expiry deleted each old project store. A project with `fallow impact disable` has no new records, so its store aged out and the project fell back to the user-global default. The expiry now keeps an explicit enable or disable and a declined opt-in, and removes only the history. A store without a decision is still removed.
+
+- **`fallow cloud logout` reports an incomplete logout when the keychain does not confirm the delete.**
+  A denied or timed-out keychain prompt counted as "no stored key", so the command printed `No stored API key` or `Logged out` while the key could still be in the keychain. The command now exits with code 2 and says that the logout is incomplete. It still removes the key from the credentials file.
+
+- **`effect.schemaExportsAsTypes` knows seven more schema forms.** With the option on, these exports are schemas when each value that they can have is a schema:
+  - a conditional expression whose two branches are schemas (`flag ? Schema.String : Schema.Number`), also as the `return` of a function;
+  - a member of a namespace import (`Imported.User.pipe(...)`), and a call of a function through one (`Imported.makeUser()`);
+  - a call of a function that returns one of its parameters, when the argument at that position is a schema (`identity(Schema.String)`);
+  - a member read or a method call of a local `const` object or array literal (`schemas[0]`, `schemas.User`, `factories.make()`);
+  - a destructured export of such a member (`export const { User } = { User: Schema.String }`).
+
+  A literal counts only when no code can change its members: the module does not export the literal, reads only members that it has, and does not assign, delete or pass on the literal, and the literal has no spread and no `this`. A parameter that the function assigns or declares again gives no schema. A read of a schema method without a call (`User.annotations`) is a function, so it is no longer a schema. An unused export of each of these forms moves from `unused-export` to `unused-type`. A value of the same form that is not a schema keeps its `unused-export` finding. The extraction cache version moves, so the first run after the update parses each file again.
+  (Closes [#5055](https://github.com/fallow-rs/fallow/issues/5055))
+
+- **A `package.json` that starts with a byte order mark is read by every dependency check.** npm and Node.js accept a leading UTF-8 byte order mark, but several checks did not read such a manifest. `fallow dead-code` then did not report an unused dependency of that workspace or an unused override, lost the `catalog:` references and overrides of that manifest, and reported a tool such as Prettier as unused when the manifest held its config key. The package manager detection, the orphan declaration check and an `extends` of a package config also skipped such a manifest. Now all of them ignore the mark.
+
+- **The unmatched `ignoreFindings` note no longer advises a removal that changes which paths are hidden.** The note says that a pattern has no effect and that you can remove it. That advice was wrong in two cases. When no positive pattern matched beside `!` exceptions, the removal of the positive patterns makes `ignoreFindings` hide every path outside the exceptions. When there is no positive pattern and no `!` exception matched, the removal of the exceptions makes `ignoreFindings` hide no path. Fallow no longer reports these patterns as `ignore-findings-pattern-unmatched`.
+
+- **The editor action that dismisses a security candidate type in a file keeps the hashbang first.** Before, the action put the `// fallow-ignore-file` comment above a `#!/usr/bin/env node` line. Node.js then failed to start the script. Now the comment goes on the line below the hashbang.
+
+- **The follow-up commands of `fallow agent install` and `fallow agent status` keep the inspected project.** Before, the `claude-approve-mcp`, `choose-harness`, `recommend-config`, `agent-install`, `agent-install-force` and `gate-script-refresh` commands did not repeat `--root`. The approve command also did not repeat `--without`. From another directory, these commands acted on the wrong project, and the approve command wrote the excluded steps. Now, when the run names `--root`, each command repeats it. The install commands also repeat the excluded steps.
+
+- **`fallow fix` keeps the module load when it removes the last name of a re-export.** `export { Widget } from './widget'` loads and runs `./widget`, for example to register a custom element. Before, `fallow fix` deleted the full statement, so the module no longer ran. Now the fix replaces the statement with `import './widget';`. The fix still deletes the statement in three cases: another static import or re-export in the file loads the same module, the re-export is type-only, or the names come from a declaration file such as `types.d.ts`. Remove the bare import yourself when the module has no side effects.
+
+- **`effect.schemaExportsAsTypes` knows each `Schema` member that gives a schema.** With the option on, an export whose value is a call of `Schema.optional`, `Schema.optionalKey`, `Schema.mutable`, `Schema.required`, `Schema.tag`, `Schema.keyof`, `Schema.fromJsonString` or one of the other lowercase members whose declared return type is a schema in effect 3 or effect 4 is now a schema. A member that gives a schema in one of the two versions counts: `Schema.optional` gives a property signature in effect 3 and a schema in effect 4. A bare read of a lowercase member (`Schema.optional`) is a function, so it is no schema. A data-last call of an effect 3 dual member, such as `Schema.annotations({ title: "x" })`, gives a function, so it is no schema either. A PascalCase value that is no schema, such as `Schema.BrandSchemaId`, `Schema.TypeId`, `Schema.Config` or `Schema.SchemaError`, keeps its `unused-export` finding. The member lists come from the declared types of effect 3.22.5 and effect 4.1.5, and a test fails when a list misses a member. The extraction cache version moves, so the first run after the update parses each file again.
+  (Closes [#5066](https://github.com/fallow-rs/fallow/issues/5066))
+
+- **`fallow dead-code` checks the members behind `export * as Name` in an entry file.** With `includeEntryExports` on, an `export * as Name from './a'` line of an entry file credited every export of `./a`, also when no consumer read it through `Name`. A named re-export of such a namespace did the same. Now these lines credit only the members that a consumer reads, as for `import * as Name`. This covers nested chains (`Name.Inner.member`) and chains that start at `import * as Root` (`Root.Name.member`). A namespace that the code passes on as a value, spreads or reads with a computed key keeps full credit. An entry file that a dynamic `import()` or `require()` loads keeps full credit. An `ignoreExports` rule for the entry file that covers `Name` credits every export behind `Name`.
+
+  The nested-chain and passed-value reads also apply to a module that is not an entry file, so two false unused-export findings there are gone. Without `includeEntryExports`, an entry file behaves as before. The graph cache version moves, so the first run after the update builds the graph again.
+  (Closes [#5053](https://github.com/fallow-rs/fallow/issues/5053))
+
+- **On Windows, JSON output keeps the brackets of a route path.** A finding in `app/blog/[id]/page.tsx` showed as `app/blog/%5Bid%5D/page.tsx` in `--format json`, while SARIF and the other platforms gave the plain path. JSON paths now use forward slashes and keep `[` and `]` on each platform. On every platform, a JSON string that holds the project root after other text, such as a message, now keeps its brackets too. SARIF and CodeClimate URIs still encode the brackets.
+- **On Windows, `fallow mutation` replaces a stale run directory while another process reads a file in it.** Windows refuses to move a directory with an open file, so the run failed with "The directory is not empty. (os error 145)". The run now tries again for up to one second.
+
+### Security
+
+- **The `url` dependency is at 2.5.9 for RUSTSEC-2026-0592.** The release binaries now build with the fixed version. No behavior of fallow changes.
+
 ## [3.46.0] - 2026-11-21
 
 ### Added
@@ -18392,7 +18615,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.45.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.47.0...HEAD
+[3.47.0]: https://github.com/fallow-rs/fallow/compare/v3.46.0...v3.47.0
 [3.46.0]: https://github.com/fallow-rs/fallow/compare/v3.45.0...v3.46.0
 [3.45.0]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.45.0
 [3.44.0]: https://github.com/fallow-rs/fallow/compare/v3.43.2...v3.44.0

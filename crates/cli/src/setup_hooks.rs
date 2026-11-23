@@ -314,15 +314,9 @@ pub fn build_hooks_status(root: &Path) -> HooksStatusReport {
 }
 
 fn git_hook_status(root: &Path) -> HookSurfaceStatus {
-    let candidates = [
-        root.join(".husky").join("pre-commit"),
-        root.join(".git").join("hooks").join("pre-commit"),
-    ];
-    let path = candidates
-        .iter()
-        .find(|path| path.exists())
-        .cloned()
-        .unwrap_or_else(|| root.join(".git").join("hooks").join("pre-commit"));
+    let git_hook = crate::init::git_hook_location::git_pre_commit_path(root);
+    let husky = root.join(".husky").join("pre-commit");
+    let path = if husky.exists() { husky } else { git_hook };
     let raw = read_optional_text(&path).ok().flatten();
     let managed = raw
         .as_deref()

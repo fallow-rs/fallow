@@ -968,7 +968,12 @@ impl PluginRegistry {
         let mut result = AggregatedPluginResult::default();
         let mut regex_errors = Vec::new();
 
-        let (all_deps, script_packages) = workspace_activation_deps(input);
+        let (all_deps, script_packages) = workspace_activation_deps(
+            input.pkg,
+            (input.root, input.project_root),
+            input.root_dependencies,
+            input.production_mode,
+        );
         let workspace_files: Vec<PathBuf> = input
             .relative_files
             .iter()
@@ -1877,12 +1882,14 @@ fn check_meta_framework_prerequisites(active_plugins: &[&dyn Plugin], root: &Pat
 /// calls it. A root dependency that no workspace script calls stays out, so
 /// a root tool does not activate its plugin in every workspace.
 fn workspace_activation_deps(
-    input: &WorkspacePluginRunInput<'_>,
+    pkg: &PackageJson,
+    (root, project_root): (&Path, &Path),
+    root_dependencies: &[String],
+    production_mode: bool,
 ) -> (Vec<String>, FxHashSet<String>) {
-    let mut deps = input.pkg.all_dependency_names();
+    let mut deps = pkg.all_dependency_names();
     let own: FxHashSet<&str> = deps.iter().map(String::as_str).collect();
-    let hoisted: Vec<String> = input
-        .root_dependencies
+    let hoisted: Vec<String> = root_dependencies
         .iter()
         .filter(|dep| !own.contains(dep.as_str()))
         .cloned()
@@ -1890,11 +1897,11 @@ fn workspace_activation_deps(
     let mut script_deps = deps.clone();
     script_deps.extend(hoisted.iter().cloned());
     let script_packages = script_activation_packages(
-        input.pkg,
-        input.root,
-        &[input.root, input.project_root],
+        pkg,
+        root,
+        &[root, project_root],
         &script_deps,
-        input.production_mode,
+        production_mode,
     );
     deps.extend(
         hoisted
@@ -1902,6 +1909,26 @@ fn workspace_activation_deps(
             .filter(|dep| script_packages.contains(dep)),
     );
     (deps, script_packages)
+}
+
+/// The dependency names that activate plugins for the workspace package
+/// `pkg` in `root`: its own dependencies plus each root dependency that one
+/// of its scripts calls. The analysis uses the same set.
+#[must_use]
+pub fn workspace_activation_dependencies(
+    pkg: &PackageJson,
+    root: &Path,
+    project_root: &Path,
+    root_dependencies: &[String],
+    production_mode: bool,
+) -> Vec<String> {
+    workspace_activation_deps(
+        pkg,
+        (root, project_root),
+        root_dependencies,
+        production_mode,
+    )
+    .0
 }
 
 /// The packages that the scripts of `pkg` call. `node_modules_roots` are

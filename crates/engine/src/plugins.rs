@@ -9,7 +9,7 @@ use crate::core_backend;
 /// External-plugin dry-run primitives for the CLI's `plugin-check` command.
 pub use crate::core_backend::{
     CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
-    is_external_plugin_active,
+    is_external_plugin_active, workspace_activation_dependencies,
 };
 
 /// Built-in plugin name roster.

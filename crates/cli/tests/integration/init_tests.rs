@@ -394,7 +394,7 @@ fn hooks_namespace_installs_and_uninstalls_git_hook() {
     assert!(git.success());
 
     let root = dir.to_str().unwrap();
-    let install = run_fallow_raw(&[
+    let install = crate::common::run_fallow_raw_with_clean_git(&[
         "--root", root, "hooks", "install", "--target", "git", "--branch", "develop",
     ]);
     assert_eq!(
@@ -414,7 +414,14 @@ fn hooks_namespace_installs_and_uninstalls_git_hook() {
         install.stderr
     );
 
-    let uninstall = run_fallow_raw(&["--root", root, "hooks", "uninstall", "--target", "git"]);
+    let uninstall = crate::common::run_fallow_raw_with_clean_git(&[
+        "--root",
+        root,
+        "hooks",
+        "uninstall",
+        "--target",
+        "git",
+    ]);
     assert_eq!(
         uninstall.code, 0,
         "hooks uninstall --target git should succeed, stderr: {}",
@@ -692,7 +699,7 @@ impl GitHookExecutionFixture {
         assert!(status.success());
         commit_empty(&git, &root);
 
-        let output = run_fallow_raw(&[
+        let output = crate::common::run_fallow_raw_with_clean_git(&[
             "--root",
             root.to_str().unwrap(),
             "hooks",
