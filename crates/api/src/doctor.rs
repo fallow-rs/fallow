@@ -90,11 +90,22 @@ where
     match resolve_doctor_run(&root, options.config_path, cache_dir) {
         Ok(run) => {
             let project = ReadyProject::of(&run);
+            let cache_repair = || {
+                if cache_dir.is_some_and(|path| !path.as_os_str().is_empty()) {
+                    return Err(
+                        "Set FALLOW_CACHE_DIR to the inspected cache directory and run fallow dead-code --quiet with the same --config value if one was selected.",
+                    );
+                }
+                let explicit = options.config_path.and(project.path.as_deref());
+                remediation_with_config("fallow dead-code --quiet", &root, explicit)
+                    .ok_or("Run fallow dead-code --quiet with the same --config value.")
+            };
             push_ready_project_checks(
                 &mut checks,
                 &root,
                 &project,
                 &run.plugin_readiness(),
+                cache_repair,
                 discover_companion,
             );
         }
@@ -192,6 +203,7 @@ fn push_ready_project_checks<F>(
     root: &Path,
     project: &ReadyProject,
     configured_plugin_diagnostics: &[fallow_config::ConfiguredPluginDiagnostic],
+    cache_repair: impl Fn() -> Result<DoctorRemediation, &'static str>,
     discover_companion: &F,
 ) where
     F: Fn(&Path) -> Result<(), String>,
@@ -265,8 +277,21 @@ fn push_ready_project_checks<F>(
     ));
 
     checks.push(dependencies_check(root));
-    checks.push(cache_check(&project.config));
-    checks.push(graph_cache_check(&project.config));
+    for mut check in [
+        cache_check(&project.config),
+        graph_cache_check(&project.config),
+    ] {
+        if check.status == DoctorCheckStatus::Warn {
+            match cache_repair() {
+                Ok(repair) => check.remediation = Some(repair),
+                Err(hint) => {
+                    check.message.push(' ');
+                    check.message.push_str(hint);
+                }
+            }
+        }
+        checks.push(check);
+    }
     checks.push(mutation_runner_check(root, project.config.mutation.runner));
 }
 
@@ -337,7 +362,7 @@ fn cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
                 "Extraction cache{size} would not be reused: {}. The next run parses every file.",
                 rejection.describe()
             ),
-            Some(remediation("fallow dead-code --quiet", false)),
+            None,
         ),
     }
 }
@@ -388,7 +413,7 @@ fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
                  and rebuilds the graph.",
                 rejection.describe()
             ),
-            Some(remediation("fallow dead-code --quiet", false)),
+            None,
         ),
     }
 }
@@ -914,7 +939,9 @@ fn build_output(checks: Vec<DoctorCheck>) -> DoctorOutput {
 
 fn relative_path(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root).ok().map(|path| {
-        let relative = path.to_string_lossy().replace('\\', "/");
+        let relative = path
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         if relative.is_empty() {
             ".".to_string()
         } else {
@@ -1162,6 +1189,85 @@ mod tests {
             .expect("dependencies check is reported");
         assert_eq!(dependencies.status, DoctorCheckStatus::Pass);
         assert_eq!(output.status, DoctorStatus::Pass);
+    }
+
+    #[test]
+    fn cache_repairs_use_the_inspected_config() {
+        let temp = tempfile::tempdir().expect("create fixture");
+        let root = temp.path();
+        let path = root.join("ci.json");
+        std::fs::write(&path, r#"{"cache":{"dir":"cache-ci"}}"#).expect("write config");
+        let cache = root.join("cache-ci");
+        std::fs::create_dir(&cache).expect("create cache directory");
+        for blob in ["cache.bin", "graph-cache.bin"] {
+            std::fs::write(cache.join(blob), b"invalid cache").expect("write corrupt cache");
+        }
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root,
+                config_path: Some(&path),
+            },
+            &|_| Err("missing companion".to_owned()),
+        );
+        for id in [DoctorCheckId::Cache, DoctorCheckId::GraphCache] {
+            let check = output
+                .checks
+                .iter()
+                .find(|check| check.id == id)
+                .expect("cache check");
+            assert_eq!(check.status, DoctorCheckStatus::Warn);
+            assert_eq!(
+                check
+                    .remediation
+                    .as_ref()
+                    .expect("cache repair command")
+                    .command,
+                "fallow dead-code --quiet --config=ci.json"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remediation_omits_a_config_with_a_literal_backslash() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let config = temp.path().join(r"ci\settings.json");
+        std::fs::write(&config, "{}").expect("write config");
+        assert!(remediation_with_config("fallow dead-code", temp.path(), Some(&config)).is_none());
+    }
+
+    #[test]
+    fn a_cache_repair_keeps_manual_cache_and_config_inputs() {
+        let temp = tempfile::tempdir().expect("create fixture");
+        let root = temp.path();
+        let config = root.join("CI checks.json");
+        std::fs::write(&config, r#"{"cache":{"dir":"configured"}}"#).expect("write config");
+        for override_dir in [None, Some(root.join("override"))] {
+            let cache = override_dir
+                .clone()
+                .unwrap_or_else(|| root.join("configured"));
+            std::fs::create_dir_all(&cache).expect("create cache directory");
+            std::fs::write(cache.join("cache.bin"), b"invalid cache").expect("write corrupt cache");
+            let output = run_doctor_with_cache_dir_and_discovery(
+                &DoctorOptions {
+                    root,
+                    config_path: Some(&config),
+                },
+                override_dir.as_deref(),
+                &|_| Err("missing companion".to_owned()),
+            );
+            let check = output
+                .checks
+                .iter()
+                .find(|check| check.id == DoctorCheckId::Cache)
+                .expect("cache check");
+            assert_eq!(check.status, DoctorCheckStatus::Warn);
+            assert!(check.remediation.is_none());
+            assert!(check.message.contains("--config"));
+            if override_dir.is_some() {
+                assert!(check.message.contains("FALLOW_CACHE_DIR"));
+            }
+        }
     }
 
     /// A project with no cache yet is not a problem; only a cache that exists
