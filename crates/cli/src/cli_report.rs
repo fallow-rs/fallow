@@ -143,7 +143,7 @@ pub fn run_report(
         view: evidence.view(),
         survivors: &survivors,
     });
-    let resolver = match saved_group_resolver(saved.grouped_by, root, report_config, output) {
+    let resolver = match saved_group_resolver(kind, saved.grouped_by, root, report_config, output) {
         Ok(resolver) => resolver,
         Err(code) => return code,
     };
@@ -1178,11 +1178,20 @@ fn parse_group_by_mode(value: &str) -> Option<GroupByMode> {
 }
 
 fn saved_group_resolver(
+    kind: EnvelopeKind,
     grouped_by: Option<GroupByMode>,
     root: &Path,
     report_config: ConfigFlags<'_>,
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
+    if kind == EnvelopeKind::Health
+        && matches!(
+            output,
+            OutputFormat::Markdown | OutputFormat::GithubAnnotations | OutputFormat::GithubSummary
+        )
+    {
+        return Ok(None);
+    }
     let explicit = report_config.explicit(root);
     // The discovered config is loaded only when the explicit config gives no
     // CODEOWNERS path, as before. The explicit config, when it loads, is the

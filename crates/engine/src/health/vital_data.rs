@@ -368,11 +368,41 @@ fn load_health_trend_baseline(
     if !incompatible.is_empty() {
         return Err(HealthError::message(
             format!(
-                "health trend snapshot has an incompatible analysis identity ({}); regenerate it with `fallow health --save-snapshot --type-aware` using the same semantic options",
-                incompatible.join(", ")
+                "health trend snapshot has an incompatible analysis identity ({}). {}",
+                incompatible.join(", "),
+                trend_snapshot_repair(opts),
             ),
             2,
         ));
     }
     Ok(Some(baseline))
+}
+
+fn trend_snapshot_repair(opts: &HealthExecutionOptions<'_>) -> String {
+    use crate::shell_quote::shell_quote;
+    use crate::write_guard::{WriteScope, shared_dirs};
+    use fallow_types::semantic::SemanticAnalysisMode;
+
+    let mode = match opts.analysis_identity.mode {
+        SemanticAnalysisMode::Syntactic => "--no-type-aware",
+        SemanticAnalysisMode::TypeAware => "--type-aware",
+    };
+    let root = shell_quote(&opts.root.to_string_lossy());
+    let health = format!("fallow health --root {root} {mode}");
+    let mut save = format!("{health} --save-snapshot");
+    if let Some(path) = opts.trend_from {
+        let allowed = std::env::current_dir().is_ok_and(|cwd| {
+            WriteScope::new(opts.root, &cwd, shared_dirs())
+                .is_ok_and(|scope| scope.check("--save-snapshot", path, &cwd).is_none())
+        });
+        if !allowed {
+            return format!(
+                "Save a snapshot in the project with `{save}`. Then compare with `{health} --trend`. Use the same analysis options for both commands."
+            );
+        }
+        let path = path.to_string_lossy();
+        save.push(if path.starts_with('-') { '=' } else { ' ' });
+        save.push_str(&shell_quote(&path));
+    }
+    format!("Regenerate the snapshot with `{save}` using the same analysis options.")
 }

@@ -1488,6 +1488,33 @@ const SAVE_FLAGS: [(&str, &str); 3] = [
     ("health", "--save-snapshot"),
 ];
 
+#[test]
+fn external_trend_snapshot_repair_uses_the_project_history() {
+    let (dir, root) = write_confinement_project();
+    let run = |args: &[&str]| run_fallow_from(dir.path(), &root, args);
+    let saved = run(&["health", "--save-snapshot", "baseline.json", "--quiet"]);
+    assert!(matches!(saved.code, 0 | 1), "{}", saved.stderr);
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("baseline.json")).unwrap()).unwrap();
+    snapshot["analysis_identity"]["mode"] = "type-aware".into();
+    let external = dir.path().join("external.json");
+    std::fs::write(&external, snapshot.to_string()).unwrap();
+
+    let trend = run(&[
+        "health",
+        "--trend-from",
+        external.to_str().unwrap(),
+        "--quiet",
+    ]);
+    assert_eq!(trend.code, 2, "{}", trend.stderr);
+    assert!(
+        trend.stderr.contains(" --save-snapshot`"),
+        "{}",
+        trend.stderr
+    );
+    assert!(trend.stderr.contains(" --trend`"), "{}", trend.stderr);
+}
+
 /// A save path outside the project root fails with exit 2 before any work,
 /// for a relative `../` path and for an absolute path.
 #[test]
