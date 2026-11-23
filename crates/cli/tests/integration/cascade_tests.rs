@@ -495,6 +495,26 @@ fn trend_shows_no_dead_export_change_across_the_flag() {
     }
 }
 
+/// A `fallow-core` test can leave a `node_modules` link to a workspace
+/// package in a shared fixture, so the copy must leave symlinks out.
+#[cfg(unix)]
+#[test]
+fn fixture_copy_skips_a_symlink_to_a_folder() {
+    let source = tempfile::tempdir().expect("source dir");
+    let package = source.path().join("packages/core");
+    std::fs::create_dir_all(&package).expect("package dir");
+    std::fs::write(package.join("index.ts"), "export {};\n").expect("source file");
+    std::fs::create_dir_all(source.path().join("node_modules")).expect("node_modules dir");
+    std::os::unix::fs::symlink(&package, source.path().join("node_modules/core"))
+        .expect("package link");
+
+    let target = tempfile::tempdir().expect("target dir");
+    super::common::copy_fixture_tree(source.path(), target.path());
+
+    assert!(target.path().join("packages/core/index.ts").is_file());
+    assert!(!target.path().join("node_modules/core").exists());
+}
+
 /// Tests on the shared fixture write `.fallow` cache files while other tests
 /// copy that fixture, so the copy must leave the cache out.
 #[test]
