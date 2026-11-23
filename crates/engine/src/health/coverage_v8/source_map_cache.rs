@@ -118,7 +118,7 @@ fn virtual_source_candidates(url: &Url) -> Vec<PathBuf> {
         .host_str()
         .map(|host| host.trim_matches('/'))
         .filter(|host| !host.is_empty() && !matches!(*host, "." | "_N_E"));
-    let decoded = decoded_virtual_path(raw);
+    let decoded = crate::url_path::decode_path(raw);
     let mut candidates = Vec::new();
     for path in [decoded.as_deref(), Some(raw)].into_iter().flatten() {
         if let Some(namespace) = namespace {
@@ -133,22 +133,6 @@ fn push_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !candidate.as_os_str().is_empty() && !candidates.contains(&candidate) {
         candidates.push(candidate);
     }
-}
-
-/// The path of a virtual source with its `%XX` escapes decoded. `None` when
-/// a decoded segment is not UTF-8 or holds a path separator, so an escape
-/// cannot name a file outside its segment.
-fn decoded_virtual_path(path: &str) -> Option<String> {
-    let segments = path
-        .split('/')
-        .map(|segment| {
-            let decoded = percent_encoding::percent_decode_str(segment)
-                .decode_utf8()
-                .ok()?;
-            (!decoded.contains(['/', '\\'])).then(|| decoded.into_owned())
-        })
-        .collect::<Option<Vec<String>>>()?;
-    Some(segments.join("/"))
 }
 
 fn resolve_virtual_candidate(candidates: &[PathBuf], base_dir: &Path) -> Option<PathBuf> {

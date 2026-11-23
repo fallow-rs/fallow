@@ -365,6 +365,54 @@ fn the_firefox_frame_form_resolves_the_same_way() {
 }
 
 #[test]
+fn browser_frame_preserves_a_scoped_package_path() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "run@file:///repo/node_modules/@scope/lib/index.js:7:2",
+        &["--format", "json"],
+    );
+    let value = parse_json(&output);
+    let frame = &value["frames"][0];
+    assert_eq!(frame["origin"], "node_modules");
+    assert_eq!(frame["function"], "run");
+    assert_eq!(frame["file"], "/repo/node_modules/@scope/lib/index.js");
+}
+
+#[test]
+fn browser_frame_matches_a_dev_server_url_to_project_source() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "at loadUser (http://localhost:5173/src/services/%75ser.ts?t=1700000000#reload:2:32)",
+        &["--format", "json"],
+    );
+    let value = parse_json(&output);
+    let frame = &value["frames"][0];
+    assert_eq!(frame["resolution"], "resolved");
+    assert_eq!(frame["candidates"][0]["file"], "src/services/user.ts");
+}
+
+#[test]
+fn browser_frames_keep_opaque_url_paths_and_relative_frame_names() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "load@https://example.test/api/a%2Fb.js:4:2\nonload@https://example.test/?v=123:4:2\nload@tag@src/task.ts:2:1",
+        &["--format", "json"],
+    );
+    let value = parse_json(&output);
+    let frames = &value["frames"];
+    assert_eq!(frames[0]["file"], "/api/a%2Fb.js");
+    assert_eq!(frames[1]["file"], "/");
+    assert_eq!(frames[2]["function"], "load@tag");
+    assert_eq!(frames[2]["origin"], "in_project");
+}
+
+#[test]
 fn repeated_runs_return_a_byte_identical_payload() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
