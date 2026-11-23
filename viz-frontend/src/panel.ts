@@ -966,27 +966,30 @@ const healthFileSection = (state: AppState, file: VizFile, fileIdx: number): HTM
   return section;
 };
 
-/**
- * The first thing the Overview tab says about a file: every lens that
- * flags it, worst first, with the plain reason. Each row opens that lens's
- * section in the panel.
- */
+/** Findings for the selected file in the Overview tab, highest severity first. */
+export const fileFindingRows = (
+  state: AppState,
+  fileIdx: number,
+): Array<{ lens: (typeof LENSES)[number]; row: RankRow }> =>
+  LENSES.flatMap((lens) => {
+    if (lens.id === "overview" || analysisAvailability(state.data, lens.id).state !== "complete")
+      return [];
+    const row = rankRowsForLens(state, lens.id).rows.find(
+      (candidate) =>
+        candidate.fileIndex === fileIdx ||
+        (candidate.clone !== undefined &&
+          state.data.files[fileIdx].clone_groups?.includes(candidate.clone)),
+    );
+    return row ? [{ lens, row }] : [];
+  }).toSorted((left, right) => (right.row.level ?? 1) - (left.row.level ?? 1));
+
 const fileFindingsSummary = (state: AppState, fileIdx: number): HTMLElement => {
   const section = sectionEl("Findings");
-  const found: Array<{ lens: (typeof LENSES)[number]; row: RankRow }> = [];
-  for (const lens of LENSES) {
-    if (lens.id === "overview") continue;
-    if (analysisAvailability(state.data, lens.id as AnalysisId).state !== "complete") continue;
-    const row = rankRowsForLens(state, lens.id).rows.find(
-      (candidate) => candidate.fileIndex === fileIdx,
-    );
-    if (row) found.push({ lens, row });
-  }
+  const found = fileFindingRows(state, fileIdx);
   if (found.length === 0) {
     section.appendChild(el("p", "sev-ok", "No findings in this file"));
     return section;
   }
-  found.sort((left, right) => (right.row.level ?? 1) - (left.row.level ?? 1));
   const list = el("ul", "file-findings");
   for (const { lens, row } of found) {
     const item = el("li", `ff-row lvl-${row.level ?? 1}`);

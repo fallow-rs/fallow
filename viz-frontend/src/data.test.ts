@@ -394,6 +394,15 @@ describe("dupRatio", () => {
 });
 
 describe("legendText", () => {
+  it("shows a package cycle when no file cycles or boundary violations exist", () => {
+    const d = data();
+    expect(legendText("architecture", d, "map")).toContain("No violations or loops");
+    d.architecture.findings.push({ kind: "package-cycle", title: "Package cycle", actions: [] });
+    expect(legendText("architecture", d, "map")).toContain(
+      "Red marks a forbidden import or a loop",
+    );
+  });
+
   it("explains the neutral map when a finding lens is clean", () => {
     expect(legendText("unused", data(), "graph")).toContain("No findings");
   });

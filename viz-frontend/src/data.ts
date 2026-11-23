@@ -824,13 +824,18 @@ export const lensFindingLevel = (
   }
 };
 
+/** Total architecture findings, including those omitted from the report. */
+export const architectureFindingTotal = (data: VizData): number | null =>
+  Array.isArray(data.architecture?.findings)
+    ? data.architecture.findings.length + (data.architecture.findings_truncated ?? 0)
+    : null;
+
 /**
  * One-line canvas legend for the active lens, shared by both views so
  * their vocabulary cannot drift. Zero-findings lenses explain the
  * neutral map instead of advertising absent colors.
  */
 export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): string => {
-  const summary = data.summary;
   const lensId = lens as string;
   if (lensId === "overview") {
     return view === "map"
@@ -855,13 +860,13 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
       const reason = availability.reason ?? `${linesTitle(analysisId)} analysis is unavailable.`;
       return `${reason} The map keeps its neutral colors.`;
     }
-    let count = availability.count;
     if (analysisId === "architecture") {
-      count += summary.circular_deps;
+      const count = architectureFindingTotal(data) ?? data.summary.boundary_violations;
       if (count === 0) return "Each color is an architecture layer. No violations or loops.";
       return "Each color is an architecture layer. Red marks a forbidden import or a loop.";
     }
-    if (count === 0) return "No findings in this lens, so the map keeps its neutral colors.";
+    if (availability.count === 0)
+      return "No findings in this lens, so the map keeps its neutral colors.";
   }
   if (analysisId === null) {
     return "No findings in this lens, so the map keeps its neutral colors.";
