@@ -3641,7 +3641,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
 
     let result = execute_audit(&opts).expect("audit should execute");
     let health = result.health.expect("health should run for changed files");
-    let timings = health.timings.expect("performance timings should be kept");
+    let timings = health.timings.as_ref().expect("performance timings");
     assert!(timings.discover_ms.abs() < f64::EPSILON);
     assert!(timings.parse_ms.abs() < f64::EPSILON);
     assert!(
