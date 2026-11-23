@@ -25239,7 +25239,7 @@
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
         "docs": "https://fallow.tools/docs/rules/react-router-open-redirect/"
       },
-      "display_label": "React router open redirect sink"
+      "display_label": "React Router open redirect sink"
     },
     {
       "id": "dom-document-write",
