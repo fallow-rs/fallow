@@ -6,7 +6,7 @@
     reason = "integration tests keep fixture setup concise"
 )]
 
-use crate::common::{parse_json, run_fallow};
+use crate::common::{parse_json, run_fallow, run_fallow_in_root};
 use serde_json::Value;
 
 const FIXTURE: &str = "trace-chain-depth";
@@ -101,4 +101,105 @@ fn ambiguous_star_name_gives_empty_chains() {
     assert_eq!(hops(&value, "callers"), Vec::<String>::new());
     assert_eq!(hops(&value, "callees"), Vec::<String>::new());
     assert_eq!(value["unresolved_callees"], serde_json::json!([]));
+}
+
+#[test]
+fn callees_stop_at_side_effect_only_imports() {
+    let value = parse_json(&run_fallow(
+        "trace",
+        "boundary-type-only",
+        &[
+            "src/ui/side_effect.ts:sideEffected",
+            "--callees",
+            "--depth",
+            "2",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(hops(&value, "callees"), ["1 src/shared/utils.ts helper"]);
+}
+
+#[test]
+fn callees_report_imported_calls_without_internal_edges() {
+    let value = parse_json(&run_fallow(
+        "trace",
+        "dev-dep-in-prod",
+        &[
+            "src/index.ts:load",
+            "--callees",
+            "--depth",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(hops(&value, "callees"), ["1 src/lib/pad.ts pad"]);
+    assert_eq!(
+        value["unresolved_callees"],
+        serde_json::json!([{"callee": "parse", "reason": "local-or-global"}])
+    );
+}
+
+fn through_barrel(declaration: &str) -> Value {
+    let project = tempfile::tempdir().unwrap();
+    for (file, source) in [
+        ("package.json", r#"{"name":"trace-barrel","type":"module"}"#),
+        (
+            "main.ts",
+            "import { x } from './barrel'; export function run() { x() }",
+        ),
+        ("barrel.ts", declaration),
+        (
+            "a.ts",
+            "import { foo } from './b'; export function x() { foo() } export { x as original }",
+        ),
+        ("b.ts", "export function foo() {}"),
+    ] {
+        std::fs::write(project.path().join(file), source).unwrap();
+    }
+    parse_json(&run_fallow_in_root(
+        "trace",
+        project.path(),
+        &[
+            "main.ts:run",
+            "--callees",
+            "--depth",
+            "3",
+            "--format",
+            "json",
+        ],
+    ))
+}
+
+#[test]
+fn callees_follow_named_barrel_re_exports() {
+    let trace = through_barrel("export { original as x } from './a'");
+    assert_eq!(
+        hops(&trace, "callees"),
+        ["1 barrel.ts x", "2 a.ts x", "3 b.ts foo"]
+    );
+    assert_eq!(trace["callees"][1]["imported_as"], "original");
+}
+
+#[test]
+fn callees_follow_star_barrel_re_exports() {
+    let trace = through_barrel("export * from './a'");
+    assert_eq!(
+        hops(&trace, "callees"),
+        ["1 barrel.ts x", "2 a.ts *", "3 b.ts foo"]
+    );
+}
+
+#[test]
+fn callees_count_a_binding_imported_and_forwarded_by_one_barrel_once() {
+    let trace = through_barrel("import { x } from './a'; export { x } from './a'");
+    assert_eq!(
+        hops(&trace, "callees"),
+        ["1 barrel.ts x", "2 a.ts x", "3 b.ts foo"]
+    );
 }

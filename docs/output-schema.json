@@ -22491,7 +22491,7 @@
         },
         "local_name": {
           "type": "string",
-          "description": "The local binding name in the file at this hop."
+          "description": "The local import name, or the forwarded export name for a re-export\n(`*` for an unaliased star re-export)."
         },
         "type_only": {
           "type": "boolean",
@@ -22534,7 +22534,7 @@
         {
           "type": "string",
           "const": "local-or-global",
-          "description": "A bare identifier call with no matching import binding (a same-module\nlocal function, a global, or a re-bound callee)."
+          "description": "A call through a bare identifier with no matching import-symbol edge.\nThis includes local bindings imported from external packages."
         },
         {
           "type": "string",
