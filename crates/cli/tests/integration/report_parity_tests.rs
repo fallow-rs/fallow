@@ -365,14 +365,23 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
             String::from_utf8_lossy(&direct.stderr)
         );
 
+        let replay_root = if command == Some("health")
+            && matches!(
+                *format,
+                "markdown" | "github-summary" | "github-annotations"
+            ) {
+            saved_dir.path()
+        } else {
+            root
+        };
         let saved = run(
-            root,
+            replay_root,
             &[
                 "report".to_string(),
                 "--from".to_string(),
                 saved_path.display().to_string(),
                 "--root".to_string(),
-                root.display().to_string(),
+                replay_root.display().to_string(),
                 "--quiet".to_string(),
                 "--format".to_string(),
                 format.to_string(),
