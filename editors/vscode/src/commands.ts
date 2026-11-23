@@ -276,19 +276,6 @@ export const execFallow = (
     });
   });
 
-// Concurrent runs can share a probe. A later run may find a replacement CLI at the same path.
-const pendingVersions = new Map<string, Promise<string | null>>();
-
-const probeCliVersion = (binaryPath: string): Promise<string | null> => {
-  const cached = pendingVersions.get(binaryPath);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const version = getBinaryVersion(binaryPath).finally(() => pendingVersions.delete(binaryPath));
-  pendingVersions.set(binaryPath, version);
-  return version;
-};
-
 /**
  * Resolve the fallow CLI to actually run, self-healing when the binary found on
  * PATH or in `node_modules` is older than the extension itself.
@@ -303,9 +290,8 @@ const probeCliVersion = (binaryPath: string): Promise<string | null> => {
  * resolved CLI is always used as-is: this never downgrades, and with
  * auto-download off the stale binary is kept so the caller can degrade loudly.
  *
- * Returns the binary to spawn together with its probed version, so the caller
- * forwards exactly the version-gated flags this binary accepts (no probe/spawn
- * skew).
+ * Probe each selected binary directly. A download can replace the executable
+ * at the same path while another command is still reading its old version.
  */
 export const resolveCliForRun = async (
   context: vscode.ExtensionContext,
@@ -314,10 +300,10 @@ export const resolveCliForRun = async (
   const found = await findCliBinary(context);
   if (!found) {
     const downloaded = await resolveCliBinary(context, outputChannel);
-    return { binary: downloaded, version: downloaded ? await probeCliVersion(downloaded) : null };
+    return { binary: downloaded, version: downloaded ? await getBinaryVersion(downloaded) : null };
   }
 
-  const version = await probeCliVersion(found);
+  const version = await getBinaryVersion(found);
   const required = getExtensionVersion();
   const tooOld = required !== null && version !== null && compareVersions(version, required) < 0;
 
@@ -326,7 +312,7 @@ export const resolveCliForRun = async (
       (await getInstalledCliPath(context, outputChannel)) ??
       (await downloadCliBinary(context, outputChannel));
     if (managed) {
-      const managedVersion = await probeCliVersion(managed);
+      const managedVersion = await getBinaryVersion(managed);
       if (managed !== found || managedVersion !== version)
         outputChannel?.appendLine(
           `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,

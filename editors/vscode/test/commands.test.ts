@@ -143,12 +143,12 @@ vi.mock("../src/binary-utils.js", async (importOriginal) => ({
 vi.mock("../src/download.js", () => ({
   getInstalledCliPath: vi.fn(() => mockInstalledCli),
   downloadCliBinary: vi.fn(async () => mockDownloadedCli),
-  getBinaryVersion: async (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null,
+  getBinaryVersion: vi.fn(async (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null),
   getExtensionVersion: () => mockExtensionVersion,
 }));
 
 import { window as mockWindow, workspace as mockWorkspace } from "vscode";
-import { downloadCliBinary, getInstalledCliPath } from "../src/download.js";
+import { downloadCliBinary, getBinaryVersion, getInstalledCliPath } from "../src/download.js";
 import {
   execFallow,
   FallowExecError,
@@ -489,6 +489,32 @@ describe("resolveCliForRun", () => {
       return path;
     });
     expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.88.1" });
+  });
+
+  it("reads the downloaded CLI version while a probe of the old executable is pending", async () => {
+    const managed = "/storage/bin/fallow";
+    const local = "/workspace/node_modules/.bin/fallow";
+    mockPathBinary = managed;
+    let finishOldProbe!: (version: string) => void;
+    vi.mocked(getBinaryVersion).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldProbe = resolve;
+        }),
+    );
+    const sidebar = resolveCliForRun(context);
+    await vi.waitFor(() => expect(getBinaryVersion).toHaveBeenCalledWith(managed));
+
+    mockPathBinary = local;
+    mockBinaryVersions = { [local]: "2.86.0" };
+    vi.mocked(downloadCliBinary).mockImplementationOnce(async () => {
+      mockBinaryVersions = { [managed]: "2.88.1" };
+      setImmediate(() => finishOldProbe("2.86.0"));
+      return managed;
+    });
+    const result = await resolveCliForRun(context);
+    await sidebar;
+    expect(result).toEqual({ binary: managed, version: "2.88.1" });
   });
 
   it("uses a resolved CLI at the extension version as-is, without downloading", async () => {
