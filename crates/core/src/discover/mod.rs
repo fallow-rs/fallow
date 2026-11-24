@@ -8,7 +8,7 @@ mod parse_scripts;
 mod production_excludes;
 mod walk;
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use fallow_config::{PackageJson, ResolvedConfig};
 use rustc_hash::FxHashSet;
@@ -29,12 +29,24 @@ pub(crate) use infrastructure::discover_infrastructure_entry_points;
 pub(crate) use orphan_declarations::find_orphan_module_declaration_files;
 pub(crate) use output_entry_source::output_entry_source_file;
 pub(crate) use parse_scripts::CommandRefContext;
+pub use production_excludes::PRODUCTION_EXCLUDE_PATTERNS;
 pub(crate) use walk::discover_files_with_additional_hidden_dirs;
 pub use walk::{
-    DiscoveredSources, HiddenDirMatch, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS,
-    SOURCE_EXTENSIONS, discover_files, discover_files_and_config_candidates,
-    discover_files_config_candidates_and_diagnostics, is_allowed_hidden_dir,
+    DiscoveredSources, HiddenDirMatch, HiddenDirScope, SOURCE_EXTENSIONS, discover_files,
+    discover_files_and_config_candidates, discover_files_config_candidates_and_diagnostics,
+    is_allowed_hidden_dir,
 };
+
+/// The paths of `entries` that a source other than the `entry` config
+/// declares. The root pass collects them before its dedup, which keeps the
+/// manual entry and drops the other source of the same path.
+fn non_manual_paths(entries: &[EntryPoint]) -> FxHashSet<PathBuf> {
+    entries
+        .iter()
+        .filter(|entry| !matches!(entry.source, EntryPointSource::ManualEntry))
+        .map(|entry| entry.path.clone())
+        .collect()
+}
 
 /// Collect package-scoped hidden directory traversal rules for active plugins.
 ///

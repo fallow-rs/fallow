@@ -34,7 +34,7 @@ mod cache_model;
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 mod e2e_tests;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub use fallow_engine::mutation::Operator;
@@ -47,6 +47,17 @@ pub use scheduler::control::split_control_run_failure;
 pub use verdicts::{MAX_VERDICT_INPUT_BYTES, apply_mutation_verdicts, validate_mutation_verdicts};
 
 use crate::AnalysisOptions;
+
+/// Writes `*` to `<cache>/.gitignore` when the cache has no ignore file, so
+/// that the run directory and the saved report never show in `git status`.
+pub(crate) fn ignore_cache_dir(cache_dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
+    let ignore = cache_dir.join(".gitignore");
+    if !ignore.exists() {
+        std::fs::write(ignore, "*\n")?;
+    }
+    Ok(())
+}
 
 /// The code that a mutation run mutates.
 #[derive(Debug, Clone, PartialEq, Eq)]

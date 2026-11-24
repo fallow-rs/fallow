@@ -17,7 +17,9 @@ use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::Value;
 
-use crate::decision_surface::{DependencyAnchor, DependencyChangeKind, DependencyEntry};
+use crate::decision_surface::{
+    DependencyAnchor, DependencyChangeKind, DependencyEntry, dependency_delta_key,
+};
 
 /// The `package.json` sections a dependency entry can live in, in the
 /// precedence order a duplicate name resolves to.
@@ -156,24 +158,6 @@ pub fn dependency_anchors_from_manifests(
         }
     }
     anchors
-}
-
-/// The stable delta key for one dependency entry: `<manifest>::<name>` for an
-/// added entry, `<manifest>::<name>@<from>-><to>` for a bump. The decision
-/// candidate key joins these with `|`, so the brief's `deltas` and the
-/// decision's `signal_key` name the same change.
-#[must_use]
-pub fn dependency_delta_key(
-    manifest: &str,
-    kind: DependencyChangeKind,
-    entry: &DependencyEntry,
-) -> String {
-    match (kind, &entry.from) {
-        (DependencyChangeKind::MajorBump, Some(from)) => {
-            format!("{manifest}::{}@{from}->{}", entry.name, entry.to)
-        }
-        _ => format!("{manifest}::{}", entry.name),
-    }
 }
 
 /// Mirror the dependency anchors onto the brief's `deltas` as stable keys so

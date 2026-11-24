@@ -1019,3 +1019,114 @@ fn resolve_root_prefers_git_toplevel_unless_explicit() {
     assert_eq!(resolve_root(&nested, false), root);
     assert_eq!(resolve_root(&nested, true), nested);
 }
+
+fn write_stale_agents_skill(base: &Path, name: &str) -> std::path::PathBuf {
+    let skill_dir = base.join(".agents/skills").join(name);
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        format!(
+            "---\nname: {name}\n---\n<!-- {MARKER_PREFIX} {MARKER_VERSION} skill=stub version=0.0.1-old -->\nold copy\n"
+        ),
+    )
+    .unwrap();
+    skill_dir
+}
+
+fn assert_refreshed(skill_dir: &Path) {
+    assert_eq!(
+        skill::inspect(skill_dir),
+        skill::SkillState::Managed {
+            flavor: skill::Flavor::Stub,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    );
+}
+
+#[test]
+fn claude_install_refreshes_stale_managed_agents_skill_in_project_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let stale = write_stale_agents_skill(dir.path(), "fallow");
+    let steps = skill::install(&ctx(dir.path(), Mode::Install), &[Harness::Claude]);
+    assert_eq!(
+        step_status(&steps, ".agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    assert_refreshed(&stale);
+    assert!(
+        !dir.path().join(".agents/skills/fallow-setup").exists(),
+        "an absent `.agents` skill must not be created for Claude alone: {steps:?}"
+    );
+}
+
+#[test]
+fn claude_install_refreshes_stale_managed_agents_skill_in_user_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let stale = write_stale_agents_skill(home.path(), "fallow");
+    let user = |dry_run: bool| Ctx {
+        home: Some(home.path().to_path_buf()),
+        user: true,
+        dry_run,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let planned = skill::install(&user(true), &[Harness::Claude]);
+    assert_eq!(
+        step_status(&planned, "~/.agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    assert!(
+        std::fs::read_to_string(stale.join("SKILL.md"))
+            .unwrap()
+            .contains("0.0.1-old"),
+        "a dry run must not write"
+    );
+    let steps = skill::install(&user(false), &[Harness::Claude]);
+    assert_eq!(
+        step_status(&steps, "~/.agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    assert_refreshed(&stale);
+    assert!(!dir.path().join(".agents").exists());
+}
+
+#[test]
+fn claude_install_creates_no_agents_skill_when_none_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let steps = skill::install(&ctx(dir.path(), Mode::Install), &[Harness::Claude]);
+    assert!(
+        steps
+            .iter()
+            .all(|s| !s.path.as_deref().unwrap_or("").starts_with(".agents")),
+        "{steps:?}"
+    );
+    assert!(!dir.path().join(".agents").exists());
+}
+
+#[test]
+fn claude_install_leaves_unmarked_agents_skill_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let skill_dir = dir.path().join(".agents/skills/fallow");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let own = "---\nname: fallow\n---\nmaintainer skill\n";
+    std::fs::write(skill_dir.join("SKILL.md"), own).unwrap();
+    let forced = Ctx {
+        force: true,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let steps = skill::install(&forced, &[Harness::Claude]);
+    assert!(
+        steps
+            .iter()
+            .all(|s| s.path.as_deref() != Some(".agents/skills/fallow")),
+        "{steps:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
+        own
+    );
+}

@@ -12,20 +12,8 @@ use fallow_types::workspace::glob_first_literal_segment;
 use ignore::WalkBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::legacy_glob::should_emit_note_once;
 use super::{ALLOWED_HIDDEN_DIRS, SCRIPT_SCOPE_DENYLIST};
-
-/// Process-wide dedupe of the size-skip / largest-files stderr notes, keyed by a
-/// content-derived string, so combined-mode (`fallow` runs check + dupes +
-/// health, each of which can trigger a source walk) emits each note at most once
-/// per distinct content. Mirrors the workspace-diagnostics `should_emit`
-/// pattern (issue #1086).
-pub(super) fn should_emit_note_once(key: String) -> bool {
-    static EMITTED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
-    EMITTED
-        .get_or_init(|| Mutex::new(FxHashSet::default()))
-        .lock()
-        .map_or(true, |mut set| set.insert(key))
-}
 
 /// A discovered file path paired with its on-disk size in bytes, as collected
 /// by the parallel walker before [`DiscoveredFile`] ids are assigned.
@@ -1160,30 +1148,6 @@ pub const SOURCE_EXTENSIONS: &[&str] = &[
     "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",
 ];
 
-/// Glob patterns for test/dev/story files excluded in production mode.
-pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = &[
-    "**/*.test.*",
-    "**/*.spec.*",
-    "**/*.e2e.*",
-    "**/*.e2e-spec.*",
-    "**/*.bench.*",
-    "**/*.fixture.*",
-    "**/*.stories.*",
-    "**/*.story.*",
-    "**/__tests__/**",
-    "**/__mocks__/**",
-    "**/__snapshots__/**",
-    "**/__fixtures__/**",
-    "**/test-d/**",
-    "**/test/**",
-    "**/tests/**",
-    "*.config.*",
-    "**/.*.js",
-    "**/.*.ts",
-    "**/.*.mjs",
-    "**/.*.cjs",
-];
-
 /// Check if a hidden directory name is on the allowlist.
 pub fn is_allowed_hidden_dir(name: &OsStr) -> bool {
     ALLOWED_HIDDEN_DIRS.iter().any(|&d| OsStr::new(d) == name)
@@ -2017,21 +1981,6 @@ mod tests {
         );
         super::super::production_excludes::build_production_excludes(&config)
             .expect("production mode builds an exclude set")
-    }
-
-    /// `build_production_excludes` drops a pattern that does not compile, so a
-    /// broken pattern would silently stop excluding its files.
-    #[test]
-    fn production_exclude_patterns_all_compile() {
-        for pattern in PRODUCTION_EXCLUDE_PATTERNS {
-            assert!(
-                globset::GlobBuilder::new(pattern)
-                    .literal_separator(true)
-                    .build()
-                    .is_ok(),
-                "production exclude pattern does not compile: {pattern}"
-            );
-        }
     }
 
     #[test]

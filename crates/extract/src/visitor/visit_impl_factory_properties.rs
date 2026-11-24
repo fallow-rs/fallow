@@ -9,9 +9,9 @@ use super::super::{
     ModuleInfoExtractor, SemanticFact,
 };
 use super::unwrap_static_expr;
-use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::visit_factory_returns::object_literal_from_return;
 use super::visit_projections::MAX_PROJECTION_VALUES;
+use super::visit_source_paths::MAX_RECORDED_CHAIN_LINKS;
 use crate::function_body::BodyRef;
 use crate::js_text::JsText;
 

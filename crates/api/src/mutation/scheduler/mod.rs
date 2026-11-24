@@ -45,8 +45,8 @@ use stored::{FirstRun, FirstRuns, job_key, journal_first_run, journal_retry, rec
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
-    ControlVerdict, FailedTest, bounded_test_error, control_fault, first_line,
-    note_control_failures, note_restarted_baseline_failure, parallel_state_hint, sorted_tests,
+    ControlVerdict, FailedTest, control_fault, first_line, note_control_failures,
+    note_restarted_baseline_failure, parallel_state_hint, sorted_tests,
 };
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).

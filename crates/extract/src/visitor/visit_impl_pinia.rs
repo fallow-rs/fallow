@@ -155,6 +155,121 @@ impl<'a> Visit<'a> for SetupBodyReadCollector<'_> {
     }
 }
 
+/// Option-store state keys that a getter or an action reads through
+/// `this.$state`. Pinia exposes each state key on the store, so
+/// `this.$state.key` reads `key`. A `this.$state` value that no key read,
+/// destructure or whole write consumes can reach every state key, so it
+/// credits each key of `state`. It credits no getter or action, because
+/// `$state` holds only the state.
+fn option_store_state_read_through_this(args: &[Argument<'_>]) -> Vec<String> {
+    let Some(Expression::ObjectExpression(options)) = args
+        .get(1)
+        .and_then(Argument::as_expression)
+        .map(unwrap_paren_expr)
+    else {
+        return Vec::new();
+    };
+    let mut collector = ThisStateReadCollector::default();
+    collector.visit_object_expression(options);
+    if collector.escaped {
+        return option_store_state_keys(options);
+    }
+    let mut keys: Vec<String> = collector.keys.into_iter().collect();
+    keys.sort_unstable();
+    keys
+}
+
+fn option_store_state_keys(options: &ObjectExpression<'_>) -> Vec<String> {
+    let mut keys = Vec::new();
+    for prop in &options.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && prop.key.static_name().is_some_and(|name| name == "state")
+            && let Some(state_obj) = state_returned_object(&prop.value)
+        {
+            let mut members = Vec::new();
+            collect_store_member_keys(state_obj, &mut members);
+            keys.extend(members.into_iter().map(|member| member.name));
+        }
+    }
+    keys
+}
+
+/// The span start of a `this.$state` expression.
+fn this_state_start(expr: &Expression<'_>) -> Option<u32> {
+    match unwrap_paren_expr(expr) {
+        Expression::StaticMemberExpression(member) if is_this_state(member) => {
+            Some(member.span.start)
+        }
+        _ => None,
+    }
+}
+
+fn is_this_state(member: &StaticMemberExpression<'_>) -> bool {
+    member.property.name == PINIA_STATE_PROPERTY
+        && matches!(member.object, Expression::ThisExpression(_))
+}
+
+/// Collect the state keys that an option store reads through `this.$state`.
+/// A parent node consumes its `this.$state` child before the walk reaches the
+/// child, so `named_uses` holds each consumed child when the child is visited.
+#[derive(Default)]
+struct ThisStateReadCollector {
+    keys: FxHashSet<String>,
+    named_uses: FxHashSet<u32>,
+    escaped: bool,
+}
+
+impl<'a> Visit<'a> for ThisStateReadCollector {
+    fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        if let Some(start) = this_state_start(&expr.object) {
+            self.named_uses.insert(start);
+            self.keys.insert(expr.property.name.to_string());
+        }
+        if is_this_state(expr) && !self.named_uses.contains(&expr.span.start) {
+            self.escaped = true;
+        }
+        walk::walk_static_member_expression(self, expr);
+    }
+
+    fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Some(start) = this_state_start(&expr.object)
+            && let Some(key) = expr.static_property_name()
+        {
+            self.named_uses.insert(start);
+            self.keys.insert(key.text().into_owned());
+        }
+        walk::walk_computed_member_expression(self, expr);
+    }
+
+    /// Pinia applies `this.$state = { ... }` as a patch, and the write reads
+    /// no key.
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if expr.operator == AssignmentOperator::Assign
+            && let AssignmentTarget::StaticMemberExpression(member) = &expr.left
+            && is_this_state(member)
+        {
+            self.named_uses.insert(member.span.start);
+        }
+        walk::walk_assignment_expression(self, expr);
+    }
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        if let BindingPattern::ObjectPattern(pattern) = &decl.id
+            && pattern.rest.is_none()
+            && let Some(start) = decl.init.as_ref().and_then(this_state_start)
+            && let Some(keys) = pattern
+                .properties
+                .iter()
+                .map(|prop| prop.key.static_name().map(|name| name.text().into_owned()))
+                .collect::<Option<Vec<_>>>()
+        {
+            self.named_uses.insert(start);
+            self.keys.extend(keys);
+        }
+        walk::walk_variable_declarator(self, decl);
+    }
+}
+
 fn harvest_option_store(obj: &ObjectExpression<'_>) -> Vec<MemberInfo> {
     let mut members = Vec::new();
     for prop in &obj.properties {
@@ -254,6 +369,12 @@ impl ModuleInfoExtractor {
             && is_define_store_callee(&call.callee)
         {
             if let Some(members) = harvest_define_store_members(&call.arguments) {
+                for member in option_store_state_read_through_this(&call.arguments) {
+                    self.member_accesses.push(MemberAccess {
+                        object: id.name.to_string(),
+                        member,
+                    });
+                }
                 self.store_member_decls.insert(id.name.to_string(), members);
             }
             for member in setup_store_members_read_in_body(&call.arguments) {

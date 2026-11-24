@@ -1314,7 +1314,7 @@
       "description": "The test runner of `fallow mutation`.",
       "oneOf": [
         {
-          "description": "Detect the runner from the project: the `vitest` dependency, the\ntest module that the test files import, a Bun file at the root, or a\n`node --test` script.",
+          "description": "Detect the runner from the project: the `vitest` dependency, the\ntest module that the test files import, the `vite-plus` dependency, a\nBun file at the root, or a `node --test` script.",
           "type": "string",
           "const": "auto"
         },

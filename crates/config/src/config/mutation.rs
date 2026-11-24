@@ -6,8 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum MutationRunner {
     /// Detect the runner from the project: the `vitest` dependency, the
-    /// test module that the test files import, a Bun file at the root, or a
-    /// `node --test` script.
+    /// test module that the test files import, the `vite-plus` dependency, a
+    /// Bun file at the root, or a `node --test` script.
     #[default]
     Auto,
     /// Vitest 4.1 to 5 from the project `node_modules`.

@@ -6,24 +6,13 @@
 //! `.gitignore` with `*`, so the saved report never makes the worktree dirty.
 //! `fallow mutation inspect` reads this file when the caller names no report.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::analysis_context::resolve_programmatic_analysis_context;
 use crate::{AnalysisOptions, ProgrammaticError};
 
 /// The file name of the saved report below `<cache dir>/mutation`.
 const LAST_REPORT_FILE: &str = "last-report.json";
-
-/// Writes `*` to `<cache>/.gitignore` when the cache has no ignore file, so
-/// that the run directory and the saved report never show in `git status`.
-pub fn ignore_cache_dir(cache_dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(cache_dir)?;
-    let ignore = cache_dir.join(".gitignore");
-    if !ignore.exists() {
-        std::fs::write(ignore, "*\n")?;
-    }
-    Ok(())
-}
 
 fn cache_error(message: String) -> ProgrammaticError {
     ProgrammaticError::new(message, 2).with_code("FALLOW_MUTATION_CACHE_WRITE_FAILED")
@@ -93,7 +82,7 @@ pub fn save_last_mutation_report(
     report: &serde_json::Value,
 ) -> Result<PathBuf, ProgrammaticError> {
     let cache_dir = cache_dir(analysis)?;
-    ignore_cache_dir(&cache_dir).map_err(|error| cache_error(error.to_string()))?;
+    super::ignore_cache_dir(&cache_dir).map_err(|error| cache_error(error.to_string()))?;
     let dir = cache_dir.join("mutation");
     std::fs::create_dir_all(&dir).map_err(|error| cache_error(error.to_string()))?;
     let bytes = serde_json::to_vec(report)
