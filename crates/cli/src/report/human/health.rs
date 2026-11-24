@@ -1130,27 +1130,6 @@ fn rule_full(id: &str) -> Option<String> {
     crate::explain::rule_by_id(id).map(|rule| rule.full.to_string())
 }
 
-/// Format `seconds` as a human-readable window label like "12 min" or "6 h".
-///
-/// Used by both the terminal and markdown renderers so a multi-day window
-/// consistently reads as "N d" in both surfaces instead of diverging to
-/// "N h" in one of them.
-pub(in crate::report) fn format_window(seconds: u64) -> String {
-    if seconds < 60 {
-        return format!("{seconds} s");
-    }
-    let minutes = seconds / 60;
-    if minutes < 120 {
-        return format!("{minutes} min");
-    }
-    let hours = minutes / 60;
-    if hours < 48 {
-        format!("{hours} h")
-    } else {
-        format!("{} d", hours / 24)
-    }
-}
-
 pub fn render_health_score(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     let Some(ref hs) = report.health_score else {
         return;

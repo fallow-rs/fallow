@@ -11,6 +11,12 @@ use crate::setup_hooks::symlink_guard::{
 };
 use crate::state_file::read_optional_bytes;
 
+/// `path` relative to `root` when it is below the root, else in full.
+pub(super) fn display_hook_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
+}
+
 /// [`refuse_outside_link`] for a Git hook in the work tree, such as a
 /// `core.hooksPath` of `.githooks`. A hook under `.git`, or in the common
 /// Git directory of a linked worktree, skips this check: a clone cannot
@@ -31,8 +37,8 @@ pub(super) fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), ExitCo
     eprintln!(
         "Error: {}",
         refusal_message(
-            &super::display_hook_path(root, path),
-            &super::display_hook_path(root, &link)
+            &display_hook_path(root, path),
+            &display_hook_path(root, &link)
         )
     );
     Err(exit_invalid_input())
@@ -48,7 +54,7 @@ pub(super) fn ensure_gitignore(root: &Path) {
     if let Some(link) = symlinked_component(root, &gitignore_path) {
         eprintln!(
             "Warning: Did not update .gitignore: {} {}; {}.",
-            super::display_hook_path(root, &link),
+            display_hook_path(root, &link),
             OUTSIDE_LINK,
             OUTSIDE_LINK_REMEDY
         );

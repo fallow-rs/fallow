@@ -55,8 +55,6 @@ use fallow_types::output_dead_code::{
 use fallow_types::results::ConstantParameterFinding;
 use fallow_types::results::{AnalysisResults, PolicyViolationSeverity, StaleSuppression};
 
-use crate::error_severity::promote_warns_to_errors;
-
 fn gate(severity: Severity) -> Option<EffectiveSeverity> {
     match severity {
         Severity::Error => Some(EffectiveSeverity::Error),
@@ -387,12 +385,12 @@ pub fn findings_without_severity(mut results: AnalysisResults) -> usize {
 /// Counted warnings become errors in every CI format. Advisory component
 /// health signals retain their saved severity. When a missing type-aware
 /// sidecar capped the refinable rules of `config`, a finding of these kinds
-/// stays `warn`: the strict rules of [`crate::error_severity::strict_rules`]
+/// stays `warn`: the strict rules of [`strict_rules`]
 /// decide which findings are raised.
 pub fn promote_effective_warns(results: &mut AnalysisResults, config: &ResolvedConfig) {
     let strict = config
         .semantic_refinable_capped
-        .then(|| crate::error_severity::strict_rules(config));
+        .then(|| strict_rules(config));
     let capped = strict
         .as_ref()
         .map(|rules| SeveritySource::new(rules, Some(config), true));
@@ -792,6 +790,87 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unproduced_catch_tags)
         || tally.add(unused_server_actions)
         || tally.add(unused_load_data_keys);
+}
+
+/// The rules of `config` for a strict (`--fail-on-issues`) run.
+///
+/// Every `warn` rule is `error`, except a rule that a missing type-aware
+/// sidecar capped at `warn` (see
+/// [`ResolvedConfig::cap_semantic_refinable_rules`]).
+#[must_use]
+pub fn strict_rules(config: &ResolvedConfig) -> RulesConfig {
+    let mut rules = config.rules.clone();
+    promote_warns_to_errors(&mut rules);
+    config.apply_semantic_refinable_cap(&mut rules);
+    rules
+}
+
+/// Promote all `Warn` severities to `Error` for a single run.
+pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
+    for rule in [
+        &mut rules.unused_files,
+        &mut rules.unused_exports,
+        &mut rules.unused_types,
+        &mut rules.private_type_leaks,
+        &mut rules.deprecated_exports_in_use,
+        &mut rules.unused_dependencies,
+        &mut rules.unused_dev_dependencies,
+        &mut rules.unused_optional_dependencies,
+        &mut rules.unused_enum_members,
+        &mut rules.unused_class_members,
+        &mut rules.unused_namespace_members,
+        &mut rules.unused_protected_class_members,
+        &mut rules.namespace_escapes,
+        &mut rules.unused_store_members,
+        &mut rules.unprovided_injects,
+        &mut rules.unrendered_components,
+        &mut rules.unused_component_props,
+        &mut rules.absent_component_props,
+        &mut rules.constant_parameters,
+        &mut rules.unused_component_emits,
+        &mut rules.unused_component_inputs,
+        &mut rules.unused_component_outputs,
+        &mut rules.unused_svelte_events,
+        &mut rules.unused_effect_layers,
+        &mut rules.unused_tagged_errors,
+        &mut rules.unproduced_catch_tags,
+        &mut rules.unused_server_actions,
+        &mut rules.unused_load_data_keys,
+        &mut rules.unresolved_imports,
+        &mut rules.unlisted_dependencies,
+        &mut rules.unlisted_binaries,
+        &mut rules.duplicate_exports,
+        &mut rules.duplicate_export_aliases,
+        &mut rules.type_only_dependencies,
+        &mut rules.test_only_dependencies,
+        &mut rules.dev_dependencies_in_production,
+        &mut rules.circular_dependencies,
+        &mut rules.re_export_cycle,
+        &mut rules.package_cycle,
+        &mut rules.boundary_violation,
+        &mut rules.coverage_gaps,
+        &mut rules.stale_suppressions,
+        &mut rules.require_suppression_reason,
+        &mut rules.unused_catalog_entries,
+        &mut rules.empty_catalog_groups,
+        &mut rules.unresolved_catalog_references,
+        &mut rules.unused_dependency_overrides,
+        &mut rules.misconfigured_dependency_overrides,
+        &mut rules.policy_violation,
+        &mut rules.invalid_client_export,
+        &mut rules.mixed_client_server_barrel,
+        &mut rules.misplaced_directive,
+        &mut rules.route_collision,
+        &mut rules.dynamic_segment_name_conflict,
+    ] {
+        promote_warn_to_error(rule);
+    }
+}
+
+fn promote_warn_to_error(rule: &mut Severity) {
+    if *rule == Severity::Warn {
+        *rule = Severity::Error;
+    }
 }
 
 #[cfg(test)]

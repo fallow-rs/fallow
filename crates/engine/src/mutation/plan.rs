@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 
 use super::database_write;
 use super::layout::Layout;
+use super::sampling::RankEntry;
 use super::{
     FunctionFacts, MutantDisposition, MutantTestReach, MutationPlan, MutationPlanCounts,
     MutationPlanInputs, MutationPlanRequest, MutationScope, PlannedFile, PlannedMutant,
@@ -121,13 +122,6 @@ struct FileOutcome {
     file: Option<PlannedFile>,
     mutants: Vec<RankEntry>,
     skipped: Option<SkippedFile>,
-}
-
-/// A mutant with the facts that only the ranking reads.
-pub(super) struct RankEntry {
-    /// True when the span of the mutant is on an added line of the diff.
-    pub(super) in_diff: bool,
-    pub(super) planned: PlannedMutant,
 }
 
 pub(super) fn build(

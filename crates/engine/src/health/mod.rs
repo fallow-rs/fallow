@@ -66,6 +66,7 @@ mod scope;
 /// classification, and Istanbul coverage ingestion.
 pub mod scoring;
 pub mod styling_score;
+mod subset_filter;
 mod tailwind_theme;
 mod targets;
 mod test_reach;
@@ -99,8 +100,7 @@ pub use runner::{
 pub use test_reach::TestReachGraph;
 use vital_data::{HealthVitalData, HealthVitalDataInput, prepare_health_vital_data};
 use vital_signs_scope::{
-    SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
-    compute_vital_signs_and_counts,
+    VitalSignsAndCountsInput, apply_duplication_metrics, compute_vital_signs_and_counts,
 };
 
 pub(crate) fn build_styling_analysis_artifacts(

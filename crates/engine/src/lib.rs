@@ -63,6 +63,7 @@ pub mod flag_report;
 pub mod flag_retirement;
 pub mod flag_vendor;
 pub mod flags;
+pub mod ignore_list_notes;
 pub mod import_bindings;
 pub(crate) mod graph {
     pub use fallow_graph::graph::*;
