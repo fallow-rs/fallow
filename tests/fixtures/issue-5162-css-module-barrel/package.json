@@ -1,0 +1,4 @@
+{
+  "name": "issue-5162-css-module-barrel",
+  "main": "src/index.ts"
+}

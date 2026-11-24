@@ -640,8 +640,11 @@ fn build_re_export_edges(
             if target_id.is_some_and(|id| loader_request(files, &re.info.source, id).is_some()) {
                 return None;
             }
-            has_namespace_re_exports |=
-                re.info.imported_name == "*" && re.info.exported_name != "*";
+            has_namespace_re_exports |= (re.info.imported_name == "*"
+                && re.info.exported_name != "*")
+                || target_id
+                    .and_then(|id| file_path(files, id))
+                    .is_some_and(|target| re_exports_class_map(&re.info.imported_name, target));
             target_id.map(|target_id| ReExportEdge {
                 source_file: target_id,
                 imported_name: re.info.imported_name.clone(),
@@ -823,6 +826,16 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
             .extension()
             .and_then(|e| e.to_str())
             .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass" | "less"))
+}
+
+/// Whether a re-export of `imported_name` from `source` forwards the class
+/// map of a CSS Module: `export { default as ui } from './ui.module.css'`.
+///
+/// The default of a CSS Module is the class map object, so the namespace
+/// re-export pass credits the classes that consumers of the re-exported name
+/// read, as it does for `export * as ui` (issue #5162).
+pub(super) fn re_exports_class_map(imported_name: &str, source: &std::path::Path) -> bool {
+    imported_name == DEFAULT_EXPORT_NAME && is_css_module_stylesheet(source)
 }
 
 /// Check if a path is a CSS Module stylesheet in any syntax the extractor

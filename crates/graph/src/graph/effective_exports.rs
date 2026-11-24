@@ -981,17 +981,17 @@ fn seed_direct_bindings(
                 }
             }
         }
-        seed_implicit_sfc_default(module, interner, resolutions, queue);
+        seed_implicit_default(module, interner, resolutions, queue);
     }
 }
 
-fn seed_implicit_sfc_default(
+fn seed_implicit_default(
     module: &ResolvedModule,
     interner: &mut ExportNameInterner,
     resolutions: &mut FxHashMap<ExportKey, NamespaceResolutions>,
     queue: &mut VecDeque<ExportLookup>,
 ) {
-    if !is_sfc_path(&module.path) {
+    if !has_implicit_default(&module.path) {
         return;
     }
     let name = interner.intern("default");
@@ -1012,11 +1012,16 @@ fn seed_implicit_sfc_default(
     }
 }
 
-fn is_sfc_path(path: &std::path::Path) -> bool {
+/// Whether the module has a default export that no declaration spells.
+///
+/// An SFC file defaults to its component. A CSS Module defaults to its class
+/// map object, so `export { default as ui } from './ui.module.css'` binds a
+/// real export (issue #5162).
+fn has_implicit_default(path: &std::path::Path) -> bool {
     matches!(
         path.extension().and_then(std::ffi::OsStr::to_str),
         Some("vue" | "svelte" | "astro")
-    )
+    ) || super::build::is_css_module_path(path)
 }
 
 fn collect_observers(

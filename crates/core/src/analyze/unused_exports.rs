@@ -1453,6 +1453,7 @@ fn evaluate_duplicate_export_group(
             ) && !overlays.contains(&entry.file_id)
         })
         .collect();
+    let independent_entries = collapse_shared_forwarded_bindings(independent_entries, &name, graph);
 
     // Collapse after the re-export strip so a barrel that re-exports from the
     // platform winner is still recognized as a chain member of the family.
@@ -1568,6 +1569,37 @@ fn platform_family_representative(
             .min_by_key(|entry| &entry.path)?,
     };
     Some(representative.file_id)
+}
+
+/// Keep one entry per binding that the entries forward from a module outside
+/// the group.
+///
+/// `export { default as ui } from './ui'` and a second barrel that forwards
+/// `ui` both bind the default of `./ui`. That module does not export `ui`, so
+/// [`is_re_export_chain_member`] cannot see the chain. The entries are aliases
+/// of one origin, not duplicates of each other (issue #5162).
+fn collapse_shared_forwarded_bindings(
+    entries: Vec<ExportEntry>,
+    export_name: &str,
+    graph: &ModuleGraph,
+) -> Vec<ExportEntry> {
+    let mut seen = FxHashSet::default();
+    entries
+        .into_iter()
+        .filter(|entry| {
+            let forwarded = entry.namespaces().iter().find_map(|&namespace| {
+                match graph.resolve_export(entry.file_id, export_name, namespace) {
+                    EffectiveExportResolution::Unique(binding)
+                        if binding.origin_file() != entry.file_id =>
+                    {
+                        Some(binding)
+                    }
+                    _ => None,
+                }
+            });
+            forwarded.is_none_or(|binding| seen.insert(binding))
+        })
+        .collect()
 }
 
 fn is_re_export_chain_member(
