@@ -37,6 +37,16 @@ static SASS_NAMESPACED_INCLUDE_SHORTHAND_RE: LazyLock<regex::Regex> = LazyLock::
 static VIEW_TRANSITION_ARGUMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"::view-transition-[a-z-]+\(([^)]*)\)"));
 
+/// Strings, URLs and block comments are masked. A brace in a Sass interpolation
+/// or a silent comment does not open a CSS rule.
+pub fn is_indented_stylesheet(masked: &str) -> bool {
+    !masked.lines().any(|line| {
+        let code = line.split_once("//").map_or(line, |(code, _)| code);
+        code.match_indices('{')
+            .any(|(i, _)| i == 0 || code.as_bytes()[i - 1] != b'#')
+    })
+}
+
 /// Mask every regex match in `src` with ASCII spaces (`0x20`) of equal byte
 /// length, so byte offsets in the returned string correspond 1:1 to byte
 /// offsets in the original.

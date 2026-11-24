@@ -245,8 +245,10 @@ pub(super) fn synthesize_platform_family_edges(
                 if *sibling == target || *sibling == module.file_id {
                     continue;
                 }
-                // Re-export propagation keeps its single resolved source; a
-                // side-effect edge is enough to keep the sibling reachable.
+                // Re-export propagation keeps its single resolved source. The
+                // side-effect edge keeps the sibling reachable, and the graph
+                // copies the re-exported names of the target to the sibling
+                // (`credit_platform_family_re_exports`).
                 extra.push(ResolvedImport {
                     info: ImportInfo {
                         source: re_export.info.source.clone(),

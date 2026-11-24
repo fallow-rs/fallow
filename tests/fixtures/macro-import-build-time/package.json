@@ -1,0 +1,10 @@
+{
+  "name": "macro-import-build-time",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "build-stamp": "1.0.0",
+    "figlet": "1.8.0",
+    "kleur": "4.1.5"
+  }
+}

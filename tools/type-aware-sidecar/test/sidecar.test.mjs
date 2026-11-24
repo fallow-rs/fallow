@@ -1100,10 +1100,11 @@ test("protocol v7 maps public API leaks and project-local public-signature coupl
       [
         'import type { Hidden } from "./model";',
         "export interface PublicResult { hidden: Hidden }",
+        "export interface SecondResult { hidden: Hidden }",
         "",
       ].join("\n"),
     );
-    write(root, "src/index.ts", 'export type { PublicResult } from "./api";\n');
+    write(root, "src/index.ts", 'export type { PublicResult, SecondResult } from "./api";\n');
 
     const apiRequest = semanticRequest(root, [
       {
@@ -1157,7 +1158,7 @@ test("protocol v7 maps public API leaks and project-local public-signature coupl
     assert.equal(coupling.data.direction, "directed");
     assert.equal(coupling.data.project_size, 3);
     assert.equal(coupling.data.distinct_coupled_files, 2);
-    assert.equal(coupling.data.edge_count, 1);
+    assert.equal(coupling.data.edge_count, 2);
     assert.equal(coupling.data.coupled_file_percentage, (2 / 3) * 100);
     assert.equal(coupling.data.p50_distinct_connections, 1);
     assert.equal(coupling.data.p90_distinct_connections, 1);

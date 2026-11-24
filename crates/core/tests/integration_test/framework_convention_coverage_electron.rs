@@ -141,3 +141,39 @@ fn electron_builder_default_script_config_files_stay_used() {
         );
     }
 }
+
+#[test]
+fn electron_forge_vite_plugin_configs_and_entries_stay_used() {
+    let root = fixture_path("electron-forge-vite-plugin");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = collect_unused_files(&root, &results);
+    for credited in [
+        "vite.main.config.ts",
+        "vite.preload.config.ts",
+        "vite.renderer.config.ts",
+        "src/main.ts",
+        "src/start.ts",
+        "src/preload.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == credited),
+            "{credited} is named by the Forge VitePlugin, unused files: {unused_files:?}"
+        );
+    }
+    assert!(
+        unused_files.iter().any(|path| path == "src/orphan.ts"),
+        "orphan file must remain reportable, unused files: {unused_files:?}"
+    );
+
+    let unused_dev_dependencies: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dev_dependencies.contains(&"vite"),
+        "vite is loaded by @electron-forge/plugin-vite, unused dev dependencies: {unused_dev_dependencies:?}"
+    );
+}

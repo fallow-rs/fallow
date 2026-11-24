@@ -1,0 +1,8 @@
+{
+  "name": "astro-props",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "astro": "5.0.0"
+  }
+}

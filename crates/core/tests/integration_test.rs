@@ -322,6 +322,8 @@ mod css_modules_unused;
 mod dev_dep_in_prod;
 #[path = "integration_test/invalid_client_exports.rs"]
 mod invalid_client_exports;
+#[path = "integration_test/macro_import_build_time.rs"]
+mod macro_import_build_time;
 #[path = "integration_test/misplaced_directive.rs"]
 mod misplaced_directive;
 #[path = "integration_test/mixed_client_server_barrel.rs"]
@@ -350,8 +352,12 @@ mod production_mode;
 mod prop_drilling;
 #[path = "integration_test/re_export_chains.rs"]
 mod re_export_chains;
+#[path = "integration_test/react_class_statics.rs"]
+mod react_class_statics;
 #[path = "integration_test/react_component_intel.rs"]
 mod react_component_intel;
+#[path = "integration_test/react_native_platform_family_re_export.rs"]
+mod react_native_platform_family_re_export;
 #[path = "integration_test/react_native_platform_self_import.rs"]
 mod react_native_platform_self_import;
 #[path = "integration_test/render_fan_in.rs"]
@@ -643,6 +649,8 @@ mod issue_462_tooling_catalogue;
 mod issue_463_glob_validation;
 #[path = "integration_test/issue_4849_public_package_reachable_surface.rs"]
 mod issue_4849_public_package_reachable_surface;
+#[path = "integration_test/issue_5101_oxlint_imported_preset.rs"]
+mod issue_5101_oxlint_imported_preset;
 #[path = "integration_test/issue_515_re_export_cycles.rs"]
 mod issue_515_re_export_cycles;
 #[path = "integration_test/issue_601_vitest_test_alias.rs"]
@@ -709,6 +717,9 @@ mod ember_classic;
 
 #[path = "integration_test/issue_620_error_subclass_name.rs"]
 mod issue_620_error_subclass_name;
+
+#[path = "integration_test/issue_5099_tojson_dispose.rs"]
+mod issue_5099_tojson_dispose;
 
 #[path = "integration_test/issue_1638_openlayers_dispatch.rs"]
 mod issue_1638_openlayers_dispatch;
@@ -841,6 +852,8 @@ mod issue_4990_entry_file_members;
 mod issue_5053_entry_namespace_reexport;
 #[path = "integration_test/issue_5098_astro_tag_attrs.rs"]
 mod issue_5098_astro_tag_attrs;
+#[path = "integration_test/issue_5162_css_module_barrel.rs"]
+mod issue_5162_css_module_barrel;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
@@ -893,6 +906,8 @@ mod typescript_content_mapper_plugin;
 mod vite_nested_config_entries;
 #[path = "integration_test/vite_plus_plugin.rs"]
 mod vite_plus_plugin;
+#[path = "integration_test/vite_pwa_assets_generator_config.rs"]
+mod vite_pwa_assets_generator_config;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
 #[path = "integration_test/vitest_include_scope.rs"]

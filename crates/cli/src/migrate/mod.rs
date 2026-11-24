@@ -279,6 +279,7 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
 
     migrate_first_knip_file(root, &mut config, &mut warnings, &mut sources)?;
 
+    let found_knip_file = !sources.is_empty();
     let mut found_jscpd_file = false;
     let jscpd_path = root.join(".jscpd.json");
     if jscpd_path.exists() {
@@ -291,7 +292,7 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
     migrate_first_stylelint_file(root, &mut config, &mut warnings, &mut sources)?;
 
     let package_needs = PackageJsonMigrationNeeds {
-        knip: sources.is_empty(),
+        knip: !found_knip_file,
         jscpd: !found_jscpd_file,
         stylelint: !sources.iter().any(|source| source.contains("stylelint")),
     };
@@ -527,7 +528,17 @@ fn migrate_unnamed_config_file(
     sources: &mut Vec<String>,
 ) -> Result<(), String> {
     let value = load_json_or_jsonc(path)?;
-    if value.get("entry").is_some()
+    if value.get("minTokens").is_some()
+        || value.get("minLines").is_some()
+        || value.get("threshold").is_some()
+        || value.get("mode").is_some()
+    {
+        migrate_jscpd(&value, config, warnings);
+        sources.push(format!("{} (jscpd config)", path.display()));
+    } else if stylelint::recognizes_config(&value) {
+        migrate_stylelint(&value, config, warnings);
+        sources.push(format!("{} (stylelint config)", path.display()));
+    } else if value.get("entry").is_some()
         || value.get("ignore").is_some()
         || value.get("rules").is_some()
         || value.get("project").is_some()
@@ -536,16 +547,6 @@ fn migrate_unnamed_config_file(
     {
         migrate_knip(&value, config, warnings);
         sources.push(format!("{} (knip config)", path.display()));
-    } else if value.get("minTokens").is_some()
-        || value.get("minLines").is_some()
-        || value.get("threshold").is_some()
-        || value.get("mode").is_some()
-    {
-        migrate_jscpd(&value, config, warnings);
-        sources.push(format!("{} (jscpd config)", path.display()));
-    } else if value.get("rules").is_some() && value.get("extends").is_some() {
-        migrate_stylelint(&value, config, warnings);
-        sources.push(format!("{} (stylelint config)", path.display()));
     } else {
         return Err(format!(
             "could not determine config format for {}",

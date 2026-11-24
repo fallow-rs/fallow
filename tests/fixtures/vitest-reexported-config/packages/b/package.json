@@ -1,0 +1,6 @@
+{
+  "name": "b",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": { "@tooling/testing": "workspace:*", "vitest": "3.0.0" }
+}

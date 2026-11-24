@@ -20,6 +20,7 @@ mod namespace_re_exports;
 mod narrowing;
 pub mod package_entry;
 mod partition_order;
+mod platform_family_credit;
 mod public_exports;
 mod re_exports;
 mod reachability;
@@ -177,9 +178,11 @@ pub struct ModuleGraph {
     /// it's only used for types and could be a devDependency.
     pub type_only_package_usage: FxHashMap<String, Vec<FileId>>,
     /// Maps npm package names to the `FileId`s that read a file of the
-    /// package through a webpack asset loader (`raw-loader!pkg/file.txt`).
-    /// The bundle holds the text, the bytes or a URL of the file, so the
-    /// package is used at build time and the import is not a runtime import.
+    /// package through a webpack asset loader (`raw-loader!pkg/file.txt`),
+    /// or that run the package as a macro (`with { type: "macro" }`).
+    /// The bundle holds the text, the bytes, a URL of the file or the macro
+    /// result, so the package is used at build time and the import is not a
+    /// runtime import.
     /// Every entry is also in `package_usage`.
     pub asset_package_usage: FxHashMap<String, Vec<FileId>>,
     /// Package specifiers that each module imports statically with a runtime
@@ -256,6 +259,19 @@ impl Edge {
                 .symbols
                 .iter()
                 .any(|symbol| symbol.load_kind.runs_target_code())
+    }
+
+    /// Whether the target can run as code in the shipped program through this
+    /// edge (see [`ImportLoadKind::runs_at_runtime`]). An edge whose every
+    /// symbol is a macro import keeps the target reachable, but not runtime
+    /// reachable.
+    #[must_use]
+    fn runs_target_code_at_runtime(&self) -> bool {
+        self.symbols.is_empty()
+            || self
+                .symbols
+                .iter()
+                .any(|symbol| symbol.load_kind.runs_at_runtime())
     }
 
     /// Whether a test that loads the target through this edge runs target
@@ -891,6 +907,7 @@ impl ModuleGraph {
             consumer_checked,
             &mut reference_paths,
         );
+        graph.credit_platform_family_re_exports(&module_by_id);
         namespace_escapes::normalize(&mut graph.namespace_escapes);
         let finalized_paths = reference_paths.finalize(&mut graph.modules);
         graph.reference_paths = finalized_paths.paths;
@@ -1545,6 +1562,31 @@ impl ModuleGraph {
         ) && matches!(
             self.resolve_export(target, name, ExportNamespace::Type),
             EffectiveExportResolution::Unique(_)
+        )
+    }
+
+    /// Whether an edge holds a macro import. A macro import runs its target
+    /// only in the bundler, so without one the runtime pass over the overall
+    /// entry points equals the overall pass.
+    fn has_build_time_edge(&self) -> bool {
+        self.edges.iter().any(|edge| {
+            edge.symbols
+                .iter()
+                .any(|symbol| symbol.load_kind == ImportLoadKind::BuildTime)
+        })
+    }
+
+    /// BFS from `entry_points` over the edges that run their target in the
+    /// shipped program.
+    fn collect_runtime_reachable(
+        &self,
+        entry_points: &FxHashSet<FileId>,
+        total_capacity: usize,
+    ) -> FixedBitSet {
+        self.collect_reachable_along(
+            entry_points,
+            total_capacity,
+            Edge::runs_target_code_at_runtime,
         )
     }
 }

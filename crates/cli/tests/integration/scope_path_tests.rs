@@ -224,6 +224,25 @@ fn bare_combined_path_scope_narrows_report() {
 }
 
 #[test]
+fn scoped_file_list_keeps_project_boundary_counts() {
+    let output = crate::common::run_fallow(
+        "list",
+        "boundary-violations",
+        &["src/ui", "--boundaries", "--files", "--format", "json"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let list = parse_json(&output);
+    let db = list["boundaries"]["zones"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|zone| zone["name"] == "db")
+        .unwrap();
+    assert_eq!(db["file_count"], 1);
+    assert_eq!(list["files"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn list_files_scope_narrows_inventory() {
     let tmp = create_scope_fixture();
     let output = run_fallow_in_root("list", tmp.path(), &["--files", "src"]);

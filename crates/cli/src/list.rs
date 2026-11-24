@@ -289,7 +289,7 @@ fn collect_list_data(
     let boundary_data = if opts.boundaries {
         Some(fallow_api::compute_boundary_data(
             config,
-            discovered.as_deref(),
+            session.as_ref().map(|session| session.files()),
         ))
     } else {
         None

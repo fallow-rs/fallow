@@ -94,7 +94,79 @@ fn a_bound_read_takes_the_facts_of_its_guard() {
 }
 
 #[test]
+fn a_constant_read_takes_the_facts_of_its_guard() {
+    let found = constants("const FEATURE_X = true;\nconst v = FEATURE_X ? null : <></>;");
+    assert!(found[0].reads[0].facts.empty_branch());
+}
+
+#[test]
+fn first_guard_keeps_the_vercel_flag_definition() {
+    let source = "import { flag } from 'flags/next';\n\
+                  const showBanner = flag({ key: 'banner', decide: () => false });\n\
+                  if (await showBanner()) {}\n\
+                  async function other(showBanner) { if (await showBanner()) {} }";
+    let flags = extract_from_source(source);
+    let [definition, read] = flags.as_slice() else {
+        panic!("expected the declaration and its guard read: {flags:?}");
+    };
+    assert!(definition.facts.definition());
+    assert_eq!(definition.line, 2);
+    assert!(definition.guard_span_start.is_none());
+    assert_eq!(
+        (read.flag_name.as_str(), read.line, read.col),
+        ("banner", 3, 10)
+    );
+    assert!(!read.facts.definition());
+    assert!(read.facts.empty_branch());
+    assert_eq!(guard_text(source, read), "if (await showBanner()) {}");
+}
+
+#[test]
 fn a_read_without_a_guard_has_no_facts() {
     let flag = only_flag("track(useFlag('beta'));");
     assert_eq!(flag.facts, FlagSiteFacts::default());
+}
+
+#[test]
+fn a_bound_vercel_flag_call_is_a_definition() {
+    let source = "import { flag, evaluate } from 'flags/next';\n\
+                  export const showBanner = flag({\n\
+                    key: 'show-banner',\n\
+                    decide: () => Boolean(process.env.FEATURE_BANNER),\n\
+                  });\n\
+                  const value = await evaluate('show-banner');\n";
+    let facts = extract_facts(source);
+    let definition = facts
+        .flag_uses
+        .iter()
+        .find(|flag| flag.flag_name == "show-banner" && flag.line == 2)
+        .expect("definition site");
+    assert!(definition.facts.definition());
+    let evaluate = facts
+        .flag_uses
+        .iter()
+        .find(|flag| flag.line == 6)
+        .expect("evaluate site");
+    assert!(!evaluate.facts.definition(), "evaluate reads the flag");
+    let definitions = facts
+        .registry_facts
+        .map(|registry| registry.definitions)
+        .unwrap_or_default();
+    assert_eq!(
+        definitions,
+        vec![FlagDefinition {
+            binding: "showBanner".to_string(),
+            line: definition.line,
+            col: definition.col,
+        }]
+    );
+}
+
+#[test]
+fn an_unbound_vercel_flag_call_is_not_a_definition() {
+    let facts = extract_facts(
+        "import { flag } from 'flags/next';\nregister(flag({ key: 'loose', decide: () => false }));",
+    );
+    assert!(!facts.flag_uses[0].facts.definition());
+    assert!(facts.registry_facts.is_none());
 }

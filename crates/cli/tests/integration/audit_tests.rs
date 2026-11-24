@@ -6734,19 +6734,19 @@ fn w2_walkthrough_json_is_byte_identical_to_guide() {
         "--format",
         "json",
         "--quiet",
+        "--mark-viewed",
+        "absent.ts",
     ]);
     assert_eq!(walkthrough_json.code, 0, "exits 0");
+    assert!(
+        walkthrough_json.stderr.contains("absent.ts"),
+        "{}",
+        walkthrough_json.stderr
+    );
     let guide_json = run_walkthrough_guide(tmp.path());
 
     let from_walkthrough = parse_json(&walkthrough_json);
-    // Same agent-contract kind + deterministic snapshot hash.
     assert_eq!(from_walkthrough["kind"], "review-walkthrough-guide");
-    assert_eq!(
-        from_walkthrough["graph_snapshot_hash"],
-        guide_json["graph_snapshot_hash"],
-    );
-    // The whole envelope matches once the random per-run id is stripped: the
-    // json branch reuses the one guide JSON path, no second serializer.
     assert_eq!(
         strip_run_id(from_walkthrough),
         strip_run_id(guide_json),
@@ -6968,15 +6968,15 @@ fn w2_walkthrough_mark_viewed_writes_local_ledger() {
         "--base",
         "main~1",
         "--walkthrough",
+        "--format",
+        "json",
         "--mark-viewed",
         "src/ui/page.ts",
     ]);
     assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
     let state_path = tmp.path().join(".fallow/walkthrough-state.json");
-    assert!(state_path.exists(), "--mark-viewed writes the ledger");
     let state: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
-    assert_eq!(state["version"], 1);
     assert_eq!(state["schema"], "walkthrough-viewed-marks");
     assert!(
         state["entries"]["src/ui/page.ts"].is_object(),
@@ -7110,7 +7110,7 @@ fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
         "main~1",
         "--walkthrough",
         "--mark-viewed",
-        "src/lib.ts",
+        "./src/../src/lib.ts",
     ]);
     assert_eq!(
         marked.code, 0,

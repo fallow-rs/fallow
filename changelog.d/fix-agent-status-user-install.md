@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow agent status` suggests `--user` commands for skills in the home folder.** A stale or foreign skill under `~/.claude/skills` or `~/.agents/skills` got the project command `fallow agent install --dry-run` or `--force`, which writes only project files, so the row stayed. Status now adds the next actions `agent-install-user` (`fallow agent install --user --dry-run`) and `agent-install-user-force` (`fallow agent install --user --force`) for those rows. The project actions keep their ids and appear only for project rows. (Closes [#5067](https://github.com/fallow-rs/fallow/issues/5067))

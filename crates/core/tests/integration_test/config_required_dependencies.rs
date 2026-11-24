@@ -360,3 +360,156 @@ fn tsconfig_plugin_in_an_ignored_path_is_not_unlisted() {
 
     assert!(unlisted_sites(&results, &root).is_empty());
 }
+
+fn unused_dependency_names(results: &AnalysisResults) -> Vec<&str> {
+    results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect()
+}
+
+fn expo_json_app(root: &Path, app_json: &str) {
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "c", "private": true, "main": "index.js", "dependencies": { "expo": "52.0.0", "expo-system-ui": "4.0.0" } }"#,
+    );
+    write(&root.join("index.js"), "import \"expo\";\n");
+    write(&root.join("app.json"), app_json);
+}
+
+#[test]
+fn listed_expo_system_ui_that_the_config_requires_is_used() {
+    let (_dir, root) = temp_root();
+    expo_json_app(
+        &root,
+        r#"{ "expo": { "name": "c", "userInterfaceStyle": "automatic" } }"#,
+    );
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis");
+
+    let unused = unused_dependency_names(&results);
+    assert!(!unused.contains(&"expo-system-ui"), "unused: {unused:?}");
+    assert!(unlisted_sites(&results, &root).is_empty());
+}
+
+#[test]
+fn listed_expo_system_ui_without_user_interface_style_is_unused() {
+    let (_dir, root) = temp_root();
+    expo_json_app(&root, r#"{ "expo": { "name": "c" } }"#);
+
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis");
+
+    assert!(unused_dependency_names(&results).contains(&"expo-system-ui"));
+}
+
+#[test]
+fn listed_tsconfig_plugin_is_used() {
+    let (_dir, root) = temp_root();
+    workspace_with_tsconfig(&root, "", r#""@acme/ts-plugin": "1.0.0""#, "packages/app");
+
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis");
+
+    let unused = unused_dependency_names(&results);
+    assert!(!unused.contains(&"@acme/ts-plugin"), "unused: {unused:?}");
+}
+
+const TSCONFIG_WITH_EFFECT_PLUGIN: &str = r#"{
+  "compilerOptions": {
+    "plugins": [{ "name": "@effect/language-service" }]
+  }
+}
+"#;
+
+/// A single-package project whose tsconfig loads the Effect language service.
+fn effect_plugin_project(root: &Path, dev_deps: &str) {
+    write(
+        &root.join("package.json"),
+        &format!(
+            r#"{{ "name": "e", "private": true, "main": "src/index.ts", "devDependencies": {{ "typescript": "5.0.0"{dev_deps} }} }}"#
+        ),
+    );
+    write(&root.join("src/index.ts"), "export const e = 1;\n");
+    write(&root.join("tsconfig.json"), TSCONFIG_WITH_EFFECT_PLUGIN);
+}
+
+fn unused_dev_dependency_names(results: &AnalysisResults) -> Vec<&str> {
+    results
+        .unused_dev_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect()
+}
+
+#[test]
+fn tsgo_package_provides_the_effect_plugin_name() {
+    let (_dir, root) = temp_root();
+    effect_plugin_project(&root, r#", "@effect/tsgo": "0.73.0""#);
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis");
+
+    assert!(unlisted_sites(&results, &root).is_empty());
+    let unused = unused_dev_dependency_names(&results);
+    assert!(!unused.contains(&"@effect/tsgo"), "unused: {unused:?}");
+}
+
+#[test]
+fn listed_effect_language_service_is_used() {
+    let (_dir, root) = temp_root();
+    effect_plugin_project(&root, r#", "@effect/language-service": "0.60.0""#);
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis");
+
+    assert!(unlisted_sites(&results, &root).is_empty());
+    let unused = unused_dev_dependency_names(&results);
+    assert!(
+        !unused.contains(&"@effect/language-service"),
+        "unused: {unused:?}"
+    );
+}
+
+#[test]
+fn effect_plugin_without_a_provider_is_unlisted() {
+    let (_dir, root) = temp_root();
+    effect_plugin_project(&root, "");
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis");
+
+    assert_eq!(
+        unlisted_sites(&results, &root),
+        vec![(
+            "@effect/language-service".to_string(),
+            "tsconfig.json".to_string(),
+            3
+        )],
+    );
+}
+
+#[test]
+fn tsgo_listed_only_by_a_sibling_does_not_provide_the_plugin() {
+    let (_dir, root) = temp_root();
+    workspace_with_tsconfig(&root, "", "", "packages/app");
+    write(
+        &root.join("packages/app/tsconfig.json"),
+        TSCONFIG_WITH_EFFECT_PLUGIN,
+    );
+    write(
+        &root.join("packages/other/package.json"),
+        r#"{ "name": "other", "private": true, "main": "index.ts", "devDependencies": { "@effect/tsgo": "0.73.0" } }"#,
+    );
+    write(
+        &root.join("packages/other/index.ts"),
+        "export const other = 1;\n",
+    );
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis");
+
+    let names: Vec<String> = unlisted_sites(&results, &root)
+        .into_iter()
+        .map(|(name, file, _)| format!("{name} {file}"))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["@effect/language-service packages/app/tsconfig.json"]
+    );
+}

@@ -185,6 +185,7 @@ fn record_package_usage(
 /// Internal module imports create an `ImportedSymbol` entry grouped by target.
 /// Namespace imports are also recorded in the namespace-imported bitset.
 /// npm package imports are recorded in the package usage maps.
+#[cfg(test)]
 fn collect_import_edge(
     import: &ResolvedImport,
     file_id: FileId,
@@ -200,7 +201,9 @@ fn collect_import_edge(
     );
 }
 
-/// [`collect_import_edge`] for an edge whose target loads as `load_kind`.
+/// Collect one resolved import whose target loads as `load_kind`. Internal
+/// module imports create an `ImportedSymbol` entry grouped by target, and npm
+/// package imports are recorded in the package usage maps.
 fn collect_import_edge_with_kind(
     import: &ResolvedImport,
     file_id: FileId,
@@ -261,8 +264,9 @@ fn collect_import_edge_with_kind(
 /// Record the package side of an import or a re-export of `specifier`.
 ///
 /// Every import uses the package. An import through an asset loader reads a
-/// file of the package at build time, so it is also recorded as a build-time
-/// use. A static value import that runs the package is startup weight.
+/// file of the package at build time, and a macro import runs the package at
+/// build time, so both are also recorded as a build-time use.
+/// A static value import that runs the package is startup weight.
 fn record_package_import(
     acc: &mut EdgeAccumulator<'_>,
     package_name: &str,
@@ -272,7 +276,11 @@ fn record_package_import(
     loader: LoaderEdge,
 ) {
     record_package_usage(acc, package_name, file_id, is_type_only);
-    if loader.load_kind == ImportLoadKind::AssetReference && !is_type_only {
+    let build_time = matches!(
+        loader.load_kind,
+        ImportLoadKind::AssetReference | ImportLoadKind::BuildTime
+    );
+    if build_time && !is_type_only {
         acc.asset_package_usage
             .entry(package_name.to_owned())
             .or_default()
@@ -304,8 +312,8 @@ fn record_eager_package_import(
     });
 }
 
-/// The load kinds that extraction recorded for dynamic imports and patterns
-/// whose kind differs from the default of their list, keyed by span start.
+/// The load kinds that extraction recorded for imports and patterns whose
+/// kind differs from the default of their list, keyed by span start.
 fn import_load_kind_overrides(resolved: &ResolvedModule) -> FxHashMap<u32, ImportLoadKind> {
     resolved
         .semantic_facts
@@ -345,9 +353,14 @@ fn collect_edges_for_module(
     acc: &mut EdgeAccumulator<'_>,
 ) -> Vec<(FileId, Vec<ImportedSymbol>)> {
     let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
+    let load_kind_overrides = import_load_kind_overrides(resolved);
 
     for import in &resolved.resolved_imports {
-        collect_import_edge(import, file_id, &mut edges_by_target, acc);
+        let load_kind = load_kind_overrides
+            .get(&import.info.span.start)
+            .copied()
+            .unwrap_or(ImportLoadKind::Static);
+        collect_import_edge_with_kind(import, file_id, load_kind, &mut edges_by_target, acc);
     }
 
     for re_export in &resolved.re_exports {
@@ -391,7 +404,6 @@ fn collect_edges_for_module(
         }
     }
 
-    let load_kind_overrides = import_load_kind_overrides(resolved);
     for import in &resolved.resolved_dynamic_imports {
         let load_kind = load_kind_overrides
             .get(&import.info.span.start)
@@ -628,8 +640,11 @@ fn build_re_export_edges(
             if target_id.is_some_and(|id| loader_request(files, &re.info.source, id).is_some()) {
                 return None;
             }
-            has_namespace_re_exports |=
-                re.info.imported_name == "*" && re.info.exported_name != "*";
+            has_namespace_re_exports |= (re.info.imported_name == "*"
+                && re.info.exported_name != "*")
+                || target_id
+                    .and_then(|id| file_path(files, id))
+                    .is_some_and(|target| re_exports_class_map(&re.info.imported_name, target));
             target_id.map(|target_id| ReExportEdge {
                 source_file: target_id,
                 imported_name: re.info.imported_name.clone(),
@@ -811,6 +826,16 @@ pub(super) fn is_css_module_path(path: &std::path::Path) -> bool {
             .extension()
             .and_then(|e| e.to_str())
             .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass" | "less"))
+}
+
+/// Whether a re-export of `imported_name` from `source` forwards the class
+/// map of a CSS Module: `export { default as ui } from './ui.module.css'`.
+///
+/// The default of a CSS Module is the class map object, so the namespace
+/// re-export pass credits the classes that consumers of the re-exported name
+/// read, as it does for `export * as ui` (issue #5162).
+pub(super) fn re_exports_class_map(imported_name: &str, source: &std::path::Path) -> bool {
+    imported_name == DEFAULT_EXPORT_NAME && is_css_module_stylesheet(source)
 }
 
 /// Check if a path is a CSS Module stylesheet in any syntax the extractor

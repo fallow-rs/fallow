@@ -24,6 +24,79 @@ fn parse_css_non_module(source: &str) -> ModuleInfo {
 }
 
 #[test]
+fn multiline_apply_tokens_keep_the_directive_line() {
+    let tokens = crate::extract_apply_tokens_located(
+        ".panel {\n  @apply flex\n    rounded-card;\n  @apply font-bold\n}",
+    );
+    assert_eq!(
+        tokens,
+        [
+            ("flex".into(), 2),
+            ("rounded-card".into(), 2),
+            ("font-bold".into(), 4),
+        ]
+    );
+}
+
+#[test]
+fn indented_sass_apply_stops_at_the_next_declaration() {
+    let sheet = ".row\n  @apply flex\n  font-family: font-brand\n.next\n  @apply rounded-card\n";
+    assert_eq!(
+        crate::css::scan_stylesheet_tokens(sheet).apply_tokens_located,
+        [("flex".into(), 2), ("rounded-card".into(), 5)]
+    );
+}
+
+#[test]
+fn indented_sass_apply_ends_before_a_terminated_declaration() {
+    let sass = ".row\n  @apply flex\n  color: red;\n";
+    assert_eq!(
+        crate::extract_apply_tokens_located(sass),
+        [("flex".into(), 2)]
+    );
+
+    let css = ".panel {\n  @apply grid\n  items-center;\n}";
+    assert_eq!(
+        crate::extract_apply_tokens_located(css),
+        [("grid".into(), 2), ("items-center".into(), 2)]
+    );
+}
+
+#[test]
+fn indented_sass_apply_reads_its_first_argument_on_the_next_line() {
+    let source = "@apply\n  flex";
+    assert_eq!(
+        crate::extract_apply_tokens_located(source),
+        [("flex".into(), 1)]
+    );
+}
+
+#[test]
+fn indented_sass_apply_ignores_a_brace_in_a_silent_comment() {
+    let sass = "// .old {\n.row\n  @apply flex\n  color: red;\n";
+    assert_eq!(
+        crate::extract_apply_tokens_located(sass),
+        [("flex".into(), 3)]
+    );
+}
+
+#[test]
+fn css_apply_after_double_slashes_keeps_continuation_lines() {
+    for opener in [
+        "@import url(http://example.test/base.css); .panel {",
+        "@import URL(http://example.test/base.css); .panel {",
+        ".panel[data-kind='//'] {",
+    ] {
+        let source = format!("{opener}\n  @apply flex\n  items-center;\n}}");
+        assert_eq!(
+            crate::extract_apply_tokens_located(&source),
+            [("flex".into(), 2), ("items-center".into(), 2)],
+            "{opener}",
+        );
+    }
+}
+
+#[test]
 fn extracts_css_import_quoted() {
     let info = parse_css(r#"@import "./reset.css";"#, "styles.css");
     assert_eq!(info.imports.len(), 1);
@@ -224,6 +297,30 @@ fn extracts_scss_forward() {
     let info = parse_css(r#"@forward "./mixins";"#, "styles.scss");
     assert_eq!(info.imports.len(), 1);
     assert_eq!(info.imports[0].source, "./mixins");
+}
+
+/// A `@use` or `@forward` of a blank string names no module. OSS-Fuzz test
+/// case 5184338726289408 found an import with the inverted span 7..6 here.
+#[test]
+fn scss_use_of_a_blank_string_adds_no_import() {
+    for source in [r#"@use " ";"#, r#"@forward "  ";"#, r#"@use "";"#] {
+        let info = parse_css(source, "styles.scss");
+        assert!(info.imports.is_empty(), "{source}: {:?}", info.imports);
+    }
+}
+
+#[test]
+fn trimmed_span_of_a_blank_match_is_not_inverted() {
+    let re = regex::Regex::new(r#""([^"]*)""#).expect("valid regex");
+    let source = r#"@use "   ";"#;
+    let m = re
+        .captures(source)
+        .and_then(|cap| cap.get(1))
+        .expect("the quoted body matches");
+    let (text, span) = crate::css::trimmed_match_with_span(m);
+    assert_eq!(text, "");
+    assert!(span.start <= span.end, "inverted span {span:?}");
+    assert!(source.get(span.start as usize..span.end as usize).is_some());
 }
 
 #[test]
@@ -629,4 +726,22 @@ fn sass_module_include_shorthand_is_not_a_class() {
 fn scss_module_adjacent_sibling_class_stays_a_class() {
     let named = module_class_names("Component.module.scss", "h1\n+p.intro { color: red; }\n");
     assert_eq!(named, vec!["intro".to_string()]);
+}
+
+#[test]
+fn apply_tokens_basic() {
+    let tokens = crate::extract_apply_tokens(".panel { @apply rounded-card font-bold; }");
+    assert_eq!(tokens, vec!["rounded-card", "font-bold"]);
+}
+
+#[test]
+fn apply_tokens_strips_important() {
+    let tokens = crate::extract_apply_tokens(".x { @apply text-brand! font-bold !important; }");
+    assert_eq!(tokens, vec!["text-brand", "font-bold"]);
+}
+
+#[test]
+fn apply_tokens_ignored_in_comments() {
+    let tokens = crate::extract_apply_tokens("/* @apply hidden-token; */ .x { color: red; }");
+    assert!(tokens.is_empty(), "got {tokens:?}");
 }

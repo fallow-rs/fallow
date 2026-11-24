@@ -49,9 +49,9 @@ use super::super::{
     unocss::UnoCssPlugin, unplugin_icons::UnpluginIconsPlugin, varlock::VarlockPlugin,
     velite::VelitePlugin, vercel::VercelPlugin, vite::VitePlugin,
     vite_plugin_pages::VitePluginPagesPlugin, vite_plus::VitePlusPlugin,
-    vitepress::VitePressPlugin, vitest::VitestPlugin, vscode::VscodePlugin, waku::WakuPlugin,
-    webdriverio::WebdriverioPlugin, webpack::WebpackPlugin, wrangler::WranglerPlugin,
-    wuchale::WuchalePlugin, wxt::WxtPlugin,
+    vite_pwa_assets_generator::VitePwaAssetsGeneratorPlugin, vitepress::VitePressPlugin,
+    vitest::VitestPlugin, vscode::VscodePlugin, waku::WakuPlugin, webdriverio::WebdriverioPlugin,
+    webpack::WebpackPlugin, wrangler::WranglerPlugin, wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
 
 macro_rules! push_plugins {
@@ -229,6 +229,7 @@ fn add_tooling_and_infra_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         SimpleGitHooksPlugin,
         SizeLimitPlugin,
         SvgoPlugin,
+        VitePwaAssetsGeneratorPlugin,
         SvgrPlugin,
         GraphqlCodegenPlugin,
         GraphqlConfigPlugin,

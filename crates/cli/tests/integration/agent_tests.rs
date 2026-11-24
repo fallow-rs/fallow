@@ -652,3 +652,62 @@ fn status_commands_keep_the_inspected_root() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn status_suggests_user_install_for_stale_and_foreign_home_skills() {
+    for (label, skill_root, display_prefix) in [
+        ("claude", ".claude/skills", "~/.claude/skills"),
+        ("neutral", ".agents/skills", "~/.agents/skills"),
+    ] {
+        let dir = agent_temp_dir(&format!("status-user-skills-{label}"));
+        let home = dir.join("home");
+        let stale_skill = home.join(skill_root).join("fallow");
+        let foreign_skill = home.join(skill_root).join("fallow-setup");
+        fs::create_dir_all(&stale_skill).unwrap();
+        fs::create_dir_all(&foreign_skill).unwrap();
+        fs::write(
+            stale_skill.join("SKILL.md"),
+            "<!-- fallow:agent-install v1 skill=embedded version=0.0.1-old -->\n# Stale\n",
+        )
+        .unwrap();
+        fs::write(foreign_skill.join("SKILL.md"), "# Custom skill\n").unwrap();
+
+        let output = run_agent(&dir, &home, &["status"]);
+        assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+        let json = crate::common::parse_json(&output);
+        let root = shell_quoted(&dir);
+        assert_eq!(
+            next_action_command(&json, "agent-install-user"),
+            format!("fallow agent install --user --dry-run --root {root}")
+        );
+        assert_eq!(
+            next_action_command(&json, "agent-install-user-force"),
+            format!("fallow agent install --user --force --root {root}")
+        );
+
+        let apply = run_agent(&dir, &home, &["install", "--user", "--force"]);
+        assert_eq!(apply.code, 0, "stderr: {}", apply.stderr);
+
+        let after = run_agent(&dir, &home, &["status"]);
+        assert_eq!(after.code, 0, "stderr: {}", after.stderr);
+        let after_json = crate::common::parse_json(&after);
+        let surfaces = after_json["surfaces"].as_array().unwrap();
+        for skill_name in ["fallow", "fallow-setup"] {
+            let home_path = format!("{display_prefix}/{skill_name}");
+            let row = surfaces
+                .iter()
+                .find(|row| row["path"] == home_path)
+                .unwrap_or_else(|| panic!("missing home row {home_path}: {after_json}"));
+            assert_eq!(row["state"], "installed", "row: {row}");
+        }
+        let ids: Vec<&str> = after_json["next_actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|a| a["id"].as_str())
+            .collect();
+        assert!(!ids.contains(&"agent-install-user"), "ids: {ids:?}");
+        assert!(!ids.contains(&"agent-install-user-force"), "ids: {ids:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

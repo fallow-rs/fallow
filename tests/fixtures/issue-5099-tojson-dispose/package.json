@@ -1,0 +1,5 @@
+{
+  "name": "issue-5099-tojson-dispose",
+  "private": true,
+  "main": "src/index.ts"
+}

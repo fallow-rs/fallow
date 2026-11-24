@@ -28,7 +28,9 @@ pub(super) fn extend(
             || config_path_is_ignored(&requirement.config_path, ctx.config)
             || should_skip_unlisted_package(package_name, ctx)
             || ctx.ignore_deps.suppresses(package_name)
-            || config_dependency_is_declared(package_name, &requirement.config_path, ctx)
+            || std::iter::once(package_name)
+                .chain(requirement.provided_by.iter().copied())
+                .any(|name| config_dependency_is_declared(name, &requirement.config_path, ctx))
         {
             continue;
         }
@@ -60,6 +62,29 @@ pub(super) fn extend(
         }
     }
     unlisted
+}
+
+/// The packages that plugins credit as used.
+///
+/// A required dependency counts as a use: the config needs the package, so a
+/// manifest that lists it uses it. Without this credit, a listed package is
+/// unused and an unlisted one is unlisted, and no project state is clean.
+/// A package that also provides the need gets the same credit.
+pub(super) fn plugin_referenced_set(
+    plugin_result: Option<&AggregatedPluginResult>,
+) -> FxHashSet<&str> {
+    plugin_result
+        .map(|pr| {
+            pr.referenced_dependencies
+                .iter()
+                .map(String::as_str)
+                .chain(pr.required_dependencies.iter().flat_map(|requirement| {
+                    std::iter::once(requirement.package_name.as_str())
+                        .chain(requirement.provided_by.iter().copied())
+                }))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Whether `ignorePatterns` covers the config file.

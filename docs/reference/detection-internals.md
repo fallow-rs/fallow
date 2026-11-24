@@ -266,6 +266,15 @@ error by suppressing a downstream detector.
   (`.module.css`, `.module.scss`, `.module.sass`, `.module.less`). The
   narrowing gate uses that same resolved-target set, so extensionless and
   path-aliased imports receive identical member and whole-object handling.
+- A barrel can forward the class map: `export { default as ui } from
+  './ui.module.css'` (issue #5162). The effective export index seeds an
+  implicit `default` binding for each CSS Module, as it does for an SFC file,
+  so the re-exported name resolves and its importers credit the barrel export.
+  The namespace re-export pass treats the edge like `export * as ui`: it
+  credits the classes that consumers of `ui` read, through every outer barrel,
+  and credits every class on a whole-object use. Duplicate-export grouping
+  keeps one location per binding that several barrels forward from one
+  module outside the group, so such a chain is one origin.
 - `import X = require('./x')` is the TypeScript spelling of a CommonJS require
   binding, so the extractor records the same non-destructured require call a
   `const X = require('./x')` declaration records (issue #2365): one CommonJS

@@ -743,20 +743,6 @@ impl PluginResult {
     }
 }
 
-/// Whether an extensionless value names a file under `root`: the value itself,
-/// the value with a source extension, or the index file of the directory it
-/// names. This is the order in which a bundler resolves a path.
-fn names_project_file(root: &Path, value: &str) -> bool {
-    let base = root.join(value);
-    base.is_file()
-        || crate::discover::SOURCE_EXTENSIONS.iter().any(|extension| {
-            let mut candidate = base.clone().into_os_string();
-            candidate.push(".");
-            candidate.push(extension);
-            Path::new(&candidate).is_file() || base.join(format!("index.{extension}")).is_file()
-        })
-}
-
 /// Brace list of the extensions a bundler tries for a request that names no
 /// extension. Entry patterns are plain globs with no extension expansion, so a
 /// bare `src/Button` would match no file.
@@ -1811,7 +1797,7 @@ mod flue;
 mod jasmine;
 mod manifest;
 mod module_request;
-use module_request::{has_glob_syntax, has_source_extension, module_request};
+use module_request::{has_glob_syntax, has_source_extension, module_request, names_project_file};
 pub mod manifest_entries;
 mod mise;
 mod osls;
@@ -1991,6 +1977,7 @@ mod vercel;
 mod vite;
 mod vite_plugin_pages;
 pub(crate) mod vite_plus;
+mod vite_pwa_assets_generator;
 mod vitepress;
 mod vitest;
 mod vscode;

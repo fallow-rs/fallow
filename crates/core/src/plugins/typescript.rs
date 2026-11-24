@@ -38,6 +38,11 @@ const EDITOR_BUNDLED_PLUGINS: &[&str] = &[
     "typescript-svelte-plugin",
 ];
 
+/// Language service plugin names that another package also provides, with
+/// those packages. `@effect/tsgo` loads the Effect plugin into the TypeScript
+/// Go compiler under the `@effect/language-service` name.
+const PLUGIN_PROVIDERS: &[(&str, &[&str])] = &[("@effect/language-service", &["@effect/tsgo"])];
+
 pub struct TypeScriptPlugin;
 
 impl Plugin for TypeScriptPlugin {
@@ -451,15 +456,20 @@ fn collect_tsconfig_plugin_name(
                 && !EDITOR_BUNDLED_PLUGINS.contains(&dep.as_str())
             {
                 let offset = (s.span.start as usize).saturating_sub(site.wrapper_len);
-                result
-                    .required_dependencies
-                    .push(RequiredDependency::at_offset(
+                let providers = PLUGIN_PROVIDERS
+                    .iter()
+                    .find_map(|(plugin, providers)| (*plugin == dep).then_some(*providers))
+                    .unwrap_or_default();
+                result.required_dependencies.push(
+                    RequiredDependency::at_offset(
                         dep.clone(),
                         site.config_path,
                         site.source,
                         offset,
                         true,
-                    ));
+                    )
+                    .with_providers(providers),
+                );
             }
             result.referenced_dependencies.push(dep);
         }
