@@ -21,10 +21,6 @@ use fallow_types::extract::{
     ordinary_whole_object_uses,
 };
 
-use super::predicates::{
-    is_angular_lifecycle_method, is_react_class_static_property, is_react_lifecycle_method,
-    is_runtime_protocol_method,
-};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 mod cloudflare_runtime;
@@ -33,10 +29,16 @@ mod factory;
 mod fluent_chain;
 mod heritage;
 mod instance;
+mod lifecycle;
 mod member_probe;
 mod namespace;
 mod playwright;
 mod typed_property;
+
+use lifecycle::{
+    is_angular_lifecycle_method, is_react_class_static_property, is_react_lifecycle_method,
+    is_runtime_protocol_method,
+};
 
 use cloudflare_runtime::{
     build_cloudflare_runtime_subclass_handlers, is_cloudflare_runtime_handler,

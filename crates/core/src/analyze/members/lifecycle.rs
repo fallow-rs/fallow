@@ -2,7 +2,7 @@
 ///
 /// These should never be flagged as unused class members because they are
 /// called by the Angular framework, not user code.
-pub(in crate::analyze) fn is_angular_lifecycle_method(name: &str) -> bool {
+pub(super) fn is_angular_lifecycle_method(name: &str) -> bool {
     matches!(
         name,
         "ngOnInit"
@@ -29,7 +29,7 @@ pub(in crate::analyze) fn is_angular_lifecycle_method(name: &str) -> bool {
     )
 }
 
-pub(in crate::analyze) fn is_react_lifecycle_method(name: &str) -> bool {
+pub(super) fn is_react_lifecycle_method(name: &str) -> bool {
     matches!(
         name,
         "render"
@@ -56,7 +56,7 @@ pub(in crate::analyze) fn is_react_lifecycle_method(name: &str) -> bool {
 ///
 /// The names are common instance fields in other code, so only a `static`
 /// member gets this credit.
-pub(in crate::analyze) fn is_react_class_static_property(name: &str) -> bool {
+pub(super) fn is_react_class_static_property(name: &str) -> bool {
     matches!(
         name,
         "defaultProps" | "displayName" | "propTypes" | "contextTypes" | "childContextTypes"
@@ -67,7 +67,7 @@ pub(in crate::analyze) fn is_react_class_static_property(name: &str) -> bool {
 ///
 /// `JSON.stringify` calls `toJSON`, so the member is used even when no code
 /// reads it by name.
-pub(in crate::analyze) fn is_runtime_protocol_method(name: &str) -> bool {
+pub(super) fn is_runtime_protocol_method(name: &str) -> bool {
     name == "toJSON"
 }
 
