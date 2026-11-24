@@ -6784,6 +6784,31 @@
           "negated_by": null
         },
         {
+          "id": "shallow_directories",
+          "long": "--shallow-directories",
+          "short": null,
+          "aliases": [],
+          "value_name": null,
+          "value_names": [],
+          "value_optional": false,
+          "action": "set-true",
+          "takes_value": false,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Show only shallow directories: directories whose interface is as large as what they hide. Advisory, no health score weight. Requires full analysis pipeline",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Sections",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
           "id": "hotspots",
           "long": "--hotspots",
           "short": null,
@@ -22550,6 +22575,70 @@
         "docs": "https://fallow.tools/docs/rules/refactoring-target/"
       },
       "display_label": "Refactoring target"
+    },
+    {
+      "id": "shallow-directory",
+      "rule_id": "fallow/shallow-directory",
+      "command": "health",
+      "category": "Health",
+      "description": "Directory shows as many interface items as it hides",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "deprecated_filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "default_severity": null,
+      "opt_in": null,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/shallow-directory/",
+      "explanation": {
+        "id": "fallow/shallow-directory",
+        "name": "Shallow Directory",
+        "summary": "Directory shows as many interface items as it hides",
+        "rationale": "Files outside the directory use at least as many of its interface items as it keeps inside, and it shows at least `health.shallowDirectories.minInterface` items (default 8). An interface item is a module-scope function or an exported class with a method; types, constants, enums, UI components and exports that a package entry publishes are no items. Only runtime imports from files that are not tests or stories count. A catalog (about one item per file), a family of functions with one parameter list, and items with about one outside user are not reported. The section is opt-in with `fallow health --shallow-directories`, advisory, and has no health score weight.",
+        "example": "`src/utils` holds 10 functions in 2 files. `src/main.ts` and `src/report.ts` use 8 of them through the barrel, and `src/utils` keeps 2 helpers inside.",
+        "example_files": [
+          {
+            "path": "src/main.ts",
+            "code": "import { slugify, truncate, capitalize, wordCount, formatDate, parseDate, addDays, isWeekend } from './utils';\nimport { report } from './report';\n\nconsole.log(report('x'), slugify('x'), truncate('x'), capitalize('x'), wordCount('x'), formatDate('x'), parseDate('x'), addDays('x'), isWeekend('x'));\n"
+          },
+          {
+            "path": "src/report.ts",
+            "code": "import { slugify, truncate, capitalize, wordCount, formatDate, parseDate, addDays, isWeekend } from './utils';\n\nexport function report(input: string): string[] {\n  return [slugify(input), truncate(input), capitalize(input), wordCount(input), formatDate(input), parseDate(input), addDays(input), isWeekend(input)];\n}\n"
+          },
+          {
+            "path": "src/utils/index.ts",
+            "code": "export * from './text';\nexport * from './time';\n"
+          },
+          {
+            "path": "src/utils/text.ts",
+            "code": "function normalize(value: string): string {\n  return value.trim();\n}\n\nexport function slugify(slugifyInput: string): string {\n  return normalize(slugifyInput);\n}\n\nexport function truncate(truncateInput: string): string {\n  return normalize(truncateInput);\n}\n\nexport function capitalize(capitalizeInput: string): string {\n  return normalize(capitalizeInput);\n}\n\nexport function wordCount(wordCountInput: string): string {\n  return normalize(wordCountInput);\n}\n\n"
+          },
+          {
+            "path": "src/utils/time.ts",
+            "code": "function pad(value: string): string {\n  return value.padStart(2, '0');\n}\n\nexport function formatDate(formatDateInput: string): string {\n  return pad(formatDateInput);\n}\n\nexport function parseDate(parseDateInput: string): string {\n  return pad(parseDateInput);\n}\n\nexport function addDays(addDaysInput: string): string {\n  return pad(addDaysInput);\n}\n\nexport function isWeekend(isWeekendInput: string): string {\n  return pad(isWeekendInput);\n}\n\n"
+          }
+        ],
+        "example_base_files": [],
+        "how_to_fix": "Group the items by the concern of their callers, and move each group into a module with a small interface, or next to its only caller. When the width is on purpose, for example a published helper set, add the directory to `health.shallowDirectories.ignore`.",
+        "docs": "https://fallow.tools/docs/rules/shallow-directory/"
+      },
+      "display_label": "Shallow directory"
     },
     {
       "id": "css-token-drift",

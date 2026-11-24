@@ -890,6 +890,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         complexity: true,
         file_scores: true,
         coverage_gaps: false,
+        shallow_directories: false,
         // Bare `fallow` includes health, so an enabled `coverage-gaps` rule
         // reports and gates here exactly as it does on `fallow health`.
         config_activates_coverage_gaps: true,

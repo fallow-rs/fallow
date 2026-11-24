@@ -1663,3 +1663,19 @@ fn resolve_no_preset_unchanged() {
     );
     assert!(resolved.boundaries.is_empty());
 }
+
+#[test]
+fn a_call_facts_request_does_not_turn_the_constant_parameter_rule_on() {
+    let mut resolved = make_config(false).resolve(
+        PathBuf::from("/project"),
+        OutputFormat::Human,
+        1,
+        true,
+        true,
+        None,
+    );
+    assert!(!resolved.reads_call_facts());
+    resolved.call_facts_requested = true;
+    assert!(resolved.reads_call_facts());
+    assert!(!resolved.constant_parameters_enabled());
+}

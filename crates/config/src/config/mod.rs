@@ -48,7 +48,7 @@ pub use format::OutputFormat;
 pub use glob_validation::compile_path_glob;
 pub use health::{
     ChangeCouplingConfig, CyclomaticPolicy, EmailMode, HealthConfig, HealthThresholdOverride,
-    OwnershipConfig,
+    OwnershipConfig, ShallowDirectoriesConfig,
 };
 pub use ignore_list_effect::{IgnoreExportName, IgnoreListEffect};
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};

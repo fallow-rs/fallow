@@ -271,6 +271,7 @@ fn viz_health_options<'a>(
         complexity: true,
         file_scores: true,
         coverage_gaps: true,
+        shallow_directories: false,
         config_activates_coverage_gaps: false,
         // Churn and ownership require a full git-history walk. Keep Viz on the
         // retained single-session artifacts and report those capabilities as

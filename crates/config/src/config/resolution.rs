@@ -236,6 +236,10 @@ pub struct ResolvedConfig {
     pub cache_config_hash: u64,
     /// Optional facts collected for this run. Immutable after session creation.
     pub extraction_mode: fallow_types::shared_state::ExtractionMode,
+    /// The run reads the call facts for a section, not for a rule: the
+    /// shallow directories section of `fallow health` reads the module-scope
+    /// functions from them. Set before the session parses.
+    pub call_facts_requested: bool,
     /// Exact global root/slot pairs omitted from the inventory.
     pub shared_state_allowlist: Vec<[String; 2]>,
     /// Package names and package-name globs excluded from both
@@ -1065,6 +1069,7 @@ impl FallowConfig {
             cache_max_size_mb: cache.max_size_mb,
             cache_config_hash: cache.config_hash,
             extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
+            call_facts_requested: false,
             shared_state_allowlist: self.shared_state_allowlist,
             ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
             ignore_binaries: IgnoreDependencyMatcher::compile(&self.ignore_binaries),
@@ -1257,14 +1262,23 @@ impl ResolvedConfig {
 mod tests;
 
 impl ResolvedConfig {
-    /// Whether a rule of this config reads the call facts of the modules: the
-    /// `constant-parameter` rule is on, globally or in an override.
+    /// Whether the run reads the call facts of the modules: the
+    /// `constant-parameter` rule is on, globally or in an override, or a
+    /// section set [`Self::call_facts_requested`].
     ///
     /// A run for which this is `false` neither stores nor decodes call facts.
     /// The parse cache records which entries hold them, so a later run that
     /// reads them parses only the files whose entry lacks them.
     #[must_use]
     pub fn reads_call_facts(&self) -> bool {
+        self.call_facts_requested || self.constant_parameters_enabled()
+    }
+
+    /// Whether the `constant-parameter` rule is on, globally or in an
+    /// override. A section that requests the call facts does not turn the
+    /// rule on.
+    #[must_use]
+    pub fn constant_parameters_enabled(&self) -> bool {
         self.rules.constant_parameters != crate::Severity::Off
             || self.overrides.iter().any(|overrides| {
                 overrides

@@ -62,6 +62,7 @@ mod health_mutation;
 mod health_report;
 mod health_runtime_coverage;
 mod health_scores;
+mod health_shallow_directories;
 mod health_targets;
 mod health_trends;
 mod health_vital_signs;
@@ -302,6 +303,10 @@ pub use health_scores::{
     ThresholdOverrideDimension, ThresholdOverrideMetrics, ThresholdOverrideState,
     ThresholdOverrideStatus, ThresholdSource, compute_finding_severity, letter_grade,
     summarize_coverage_source_consistency,
+};
+pub use health_shallow_directories::{
+    ShallowDirectoriesReport, ShallowDirectoryAction, ShallowDirectoryActionType,
+    ShallowDirectoryFinding, ShallowDirectoryItem, ShallowDirectoryItemKind,
 };
 pub use health_targets::{
     CloneSiblingEvidence, CoChangePartnerEvidence, Confidence, ContributingFactor,

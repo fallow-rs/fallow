@@ -234,6 +234,7 @@ fn needs_health_file_scores(
     opts.file_scores
         || report_coverage_gaps
         || enforce_coverage_gaps
+        || opts.shallow_directories
         || opts.hotspots
         || opts.targets
         || opts.force_full

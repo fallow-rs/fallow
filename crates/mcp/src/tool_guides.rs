@@ -59,6 +59,13 @@ const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
 This analysis is opt-in because it parses every project stylesheet. Standard CSS is parsed structurally. Sass/Less sources are scanned only where fallow can stay conservative without expanding preprocessor semantics.",
     },
     ToolGuideSection {
+        topic: "shallow_directories",
+        summary: "When a directory is shallow, and how to act on one.",
+        detail: r"Set shallow_directories=true to add the `shallow_directories` section. Files outside a shallow directory use at least as many of its interface items as it keeps inside. The directory also shows at least `health.shallowDirectories.minInterface` items (default 8). An interface item is a module-scope function or an exported class with a method. Types, constants, enums and UI components do not count. Exports that a package entry re-exports do not count either. Catalogs (about one item per file), families of functions with one parameter list, and items with about one outside user are not reported.
+
+Each entry lists the 7 items with the most outside users. To act on an entry, follow `narrow-interface`: move the logic behind fewer items, or merge the directory into its callers. When the width is on purpose, add the `value` of the `ignore-directory` action to the `config_key` list in the config file. The section is advisory: it has no score weight and never gates.",
+    },
+    ToolGuideSection {
         topic: "complexity_breakdown",
         summary: "What a `contributions[]` entry names, and how JSX depth is carried.",
         detail: r"Set complexity_breakdown=true to add a `contributions[]` array to each complexity finding. The array breaks down cyclomatic and cognitive scores per decision point. Each entry names the construct (if, else-if, ternary, boolean operator, loop, case, or catch), its source line, and its weight. React/Preact component entries also include hook-density and prop-count contributions. Use these entries to identify why a function scored high and which lines to refactor.

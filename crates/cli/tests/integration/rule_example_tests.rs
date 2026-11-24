@@ -338,6 +338,7 @@ const JSON_ROWS: &[(&str, &str)] = &[
     ("high-cyclomatic-complexity", "/findings"),
     ("long-file", "/findings"),
     ("refactoring-target", "/targets"),
+    ("shallow-directory", "/shallow_directories/directories"),
     ("untested-export", "/coverage_gaps/exports"),
     ("untested-file", "/coverage_gaps/files"),
 ];
@@ -369,13 +370,15 @@ fn tagged_rows<'a>(node: &'a Value, rule: &str, rows: &mut Vec<&'a Value>) {
 /// or `None` when the format gives no line.
 type Found = (String, Option<u64>);
 
-/// The location of one JSON row: the file in `path`, `file`, `from_path` or
-/// `files[0]` (a cycle), and the line in `line` or `start_line`. Only the
-/// fields of the row itself count, not the objects in it.
+/// The location of one JSON row: the file in `anchor_file` (a directory
+/// finding), `path`, `file`, `from_path` or `files[0]` (a cycle), and the line
+/// in `line` or `start_line`. Only the fields of the row itself count, not the
+/// objects in it.
 fn row_location(row: &Value) -> Option<Found> {
     let object = row.as_object()?;
     let path = object
-        .get("path")
+        .get("anchor_file")
+        .or_else(|| object.get("path"))
         .or_else(|| object.get("file"))
         .or_else(|| object.get("from_path"))
         .or_else(|| object.get("files").and_then(|files| files.get(0)))

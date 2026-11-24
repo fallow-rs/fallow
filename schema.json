@@ -238,6 +238,10 @@
           "minSharedRevisions": 5,
           "minDegree": 0.3
         },
+        "shallowDirectories": {
+          "minInterface": 8,
+          "ignore": []
+        },
         "suggestInlineSuppression": true,
         "inlineThresholdOverrides": true
       }
@@ -1569,6 +1573,14 @@
             "minDegree": 0.3
           }
         },
+        "shallowDirectories": {
+          "description": "Settings for the shallow directories section\n(`fallow health --shallow-directories`). Older fallow versions reject\nthis key as unknown, so pair it with `minimumVersion` set to the\nrelease that added it.",
+          "$ref": "#/$defs/ShallowDirectoriesConfig",
+          "default": {
+            "minInterface": 8,
+            "ignore": []
+          }
+        },
         "suggestInlineSuppression": {
           "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
           "type": "boolean",
@@ -1758,6 +1770,28 @@
           "minimum": 0.0,
           "maximum": 1.0,
           "default": 0.3
+        }
+      },
+      "additionalProperties": false
+    },
+    "ShallowDirectoriesConfig": {
+      "description": "Settings for the shallow directories section\n(`fallow health --shallow-directories`).\n\nA directory is shallow when files outside it use at least as many of its\ninterface items as it keeps inside, and it shows at least `minInterface`\nitems.",
+      "type": "object",
+      "properties": {
+        "minInterface": {
+          "description": "Minimum number of interface items that files outside a directory use\nbefore the directory can be shallow (default: 8, at least 1).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "default": 8
+        },
+        "ignore": {
+          "description": "Glob patterns for directories to leave out of the section, relative to\nthe project root (for example `src/generated` or `src/api/**`). A\npattern matches the directory path, not the files in it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false

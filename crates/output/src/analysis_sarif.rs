@@ -187,6 +187,7 @@ fn append_health_sarif_results(
     }
 
     append_refactoring_target_sarif_results(sarif_results, report, root);
+    append_shallow_directory_sarif_results(sarif_results, report);
     append_coverage_gap_sarif_results(sarif_results, report, root, snippets);
     append_styling_sarif_results(sarif_results, report, root);
 }
@@ -307,6 +308,11 @@ fn health_complexity_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<ser
             "fallow/refactoring-target",
             "File identified as a high-priority refactoring candidate",
             "warning",
+        ),
+        rule_builder(
+            "fallow/shallow-directory",
+            "Directory shows as many interface items as it hides",
+            "note",
         ),
     ]
 }
@@ -545,6 +551,37 @@ fn append_refactoring_target_sarif_results(
             &uri,
             None,
         ));
+    }
+}
+
+/// One `note` per shallow directory, on its anchor file. The paths of the
+/// section are already relative to the root.
+fn append_shallow_directory_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    report: &HealthReport,
+) {
+    let Some(ref section) = report.shallow_directories else {
+        return;
+    };
+    for dir in &section.directories {
+        let message = format!(
+            "{} is shallow: files outside it use {} interface items, and it hides {}",
+            normalize_uri(&dir.path.display().to_string()),
+            dir.shown_count,
+            dir.hidden_count,
+        );
+        let directory = normalize_uri(&dir.path.display().to_string());
+        let uri = normalize_uri(&dir.anchor_file.display().to_string());
+        let mut result = sarif_result("fallow/shallow-directory", "note", &message, &uri, None);
+        // The fingerprint reads the directory, not the anchor file, so a new
+        // first file of the directory keeps the alert identity.
+        let fingerprint =
+            crate::codeclimate_fingerprint_hash(&["fallow/shallow-directory", &directory]);
+        result["partialFingerprints"][crate::SARIF_FINGERPRINT_KEY] =
+            serde_json::Value::from(fingerprint.clone());
+        result["partialFingerprints"][crate::GHAS_SARIF_FINGERPRINT_KEY] =
+            serde_json::Value::from(fingerprint);
+        sarif_results.push(result);
     }
 }
 
@@ -915,5 +952,39 @@ mod tests {
         );
         assert_eq!(crap_rule, "fallow/high-crap-score");
         assert!(crap_message.contains("threshold: 500.0"), "{crap_message}");
+    }
+
+    fn shallow_report(anchor: &str) -> HealthReport {
+        HealthReport {
+            shallow_directories: Some(crate::ShallowDirectoriesReport {
+                min_interface: 8,
+                total: 1,
+                directories: vec![crate::ShallowDirectoryFinding {
+                    path: PathBuf::from("src/utils"),
+                    anchor_file: PathBuf::from(anchor),
+                    shown_count: 9,
+                    shown_files: 2,
+                    hidden_count: 1,
+                    items: Vec::new(),
+                    more_items: 0,
+                    actions: Vec::new(),
+                }],
+            }),
+            ..HealthReport::default()
+        }
+    }
+
+    #[test]
+    fn a_new_anchor_file_keeps_the_shallow_directory_fingerprint() {
+        let fingerprint = |anchor: &str| {
+            let mut results = Vec::new();
+            append_shallow_directory_sarif_results(&mut results, &shallow_report(anchor));
+            assert_eq!(
+                results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                anchor
+            );
+            results[0]["partialFingerprints"][crate::SARIF_FINGERPRINT_KEY].clone()
+        };
+        assert_eq!(fingerprint("src/utils/a.ts"), fingerprint("src/utils/0.ts"));
     }
 }

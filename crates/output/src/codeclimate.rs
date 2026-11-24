@@ -72,10 +72,8 @@ pub enum CodeClimateIssueKind {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum CodeClimateSeverity {
-    /// Informational. Reserved for future severity mappings; not produced
-    /// by the current runtime path (which only emits Minor / Major /
-    /// Critical via `severity_to_codeclimate` and the health / runtime-
-    /// coverage match arms).
+    /// Informational. Only the advisory shallow directories section of
+    /// health output produces it.
     Info,
     /// Minor finding.
     Minor,

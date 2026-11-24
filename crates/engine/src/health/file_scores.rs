@@ -70,6 +70,7 @@ pub fn compute_file_scores_and_churn<T>(
                 },
                 with_static_links: needs_churn,
                 test_reach: input.test_reach,
+                shallow_directories: input.opts.shallow_directories,
             })?
         } else {
             (None, None, None)
@@ -125,6 +126,7 @@ struct FileScoreInput<'a> {
     crap_thresholds: scoring::CrapScoreThresholds<'a>,
     with_static_links: bool,
     test_reach: &'a SharedTestReach<'a>,
+    shallow_directories: bool,
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, HealthError> {
@@ -140,6 +142,30 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
         &mut analysis_output.results,
         input.config,
     );
+    let shallow_directories = input
+        .shallow_directories
+        .then_some(analysis_output.graph.as_ref())
+        .flatten()
+        .map(|graph| {
+            super::shallow_directories::find_shallow_directories(
+                &super::shallow_directories::ShallowDirectoriesInput {
+                    graph: graph.as_graph(),
+                    modules: input.modules,
+                    root: &input.config.root,
+                    config: &input.config.health.shallow_directories,
+                },
+            )
+        })
+        .map(|mut report| {
+            scope_shallow_directories(
+                &mut report,
+                &input.config.root,
+                input.ws_roots,
+                input.ignore_set,
+                input.changed_files,
+            );
+            report
+        });
     match compute_file_scores(
         scoring::FileScoreComputeInput {
             modules: input.modules,
@@ -154,6 +180,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
         analysis_output,
     ) {
         Ok(mut output) => {
+            output.shallow_directories = shallow_directories;
             if let Some(ws) = input.ws_roots {
                 output.scores.retain(|s| ws.contains(&s.path));
             }
@@ -192,4 +219,24 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
             Ok((None, Some(0), None))
         }
     }
+}
+
+/// Keep the shallow directories inside the workspace scope, outside
+/// `health.ignore`, and, with `--changed-since`, those that hold a changed
+/// file.
+fn scope_shallow_directories(
+    report: &mut fallow_output::ShallowDirectoriesReport,
+    root: &std::path::Path,
+    ws_roots: Option<&crate::workspace_scope::WorkspaceScope>,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) {
+    report.directories.retain(|dir| {
+        let absolute = root.join(&dir.path);
+        ws_roots.is_none_or(|ws| ws.contains(&absolute))
+            && !super::shallow_directories::matches_directory(ignore_set, &dir.path)
+            && changed_files
+                .is_none_or(|changed| changed.iter().any(|file| file.starts_with(&absolute)))
+    });
+    report.total = report.directories.len();
 }
