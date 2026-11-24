@@ -885,6 +885,7 @@ fn module_to_cached_roundtrip_members() {
                     override_base: None,
                     is_protected: false,
                     is_static: false,
+                    pairs_with_symbol_dispose: false,
                 },
                 MemberInfo {
                     name: "greet".to_string(),
@@ -897,6 +898,7 @@ fn module_to_cached_roundtrip_members() {
                     override_base: None,
                     is_protected: false,
                     is_static: false,
+                    pairs_with_symbol_dispose: false,
                 },
                 MemberInfo {
                     name: "name".to_string(),
@@ -909,6 +911,7 @@ fn module_to_cached_roundtrip_members() {
                     override_base: None,
                     is_protected: false,
                     is_static: false,
+                    pairs_with_symbol_dispose: false,
                 },
             ],
             is_side_effect_used: false,
@@ -1533,6 +1536,7 @@ fn module_to_cached_roundtrip_member_decorators() {
                 override_base: None,
                 is_protected: false,
                 is_static: false,
+                pairs_with_symbol_dispose: false,
             }],
             is_side_effect_used: false,
             super_class: None,

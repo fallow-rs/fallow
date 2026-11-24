@@ -889,7 +889,38 @@ pub fn extract_class_members(
             _ => {}
         }
     }
+    mark_symbol_dispose_pairs(class, &mut members);
     members
+}
+
+/// Mark each `dispose` method whose class also declares `[Symbol.dispose]` or
+/// `[Symbol.asyncDispose]` with the same `static` modifier.
+fn mark_symbol_dispose_pairs(class: &Class<'_>, members: &mut [MemberInfo]) {
+    for element in &class.body.body {
+        let ClassElement::MethodDefinition(method) = element else {
+            continue;
+        };
+        if !is_symbol_dispose_key(&method.key) {
+            continue;
+        }
+        for member in members.iter_mut() {
+            if member.kind == MemberKind::ClassMethod
+                && member.name == "dispose"
+                && member.is_static == method.r#static
+            {
+                member.pairs_with_symbol_dispose = true;
+            }
+        }
+    }
+}
+
+/// Whether a computed class key is `Symbol.dispose` or `Symbol.asyncDispose`.
+fn is_symbol_dispose_key(key: &PropertyKey<'_>) -> bool {
+    let Some(Expression::StaticMemberExpression(member)) = key.as_expression() else {
+        return false;
+    };
+    matches!(&member.object, Expression::Identifier(object) if object.name == "Symbol")
+        && matches!(member.property.name.as_str(), "dispose" | "asyncDispose")
 }
 
 /// Whether `method` is the one declaration that stands for its overload set.
@@ -1000,6 +1031,7 @@ fn build_method_member(
         override_base: None,
         is_protected: matches!(method.accessibility, Some(TSAccessibility::Protected)),
         is_static: method.r#static,
+        pairs_with_symbol_dispose: false,
     })
 }
 
@@ -1038,6 +1070,7 @@ fn build_property_member(
         override_base: None,
         is_protected: matches!(prop.accessibility, Some(TSAccessibility::Protected)),
         is_static: prop.r#static,
+        pairs_with_symbol_dispose: false,
     })
 }
 
