@@ -21,7 +21,7 @@
   "dependencies": {
     "dpdm": "^4.3.0",
     "jscpd": "^5.4.3",
-    "knip": "^6.44.2",
+    "knip": "^6.45.1",
     "madge": "^8.0.0"
   },
   "overrides": {
