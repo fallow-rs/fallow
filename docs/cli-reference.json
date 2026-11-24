@@ -19267,7 +19267,7 @@
           },
           {
             "path": "package.json",
-            "code": "{\n  \"name\": \"shop\",\n  \"private\": true,\n  \"main\": \"src/index.ts\",\n  \"dependencies\": {\n    \"zod\": \"^3.23.0\"\n  }\n}\n"
+            "code": "{\n  \"name\": \"shop\",\n  \"private\": true,\n  \"main\": \"src/index.ts\",\n  \"dependencies\": {\n    \"zod\": \"^4.6.7\"\n  }\n}\n"
           },
           {
             "path": "src/index.ts",
@@ -19326,7 +19326,7 @@
         "example_files": [
           {
             "path": "package.json",
-            "code": "{\n  \"name\": \"shop\",\n  \"private\": true,\n  \"main\": \"src/cart.ts\",\n  \"dependencies\": {\n    \"vitest\": \"^3.0.0\"\n  }\n}\n"
+            "code": "{\n  \"name\": \"shop\",\n  \"private\": true,\n  \"main\": \"src/cart.ts\",\n  \"dependencies\": {\n    \"vitest\": \"^5.1.1\"\n  }\n}\n"
           },
           {
             "path": "src/cart.test.ts",
