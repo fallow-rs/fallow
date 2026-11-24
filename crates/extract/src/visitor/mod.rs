@@ -1207,17 +1207,17 @@ pub(crate) struct ModuleInfoExtractor {
     /// Nested lexical `path.relative(base, resolved)` aliases.
     path_relative_binding_stack: Vec<FxHashMap<String, Option<String>>>,
     /// Harvested Pinia store members keyed by the store binding's local name
-    /// (`export const useFoo = defineStore('foo', {...})` -> `"useFoo"` maps to
-    /// its `state` / `getters` / `actions` keys, or setup-store returned keys,
-    /// as `MemberKind::StoreMember`). Copied onto the matching `ExportInfo` in
-    /// `enrich_store_exports` (the same side-map + finalizer shape as
-    /// `enrich_local_class_exports`). Working state only; not persisted.
+    /// (`state` / `getters` / `actions` keys, or setup-store returned keys).
+    /// `enrich_store_exports` copies them onto the matching `ExportInfo`, the same
+    /// shape as `enrich_local_class_exports`. Working state only; not persisted.
     store_member_decls: FxHashMap<String, Vec<MemberInfo>>,
-    /// Locals bound to a store-factory call (`const s = useFooStore()`).
-    /// Gates the store-consumption destructure crediting (`const { count } = s`
-    /// / `storeToRefs(s)`) so it never fires on a plain `new`-instance or object
-    /// binding, keeping class-member detection drift-free. Working state only.
+    /// Locals bound to a store-factory call (`const s = useFooStore()`). Gates the
+    /// destructure and `storeToRefs(s)` crediting so it never fires on a plain
+    /// `new`-instance or object binding. Working state only.
     store_instance_locals: FxHashSet<String>,
+    /// Span starts of store `$state` expressions that a key read, a destructure or
+    /// a whole write consumes. Any other one marks the whole store as used.
+    pinia_state_named_uses: FxHashSet<u32>,
     /// Local type aliases of the form `type X = ReturnType<typeof useFooStore>`
     /// mapped to the store factory name (`X -> useFooStore`). Lets a param typed
     /// as the store (`(s: X)` or `(props: { store: X })`) bind to the factory so
