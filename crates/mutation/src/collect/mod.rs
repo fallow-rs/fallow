@@ -48,6 +48,7 @@ use oxc_syntax::operator::{
 use oxc_syntax::reference::ReferenceId;
 use oxc_syntax::scope::ScopeFlags;
 
+use crate::logging_only::callee_without_wrappers;
 use crate::replacements::{
     arithmetic_replacement, assignment_replacement, equivalent_zero_replacement, is_boolean_valued,
     is_comparison_level, is_relational, is_text_operand, lowers_precedence, mirrored,
@@ -628,21 +629,6 @@ fn is_logging_callee(callee: &Expression<'_>) -> bool {
 /// A `require(...)` call, also behind parentheses and TypeScript wrappers.
 fn is_require_callee(callee: &Expression<'_>) -> bool {
     callee_without_wrappers(callee).is_specific_id("require")
-}
-
-/// The callee without parentheses and TypeScript expression wrappers, at any
-/// depth. Type stripping keeps the reference, so `(o?.m as any)()` calls `m`
-/// with `this` set to `o`, the same as `(o?.m)()`.
-pub fn callee_without_wrappers<'e, 'a>(callee: &'e Expression<'a>) -> &'e Expression<'a> {
-    match callee {
-        Expression::ParenthesizedExpression(inner) => callee_without_wrappers(&inner.expression),
-        Expression::TSAsExpression(inner) => callee_without_wrappers(&inner.expression),
-        Expression::TSSatisfiesExpression(inner) => callee_without_wrappers(&inner.expression),
-        Expression::TSNonNullExpression(inner) => callee_without_wrappers(&inner.expression),
-        Expression::TSTypeAssertion(inner) => callee_without_wrappers(&inner.expression),
-        Expression::TSInstantiationExpression(inner) => callee_without_wrappers(&inner.expression),
-        _ => callee,
-    }
 }
 
 /// True when `expression` is part of an optional chain that has an optional

@@ -11,7 +11,20 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::Visit;
 
-use crate::collect::callee_without_wrappers;
+/// The callee without parentheses and TypeScript expression wrappers, at any
+/// depth. Type stripping keeps the reference, so `(o?.m as any)()` calls `m`
+/// with `this` set to `o`, the same as `(o?.m)()`.
+pub fn callee_without_wrappers<'e, 'a>(callee: &'e Expression<'a>) -> &'e Expression<'a> {
+    match callee {
+        Expression::ParenthesizedExpression(inner) => callee_without_wrappers(&inner.expression),
+        Expression::TSAsExpression(inner) => callee_without_wrappers(&inner.expression),
+        Expression::TSSatisfiesExpression(inner) => callee_without_wrappers(&inner.expression),
+        Expression::TSNonNullExpression(inner) => callee_without_wrappers(&inner.expression),
+        Expression::TSTypeAssertion(inner) => callee_without_wrappers(&inner.expression),
+        Expression::TSInstantiationExpression(inner) => callee_without_wrappers(&inner.expression),
+        _ => callee,
+    }
+}
 
 /// Which logging roots of a file are the globals. A file that declares or
 /// imports a binding named `console` or `debug` anywhere can call a function
