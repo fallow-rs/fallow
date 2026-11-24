@@ -62,18 +62,89 @@ const OVERLAY_PLUGIN = "fallow-mutation-overlay";
 /** Keys a test module by its project, because two projects can include one file. */
 const moduleKey = (project, moduleId) => `${project.name}\0${moduleId}`;
 
-const resolvePackage = (projectRequire, root) => {
+/** The `package.json` fields of the root whose packages can bring the project its Vitest. */
+const ROOT_DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies"];
+/**
+ * The `package.json` fields of a listed package that make the package bring
+ * its own Vitest. A `devDependencies` entry does not count, because a
+ * workspace package can link its own Vitest that the project does not run. A
+ * `peerDependencies` entry does not count, because an unmet peer lets the
+ * lookup reach a Vitest that pnpm hoists into `node_modules/.pnpm/node_modules`.
+ */
+const BRINGS_VITEST_FIELDS = ["dependencies", "optionalDependencies"];
+
+const tryResolve = (resolver, specifier) => {
   try {
-    return projectRequire.resolve("vitest/package.json");
+    return resolver.resolve(specifier);
   } catch {
-    throw new CompanionError("runner-not-found", `vitest is not installed in ${root}`);
+    return undefined;
   }
+};
+
+const readManifest = (path) => {
+  try {
+    const manifest = JSON.parse(readFileSync(path, "utf8"));
+    return isPlainObject(manifest) ? manifest : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The names that `manifest` lists in `fields`, in field order and without duplicates. */
+const dependencyNames = (manifest, fields) => [
+  ...new Set(
+    fields
+      .map((field) => manifest?.[field])
+      .filter(isPlainObject)
+      .flatMap(Object.keys),
+  ),
+];
+
+/**
+ * The `package.json` of the installed package `name`, by the Node lookup of
+ * `node_modules` directories. The lookup does not read the `exports` field,
+ * because a package can keep its `package.json` out of `exports`.
+ */
+const installedManifest = (projectRequire, name) =>
+  (projectRequire.resolve.paths(name) ?? [])
+    .map((dir) => join(dir, name, "package.json"))
+    .find(existsSync);
+
+/**
+ * The `require` that resolves the Vitest of the project. The project root
+ * comes first. Then each package that the root `package.json` lists and that
+ * declares `vitest` in `BRINGS_VITEST_FIELDS` can bring its own Vitest, as a
+ * toolchain such as Vite+ does. A strict package manager such as pnpm keeps
+ * that Vitest out of the root `node_modules`, next to the real directory of
+ * the package, so the lookup starts from the real path. A package that does
+ * not declare `vitest` is skipped: a lookup from it can reach an unrelated
+ * Vitest that pnpm hoists into `node_modules/.pnpm/node_modules`.
+ */
+const vitestRequire = (root) => {
+  const projectRequire = createRequire(join(root, "package.json"));
+  if (tryResolve(projectRequire, "vitest/package.json") !== undefined) return projectRequire;
+  const rootManifest = readManifest(join(root, "package.json"));
+  for (const name of dependencyNames(rootManifest, ROOT_DEPENDENCY_FIELDS)) {
+    const manifest = installedManifest(projectRequire, name);
+    if (manifest === undefined) continue;
+    const realManifest = realPath(manifest);
+    if (!dependencyNames(readManifest(realManifest), BRINGS_VITEST_FIELDS).includes(RUNNER_NAME)) {
+      continue;
+    }
+    const dependencyRequire = createRequire(realManifest);
+    if (tryResolve(dependencyRequire, "vitest/package.json") !== undefined) {
+      return dependencyRequire;
+    }
+  }
+  throw new CompanionError("runner-not-found", `vitest is not installed in ${root}`);
 };
 
 /** Loads `vitest/node` from the project, never from the companion. */
 const loadProjectVitest = async (root) => {
-  const projectRequire = createRequire(join(root, "package.json"));
-  const { version } = JSON.parse(readFileSync(resolvePackage(projectRequire, root), "utf8"));
+  const projectRequire = vitestRequire(root);
+  const { version } = JSON.parse(
+    readFileSync(projectRequire.resolve("vitest/package.json"), "utf8"),
+  );
   if (!isSupportedVersion(RUNNER_NAME, version)) {
     throw unsupportedVersion(RUNNER_NAME, `vitest ${version}`);
   }
