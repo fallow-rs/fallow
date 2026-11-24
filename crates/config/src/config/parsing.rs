@@ -7,17 +7,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::FallowConfig;
 
-/// Config file names the loader accepts, in discovery priority order.
-///
-/// Public because surfaces outside config loading have to react to the same
-/// set: the language server registers a file watcher per name, so a name added
-/// here reaches the editor without a second list to keep in step.
-pub const CONFIG_FILE_NAMES: &[&str] = &[
-    ".fallowrc.json",
-    ".fallowrc.jsonc",
-    "fallow.toml",
-    ".fallow.toml",
-];
+pub use fallow_types::config_file_names::{
+    CONFIG_FILE_NAMES, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,
+};
 
 /// Supported config file names in priority order.
 const CONFIG_NAMES: &[&str] = CONFIG_FILE_NAMES;

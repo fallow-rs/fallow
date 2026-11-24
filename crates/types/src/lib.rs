@@ -35,6 +35,8 @@ pub mod cloud;
 pub mod command_surfaces;
 /// Per-construct complexity increments behind the complexity scores.
 pub mod complexity_contribution;
+/// The config file names that discovery reads and the near-miss names.
+pub mod config_file_names;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
 /// Shared duplicate-code output contracts.

@@ -993,6 +993,12 @@ used: string
  */
 ignored: string
 } | {
+kind: "config-file-name-unrecognized"
+/**
+ * The file name that the run did not read.
+ */
+name: string
+} | {
 kind: "unknown-security-category"
 /**
  * The category id, as written in the config.

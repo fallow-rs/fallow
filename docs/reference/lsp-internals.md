@@ -107,10 +107,14 @@ lifecycle behavior.
   `extends` config) goes to the output log, once per changed set.
 - The `workspace/didChangeWatchedFiles` registration derives its config-file
   globs from `fallow_config::CONFIG_FILE_NAMES`, the list the loader itself
-  reads, and `type_aware_resolution_file` matches the same names. Add a config
-  file name there, not in `crates/lsp`. The legacy `fallow.json`-style patterns
-  stay registered separately because `initializationOptions.configPath` can
-  still point at one.
+  reads, and from `fallow_config::UNRECOGNIZED_CONFIG_FILE_NAMES`, the
+  near-miss names such as `fallow.jsonc`. `session_input_file` and
+  `type_aware_resolution_file` match both lists through
+  `fallow_config::config_file_name`. Add a name in `crates/types`, not in
+  `crates/lsp`. The near-miss names stay watched for two reasons: a run
+  reports a `config-file-name-unrecognized` notice for them, and
+  `initializationOptions.configPath` can still name a JSON file with such a
+  name.
 - Code actions must be safe, scoped, and derived from the current issue.
 - The remove-export quick fix parses the live document text with
   `fallow_api::source_edits::SourceEditIndex`. It offers the edit only for an

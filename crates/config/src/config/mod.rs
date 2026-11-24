@@ -60,7 +60,10 @@ pub use markup_extensions::{
 };
 pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
 pub use override_effect::{IneffectiveOverrideRule, project_level_override_rules};
-pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions, extends_timeout_from_env_value};
+pub use parsing::{
+    CONFIG_FILE_NAMES, ConfigLoadOptions, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,
+    extends_timeout_from_env_value,
+};
 pub use resolution::{
     AnalysisSnapshot, CACHE_DIR_ENV, CACHE_MAX_SIZE_ENV, CompiledIgnoreCatalogReferenceRule,
     CompiledIgnoreDependencyOverrideRule, CompiledIgnoreExportRule, ConfigOverride,
