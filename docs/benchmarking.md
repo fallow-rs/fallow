@@ -56,16 +56,20 @@ syscalls that take more time than the work itself. The simulated value still
 counts the instructions of the worker, so the warning alone is no reason to
 distrust a result.
 
-Every simulation job sets `cycle-estimation: false`, so each instruction has
+Every simulation job sets `cycle-estimation: 'false'`, so each instruction has
 the same cost and the value follows the instruction count. The cycle estimate
 of CodSpeed adds a cost for cache misses from a cache model of the physical
 CPU. The hosted runners change between Intel and AMD CPUs from run to run, so
 that estimate moves on the same code. The instruction count does not depend on
-the CPU. Cache and memory cost shows in the walltime jobs.
-`scripts/check-benchmark-harness.py` rejects a simulation job without the
-setting.
+the CPU.
 
-When this setting changed, each value of the Rust shards dropped once,
+Thus a change of cache locality or memory layout, for example a new
+struct layout or a `Vec` that becomes a hash map, does not show in these
+shards. The walltime jobs show that cost for the CLI. For a Rust component,
+use the local walltime retain gates below.
+
+`scripts/check-benchmark-harness.py` rejects a simulation job without the
+setting. The Rust shards set it in #5197. Each value dropped once at that change,
 because the value no longer holds the cache-miss cost. Do not compare a run
 from before that change with a run after it.
 
