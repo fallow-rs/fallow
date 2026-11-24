@@ -776,6 +776,10 @@ pub struct PathRule {
     /// such as the Storybook `../src/**`, which must not climb out of the
     /// workspace.
     pub parent_relative: bool,
+    /// Whether `pattern` is always relative to the plugin root. The workspace
+    /// prefix then applies also to a pattern that starts with the prefix text,
+    /// such as `docs/js/x.js` in a workspace package named `docs`.
+    pub package_relative: bool,
 }
 
 impl PathRule {
@@ -787,6 +791,7 @@ impl PathRule {
             exclude_regexes: Vec::new(),
             exclude_segment_regexes: Vec::new(),
             parent_relative: false,
+            package_relative: false,
         }
     }
 
@@ -858,6 +863,8 @@ impl PathRule {
         let prefix = |pattern: &str| {
             if self.parent_relative && pattern.starts_with("../") {
                 resolve_parent_relative_pattern(pattern, ws_prefix)
+            } else if self.package_relative {
+                format!("{ws_prefix}/{pattern}")
             } else {
                 prefix_workspace_pattern(pattern, ws_prefix)
             }
@@ -876,6 +883,7 @@ impl PathRule {
                 .collect(),
             exclude_segment_regexes: self.exclude_segment_regexes.clone(),
             parent_relative: false,
+            package_relative: false,
         }
     }
 }
@@ -1893,6 +1901,7 @@ mod lint_staged;
 mod lit;
 mod markdownlint;
 mod mintlify;
+mod mkdocs;
 mod mocha;
 mod module_federation;
 mod msw;

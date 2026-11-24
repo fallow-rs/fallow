@@ -1,0 +1,13 @@
+site_name: Demo
+theme:
+  name: material
+markdown_extensions:
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+extra_javascript:
+  - js/extra.js
+  - path: js/module.mjs
+    type: module
+  - https://unpkg.com/example@1.0.0/index.js
+extra_css:
+  - css/extra.css

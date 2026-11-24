@@ -315,7 +315,8 @@ fn all_builtin_plugins_have_activation_signals() {
     // Plugins activated from package metadata or filesystem sentinels rather
     // than dependency enablers (napi binary name; deno.json presence;
     // kibana.jsonc presence; action.yml with a node runtime; the package.json
-    // n8n block; an extension.js beside a metadata.json).
+    // n8n block; an extension.js beside a metadata.json; mkdocs.yml or
+    // zensical.toml presence).
     const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &[
         "napi-rs",
         "deno",
@@ -324,6 +325,7 @@ fn all_builtin_plugins_have_activation_signals() {
         "github-action",
         "n8n",
         "gnome-shell-extension",
+        "mkdocs",
     ];
     let plugins = registry::builtin::create_builtin_plugins();
     for p in &plugins {
@@ -666,6 +668,21 @@ fn builtin_plugin_count_is_expected() {
         plugins.len() >= 110,
         "expected at least 110 built-in plugins, got {}",
         plugins.len()
+    );
+}
+
+/// A package-relative pattern gets the workspace prefix also when it starts
+/// with the prefix text. Without the flag, the registry keeps such a pattern
+/// as written.
+#[test]
+fn a_package_relative_pattern_always_gets_the_workspace_prefix() {
+    let mut rule = PathRule::new("docs/js/x.js");
+    assert_eq!(rule.prefixed("docs").pattern, "docs/js/x.js");
+    rule.package_relative = true;
+    assert_eq!(rule.prefixed("docs").pattern, "docs/docs/js/x.js");
+    assert_eq!(
+        rule.prefixed("packages/site").pattern,
+        "packages/site/docs/js/x.js"
     );
 }
 
