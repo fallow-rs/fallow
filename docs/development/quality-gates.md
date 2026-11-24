@@ -1219,6 +1219,18 @@ it also compares the values of a squash merge without a rebase, and it
 rebases when that merge loses a bump. Both scripts use
 `scripts/version-constants.mjs`.
 
+These checks see a bump, but they cannot see a missing one. The graph cache
+key has no binary version, so a change to how the graph is built must bump
+`GRAPH_CACHE_VERSION`, or a warm run replays the old graph. The
+`cache::source_pin` test in `crates/graph` parses each production module of
+the crate and pins a hash of its tokens to the version. When that code
+changes, the test fails. Bump the version when the persisted graph can hold
+other facts, then set the pin to the values that the failure prints. Comments,
+formatting and code that compiles only with `test` do not change the hash. The
+pin covers only `fallow-graph`. A change in a crate that feeds the graph, such
+as the extraction or the plugin config code, still needs a decision without a
+test.
+
 ## Evidence standard
 
 For a bug fix, prove the reproduction fails without the change, passes with the

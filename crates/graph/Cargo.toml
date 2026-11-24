@@ -55,6 +55,10 @@ read-trace = []
 [dev-dependencies]
 fallow-config = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
+# Parse the crate sources for the graph cache source pin test.
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full", "visit-mut"] }
 tempfile = { workspace = true }
 fallow-types = { workspace = true }
 rustc-hash = { workspace = true }

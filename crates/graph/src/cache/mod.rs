@@ -19,6 +19,8 @@ use crate::resolve::{
     ResolvedReExport, ResolvedReplacedModuleTarget,
 };
 
+#[cfg(test)]
+mod source_pin;
 mod store;
 
 pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
@@ -37,10 +39,14 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// unmodified tree and silently hides the new behaviour. The same applies to
 /// plugin config extraction, which seeds entry points and path aliases.
 ///
+/// The `source_pin` test pins this value to a hash of the production code of
+/// this crate, so a change to that code fails the test until the author
+/// decides about a bump.
+///
 /// Never reuse a version number that a published build wrote, even from a
 /// development commit. Git history and the CHANGELOG record the reason for
 /// each bump.
-pub const GRAPH_CACHE_VERSION: u32 = 130;
+pub const GRAPH_CACHE_VERSION: u32 = 131;
 
 /// Cached form of a resolved target.
 ///
