@@ -113,7 +113,7 @@ pub(super) fn find_shallow_directories(
         input.modules.iter().map(|m| (m.file_id, m)).collect();
     let relative_paths: FxHashMap<FileId, PathBuf> = input
         .graph
-        .modules
+        .modules()
         .iter()
         .map(|node| (node.file_id, relative_to(input.root, &node.path)))
         .collect();
@@ -121,7 +121,7 @@ pub(super) fn find_shallow_directories(
     let published = published_exports(input.graph);
     let items: Vec<Item> = input
         .graph
-        .modules
+        .modules()
         .iter()
         .filter(|node| {
             relative_paths
@@ -155,7 +155,7 @@ pub(super) fn find_shallow_directories(
 /// the package shows it on purpose, so it is no item.
 fn published_exports(graph: &ModuleGraph) -> FxHashSet<(FileId, String)> {
     let nodes: FxHashMap<FileId, &ModuleNode> = graph
-        .modules
+        .modules()
         .iter()
         .map(|node| (node.file_id, node))
         .collect();
@@ -164,7 +164,7 @@ fn published_exports(graph: &ModuleGraph) -> FxHashSet<(FileId, String)> {
         published: FxHashSet::default(),
         star_seen: FxHashSet::default(),
         stack: graph
-            .modules
+            .modules()
             .iter()
             .filter(|node| node.is_entry_point())
             .map(|node| (node.file_id, None))
