@@ -552,6 +552,31 @@ the source index fallback then apply. The plugin collects the skipped paths,
 so a missing target writes no warning. An action in a nested directory, such
 as `.github/actions/<name>/action.yml`, is not read.
 
+## MkDocs and Zensical site assets
+
+The `mkdocs` plugin reads `mkdocs.yml`, `mkdocs.yaml` and `zensical.toml`.
+Both tools are Python tools with no npm dependency, so a config file
+activates the plugin. A JavaScript project often keeps its site in a
+directory such as `docs/` that is not a workspace package. The plugin
+therefore activates on a config anywhere below the root, through
+`ConfigCandidateIndex::any_descendant_contains`. Config discovery then reads
+each nested config that is an ancestor of a source file. In production mode,
+only a config in the root activates the plugin.
+
+Each item of `extra_javascript` and `extra_css` is a path string or a
+mapping with a `path` key. The plugin joins the path to `docs_dir` (default
+`docs`) next to the config, and resolves `.` and `..` without the
+filesystem. It drops a path that leaves the root or names a URL. Zensical
+keeps the same keys in its `[project]` table. The YAML reader accepts the
+custom tags of a Material for MkDocs config, such as `!!python/name:` and
+`!ENV`.
+
+Each entry rule sets `PathRule::package_relative`. The workspace prefix then
+applies also when the path starts with the name of its package. A site in a
+workspace package named `docs` with the default `docs_dir` needs this. The
+flag matters only for a workspace pass that runs without the root pass, for
+example in production mode with no root config.
+
 ## VitePress `vite` block
 
 The `vitepress` plugin parses `.vitepress/config.*` and

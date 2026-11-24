@@ -217,6 +217,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/metro_extra_node_modules.rs"]
 mod metro_extra_node_modules;
+#[path = "integration_test/mkdocs_extra_assets.rs"]
+mod mkdocs_extra_assets;
 #[path = "integration_test/module_dir_path_references.rs"]
 mod module_dir_path_references;
 #[path = "integration_test/n8n_plugin.rs"]

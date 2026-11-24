@@ -1,0 +1,1 @@
+{ "name": "mkdocs-workspace-sites", "private": true, "workspaces": ["docs", "packages/*"] }
