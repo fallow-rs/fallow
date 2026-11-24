@@ -1006,6 +1006,7 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
     if let Some(module) = module {
         *combined = module;
     }
+    combined.has_load_data_whole_use |= credit_load_data && template_usage.has_load_data_whole_use;
     apply_prop_template_credit(&template_usage, props_return_binding, combined);
     merge_template_usage_into_combined(template_usage, combined);
 }
@@ -1031,9 +1032,7 @@ fn build_template_credited_set(
         credited.insert("data".to_string());
         // FP-1: a route component spreading / passing the whole `data` prop in
         // markup consumes arbitrary keys opaquely; force the detector to abstain.
-        if SVELTE_TEMPLATE_DATA_WHOLE_USE_RE.is_match(source) {
-            combined.has_load_data_whole_use = true;
-        }
+        combined.has_load_data_whole_use |= SVELTE_TEMPLATE_DATA_WHOLE_USE_RE.is_match(source);
     }
     if !combined.component_props.is_empty() {
         for prop in &combined.component_props {

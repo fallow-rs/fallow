@@ -15,6 +15,7 @@ mod regex_compile;
 mod sfc;
 mod sfc_blocks;
 mod sfc_complexity;
+mod sfc_load_data;
 mod store_aliases;
 mod suppress_literals;
 
