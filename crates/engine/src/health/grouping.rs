@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::scoring::FileScoreOutput;
+use super::subset_filter::SubsetFilter;
 use super::{
-    HealthGroupResolver, SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
+    HealthGroupResolver, VitalSignsAndCountsInput, apply_duplication_metrics,
     compute_vital_signs_and_counts,
 };
 use crate::vital_signs;

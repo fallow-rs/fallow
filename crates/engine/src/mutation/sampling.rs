@@ -5,8 +5,14 @@ use std::collections::BTreeMap;
 use fallow_mutation::Operator;
 use sha2::{Digest, Sha256};
 
-use super::MutantDisposition;
-use super::plan::RankEntry;
+use super::{MutantDisposition, PlannedMutant};
+
+/// A mutant with the facts that only the ranking reads.
+pub(super) struct RankEntry {
+    /// True when the span of the mutant is on an added line of the diff.
+    pub(super) in_diff: bool,
+    pub(super) planned: PlannedMutant,
+}
 
 /// The rank of an operator when a line keeps only some of its mutants. Lower
 /// ranks stay. Relational, condition, arithmetic and logical mutants change
@@ -88,8 +94,9 @@ pub(super) fn sample_per_line(mutants: &mut [RankEntry], per_line: usize) {
 mod tests {
     use fallow_mutation::MutationOptions;
 
+    use super::super::PlannedMutant;
     use super::super::layout::Layout;
-    use super::super::{PlannedMutant, plan::RankEntry};
+    use super::RankEntry;
     use super::*;
 
     /// One line with an arithmetic, a relational and a logical mutant, plus

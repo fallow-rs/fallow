@@ -1205,11 +1205,11 @@ fn a_mutant_on_an_added_line_ranks_first_without_an_enclosing_function() {
     let in_function = pick("src/math.ts", false);
     let top_level = pick("src/page.ts", true);
     let mut entries = vec![
-        plan::RankEntry {
+        sampling::RankEntry {
             in_diff: false,
             planned: in_function.clone(),
         },
-        plan::RankEntry {
+        sampling::RankEntry {
             in_diff: true,
             planned: top_level.clone(),
         },

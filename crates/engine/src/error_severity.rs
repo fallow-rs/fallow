@@ -11,6 +11,7 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use crate::effective_severity::{
     SeveritySource, any_finding_with_severity, count_findings_with_severity,
 };
+pub use crate::effective_severity::{promote_warns_to_errors, strict_rules};
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
 ///
@@ -49,87 +50,6 @@ pub fn count_error_severity_issues(
 ) -> usize {
     let source = SeveritySource::new(rules, config, promote_warns);
     count_findings_with_severity(results, &source, Severity::Error)
-}
-
-/// The rules of `config` for a strict (`--fail-on-issues`) run.
-///
-/// Every `warn` rule is `error`, except a rule that a missing type-aware
-/// sidecar capped at `warn` (see
-/// [`ResolvedConfig::cap_semantic_refinable_rules`]).
-#[must_use]
-pub fn strict_rules(config: &ResolvedConfig) -> RulesConfig {
-    let mut rules = config.rules.clone();
-    promote_warns_to_errors(&mut rules);
-    config.apply_semantic_refinable_cap(&mut rules);
-    rules
-}
-
-/// Promote all `Warn` severities to `Error` for a single run.
-pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
-    for rule in [
-        &mut rules.unused_files,
-        &mut rules.unused_exports,
-        &mut rules.unused_types,
-        &mut rules.private_type_leaks,
-        &mut rules.deprecated_exports_in_use,
-        &mut rules.unused_dependencies,
-        &mut rules.unused_dev_dependencies,
-        &mut rules.unused_optional_dependencies,
-        &mut rules.unused_enum_members,
-        &mut rules.unused_class_members,
-        &mut rules.unused_namespace_members,
-        &mut rules.unused_protected_class_members,
-        &mut rules.namespace_escapes,
-        &mut rules.unused_store_members,
-        &mut rules.unprovided_injects,
-        &mut rules.unrendered_components,
-        &mut rules.unused_component_props,
-        &mut rules.absent_component_props,
-        &mut rules.constant_parameters,
-        &mut rules.unused_component_emits,
-        &mut rules.unused_component_inputs,
-        &mut rules.unused_component_outputs,
-        &mut rules.unused_svelte_events,
-        &mut rules.unused_effect_layers,
-        &mut rules.unused_tagged_errors,
-        &mut rules.unproduced_catch_tags,
-        &mut rules.unused_server_actions,
-        &mut rules.unused_load_data_keys,
-        &mut rules.unresolved_imports,
-        &mut rules.unlisted_dependencies,
-        &mut rules.unlisted_binaries,
-        &mut rules.duplicate_exports,
-        &mut rules.duplicate_export_aliases,
-        &mut rules.type_only_dependencies,
-        &mut rules.test_only_dependencies,
-        &mut rules.dev_dependencies_in_production,
-        &mut rules.circular_dependencies,
-        &mut rules.re_export_cycle,
-        &mut rules.package_cycle,
-        &mut rules.boundary_violation,
-        &mut rules.coverage_gaps,
-        &mut rules.stale_suppressions,
-        &mut rules.require_suppression_reason,
-        &mut rules.unused_catalog_entries,
-        &mut rules.empty_catalog_groups,
-        &mut rules.unresolved_catalog_references,
-        &mut rules.unused_dependency_overrides,
-        &mut rules.misconfigured_dependency_overrides,
-        &mut rules.policy_violation,
-        &mut rules.invalid_client_export,
-        &mut rules.mixed_client_server_barrel,
-        &mut rules.misplaced_directive,
-        &mut rules.route_collision,
-        &mut rules.dynamic_segment_name_conflict,
-    ] {
-        promote_warn_to_error(rule);
-    }
-}
-
-fn promote_warn_to_error(rule: &mut Severity) {
-    if *rule == Severity::Warn {
-        *rule = Severity::Error;
-    }
 }
 
 /// Promote per-finding `warn` policy-violation severities to `error` for a
