@@ -96,6 +96,7 @@ fn security_runtime_health_options<'a>(
         complexity: false,
         file_scores: false,
         coverage_gaps: false,
+        shallow_directories: false,
         config_activates_coverage_gaps: false,
         hotspots: false,
         ownership: false,

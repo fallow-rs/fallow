@@ -75,6 +75,8 @@ pub struct FileScoreOutput {
     /// hidden co-change pair from a pair that an import already explains.
     /// `None` when the run reads no commit history.
     pub(crate) static_links: Option<crate::change_coupling::StaticLinkIndex>,
+    /// Shallow directories. `Some` when the run has `--shallow-directories`.
+    pub(crate) shallow_directories: Option<fallow_output::ShallowDirectoriesReport>,
 }
 
 struct FileScoreOutputParts<'a> {
@@ -2608,9 +2610,9 @@ pub(super) fn compute_file_scores(
     let graph = retained_graph.as_graph();
     let results = &analysis_output.results;
 
-    let circular_files = collect_circular_files(results);
+    let circular_files = super::cycle_files::collect_circular_files(results);
     let top_complex_fns = collect_top_complex_fns(modules, file_paths);
-    let cycle_members = collect_cycle_members(results);
+    let cycle_members = super::cycle_files::collect_cycle_members(results);
     let direct_callers = collect_direct_callers(graph, file_paths);
     let unused_export_names = collect_unused_export_names(results);
 
@@ -2919,6 +2921,7 @@ fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
         static_links: parts
             .with_static_links
             .then(|| crate::change_coupling::StaticLinkIndex::from_graph(parts.graph)),
+        shallow_directories: None,
     }
 }
 
@@ -3157,16 +3160,6 @@ fn prepare_file_score_coverage_setup<'a>(
     }
 }
 
-fn collect_circular_files(
-    results: &crate::results::AnalysisResults,
-) -> rustc_hash::FxHashSet<std::path::PathBuf> {
-    results
-        .circular_dependencies
-        .iter()
-        .flat_map(|c| c.cycle.files.iter().cloned())
-        .collect()
-}
-
 fn collect_top_complex_fns(
     modules: &[crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
@@ -3196,33 +3189,6 @@ fn collect_top_complex_fns(
         }
     }
     top_complex_fns
-}
-
-fn collect_cycle_members(
-    results: &crate::results::AnalysisResults,
-) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> {
-    let mut cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
-        rustc_hash::FxHashMap::default();
-    for cycle in &results.circular_dependencies {
-        for file in &cycle.cycle.files {
-            let others: Vec<std::path::PathBuf> = cycle
-                .cycle
-                .files
-                .iter()
-                .filter(|f| *f != file)
-                .cloned()
-                .collect();
-            cycle_members
-                .entry(file.clone())
-                .or_default()
-                .extend(others);
-        }
-    }
-    for members in cycle_members.values_mut() {
-        members.sort();
-        members.dedup();
-    }
-    cycle_members
 }
 
 fn collect_unused_export_names(

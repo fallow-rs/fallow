@@ -257,6 +257,9 @@ pub fn load_health_config_in(
     if opts.gates.fail_on_parse_error {
         config.fail_on_parse_error = true;
     }
+    if opts.shallow_directories {
+        config.call_facts_requested = true;
+    }
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
     Ok((config, config_ms))
 }

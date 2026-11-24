@@ -213,6 +213,53 @@ impl Default for ChangeCouplingConfig {
     }
 }
 
+/// Settings for the shallow directories section
+/// (`fallow health --shallow-directories`).
+///
+/// A directory is shallow when files outside it use at least as many of its
+/// interface items as it keeps inside, and it shows at least `minInterface`
+/// items.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ShallowDirectoriesConfig {
+    /// Minimum number of interface items that files outside a directory use
+    /// before the directory can be shallow (default: 8, at least 1).
+    #[serde(default = "default_shallow_min_interface")]
+    #[schemars(range(min = 1))]
+    pub min_interface: u32,
+    /// Glob patterns for directories to leave out of the section, relative to
+    /// the project root (for example `src/generated` or `src/api/**`). A
+    /// pattern matches the directory path, not the files in it.
+    #[serde(default)]
+    pub ignore: Vec<String>,
+}
+
+const fn default_shallow_min_interface() -> u32 {
+    8
+}
+
+impl Default for ShallowDirectoriesConfig {
+    fn default() -> Self {
+        Self {
+            min_interface: default_shallow_min_interface(),
+            ignore: Vec::new(),
+        }
+    }
+}
+
+impl ShallowDirectoriesConfig {
+    /// Validate the ranges that serde cannot express.
+    #[must_use]
+    pub fn errors(&self) -> Vec<String> {
+        if self.min_interface == 0 {
+            return vec![
+                "health.shallowDirectories.minInterface must be at least 1, found 0".to_string(),
+            ];
+        }
+        Vec::new()
+    }
+}
+
 /// How `fallow health` counts cyclomatic complexity for its gates.
 ///
 /// The policy changes the cyclomatic value that the `maxCyclomatic` gate reads
@@ -372,6 +419,13 @@ pub struct HealthConfig {
     #[serde(default)]
     pub change_coupling: ChangeCouplingConfig,
 
+    /// Settings for the shallow directories section
+    /// (`fallow health --shallow-directories`). Older fallow versions reject
+    /// this key as unknown, so pair it with `minimumVersion` set to the
+    /// release that added it.
+    #[serde(default)]
+    pub shallow_directories: ShallowDirectoriesConfig,
+
     /// Whether health JSON output emits `suppress-line` action hints
     /// alongside complexity findings (default: `true`). Set to `false` to
     /// opt out across the project: useful for teams that manage suppressions
@@ -410,6 +464,7 @@ impl Default for HealthConfig {
             threshold_overrides: vec![],
             ownership: OwnershipConfig::default(),
             change_coupling: ChangeCouplingConfig::default(),
+            shallow_directories: ShallowDirectoriesConfig::default(),
             suggest_inline_suppression: default_suggest_inline_suppression(),
             inline_threshold_overrides: default_inline_threshold_overrides(),
         }
@@ -700,6 +755,7 @@ maxCognitive = 25
                 min_degree: 0.4,
                 ..ChangeCouplingConfig::default()
             },
+            shallow_directories: ShallowDirectoriesConfig::default(),
             suggest_inline_suppression: false,
             inline_threshold_overrides: false,
         };

@@ -4,8 +4,8 @@ use crate::{
     ChangeCouplingReport, CoverageGaps, CoverageIntelligenceReport, CssAnalyticsReport,
     FileHealthScore, FrameworkHealthDiagnostics, HealthActionsMeta, HealthFinding, HealthScore,
     HealthSummary, HealthTrend, HotspotFinding, HotspotSummary, LargeFunctionEntry,
-    RefactoringTargetFinding, RuntimeCoverageReport, StylingFinding, StylingHealth,
-    TargetThresholds, ThresholdOverrideState, VitalSigns,
+    RefactoringTargetFinding, RuntimeCoverageReport, ShallowDirectoriesReport, StylingFinding,
+    StylingHealth, TargetThresholds, ThresholdOverrideState, VitalSigns,
 };
 use fallow_types::output_dead_code::PropDrillingChainFinding;
 
@@ -51,6 +51,9 @@ pub enum HealthSection {
     Mutation,
     /// `css_analytics`, `styling_health` and `styling_findings`.
     Css,
+    /// `shallow_directories`. Only a run with `--shallow-directories`
+    /// produces it.
+    ShallowDirectories,
 }
 
 /// Result of complexity analysis for reporting.
@@ -138,6 +141,11 @@ pub struct HealthReport {
     /// Advisory: no health score weight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change_coupling: Option<ChangeCouplingReport>,
+    /// Directories whose interface is as large as what they hide. Present
+    /// when the run has `--shallow-directories`. Advisory: no health score
+    /// weight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shallow_directories: Option<ShallowDirectoriesReport>,
     /// Runtime coverage findings from the runtime coverage add-on (only
     /// populated with `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

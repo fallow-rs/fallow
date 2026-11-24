@@ -851,6 +851,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         complexity_breakdown,
         file_scores,
         coverage_gaps,
+        shallow_directories,
         hotspots,
         ownership,
         ownership_emails,
@@ -899,6 +900,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         complexity_breakdown,
         file_scores,
         coverage_gaps,
+        shallow_directories,
         hotspots,
         ownership,
         ownership_emails: ownership_emails.map(EmailModeArg::to_config),
@@ -1926,6 +1928,7 @@ struct HealthDispatchArgs<'a> {
     complexity_breakdown: bool,
     file_scores: bool,
     coverage_gaps: bool,
+    shallow_directories: bool,
     hotspots: bool,
     ownership: bool,
     ownership_emails: Option<fallow_config::EmailMode>,
@@ -2109,6 +2112,7 @@ fn derive_health_dispatch_run<'a>(
             complexity: args.complexity,
             file_scores: args.file_scores,
             coverage_gaps: args.coverage_gaps,
+            shallow_directories: args.shallow_directories,
             hotspots: args.hotspots,
             ownership: args.ownership,
             ownership_emails: args.ownership_emails,
@@ -2128,15 +2132,7 @@ fn derive_health_dispatch_run<'a>(
     if args.type_coupling && !run.sections.any_section {
         run.sections = fallow_engine::health::DerivedHealthSections {
             any_section: true,
-            complexity: false,
-            file_scores: false,
-            coverage_gaps: false,
-            hotspots: false,
-            targets: false,
-            css: false,
-            score: false,
-            force_full: false,
-            score_only_output: false,
+            ..fallow_engine::health::DerivedHealthSections::NONE
         };
     }
     run
@@ -2222,6 +2218,7 @@ fn run_health_dispatch(
             complexity: sections.complexity,
             file_scores: sections.file_scores,
             coverage_gaps: sections.coverage_gaps,
+            shallow_directories: sections.shallow_directories,
             config_activates_coverage_gaps: !sections.any_section,
             hotspots: sections.hotspots,
             ownership: run.ownership,
@@ -2271,6 +2268,7 @@ fn health_type_coupling_is_default_section(args: &HealthDispatchArgs<'_>) -> boo
     !args.complexity
         && !args.file_scores
         && !args.coverage_gaps
+        && !args.shallow_directories
         && !args.hotspots
         && !args.ownership
         && !args.targets

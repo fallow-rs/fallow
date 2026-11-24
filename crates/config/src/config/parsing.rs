@@ -1433,6 +1433,7 @@ impl FallowConfig {
         }
         let mut health_errors = config.health.threshold_override_errors();
         health_errors.extend(config.health.change_coupling.errors());
+        health_errors.extend(config.health.shallow_directories.errors());
         for (index, pattern) in config.health.tailwind_ignore_patterns.iter().enumerate() {
             if let Err(error) = regex::Regex::new(pattern) {
                 health_errors.push(format!(
@@ -1561,6 +1562,11 @@ impl FallowConfig {
         validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", errors);
         validate_user_globs(&self.similar_code.ignore, "similarCode.ignore", errors);
         validate_user_globs(&self.health.ignore, "health.ignore", errors);
+        validate_user_globs(
+            &self.health.shallow_directories.ignore,
+            "health.shallowDirectories.ignore",
+            errors,
+        );
         for override_entry in &self.health.threshold_overrides {
             validate_user_globs(
                 &override_entry.files,

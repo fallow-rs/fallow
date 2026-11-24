@@ -438,6 +438,8 @@ fn derive_programmatic_health_execution_options<'a>(
         complexity: run.sections.complexity,
         file_scores: run.sections.file_scores,
         coverage_gaps: run.sections.coverage_gaps,
+        // The programmatic API has no shallow directories option yet.
+        shallow_directories: false,
         config_activates_coverage_gaps: options.config_activates_coverage_gaps
             || !run.sections.any_section,
         hotspots: run.sections.hotspots,

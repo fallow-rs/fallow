@@ -220,9 +220,8 @@ pub fn benchmark_local_json(
     ))
 }
 
-/// Build the `HealthOptions` for a local `coverage analyze` run: complexity,
-/// hotspot, and gating features are off so the run focuses on the supplied
-/// runtime-coverage artifact.
+/// Build the `HealthOptions` for a local `coverage analyze` run. Complexity,
+/// hotspots and gates are off, so the run reads only the runtime coverage.
 fn local_health_options<'a>(
     args: &AnalyzeArgs,
     ctx: &RunContext<'a>,
@@ -253,6 +252,7 @@ fn local_health_options<'a>(
         complexity: false,
         file_scores: false,
         coverage_gaps: false,
+        shallow_directories: false,
         config_activates_coverage_gaps: false,
         hotspots: false,
         ownership: false,
