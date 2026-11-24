@@ -239,7 +239,7 @@ pub(crate) fn import_sources_from_masked(stripped: &str, is_scss: bool) -> Vec<C
 
     if is_scss {
         for cap in SCSS_USE_RE.captures_iter(stripped) {
-            if let Some(m) = cap.get(1) {
+            if let Some(m) = cap.get(1).filter(|m| !m.as_str().trim().is_empty()) {
                 let (raw, span) = trimmed_match_with_span(m);
                 out.push(CssImportSource {
                     normalized: normalize_css_import_path(raw.clone(), true),
@@ -271,7 +271,7 @@ pub(crate) fn import_sources_from_masked(stripped: &str, is_scss: bool) -> Vec<C
 pub(crate) fn trimmed_match_with_span(m: regex::Match<'_>) -> (String, Span) {
     let raw = m.as_str();
     let trimmed_start = raw.len() - raw.trim_start().len();
-    let trimmed_end = raw.trim_end().len();
+    let trimmed_end = raw.trim_end().len().max(trimmed_start);
     let start = m.start() + trimmed_start;
     let end = m.start() + trimmed_end;
     (raw.trim().to_string(), Span::new(start as u32, end as u32))

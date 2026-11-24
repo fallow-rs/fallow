@@ -60,6 +60,16 @@ pub const MAX_NESTING_DEPTH: u32 = 1024;
 /// functions at most, for example `color-mix(in srgb, light-dark(rgb(...)))`.
 pub const MAX_COLOR_FUNCTION_DEPTH: usize = 8;
 
+/// Estimated extra parse work of one outermost color function past which
+/// lightningcss does not parse the stylesheet.
+///
+/// Each nested color function doubles the parse time of the text inside it,
+/// so a byte inside `k` open color functions costs about `2^k`, see
+/// [`Scanner::color_cost`]. Real color functions are short, so real
+/// stylesheets stay far below this budget, also when they hold many of them.
+/// Eight unclosed functions in front of 5 KB of text pass it.
+const MAX_COLOR_PARSE_COST: usize = 1 << 20;
+
 /// The CSS functions that lightningcss tries to parse as a color first.
 const COLOR_FUNCTIONS: &[&[u8]] = &[
     b"rgb",
@@ -135,7 +145,7 @@ pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) ->
 /// `style_parse_is_safe`.
 pub fn parse_style_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
     let scan = scan_depth(source, MAX_NESTING_DEPTH, Dialect::Style);
-    if scan.max_colors > MAX_COLOR_FUNCTION_DEPTH {
+    if scan.max_colors > MAX_COLOR_FUNCTION_DEPTH || scan.color_cost > MAX_COLOR_PARSE_COST {
         return None;
     }
     run_bounded(source, scan.max_depth, || {
@@ -230,6 +240,7 @@ fn max_depth(source: &str, limit: u32, dialect: Dialect) -> u32 {
 fn scan_depth(source: &str, limit: u32, dialect: Dialect) -> Scanner<'_> {
     let mut scanner = Scanner::new(source, limit, dialect);
     scanner.scan();
+    scanner.end_open_color_functions();
     scanner
 }
 
@@ -256,10 +267,18 @@ struct Scanner<'a> {
     /// Whether this scanner reads the body of a guessed regex as code, see
     /// [`Scanner::count_regex_type_arguments`].
     regex_body: bool,
-    /// Depth of each open stylesheet color function, innermost last.
-    colors: Vec<u32>,
+    /// Depth and `(` offset of each open stylesheet color function,
+    /// innermost last.
+    colors: Vec<(u32, usize)>,
     /// Maximum number of color functions open at one time.
     max_colors: usize,
+    /// The highest extra parse work of one outermost color function: the sum
+    /// over the color functions nested in it of the byte length of each,
+    /// doubled once for each color function around it. A byte inside `k`
+    /// nested color functions adds `2^k - 2`.
+    color_cost: usize,
+    /// The extra parse work of the outermost color function that is open.
+    open_color_cost: usize,
     /// The closing byte of each open stylesheet block, innermost last. In CSS
     /// only the matching byte ends a block, so a `}` inside an open `(` is a
     /// plain token.
@@ -292,6 +311,8 @@ impl<'a> Scanner<'a> {
             regex_body: false,
             colors: Vec::new(),
             max_colors: 0,
+            color_cost: 0,
+            open_color_cost: 0,
             style_closers: Vec::new(),
         }
     }
@@ -488,7 +509,7 @@ impl Scanner<'_> {
             _ if self.at_color_function() => {
                 self.open();
                 self.style_closers.push(b')');
-                self.colors.push(self.depth);
+                self.colors.push((self.depth, self.pos - 1));
                 self.max_colors = self.max_colors.max(self.colors.len());
             }
             _ => return false,
@@ -498,9 +519,41 @@ impl Scanner<'_> {
 
     /// Ends the color functions that a closing bracket closed.
     fn close_color_functions(&mut self) {
-        while self.colors.last().is_some_and(|open| *open > self.depth) {
-            self.colors.pop();
+        while self
+            .colors
+            .last()
+            .is_some_and(|(open, _)| *open > self.depth)
+        {
+            self.end_color_function(self.pos);
         }
+    }
+
+    /// Ends the color functions that are still open at the end of the source.
+    /// lightningcss reads each of them to the end.
+    fn end_open_color_functions(&mut self) {
+        while !self.colors.is_empty() {
+            self.end_color_function(self.bytes.len());
+        }
+    }
+
+    /// Ends the innermost color function at the byte offset `end`. A nested
+    /// function adds its weighted span to the work of its outermost function,
+    /// and an outermost function updates [`Scanner::color_cost`].
+    fn end_color_function(&mut self, end: usize) {
+        let Some((_, start)) = self.colors.pop() else {
+            return;
+        };
+        let outer = self.colors.len();
+        if outer == 0 {
+            self.color_cost = self.color_cost.max(self.open_color_cost);
+            self.open_color_cost = 0;
+            return;
+        }
+        let span = end.saturating_sub(start);
+        let weight = 1usize.checked_shl(outer as u32).unwrap_or(usize::MAX);
+        self.open_color_cost = self
+            .open_color_cost
+            .saturating_add(span.saturating_mul(weight));
     }
 
     /// Skips a comment, a regex literal, or a division operator.
@@ -948,6 +1001,38 @@ mod tests {
         assert_eq!(color_depth_of(".a{content:\"rgb(rgb(\"}/* hsl(hsl( */"), 0);
         // An unclosed color function stays open.
         assert_eq!(color_depth_of(".a{x:light-dark(((light-dark(}"), 2);
+    }
+
+    fn color_cost_of(source: &str) -> usize {
+        scan_depth(source, u32::MAX, Dialect::Style).color_cost
+    }
+
+    #[test]
+    fn color_cost_doubles_with_each_nested_color_function() {
+        assert_eq!(color_cost_of(".a{color:red}"), 0);
+        // An outermost color function costs no extra work.
+        assert_eq!(color_cost_of(".a{x:rgb(1)}"), 0);
+        // The inner arguments `(1)` span 3 bytes, doubled at the second level.
+        assert_eq!(color_cost_of(".a{x:rgb(rgb(1))}"), 6);
+        // A third level doubles again.
+        assert_eq!(color_cost_of(".a{x:rgb(rgb(rgb(1)))}"), 2 * 8 + 4 * 3);
+        // Sibling functions do not add up: the most expensive one counts.
+        assert_eq!(color_cost_of(".a{x:rgb(rgb(1)) rgb(rgb(1))}"), 6);
+        // An unclosed color function spans the rest of the source.
+        assert_eq!(color_cost_of("rgb(rgb(1"), 2 * 2);
+    }
+
+    /// OSS-Fuzz test case 6315655184580608: eight nested `light-dark(` calls
+    /// that are never closed, with 90 KB of text after them, made the parse
+    /// take more than a minute.
+    #[test]
+    fn deeply_nested_unclosed_color_functions_skip_the_parse() {
+        let source = format!("@x {}{}", "light-dark(".repeat(8), "a b ".repeat(20_000));
+        assert!(crate::parse_style_bounded(&source, || ()).is_none());
+        // A large stylesheet of many short color functions stays parsed.
+        let flat = ".a{color:color-mix(in oklab, light-dark(red, blue) 50%, transparent)}\n"
+            .repeat(60_000);
+        assert!(crate::parse_style_bounded(&flat, || ()).is_some());
     }
 
     #[test]

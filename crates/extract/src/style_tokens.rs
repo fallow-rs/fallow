@@ -4,7 +4,7 @@
 
 use cssparser::{ParseError, Parser, ParserInput, Token};
 use lightningcss::traits::Parse;
-use lightningcss::values::{calc::Calc, percentage::Percentage};
+use lightningcss::values::{angle::Angle, calc::Calc, percentage::Percentage};
 
 use crate::nesting::MAX_COLOR_FUNCTION_DEPTH;
 
@@ -34,6 +34,16 @@ const COLOR_FUNCTIONS: &[&str] = &[
     "alpha",
 ];
 
+/// The color functions whose first channel is a hue that `cssparser-color`
+/// converts with a debug assertion on its range.
+const HUE_COLOR_FUNCTIONS: &[&str] = &["hsl", "hsla", "hwb"];
+
+/// The magnitude of a number in a hue color function past which the walk
+/// rejects the stylesheet. f32 rounding in the hue normalization of
+/// `cssparser-color` can leave a very large hue, such as `3e35`, outside one
+/// turn. A real hue is at most a few turns.
+const MAX_HUE_MAGNITUDE: f32 = 1e6;
+
 /// The CSS math functions that lightningcss parses as a calculation.
 const MATH_FUNCTIONS: &[&str] = &[
     "calc", "min", "max", "clamp", "round", "rem", "mod", "sin", "cos", "tan", "asin", "acos",
@@ -62,8 +72,9 @@ const ATAN2_LEVELS: usize = 3;
 /// Whether lightningcss parses `source` without a panic and without
 /// exponential time. Returns false when color functions nest deeper than
 /// [`MAX_COLOR_FUNCTION_DEPTH`], when math functions nest deeper than
-/// [`MAX_MATH_FUNCTION_DEPTH`], or when a math function makes lightningcss
-/// panic, see [`math_function_panics`]. The walk recurses once per block, so
+/// [`MAX_MATH_FUNCTION_DEPTH`], when a math function makes lightningcss
+/// panic, see [`math_function_panics`], or when a hue color function holds a
+/// number past [`MAX_HUE_MAGNITUDE`], also as the result of a math function. The walk recurses once per block, so
 /// call it on a stack that the parse of `source` fits on.
 pub fn style_parse_is_safe(source: &str) -> bool {
     if !may_open_checked_function(source) {
@@ -103,6 +114,8 @@ const fn is_name_byte(byte: u8) -> bool {
 struct Context {
     colors: usize,
     math: usize,
+    /// Whether one of the [`HUE_COLOR_FUNCTIONS`] is open.
+    hue: bool,
     /// Whether a math function is open and no color function opened inside
     /// it. lightningcss parses such a math function only as a part of the
     /// math function around it, so only that one needs a check.
@@ -119,6 +132,7 @@ impl Context {
         Self {
             colors: self.colors + usize::from(block.color),
             math: self.math + block.math_levels,
+            hue: self.hue || block.hue,
             in_math: (self.in_math || block.is_math()) && !block.color,
             // A legacy `rgb(10%, 10%, ...)` reads each channel after a
             // percentage as a bare percentage.
@@ -135,6 +149,7 @@ impl Context {
 #[derive(Clone, Copy)]
 struct Block {
     color: bool,
+    hue: bool,
     /// The levels that the block adds to the math nesting, 0 for a block that
     /// is not a math function.
     math_levels: usize,
@@ -148,6 +163,7 @@ impl Block {
         match token {
             Token::Function(name) => Some(Self {
                 color: is_one_of(name, COLOR_FUNCTIONS),
+                hue: is_one_of(name, HUE_COLOR_FUNCTIONS),
                 math_levels: if name.eq_ignore_ascii_case("atan2") {
                     ATAN2_LEVELS
                 } else {
@@ -165,6 +181,7 @@ impl Block {
     const fn bracket(rules: bool) -> Self {
         Self {
             color: false,
+            hue: false,
             math_levels: 0,
             legacy_rgb: false,
             rules,
@@ -191,6 +208,9 @@ fn walk<'i>(
         let Ok(token) = parser.next() else {
             return Ok(());
         };
+        if context.hue && is_extreme_number(token) {
+            return Err(parser.new_custom_error(()));
+        }
         if rules && read_declaration(token, &mut property, &mut context) {
             continue;
         }
@@ -206,11 +226,13 @@ fn walk<'i>(
         if block.rules {
             context.number_allowed = false;
         }
-        if block.is_math()
-            && !context.in_math
-            && math_function_panics(parser.slice_from(start), context.number_allowed)
-        {
-            return Err(parser.new_custom_error(()));
+        if block.is_math() && !context.in_math {
+            let text = parser.slice_from(start);
+            if math_function_panics(text, context.number_allowed)
+                || (context.hue && math_hue_is_extreme(text))
+            {
+                return Err(parser.new_custom_error(()));
+            }
         }
     }
 }
@@ -229,6 +251,27 @@ fn read_declaration(token: &Token<'_>, property: &mut Option<bool>, context: &mu
         _ => return false,
     }
     true
+}
+
+/// Whether `token` is a number past [`MAX_HUE_MAGNITUDE`].
+fn is_extreme_number(token: &Token<'_>) -> bool {
+    match token {
+        Token::Number { value, .. } | Token::Dimension { value, .. } => is_extreme_hue(*value),
+        _ => false,
+    }
+}
+
+/// Whether the math function `text` in a hue color function computes a
+/// number or an angle past [`MAX_HUE_MAGNITUDE`], such as `calc(1e6 * 1e6)`
+/// or `calc(infinity)`. A math function that lightningcss cannot compute,
+/// such as `calc(var(--h) + 10)`, is not extreme.
+fn math_hue_is_extreme(text: &str) -> bool {
+    f32::parse_string(text).is_ok_and(is_extreme_hue)
+        || Angle::parse_string(text).is_ok_and(|angle| is_extreme_hue(angle.to_degrees()))
+}
+
+fn is_extreme_hue(value: f32) -> bool {
+    !value.is_finite() || value.abs() > MAX_HUE_MAGNITUDE
 }
 
 fn is_one_of(name: &str, names: &[&str]) -> bool {

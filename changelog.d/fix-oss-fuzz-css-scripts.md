@@ -1,0 +1,5 @@
+### Fixed
+
+- **A crafted stylesheet with nested color functions can no longer make `fallow dead-code` or `fallow health --css` hang.** The CSS parse time doubles at each level of nested color functions such as `light-dark(light-dark(...))`, and it grows with the length of the text inside them. A file with 8 unclosed color functions in front of a long text stayed under the depth limit, but its parse took minutes. Fallow now estimates the parse work of the color functions and skips the structural parse of a stylesheet past that budget. CSS Modules classes in such a file come from the plain class scan, and the file gets no CSS analytics. Real stylesheets are not affected.
+- **A package script with a very long command word no longer slows the analysis.** For each argument of a script command, fallow copied and hashed the full command word to look up the flags that name a package. A command word of some hundred kilobytes with many arguments took seconds. Fallow now looks up the command once.
+- **A Sass `@use` or `@forward` of a blank string no longer adds an import.** `@use " "` gave an import with an empty name and a source span whose end was before its start.

@@ -497,3 +497,56 @@ fn deep_inline_html_script_skips_its_body() {
     assert!(sources.contains(&"./ok.js"), "{sources:?}");
     assert!(!sources.contains(&"./deep.js"), "{sources:?}");
 }
+
+/// OSS-Fuzz test case 5735794955059200: lightningcss normalizes the hue of
+/// `hwb(3e35 ...)` to a value outside one turn, and a debug assertion in
+/// `cssparser-color` then fails. A hue this large is never real CSS.
+#[test]
+fn an_extreme_hue_skips_the_css_parser() {
+    for declaration in [
+        "@d hwb(3e35 3 3",
+        ".a{color:hsl(3e35 50% 50%)}",
+        ".a{color:hsla(calc(3e35deg) 50% 50%)}",
+        ".a{color:hsl(calc(1e6 * 1e6) 50% 50%)}",
+        ".a{color:hsl(calc(infinity) 50% 50%)}",
+        ".a{color:hsl(calc(-infinity) 50% 50%)}",
+        ".a{color:hwb(calc(1e6 * 1e6 * 1e6) 5% 5%)}",
+    ] {
+        let source = format!(".keep{{color:red}}\n{declaration}");
+        let names = css_module_exports_in_time(source.clone());
+        assert!(
+            names.contains(&"keep".to_string()),
+            "{declaration}: {names:?}"
+        );
+        assert!(
+            crate::parse_style_bounded(&source, || ()).is_none(),
+            "{declaration} must skip the parser"
+        );
+    }
+    for source in [
+        ".a{color:hsl(720deg 50% 50%)}",
+        ".a{color:hwb(1e5 10% 10%)}",
+        ".a{color:lch(50% 30 3e35)}",
+        ".a{color:hsl(calc(var(--h) + 10) 50% 50%)}",
+        ".a{color:hsl(calc(120deg * 2) 50% 50%)}",
+    ] {
+        assert!(
+            crate::parse_style_bounded(source, || ()).is_some(),
+            "{source}"
+        );
+    }
+}
+
+/// OSS-Fuzz test case 5117349517393920: lightningcss prints an empty
+/// `grid-template-areas` with an indent that it never opened, and the indent
+/// subtraction overflows.
+#[test]
+fn an_empty_grid_template_areas_value_is_not_rendered() {
+    for source in [
+        "r{grid-template-areas:",
+        ".a{grid-template-areas: ;color:red}",
+    ] {
+        let analytics = crate::css_metrics::compute_css_analytics(source);
+        assert!(analytics.is_some(), "{source}");
+    }
+}
