@@ -76,4 +76,23 @@ describe("visualization URL state", () => {
     expect(appState.drillPath).toBe("");
     expect(appState.selected).toBeNull();
   });
+
+  it("clears the clone and road selections that the hash cannot represent", () => {
+    const appState = state();
+    appState.selectedClone = 0;
+    appState.selectedRoad = {
+      srcKey: "src",
+      dstKey: "lib",
+      count: 1,
+      violations: 0,
+      cycleEdges: 0,
+      pairs: [],
+    };
+
+    applyHash(appState, "#view=graph&lens=health");
+
+    expect(appState.selectedClone).toBeNull();
+    expect(appState.selectedRoad).toBeNull();
+    expect(appState.lens).toBe("health");
+  });
 });

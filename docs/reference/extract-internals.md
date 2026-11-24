@@ -502,6 +502,35 @@ context into resolution so a stylesheet cannot resolve to a same-named
 component through the JavaScript extension order. Preserve template-local
 bindings, whole-object credit and framework metadata when changing scanners.
 
+A markup snippet (a Vue or Svelte template expression, an Astro template
+region) and an inline HTML script give their host the same facts as the same
+code in a script block. The rules are:
+
+- The script pass of a component builds a `ScriptBindingContext` with the
+  bindings that markup can call or read: the Svelte `createEventDispatcher()`
+  bindings, the Vue `defineEmits()` return binding with `$emit`, and the
+  script constants with a literal value, which a security sink argument
+  reads as a literal. All snippets of a component share this context by
+  reference, so no snippet copies it. A template local of the same name
+  shadows a binding of the context. The context has no import
+  declarations, so a sink callee that only an import names (for example
+  `exec` from `child_process`) is not a sink in markup.
+- A snippet that does not parse and names a dispatch or emit binding makes
+  the component abstain, as a call with no literal event name does.
+- The template scan reads only HTML tags. A Vue component whose root
+  `<template>` has another `lang` (`lang="pug"`) abstains from emit findings.
+- Each snippet extractor merges into the component module through
+  `ModuleInfoExtractor::merge_into`, the merge of the script blocks. Each
+  span of a snippet moves to the start of its markup tag or region.
+- `ModuleInfoExtractor::clear_script_only_facts` is the one list of the facts
+  that do not go to the host. A new fact goes to the host by default.
+- `crates/extract/src/tests/markup_parity.rs` extracts a set of expression
+  shapes once in a script function and once in markup, for each host, and
+  asserts equal facts. Its field list names each `ModuleInfo` field, so a new
+  field must be sorted into a compared or an ignored group.
+- The Svelte `on:<name>` listener scan stays a tag scan, because the event
+  name is an attribute name, not an expression.
+
 Import facts also come from JSDoc type references, import-then-export syntax,
 namespace destructuring and proven Node child-process entry calls. These paths
 must retain import provenance, type/value meaning and lexical binding identity.
@@ -604,6 +633,23 @@ import, Vite uses the tsconfig settings for TypeScript files. The analysis
 then skips the credit rule for TypeScript files below the directory of that
 tsconfig. The check uses the directory only, not the `include` of the
 tsconfig.
+
+The same analysis pass (`analyze/jsx_runtime_credits.rs`) also credits `react`
+for a flagged module in two more cases, without a bundler config:
+
+- The module is below a tsconfig with `jsx` set to `react-jsx` or
+  `react-jsxdev` and no `jsxImportSource`. The TypeScript plugin records
+  each tsconfig directory with a JSX setting in `tsconfig_jsx_dirs`, with
+  `automatic_react` set for this case. For a TypeScript file,
+  the nearest tsconfig with a JSX setting decides, so a deeper tsconfig with
+  `jsxImportSource` or a `preserve` mode removes the credit.
+- The module is in a package where a framework with the automatic runtime is
+  active (`AUTOMATIC_JSX_FRAMEWORK_PLUGINS`, today Next.js).
+
+A tsconfig `jsxImportSource` credits its package in the TypeScript plugin,
+also without a JSX file. The Vitest credit rules stay in the plugin, because
+only the plugin knows the files that each Vite or Vitest config transforms
+and the JSX settings of that config.
 
 The resolver adds the edge to each flagged module that an include glob
 matches and no exclude glob matches, relative to the config directory. A

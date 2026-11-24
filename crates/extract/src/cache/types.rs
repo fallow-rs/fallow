@@ -10,12 +10,12 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 471;
+pub(super) const CACHE_VERSION: u32 = 480;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
 /// reason in the commit message and the CHANGELOG.
-pub const DUPES_CACHE_VERSION: u32 = 25;
+pub const DUPES_CACHE_VERSION: u32 = 26;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
@@ -56,7 +56,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1616);
+assert_cached_type_size!(CachedModule, 1664);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 // The call facts blob of `CachedModule` encodes these types. A blob that an
 // older shape wrote does not decode, and the entry then parses again on each
@@ -77,6 +77,8 @@ assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
 assert_cached_type_size!(CachedSuppression, 88);
 assert_cached_type_size!(CachedRangeMarkerProblem, 32);
+assert_cached_type_size!(CachedInlineThreshold, 64);
+assert_cached_type_size!(CachedInlineThresholdProblem, 32);
 assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
 assert_cached_type_size!(CachedExport, 152);
 assert_cached_type_size!(CachedImport, 96);
@@ -182,6 +184,10 @@ pub struct CachedModule {
     pub unknown_suppression_kinds: Vec<CachedUnknownSuppressionKind>,
     /// Range markers with a problem.
     pub range_marker_problems: Vec<CachedRangeMarkerProblem>,
+    /// `fallow-override-threshold-next-line` comments that parsed.
+    pub inline_thresholds: Vec<CachedInlineThreshold>,
+    /// `fallow-override-threshold-next-line` comments with a problem.
+    pub inline_threshold_problems: Vec<CachedInlineThresholdProblem>,
     /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics.
@@ -474,6 +480,36 @@ pub struct CachedRangeMarkerProblem {
     /// `RangeMarkerProblemKind` discriminant, see `range_problem_code`.
     pub kind: u8,
     /// The unsupported kind token, when present.
+    pub token: Option<String>,
+}
+
+/// Cached `fallow-override-threshold-next-line` comment.
+#[derive(Debug, Clone, Encode, Decode)]
+pub struct CachedInlineThreshold {
+    /// 1-based line that the comment applies to.
+    pub line: u32,
+    /// 1-based line of the comment.
+    pub comment_line: u32,
+    /// Cyclomatic ceiling.
+    pub max_cyclomatic: Option<u16>,
+    /// Cognitive ceiling.
+    pub max_cognitive: Option<u16>,
+    /// CRAP ceiling.
+    pub max_crap: Option<f64>,
+    /// Unit-size ceiling.
+    pub max_unit_size: Option<u32>,
+    /// The reason after ` -- `.
+    pub reason: String,
+}
+
+/// Cached `fallow-override-threshold-next-line` comment with a problem.
+#[derive(Debug, Clone, Encode, Decode)]
+pub struct CachedInlineThresholdProblem {
+    /// 1-based line of the comment.
+    pub line: u32,
+    /// `InlineThresholdProblemKind` code.
+    pub kind: u8,
+    /// The token with the problem, when present.
     pub token: Option<String>,
 }
 

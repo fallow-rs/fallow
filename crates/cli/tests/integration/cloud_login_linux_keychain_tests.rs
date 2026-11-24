@@ -155,3 +155,85 @@ fn cloud_login_with_a_secret_service_stores_the_key_in_the_keyring() {
         "logout clears the keyring"
     );
 }
+
+/// Run `cloud logout` with a fake `secret-tool` whose body is `script`, a
+/// D-Bus address, and a credentials file that holds a key for the endpoint.
+/// Returns the output and the text of the credentials file after the logout.
+fn logout_with_fake_secret_tool(script: &str) -> (CommandOutput, String) {
+    let (dir, home) = project();
+    let bin = home.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("secret-tool");
+    std::fs::write(&fake, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let endpoint = "http://127.0.0.1:9";
+    let config = home.path().join(".config").join("fallow");
+    std::fs::create_dir_all(&config).unwrap();
+    let credentials = config.join("credentials");
+    std::fs::write(
+        &credentials,
+        serde_json::json!({ "version": 1, "keys": { endpoint: ISSUED_KEY } }).to_string(),
+    )
+    .unwrap();
+    let env = Env {
+        api_url: Some(endpoint),
+        api_key: None,
+        home: home.path(),
+    };
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let logout = run_with(LOGOUT, dir.path(), &env, |command: &mut Command| {
+        command
+            .env_remove("FALLOW_CREDENTIAL_STORE")
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+            .env("PATH", &path);
+    });
+    let left = std::fs::read_to_string(&credentials).unwrap_or_default();
+    drop((dir, home));
+    (logout, left)
+}
+
+#[test]
+fn cloud_logout_reports_a_keychain_that_keeps_the_key() {
+    let (logout, left) = logout_with_fake_secret_tool(&format!(
+        "if [ \"$1\" = lookup ]; then echo {ISSUED_KEY}; exit 0; fi\nexit 1"
+    ));
+
+    assert_eq!(
+        logout.code, 2,
+        "stdout={} stderr={}",
+        logout.stdout, logout.stderr
+    );
+    let error = parse_json(&logout);
+    assert_eq!(error["error"], true);
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("logout is incomplete"), "{message}");
+    assert!(
+        message.contains("removed the key from the credentials file"),
+        "{message}"
+    );
+    assert!(
+        !left.contains(ISSUED_KEY),
+        "the file entry is removed: {left}"
+    );
+}
+
+#[test]
+fn cloud_logout_without_a_secret_service_uses_only_the_file() {
+    let (logout, left) = logout_with_fake_secret_tool("exit 1");
+
+    assert_eq!(
+        logout.code, 0,
+        "stdout={} stderr={}",
+        logout.stdout, logout.stderr
+    );
+    let removed = parse_json(&logout);
+    assert_eq!(removed["removed_from_keychain"], false);
+    assert_eq!(removed["removed_from_credentials_file"], true);
+    assert!(
+        !left.contains(ISSUED_KEY),
+        "the file entry is removed: {left}"
+    );
+}

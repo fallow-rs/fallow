@@ -1,0 +1,7 @@
+.page {
+  margin: 0;
+}
+
+.toast {
+  animation: fade-in 1s;
+}

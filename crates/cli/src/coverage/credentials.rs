@@ -204,21 +204,37 @@ pub fn store_api_key(base_url: &str, key: &str) -> Result<KeySource, String> {
     Ok(KeySource::CredentialsFile)
 }
 
+/// The result of a keychain delete.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Deletion {
+    /// The tool confirmed the delete. `secret-tool clear` also confirms
+    /// when no entry matched.
+    Removed,
+    /// The keychain held no key, or this machine has no keychain.
+    #[default]
+    Absent,
+    /// The tool did not confirm the delete: it was denied, timed out or
+    /// failed. The key can still be in the keychain.
+    Failed,
+}
+
 /// What [`remove_api_key`] removed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Removed {
-    pub keychain: bool,
+    pub keychain: Deletion,
     pub file: bool,
 }
 
 /// Remove the stored key for `base_url` from the keychain and from the file.
+/// The file entry is removed also when the keychain delete fails.
 ///
 /// # Errors
 ///
 /// Returns a message when the credentials file cannot be rewritten.
 pub fn remove_api_key(base_url: &str) -> Result<Removed, String> {
-    let keychain =
-        keychain().is_some_and(|keychain| keychain.delete(base_url, KEYCHAIN_INTERACTIVE_LIMIT));
+    let keychain = keychain().map_or(Deletion::Absent, |keychain| {
+        keychain.delete(base_url, KEYCHAIN_INTERACTIVE_LIMIT)
+    });
     let file = match credentials_path() {
         Some(path) => remove_from_file(&path, base_url)?,
         None => false,
@@ -229,10 +245,7 @@ pub fn remove_api_key(base_url: &str) -> Result<Removed, String> {
 /// Path of the credentials file: `$XDG_CONFIG_HOME/fallow/credentials`, else
 /// `~/.config/fallow/credentials`.
 pub fn credentials_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| fallow_license::user_home_dir().map(|home| home.join(".config")))?;
+    let base = fallow_process::HostPaths::from_env().xdg_config_base()?;
     Some(base.join("fallow").join("credentials"))
 }
 
@@ -417,9 +430,9 @@ fn keychain() -> Option<Keychain> {
 }
 
 fn secret_tool_on_path() -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| dir.join("secret-tool").is_file())
-    })
+    fallow_process::HostPaths::from_env()
+        .search_dirs()
+        .any(|dir| dir.join("secret-tool").is_file())
 }
 
 fn keychain_disabled_by_env() -> bool {
@@ -446,6 +459,9 @@ fn store_mode() -> StoreMode {
 }
 
 const MACOS_SECURITY: &str = "/usr/bin/security";
+/// The exit status of `security` when no keychain entry matches
+/// (`errSecItemNotFound`).
+const MACOS_ITEM_NOT_FOUND: i32 = 44;
 
 /// Run a keychain tool with `input` on stdin and return its exit status and
 /// stdout. Returns `None` when the tool does not start, when the input does
@@ -602,7 +618,7 @@ impl Keychain {
         false
     }
 
-    fn delete(self, account: &str, limit: Duration) -> bool {
+    fn delete(self, account: &str, limit: Duration) -> Deletion {
         let command = match self {
             Self::MacOs => self.command(&[
                 "delete-generic-password",
@@ -615,7 +631,32 @@ impl Keychain {
                 self.command(&["clear", "service", KEYCHAIN_SERVICE, "account", account])
             }
         };
-        run_limited(command, None, limit).is_some_and(|output| output.status.success())
+        match self.deletion(run_limited(command, None, limit).as_ref()) {
+            // `secret-tool` also exits 1 when no Secret Service runs. A
+            // lookup then finds no key either, so nothing is left to clear.
+            Deletion::Failed
+                if matches!(self, Self::SecretTool) && self.read(account, limit).is_none() =>
+            {
+                Deletion::Absent
+            }
+            deletion => deletion,
+        }
+    }
+
+    /// Classify the output of a delete. `security` exits with
+    /// [`MACOS_ITEM_NOT_FOUND`] when no entry matches. `secret-tool clear`
+    /// exits 0 also when no entry matches, so a success can be an absent key.
+    fn deletion(self, output: Option<&Output>) -> Deletion {
+        let Some(output) = output else {
+            return Deletion::Failed;
+        };
+        if output.status.success() {
+            return Deletion::Removed;
+        }
+        match self {
+            Self::MacOs if output.status.code() == Some(MACOS_ITEM_NOT_FOUND) => Deletion::Absent,
+            Self::MacOs | Self::SecretTool => Deletion::Failed,
+        }
     }
 }
 
@@ -780,6 +821,43 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    fn exit_with(code: i32) -> Option<Output> {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", &format!("exit {code}")]);
+        run_limited(command, None, std::time::Duration::from_secs(10))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_denied_or_timed_out_keychain_delete_is_not_an_absent_key() {
+        for keychain in [Keychain::MacOs, Keychain::SecretTool] {
+            assert_eq!(
+                keychain.deletion(None),
+                Deletion::Failed,
+                "{keychain:?} timeout"
+            );
+            assert_eq!(
+                keychain.deletion(exit_with(0).as_ref()),
+                Deletion::Removed,
+                "{keychain:?} success"
+            );
+            assert_eq!(
+                keychain.deletion(exit_with(1).as_ref()),
+                Deletion::Failed,
+                "{keychain:?} failure"
+            );
+        }
+        assert_eq!(
+            Keychain::MacOs.deletion(exit_with(MACOS_ITEM_NOT_FOUND).as_ref()),
+            Deletion::Absent
+        );
+        assert_eq!(
+            Keychain::SecretTool.deletion(exit_with(MACOS_ITEM_NOT_FOUND).as_ref()),
+            Deletion::Failed
+        );
+    }
+
     /// Writes, reads and removes a real OS keychain entry. Ignored by
     /// default, because CI has no keychain. Run it on a developer machine
     /// with `cargo test -p fallow-cli keychain_round_trip -- --ignored`.
@@ -809,7 +887,15 @@ mod tests {
                 .as_deref(),
             Some("fallow_read_k1_probe2")
         );
-        assert!(keychain.delete(&account, KEYCHAIN_INTERACTIVE_LIMIT));
+        assert_eq!(
+            keychain.delete(&account, KEYCHAIN_INTERACTIVE_LIMIT),
+            Deletion::Removed
+        );
+        assert_eq!(
+            keychain.delete(&account, KEYCHAIN_INTERACTIVE_LIMIT),
+            Deletion::Absent,
+            "a second delete finds no entry"
+        );
         assert_eq!(keychain.read(&account, KEYCHAIN_INTERACTIVE_LIMIT), None);
     }
 

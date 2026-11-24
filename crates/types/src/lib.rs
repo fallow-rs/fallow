@@ -58,6 +58,8 @@ pub mod guard;
 /// Stable finding identity: the shared FNV-1a 64 hash and dead-code
 /// `finding_id` values.
 pub mod identity;
+/// Inline health threshold override comments.
+pub mod inline_threshold;
 /// Shared issue-type contract metadata used by CLI, LSP, MCP, and suppression
 /// helpers.
 pub mod issue_meta;

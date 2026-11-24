@@ -467,6 +467,7 @@ pub fn serialize_duplication_programmatic_json(
         output,
         root,
         threshold: _,
+        ignored_clone_groups: _,
         telemetry_analysis_run_id,
     } = output;
     let mut json = serialize_dupes_json_output(output, telemetry_analysis_run_id.as_deref())
@@ -780,6 +781,7 @@ mod tests {
             }),
             root: root.to_path_buf(),
             threshold: 0.0,
+            ignored_clone_groups: Vec::new(),
             telemetry_analysis_run_id: None,
         }
     }

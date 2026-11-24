@@ -471,3 +471,516 @@ export default Rule.pipe(Schema.brand("Branded"))
         facts.schema_exports
     );
 }
+
+#[test]
+fn records_a_call_of_a_local_helper_that_returns_a_schema() {
+    let names = schema_exports(
+        r#"
+import * as S from "effect/Schema"
+const Text = S.String
+const makeNamed = () => S.Struct({ name: Text })
+function makeFn() { return S.Struct({ name: Text }) }
+const makeArg = (n: string) => S.Struct({ [n]: Text })
+const makeExpression = function () { return Text.pipe(S.brand("Named")) }
+function makeEither(strict: boolean) {
+  if (strict) {
+    return S.Struct({ name: Text })
+  }
+  return S.Struct({})
+}
+function makeOrThrow(ok: boolean) {
+  if (ok) return S.String
+  throw new Error("no schema")
+}
+function makeWithLocal() {
+  const base = S.Struct({ name: Text })
+  return base.pipe(S.annotations({ title: "Named" }))
+}
+function makeInner() { return makeNamed() }
+function makeOuter() { return makeInner().annotations({ title: "Outer" }) }
+export const FromHelper = makeNamed()
+export const FromFn = makeFn()
+export const FromArg = makeArg("x")
+export const FromExpression = makeExpression()
+export const FromEither = makeEither(true)
+export const FromThrow = makeOrThrow(true)
+export const FromLocal = makeWithLocal()
+export const FromNested = makeOuter()
+export const FromPipe = makeNamed().pipe(S.annotations({ title: "Piped" }))
+export const FromHoisted = makeLater()
+function makeLater() { return S.Number }
+const Step = makeNamed()
+export const FromStep = Step.annotations({ title: "Step" })
+const MakeTyped = (name: string) => S.Struct({ [name]: Text })
+type MakeTyped = typeof Text
+function overloaded(name: string): typeof Text
+function overloaded(name: number): typeof Text
+function overloaded(name: unknown) { return Text.pipe(S.annotations({ title: String(name) })) }
+export const FromTypedName = MakeTyped("x")
+export const FromOverload = overloaded(1)
+export default makeNamed()
+"#,
+    );
+    assert_eq!(
+        names,
+        vec![
+            "FromArg",
+            "FromEither",
+            "FromExpression",
+            "FromFn",
+            "FromHelper",
+            "FromHoisted",
+            "FromLocal",
+            "FromNested",
+            "FromOverload",
+            "FromPipe",
+            "FromStep",
+            "FromThrow",
+            "FromTypedName",
+            "default",
+        ]
+    );
+}
+
+#[test]
+fn a_helper_with_a_return_that_is_no_schema_gives_no_schema() {
+    let names = schema_exports(
+        r#"
+import * as S from "effect/Schema"
+const Text = S.String
+const makeNamed = () => S.Struct({ name: Text })
+const one = () => 1
+function mixed(flag: boolean) {
+  if (flag) return S.String
+  return "text"
+}
+function mayEnd(flag: boolean) {
+  if (flag) return S.String
+}
+function bare(flag: boolean) {
+  if (flag) return
+  return S.String
+}
+async function later() { return S.String }
+function* each() { return S.String }
+const laterArrow = async () => S.String
+function decoder() { return S.decodeUnknownSync(Text) }
+function fromParameter(schema: typeof Text) { return schema.pipe(S.brand("P")) }
+function nested() {
+  const inner = () => S.String
+  return inner
+}
+function looped(): unknown { return looped() }
+let reassigned = () => S.String
+reassigned = () => 1 as never
+function replaced() { return S.String }
+replaced = (() => 1) as never
+function curried() { return () => S.String }
+function twice() { return S.String }
+function twice() { return 1 }
+function conditional(flag: boolean) { return flag ? S.String : 1 }
+function logical(value: unknown) { return value || S.String }
+function sequence() { return (1, S.String) }
+function inTry() { try { return S.String } finally { one() } }
+function inSwitch(kind: number) { switch (kind) { default: return S.String } }
+function inLoop() { for (;;) { return S.String } }
+declare function declared(): typeof Text
+function merged() { return S.String }
+namespace merged { export const extra = 1 }
+function ping(): unknown { return pong() }
+function pong(): unknown { return ping() }
+function shadowed(Text: number) { return Text }
+let Changed = S.String
+Changed = 1 as never
+function fromChanged() { return Changed }
+function d1() { return S.String }
+function d2() { return d1() }
+function d3() { return d2() }
+function d4() { return d3() }
+function d5() { return d4() }
+export const NotSchema = (() => 1)()
+export const FromOne = one()
+export const FromMixed = mixed(true)
+export const FromMayEnd = mayEnd(true)
+export const FromBare = bare(true)
+export const FromAsync = later()
+export const FromGenerator = each()
+export const FromAsyncArrow = laterArrow()
+export const FromDecoder = decoder()
+export const FromParameter = fromParameter(Text)
+export const FromNestedFunction = nested()
+export const FromLoop = looped()
+export const FromReassigned = reassigned()
+export const FromReplaced = replaced()
+export const FromCurried = curried()
+export const FromTwice = twice()
+export const FromConditional = conditional(true)
+export const FromLogical = logical(1)
+export const FromSequence = sequence()
+export const FromTry = inTry()
+export const FromSwitch = inSwitch(1)
+export const FromLoopBody = inLoop()
+export const FromDeclared = declared()
+export const FromMerged = merged()
+export const FromPing = ping()
+export const FromShadowed = shadowed(1)
+export const FromChanged = fromChanged()
+export const ChangedCopy = Changed
+export const CalledTwice = makeNamed()()
+export const TooDeep = d5()
+export const HelperAlias = makeNamed
+export const MadeValue = makeNamed().make({ name: "x" })
+export { makeNamed }
+export function exportedHelper() { return S.String }
+"#,
+    );
+    assert!(names.is_empty(), "no export is a schema: {names:?}");
+}
+
+#[test]
+fn a_helper_is_a_schema_after_the_module_declares_the_schema_that_it_returns() {
+    let facts = facts(
+        r#"
+import * as S from "effect/Schema"
+export function makeBase() { return Base.annotations({ title: "Base" }) }
+export const TooEarly = makeBase()
+const Base = S.String
+export const AfterBase = makeBase()
+"#,
+    );
+    assert_eq!(facts.schema_exports, vec!["AfterBase"]);
+    assert_eq!(facts.schema_factory_exports, vec!["makeBase"]);
+}
+
+#[test]
+fn a_helper_within_the_depth_limit_is_a_schema_after_a_deeper_one_fails() {
+    let names = schema_exports(
+        r#"
+import * as S from "effect/Schema"
+function d1() { return S.String }
+function d2() { return d1() }
+function d3() { return d2() }
+function d4() { return d3() }
+function d5() { return d4() }
+export const TooDeep = d5()
+export const AtLimit = d4()
+"#,
+    );
+    assert_eq!(names, vec!["AtLimit"]);
+}
+
+#[test]
+fn records_exported_helpers_and_calls_of_imported_helpers() {
+    let facts = facts(
+        r#"
+import { Schema } from "effect"
+import { Rule, makeRule } from "./contracts"
+export const makeNamed = () => Schema.Struct({})
+export function makeFn() { return Schema.String }
+const makeHidden = () => Schema.String
+export const makeFromImport = () => Rule.pipe(Schema.brand("R"))
+export const notAHelper = () => 1
+export const FromImported = makeRule()
+export const FromImportedPipe = makeRule("x").pipe(Schema.brand("B"))
+function wrap() { return makeRule() }
+export const FromWrapped = wrap()
+export const Chained = Rule.pipe(Schema.brand("C"))
+export const ImportedAlias = makeRule
+"#,
+    );
+    assert_eq!(facts.schema_factory_exports, vec!["makeFn", "makeNamed"]);
+    let derived: Vec<(&str, &str, bool)> = facts
+        .derived_schema_exports
+        .iter()
+        .map(|derived| {
+            (
+                derived.export_name.as_str(),
+                derived.import_local.as_str(),
+                derived.through_call,
+            )
+        })
+        .collect();
+    assert_eq!(
+        derived,
+        vec![
+            ("FromImported", "makeRule", true),
+            ("FromImportedPipe", "makeRule", true),
+            ("FromWrapped", "makeRule", true),
+            ("Chained", "Rule", false),
+            ("ImportedAlias", "makeRule", false),
+        ]
+    );
+    assert!(
+        facts.schema_exports.is_empty(),
+        "{:?}",
+        facts.schema_exports
+    );
+}
+
+#[test]
+fn credits_a_literal_member_only_when_no_code_can_change_it() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+const kept = { User: Schema.String }
+export const Kept = kept.User
+const shifted = [Schema.String, Schema.Number]
+shifted.shift()
+export const fromShifted = shifted[0]
+const deleted = { User: Schema.String }
+delete (deleted.User as never)
+export const fromDeleted = deleted.User
+const assigned = { User: Schema.String }
+;(assigned.User as unknown) = 1
+export const fromAssigned = assigned.User
+const chained = { User: Schema.String }
+delete chained?.User
+export const fromChained = chained.User
+export const exported = { User: Schema.String }
+export const fromExported = exported.User
+const padded = [Schema.String]
+export const fromPadded = padded["00"]
+"#,
+    );
+    assert_eq!(names, vec!["Kept"]);
+}
+
+#[test]
+fn gives_no_schema_for_a_redeclared_parameter_a_large_key_or_a_method_read() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+function id(x: unknown) { return x }
+export const Kept = id(Schema.String)
+function redeclared(x: unknown) { var x = 1; return x }
+export const fromRedeclared = redeclared(Schema.String)
+function shadowed(x: unknown) { function x() {} return x }
+export const fromShadowed = shadowed(Schema.String)
+const large = { "1000000000000000000000": Schema.String }
+export const fromLargeKey = large[1e21]
+export const methodRead = Schema.String.annotations
+const record = { User: Schema.String }
+export const recordMethodRead = record.User.annotations
+"#,
+    );
+    assert_eq!(names, vec!["Kept"]);
+}
+
+#[test]
+fn records_property_wrappers_and_other_lowercase_constructors() {
+    let names = schema_exports(
+        r#"
+import * as Schema from "effect/Schema"
+import { Id } from "./ids"
+export const Optional = Schema.optional(Schema.String)
+export const OptionalImported = Schema.optional(Id.annotate({ description: "x" }))
+export const OptionalKey = Schema.optionalKey(Schema.String)
+export const Mutable = Schema.mutable(Schema.Array(Schema.String))
+export const Required = Schema.required(Schema.optional(Schema.String))
+export const Tagged = Schema.tag("a")
+export const Keys = Schema.keyof(Schema.Struct({ a: Schema.String }))
+export const FromJson = Schema.fromJsonString(Schema.String)
+"#,
+    );
+    assert_eq!(
+        names,
+        vec![
+            "FromJson",
+            "Keys",
+            "Mutable",
+            "Optional",
+            "OptionalImported",
+            "OptionalKey",
+            "Required",
+            "Tagged",
+        ]
+    );
+}
+
+#[test]
+fn a_lowercase_constructor_without_a_call_or_a_non_schema_value_is_no_schema() {
+    let names = schema_exports(
+        r#"
+import * as Schema from "effect/Schema"
+export const bareOptional = Schema.optional
+export const bareSuspend = Schema.suspend
+export const decoder = Schema.decodeUnknownSync(Schema.String)
+export const encoder = Schema.encodeSync(Schema.String)
+export const guard = Schema.is(Schema.String)
+export const assertion = Schema.asserts(Schema.String)
+export const validator = Schema.validateSync(Schema.String)
+export const formatter = Schema.toFormatter(Schema.String)
+export const MarkerId = Schema.BrandSchemaId
+export const SchemaTypeId = Schema.TypeId
+export const AppConfig = Schema.Config("PORT", Schema.NumberFromString)
+export const Failure = Schema.SchemaError
+"#,
+    );
+    assert!(names.is_empty(), "no export is a schema: {names:?}");
+}
+
+/// The lowercase `Schema` members that `scripts/effect-schema-members.mjs`
+/// found to give a schema in effect 3.22.5 or effect 4.1.5, and that the
+/// constructor list missed before (#5066).
+const ADDED_LOWERCASE_CONSTRUCTORS: &[&str] = &[
+    "annotations",
+    "asSchema",
+    "attachPropertySignature",
+    "encodedBoundSchema",
+    "exitSchema",
+    "failureSchema",
+    "filterEffect",
+    "flip",
+    "fromFormData",
+    "fromJsonString",
+    "fromURLSearchParams",
+    "getNumberIndexedAccess",
+    "head",
+    "headNonEmpty",
+    "headOrElse",
+    "instanceOf",
+    "keyof",
+    "make",
+    "mutable",
+    "mutableKey",
+    "optional",
+    "optionalKey",
+    "parseNumber",
+    "partial",
+    "partialWith",
+    "pluck",
+    "readonlyKey",
+    "rename",
+    "required",
+    "requiredKey",
+    "revealBottom",
+    "revealCodec",
+    "serializableSchema",
+    "split",
+    "standardSchemaV1",
+    "successSchema",
+    "tag",
+    "tagDefaultOmit",
+    "toCodecArrayFromSingle",
+    "toCodecGoJson",
+    "toCodecIso",
+    "toCodecJson",
+    "toCodecStringTree",
+    "toStandardJSONSchemaV1",
+    "toStandardSchemaV1",
+    "transformLiteral",
+    "transformLiterals",
+];
+
+#[test]
+fn records_a_call_of_each_added_lowercase_constructor() {
+    for name in ADDED_LOWERCASE_CONSTRUCTORS {
+        let source = format!(
+            "import * as Schema from \"effect/Schema\"\nexport const Probe = Schema.{name}(Schema.String, Schema.String, Schema.String)\nexport const bare = Schema.{name}\n"
+        );
+        assert_eq!(schema_exports(&source), vec!["Probe"], "Schema.{name}");
+    }
+}
+
+/// PascalCase `Schema` values that give no schema in effect 3.22.5 and
+/// effect 4.1.5 (#5066).
+const PASCAL_CASE_NON_SCHEMAS: &[&str] = &[
+    "BetweenBigDecimalSchemaId",
+    "BetweenBigIntSchemaId",
+    "BetweenDateSchemaId",
+    "BetweenDurationSchemaId",
+    "BetweenSchemaId",
+    "BrandSchemaId",
+    "CapitalizedSchemaId",
+    "Config",
+    "DateFromSelfSchemaId",
+    "EndsWithSchemaId",
+    "FiniteSchemaId",
+    "FromPropertySignature",
+    "GreaterThanBigDecimalSchemaId",
+    "GreaterThanBigIntSchemaId",
+    "GreaterThanDateSchemaId",
+    "GreaterThanDurationSchemaId",
+    "GreaterThanOrEqualToBigDecimalSchemaId",
+    "GreaterThanOrEqualToBigIntSchemaId",
+    "GreaterThanOrEqualToDateSchemaId",
+    "GreaterThanOrEqualToDurationSchemaId",
+    "GreaterThanOrEqualToSchemaId",
+    "GreaterThanSchemaId",
+    "IncludesSchemaId",
+    "InstanceOfSchemaId",
+    "IntSchemaId",
+    "ItemsCountSchemaId",
+    "JsonNumberSchemaId",
+    "LengthSchemaId",
+    "LessThanBigDecimalSchemaId",
+    "LessThanBigIntSchemaId",
+    "LessThanDateSchemaId",
+    "LessThanDurationSchemaId",
+    "LessThanOrEqualToBigDecimalSchemaId",
+    "LessThanOrEqualToBigIntSchemaId",
+    "LessThanOrEqualToDateSchemaId",
+    "LessThanOrEqualToDurationSchemaId",
+    "LessThanOrEqualToSchemaId",
+    "LessThanSchemaId",
+    "LowercasedSchemaId",
+    "MaxItemsSchemaId",
+    "MaxLengthSchemaId",
+    "MinItemsSchemaId",
+    "MinLengthSchemaId",
+    "MultipleOfSchemaId",
+    "NegativeBigDecimalSchemaId",
+    "NonNaNSchemaId",
+    "NonNegativeBigDecimalSchemaId",
+    "NonPositiveBigDecimalSchemaId",
+    "PatternSchemaId",
+    "PositiveBigDecimalSchemaId",
+    "PropertySignatureDeclaration",
+    "PropertySignatureTransformation",
+    "PropertySignatureTypeId",
+    "RefineSchemaId",
+    "SchemaError",
+    "StartsWithSchemaId",
+    "ToPropertySignature",
+    "TrimmedSchemaId",
+    "TypeId",
+    "ULIDSchemaId",
+    "UUIDSchemaId",
+    "UncapitalizedSchemaId",
+    "UppercasedSchemaId",
+    "ValidDateSchemaId",
+];
+
+#[test]
+fn a_pascal_case_value_that_is_no_schema_gives_no_schema() {
+    for name in PASCAL_CASE_NON_SCHEMAS {
+        let source = format!(
+            "import {{ Schema }} from \"effect\"\nexport const read = Schema.{name}\nexport const called = Schema.{name}(\"x\", Schema.String)\n"
+        );
+        assert!(schema_exports(&source).is_empty(), "Schema.{name}");
+    }
+}
+
+#[test]
+fn a_data_last_call_of_a_dual_member_is_no_schema() {
+    let names = schema_exports(
+        r#"
+import { Schema } from "effect"
+const User = Schema.Struct({ a: Schema.String })
+export const withTitle = Schema.annotations({ title: "x" })
+export const pickA = Schema.pluck("a")
+export const renameA = Schema.rename({ a: "b" })
+export const extendUser = Schema.extend(User)
+export const toNumber = Schema.transform(Schema.Number, { decode: Number, encode: String })
+export const Titled = Schema.annotations(User, { title: "x" })
+export const Plucked = Schema.pluck(User, "a")
+export const Extended = Schema.extend(User, Schema.Struct({ b: Schema.Number }))
+export const Transformed = Schema.transform(Schema.String, Schema.Number, { decode: Number, encode: String })
+export const Spread = Schema.annotations(...[User, { title: "x" }])
+"#,
+    );
+    assert_eq!(
+        names,
+        vec!["Extended", "Plucked", "Spread", "Titled", "Transformed"]
+    );
+}

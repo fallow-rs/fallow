@@ -332,12 +332,17 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * Audit-mode marker emitted on each finding when `fallow audit --format json`
  * runs with a base ref. `true` means the finding's structural key was not
  * present at the base ref (introduced by the current changeset); `false`
- * means it was inherited. Duplication findings carry one carve-out: a clone
- * group whose structural key is new but whose instances contain no added line
- * from the diff (a group re-shaped by removing duplication elsewhere) is
- * demoted to inherited and serializes `false` (issue #2164). Such demoted
- * groups additionally carry a `demotion_reason` field naming the rule, and
- * are counted in `attribution.duplication_demoted` (issue #2220).
+ * means it was inherited. Clone groups compare by content, not by key alone:
+ * `true` means the group adds a copy that the base did not have, or makes
+ * two different pieces of old code equal, and no `duplicates.ignoredClones`
+ * entry accepts it. A group whose copies the change edited inside one base
+ * clone serializes `false`, and its region has the grade `inherited-edited`
+ * (issue #4968). A clone group whose key is new but whose instances contain
+ * no added line from the diff (a group re-shaped by removing duplication
+ * elsewhere) is demoted to inherited and serializes `false` (issue #2164).
+ * Such demoted groups additionally carry a `demotion_reason` field naming the
+ * rule, and their regions are counted in `attribution.duplication_demoted`
+ * (issue #2220).
  *
  * Outside of audit sub-results the field is omitted, so call sites typically
  * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
@@ -415,6 +420,10 @@ export type DependencyLocation = ("dependencies" | "devDependencies" | "optional
  * The kind of member.
  */
 export type MemberKind = ("enum_member" | "class_method" | "class_property" | "namespace_member" | "store_member")
+/**
+ * Why a namespace binding gets the full export credit of its target.
+ */
+export type NamespaceEscapeReason = ("whole-object-use" | "re-exported-binding" | "no-member-read")
 /**
  * Discriminator for [`ReExportCycle`]: which structural shape was detected.
  */
@@ -1036,6 +1045,10 @@ export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "su
  */
 export type RangeMarkerProblemKind = ("unclosed_start" | "unmatched_end" | "nested_start" | "missing_kind" | "unsupported_kind" | "not_own_line")
 /**
+ * The audit grade of a clone region.
+ */
+export type CloneRegionGrade = ("introduced" | "inherited" | "inherited-edited")
+/**
  * Which complexity threshold was exceeded.
  */
 export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | "cyclomatic_crap" | "cognitive_crap" | "all" | "file_lines")
@@ -1142,6 +1155,11 @@ export type ThresholdOverrideStatus = ("active" | "stale" | "insufficient" | "no
  * still breaches `maxCrap`.
  */
 export type ThresholdOverrideDimension = ("complexity" | "crap")
+/**
+ * What is wrong with one inline threshold override comment. A comment with a
+ * problem has no effect.
+ */
+export type InlineThresholdProblemKind = ("missing_reason" | "missing_threshold" | "invalid_key" | "invalid_value" | "disabled")
 /**
  * Discriminant for [`UntestedFileAction::kind`]. Mirrors the action types
  * emitted by `build_untested_file_actions`.
@@ -2205,11 +2223,14 @@ complexity_inherited: number
  */
 complexity_worsened?: number
 /**
- * Clone groups absent from the base snapshot.
+ * Clone regions that fail the new-only gate: a member clone group has a
+ * copy that the base snapshot does not have. Overlapping clone groups
+ * are one region.
  */
 duplication_introduced: number
 /**
- * Clone groups already present in the base snapshot.
+ * Clone regions that do not fail the new-only gate, also the regions
+ * whose copies the change edited.
  */
 duplication_inherited: number
 styling_introduced: number
@@ -3377,6 +3398,12 @@ unused_namespace_members?: UnusedNamespaceMemberFinding[]
  */
 unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
 /**
+ * Namespace bindings that the code uses as a whole value, so every
+ * export of the target module gets credit and stays unchecked. The rule
+ * is `off` by default, so this array is empty unless a config turns it on.
+ */
+namespace_escapes?: NamespaceEscapeFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -3909,6 +3936,11 @@ unused_namespace_members?: number
  * is `off` by default.
  */
 unused_protected_class_members?: number
+/**
+ * Namespace bindings that the code uses as a whole value. Omitted when
+ * zero, because the rule is `off` by default.
+ */
+namespace_escapes?: number
 /**
  * Unused store members.
  */
@@ -5206,6 +5238,66 @@ effective_severity?: (EffectiveSeverity | null)
 reachability_caveats?: ReachabilityCaveat[]
 }
 /**
+ * Wire-shape envelope for a [`NamespaceEscape`] finding consumed under the
+ * `namespace_escapes` key. Emits only a line-level suppress action: the fix
+ * is to read the members by name, which is a code change for the user.
+ */
+export interface NamespaceEscapeFinding {
+/**
+ * The file that declares the binding.
+ */
+path: string
+/**
+ * 1-based line of the import that declares the binding.
+ */
+line: number
+/**
+ * 0-based byte column of the import specifier that declares the
+ * binding: the `*` of `import * as Ns`, or the specifier of a named
+ * import.
+ */
+col: number
+/**
+ * The local name of the binding.
+ */
+local_name: string
+/**
+ * The module whose exports get the full credit.
+ */
+module: string
+/**
+ * The count of exports in `module` and the modules it re-exports from
+ * that would be unused-export or unused-type findings without this credit.
+ */
+hidden_exports: number
+reason: NamespaceEscapeReason
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
  * `unused_store_members` key (a Pinia `state` / `getters` / `actions` key, or
  * a setup-store returned key, declared but never accessed by any consumer
@@ -5825,11 +5917,18 @@ col: number
  */
 export interface ReExportCycleFinding {
 /**
- * Files participating in the cycle, sorted lexicographically. For a
- * self-loop, exactly one entry.
+ * Member files, sorted lexicographically. A self-loop has one entry.
  */
 files: string[]
 kind: ReExportCycleKind
+/**
+ * 1-based line of the re-export in `files[0]` that closes the cycle, or `0` if unknown.
+ */
+line?: number
+/**
+ * 0-based byte column of that re-export.
+ */
+col?: number
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
@@ -8258,10 +8357,10 @@ reason?: (string | null)
  * whole object narrows the report tells its reader an unwritten SARIF file
  * widened the analysis, which is what `affects` exists to prevent.
  *
- * `scope_size` is emitted for `diff-filter`, in added lines, for
- * `changed-since`, in changed files that the run analyzed, and for
- * `group-filter`, in groups that the run kept. `package-baselines`
- * and `sarif-file` measure no scope; the applied package refs travel in
+ * `scope_size` is emitted for `diff-filter`, in added lines plus touched
+ * files that add no line, for `changed-since`, in changed files that the run
+ * analyzed, and for `group-filter`, in groups that the run kept.
+ * `package-baselines` and `sarif-file` measure no scope; the applied package refs travel in
  * `package_baselines`. A consumer reads the unit off the name, so a name that
  * starts to measure its own scope in a later release needs no change here.
  *
@@ -8301,13 +8400,15 @@ requested: string
  * every unapplied entry: a request that stood down narrowed nothing, so a
  * number there would describe a scope nobody applied.
  *
- * The unit belongs to the name. `diff-filter` counts added lines, which is
- * what its filter keeps a finding for. `changed-since` counts changed
- * files that the run analyzed: a changed file that discovery or an ignore
- * rule dropped does not count, so a change to a README only gives `0`. A
- * combined run counts a file that any of its analyses kept, because a
- * per-analysis `production` setting can give its analyses different
- * files. `group-filter` counts the groups that the run kept.
+ * The unit belongs to the name. `diff-filter` counts added lines, plus one
+ * for each touched file that adds no line (a pure rename), because its
+ * filter keeps a finding on an added line or on a whole touched file.
+ * `changed-since` counts changed files that the run analyzed: a changed
+ * file that discovery or an ignore rule dropped does not count, so a
+ * change to a README only gives `0`. A combined run counts a file that
+ * any of its analyses kept, because a per-analysis `production` setting
+ * can give its analyses different files. `group-filter` counts the groups
+ * that the run kept.
  * Read the unit off the name the entry is keyed under, never across names,
  * and read an absent member as "not measured" rather than as zero.
  *
@@ -8316,9 +8417,10 @@ requested: string
  * cap for a larger diff, so read any non-zero value as a lower bound.
  *
  * `0` is the case this member exists for: a request that applied over an
- * empty scope. Every finding then filters out and the report reads clean,
- * so a consumer that sees no findings beside `scope_size: 0` learns that
- * nothing was analyzable rather than that the code is clean.
+ * empty scope. Every source-anchored finding then filters out and the
+ * report reads clean, so a consumer that sees no findings beside
+ * `scope_size: 0` learns that nothing was analyzable rather than that
+ * the code is clean.
  */
 scope_size?: (number | null)
 /**
@@ -8431,6 +8533,12 @@ mirrored_directories?: MirroredDirectory[]
  */
 range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
+/**
+ * Set only by `fallow audit` with a base: the clone groups whose
+ * instances overlap, graded as one finding each. The new-only gate
+ * counts these regions.
+ */
+clone_regions?: CloneRegionFinding[]
 }
 /**
  * Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
@@ -8495,6 +8603,11 @@ introduced?: (AuditIntroduced | null)
  * --format json` (issue #2220).
  */
 demotion_reason?: (CloneDemotionReason | null)
+/**
+ * Set only by `fallow audit` with a base: the index of the region of
+ * this group in `clone_regions[]`.
+ */
+region?: (number | null)
 }
 /**
  * A single instance of duplicated code at a specific location.
@@ -8765,6 +8878,63 @@ clone_groups_ignored?: number
 near_candidates_skipped?: number
 }
 /**
+ * A clone region of `fallow audit`: the clone groups whose instances
+ * overlap, graded as one finding. One paste can give a long group with
+ * fewer copies and a short group with more copies; both are members of one
+ * region (issue #4967).
+ */
+export interface CloneRegionFinding {
+grade: CloneRegionGrade
+/**
+ * Whether the region fails the new-only gate. Each member group in
+ * `clone_groups[]` carries the same `introduced` value.
+ */
+introduced: boolean
+/**
+ * Indices of the member groups in `clone_groups[]`.
+ */
+groups: number[]
+/**
+ * The union of the member instance lines in each file.
+ */
+instances: CloneRegionSpan[]
+/**
+ * The `duplicates.ignoredClones` entries that accept the region. An
+ * entry accepts an `inherited-edited` region when it matched the base
+ * clone, and an `introduced` region when it hid the head group of each
+ * new copy.
+ */
+accepted_by?: string[]
+/**
+ * The keys to put in `duplicates.ignoredClones` in place of
+ * `accepted_by`, so that `fallow dupes` also hides the edited clone.
+ * Present only for an accepted `inherited-edited` region.
+ */
+ignore_hint?: string[]
+/**
+ * Set when the region does not fail the gate because the change wrote
+ * no line of a member group whose key is new (issue #2164).
+ */
+demotion_reason?: (CloneDemotionReason | null)
+}
+/**
+ * One file span of a clone region.
+ */
+export interface CloneRegionSpan {
+/**
+ * Project-root-relative path, with forward slashes.
+ */
+file: string
+/**
+ * 1-based first line.
+ */
+start_line: number
+/**
+ * 1-based last line, inclusive.
+ */
+end_line: number
+}
+/**
  * Result of complexity analysis for reporting.
  */
 export interface HealthReport {
@@ -8791,6 +8961,17 @@ sections?: (HealthSection[] | null)
  * exceptions, stale exceptions, and full-run no-match cleanup hints.
  */
 threshold_overrides?: ThresholdOverrideState[]
+/**
+ * `fallow-override-threshold-next-line` comment states, one row per
+ * comment and threshold dimension. The status values are the values of
+ * `threshold_overrides`. Absent when the project has no such comment.
+ */
+inline_threshold_overrides?: InlineThresholdOverrideState[]
+/**
+ * `fallow-override-threshold-next-line` comments with a problem. Such a
+ * comment has no effect.
+ */
+inline_threshold_override_problems?: InlineThresholdOverrideProblem[]
 /**
  * Project-wide vital signs (always computed from available data).
  */
@@ -9054,6 +9235,12 @@ effective_thresholds?: (HealthEffectiveThresholds | null)
  * Source of the effective thresholds. Omitted when thresholds are global.
  */
 threshold_source?: (ThresholdSource | null)
+/**
+ * 1-based line of the `fallow-override-threshold-next-line` comment that
+ * set a cyclomatic, cognitive or CRAP ceiling of this finding. Absent
+ * when only config entries or the global thresholds apply.
+ */
+override_comment_line?: (number | null)
 /**
  * File-length ceiling in physical lines that the file exceeded. Present
  * only on a file-level finding (`exceeded: "file_lines"`), where
@@ -9604,6 +9791,68 @@ crap?: (number | null)
  * and `<component>` rollup rows, which are never scored on unit size.
  */
 line_count?: (number | null)
+}
+/**
+ * Report entry for one `fallow-override-threshold-next-line` comment and one
+ * threshold dimension. The status values are the values of a
+ * `thresholdOverrides` row: `active`, `stale`, `insufficient` and `no_match`.
+ */
+export interface InlineThresholdOverrideState {
+status: ThresholdOverrideStatus
+dimension: ThresholdOverrideDimension
+/**
+ * Dimensions the function still breaches despite this comment.
+ */
+outstanding?: ThresholdOverrideDimension[]
+/**
+ * File that holds the comment.
+ */
+path: string
+/**
+ * 1-based line of the comment.
+ */
+comment_line: number
+/**
+ * Name of the function on the next line. Absent on `no_match` rows.
+ */
+function?: (string | null)
+/**
+ * 1-based line of the function. Absent on `no_match` rows.
+ */
+line?: (number | null)
+/**
+ * 0-based byte column of the function. Absent on `no_match` rows.
+ */
+col?: (number | null)
+configured_thresholds: HealthConfiguredThresholds
+effective_thresholds: HealthEffectiveThresholds
+/**
+ * Current metrics of the function, when the comment matched one.
+ */
+metrics?: (ThresholdOverrideMetrics | null)
+/**
+ * The reason after ` -- ` in the comment.
+ */
+reason: string
+}
+/**
+ * One `fallow-override-threshold-next-line` comment with a problem. The
+ * comment has no effect.
+ */
+export interface InlineThresholdOverrideProblem {
+/**
+ * File that holds the comment.
+ */
+path: string
+/**
+ * 1-based line of the comment.
+ */
+line: number
+problem: InlineThresholdProblemKind
+/**
+ * The token with the problem, when one token has it.
+ */
+token?: (string | null)
 }
 /**
  * Project-wide vital signs: a fixed set of metrics for trend tracking.
@@ -12322,6 +12571,11 @@ export interface ScopedUnusedClasses {
  */
 path: string
 /**
+ * 1-based line of the first definition of one of the classes. A report
+ * saved before the field existed reads as `0`.
+ */
+line?: number
+/**
  * The scoped class names with no use elsewhere in the component, sorted.
  */
 classes: string[]
@@ -12397,6 +12651,12 @@ name: string
  * references it.
  */
 path: string
+/**
+ * 1-based line of the first rule in `path` that references it. `0` when
+ * the line is not known, for example in a report saved before the field
+ * existed.
+ */
+line?: number
 /**
  * Read-only verification step(s) an agent can run before fixing the
  * reference. Always at least one entry, so consumers can iterate `actions`
@@ -13592,6 +13852,13 @@ re_export_chains: ReExportChain[]
  */
 plugin_credits?: PluginExportCredit[]
 /**
+ * The JSDoc visibility tag that keeps an export with no consumer out
+ * of `unused-export`: `public`, `internal`, `alpha` or `beta`. The
+ * `keepExportTags` config key selects the tags that do this. Absent
+ * when the export is used, or when no kept tag is on it.
+ */
+kept_by_tag?: (string | null)
+/**
  * Human-readable reason summary.
  */
 reason: string
@@ -14514,7 +14781,8 @@ file: string
  */
 imported_as: string
 /**
- * The local binding name in the file at this hop.
+ * The local import name, or the forwarded export name for a re-export
+ * (`*` for an unaliased star re-export).
  */
 local_name: string
 /**
@@ -15436,6 +15704,17 @@ sections?: (HealthSection[] | null)
  */
 threshold_overrides?: ThresholdOverrideState[]
 /**
+ * `fallow-override-threshold-next-line` comment states, one row per
+ * comment and threshold dimension. The status values are the values of
+ * `threshold_overrides`. Absent when the project has no such comment.
+ */
+inline_threshold_overrides?: InlineThresholdOverrideState[]
+/**
+ * `fallow-override-threshold-next-line` comments with a problem. Such a
+ * comment has no effect.
+ */
+inline_threshold_override_problems?: InlineThresholdOverrideProblem[]
+/**
  * Project-wide vital signs (always computed from available data).
  */
 vital_signs?: (VitalSigns | null)
@@ -15794,6 +16073,12 @@ mirrored_directories?: MirroredDirectory[]
  */
 range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
+/**
+ * Set only by `fallow audit` with a base: the clone groups whose
+ * instances overlap, graded as one finding each. The new-only gate
+ * counts these regions.
+ */
+clone_regions?: CloneRegionFinding[]
 /**
  * Number of clone groups carried in `clone_groups[]`.
  */
@@ -16211,6 +16496,12 @@ unused_namespace_members?: UnusedNamespaceMemberFinding[]
  * by default, so this array is empty unless a config turns it on.
  */
 unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
+/**
+ * Namespace bindings that the code uses as a whole value, so every
+ * export of the target module gets credit and stays unchecked. The rule
+ * is `off` by default, so this array is empty unless a config turns it on.
+ */
+namespace_escapes?: NamespaceEscapeFinding[]
 /**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
@@ -18030,6 +18321,12 @@ unused_namespace_members?: UnusedNamespaceMemberFinding[]
  */
 unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
 /**
+ * Namespace bindings that the code uses as a whole value, so every
+ * export of the target module gets credit and stays unchecked. The rule
+ * is `off` by default, so this array is empty unless a config turns it on.
+ */
+namespace_escapes?: NamespaceEscapeFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -18617,6 +18914,12 @@ mirrored_directories?: MirroredDirectory[]
  */
 range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
+/**
+ * Set only by `fallow audit` with a base: the clone groups whose
+ * instances overlap, graded as one finding each. The new-only gate
+ * counts these regions.
+ */
+clone_regions?: CloneRegionFinding[]
 /**
  * This run's view of the loaded duplication baseline, present only when
  * `--dupes-baseline` loaded one. Read `change_scoped` before dividing
@@ -21740,11 +22043,13 @@ reasons: string[]
 tests: MutationTestKillRow[]
 /**
  * Tests with nonempty kills and no unique kills, sorted by test id.
- * In target mode, only the tests of complete targets.
+ * In target mode, only the tests of complete targets. The full matrix
+ * leaves out the duplicate test ids of the dry run.
  */
 candidates: string[]
 /**
- * Tests with coverage and no observed kills, sorted by test id.
+ * Tests with coverage and no observed kills, sorted by test id. The full
+ * matrix leaves out the duplicate test ids of the dry run.
  */
 coverage_without_kills: string[]
 /**
@@ -21780,7 +22085,9 @@ kills: string[]
  */
 unique_kills: string[]
 /**
- * The tests whose kill sets contain this full kill set, sorted.
+ * The tests whose kill sets contain this full kill set, sorted. The
+ * full matrix leaves out the duplicate test ids of the dry run, whose
+ * kills can belong to a twin test.
  */
 subsuming_tests: string[]
 /**
@@ -23567,6 +23874,16 @@ export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
  * this alias; new code should prefer `MisconfiguredDependencyOverrideFinding`.
  */
 export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `NamespaceEscape` name.
+ * The wire shape is byte-identical: `NamespaceEscapeFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `NamespaceEscape` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `NamespaceEscapeFinding`.
+ */
+export type NamespaceEscape = NamespaceEscapeFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `PackageCycle` name.

@@ -7,22 +7,20 @@
 #[cfg(unix)]
 use crate::common::run_fallow_raw;
 use crate::common::{
-    CommandOutput, canonical_report_without_gate_outcomes, fallow_bin, fixture_path, parse_json,
-    redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+    CommandOutput, canonical_report_without_gate_outcomes, fallow_bin, fixture_path, git,
+    parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
 };
 use std::path::Path;
 use tempfile::tempdir;
 
 fn init_git_index(root: &std::path::Path) {
-    let status = std::process::Command::new("git")
+    let status = crate::common::git_command(root)
         .args(["init", "-q"])
-        .current_dir(root)
         .status()
         .expect("git init should run");
     assert!(status.success(), "git init should succeed");
-    let status = std::process::Command::new("git")
+    let status = crate::common::git_command(root)
         .args(["add", "."])
-        .current_dir(root)
         .status()
         .expect("git add should run");
     assert!(status.success(), "git add should succeed");
@@ -1943,27 +1941,6 @@ fn the_grouped_dupes_envelope_carries_baseline_staleness() {
 const WIRING_NOTE: &str = "note: module wiring excluded from clones";
 const GATE_NOTE: &str = "note: hid 1 clone group below minOccurrences";
 
-fn git(dir: &Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command should run");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 /// Run bare `fallow` (combined mode) against an explicit root. The shared
 /// harness only offers a fixture-directory variant, and these tests build their
 /// project in a temp dir so the config can be rewritten between runs.
@@ -1977,11 +1954,7 @@ fn run_combined_in_root(root: &Path, args: &[&str]) -> CommandOutput {
         cmd.arg(arg);
     }
     let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 /// A project whose duplication run carries both scoped notes at once: `a.ts` /
@@ -2216,9 +2189,8 @@ fn audit_notes_route_to_the_config_keys_audit_honors() {
         noted.stderr
     );
 
-    // Audit builds its `DupesOptions` from config alone, so the flags the other
-    // two modes honor parse here and change nothing. A note naming them would
-    // fail silently, which is why audit names the keys instead.
+    // Audit builds its `DupesOptions` from config alone, so it rejects the
+    // global flags and names the config key instead.
     let flagged = run_fallow_in_root(
         "audit",
         dir.path(),
@@ -2231,9 +2203,12 @@ fn audit_notes_route_to_the_config_keys_audit_honors() {
             "2",
         ],
     );
+    assert_eq!(flagged.code, 2, "stderr: {}", flagged.stderr);
     assert!(
-        flagged.stderr.contains(WIRING_NOTE) && flagged.stderr.contains(GATE_NOTE),
-        "the `--dupes-` globals must remain inert under audit. stderr: {}",
+        flagged.stderr.contains(
+            "`fallow audit` does not read `--dupes-min-occurrences`. Set `duplicates.minOccurrences` in the config"
+        ),
+        "audit rejects the `--dupes-` globals and names the config key. stderr: {}",
         flagged.stderr
     );
 

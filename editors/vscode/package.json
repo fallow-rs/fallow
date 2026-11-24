@@ -310,6 +310,7 @@
             "unused-enum-members": true,
             "unused-class-members": true,
             "unused-protected-class-members": true,
+            "namespace-escapes": true,
             "unused-namespace-members": true,
             "unused-store-members": true,
             "unresolved-imports": true,
@@ -384,6 +385,9 @@
               "type": "boolean"
             },
             "unused-protected-class-members": {
+              "type": "boolean"
+            },
+            "namespace-escapes": {
               "type": "boolean"
             },
             "unused-namespace-members": {

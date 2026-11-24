@@ -40,7 +40,7 @@ expression: json_str
     "location": {
       "path": "src/utils/index.ts",
       "lines": {
-        "begin": 1
+        "begin": 3
       }
     }
   }

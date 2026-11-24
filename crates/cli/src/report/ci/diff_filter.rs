@@ -212,15 +212,19 @@ fn load_diff_index_from_reader(
 
 fn loaded_from_text(text: String, label: &str, quiet: bool) -> LoadedDiff {
     let index = DiffIndex::from_unified_diff(&text);
-    // Not a stand-down: the filter IS applied and its scope is empty, so every
-    // source-anchored finding filters out and the report reads clean. A
-    // different fact from the ones above, and deliberately still only advice.
+    // Not a stand-down: the filter is applied with no added line, so most
+    // findings on a source line filter out. Manifest, catalog and override
+    // findings bypass the filter. Advisory component findings bypass it too,
+    // and so does a path that has no diff key. A finding anchored to a whole
+    // file (an unused file, a cycle) passes when the diff touches that file,
+    // for example through a rename. This warning is only advice.
     if !quiet && index.added_line_count() == 0 {
         eprintln!(
-            "fallow: warning [diff-file]: {label} parsed 0 added lines; \
-             no findings will pass the diff filter. Verify the input is a unified diff \
-             (look for `+++ b/<path>` headers). Pure-rename, binary-only, and \
-             deletion-only diffs also produce empty indices."
+            "fallow: warning [diff-file]: {label} parsed 0 added lines, so most findings \
+             on a source line filter out. Dependency findings, advisory component findings, \
+             and findings on a whole touched file (an unused file, a cycle) still pass. \
+             Verify that the input is a unified diff (look for `+++ b/<path>` headers). \
+             Pure-rename, binary-only, and deletion-only diffs also add no lines."
         );
     }
     LoadedDiff {
@@ -285,14 +289,16 @@ pub(crate) fn init_shared_diff(
         let label = src.label();
         match place_diff(src, root, candidate_bases, quiet) {
             Ok(loaded) => {
-                // The added-line count travels as the scope the filter left,
-                // because `0` is the case a report cannot state for itself: the
-                // filter applied, every source-anchored finding dropped, and the
-                // clean document that follows covered nothing (issue #2734).
+                // The scope travels with the outcome, because `0` is the case a
+                // report cannot state for itself: the filter applied, every
+                // source-anchored finding dropped, and the clean document that
+                // follows covered nothing (issue #2734). A touched file without
+                // an added line counts, so a pure rename that keeps a
+                // file-anchored finding is not an empty scope (issue #4974).
                 request = Some(fallow_output::RequestOutcome::applied_with_scope_size(
                     fallow_output::RequestName::DiffFilter,
                     label,
-                    loaded.index.added_line_count() as u64,
+                    loaded.index.filter_scope_size() as u64,
                 ));
                 Some(loaded)
             }

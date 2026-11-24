@@ -8,7 +8,6 @@ use fallow_types::duplicates::DuplicationReport;
 
 use super::super::github_annotations::EnvelopeKind;
 use super::super::grouping::{self, OwnershipResolver};
-use super::cc_path;
 
 pub(super) fn annotate_dead_code_owner(
     issues: &mut [CodeClimateIssue],
@@ -43,20 +42,14 @@ pub(super) fn annotate_duplication_groups(
     let Some(resolver) = resolver else {
         return;
     };
-    use rustc_hash::FxHashMap;
-    let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
+    // The CodeClimate builder emits one issue per instance in clone group order.
+    let mut issues = issues.iter_mut();
     for group in &report.clone_groups {
         let owner = super::super::dupes_grouping::largest_owner(group, root, resolver);
-        for instance in &group.instances {
-            path_to_owner.insert(cc_path(&instance.file, root), owner.clone());
+        for issue in issues.by_ref().take(group.instances.len()) {
+            issue.group = Some(owner.clone());
         }
     }
-    annotate_codeclimate_issues(issues, CodeClimateAnnotationField::Group, |path| {
-        path_to_owner
-            .get(path)
-            .cloned()
-            .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
-    });
 }
 
 pub(super) fn annotate_saved_fallback_grouping(

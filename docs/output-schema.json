@@ -299,7 +299,7 @@
     },
     "AuditIntroduced": {
       "type": "boolean",
-      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Duplication findings carry one carve-out: a clone\ngroup whose structural key is new but whose instances contain no added line\nfrom the diff (a group re-shaped by removing duplication elsewhere) is\ndemoted to inherited and serializes `false` (issue #2164). Such demoted\ngroups additionally carry a `demotion_reason` field naming the rule, and\nare counted in `attribution.duplication_demoted` (issue #2220).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
+      "description": "Audit-mode marker emitted on each finding when `fallow audit --format json`\nruns with a base ref. `true` means the finding's structural key was not\npresent at the base ref (introduced by the current changeset); `false`\nmeans it was inherited. Clone groups compare by content, not by key alone:\n`true` means the group adds a copy that the base did not have, or makes\ntwo different pieces of old code equal, and no `duplicates.ignoredClones`\nentry accepts it. A group whose copies the change edited inside one base\nclone serializes `false`, and its region has the grade `inherited-edited`\n(issue #4968). A clone group whose key is new but whose instances contain\nno added line from the diff (a group re-shaped by removing duplication\nelsewhere) is demoted to inherited and serializes `false` (issue #2164).\nSuch demoted groups additionally carry a `demotion_reason` field naming the\nrule, and their regions are counted in `attribution.duplication_demoted`\n(issue #2220).\n\nOutside of audit sub-results the field is omitted, so call sites typically\nhold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean."
     },
     "ExplainOutput": {
       "type": "object",
@@ -723,6 +723,13 @@
             "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -1426,6 +1433,13 @@
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
         },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -1805,6 +1819,20 @@
             "$ref": "#/definitions/ThresholdOverrideState"
           },
           "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
+        },
+        "inline_threshold_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideState"
+          },
+          "description": "`fallow-override-threshold-next-line` comment states, one row per\ncomment and threshold dimension. The status values are the values of\n`threshold_overrides`. Absent when the project has no such comment."
+        },
+        "inline_threshold_override_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideProblem"
+          },
+          "description": "`fallow-override-threshold-next-line` comments with a problem. Such a\ncomment has no effect."
         },
         "vital_signs": {
           "anyOf": [
@@ -3134,6 +3162,20 @@
           },
           "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
         },
+        "inline_threshold_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideState"
+          },
+          "description": "`fallow-override-threshold-next-line` comment states, one row per\ncomment and threshold dimension. The status values are the values of\n`threshold_overrides`. Absent when the project has no such comment."
+        },
+        "inline_threshold_override_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InlineThresholdOverrideProblem"
+          },
+          "description": "`fallow-override-threshold-next-line` comments with a problem. Such a\ncomment has no effect."
+        },
         "vital_signs": {
           "anyOf": [
             {
@@ -3383,6 +3425,13 @@
         "stats": {
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
+        },
+        "clone_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionFinding"
+          },
+          "description": "Set only by `fallow audit` with a base: the clone groups whose\ninstances overlap, graded as one finding each. The new-only gate\ncounts these regions."
         },
         "clone_groups_shown": {
           "type": "integer",
@@ -3934,6 +3983,13 @@
             }
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
+        },
+        "override_comment_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the `fallow-override-threshold-next-line` comment that\nset a cyclomatic, cognitive or CRAP ceiling of this finding. Absent\nwhen only config entries or the global thresholds apply."
         },
         "max_file_lines": {
           "type": [
@@ -6484,6 +6540,10 @@
           "type": "integer",
           "description": "Unused protected class members. Omitted when zero, because the rule\nis `off` by default."
         },
+        "namespace_escapes": {
+          "type": "integer",
+          "description": "Namespace bindings that the code uses as a whole value. Omitted when\nzero, because the rule is `off` by default."
+        },
         "unused_store_members": {
           "type": "integer",
           "description": "Unused store members."
@@ -7349,6 +7409,13 @@
             "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -9061,11 +9128,11 @@
         },
         "duplication_introduced": {
           "type": "integer",
-          "description": "Clone groups absent from the base snapshot."
+          "description": "Clone regions that fail the new-only gate: a member clone group has a\ncopy that the base snapshot does not have. Overlapping clone groups\nare one region."
         },
         "duplication_inherited": {
           "type": "integer",
-          "description": "Clone groups already present in the base snapshot."
+          "description": "Clone regions that do not fail the new-only gate, also the regions\nwhose copies the change edited."
         },
         "styling_introduced": {
           "type": "integer"
@@ -12805,6 +12872,13 @@
           ],
           "description": "Source of the effective thresholds. Omitted when thresholds are global."
         },
+        "override_comment_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the `fallow-override-threshold-next-line` comment that\nset a cyclomatic, cognitive or CRAP ceiling of this finding. Absent\nwhen only config entries or the global thresholds apply."
+        },
         "max_file_lines": {
           "type": [
             "integer",
@@ -13194,6 +13268,13 @@
             }
           ],
           "description": "Set only by `fallow audit` under `--gate new-only`, on groups whose\n`introduced` flag the gate demoted to `false`: why the demotion\nhappened. `None` everywhere else, including `fallow dupes\n--format json` (issue #2220)."
+        },
+        "region": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Set only by `fallow audit` with a base: the index of the region of\nthis group in `clone_regions[]`."
         }
       },
       "required": [
@@ -13240,6 +13321,13 @@
         "stats": {
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
+        },
+        "clone_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionFinding"
+          },
+          "description": "Set only by `fallow audit` with a base: the clone groups whose\ninstances overlap, graded as one finding each. The new-only gate\ncounts these regions."
         }
       },
       "required": [
@@ -14335,11 +14423,19 @@
           "items": {
             "type": "string"
           },
-          "description": "Files participating in the cycle, sorted lexicographically. For a\nself-loop, exactly one entry."
+          "description": "Member files, sorted lexicographically. A self-loop has one entry."
         },
         "kind": {
           "description": "Which structural shape this finding describes.",
           "$ref": "#/definitions/ReExportCycleKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the re-export in `files[0]` that closes the cycle, or `0` if unknown."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of that re-export."
         },
         "finding_id": {
           "type": [
@@ -17362,7 +17458,7 @@
         {
           "type": "string",
           "const": "override",
-          "description": "A `thresholdOverrides` config entry changed at least one ceiling."
+          "description": "A `thresholdOverrides` config entry or a\n`fallow-override-threshold-next-line` comment changed at least one\nceiling. `override_comment_line` is present when a comment did."
         }
       ],
       "description": "Source for a finding's effective thresholds."
@@ -19144,6 +19240,10 @@
           "type": "string",
           "description": "Project-root-relative, forward-slash path to the SFC."
         },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the first definition of one of the classes. A report\nsaved before the field existed reads as `0`."
+        },
         "classes": {
           "type": "array",
           "items": {
@@ -19267,6 +19367,10 @@
         "path": {
           "type": "string",
           "description": "Project-root-relative, forward-slash path to the first stylesheet that\nreferences it."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the first rule in `path` that references it. `0` when\nthe line is not known, for example in a report saved before the field\nexisted."
         },
         "actions": {
           "type": "array",
@@ -22387,7 +22491,7 @@
         },
         "local_name": {
           "type": "string",
-          "description": "The local binding name in the file at this hop."
+          "description": "The local import name, or the forwarded export name for a re-export\n(`*` for an unaliased star re-export)."
         },
         "type_only": {
           "type": "boolean",
@@ -22430,7 +22534,7 @@
         {
           "type": "string",
           "const": "local-or-global",
-          "description": "A bare identifier call with no matching import binding (a same-module\nlocal function, a global, or a re-bound callee)."
+          "description": "A call through a bare identifier with no matching import-symbol edge.\nThis includes local bindings imported from external packages."
         },
         {
           "type": "string",
@@ -25659,6 +25763,13 @@
             "$ref": "#/definitions/PluginExportCredit"
           },
           "description": "The framework plugin rules that mark this export as used. The\nframework calls or reads the export, so no import is necessary. A\ncredit sets `is_used` when the file is reachable. Absent when no\nplugin credits the export."
+        },
+        "kept_by_tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The JSDoc visibility tag that keeps an export with no consumer out\nof `unused-export`: `public`, `internal`, `alpha` or `beta`. The\n`keepExportTags` config key selects the tags that do this. Absent\nwhen the export is used, or when no kept tag is on it."
         },
         "reason": {
           "type": "string",
@@ -29665,7 +29776,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/RequestOutcome"
       },
-      "description": "Every narrowing or shaping request a run received, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since`, `diff-filter`,\n`package-baselines`, `sarif-file` and `group-filter`. The reasons are `git-missing`,\n`not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,\n`unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`\nfor `package-baselines`, `oversize`,\n`unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for\n`diff-filter`, and `directory-create-failed`, `write-failed` and\n`serialize-failed` for `sarif-file`. Every set is open: a name a consumer\ndoes not recognise means \"some request\", not an error.\n\n`sarif-file` reports a secondary artifact rather than the scope of the\nreport it travels in, and it is in the same object for the same reason the\nothers are: the run was asked to do something and did something else, and\nnothing in the primary report says so. Which of the two an entry is, every\nentry says for itself: `affects` is `scope` for the narrowing requests and\n`artifact` for this one. Select on it. A consumer that instead assumes the\nwhole object narrows the report tells its reader an unwritten SARIF file\nwidened the analysis, which is what `affects` exists to prevent.\n\n`scope_size` is emitted for `diff-filter`, in added lines, for\n`changed-since`, in changed files that the run analyzed, and for\n`group-filter`, in groups that the run kept. `package-baselines`\nand `sarif-file` measure no scope; the applied package refs travel in\n`package_baselines`. A consumer reads the unit off the name, so a name that\nstarts to measure its own scope in a later release needs no change here.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
+      "description": "Every narrowing or shaping request a run received, keyed by name.\n\nReceived, not failed: a request the run honoured is published with\n`status: \"applied\"`, so a consumer can say \"scoped to the change\"\npositively. Read an absent object as \"nothing was asked for\", never as\n\"nothing failed\".\n\nAbsent from an envelope whenever it is empty, so a run that was asked for\nnothing is byte-identical to one produced before this object existed. An\nempty object is never emitted: it would assert that something was asked and\nall of it applied, which is a different and false claim.\n\nThe names this build can emit are `changed-since`, `diff-filter`,\n`package-baselines`, `sarif-file` and `group-filter`. The reasons are `git-missing`,\n`not-a-repository`, `git-failed` and `invalid-ref` for `changed-since`,\n`unknown-workspace`, `git-missing`, `not-a-repository` and `git-failed`\nfor `package-baselines`, `oversize`,\n`unreadable`, `not-utf8`, `foreign-namespace` and `ambiguous-base` for\n`diff-filter`, and `directory-create-failed`, `write-failed` and\n`serialize-failed` for `sarif-file`. Every set is open: a name a consumer\ndoes not recognise means \"some request\", not an error.\n\n`sarif-file` reports a secondary artifact rather than the scope of the\nreport it travels in, and it is in the same object for the same reason the\nothers are: the run was asked to do something and did something else, and\nnothing in the primary report says so. Which of the two an entry is, every\nentry says for itself: `affects` is `scope` for the narrowing requests and\n`artifact` for this one. Select on it. A consumer that instead assumes the\nwhole object narrows the report tells its reader an unwritten SARIF file\nwidened the analysis, which is what `affects` exists to prevent.\n\n`scope_size` is emitted for `diff-filter`, in added lines plus touched\nfiles that add no line, for `changed-since`, in changed files that the run\nanalyzed, and for `group-filter`, in groups that the run kept.\n`package-baselines` and `sarif-file` measure no scope; the applied package refs travel in\n`package_baselines`. A consumer reads the unit off the name, so a name that\nstarts to measure its own scope in a later release needs no change here.\n\n`invalid-ref` is reachable only through the programmatic API. The\n`--changed-since` flag validates its value before a run starts and fails\nwith exit 2 and an error document, which is the right side to err on: a\nmalformed ref is invalid input rather than a report of the wrong scope."
     },
     "RequestOutcome": {
       "type": "object",
@@ -29687,7 +29798,7 @@
             "integer",
             "null"
           ],
-          "description": "How much this request left in scope, in the request's own unit, when the\nrun applied it AND measured that scope. Absent otherwise, including on\nevery unapplied entry: a request that stood down narrowed nothing, so a\nnumber there would describe a scope nobody applied.\n\nThe unit belongs to the name. `diff-filter` counts added lines, which is\nwhat its filter keeps a finding for. `changed-since` counts changed\nfiles that the run analyzed: a changed file that discovery or an ignore\nrule dropped does not count, so a change to a README only gives `0`. A\ncombined run counts a file that any of its analyses kept, because a\nper-analysis `production` setting can give its analyses different\nfiles. `group-filter` counts the groups that the run kept.\nRead the unit off the name the entry is keyed under, never across names,\nand read an absent member as \"not measured\" rather than as zero.\n\nThe count is what the run indexed rather than the true total:\n`diff-filter` indexes at most one million added lines and reports that\ncap for a larger diff, so read any non-zero value as a lower bound.\n\n`0` is the case this member exists for: a request that applied over an\nempty scope. Every finding then filters out and the report reads clean,\nso a consumer that sees no findings beside `scope_size: 0` learns that\nnothing was analyzable rather than that the code is clean."
+          "description": "How much this request left in scope, in the request's own unit, when the\nrun applied it AND measured that scope. Absent otherwise, including on\nevery unapplied entry: a request that stood down narrowed nothing, so a\nnumber there would describe a scope nobody applied.\n\nThe unit belongs to the name. `diff-filter` counts added lines, plus one\nfor each touched file that adds no line (a pure rename), because its\nfilter keeps a finding on an added line or on a whole touched file.\n`changed-since` counts changed files that the run analyzed: a changed\nfile that discovery or an ignore rule dropped does not count, so a\nchange to a README only gives `0`. A combined run counts a file that\nany of its analyses kept, because a per-analysis `production` setting\ncan give its analyses different files. `group-filter` counts the groups\nthat the run kept.\nRead the unit off the name the entry is keyed under, never across names,\nand read an absent member as \"not measured\" rather than as zero.\n\nThe count is what the run indexed rather than the true total:\n`diff-filter` indexes at most one million added lines and reports that\ncap for a larger diff, so read any non-zero value as a lower bound.\n\n`0` is the case this member exists for: a request that applied over an\nempty scope. Every source-anchored finding then filters out and the\nreport reads clean, so a consumer that sees no findings beside\n`scope_size: 0` learns that nothing was analyzable rather than that\nthe code is clean."
         },
         "reason": {
           "type": [
@@ -29865,6 +29976,13 @@
         "stats": {
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
+        },
+        "clone_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionFinding"
+          },
+          "description": "Set only by `fallow audit` with a base: the clone groups whose\ninstances overlap, graded as one finding each. The new-only gate\ncounts these regions."
         },
         "baseline_staleness": {
           "anyOf": [
@@ -31794,6 +31912,13 @@
             "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
           },
           "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
+        "namespace_escapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NamespaceEscapeFinding"
+          },
+          "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -36215,14 +36340,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Tests with nonempty kills and no unique kills, sorted by test id.\nIn target mode, only the tests of complete targets."
+          "description": "Tests with nonempty kills and no unique kills, sorted by test id.\nIn target mode, only the tests of complete targets. The full matrix\nleaves out the duplicate test ids of the dry run."
         },
         "coverage_without_kills": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Tests with coverage and no observed kills, sorted by test id."
+          "description": "Tests with coverage and no observed kills, sorted by test id. The full\nmatrix leaves out the duplicate test ids of the dry run."
         },
         "targets": {
           "type": [
@@ -36305,7 +36430,7 @@
           "items": {
             "type": "string"
           },
-          "description": "The tests whose kill sets contain this full kill set, sorted."
+          "description": "The tests whose kill sets contain this full kill set, sorted. The\nfull matrix leaves out the duplicate test ids of the dry run, whose\nkills can belong to a twin test."
         },
         "notes": {
           "type": "array",
@@ -39806,6 +39931,350 @@
         "code"
       ],
       "description": "One file of the example project of a rule."
+    },
+    "InlineThresholdOverrideState": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "Lifecycle state of the comment.",
+          "$ref": "#/definitions/ThresholdOverrideStatus"
+        },
+        "dimension": {
+          "description": "Threshold dimension this row describes.",
+          "$ref": "#/definitions/ThresholdOverrideDimension"
+        },
+        "outstanding": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThresholdOverrideDimension"
+          },
+          "description": "Dimensions the function still breaches despite this comment."
+        },
+        "path": {
+          "type": "string",
+          "description": "File that holds the comment."
+        },
+        "comment_line": {
+          "type": "integer",
+          "description": "1-based line of the comment."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the function on the next line. Absent on `no_match` rows."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the function. Absent on `no_match` rows."
+        },
+        "col": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "0-based byte column of the function. Absent on `no_match` rows."
+        },
+        "configured_thresholds": {
+          "description": "Ceilings the comment sets.",
+          "$ref": "#/definitions/HealthConfiguredThresholds"
+        },
+        "effective_thresholds": {
+          "description": "Ceilings in effect after the config and the comment apply.",
+          "$ref": "#/definitions/HealthEffectiveThresholds"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThresholdOverrideMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current metrics of the function, when the comment matched one."
+        },
+        "reason": {
+          "type": "string",
+          "description": "The reason after ` -- ` in the comment."
+        }
+      },
+      "required": [
+        "status",
+        "dimension",
+        "path",
+        "comment_line",
+        "configured_thresholds",
+        "effective_thresholds",
+        "reason"
+      ],
+      "description": "Report entry for one `fallow-override-threshold-next-line` comment and one\nthreshold dimension. The status values are the values of a\n`thresholdOverrides` row: `active`, `stale`, `insufficient` and `no_match`."
+    },
+    "InlineThresholdOverrideProblem": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that holds the comment."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the comment."
+        },
+        "problem": {
+          "description": "What is wrong with the comment.",
+          "$ref": "#/definitions/InlineThresholdProblemKind"
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The token with the problem, when one token has it."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "problem"
+      ],
+      "description": "One `fallow-override-threshold-next-line` comment with a problem. The\ncomment has no effect."
+    },
+    "InlineThresholdProblemKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "missing_reason",
+          "description": "The comment has no reason after ` -- `."
+        },
+        {
+          "type": "string",
+          "const": "missing_threshold",
+          "description": "The comment sets no threshold."
+        },
+        {
+          "type": "string",
+          "const": "invalid_key",
+          "description": "A token is not a known key, or a key occurs two times."
+        },
+        {
+          "type": "string",
+          "const": "invalid_value",
+          "description": "A value is not a valid number for its key."
+        },
+        {
+          "type": "string",
+          "const": "disabled",
+          "description": "`health.inlineThresholdOverrides` is `false`, so the comment form is off."
+        }
+      ],
+      "description": "What is wrong with one inline threshold override comment. A comment with a\nproblem has no effect."
+    },
+    "CloneRegionFinding": {
+      "type": "object",
+      "properties": {
+        "grade": {
+          "description": "The grade of the region against the base.",
+          "$ref": "#/definitions/CloneRegionGrade"
+        },
+        "introduced": {
+          "type": "boolean",
+          "description": "Whether the region fails the new-only gate. Each member group in\n`clone_groups[]` carries the same `introduced` value."
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Indices of the member groups in `clone_groups[]`."
+        },
+        "instances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CloneRegionSpan"
+          },
+          "description": "The union of the member instance lines in each file."
+        },
+        "accepted_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The `duplicates.ignoredClones` entries that accept the region. An\nentry accepts an `inherited-edited` region when it matched the base\nclone, and an `introduced` region when it hid the head group of each\nnew copy."
+        },
+        "ignore_hint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The keys to put in `duplicates.ignoredClones` in place of\n`accepted_by`, so that `fallow dupes` also hides the edited clone.\nPresent only for an accepted `inherited-edited` region."
+        },
+        "demotion_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CloneDemotionReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the region does not fail the gate because the change wrote\nno line of a member group whose key is new (issue #2164)."
+        }
+      },
+      "required": [
+        "grade",
+        "introduced",
+        "groups",
+        "instances"
+      ],
+      "description": "A clone region of `fallow audit`: the clone groups whose instances\noverlap, graded as one finding. One paste can give a long group with\nfewer copies and a short group with more copies; both are members of one\nregion (issue #4967)."
+    },
+    "CloneRegionGrade": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "introduced",
+          "description": "A member group has a copy that the base does not have, or the change\nmade two different pieces of old code equal. The region fails the\n`introduced-clone-group` gate unless `accepted_by` names the\n`ignoredClones` entries that accept each new copy."
+        },
+        {
+          "type": "string",
+          "const": "inherited",
+          "description": "Each member group is a base group, or the change wrote no line of it."
+        },
+        {
+          "type": "string",
+          "const": "inherited-edited",
+          "description": "Each member group lies inside a base group, at the same place of each\nbase copy, and the change edited one or more of its copies. Each copy\ngrows by fewer lines than `duplicates.minLines`. A rewrite that keeps\nthe size of every copy counts as an edit. The region does not fail the\ngate."
+        }
+      ],
+      "description": "The audit grade of a clone region."
+    },
+    "CloneRegionSpan": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Project-root-relative path, with forward slashes."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based first line."
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based last line, inclusive."
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "description": "One file span of a clone region."
+    },
+    "NamespaceEscapeFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The file that declares the binding."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the import that declares the binding."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the import specifier that declares the\nbinding: the `*` of `import * as Ns`, or the specifier of a named\nimport."
+        },
+        "local_name": {
+          "type": "string",
+          "description": "The local name of the binding."
+        },
+        "module": {
+          "type": "string",
+          "description": "The module whose exports get the full credit."
+        },
+        "hidden_exports": {
+          "type": "integer",
+          "description": "The count of exports in `module` and the modules it re-exports from\nthat would be unused-export or unused-type findings without this credit."
+        },
+        "reason": {
+          "description": "Why the binding gets the full credit.",
+          "$ref": "#/definitions/NamespaceEscapeReason"
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col",
+        "local_name",
+        "module",
+        "hidden_exports",
+        "reason",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`NamespaceEscape`] finding consumed under the\n`namespace_escapes` key. Emits only a line-level suppress action: the fix\nis to read the members by name, which is a code change for the user."
+    },
+    "NamespaceEscapeReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "whole-object-use",
+          "description": "The code uses the binding as a value: a cast, an assignment, a call\nargument, a spread, a computed member read, or a reflective call such\nas `Object.keys(Ns)`."
+        },
+        {
+          "type": "string",
+          "const": "re-exported-binding",
+          "description": "A module that is not an entry point re-exports the binding with\n`export { Ns }`, so fallow cannot see which members its consumers read."
+        },
+        {
+          "type": "string",
+          "const": "no-member-read",
+          "description": "The code reads no member of the binding by name and does not use it\nas a value, for example only in `typeof Ns`."
+        }
+      ],
+      "description": "Why a namespace binding gets the full export credit of its target."
     }
   }
 }

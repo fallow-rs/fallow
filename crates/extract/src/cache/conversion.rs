@@ -30,10 +30,11 @@ pub fn current_unix_seconds() -> u64 {
 
 use super::types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport,
-    CachedLocalTypeDeclaration, CachedMember, CachedModule, CachedNamespaceObjectAlias,
-    CachedPublicSignatureTypeReference, CachedRangeMarkerProblem, CachedReExport,
-    CachedRequireCall, CachedSuppression, CachedUnknownSuppressionKind, IMPORT_KIND_DEFAULT,
-    IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE, IMPORT_KIND_SIDE_EFFECT,
+    CachedInlineThreshold, CachedInlineThresholdProblem, CachedLocalTypeDeclaration, CachedMember,
+    CachedModule, CachedNamespaceObjectAlias, CachedPublicSignatureTypeReference,
+    CachedRangeMarkerProblem, CachedReExport, CachedRequireCall, CachedSuppression,
+    CachedUnknownSuppressionKind, IMPORT_KIND_DEFAULT, IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE,
+    IMPORT_KIND_SIDE_EFFECT,
 };
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`],
@@ -270,6 +271,40 @@ fn module_range_problems_to_cached(
             token: problem.token.clone(),
         })
         .collect()
+}
+
+fn cached_inline_thresholds_to_module(
+    cached: &CachedModule,
+) -> fallow_types::inline_threshold::InlineThresholdOverrides {
+    use fallow_types::inline_threshold::{
+        InlineThresholdOverride, InlineThresholdProblem, InlineThresholdProblemKind,
+    };
+    fallow_types::inline_threshold::InlineThresholdOverrides {
+        entries: cached
+            .inline_thresholds
+            .iter()
+            .map(|entry| InlineThresholdOverride {
+                line: entry.line,
+                comment_line: entry.comment_line,
+                max_cyclomatic: entry.max_cyclomatic,
+                max_cognitive: entry.max_cognitive,
+                max_crap: entry.max_crap,
+                max_unit_size: entry.max_unit_size,
+                reason: entry.reason.clone(),
+            })
+            .collect(),
+        problems: cached
+            .inline_threshold_problems
+            .iter()
+            .filter_map(|problem| {
+                Some(InlineThresholdProblem {
+                    line: problem.line,
+                    kind: InlineThresholdProblemKind::from_code(problem.kind)?,
+                    token: problem.token.clone(),
+                })
+            })
+            .collect(),
+    }
 }
 
 fn cached_unknown_suppressions_to_module(
@@ -599,6 +634,7 @@ pub fn cached_to_module_opts(
             &cached.unknown_suppression_kinds,
         ),
         range_marker_problems: cached_range_problems_to_module(&cached.range_marker_problems),
+        inline_threshold_overrides: cached_inline_thresholds_to_module(cached),
         unused_import_bindings: cached.unused_import_bindings.clone(),
         type_referenced_import_bindings: cached.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: cached.value_referenced_import_bindings.clone(),
@@ -756,6 +792,30 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
             &module.unknown_suppression_kinds,
         ),
         range_marker_problems: module_range_problems_to_cached(&module.range_marker_problems),
+        inline_thresholds: module
+            .inline_threshold_overrides
+            .entries
+            .iter()
+            .map(|entry| CachedInlineThreshold {
+                line: entry.line,
+                comment_line: entry.comment_line,
+                max_cyclomatic: entry.max_cyclomatic,
+                max_cognitive: entry.max_cognitive,
+                max_crap: entry.max_crap,
+                max_unit_size: entry.max_unit_size,
+                reason: entry.reason.clone(),
+            })
+            .collect(),
+        inline_threshold_problems: module
+            .inline_threshold_overrides
+            .problems
+            .iter()
+            .map(|problem| CachedInlineThresholdProblem {
+                line: problem.line,
+                kind: problem.kind.to_code(),
+                token: problem.token.clone(),
+            })
+            .collect(),
         line_offsets: module.line_offsets.clone(),
         complexity: module.complexity.clone(),
         complexity_extracted: false,

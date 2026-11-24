@@ -7,13 +7,13 @@
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::common::{fallow_bin, parse_json};
-use crate::http_stub::read_request;
+use crate::http_stub::{accept_expected, read_request};
 
 #[derive(Clone)]
 struct MockResponse {
@@ -32,32 +32,26 @@ fn serve_with_headers(
 ) -> (String, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let url = format!("http://{}", listener.local_addr().expect("local addr"));
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let handle = {
-        let requests = Arc::clone(&requests);
-        thread::spawn(move || {
-            for (response, headers) in responses {
-                let (mut stream, _) = listener.accept().expect("accept request");
-                let request = read_request(&mut stream);
-                assert!(
-                    request.starts_with(response.method),
-                    "expected {} request, got:\n{request}",
-                    response.method
-                );
-                assert!(
-                    request.contains(response.path_contains),
-                    "expected path containing {}, got:\n{request}",
-                    response.path_contains
-                );
-                requests.lock().expect("request lock").push(request);
-                write_response(&mut stream, response.status, headers, response.body);
-            }
-            Arc::try_unwrap(requests)
-                .expect("request refs released")
-                .into_inner()
-                .expect("request lock")
-        })
-    };
+    let handle = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for (response, headers) in responses {
+            let mut stream = accept_expected(&listener, requests.len() + 1);
+            let request = read_request(&mut stream);
+            assert!(
+                request.starts_with(response.method),
+                "expected {} request, got:\n{request}",
+                response.method
+            );
+            assert!(
+                request.contains(response.path_contains),
+                "expected path containing {}, got:\n{request}",
+                response.path_contains
+            );
+            requests.push(request);
+            write_response(&mut stream, response.status, headers, response.body);
+        }
+        requests
+    });
     (url, handle)
 }
 
@@ -76,6 +70,79 @@ fn write_response(stream: &mut TcpStream, status: u16, headers: &str, body: &str
     stream
         .write_all(response.as_bytes())
         .expect("write response");
+}
+
+/// A provider that refuses the connection, so the lookup of the existing
+/// comments fails before any post.
+const REFUSED_API: &str = "http://127.0.0.1:9";
+const DEDUP_LOOKUP_FAILED: &str = "FALLOW_CI_DEDUP_LOOKUP_FAILED";
+
+#[test]
+fn post_review_tags_a_failed_comment_lookup_with_a_stable_code() {
+    for provider_args in [
+        ["--provider", "github", "--pr", "7", "--repo", "owner/repo"].as_slice(),
+        ["--provider", "gitlab", "--mr", "7", "--project-id", "1"].as_slice(),
+    ] {
+        let envelope = write_envelope(&["abc"]);
+        let output = run_post_review(provider_args, REFUSED_API, &envelope);
+        assert_eq!(output.code, 7, "{provider_args:?}: {}", output.stderr);
+        let error = parse_json(&output);
+        assert_eq!(
+            error["code"], DEDUP_LOOKUP_FAILED,
+            "{provider_args:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn post_review_leaves_a_missing_token_without_the_lookup_code() {
+    let envelope = write_envelope(&["abc"]);
+    let output = Command::new(fallow_bin())
+        .args(["--format", "json", "--quiet", "ci", "post-review"])
+        .args(["--provider", "github", "--pr", "7", "--repo", "owner/repo"])
+        .args(["--api-url", REFUSED_API])
+        .arg("--envelope")
+        .arg(envelope.path().join("review.json"))
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
+        .output()
+        .expect("run fallow");
+    let output = crate::common::CommandOutput::from_process(output);
+    let error = parse_json(&output);
+    assert_eq!(error["error"], true, "{error}");
+    assert!(error.get("code").is_none(), "{error}");
+}
+
+#[test]
+fn post_pr_comment_tags_a_failed_comment_lookup_with_a_stable_code() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let body = dir.path().join("comment.md");
+    std::fs::write(&body, "<!-- fallow-id: fallow-results -->\nbody\n").expect("body");
+    for provider_args in [
+        ["--provider", "github", "--pr", "7", "--repo", "owner/repo"].as_slice(),
+        ["--provider", "gitlab", "--mr", "7", "--project-id", "1"].as_slice(),
+    ] {
+        let output = Command::new(fallow_bin())
+            .args(["--format", "json", "--quiet", "ci", "post-pr-comment"])
+            .args(provider_args)
+            .args(["--api-url", REFUSED_API, "--marker-id", "fallow-results"])
+            .arg("--body")
+            .arg(&body)
+            .env("GH_TOKEN", "test-token")
+            .env("GITLAB_TOKEN", "test-token")
+            .env("FALLOW_API_RETRIES", "1")
+            .env("NO_PROXY", "127.0.0.1,localhost")
+            .env("no_proxy", "127.0.0.1,localhost")
+            .output()
+            .expect("run fallow");
+        let output = crate::common::CommandOutput::from_process(output);
+        assert_eq!(output.code, 7, "{provider_args:?}: {}", output.stderr);
+        let error = parse_json(&output);
+        assert_eq!(
+            error["code"], DEDUP_LOOKUP_FAILED,
+            "{provider_args:?}: {error}"
+        );
+    }
 }
 
 fn write_envelope(fingerprints: &[&str]) -> tempfile::TempDir {
@@ -172,6 +239,45 @@ fn post_review_rejects_scope_downgrade_and_cross_scope_before_provider_lookup() 
         assert!(rendered.contains("comments[0].body scope"));
         assert!(!rendered.contains("GitHub request failed"));
     }
+}
+
+#[test]
+fn github_review_uses_the_graphql_endpoint_of_the_selected_runner() {
+    let envelope = write_envelope(&[]);
+    let (server_url, server) = serve(vec![github_comments("[]"), github_threads_empty()]);
+    let api = format!("{server_url}/api/v3");
+    let output = Command::new(fallow_bin())
+        .args([
+            "ci",
+            "post-review",
+            "--provider",
+            "github",
+            "--pr",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--dry-run",
+            "--api-url",
+            &api,
+            "--envelope",
+        ])
+        .arg(envelope.path().join("review.json"))
+        .env("GH_TOKEN", "test-token")
+        .env("GITHUB_API_URL", &api)
+        .env("GITHUB_GRAPHQL_URL", format!("{server_url}/runner/graphql"))
+        .output()
+        .expect("run post-review");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let requests = server.join().expect("server thread");
+    assert!(
+        requests[1].starts_with("POST /runner/graphql "),
+        "{}",
+        requests[1]
+    );
 }
 
 #[test]
@@ -331,6 +437,11 @@ fn run_reconcile_with_identity_and_retries(
         .env("RUST_LOG", "")
         .env("FALLOW_API_RETRIES", retries)
         .env("FALLOW_API_RETRY_DELAY", "0")
+        .env("GITHUB_API_URL", REFUSED_API)
+        .env(
+            "GITHUB_GRAPHQL_URL",
+            format!("{REFUSED_API}/runner/graphql"),
+        )
         .env("GH_TOKEN", "test-token")
         .env("GITHUB_SHA", sha)
         .env("GITLAB_TOKEN", "test-token")
@@ -340,11 +451,7 @@ fn run_reconcile_with_identity_and_retries(
         command.env("FALLOW_BOT_LOGIN", bot_login);
     }
     let output = command.output().expect("run fallow");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 fn run_post_review(
@@ -388,11 +495,7 @@ fn run_post_review_with_identity(
         command.env("FALLOW_BOT_LOGIN", bot_login);
     }
     let output = command.output().expect("run fallow post-review");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 fn github_comments(body: &'static str) -> MockResponse {
@@ -874,13 +977,17 @@ fn github_existing_legacy_bare_marker_skips_reply_and_resolves_active_thread() {
 
     let output = run_reconcile(
         &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
-        &api_url,
+        &format!("{api_url}/api/v3/"),
         &envelope,
     );
     let json = parse_json(&output);
     assert_eq!(json["resolution_comments_posted"], 0);
     assert_eq!(json["threads_resolved"], 1);
-    assert_eq!(server.join().expect("server thread").len(), 4);
+    let requests = server.join().expect("server thread");
+    assert!(requests[0].starts_with("GET /api/v3/repos/"));
+    for request in &requests[1..] {
+        assert!(request.starts_with("POST /api/graphql "), "{request}");
+    }
 }
 
 #[test]

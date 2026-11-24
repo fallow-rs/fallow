@@ -19,7 +19,8 @@ prepare_artifacts "${FALLOW_ARTIFACTS_DIR:-.}" \
 : "${GH_REPO:?GH_REPO is required}"
 
 # Initialize markers so downstream gates always see definitive values. The
-# Rust post adapter may later overwrite `post_skipped_reason` for clean runs.
+# Rust post adapter may later overwrite `post_skipped_reason` for clean runs,
+# and a failed lookup of the existing comment sets `dedup_lookup_failed`.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "post_skipped_reason=none" >> "$GITHUB_OUTPUT"
   echo "dedup_lookup_failed=false" >> "$GITHUB_OUTPUT"
@@ -72,11 +73,19 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
     --pr "$PR_NUMBER"
     --repo "$GH_REPO"
     --body "$PR_COMMENT_FILE"
+    --api-url "${GITHUB_API_URL:-https://api.github.com}"
   )
   [ -f "$PR_COMMENT_ENVELOPE_FILE" ] && POST_COMMENT_ARGS+=(--envelope "$PR_COMMENT_ENVELOPE_FILE")
+  # JSON format puts a failure on stdout as an error document with a code.
+  POST_COMMENT_ARGS+=(--format json)
   POST_COMMENT_ARGS+=(--marker-id "$COMMENT_MARKER_ID")
   if ! fallow "${POST_COMMENT_ARGS[@]}" > "$PLAN_FILE"; then
-    echo "::warning::Failed to post PR comment"
+    if is_dedup_lookup_failure "$PLAN_FILE"; then
+      [ -z "${GITHUB_OUTPUT:-}" ] || echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"
+      echo "::warning::Skipped the PR comment: fallow could not read the existing comments, so a new comment could be a duplicate"
+    else
+      echo "::warning::Failed to post PR comment: $(escape_command_data "$(post_error_message "$PLAN_FILE")")"
+    fi
     exit 0
   fi
   ACTION=$(jq -r '.action' "$PLAN_FILE")

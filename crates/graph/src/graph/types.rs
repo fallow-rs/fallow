@@ -5,9 +5,24 @@ use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::PathBuf;
 
-use fallow_types::discover::FileId;
+use fallow_types::discover::{EntryPoint, FileId};
 use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 use rustc_hash::{FxHashMap, FxHashSet};
+
+/// The entry points of a graph build, split by reachability role.
+#[derive(Debug, Clone, Copy)]
+pub struct ReachabilityRoots<'a> {
+    /// Every entry point, of any role.
+    pub all: &'a [EntryPoint],
+    /// Runtime/application entry points.
+    pub runtime: &'a [EntryPoint],
+    /// Test entry points.
+    pub test: &'a [EntryPoint],
+    /// The entry points whose exports need a consumer in the graph
+    /// (`includeEntryExports`). An `export *` of such a file credits only the
+    /// names that an importer uses, like the `export *` of any other module.
+    pub consumer_checked: &'a FxHashSet<FileId>,
+}
 
 /// A single module in the graph.
 ///
@@ -35,12 +50,52 @@ const FLAG_REACHABLE: u8 = 1 << 1;
 const FLAG_RUNTIME_REACHABLE: u8 = 1 << 2;
 const FLAG_TEST_REACHABLE: u8 = 1 << 3;
 const FLAG_CJS_EXPORTS: u8 = 1 << 4;
+const FLAG_CONSUMER_CHECKED: u8 = 1 << 5;
+const FLAG_FIXTURE_ENTRY: u8 = 1 << 6;
 
 impl ModuleNode {
     /// Whether this module is an entry point.
     #[inline]
     pub const fn is_entry_point(&self) -> bool {
         self.flags & FLAG_ENTRY_POINT != 0
+    }
+
+    /// Whether this module is an entry point whose exports reach consumers
+    /// that the graph cannot list, so each name it exports counts as used.
+    ///
+    /// An entry point that `includeEntryExports` covers is consumer-checked:
+    /// its exports need an importer in the project, like the exports of any
+    /// other module.
+    #[inline]
+    pub(crate) const fn exposes_entry_surface(&self) -> bool {
+        self.flags & FLAG_ENTRY_POINT != 0 && self.flags & FLAG_CONSUMER_CHECKED == 0
+    }
+
+    /// Whether this module is an entry point whose exports need a consumer in
+    /// the project: `includeEntryExports` covers it, or it is a fixture file
+    /// that a module imports by name.
+    #[inline]
+    pub const fn is_consumer_checked(&self) -> bool {
+        self.flags & FLAG_ENTRY_POINT != 0 && self.flags & FLAG_CONSUMER_CHECKED != 0
+    }
+
+    /// Whether this module is a consumer-checked entry point that only a
+    /// plugin fixture pattern seeds. A tool can still load such a file by
+    /// path, so its default export counts as used.
+    #[inline]
+    pub const fn is_fixture_entry(&self) -> bool {
+        self.is_consumer_checked() && self.flags & FLAG_FIXTURE_ENTRY != 0
+    }
+
+    #[inline]
+    pub(crate) const fn set_fixture_entry(&mut self) {
+        self.flags |= FLAG_FIXTURE_ENTRY;
+    }
+
+    /// Mark this module as an entry point that `includeEntryExports` covers.
+    #[inline]
+    pub(crate) const fn set_consumer_checked(&mut self) {
+        self.flags |= FLAG_CONSUMER_CHECKED;
     }
 
     /// Whether the export `name` carries a visibility tag such as `@public`

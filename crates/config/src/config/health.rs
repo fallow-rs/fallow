@@ -44,6 +44,11 @@ const fn default_suggest_inline_suppression() -> bool {
     true
 }
 
+/// Default for `inline_threshold_overrides`: the comment form applies.
+const fn default_inline_threshold_overrides() -> bool {
+    true
+}
+
 /// Default bot/service-account author patterns filtered from ownership metrics.
 ///
 /// Matches common CI bot signatures and service-account naming conventions.
@@ -100,9 +105,9 @@ pub enum EmailMode {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnershipConfig {
-    /// Glob patterns (matched against the author email local-part) that
-    /// identify bot or service-account commits to exclude from ownership
-    /// signals. Overrides the defaults entirely when set.
+    /// Glob patterns that identify bot or service-account commits to exclude
+    /// from ownership signals. A pattern matches the local part of the author
+    /// email or the full author value. Overrides the defaults entirely when set.
     #[serde(default = "default_bot_patterns")]
     pub bot_patterns: Vec<String>,
 
@@ -377,6 +382,15 @@ pub struct HealthConfig {
     /// since baseline files are a separate suppression mechanism.
     #[serde(default = "default_suggest_inline_suppression")]
     pub suggest_inline_suppression: bool,
+
+    /// Whether `fallow-override-threshold-next-line` comments apply (default:
+    /// `true`). Such a comment sets the health ceilings of the function on
+    /// the next line, as in
+    /// `// fallow-override-threshold-next-line maxCognitive=40 -- reason`.
+    /// Set to `false` to keep every exception in `thresholdOverrides`: each
+    /// comment then has no effect and the report lists it as `disabled`.
+    #[serde(default = "default_inline_threshold_overrides")]
+    pub inline_threshold_overrides: bool,
 }
 
 impl Default for HealthConfig {
@@ -397,6 +411,7 @@ impl Default for HealthConfig {
             ownership: OwnershipConfig::default(),
             change_coupling: ChangeCouplingConfig::default(),
             suggest_inline_suppression: default_suggest_inline_suppression(),
+            inline_threshold_overrides: default_inline_threshold_overrides(),
         }
     }
 }
@@ -686,6 +701,7 @@ maxCognitive = 25
                 ..ChangeCouplingConfig::default()
             },
             suggest_inline_suppression: false,
+            inline_threshold_overrides: false,
         };
         let json = serde_json::to_string(&config).unwrap();
         let restored: HealthConfig = serde_json::from_str(&json).unwrap();
@@ -705,6 +721,8 @@ maxCognitive = 25
         assert_eq!(restored.threshold_overrides[0].max_cyclomatic, Some(30));
         assert_eq!(restored.threshold_overrides[0].max_crap, Some(45.0));
         assert!(!restored.suggest_inline_suppression);
+        assert!(!restored.inline_threshold_overrides);
+        assert!(HealthConfig::default().inline_threshold_overrides);
     }
 
     #[test]

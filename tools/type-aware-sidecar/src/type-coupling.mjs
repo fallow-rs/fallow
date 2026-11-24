@@ -95,7 +95,13 @@ const percentage = (numerator, denominator) =>
 
 const couplingConcentration = (edges, contributors) => {
   if (edges.length === 0) return 0;
-  return contributors.reduce((sum, entry) => sum + connectionDegree(entry), 0) / (edges.length * 2);
+  const paths = new Set(contributors.map((entry) => entry.path));
+  let endpoints = 0;
+  for (const { source, target } of edges) {
+    if (paths.has(source.path)) endpoints++;
+    if (paths.has(target.path)) endpoints++;
+  }
+  return endpoints / (edges.length * 2);
 };
 
 const couplingEvidence = (edges) =>

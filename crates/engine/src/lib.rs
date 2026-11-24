@@ -56,7 +56,6 @@ pub mod duplicates;
 mod effective_severity;
 pub mod entry_weight;
 pub mod error_severity;
-pub mod export_declarations;
 mod feature_flags;
 pub mod flag_age;
 mod flag_registry;
@@ -73,6 +72,11 @@ mod base_worktree_orphans;
 mod base_worktree_registration;
 #[path = "git_env.rs"]
 mod git_env;
+/// Git commands for the test fixtures of this crate and of the crates that
+/// use it.
+#[cfg(any(test, feature = "testing"))]
+pub mod git_fixture;
+mod git_identity;
 pub mod guard;
 pub mod health;
 pub mod list_inventory;
@@ -82,12 +86,14 @@ pub mod module_graph;
 pub mod mutation;
 pub mod package_baselines;
 pub mod plugins;
+pub mod post_edit;
 pub mod project_analysis;
 pub mod project_config;
 mod public_api;
 pub mod repo_refs;
 pub mod requested_rule_off;
 pub mod resolved_run;
+mod result_scope;
 mod results;
 pub mod search_visibility;
 mod security;
@@ -98,6 +104,7 @@ pub mod shell_quote;
 pub mod similar_code;
 pub mod sink_substitution;
 pub mod source;
+pub mod source_edits;
 mod suppress;
 pub mod test_paths;
 pub mod thread_pool;
@@ -105,6 +112,7 @@ pub mod trace;
 pub mod trace_chain;
 pub mod trace_error;
 pub mod unprovable;
+mod url_path;
 /// Input validation shared by CLI-facing entry points: git refs, root paths,
 /// and control-character rejection.
 pub mod validate;

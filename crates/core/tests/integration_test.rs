@@ -8,10 +8,14 @@
     reason = "Core-internal policy: integration tests exercise the workspace path-dep fallow_core::analyze* surface; the deprecation warning targets external crates.io consumers"
 )]
 
+#[path = "integration_test/bom_package_json.rs"]
+mod bom_package_json;
 #[path = "integration_test/command_file_references.rs"]
 mod command_file_references;
 #[path = "integration_test/common.rs"]
 mod common;
+#[path = "integration_test/fixture_file_exports.rs"]
+mod fixture_file_exports;
 
 #[path = "integration_test/ag_ui_agent_hooks.rs"]
 mod ag_ui_agent_hooks;
@@ -197,6 +201,8 @@ mod issue_954_pino_transport_target;
 mod jsdoc_import_tag;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
+#[path = "integration_test/jsx_automatic_runtime.rs"]
+mod jsx_automatic_runtime;
 #[path = "integration_test/jsx_import_source_pragma.rs"]
 mod jsx_import_source_pragma;
 #[path = "integration_test/kibana_framework_plugin.rs"]
@@ -265,6 +271,8 @@ mod symlink_root_containment;
 mod tool_convention_entries;
 #[path = "integration_test/tsconfig_paths_into_node_modules.rs"]
 mod tsconfig_paths_into_node_modules;
+#[path = "integration_test/tsconfig_solution_owner_paths.rs"]
+mod tsconfig_solution_owner_paths;
 #[path = "integration_test/tsdown_root_workspace_globs.rs"]
 mod tsdown_root_workspace_globs;
 #[path = "integration_test/type_test_entries.rs"]
@@ -376,10 +384,14 @@ mod security_imported_callees;
 mod security_multihop_taint;
 #[path = "integration_test/security_react_router_client_roots.rs"]
 mod security_react_router_client_roots;
+#[path = "integration_test/security_react_router_open_redirect.rs"]
+mod security_react_router_open_redirect;
 #[path = "integration_test/security_request_receivers.rs"]
 mod security_request_receivers;
 #[path = "integration_test/security_secret_to_network.rs"]
 mod security_secret_to_network;
+#[path = "integration_test/security_shape_matrix.rs"]
+mod security_shape_matrix;
 #[path = "integration_test/security_taint_confidence.rs"]
 mod security_taint_confidence;
 #[path = "integration_test/security_template_xss_sinks.rs"]
@@ -543,6 +555,8 @@ mod issue_4716_vite_workspace_rollup_input;
 mod issue_4724_cross_file_holder_prototype_reads;
 #[path = "integration_test/issue_4771_vite_alias_interface_members.rs"]
 mod issue_4771_vite_alias_interface_members;
+#[path = "integration_test/issue_4942_svelte_markup_dispatch.rs"]
+mod issue_4942_svelte_markup_dispatch;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]
@@ -819,6 +833,12 @@ mod issue_4824_whole_object_same_name_local;
 mod issue_4828_svelte_markup_script_attr_gt;
 #[path = "integration_test/issue_4850_inferred_signature_backing.rs"]
 mod issue_4850_inferred_signature_backing;
+#[path = "integration_test/issue_4986_entry_star_exports.rs"]
+mod issue_4986_entry_star_exports;
+#[path = "integration_test/issue_4990_entry_file_members.rs"]
+mod issue_4990_entry_file_members;
+#[path = "integration_test/issue_5053_entry_namespace_reexport.rs"]
+mod issue_5053_entry_namespace_reexport;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
@@ -835,6 +855,8 @@ mod jasmine_plugin;
 mod mise_plugin;
 #[path = "integration_test/namespace_class_static_member.rs"]
 mod namespace_class_static_member;
+#[path = "integration_test/namespace_escapes.rs"]
+mod namespace_escapes;
 #[path = "integration_test/namespace_issue_types.rs"]
 mod namespace_issue_types;
 #[path = "integration_test/namespace_spy_call_member.rs"]

@@ -15,8 +15,11 @@ use crate::results::UnusedExport;
 /// An export also counts as a schema when it forwards a schema of another
 /// module (`import { A } from "./a"; export { A }` or `export { A } from
 /// "./a"`), or when its chain starts at an imported schema
-/// (`Imported.pipe(Schema.brand("B"))`). A forwarded non-schema value stays
-/// a value export.
+/// (`Imported.pipe(Schema.brand("B"))`), or at a member of a namespace import
+/// (`Imported.User.pipe(...)`). A call of an imported function is a schema
+/// when each `return` of that function is a schema (`makeImported()`,
+/// `Imported.makeUser()`). The function export itself stays a value export, as
+/// does a forwarded non-schema value.
 pub(super) fn schema_exports_by_file(
     config: &ResolvedConfig,
     graph: &ModuleGraph,
@@ -35,18 +38,43 @@ pub(super) fn schema_exports_by_file(
                 .map(move |name| (file_id, name.clone()))
         })
         .collect();
+    let mut factories: FxHashSet<(FileId, String)> = modules
+        .iter()
+        .filter_map(|module| Some((module.file_id, module.effect_facts.as_deref()?)))
+        .flat_map(|(file_id, facts)| {
+            facts
+                .schema_factory_exports
+                .iter()
+                .map(move |name| (file_id, name.clone()))
+        })
+        .collect();
     let candidates: Vec<ForwardCandidate> = modules
         .iter()
         .flat_map(|module| forward_candidates(graph, module))
         .collect();
     loop {
-        let before = schemas.len();
+        let before = schemas.len() + factories.len();
         for candidate in &candidates {
-            if schemas.contains(&candidate.origin) {
-                schemas.insert((candidate.file_id, candidate.export_name.clone()));
+            let export = || (candidate.file_id, candidate.export_name.clone());
+            let origin_is_schema = schemas.contains(&candidate.origin);
+            let origin_is_factory = factories.contains(&candidate.origin);
+            match candidate.link {
+                Link::Forward => {
+                    if origin_is_schema {
+                        schemas.insert(export());
+                    }
+                    if origin_is_factory {
+                        factories.insert(export());
+                    }
+                }
+                Link::Chain { through_call } => {
+                    if origin_is_schema || (through_call && origin_is_factory) {
+                        schemas.insert(export());
+                    }
+                }
             }
         }
-        if schemas.len() == before {
+        if schemas.len() + factories.len() == before {
             break;
         }
     }
@@ -70,11 +98,25 @@ fn declaring_origin(graph: &ModuleGraph, file_id: FileId, name: String) -> (File
         })
 }
 
-/// An export that is a schema when the export `origin` is one.
+/// An export whose kind follows from the export `origin`.
 struct ForwardCandidate {
     file_id: FileId,
     export_name: String,
     origin: (FileId, String),
+    link: Link,
+}
+
+/// How an export uses its origin.
+#[derive(Clone, Copy)]
+enum Link {
+    /// The export is the origin binding: a schema when the origin is a
+    /// schema, and a function that returns a schema when the origin is one.
+    Forward,
+    /// The export is a schema chain on the origin. It is a schema when the
+    /// origin is a schema. With `through_call`, the chain calls the origin,
+    /// so it is also a schema when the origin is a function that returns a
+    /// schema.
+    Chain { through_call: bool },
 }
 
 /// The value exports of `module` that forward an imported binding, or whose
@@ -82,6 +124,7 @@ struct ForwardCandidate {
 fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCandidate> {
     let file_id = module.file_id;
     let mut imports: FxHashMap<&str, (FileId, &str)> = FxHashMap::default();
+    let mut namespaces: FxHashMap<&str, FileId> = FxHashMap::default();
     for (target, symbols) in graph.outgoing_symbol_edges(file_id) {
         for symbol in symbols
             .iter()
@@ -90,18 +133,23 @@ fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCa
             let imported = match &symbol.imported_name {
                 ImportedName::Named(name) => name.as_str(),
                 ImportedName::Default => "default",
-                ImportedName::Namespace | ImportedName::SideEffect => continue,
+                ImportedName::Namespace => {
+                    namespaces.insert(symbol.local_name.as_str(), target);
+                    continue;
+                }
+                ImportedName::SideEffect => continue,
             };
             imports.insert(symbol.local_name.as_str(), (target, imported));
         }
     }
-    let candidate = |export_name: String, local: &str| {
+    let candidate = |export_name: String, local: &str, link: Link| {
         imports
             .get(local)
             .map(|&(target, imported)| ForwardCandidate {
                 file_id,
                 export_name,
                 origin: declaring_origin(graph, target, imported.to_string()),
+                link,
             })
     };
     let mut candidates: Vec<ForwardCandidate> = module
@@ -113,15 +161,25 @@ fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCa
                 ExportName::Named(name) => Some(name.as_str()),
                 ExportName::Default => None,
             })?;
-            candidate(export.name.to_string(), local)
+            candidate(export.name.to_string(), local, Link::Forward)
         })
         .collect();
     if let Some(facts) = module.effect_facts.as_deref() {
-        candidates.extend(
-            facts.derived_schema_exports.iter().filter_map(|derived| {
-                candidate(derived.export_name.clone(), &derived.import_local)
-            }),
-        );
+        candidates.extend(facts.derived_schema_exports.iter().filter_map(|derived| {
+            let link = Link::Chain {
+                through_call: derived.through_call,
+            };
+            let Some(member) = &derived.member else {
+                return candidate(derived.export_name.clone(), &derived.import_local, link);
+            };
+            let &target = namespaces.get(derived.import_local.as_str())?;
+            Some(ForwardCandidate {
+                file_id,
+                export_name: derived.export_name.clone(),
+                origin: declaring_origin(graph, target, member.clone()),
+                link,
+            })
+        }));
     }
     if let Some(node) = graph.modules.get(file_id.0 as usize) {
         candidates.extend(
@@ -136,6 +194,7 @@ fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCa
                         re_export.source_file,
                         re_export.imported_name.clone(),
                     ),
+                    link: Link::Forward,
                 }),
         );
     }

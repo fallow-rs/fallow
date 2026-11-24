@@ -148,7 +148,7 @@ pub fn find_duplicates(
 /// returns the per-file token data alongside the corpus totals.
 fn tokenize_corpus_for_duplicates(
     input: TokenizeCorpusInput<'_>,
-) -> (Vec<TokenizedFile>, detect::CorpusTotals) {
+) -> (Vec<TokenizedFile>, crate::duplicates::CorpusTotals) {
     let (files, config) = (input.files, input.config);
     let normalization =
         fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
@@ -205,7 +205,7 @@ fn tokenize_corpus_for_duplicates(
         "tokenized files for duplication analysis"
     );
 
-    let corpus_totals = detect::CorpusTotals {
+    let corpus_totals = crate::duplicates::CorpusTotals {
         files: file_data.len(),
         lines: file_data
             .iter()
@@ -223,9 +223,9 @@ fn detect_and_postprocess(
     root: &Path,
     config: &DuplicatesConfig,
     mut file_data: Vec<TokenizedFile>,
-    corpus_totals: detect::CorpusTotals,
+    corpus_totals: crate::duplicates::CorpusTotals,
     focus_files: Option<&FxHashSet<PathBuf>>,
-) -> DuplicationReport {
+) -> (DuplicationReport, Vec<crate::duplicates::IgnoredCloneGroup>) {
     let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
         .iter()
         .filter(|file| !file.suppressions.is_empty())
@@ -273,7 +273,7 @@ fn detect_and_postprocess(
     let detector = CloneDetector::new(config.min_tokens, config.min_lines, config.skip_local)
         .with_consistent_identifiers(normalization.consistent_identifiers);
     let mut report = if let Some(focus_files) = focus_files {
-        detector.detect_touching_files(detector_data, focus_files)
+        detector.detect_touching_files_with_totals(detector_data, focus_files, corpus_totals)
     } else {
         detector.detect_with_totals(detector_data, corpus_totals)
     };
@@ -301,7 +301,7 @@ fn detect_and_postprocess(
         report.stats = crate::duplicates::recompute_stats(&report);
     }
 
-    apply_ignored_clones_filter(&mut report, &config.ignored_clones);
+    let ignored = apply_ignored_clones_filter(&mut report, &config.ignored_clones);
     apply_min_occurrences_filter(&mut report, config.min_occurrences);
     // Families copy their groups, so mark the instances before the copy.
     mark_symlinked_instances(&mut report, root);
@@ -311,7 +311,7 @@ fn detect_and_postprocess(
         families::detect_mirrored_directories(&report.clone_families, root);
     report.stats.clone_families = report.clone_families.len();
     report.sort();
-    report
+    (report, ignored)
 }
 
 /// Whether `path` is a symlink, or lies under a symlinked directory, below
@@ -342,24 +342,37 @@ fn mark_symlinked_instances(report: &mut DuplicationReport, root: &Path) {
     }
 }
 
-fn apply_ignored_clones_filter(report: &mut DuplicationReport, ignored: &[String]) {
+/// Remove the groups that `ignored` names, and return them with the key that
+/// hid each one.
+fn apply_ignored_clones_filter(
+    report: &mut DuplicationReport,
+    ignored: &[String],
+) -> Vec<crate::duplicates::IgnoredCloneGroup> {
     if ignored.is_empty() || report.clone_groups.is_empty() {
-        return;
+        return Vec::new();
     }
 
     let ignored = ignored.iter().map(String::as_str).collect::<FxHashSet<_>>();
     let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
-    let before = report.clone_groups.len();
-    report.clone_groups.retain(|group| {
-        !ignored.contains(fingerprints.ignored_clone_key_for_group(group).as_str())
-    });
-    let hidden = before.saturating_sub(report.clone_groups.len());
-    if hidden == 0 {
-        return;
+    let mut hidden = Vec::new();
+    for group in std::mem::take(&mut report.clone_groups) {
+        let key = fingerprints.ignored_clone_key_for_group(&group);
+        if ignored.contains(key.as_str()) {
+            hidden.push(crate::duplicates::IgnoredCloneGroup { key, group });
+        } else {
+            report.clone_groups.push(group);
+        }
+    }
+    if hidden.is_empty() {
+        return hidden;
     }
 
-    report.stats.clone_groups_ignored = report.stats.clone_groups_ignored.saturating_add(hidden);
+    report.stats.clone_groups_ignored = report
+        .stats
+        .clone_groups_ignored
+        .saturating_add(hidden.len());
     report.stats = crate::duplicates::recompute_stats(report);
+    hidden
 }
 
 /// Run duplication detection with optional focus files and token cache.
@@ -396,7 +409,8 @@ pub fn detect_duplicates(
         cache_root,
     });
 
-    let report = detect_and_postprocess(root, config, file_data, corpus_totals, focus_files);
+    let (report, ignored_clone_groups) =
+        detect_and_postprocess(root, config, file_data, corpus_totals, focus_files);
 
     let default_ignore_skips =
         build_default_ignore_skips(extra_ignores.as_ref(), &default_skip_counts);
@@ -404,6 +418,7 @@ pub fn detect_duplicates(
     DuplicationAnalysis {
         report,
         default_ignore_skips,
+        ignored_clone_groups,
     }
 }
 
@@ -1171,6 +1186,81 @@ export function renderInvoice(id: string): string {
         assert!(
             !cache_root.exists(),
             "small projects should avoid token-cache IO overhead"
+        );
+    }
+
+    #[test]
+    fn focused_shingle_prefilter_preserves_corpus_totals() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let focused_code = r"
+export function focused(input: number): number {
+    const doubled = input * 2;
+    const shifted = doubled + 10;
+    return shifted / 2;
+}
+";
+        let untouched_code = r#"
+export function untouched(input: string): string {
+    const lowered = input.toLowerCase();
+    const padded = lowered.padStart(10, "x");
+    return padded.slice(0, 8);
+}
+"#;
+        let table_code =
+            "export const primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43];\n";
+
+        let changed_path = src_dir.join("changed.ts");
+        let sources = [
+            (changed_path.clone(), focused_code),
+            (src_dir.join("focused-copy.ts"), focused_code),
+            (src_dir.join("untouched-a.ts"), untouched_code),
+            (src_dir.join("untouched-b.ts"), untouched_code),
+            (src_dir.join("table.ts"), table_code),
+        ];
+        let files: Vec<DiscoveredFile> = sources
+            .iter()
+            .enumerate()
+            .map(|(index, (path, code))| {
+                std::fs::write(path, code).expect("write source");
+                DiscoveredFile {
+                    id: FileId(u32::try_from(index).expect("small index")),
+                    path: path.clone(),
+                    size_bytes: code.len() as u64,
+                }
+            })
+            .collect();
+
+        let config_for = |min_corpus_size_for_shingle_filter| DuplicatesConfig {
+            mode: DetectionMode::Strict,
+            min_tokens: 5,
+            min_lines: 2,
+            min_corpus_size_for_shingle_filter,
+            ..DuplicatesConfig::default()
+        };
+        let mut focus = FxHashSet::default();
+        focus.insert(changed_path);
+
+        let filtered =
+            detect_duplicates(dir.path(), &files, &config_for(1), Some(&focus), None).report;
+        let unfiltered = detect_duplicates(
+            dir.path(),
+            &files,
+            &config_for(usize::MAX),
+            Some(&focus),
+            None,
+        )
+        .report;
+
+        assert_eq!(filtered.stats.total_files, files.len());
+        assert_eq!(filtered.stats.total_files, unfiltered.stats.total_files);
+        assert_eq!(filtered.stats.total_lines, unfiltered.stats.total_lines);
+        assert_eq!(filtered.stats.total_tokens, unfiltered.stats.total_tokens);
+        assert!(
+            (filtered.stats.duplication_percentage - unfiltered.stats.duplication_percentage).abs()
+                < f64::EPSILON
         );
     }
 

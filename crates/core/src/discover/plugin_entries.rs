@@ -93,6 +93,9 @@ pub fn discover_plugin_entry_point_sets_timed(
     let match_ms = match_start.elapsed().as_secs_f64() * 1000.0;
 
     push_plugin_setup_files(&mut entries, &config.root, plugin_result);
+    entries
+        .fixture_only
+        .retain(|path| !is_in_fixture_project(path, &config.root));
 
     TimedPluginEntryPoints {
         entries: entries.dedup(),
@@ -151,12 +154,16 @@ fn build_plugin_glob_meta<'a>(
             glob_meta.push(compiled);
         }
     }
-    for (pattern, pname) in plugin_result
+    let support_patterns = plugin_result
         .discovered_always_used
         .iter()
         .chain(plugin_result.always_used.iter())
-        .chain(plugin_result.fixture_patterns.iter())
-    {
+        .map(|rule| (rule, false));
+    let fixture_patterns = plugin_result
+        .fixture_patterns
+        .iter()
+        .map(|rule| (rule, true));
+    for ((pattern, pname), fixture) in support_patterns.chain(fixture_patterns) {
         let Ok(glob) = fallow_config::compile_path_glob(pattern) else {
             continue;
         };
@@ -172,6 +179,7 @@ fn build_plugin_glob_meta<'a>(
             plugin_name: pname,
             role: EntryPointRole::Support,
             production_excluded: false,
+            fixture,
         });
     }
     (PluginGlobIndex::build(globs), glob_meta)
@@ -338,6 +346,12 @@ fn categorize_plugin_match(
         entries.production_excluded.push(entry.path);
         return;
     }
+    if matches
+        .iter()
+        .all(|&match_idx| glob_meta[match_idx].fixture)
+    {
+        entries.fixture_only.push(entry.path.clone());
+    }
     let mut has_runtime = false;
     let mut has_test = false;
     let mut has_support = false;
@@ -358,6 +372,44 @@ fn categorize_plugin_match(
     if has_support || (!has_runtime && !has_test) {
         entries.push_support(entry);
     }
+}
+
+/// Directory names that start the data of a fixture.
+const FIXTURE_DIR_NAMES: &[&str] = &["fixtures", "__fixtures__"];
+
+fn is_fixture_dir_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| FIXTURE_DIR_NAMES.contains(&name))
+}
+
+/// Whether a directory below `root` on the way to `path` is a fixture
+/// directory, such as `test/fixtures/`.
+pub fn is_below_fixture_dir(path: &Path, root: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative
+        .parent()
+        .is_some_and(|dir| dir.iter().any(is_fixture_dir_name))
+}
+
+/// Whether `path` belongs to a fixture that is a small project of its own: a
+/// directory between the file and the outermost fixture directory above it,
+/// that directory included, holds a `package.json`. The files of such a
+/// fixture are input data for a test, not modules that a test imports by name.
+fn is_in_fixture_project(path: &Path, root: &Path) -> bool {
+    let dirs: Vec<&Path> = path
+        .ancestors()
+        .skip(1)
+        .take_while(|dir| *dir != root && dir.starts_with(root))
+        .collect();
+    let Some(outermost) = dirs
+        .iter()
+        .rposition(|dir| dir.file_name().is_some_and(is_fixture_dir_name))
+    else {
+        return false;
+    };
+    dirs[..=outermost]
+        .iter()
+        .any(|dir| dir.join("package.json").is_file())
 }
 
 /// Resolve plugin-declared setup files (with source-extension fallback) into support entries.
@@ -407,6 +459,8 @@ struct CompiledEntryRule<'a> {
     /// A user `support` entry rule in production mode. See
     /// [`production_skipped_plugins`].
     production_excluded: bool,
+    /// A plugin fixture pattern, such as `**/fixtures/**`.
+    fixture: bool,
 }
 
 impl CompiledEntryRule<'_> {
@@ -439,6 +493,7 @@ fn compile_entry_rule<'a>(
             plugin_name,
             role,
             production_excluded: false,
+            fixture: false,
         },
     ))
 }

@@ -1,0 +1,1 @@
+{ "name": "@p/plain", "private": true, "exports": { ".": "./src/index.ts" } }

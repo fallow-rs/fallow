@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fallow_types::output_dead_code::{UnusedDependencyFinding, UnusedExportFinding};
 use fallow_types::results::{DependencyLocation, UnusedDependency, UnusedExport};
@@ -9,27 +8,7 @@ use rustc_hash::FxHashSet;
 use super::base_files::{is_analysis_input, is_non_behavioral_doc, js_ts_tokens_equivalent};
 use super::*;
 
-fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstderr:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_engine::git_fixture::fixture_git as git;
 
 /// A git repository with one commit that holds `README.md` = `seed\n`.
 fn seeded_repo(parent: &Path) -> PathBuf {
@@ -540,6 +519,12 @@ fn tokens_equivalent_comment_markers_force_false() {
         "/** @beta */",
         "/** @alpha */",
         "/** @type {import('./types').Foo} */",
+        "/** @deprecated use y */",
+        "/** @jsxImportSource preact */",
+        "/** @jsxRuntime classic */",
+        "/** @import { Foo } from './types' */",
+        "/// <reference types=\"node\" />",
+        "// fallow-override-threshold-next-line cyclomatic 30",
     ] {
         let tagged = format!("{comment}\nexport const x = 1;\n");
         let plain = "/** */\nexport const x = 1;\n";
@@ -552,6 +537,59 @@ fn tokens_equivalent_comment_markers_force_false() {
             "a change to `{comment}` must force false in either direction"
         );
     }
+}
+
+/// The import or export form decides which exports a file credits and
+/// whether the edge is type-only, so a change of the form must refuse reuse.
+#[test]
+fn tokens_equivalent_import_and_export_form_change_is_not_equivalent() {
+    for (current, base) in [
+        ("import a from './x';", "import * as a from './x';"),
+        (
+            "import a, * as b from './x';",
+            "import a, { b } from './x';",
+        ),
+        ("import type { A } from './x';", "import { A } from './x';"),
+        ("import { type A } from './x';", "import { A } from './x';"),
+        ("export type { A } from './x';", "export { A } from './x';"),
+        ("export { type A } from './x';", "export { A } from './x';"),
+        (
+            "type A = 1;\nexport type { A };",
+            "type A = 1;\nexport { A };",
+        ),
+        ("export type * from './x';", "export * from './x';"),
+    ] {
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), current, base),
+            "a form change must refuse reuse: {current:?} versus {base:?}"
+        );
+    }
+    assert!(js_ts_tokens_equivalent(
+        Path::new("a.ts"),
+        "import type { A } from './x';\nimport * as b from './y';",
+        "import   type {A} from './x'\nimport * as   b from './y'",
+    ));
+}
+
+/// The exported name of a namespace re-export is the export that a
+/// consumer imports. A change of it, or a change between a star re-export
+/// and a namespace re-export, changes the export graph.
+#[test]
+fn tokens_equivalent_namespace_re_export_name_change_is_not_equivalent() {
+    for (current, base) in [
+        ("export * as a from './x';", "export * as b from './x';"),
+        ("export * as a from './x';", "export * from './x';"),
+    ] {
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), current, base),
+            "a re-export change must refuse reuse: {current:?} versus {base:?}"
+        );
+    }
+    assert!(js_ts_tokens_equivalent(
+        Path::new("a.ts"),
+        "export * as a from './x';",
+        "export  *  as  a  from  './x' ;",
+    ));
 }
 
 #[test]

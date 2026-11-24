@@ -38,6 +38,9 @@ const SHOWN_HASH_LEN: usize = 12;
 /// The largest journal that `--resume` reads. A line is about 200 bytes, so
 /// this is far above the 20000 entries of the result cache.
 const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
+/// The largest header line that [`Journal::remove_owned`] reads. A header
+/// is a few hundred bytes; the operator and target lists make it longer.
+const MAX_HEADER_BYTES: u64 = 1024 * 1024;
 /// The file name of a journal that the run did not read.
 const UNREAD_FILE: &str = "journal.jsonl.unread";
 /// A temporary journal file older than this belongs to a run that ended
@@ -75,6 +78,10 @@ pub struct JournalHeader {
     /// True for `--kill-matrix-full`.
     #[serde(default)]
     pub kill_matrix_full: bool,
+    /// The id of the run that wrote the journal. [`Journal::open`] sets it.
+    /// It is not part of the fingerprint: a resumed run writes its own id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
 }
 
 impl JournalHeader {
@@ -310,6 +317,17 @@ fn write_start(path: &Path, header: &JournalHeader, entries: &[Line]) -> Result<
         .map_err(|error| fail(&error))
 }
 
+/// A new id for the journal header of a run: the process id, the time and a
+/// counter, so two runs in one process or in two processes get other ids.
+fn new_run_id() -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{nanos}-{sequence}", std::process::id())
+}
+
 /// The outcome journal of one run.
 #[derive(Debug)]
 pub struct Journal {
@@ -324,6 +342,8 @@ pub struct Journal {
     rejected: Mutex<FxHashSet<String>>,
     /// The first write error.
     write_error: Mutex<Option<String>>,
+    /// The id of this run in the journal header.
+    run_id: String,
 }
 
 /// The journal of a run, and why a `--resume` run started from the
@@ -368,6 +388,10 @@ impl Journal {
         max_bytes: u64,
     ) -> Result<Opened, JournalMismatch> {
         let path = Self::path(mutation_cache);
+        let header = &JournalHeader {
+            run_id: new_run_id(),
+            ..header.clone()
+        };
         let fresh = |reason: &str| format!("the run started from the beginning, because {reason}");
         let mut start_error = None;
         let (entries, note) = if resume {
@@ -410,6 +434,7 @@ impl Journal {
                 .collect(),
             rejected: Mutex::new(FxHashSet::default()),
             write_error: Mutex::new(write_error),
+            run_id: header.run_id.clone(),
         };
         Ok(Opened { journal, note })
     }
@@ -418,6 +443,47 @@ impl Journal {
     #[must_use]
     pub fn rejected(&self) -> usize {
         self.rejected.lock().map_or(0, |rejected| rejected.len())
+    }
+
+    /// The id of this run in the journal header.
+    #[must_use]
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    /// Removes the journal below `mutation_cache` when the run `run_id`
+    /// wrote it, and returns true when it removed the journal. A journal of
+    /// another run, for example a newer run of the same project that started
+    /// while this run was active, stays in place. A run that replaces the
+    /// journal between the header read and the removal still loses it; that
+    /// window is the time of one read, not the time of a run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an IO error when the journal cannot be read or removed.
+    pub fn remove_owned(mutation_cache: &Path, run_id: &str) -> std::io::Result<bool> {
+        let path = Self::path(mutation_cache);
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let mut first = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(std::io::Read::take(file, MAX_HEADER_BYTES)),
+            &mut first,
+        )?;
+        let owned = !run_id.is_empty()
+            && serde_json::from_str::<JournalHeader>(first.trim_end())
+                .is_ok_and(|header| header.run_id == run_id);
+        if !owned {
+            return Ok(false);
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     /// The first write error of the run.

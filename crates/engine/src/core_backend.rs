@@ -31,6 +31,7 @@ pub use fallow_core::plugins::registry::builtin_config_lookup;
 pub use fallow_core::plugins::registry::builtin_config_patterns;
 pub use fallow_core::plugins::registry::builtin_plugin_names;
 pub use fallow_core::plugins::registry::is_external_plugin_active;
+pub use fallow_core::plugins::registry::workspace_activation_dependencies;
 pub use fallow_core::plugins::types_package_target;
 
 // Discovery vocabulary owned by the surviving core walk, re-exported so the

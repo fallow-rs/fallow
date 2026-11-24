@@ -58,9 +58,10 @@ pub(super) fn collect_large_functions(
             if fallow_types::extract::is_synthetic_module_unit(&func.name) {
                 continue;
             }
-            let max_unit_size = input
-                .thresholds
-                .effective_max_unit_size(relative, func.name.as_str());
+            let max_unit_size =
+                input
+                    .thresholds
+                    .effective_max_unit_size(relative, func.name.as_str(), func.line);
             if func.line_count > max_unit_size {
                 entries.push(fallow_output::LargeFunctionEntry {
                     path: path.clone(),

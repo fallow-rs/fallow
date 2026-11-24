@@ -18,11 +18,12 @@ Run a capped live pass:
 python3 scripts/public-config-corpus.py \
   --limit 40 \
   --search-timeout 30 \
-  --timeout 15 \
-  --output docs/public-config-corpus.md
+  --timeout 15
 ```
 
-The default cache lives under `.fallow/public-config-corpus/`, which is intentionally untracked. The manifest is written to `.fallow/public-config-corpus/manifest.json` unless `--manifest` is provided.
+The default cache lives under `.fallow/public-config-corpus/`, which is intentionally untracked. The report is written to `.fallow/public-config-corpus/report.md` unless `--output` is provided, and the manifest to `.fallow/public-config-corpus/manifest.json` unless `--manifest` is provided. Review the report before you quote it in a tracked file. The script refuses to write the report over this runbook.
+
+An authenticated code search also returns private repositories that the token can read. The script keeps only results whose repository is marked public (`isPrivate: false`). It counts the other results in the "Skipped results without public visibility" line of the report and leaves no other trace of them.
 
 For reviewable local testing without GitHub access:
 

@@ -1610,8 +1610,8 @@ fn read_workspace_package(
     if is_package_json_ignored(&ws_pkg_path, config) {
         return None;
     }
-    let ws_pkg_content = std::fs::read_to_string(&ws_pkg_path).ok()?;
-    let ws_pkg = serde_json::from_str::<PackageJson>(&ws_pkg_content).ok()?;
+    let ws_pkg_content = PackageJson::read_source(&ws_pkg_path).ok()?;
+    let ws_pkg = PackageJson::parse(&ws_pkg_content).ok()?;
     Some((ws_pkg_path, ws_pkg_content, ws_pkg))
 }
 

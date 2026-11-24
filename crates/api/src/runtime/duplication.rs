@@ -78,33 +78,55 @@ pub(super) fn run_duplication_with_session(
     let change_scope =
         resolved.change_scope(global_files, session.config(), session.workspaces())?;
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
-    let report = if let Some(changed_files) = global_files {
+    let analysis = if let Some(changed_files) = global_files {
         resolved
             .measure_changed_since_scope(session.files().iter().map(|file| file.path.as_path()));
         let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-        session
-            .find_duplicates_touching_files_with_defaults(&dupes_config, &changed_files, cache_dir)
-            .report
+        session.find_duplicates_touching_files_with_defaults(
+            &dupes_config,
+            &changed_files,
+            cache_dir,
+        )
     } else {
-        session
-            .find_duplicates_with_defaults(&dupes_config, cache_dir)
-            .report
+        session.find_duplicates_with_defaults(&dupes_config, cache_dir)
     };
 
     // Duplication detection cannot fail, so a token set while it ran has to be
     // reported here rather than dressed up as a complete report.
     resolved.ensure_not_cancelled("the duplication report")?;
-    run_duplication_report_with_session(options, resolved, session, report, &change_scope, start)
+    run_duplication_report_with_session(
+        options,
+        resolved,
+        session,
+        DuplicationRunReport {
+            report: analysis.report,
+            ignored_clone_groups: analysis.ignored_clone_groups,
+        },
+        &change_scope,
+        start,
+    )
+}
+
+/// The detector result that one duplication run reports.
+pub(super) struct DuplicationRunReport {
+    /// The clone groups after every filter.
+    pub report: fallow_engine::duplicates::DuplicationReport,
+    /// The clone groups that `duplicates.ignoredClones` hid.
+    pub ignored_clone_groups: Vec<fallow_engine::duplicates::IgnoredCloneGroup>,
 }
 
 pub(super) fn run_duplication_report_with_session(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
-    mut report: fallow_engine::duplicates::DuplicationReport,
+    run_report: DuplicationRunReport,
     change_scope: &ChangeScope,
     start: Instant,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
+    let DuplicationRunReport {
+        mut report,
+        ignored_clone_groups,
+    } = run_report;
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
     fallow_engine::duplicates::apply_scope(
@@ -165,6 +187,7 @@ pub(super) fn run_duplication_report_with_session(
         output,
         root: session.root().to_path_buf(),
         threshold: dupes_config.threshold,
+        ignored_clone_groups,
         telemetry_analysis_run_id: None,
     })
 }

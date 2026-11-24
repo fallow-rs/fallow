@@ -18,8 +18,7 @@
 //! - **Callees (DOWN):** the import-symbol edges OUT of `M` (resolved callees,
 //!   each a `(local, imported, target_module)` triple), recursed into the target
 //!   module's exports up to `depth`, PLUS the call sites in `M`
-//!   (`ModuleInfo.callee_uses`) whose leading identifier is bound to no import
-//!   (unresolved callees: locals, globals, dynamic dispatch, re-bound callees).
+//!   (`ModuleInfo.callee_uses`) whose leading identifier has no import-symbol edge.
 //!
 //! NOT resolved (reported as unresolved or absent, the same class of limits the
 //! security taint walk carries): computed-member calls, dynamic dispatch,
@@ -27,6 +26,7 @@
 //! with no import-symbol edge. The walk is MODULE-scoped, not per-function: a
 //! true intra-function dataflow is beyond ADR-001 syntactic scope.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use fallow_types::extract::{ImportedName, ModuleInfo};
@@ -38,7 +38,7 @@ use fallow_types::trace_chain::{
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
-use crate::graph::{ExportNamespace, ModuleGraph};
+use crate::graph::{ExportNamespace, ImportedSymbol, ModuleGraph};
 use crate::trace::trace_impl::find_module;
 
 /// Trace the symbol-level call chain for `query.symbol` in `query.file`.
@@ -73,12 +73,23 @@ pub fn trace_symbol_chain(
     let module_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
 
-    let callers = directions
-        .callers
-        .then(|| collect_callers(graph, root, module.file_id, symbol, depth));
-    let callees_walk = directions
-        .callees
-        .then(|| collect_callees(graph, &module_by_id, root, module.file_id, symbol, depth));
+    // A name that the file does not export has no chains. A namespace
+    // importer would otherwise match any name, and the callee walk is
+    // file-scoped, so a typo would get plausible hops.
+    let callers = directions.callers.then(|| {
+        if symbol_found {
+            collect_callers(graph, root, module.file_id, symbol, depth)
+        } else {
+            Vec::new()
+        }
+    });
+    let callees_walk = directions.callees.then(|| {
+        if symbol_found {
+            collect_callees(graph, &module_by_id, root, module.file_id, depth)
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    });
     let (callees, unresolved_callees) = match callees_walk {
         Some((resolved, unresolved)) => (Some(resolved), Some(unresolved)),
         None => (None, None),
@@ -156,15 +167,11 @@ const fn namespace_order(namespace: SemanticNamespace) -> u8 {
     }
 }
 
-/// Shared walk state, so the recursive helpers stay under the argument cap.
-struct WalkCtx<'a> {
-    graph: &'a ModuleGraph,
-    root: &'a Path,
-    max_depth: u32,
-}
-
-/// Walk UP: every module that imports `symbol` from `target`, recursed through
+/// Walk UP: every module that imports `symbol` from `target`, followed through
 /// each importer's own binding up to `depth`.
+///
+/// The walk is breadth-first, so each binding gets its shortest depth and a
+/// deeper path cannot hide a shorter one from the depth limit.
 fn collect_callers(
     graph: &ModuleGraph,
     root: &Path,
@@ -172,161 +179,170 @@ fn collect_callers(
     symbol: &str,
     depth: u32,
 ) -> Vec<ChainHop> {
-    let ctx = WalkCtx {
-        graph,
-        root,
-        max_depth: depth,
-    };
     let mut hops = Vec::new();
     let mut visited: FxHashSet<(FileId, String)> = FxHashSet::default();
-    walk_callers_recursive(&ctx, target, symbol, 1, &mut visited, &mut hops);
+    let mut queue: VecDeque<(FileId, String, u32)> = VecDeque::new();
+    queue.push_back((target, symbol.to_owned(), 1));
+    while let Some((target, symbol, current_depth)) = queue.pop_front() {
+        if current_depth > depth {
+            continue;
+        }
+        for (importer, sym) in importing_symbols(graph, target, &symbol) {
+            if !visited.insert((importer, sym.local_name.clone())) {
+                continue;
+            }
+            hops.push(ChainHop {
+                file: module_path(graph, importer, root),
+                imported_as: imported_name_label(&sym.imported_name).to_owned(),
+                local_name: sym.local_name.clone(),
+                type_only: sym.is_type_only,
+                depth: current_depth,
+            });
+            // The importer's local binding is the next symbol whose callers
+            // the walk follows (a re-exported symbol).
+            queue.push_back((importer, sym.local_name.clone(), current_depth + 1));
+        }
+    }
+    sort_hops(&mut hops);
+    hops
+}
+
+/// Walk DOWN: the import-symbol edges OUT of `module_id` (resolved callees),
+/// followed into each target module up to `depth`, plus the call sites in
+/// `module_id` whose callee has no matching import-symbol edge.
+///
+/// The walk is breadth-first, so each module is expanded at its shortest
+/// depth.
+fn collect_callees(
+    graph: &ModuleGraph,
+    module_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    root: &Path,
+    module_id: FileId,
+    depth: u32,
+) -> (Vec<ChainHop>, Vec<UnresolvedCallee>) {
+    let mut resolved = Vec::new();
+    let mut visited: FxHashSet<FileId> = FxHashSet::default();
+    visited.insert(module_id);
+    let mut queue: VecDeque<(FileId, u32)> = VecDeque::new();
+    queue.push_back((module_id, 1));
+    while let Some((module_id, current_depth)) = queue.pop_front() {
+        if current_depth > depth {
+            continue;
+        }
+        let Some(module) = graph.modules.get(module_id.0 as usize) else {
+            continue;
+        };
+        // The import edge for a re-export has no binding. Its names live on
+        // the re-export record, which a bare side-effect import does not have.
+        let forwarded = module.re_exports.iter().map(|edge| {
+            (
+                edge.source_file,
+                edge.imported_name.as_str(),
+                edge.exported_name.as_str(),
+                edge.is_type_only,
+            )
+        });
+        // Importing and re-exporting the same binding describes one hop.
+        let forwarded_bindings: FxHashSet<_> = forwarded.clone().collect();
+        let imports = direct_callee_bindings(graph, module_id)
+            .filter(|binding| !forwarded_bindings.contains(binding));
+        for (target, imported_as, local_name, type_only) in imports.chain(forwarded) {
+            resolved.push(ChainHop {
+                file: module_path(graph, target, root),
+                imported_as: imported_as.to_owned(),
+                local_name: local_name.to_owned(),
+                type_only,
+                depth: current_depth,
+            });
+            if visited.insert(target) {
+                queue.push_back((target, current_depth + 1));
+            }
+        }
+    }
+    sort_hops(&mut resolved);
+
+    let unresolved = module_by_id
+        .get(&module_id)
+        .map(|info| {
+            let resolved_locals = direct_callee_bindings(graph, module_id)
+                .map(|(_, _, local_name, _)| local_name)
+                .collect();
+            collect_unresolved_callees(info, &resolved_locals)
+        })
+        .unwrap_or_default();
+
+    (resolved, unresolved)
+}
+
+/// Direct import bindings with an internal target. Re-exports do not introduce
+/// local bindings that can resolve a call in this module.
+fn direct_callee_bindings(
+    graph: &ModuleGraph,
+    module_id: FileId,
+) -> impl Iterator<Item = (FileId, &str, &str, bool)> {
+    graph
+        .outgoing_symbol_edges(module_id)
+        .flat_map(|(target, symbols)| {
+            symbols
+                .iter()
+                .filter(|symbol| !matches!(symbol.imported_name, ImportedName::SideEffect))
+                .map(move |symbol| {
+                    (
+                        target,
+                        imported_name_label(&symbol.imported_name),
+                        symbol.local_name.as_str(),
+                        symbol.is_type_only,
+                    )
+                })
+        })
+}
+
+/// Each import of `symbol` from `target`, with the module that imports it.
+fn importing_symbols<'g>(
+    graph: &'g ModuleGraph,
+    target: FileId,
+    symbol: &'g str,
+) -> impl Iterator<Item = (FileId, &'g ImportedSymbol)> + 'g {
+    graph
+        .importers_of(target)
+        .iter()
+        .flat_map(move |&importer| {
+            graph
+                .outgoing_symbol_edges(importer)
+                .filter(move |(edge_target, _)| *edge_target == target)
+                .flat_map(|(_, symbols)| symbols.iter())
+                .filter(move |sym| imported_name_matches(&sym.imported_name, symbol))
+                .map(move |sym| (importer, sym))
+        })
+}
+
+fn module_path(graph: &ModuleGraph, file_id: FileId, root: &Path) -> PathBuf {
+    graph
+        .modules
+        .get(file_id.0 as usize)
+        .map_or_else(|| PathBuf::from("<unknown>"), |m| relativize(&m.path, root))
+}
+
+fn sort_hops(hops: &mut [ChainHop]) {
     hops.sort_by(|a, b| {
         a.depth
             .cmp(&b.depth)
             .then_with(|| a.file.cmp(&b.file))
             .then_with(|| a.local_name.cmp(&b.local_name))
     });
-    hops
 }
 
-fn walk_callers_recursive(
-    ctx: &WalkCtx<'_>,
-    target: FileId,
-    symbol: &str,
-    current_depth: u32,
-    visited: &mut FxHashSet<(FileId, String)>,
-    hops: &mut Vec<ChainHop>,
-) {
-    if current_depth > ctx.max_depth {
-        return;
-    }
-    for &importer in ctx.graph.importers_of(target) {
-        for (edge_target, symbols) in ctx.graph.outgoing_symbol_edges(importer) {
-            if edge_target != target {
-                continue;
-            }
-            for sym in symbols {
-                if !imported_name_matches(&sym.imported_name, symbol) {
-                    continue;
-                }
-                let key = (importer, sym.local_name.clone());
-                if !visited.insert(key) {
-                    continue;
-                }
-                let importer_path = ctx.graph.modules.get(importer.0 as usize).map_or_else(
-                    || PathBuf::from("<unknown>"),
-                    |m| relativize(&m.path, ctx.root),
-                );
-                hops.push(ChainHop {
-                    file: importer_path,
-                    imported_as: imported_name_label(&sym.imported_name),
-                    local_name: sym.local_name.clone(),
-                    type_only: sym.is_type_only,
-                    depth: current_depth,
-                });
-                // Recurse: the importer's local binding becomes the next symbol
-                // whose callers we walk (covers a re-exported / forwarded symbol).
-                walk_callers_recursive(
-                    ctx,
-                    importer,
-                    &sym.local_name,
-                    current_depth + 1,
-                    visited,
-                    hops,
-                );
-            }
-        }
-    }
-}
-
-/// Walk DOWN: the import-symbol edges OUT of `module_id` (resolved callees),
-/// recursed into each target module's exports up to `depth`, plus the call sites
-/// in `module_id` whose callee did not resolve to an import binding (unresolved).
-fn collect_callees(
-    graph: &ModuleGraph,
-    module_by_id: &FxHashMap<FileId, &ModuleInfo>,
-    root: &Path,
-    module_id: FileId,
-    _symbol: &str,
-    depth: u32,
-) -> (Vec<ChainHop>, Vec<UnresolvedCallee>) {
-    let ctx = WalkCtx {
-        graph,
-        root,
-        max_depth: depth,
-    };
-    let mut resolved = Vec::new();
-    let mut visited: FxHashSet<FileId> = FxHashSet::default();
-    visited.insert(module_id);
-    walk_callees_recursive(&ctx, module_id, 1, &mut visited, &mut resolved);
-    resolved.sort_by(|a, b| {
-        a.depth
-            .cmp(&b.depth)
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.local_name.cmp(&b.local_name))
-    });
-
-    let unresolved = module_by_id
-        .get(&module_id)
-        .map(|info| collect_unresolved_callees(info))
-        .unwrap_or_default();
-
-    (resolved, unresolved)
-}
-
-fn walk_callees_recursive(
-    ctx: &WalkCtx<'_>,
-    module_id: FileId,
-    current_depth: u32,
-    visited: &mut FxHashSet<FileId>,
-    hops: &mut Vec<ChainHop>,
-) {
-    if current_depth > ctx.max_depth {
-        return;
-    }
-    for (edge_target, symbols) in ctx.graph.outgoing_symbol_edges(module_id) {
-        let target_path = ctx.graph.modules.get(edge_target.0 as usize).map_or_else(
-            || PathBuf::from("<unknown>"),
-            |m| relativize(&m.path, ctx.root),
-        );
-        for sym in symbols {
-            // Side-effect imports carry no value-level callee; skip them.
-            if matches!(sym.imported_name, ImportedName::SideEffect) {
-                continue;
-            }
-            hops.push(ChainHop {
-                file: target_path.clone(),
-                imported_as: imported_name_label(&sym.imported_name),
-                local_name: sym.local_name.clone(),
-                type_only: sym.is_type_only,
-                depth: current_depth,
-            });
-        }
-        if visited.insert(edge_target) {
-            walk_callees_recursive(ctx, edge_target, current_depth + 1, visited, hops);
-        }
-    }
-}
-
-/// Build the unresolved-callee list from a module's call sites: every
-/// `callee_uses` call path (not a `new` expression) whose leading identifier is bound to no import is
-/// surfaced (best-effort classification). A dotted path is `MemberOrDynamic`; a
-/// bare identifier with no import binding is `LocalOrGlobal`.
-fn collect_unresolved_callees(info: &ModuleInfo) -> Vec<UnresolvedCallee> {
-    let import_locals: FxHashSet<&str> =
-        info.imports.iter().map(|i| i.local_name.as_str()).collect();
-
+/// Report calls whose leading identifier has no resolved edge in this module.
+fn collect_unresolved_callees(
+    info: &ModuleInfo,
+    resolved_locals: &FxHashSet<&str>,
+) -> Vec<UnresolvedCallee> {
     let mut out = Vec::new();
     let mut seen: FxHashSet<&str> = FxHashSet::default();
     for callee in info.callee_uses.iter().filter(|callee| !callee.is_new) {
         let path = callee.callee_path.as_str();
         let leading = path.split('.').next().unwrap_or(path);
-        // A callee whose leading identifier is an imported binding resolves to a
-        // graph edge already (covered by the resolved callee list); skip it.
-        if import_locals.contains(leading) {
-            continue;
-        }
-        if !seen.insert(path) {
+        if resolved_locals.contains(leading) || !seen.insert(path) {
             continue;
         }
         let reason = if path.contains('.') {
@@ -362,7 +378,7 @@ fn build_reason(
         );
     }
     if !symbol_found {
-        return "symbol not found as an export of this file; chains are file-scoped best-effort and may be empty".to_string();
+        return "symbol not found as an export of this file, so the chains are empty".to_string();
     }
     let mut parts = Vec::new();
     if let Some(callers) = callers {
@@ -391,12 +407,12 @@ fn imported_name_matches(name: &ImportedName, symbol: &str) -> bool {
     }
 }
 
-fn imported_name_label(name: &ImportedName) -> String {
+fn imported_name_label(name: &ImportedName) -> &str {
     match name {
-        ImportedName::Named(name) => name.clone(),
-        ImportedName::Default => "default".to_string(),
-        ImportedName::Namespace => "*".to_string(),
-        ImportedName::SideEffect => "side-effect".to_string(),
+        ImportedName::Named(name) => name,
+        ImportedName::Default => "default",
+        ImportedName::Namespace => "*",
+        ImportedName::SideEffect => "side-effect",
     }
 }
 
@@ -442,7 +458,7 @@ mod tests {
             ],
             ..ModuleInfo::empty(FileId(1))
         };
-        let unresolved = collect_unresolved_callees(&info);
+        let unresolved = collect_unresolved_callees(&info, &FxHashSet::default());
         assert_eq!(unresolved.len(), 2);
         assert_eq!(unresolved[0].callee, "localHelper");
         assert_eq!(unresolved[0].reason, UnresolvedReason::LocalOrGlobal);
@@ -467,24 +483,14 @@ mod tests {
             ],
             ..ModuleInfo::empty(FileId(1))
         };
-        let unresolved = collect_unresolved_callees(&info);
+        let unresolved = collect_unresolved_callees(&info, &FxHashSet::default());
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].callee, "localHelper");
     }
 
     #[test]
-    fn imported_callees_are_not_listed_as_unresolved() {
+    fn resolved_callees_are_not_listed_as_unresolved() {
         let info = ModuleInfo {
-            imports: vec![fallow_types::extract::ImportInfo {
-                source: "./dep".to_string(),
-                imported_name: ImportedName::Named("dep".to_string()),
-                local_name: "dep".to_string(),
-                is_type_only: false,
-                is_type_only_star: false,
-                from_style: false,
-                span: oxc_span::Span::default(),
-                source_span: oxc_span::Span::default(),
-            }],
             callee_uses: vec![
                 fallow_types::extract::CalleeUse {
                     callee_path: "dep".to_string(),
@@ -499,9 +505,8 @@ mod tests {
             ],
             ..ModuleInfo::empty(FileId(1))
         };
-        let unresolved = collect_unresolved_callees(&info);
-        // `dep` resolves to an import (covered by resolved callees); only `ghost`
-        // is unresolved.
+        let resolved_locals = std::iter::once("dep").collect();
+        let unresolved = collect_unresolved_callees(&info, &resolved_locals);
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].callee, "ghost");
     }

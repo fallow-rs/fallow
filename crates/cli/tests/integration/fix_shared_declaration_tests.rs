@@ -286,12 +286,24 @@ fn fix_removes_the_keyword_of_the_declaration_after_a_used_export_on_one_line() 
 
 #[test]
 fn fix_keeps_a_shared_declaration_at_the_line_start_for_another_name_on_the_line() {
-    // Only `z` is unused, but the `export` keyword at the line start belongs
-    // to the declaration of `a` and `b`.
-    assert_withheld(
+    // Only `z` is unused. The `export` keyword at the line start belongs to
+    // the declaration of `a` and `b`, so the fix removes the second keyword.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
         "const o = { a: 1, b: 2 };\nexport const { a, b } = o; export const z = 1;\n",
         "import { a, b } from './store';\n\na;\nb;\n",
-        &[],
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, vec![entry(2, "z")]);
+    assert_eq!(preview.withheld, Vec::new());
+
+    apply(root);
+    assert_eq!(
+        read_store(root),
+        "const o = { a: 1, b: 2 };\nexport const { a, b } = o; const z = 1;\n"
     );
 }
 
@@ -369,5 +381,43 @@ fn fix_removes_the_export_of_a_single_name_pattern_in_a_vue_file() {
     assert_eq!(
         std::fs::read_to_string(root.join("src/Store.vue")).unwrap(),
         "<script lang=\"ts\">\nconst x = { a: 1 };\nconst { a } = x;\nexport const used = 1;\n</script>\n"
+    );
+}
+
+#[test]
+fn fix_removes_the_export_of_the_second_function_on_one_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
+        "export function live() {} export function dead() {}\n",
+        "import { live } from './store';\n\nlive();\n",
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, vec![entry(1, "dead")]);
+
+    apply(root);
+    assert_eq!(
+        read_store(root),
+        "export function live() {} function dead() {}\n"
+    );
+}
+
+#[test]
+fn fix_keeps_a_shared_declaration_with_a_comment_after_export() {
+    assert_withheld(
+        "export /* values */ const live = 1, dead = 2;\n",
+        "import { live } from './store';\n\nlive;\n",
+        &[(1, "dead")],
+    );
+}
+
+#[test]
+fn fix_keeps_a_shared_declaration_with_a_tab_after_export() {
+    assert_withheld(
+        "export\tconst live = 1, dead = 2;\n",
+        "import { live } from './store';\n\nlive;\n",
+        &[(1, "dead")],
     );
 }

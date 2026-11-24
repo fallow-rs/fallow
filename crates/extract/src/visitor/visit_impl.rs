@@ -149,6 +149,7 @@ pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
 pub(super) use visit_security_sinks::SinkAliasState;
 pub(super) use visit_security_sinks::flatten_callee_path;
+pub(super) use visit_svelte_events::MarkupContext;
 #[path = "visit_impl_taint_chain.rs"]
 mod taint_chain;
 use taint_chain::collect_chained_taint_idents;
@@ -4293,8 +4294,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.try_record_fluent_chain_access(expr);
         self.record_pinia_map_helpers(expr);
         self.record_di_key_site(expr);
-        self.record_svelte_dispatch_call(expr);
-        self.record_svelte_dispatch_whole_arg_use(expr);
+        self.record_component_event_calls(expr);
         self.record_load_data_whole_arg_use(expr);
         self.record_route_loader_data_whole_arg_use(expr);
 

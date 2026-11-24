@@ -67,8 +67,7 @@ fn handle_matches_owner(identifier: &str, declared_owner: &str) -> bool {
     if owner_handle.is_empty() || identifier.is_empty() {
         return false;
     }
-    let id_handle = identifier.split('@').next().unwrap_or(identifier);
-    let id_handle = id_handle.split('+').next_back().unwrap_or(id_handle);
+    let id_handle = fallow_engine::health::ownership::ContributorId::new(identifier).handle();
     id_handle.eq_ignore_ascii_case(owner_handle)
 }
 
@@ -431,7 +430,11 @@ mod tests {
     #[test]
     fn owner_matching_handles_email_plus_suffixes_and_empty_values() {
         assert!(handle_matches_owner("alice@example.com", "@alice"));
-        assert!(handle_matches_owner("team+alice@example.com", "alice"));
+        assert!(handle_matches_owner(
+            "12345+alice@users.noreply.github.com",
+            "alice"
+        ));
+        assert!(!handle_matches_owner("team+alice@example.com", "alice"));
         assert!(handle_matches_owner("Alice", "@alice"));
         assert!(!handle_matches_owner("", "@alice"));
         assert!(!handle_matches_owner("alice@example.com", "@"));
@@ -441,7 +444,7 @@ mod tests {
     #[test]
     fn ownership_line_collapses_matching_owner_and_flags_risk() {
         let matching = ownership(
-            "team+alice@example.com",
+            "12345+alice@users.noreply.github.com",
             1.0,
             1,
             Some("@alice"),
@@ -450,7 +453,9 @@ mod tests {
         let line = plain(&[render_ownership_line(&matching, ChurnTrend::Accelerating)]);
 
         assert!(line.contains("bus=1 (sole author)"));
-        assert!(line.contains("owned by team+alice@example.com (100%, declared @alice)"));
+        assert!(
+            line.contains("owned by 12345+alice@users.noreply.github.com (100%, declared @alice)")
+        );
 
         let mut drifting = ownership(
             "bob@example.com",

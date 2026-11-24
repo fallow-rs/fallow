@@ -484,6 +484,7 @@ fn entry_named_re_export_through_star_records_route_provenance_without_duplicate
                 all: &all_entries,
                 runtime: &runtime_entries,
                 test: &test_entries,
+                consumer_checked: &FxHashSet::default(),
             },
             &files,
             &FxHashSet::default(),

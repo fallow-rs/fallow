@@ -21,6 +21,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-enum-members": true,
   "unused-class-members": true,
   "unused-protected-class-members": true,
+  "namespace-escapes": true,
   "unused-namespace-members": true,
   "unused-store-members": true,
   "unresolved-imports": true,
@@ -93,6 +94,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "misconfigured-overrides": "misconfigured-dependency-overrides",
   "misplaced-directives": "misplaced-directive",
   "mixed-client-server-barrels": "mixed-client-server-barrel",
+  "namespace-escape": "namespace-escapes",
   "package-cycles": "package-cycle",
   "policy-violations": "policy-violation",
   "private-type-leak": "private-type-leaks",
@@ -189,6 +191,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "unused-protected-class-member",
     "label": "Unused Protected Class Members"
+  },
+  {
+    "code": "namespace-escape",
+    "label": "Namespace Escapes"
   },
   {
     "code": "unused-namespace-member",

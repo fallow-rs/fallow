@@ -1,0 +1,10 @@
+{
+  "name": "security-react-router-open-redirect-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "19.0.0",
+    "react-router": "7.6.0"
+  }
+}

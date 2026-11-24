@@ -30,7 +30,7 @@ pub enum CloudCli {
 pub enum LicenseCli {
     /// Activate a license JWT.
     ///
-    /// JWT input precedence: positional arg > `--from-file` > stdin (`-`).
+    /// Pass a JWT as an argument, read it with `--from-file`, or pipe it to `fallow license activate --stdin`.
     /// All paths normalize whitespace before crypto verification.
     Activate {
         /// JWT as a positional argument.

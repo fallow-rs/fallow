@@ -342,6 +342,64 @@ fn architecture_reports_only_architecture_findings() {
 }
 
 #[test]
+fn architecture_diff_scope_drops_policy_findings_outside_the_diff() {
+    let dir = architecture_project("");
+    write(
+        dir.path(),
+        "pr.diff",
+        "diff --git a/src/shared/utils.ts b/src/shared/utils.ts\n\
+         --- a/src/shared/utils.ts\n\
+         +++ b/src/shared/utils.ts\n\
+         @@ -1,1 +1,2 @@\n\
+         \x20export const helper = () => 'help';\n\
+         +export const neverUsed = 1;\n",
+    );
+    let diff = dir.path().join("pr.diff");
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--diff-file",
+            diff.to_str().expect("utf-8 path"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    assert_eq!(array_len(&json, "policy_violations"), 0, "{json}");
+
+    write(
+        dir.path(),
+        "app.diff",
+        "diff --git a/src/ui/App.ts b/src/ui/App.ts\n\
+         --- a/src/ui/App.ts\n\
+         +++ b/src/ui/App.ts\n\
+         @@ -2,1 +2,2 @@\n\
+         \x20import { query } from '../db/query';\n\
+         +import moment from 'moment';\n",
+    );
+    let diff = dir.path().join("app.diff");
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--diff-file",
+            diff.to_str().expect("utf-8 path"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        array_len(&json, "policy_violations"),
+        1,
+        "a diff that adds the banned import keeps its violation: {json}"
+    );
+}
+
+#[test]
 fn architecture_filter_flags_select_one_kind() {
     let dir = architecture_project("");
     let cycles = parse_json(&run(
@@ -970,6 +1028,43 @@ fn dead_code_summary_keeps_one_row_list() {
         "dead-code keeps its row list: {}",
         output.stdout
     );
+}
+
+#[test]
+fn shared_state_regression_recovery_keeps_the_requested_architecture_checks() {
+    let project = crate::common::copy_fixture("circular-re-export");
+    for (path, cycles) in [("inventory.json", false), ("cycles.json", true)] {
+        let mut args = vec![
+            "architecture",
+            "--shared-state",
+            "--fail-on-regression",
+            "--regression-baseline",
+            path,
+            "--format",
+            "json",
+            "--quiet",
+        ];
+        if cycles {
+            args.push("--cycles");
+        }
+        let output = crate::common::run_fallow_raw_in_dir(project.path(), &args);
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        let json = parse_json(&output);
+        let (_, hint) = json["message"]
+            .as_str()
+            .expect("error message")
+            .rsplit_once(": fallow ")
+            .expect("baseline recovery command");
+        let recovery: Vec<_> = hint.split_whitespace().collect();
+        let saved = crate::common::run_fallow_raw_in_dir(project.path(), &recovery);
+        assert!(matches!(saved.code, 0 | 1), "{}", saved.stderr);
+        let baseline: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(project.path().join(path)).unwrap()).unwrap();
+        assert_eq!(
+            baseline["check"]["circular_dependencies"],
+            usize::from(cycles)
+        );
+    }
 }
 
 #[test]

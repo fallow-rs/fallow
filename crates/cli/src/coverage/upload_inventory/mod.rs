@@ -256,8 +256,11 @@ fn prepare_inventory_upload(
         LOG_PREFIX,
         "upload-inventory",
         "the inventory comes",
-        args.dry_run,
-        args.allow_dirty,
+        upload_common::WorktreeFlags {
+            dry_run: args.dry_run,
+            allow_dirty: args.allow_dirty,
+            explicit_git_sha: args.git_sha.is_some(),
+        },
         root,
     )?;
 
@@ -1090,10 +1093,11 @@ fn classify_upload_error(
     message: String,
 ) -> Result<(), UploadError> {
     match (status, code) {
-        (400, Some("payload_too_large")) => Err(UploadError::PayloadTooLarge(message)),
+        (400, Some("payload_too_large")) | (413, _) => Err(UploadError::PayloadTooLarge(message)),
         (400, _) => Err(UploadError::Validation(message)),
         (401 | 403, _) => Err(UploadError::AuthRejected(message)),
-        _ => Err(UploadError::ServerError(message)),
+        _ if upload_common::is_transient_status(status) => Err(UploadError::ServerError(message)),
+        _ => Err(UploadError::Validation(message)),
     }
 }
 

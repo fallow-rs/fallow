@@ -457,6 +457,8 @@ expression: redact_version(&json_str)
         "src/api/internal/index.ts"
       ],
       "kind": "multi-node",
+      "line": 1,
+      "col": 0,
       "actions": [
         {
           "type": "refactor-re-export-cycle",

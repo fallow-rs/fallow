@@ -18,11 +18,13 @@ import {
   easeOut,
   fitTransform,
   getGVS,
-  lensFlagsStandalone,
   markIntroSeen,
   nodeHitTest,
   roadHitTest,
+  selectedRoadIndex,
+  setStandaloneOpen,
   stageSize,
+  standaloneVisible,
   worldToScreen,
 } from "./shared";
 import { renderGraph } from "./render";
@@ -61,6 +63,9 @@ export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
   gvs.clusterMode = mode;
   gvs.initialized = false;
   initGraphNodes(state);
+  reconcileGraphView(state);
+  // The road panel shows data of the previous grouping.
+  state.requestRender();
 };
 /** Seed the graph node lens-color crossfade with the pre-switch colors. */
 export const startGraphLensFade = (state: AppState, prev: Map<number, string>): void => {
@@ -184,11 +189,16 @@ export const graphPathTrace = (state: AppState, x: number, y: number): boolean =
   return true;
 };
 
+/** Set or clear the selected road. The canvas derives its road index from this. */
+export const selectRoad = (state: AppState, road: RoadSelection | null): void => {
+  state.selectedRoad = road;
+};
+
 /** Clear road selection / path trace (esc, click-away, view switches). */
 export const clearGraphFocus = (state: AppState): boolean => {
   const gvs = getGVS(state);
-  const had = gvs.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
-  gvs.selectedRoad = null;
+  const had = state.selectedRoad !== null || gvs.path !== null || gvs.pathFrom !== null;
+  selectRoad(state, null);
   gvs.path = null;
   gvs.pathFrom = null;
   return had;
@@ -210,12 +220,13 @@ export const resetGraphView = (state: AppState, animate = true): void => {
   // Recompute the fit transform from current cluster bounds.
   const { w: width, h: height } = stageSize(state);
   const anyConnected = gvs.clusters.some((cluster) => !cluster.isolated);
+  const standaloneShown = standaloneVisible(state, gvs);
   const fit = fitTransform(
     width,
     height,
     clusterBounds(
       gvs.clusters,
-      (cluster) => !(cluster.isolated && anyConnected && !gvs.standaloneOpen),
+      (cluster) => !(cluster.isolated && anyConnected && !standaloneShown),
     ),
   );
   // Re-anchor the zoom extent and LOD baseline to the refreshed fit,
@@ -225,12 +236,11 @@ export const resetGraphView = (state: AppState, animate = true): void => {
   tweenCamera(state, zoomIdentity.translate(fit.x, fit.y).scale(fit.k), animate ? CAMERA_MS : 0);
 };
 
-/** Zoom to the first search match and pulse it (Enter in the search box). */
-export const graphFocusSearch = (state: AppState): void => {
-  const gvs = getGVS(state);
-  if (!gvs.initialized || state.searchMatches.size === 0) return;
+/** The shortest match path, without `skip` when another match exists. */
+const shortestMatch = (state: AppState, skip: number | null): number | null => {
   let best: number | null = null;
   for (const fileIndex of state.searchMatches) {
+    if (fileIndex === skip && state.searchMatches.size > 1) continue;
     if (
       best === null ||
       state.data.files[fileIndex].path.length < state.data.files[best].path.length
@@ -238,7 +248,21 @@ export const graphFocusSearch = (state: AppState): void => {
       best = fileIndex;
     }
   }
-  if (best === null) return;
+  return best;
+};
+
+/**
+ * Enter in the search box. The overview zooms to the shortest match and
+ * pulses it. In the ego view, the camera cannot leave the selected file, so
+ * the function returns the shortest other match for the caller to select.
+ * Otherwise it returns `null`.
+ */
+export const graphFocusSearch = (state: AppState): number | null => {
+  const gvs = getGVS(state);
+  if (!gvs.initialized || state.searchMatches.size === 0) return null;
+  const best = shortestMatch(state, state.selected);
+  if (best === null) return null;
+  if (state.selected !== null) return best === state.selected ? null : best;
   centerOnFile(state, best);
   // The camera glide is the reduced-motion feedback; skip the pulse rings.
   if (!state.reducedMotion) {
@@ -246,6 +270,7 @@ export const graphFocusSearch = (state: AppState): void => {
     gvs.pulseAt = performance.now();
   }
   renderGraph(state);
+  return null;
 };
 
 /** What the cursor is over (drives hover state, cursor, and tooltip). */
@@ -350,7 +375,7 @@ export const graphHandleClick = (state: AppState, x: number, y: number): GraphCl
   }
   const chip = gvs.standaloneChip;
   if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h) {
-    gvs.standaloneOpen = !gvs.standaloneOpen;
+    setStandaloneOpen(state, gvs, !standaloneVisible(state, gvs));
     renderGraph(state);
     return { kind: "handled" };
   }
@@ -358,8 +383,9 @@ export const graphHandleClick = (state: AppState, x: number, y: number): GraphCl
   if (node !== null) return { kind: "file", fileIndex: node };
   const road = roadHitTest(state, x, y);
   if (road !== null) {
-    gvs.selectedRoad = road;
-    return { kind: "road", road: buildRoadSelection(state, road) };
+    const selection = buildRoadSelection(state, road);
+    selectRoad(state, selection);
+    return { kind: "road", road: selection };
   }
   if (clearGraphFocus(state)) return { kind: "handled" };
   return { kind: "none" };
@@ -379,6 +405,10 @@ export const centerOnFile = (state: AppState, fileIndex: number): void => {
   if (!gvs.initialized || !gvs.zoomBehavior || state.selected !== null) return;
   const node = gvs.fileNodes[fileIndex];
   if (!node || node.x == null || node.y == null) return;
+  // The renderer skips an isolated cluster while the strip is closed.
+  if (gvs.clusters[node.cluster].isolated && !standaloneVisible(state, gvs)) {
+    setStandaloneOpen(state, gvs, true);
+  }
   const stageEl = state.canvas.parentElement;
   const width = stageEl ? stageEl.clientWidth : window.innerWidth;
   const height = stageEl ? stageEl.clientHeight : window.innerHeight;
@@ -390,14 +420,21 @@ export const centerOnFile = (state: AppState, fileIndex: number): void => {
 };
 
 /**
- * Open the standalone strip when the new lens flags files in it, close it
- * again when it does not, and refit so the change stays in view.
+ * Bring the graph view in line with the app state after a lens, view,
+ * analysis, grouping or URL hash change: resolve the selected road again in
+ * the current roads, and refit the camera when the standalone strip opened
+ * or closed.
  */
-export const syncStandaloneForLens = (state: AppState): void => {
+export const reconcileGraphView = (state: AppState): void => {
   const gvs = getGVS(state);
-  if (!gvs.initialized || !gvs.clusters.some((cluster) => !cluster.isolated)) return;
-  const flagged = lensFlagsStandalone(state, gvs.clusters);
-  if (flagged === gvs.standaloneOpen) return;
-  gvs.standaloneOpen = flagged;
-  resetGraphView(state);
+  if (!gvs.initialized) return;
+  if (state.selectedRoad !== null) {
+    const index = selectedRoadIndex(state, gvs);
+    selectRoad(state, index === null ? null : buildRoadSelection(state, index));
+  }
+  if (state.view !== "graph") return;
+  const before = gvs.standalone === null ? null : gvs.standalone.open;
+  const after = standaloneVisible(state, gvs);
+  if (before !== null && before !== after) resetGraphView(state);
+  else refitOnResize(state);
 };

@@ -205,6 +205,8 @@ pub struct ScheduleOutcome {
     pub results: FxHashMap<String, MutantOutcome>,
     /// Current baseline test files, keyed by opaque runner test id.
     pub test_files: FxHashMap<String, String>,
+    /// The test ids that the dry run reports more than one time, sorted.
+    pub duplicate_test_ids: Vec<String>,
     pub baseline_failures: Vec<BaselineFailure>,
     pub unloaded_paths: Vec<String>,
     /// The static test files that the runner does not list, in plan order. Their
@@ -234,6 +236,7 @@ impl ScheduleOutcome {
             ready: None,
             results: FxHashMap::default(),
             test_files: FxHashMap::default(),
+            duplicate_test_ids: Vec::new(),
             baseline_failures: Vec::new(),
             unloaded_paths: Vec::new(),
             undiscovered_test_files: Vec::new(),

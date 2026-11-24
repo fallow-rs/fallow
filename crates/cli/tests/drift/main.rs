@@ -16,6 +16,8 @@
 //! The harness needs the `fallow-mcp` binary next to the `fallow` binary:
 //! run `cargo build -p fallow-mcp` before `cargo test -p fallow-cli --test drift`.
 
+mod clone_controls;
+mod clones;
 #[path = "../common/mod.rs"]
 mod common;
 mod invariants;
@@ -33,6 +35,10 @@ use proptest::test_runner::{
 use serde_json::Value;
 use tempfile::TempDir;
 
+use crate::clones::{
+    base_clone_groups, case_min_lines, clone_holds_added_line, clone_line_counts, clone_spans,
+    clone_texts,
+};
 use crate::invariants::{ExitRule, Verdict, VerdictRuns};
 use crate::keys::{
     AuditKeys, FindingKey, IdentifiedFinding, KeySet, audit_keys, combined_keys,
@@ -1409,90 +1415,6 @@ fn i5_audit_config_section_agrees_across_surfaces() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
-/// Positive control of the clone-group rules of I4. A clone that grows with
-/// an added line in each instance is a new clone group, so audit reports it
-/// as introduced. A clone that changes shape only because a deleted file took
-/// an import away holds no added line, so audit demotes it to inherited
-/// (#2164). Without this control, an identity that ignores the clone size, or
-/// an expected split without the demotion, passes I4 until a random case
-/// finds the gap.
-#[test]
-#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
-fn audit_controls_see_clone_group_changes() {
-    use crate::model::{ChangeSpec, ExportSpec, FileSpec};
-    let file = |exports: usize, imports: Vec<(usize, usize)>| FileSpec {
-        second_package: false,
-        entry_imported: false,
-        suppress_file: false,
-        exports: vec![
-            ExportSpec {
-                is_type: false,
-                suppressed: false,
-            };
-            exports
-        ],
-        imports,
-    };
-    let model = |files: Vec<FileSpec>, duplicate: (usize, usize), changes| ProjectModel {
-        workspaces: false,
-        files,
-        deps: Vec::new(),
-        duplicate: Some((duplicate.0, duplicate.1, false)),
-        complex: None,
-        changes,
-        baseline_mask: vec![false],
-    };
-    let grown = model(
-        vec![file(0, Vec::new()), file(0, Vec::new())],
-        (0, 1),
-        vec![ChangeSpec::Edit(0), ChangeSpec::Edit(1)],
-    );
-    let reshaped = model(
-        vec![
-            file(1, Vec::new()),
-            file(1, Vec::new()),
-            file(0, vec![(0, 0)]),
-        ],
-        (1, 2),
-        vec![ChangeSpec::Delete(0)],
-    );
-    // Both clone files import the deleted file, so the head edits the
-    // `console.log` line that starts the surviving clone in both. Its text
-    // changes, so the group is new.
-    let edited = model(
-        vec![
-            file(1, Vec::new()),
-            file(1, Vec::new()),
-            file(0, vec![(0, 0), (1, 0)]),
-            file(0, vec![(0, 0), (1, 0)]),
-        ],
-        (2, 3),
-        vec![ChangeSpec::Delete(1)],
-    );
-    for (name, model, split) in [
-        ("grown", grown, "introduced"),
-        ("reshaped", reshaped, "inherited"),
-        ("edited", edited, "introduced"),
-    ] {
-        let project = Project::new(&model, true);
-        let expected = expected_audit_split(&project);
-        let keys = if split == "introduced" {
-            &expected.introduced
-        } else {
-            &expected.inherited
-        };
-        assert!(
-            keys.iter().any(|key| key.kind == keys::DUPLICATION_KIND),
-            "the {name} control has no {split} clone group\n{}",
-            keys::render(keys)
-        );
-        let cli = audit_keys(&cli_audit(&project.root));
-        project
-            .explain(invariants::i4_audit_attribution(&expected, &cli))
-            .unwrap_or_else(|err| panic!("{name} control: {err}"));
-    }
-}
-
 /// Two stale suppressions in one file are two findings. The base has a stale
 /// `unused-export` suppression. The head deletes the importer, so the file is
 /// unused, and its `unused-type` suppression is stale too. That one is
@@ -1642,6 +1564,25 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
             .entry(identity(key, &renames, &project.files.base))
             .or_default() += 1;
     }
+    // The edit rule of the audit, on the same diff that the audit reads.
+    let base_clones = base_clone_groups(&base_keys);
+    let renamed: Vec<fallow_engine::changed_files::RenamedFile> = git_renames
+        .iter()
+        .map(|(old, new)| fallow_engine::changed_files::RenamedFile {
+            from: project.root.join(old),
+            to: project.root.join(new),
+        })
+        .collect();
+    let diff = fallow_output::DiffIndex::from_unified_diff(
+        &fallow_engine::changed_files::try_get_changed_diff(&project.root, BASE_REF)
+            .expect("read the diff of the case"),
+    );
+    let change = fallow_api::audit_run::CloneChange {
+        root: &project.root,
+        diff: &diff,
+        renames: &renamed,
+    };
+    let min_lines = case_min_lines(&project.files.head);
     let mut head_keys: Vec<FindingKey> = Analysis::ALL
         .into_iter()
         .flat_map(|analysis| cli_keys(analysis, &project.root, &unscoped, None))
@@ -1666,7 +1607,11 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         }
         let untouched_clone =
             key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
-        if untouched_clone || in_base {
+        let edited_clone = key.kind == keys::DUPLICATION_KIND
+            && clone_spans(&key.symbol).is_some_and(|spans| {
+                fallow_api::audit_run::edits_base_clone(&spans, &change, &base_clones, min_lines)
+            });
+        if untouched_clone || edited_clone || in_base {
             expected.inherited.insert(key);
         } else {
             expected.introduced.insert(key);
@@ -1745,21 +1690,6 @@ fn added_line_names(
     })
 }
 
-/// Whether an instance of a clone-group symbol holds an added line of its
-/// file.
-fn clone_holds_added_line(symbol: &str, added: &BTreeMap<String, Vec<(u64, u64)>>) -> bool {
-    keys::clone_instances(symbol).any(|instance| {
-        let Some(instance) = instance else {
-            return true;
-        };
-        added.get(instance.path).is_some_and(|hunks| {
-            hunks
-                .iter()
-                .any(|&(first, last)| first <= instance.end_line && instance.start_line <= last)
-        })
-    })
-}
-
 /// Head paths whose content differs from the base commit, and new head paths
 /// (renamed or added files).
 fn changed_paths(files: &Materialized) -> BTreeSet<String> {
@@ -1800,54 +1730,6 @@ fn identity(
         key.symbol.clone()
     };
     (key.kind.clone(), paths, symbol)
-}
-
-/// The sorted source text of the instances in a clone-group symbol, read
-/// from `contents`. The first line starts at the start column and the last
-/// line ends at the end column, because a clone can start or end inside a
-/// line; text outside the clone does not change its identity.
-fn clone_texts(symbol: &str, contents: &BTreeMap<String, String>) -> String {
-    let mut texts: Vec<String> = keys::clone_instances(symbol)
-        .filter_map(|instance| {
-            let instance = instance?;
-            let start = usize::try_from(instance.start_line).ok()?.checked_sub(1)?;
-            let end = usize::try_from(instance.end_line).ok()?;
-            let lines: Vec<&str> = contents.get(instance.path)?.lines().collect();
-            let mut span: Vec<String> = lines
-                .get(start..end.min(lines.len()))?
-                .iter()
-                .map(|line| (*line).to_string())
-                .collect();
-            let start_col = usize::try_from(instance.start_col).ok()?;
-            let end_col = usize::try_from(instance.end_col).ok()?;
-            if let Some(last) = span.last_mut() {
-                *last = last.get(..end_col)?.to_string();
-            }
-            if let Some(first) = span.first_mut() {
-                *first = first.get(start_col..)?.to_string();
-            }
-            Some(span.join("\n"))
-        })
-        .collect();
-    texts.sort_unstable();
-    texts.join("\u{1f}")
-}
-
-/// The sorted line counts of the instances in a clone-group symbol, without
-/// the paths and positions.
-fn clone_line_counts(symbol: &str) -> String {
-    let mut counts: Vec<u64> = keys::clone_instances(symbol)
-        .filter_map(|instance| {
-            let instance = instance?;
-            Some(instance.end_line + 1 - instance.start_line)
-        })
-        .collect();
-    counts.sort_unstable();
-    counts
-        .iter()
-        .map(u64::to_string)
-        .collect::<Vec<_>>()
-        .join(",")
 }
 
 #[test]

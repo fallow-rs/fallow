@@ -398,7 +398,12 @@ fn print_pr_comment_from_ci_issues(
     let envelope = PrCommentEnvelope {
         marker_id: sticky_marker_id(),
         body,
-        is_clean: issues.is_empty() && conclusion == PrDecisionConclusion::Success,
+        // A failed enforced gate makes the run not clean even when the diff
+        // filter drops every finding, so the post plan creates a first
+        // comment that says the gate failed.
+        is_clean: issues.is_empty()
+            && heading_conclusion(Some(conclusion), status.gates)
+                == Some(PrDecisionConclusion::Success),
         details_url: None,
         check_summary: Some(decision_summary_label(conclusion).to_owned()),
         truncation: PrCommentTruncation {
@@ -741,6 +746,7 @@ mod tests {
             "fallow/unused-class-member",
             "fallow/unused-namespace-member",
             "fallow/unused-protected-class-member",
+            "fallow/namespace-escape",
             "fallow/unused-store-member",
             "fallow/unresolved-import",
             "fallow/unlisted-dependency",

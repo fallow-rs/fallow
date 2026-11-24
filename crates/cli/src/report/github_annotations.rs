@@ -29,6 +29,10 @@ use super::github::{
 };
 use crate::report::sink::outln;
 
+#[path = "github_annotations_members.rs"]
+mod members;
+use members::collect_check_members;
+
 /// Which JSON envelope family is being rendered. Mirrors the `kind` field on
 /// the `--format json` root plus the two aggregate shapes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -673,84 +677,6 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
     );
 }
 
-fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
-    push_each(
-        out,
-        env,
-        "unused_enum_members",
-        "Unused enum member",
-        Anchor::line_col,
-        |it| {
-            format!(
-                "Enum member '{}.{}' is never referenced in the codebase.\n\nRemove the member.{}",
-                s(it, "parent_name"),
-                s(it, "member_name"),
-                caveat_note(it),
-            )
-        },
-    );
-    push_each(
-        out,
-        env,
-        "unused_class_members",
-        "Unused class member",
-        Anchor::line_col,
-        |it| {
-            format!(
-                "Class member '{}.{}' is never referenced.\n\nRemove the member, or make it private.{}",
-                s(it, "parent_name"),
-                s(it, "member_name"),
-                caveat_note(it),
-            )
-        },
-    );
-    push_each(
-        out,
-        env,
-        "unused_protected_class_members",
-        "Unused protected class member",
-        Anchor::line_col,
-        |it| {
-            format!(
-                "Protected class member '{}.{}' is never referenced by its class or a subclass.\n\nRemove the member, or make it private.{}",
-                s(it, "parent_name"),
-                s(it, "member_name"),
-                caveat_note(it),
-            )
-        },
-    );
-    push_each(
-        out,
-        env,
-        "unused_namespace_members",
-        "Unused namespace member",
-        Anchor::line_col,
-        |it| {
-            format!(
-                "Namespace member '{}.{}' is never referenced.\n\nRemove the member, or remove its export keyword when only the namespace body uses it.{}",
-                s(it, "parent_name"),
-                s(it, "member_name"),
-                caveat_note(it),
-            )
-        },
-    );
-    push_each(
-        out,
-        env,
-        "unused_store_members",
-        "Unused store member",
-        Anchor::line_col,
-        |it| {
-            format!(
-                "Store member '{}.{}' is never accessed by any consumer.\n\nRemove the unused state, getter or action.{}",
-                s(it, "parent_name"),
-                s(it, "member_name"),
-                caveat_note(it),
-            )
-        },
-    );
-}
-
 fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
@@ -823,7 +749,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
             out,
             gate_level(cycle, AnnotationLevel::Warning),
             files.first().copied().unwrap_or_default(),
-            no_anchor(cycle),
+            Anchor::gated_line_col(cycle),
             "Re-export cycle".to_owned(),
             format!(
                 "{headline}\n\nAn import through a member of the loop can resolve to nothing.\n{remedy}",

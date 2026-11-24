@@ -1,3 +1,4 @@
+import { isTextInput, isDashboardKey } from "./keyboard";
 import { applyHash, createState, runSearch, setDarkMode, storeTheme, syncHash } from "./state";
 import type { AppState } from "./state";
 import type { Lens, SecondaryAnalysis, TreeNode } from "./types";
@@ -13,7 +14,6 @@ import {
   treemapHitTest,
 } from "./treemap";
 import {
-  centerOnFile,
   clearGraphFocus,
   clearRoadHover,
   dismissIntro,
@@ -25,6 +25,7 @@ import {
   graphInitSteps,
   initGraphNodes,
   nodeScreenPos,
+  reconcileGraphView,
   refitOnResize,
   usableStageWidth,
   minimapHit,
@@ -33,9 +34,9 @@ import {
   resetEgoTrail,
   resetGraphView,
   roadFacts,
+  selectRoad,
   setClusterMode,
   startGraphLensFade,
-  syncStandaloneForLens,
 } from "./graph";
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, updateChrome } from "./chrome";
@@ -76,12 +77,6 @@ const installSegmentSliders = (): void => {
   for (const group of document.querySelectorAll<HTMLElement>(".lens-tabs, .seg")) {
     installSlider(group);
   }
-};
-
-/** True when keyboard focus sits in a text field. */
-const isTextInput = (target: EventTarget | null): boolean => {
-  const tag = (target as HTMLElement | null)?.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA";
 };
 
 const init = (): void => {
@@ -146,8 +141,7 @@ const init = (): void => {
     if (state.view === "graph") startGraphLensFade(state, prev);
     // The ranked panel opens or closes with the lens; keep the graph
     // fitted to the space that remains while the camera is untouched.
-    if (state.view === "graph") refitOnResize(state);
-    if (state.view === "graph") syncStandaloneForLens(state);
+    reconcileGraphView(state);
     requestRender();
   };
 
@@ -160,14 +154,15 @@ const init = (): void => {
     startLensFade(state, prev);
     if (state.view === "graph") {
       startGraphLensFade(state, prev);
-      refitOnResize(state);
     }
+    reconcileGraphView(state);
     requestRender();
   };
 
   const setView = (view: "map" | "graph"): void => {
     if (state.view === view) return;
     state.view = view;
+    reconcileGraphView(state);
     state.hoveredCell = null;
     state.graphHovered = null;
     hideTooltip();
@@ -276,24 +271,21 @@ const init = (): void => {
     // Leaving the graph ego stage swaps back to the overview; soften that
     // return the same way as a view swap so it does not read as a reset.
     if (fileIndex === null && hadSelection && state.view === "graph") flashCanvas();
-    if (fileIndex !== null && reveal) {
-      if (state.view === "map") {
-        const dir = dirname(state.data.files[fileIndex].path);
-        // Drill to the nearest ancestor directory that exists as a node and
-        // contains the file, so the selection is visible.
-        if (
-          !state.data.files[fileIndex].path.startsWith(
-            state.drillPath === "" ? "" : `${state.drillPath}/`,
-          )
-        ) {
-          let target = dir;
-          while (target !== "" && !state.index.nodesByPath.has(target)) {
-            target = dirname(target);
-          }
-          state.drillPath = target;
+    // The graph ego view frames the selected file by itself.
+    if (fileIndex !== null && reveal && state.view === "map") {
+      const dir = dirname(state.data.files[fileIndex].path);
+      // Drill to the nearest ancestor directory that exists as a node and
+      // contains the file, so the selection is visible.
+      if (
+        !state.data.files[fileIndex].path.startsWith(
+          state.drillPath === "" ? "" : `${state.drillPath}/`,
+        )
+      ) {
+        let target = dir;
+        while (target !== "" && !state.index.nodesByPath.has(target)) {
+          target = dirname(target);
         }
-      } else {
-        centerOnFile(state, fileIndex);
+        state.drillPath = target;
       }
     }
     requestRender();
@@ -330,7 +322,6 @@ const init = (): void => {
           panel,
           (fileIndex) => selectFile(fileIndex, true),
           () => {
-            state.selectedRoad = null;
             clearGraphFocus(state);
             selectFile(null);
           },
@@ -488,16 +479,15 @@ const init = (): void => {
     if (event.shiftKey && graphPathTrace(state, x, y)) return;
     const result = graphHandleClick(state, x, y);
     if (result.kind === "file") {
-      state.selectedRoad = null;
+      selectRoad(state, null);
       hideTooltip();
       selectFile(result.fileIndex);
     } else if (result.kind === "road") {
-      state.selectedRoad = result.road;
       state.selected = null;
       hideTooltip();
       requestRender();
     } else if (result.kind === "none") {
-      state.selectedRoad = null;
+      selectRoad(state, null);
       selectFile(null);
     } else {
       requestRender();
@@ -524,8 +514,7 @@ const init = (): void => {
     } else if (state.selectedClone !== null) {
       state.selectedClone = null;
       requestRender();
-    } else if (clearGraphFocus(state) || state.selectedRoad !== null) {
-      state.selectedRoad = null;
+    } else if (clearGraphFocus(state)) {
       requestRender();
     } else if (state.search !== "" && refs) {
       refs.search.value = "";
@@ -575,9 +564,20 @@ const init = (): void => {
     keyActions.set(String(index + 1), () => setLens(lens));
   });
 
+  const searchEnter = (): void => {
+    const match = graphFocusSearch(state);
+    if (match === null) return;
+    selectRoad(state, null);
+    selectFile(match);
+    // selectFile moves focus to the panel in a frame callback. Take it back
+    // in the next callback, so the next keys refine the query instead of
+    // running shortcuts.
+    requestAnimationFrame(() => refs?.search.focus());
+  };
+
   const handleInputKey = (event: KeyboardEvent): void => {
     if (event.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
-      graphFocusSearch(state);
+      searchEnter();
     }
   };
 
@@ -592,6 +592,7 @@ const init = (): void => {
   };
 
   window.addEventListener("keydown", (event) => {
+    if (!isDashboardKey(event)) return;
     const inInput = isTextInput(event.target);
     if (event.key === "Escape") {
       handleEscape(inInput);
@@ -614,11 +615,10 @@ const init = (): void => {
     requestRender();
   });
   window.addEventListener("hashchange", () => {
-    const lensBefore = state.lens;
     applyHash(state, window.location.hash);
-    // Back and forward can change the lens; the strip of unconnected
-    // folders must follow it as it does for a tab click.
-    if (state.lens !== lensBefore && state.view === "graph") syncStandaloneForLens(state);
+    // A hash edit can change the lens and the view; the strip of
+    // unconnected folders and the camera fit must follow.
+    reconcileGraphView(state);
     requestRender();
   });
 

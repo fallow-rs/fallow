@@ -30,11 +30,7 @@ fn telemetry_command(args: &[&str]) -> crate::common::CommandOutput {
         cmd.arg(arg);
     }
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 #[test]
@@ -73,11 +69,7 @@ fn telemetry_inspect_preserves_command_stdout_json() {
         .arg("../repo/main")
         .args(["--format", "json", "--quiet"]);
     let raw = cmd.output().expect("failed to run fallow binary");
-    let output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
-        code: raw.status.code().unwrap_or(-1),
-    };
+    let output = crate::common::CommandOutput::from_process(raw);
 
     assert_eq!(output.code, 0, "analysis should exit 0: {}", output.stderr);
     let json = parse_json(&output);
@@ -168,11 +160,7 @@ fn telemetry_inspect_reports_safe_followup_fields() {
         .arg("tmp_8x7p4k")
         .args(["--format", "json", "--quiet", "explain", "unused-exports"]);
     let raw = cmd.output().expect("failed to run fallow binary");
-    let output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
-        code: raw.status.code().unwrap_or(-1),
-    };
+    let output = crate::common::CommandOutput::from_process(raw);
 
     assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
     let event_start = output
@@ -200,11 +188,7 @@ fn invalid_explicit_agent_source_is_ignored() {
         .env("NO_COLOR", "1")
         .args(["--format", "json", "--quiet"]);
     let raw = cmd.output().expect("failed to run fallow binary");
-    let output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
-        code: raw.status.code().unwrap_or(-1),
-    };
+    let output = crate::common::CommandOutput::from_process(raw);
 
     assert_eq!(output.code, 0, "analysis should exit 0: {}", output.stderr);
     let event_start = output
@@ -249,11 +233,7 @@ fn inspect_event_output(
         cmd.env(key, value);
     }
     let raw = cmd.output().expect("failed to run fallow binary");
-    let output = crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&raw.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&raw.stderr).to_string(),
-        code: raw.status.code().unwrap_or(-1),
-    };
+    let output = crate::common::CommandOutput::from_process(raw);
     let event_start = output.stderr.find('{').unwrap_or_else(|| {
         panic!(
             "inspect stderr should contain telemetry JSON; stderr was: {}",

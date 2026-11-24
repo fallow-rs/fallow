@@ -364,13 +364,39 @@ pub struct AuditComparison {
     /// Attribution class of each complexity finding, in report order. Empty
     /// without a base snapshot.
     pub health_classes: Vec<crate::audit_complexity::ComplexityClass>,
-    /// Duplication group membership.
+    /// Duplication group membership. The introduced flag of a group is the
+    /// gate result of its region.
     pub dupes: AuditDomainLedger,
+    /// The clone regions: the head groups whose instances overlap, with a
+    /// grade each. Empty until the audit grades them, or without a base.
+    pub dupe_regions: crate::audit_run::CloneRegions,
     /// Styling finding membership.
     pub styling: AuditDomainLedger,
 }
 
 impl AuditComparison {
+    /// Number of clone regions that fail the gate. Without graded regions,
+    /// the number of introduced clone groups.
+    #[must_use]
+    pub fn duplication_introduced_count(&self) -> usize {
+        if self.dupe_regions.regions().is_empty() {
+            self.dupes.introduced_count()
+        } else {
+            self.dupe_regions.introduced_count()
+        }
+    }
+
+    /// Number of clone regions that do not fail the gate. Without graded
+    /// regions, the number of inherited clone groups.
+    #[must_use]
+    pub fn duplication_inherited_count(&self) -> usize {
+        if self.dupe_regions.regions().is_empty() {
+            self.dupes.inherited_count()
+        } else {
+            self.dupe_regions.inherited_count()
+        }
+    }
+
     /// Number of complexity findings whose attribution is `worsened`.
     #[must_use]
     pub fn complexity_worsened_count(&self) -> usize {
@@ -419,32 +445,86 @@ pub fn remap_keys_for_renames(
 }
 
 pub(crate) fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> String {
-    if !key
-        .split([':', '|'])
-        .any(|segment| renames.contains_key(segment))
-    {
+    let renamed = |segment: &str| {
+        if segment.contains('|') {
+            segment
+                .split('|')
+                .any(|piece| renamed_set_member(piece, renames).is_some())
+        } else {
+            renamed_part(segment, renames).is_some()
+        }
+    };
+    if !key.split(':').any(renamed) {
         return key.to_string();
     }
     let segments: Vec<String> = key
         .split(':')
         .map(|segment| {
             if segment.contains('|') {
-                let mut pieces: Vec<&str> = segment
+                let mut pieces: Vec<String> = segment
                     .split('|')
-                    .map(|piece| renames.get(piece).map_or(piece, String::as_str))
+                    .map(|piece| {
+                        renamed_set_member(piece, renames).unwrap_or_else(|| piece.to_string())
+                    })
                     .collect();
-                pieces.sort_unstable();
+                // The key sorts the set members before it escapes the part.
+                pieces.sort_unstable_by_key(|piece| unescape_key_part(piece));
                 pieces.dedup();
                 pieces.join("|")
             } else {
-                renames
-                    .get(segment)
-                    .cloned()
-                    .unwrap_or_else(|| segment.to_string())
+                renamed_part(segment, renames).unwrap_or_else(|| segment.to_string())
             }
         })
         .collect();
     segments.join(":")
+}
+
+/// The head path of a renamed key part, in the form of the part.
+///
+/// A dead-code key escapes `%` and `:` in each part, and the rename map holds
+/// plain paths, so an escaped part is compared and returned in the escaped
+/// form. Other keys hold the plain path.
+fn renamed_part(part: &str, renames: &FxHashMap<String, String>) -> Option<String> {
+    if let Some(renamed) = renames.get(part) {
+        return Some(renamed.clone());
+    }
+    if !part.contains('%') {
+        return None;
+    }
+    renames
+        .get(&unescape_key_part(part))
+        .map(|renamed| escape_key_part(renamed))
+}
+
+/// The head path of a renamed member of a `|`-separated path set, in the form
+/// of the member.
+///
+/// A dead-code key escapes each set member (`%` as `%25`, `|` as `%7C`) and
+/// then the whole part, so an escaped member is decoded twice and encoded
+/// twice. Other keys hold the plain path.
+fn renamed_set_member(member: &str, renames: &FxHashMap<String, String>) -> Option<String> {
+    if let Some(renamed) = renames.get(member) {
+        return Some(renamed.clone());
+    }
+    if !member.contains('%') {
+        return None;
+    }
+    let path = unescape_key_part(member)
+        .replace("%7C", "|")
+        .replace("%25", "%");
+    renames
+        .get(&path)
+        .map(|renamed| escape_key_part(&renamed.replace('%', "%25").replace('|', "%7C")))
+}
+
+/// A key part as the finding holds it: `%3A` is `:` and `%25` is `%`.
+pub(crate) fn unescape_key_part(part: &str) -> String {
+    part.replace("%3A", ":").replace("%25", "%")
+}
+
+/// A path as a dead-code key part holds it: `%` is `%25` and `:` is `%3A`.
+fn escape_key_part(path: &str) -> String {
+    path.replace('%', "%25").replace(':', "%3A")
 }
 
 /// Canonical path form used inside attribution keys. The engine owns the one
@@ -461,20 +541,6 @@ pub fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<St
     dead_code_occurrence_keys(items, &IdentityPaths::new(root))
 }
 
-/// Build the set of audit attribution keys for all dead-code findings in
-/// `results`.
-///
-/// Each key is a stable string that uniquely identifies one finding across
-/// runs (e.g. `unused-file:src/dead.ts`, `unused-export:src/a.ts:Foo`).
-/// `retain_introduced_dead_code` and `annotate_dead_code_json` use the same
-/// key format to diff the current run against a base snapshot.
-///
-/// This destructure is deliberately exhaustive: adding a field to
-/// `AnalysisResults` must fail compilation here so the author decides
-/// explicitly whether the new finding type needs an audit key (add a loop)
-/// or has no key representation today (bind with underscore and document why).
-///
-/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
 /// The six dependency-related finding slices, bundled so the dependency
 /// dispatcher takes one parameter instead of six.
 #[derive(Clone, Copy)]
@@ -517,7 +583,21 @@ struct ComponentContractFindingSlices<'a> {
     unproduced_catch_tags: &'a [fallow_types::output_dead_code::UnproducedCatchTagFinding],
 }
 
-/// `dead_code_keys`, `retain_introduced_dead_code`.
+/// Build the set of audit attribution keys for all dead-code findings in
+/// `results`.
+///
+/// Each key is a stable string that uniquely identifies one finding across
+/// runs (e.g. `unused-file:src/dead.ts`, `unused-export:src/a.ts:Foo`).
+/// `retain_introduced_dead_code` and `annotate_dead_code_json` use the same
+/// key format to diff the current run against a base snapshot.
+///
+/// This destructure is deliberately exhaustive: adding a field to
+/// `AnalysisResults` must fail compilation here so the author decides
+/// explicitly whether the new finding type needs an audit key (add a loop)
+/// or has no key representation today (bind with underscore and document why).
+///
+/// Sibling exhaustive sites: `retain_in_scope` in `crates/engine/src/result_scope.rs`,
+/// `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection `off` filter branches in
@@ -572,6 +652,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_class_members,
             unused_namespace_members,
             unused_protected_class_members,
+            namespace_escapes,
             unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
@@ -682,6 +763,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_protected_class_members,
             unused_store_members,
         );
+        self.add_items(AuditCollection::NamespaceEscapes, namespace_escapes);
         self.add_component_contract_findings(&ComponentContractFindingSlices {
             unused_component_props,
             absent_component_props,
@@ -1349,7 +1431,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// retain block) or has no key representation today (bind with underscore and
 /// document why).
 ///
-/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `retain_in_scope` in `crates/engine/src/result_scope.rs`,
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
@@ -1398,6 +1480,7 @@ pub fn retain_introduced_dead_code(
         unused_class_members,
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unresolved_imports,
         unused_dependencies,
@@ -1527,6 +1610,7 @@ pub fn annotate_dead_code_json(
         unused_class_members,
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unresolved_imports,
         duplicate_exports,
@@ -1799,35 +1883,6 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
         group.line_count,
         hasher.finish()
     )
-}
-
-/// Keys of clone groups whose every instance lies entirely outside the diff's
-/// added lines: no instance range contains an added line, so the changeset did
-/// not write the duplicated text, and the group only became reportable (under
-/// a new attribution key) because the changeset removed code elsewhere;
-/// deduplicating one region can create or re-shape a clone group across files
-/// (issue #2164). New-only gating demotes these groups to inherited so a
-/// clone-removal refactor is not failed by the duplication it did not write.
-/// An instance whose path cannot be mapped into the diff's namespace is
-/// treated as touched, so its group keeps gating.
-pub fn preexisting_dupe_group_keys<'a>(
-    groups: impl IntoIterator<Item = &'a fallow_types::duplicates::CloneGroup>,
-    root: &Path,
-    diff: &fallow_output::DiffIndex,
-) -> FxHashSet<String> {
-    let instance_touched = |instance: &fallow_types::duplicates::CloneInstance| -> bool {
-        let Some(rel) = diff.key_for(&instance.file, root) else {
-            return true;
-        };
-        let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
-        let end = u64::try_from(instance.end_line).unwrap_or(u64::MAX);
-        diff.range_overlaps_added(&rel, start, end)
-    };
-    groups
-        .into_iter()
-        .filter(|group| !group.instances.iter().any(instance_touched))
-        .map(|group| dupe_group_key(group, root))
-        .collect()
 }
 
 #[path = "audit_keys_introduced.rs"]

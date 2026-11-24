@@ -4,5 +4,10 @@ interface Comment {
   body: string;
 }
 
-export const trustCommentHtml = (sanitizer: DomSanitizer, comment: Comment): SafeHtml =>
-  sanitizer.bypassSecurityTrustHtml(comment.body);
+export class CommentHtml {
+  constructor(private readonly sanitizer: DomSanitizer) {}
+
+  trust(comment: Comment): SafeHtml {
+    return this.sanitizer.bypassSecurityTrustHtml(comment.body);
+  }
+}

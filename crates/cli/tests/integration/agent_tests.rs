@@ -6,7 +6,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::common::run_fallow_raw_with_env;
 
@@ -40,9 +39,8 @@ fn agent_temp_dir(suffix: &str) -> PathBuf {
         "---\nname: fallow\ndescription: Test skill.\nlicense: MIT\n---\n\n# Shipped\n",
     )
     .unwrap();
-    let status = Command::new("git")
+    let status = crate::common::git_command(&dir)
         .args(["init", "-q"])
-        .current_dir(&dir)
         .status()
         .unwrap();
     assert!(status.success());
@@ -577,5 +575,80 @@ fn status_reports_path_drift_only_when_the_gate_runs_the_path_fallow() {
 
     fs::remove_file(dir.join("node_modules/.bin/fallow")).unwrap();
     assert!(status(), "the gate runs the fallow on PATH");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+fn shell_quoted(path: &Path) -> String {
+    fallow_engine::shell_quote::shell_quote(path.to_str().unwrap())
+}
+
+fn next_action_command(json: &serde_json::Value, id: &str) -> String {
+    json["next_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["id"] == id)
+        .unwrap_or_else(|| panic!("no {id} action: {json}"))["command"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// A follow-up command runs from another shell, so it repeats the inspected
+/// root and the excluded steps of the run.
+#[test]
+fn install_approve_command_keeps_the_root_and_the_excluded_steps() {
+    let dir = agent_temp_dir("approve-scope");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let output = run_agent(
+        &dir,
+        &home,
+        &[
+            "install",
+            "--harness",
+            "claude",
+            "--without",
+            "hooks",
+            "--force",
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    let root = shell_quoted(&dir);
+    assert_eq!(
+        next_action_command(&json, "claude-approve-mcp"),
+        format!("fallow agent install --harness claude --without hooks --approve --root {root}"),
+        "the approve command must not repeat --force"
+    );
+    assert_eq!(
+        next_action_command(&json, "recommend-config"),
+        format!("fallow recommend --format json --root {root}")
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn status_commands_keep_the_inspected_root() {
+    let dir = agent_temp_dir("status-scope");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        dir.join(".mcp.json"),
+        r#"{"mcpServers":{"fallow":{"command":"x"}}}"#,
+    )
+    .unwrap();
+    let output = run_agent(&dir, &home, &["status"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = crate::common::parse_json(&output);
+    let root = shell_quoted(&dir);
+    assert_eq!(
+        next_action_command(&json, "agent-install"),
+        format!("fallow agent install --dry-run --root {root}")
+    );
+    assert_eq!(
+        next_action_command(&json, "agent-install-force"),
+        format!("fallow agent install --force --root {root}")
+    );
     let _ = fs::remove_dir_all(&dir);
 }

@@ -804,23 +804,31 @@ fn build_server_only_finding(
     // the absolute path here would leak it past relativization and make output
     // environment-dependent.
     let subject = kind.subject();
-    let sink_reason = if scan.framework_roots.is_server_sink(server_id) {
-        "it is a React Router .server module"
+    // The advice follows the origin of the sink. React Router has no
+    // `next/dynamic`, Server Actions or "use server" modules, so a `.server`
+    // sink gets React Router advice. The shared phrase lets the `Next:` step
+    // pick the same advice.
+    let evidence = if scan.framework_roots.is_server_sink(server_id) {
+        let phrase = fallow_types::security_next_step::REACT_ROUTER_SERVER_SINK;
+        format!(
+            "{subject} transitively {phrase} (see the sink hop in the trace). React Router \
+             fails the client build for this import. Candidate for verification: confirm \
+             that client code reaches the import and that the import is not type-only."
+        )
     } else {
-        "it imports server-only code such as server-only, next/headers, next/server, or \
-         node:fs / node:child_process"
+        format!(
+            "{subject} transitively imports a SERVER-ONLY module \
+             (it imports server-only code such as server-only, next/headers, next/server, or \
+             node:fs / node:child_process; see the sink hop in the trace). Candidate for \
+             verification: confirm whether this server-only code is meant to run on the client. \
+             If it is pulled in only through next/dynamic(..., {{ ssr: false }}), it is the \
+             sanctioned client-only escape hatch and is a false positive. fallow already \
+             excludes a Server Action module whose value exports are all async functions. \
+             If the sink is a Server Action module, it has a non-action export (a top-level \
+             const, a re-export, or a default value), and that export carries the \
+             server-only import into the client bundle."
+        )
     };
-    let evidence = format!(
-        "{subject} transitively imports a SERVER-ONLY module \
-         ({sink_reason}; see the sink hop in the trace). Candidate for \
-         verification: confirm whether this server-only code is meant to run on the client. \
-         If it is pulled in only through next/dynamic(..., {{ ssr: false }}), it is the \
-         sanctioned client-only escape hatch and is a false positive. fallow already \
-         excludes a Server Action module whose value exports are all async functions. \
-         If the sink is a Server Action module, it has a non-action export (a top-level \
-         const, a re-export, or a default value), and that export carries the \
-         server-only import into the client bundle."
-    );
 
     let candidate = client_leak_candidate(
         anchor.path.clone(),
@@ -888,7 +896,9 @@ fn build_direct_finding(
         hop.col,
         Some(SECRET_LEAK_CATEGORY.to_owned()),
     );
-    build_client_server_leak_finding(evidence, vec![hop], candidate)
+    let mut finding = build_client_server_leak_finding(evidence, vec![hop], candidate);
+    finding.stable_id_input = Some(SecurityStableIdInput::SecretReads(var_list));
+    finding
 }
 
 /// Build a finding for the direct SERVER-ONLY case: a `"use client"` file that is

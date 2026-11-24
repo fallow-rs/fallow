@@ -50,11 +50,24 @@ jobs:
       # within the header limit. A merge by hand uses the title, so the
       # automation also shortens a long Dependabot title. The check uses the
       # author, because the automation edits the title as another actor.
+      # A squash merge appends " (#<number>)" to its subject, and the push
+      # check of main lints that subject, so this check lints it too. The
+      # subject is the title, or the commit subject when the pull request has
+      # one commit (the COMMIT_OR_PR_TITLE setting of the repository).
       - name: Lint pull request title
         if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: printf '%s\n' "$PR_TITLE" | npm run commitlint -- --verbose
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s (#%s)\n' "$PR_TITLE" "$PR_NUMBER" | npm run commitlint -- --verbose
+          if [ "$PR_COMMITS" = "1" ]; then
+            subject="$(git log -1 --format=%s "$PR_HEAD_SHA")"
+            printf '%s (#%s)\n' "$subject" "$PR_NUMBER" | npm run commitlint -- --verbose
+          fi
 
       # Deferred work in a description must link a tracking issue, so it is
       # not lost after the merge. Bot pull requests carry generated text.

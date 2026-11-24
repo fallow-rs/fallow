@@ -9,8 +9,8 @@
 use std::collections::BTreeSet;
 
 use fallow_output::{
-    MutantEquivalenceHint, MutantStatus, MutationReport, MutationStatusCounts, MutationSummary,
-    MutationVerdictInput, MutationVerdictJoin,
+    MutantEquivalenceHint, MutantStatus, MutationFunctionResult, MutationReport,
+    MutationStatusCounts, MutationSummary, MutationVerdictInput, MutationVerdictJoin,
 };
 use rustc_hash::FxHashSet;
 use std::fmt::Write as _;
@@ -62,6 +62,15 @@ const fn effect(status: MutantStatus) -> Effect {
 
 /// Moves one mutant from `from` to `equivalent` in the function group that
 /// holds it.
+///
+/// Two callbacks on one line can give two groups with the same file, name
+/// and first line. A survivor is in the `survived` list of exactly one
+/// group, so that list decides. Other statuses have no such list, so a group
+/// that also spans the line of the mutant comes first. The report has no
+/// column span, so two callbacks that start and end on one line still share
+/// the key. A group that holds the count without the span still takes the
+/// move, because a `--recheck` merge counts carried mutants under the first
+/// group of the key and the counts must stay in step with the mutants.
 fn move_in_function(report: &mut MutationReport, index: usize, from: MutantStatus) {
     let location = &report.mutants[index].location;
     let key = (
@@ -69,11 +78,21 @@ fn move_in_function(report: &mut MutationReport, index: usize, from: MutantStatu
         location.function.as_deref(),
         location.function_line,
     );
-    let group = report.functions.iter_mut().find(|group| {
+    let holds = |group: &MutationFunctionResult| {
+        if from == MutantStatus::Survived {
+            return group.survived.contains(&location.mutant_id);
+        }
         (group.file.as_str(), group.name.as_deref(), group.line) == key
             && count_of(&group.counts, from) > 0
-    });
-    let Some(group) = group else {
+    };
+    let spans =
+        |group: &MutationFunctionResult| group.end_line.is_none_or(|end| location.line <= end);
+    let position = report
+        .functions
+        .iter()
+        .position(|group| holds(group) && spans(group))
+        .or_else(|| report.functions.iter().position(holds));
+    let Some(group) = position.map(|position| &mut report.functions[position]) else {
         return;
     };
     group.counts.remove(from);
@@ -323,6 +342,7 @@ mod tests {
             compare: None,
             gate_outcomes: None,
             recording: None,
+            journal_run_id: None,
         }
     }
 
@@ -468,6 +488,108 @@ mod tests {
         assert_eq!(join.applied, vec!["m2".to_owned(), "m4".to_owned()]);
         assert!(join.unmatched.is_empty());
         assert_eq!(join.verdicts_sha256.len(), 64);
+    }
+
+    /// Two anonymous callbacks on one line: one function group each, with the
+    /// same file, name and first line.
+    fn two_callbacks_on_one_line(
+        first: MutantResult,
+        second: MutantResult,
+        second_end_line: u32,
+    ) -> MutationReport {
+        let mut first = first;
+        let mut second = second;
+        for result in [&mut first, &mut second] {
+            result.location.function = None;
+            result.location.function_line = Some(1);
+        }
+        first.location.line = 1;
+        second.location.line = second_end_line;
+        let group = |result: &MutantResult, end_line: u32| {
+            let mut counts = MutationStatusCounts::default();
+            counts.add(result.status);
+            MutationFunctionResult {
+                file: "src/a.ts".to_owned(),
+                name: None,
+                line: Some(1),
+                end_line: Some(end_line),
+                in_diff: true,
+                cyclomatic: Some(1),
+                counts,
+                score: counts.score(),
+                survived: (result.status == MutantStatus::Survived)
+                    .then(|| result.location.mutant_id.clone())
+                    .into_iter()
+                    .collect(),
+            }
+        };
+        let functions = vec![group(&first, 1), group(&second, second_end_line)];
+        let mut report = report(vec![first, second]);
+        report.functions = functions;
+        report
+    }
+
+    #[test]
+    fn a_verdict_moves_the_survivor_in_its_own_callback_group() {
+        let mut report = two_callbacks_on_one_line(
+            mutant("m1", MutantStatus::Survived),
+            mutant("m2", MutantStatus::Survived),
+            1,
+        );
+
+        apply_mutation_verdicts(&mut report, &document(&["m2"])).unwrap();
+
+        let [first, second] = report.functions.as_slice() else {
+            panic!("two groups");
+        };
+        assert_eq!(first.survived, ["m1"]);
+        assert_eq!(first.counts.survived, 1);
+        assert_eq!(first.counts.equivalent, 0);
+        assert!(second.survived.is_empty());
+        assert_eq!(second.counts.survived, 0);
+        assert_eq!(second.counts.equivalent, 1);
+    }
+
+    #[test]
+    fn a_verdict_moves_an_uncovered_mutant_in_the_group_that_spans_its_line() {
+        let mut report = two_callbacks_on_one_line(
+            mutant("m1", MutantStatus::NoCoverage),
+            mutant("m2", MutantStatus::NoCoverage),
+            3,
+        );
+
+        apply_mutation_verdicts(&mut report, &document(&["m2"])).unwrap();
+
+        let [first, second] = report.functions.as_slice() else {
+            panic!("two groups");
+        };
+        assert_eq!(first.counts.no_coverage, 1);
+        assert_eq!(first.counts.equivalent, 0);
+        assert_eq!(second.counts.no_coverage, 0);
+        assert_eq!(second.counts.equivalent, 1);
+    }
+
+    /// A `--recheck` merge counts a carried mutant under the first group of
+    /// its key, also when the mutant sits past the end of that group.
+    #[test]
+    fn a_verdict_moves_a_mutant_that_only_the_first_group_of_its_key_counts() {
+        let mut report = two_callbacks_on_one_line(
+            mutant("m1", MutantStatus::NoCoverage),
+            mutant("m2", MutantStatus::NoCoverage),
+            3,
+        );
+        report.functions[0].counts.add(MutantStatus::NoCoverage);
+        report.functions[1].counts.remove(MutantStatus::NoCoverage);
+
+        apply_mutation_verdicts(&mut report, &document(&["m2"])).unwrap();
+
+        let [first, second] = report.functions.as_slice() else {
+            panic!("two groups");
+        };
+        assert_eq!(first.counts.no_coverage, 1);
+        assert_eq!(first.counts.equivalent, 1);
+        assert_eq!(second.counts.no_coverage, 0);
+        assert_eq!(second.counts.equivalent, 0);
     }
 
     #[test]

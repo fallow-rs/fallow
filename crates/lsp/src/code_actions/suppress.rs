@@ -123,7 +123,10 @@ pub fn build_suppress_security_actions(
             actions.push(suppress_action(
                 format!("Dismiss this security candidate type in this file ({label})"),
                 uri,
-                insert_before(0, format!("// fallow-ignore-file {token}\n")),
+                insert_before(
+                    file_comment_line(file_lines),
+                    format!("// fallow-ignore-file {token}\n"),
+                ),
                 linked,
             ));
         }
@@ -147,6 +150,16 @@ fn build_suppress_security_actions_for_test(
         cursor_range,
         file_lines,
     ))
+}
+
+/// The line for a file-level suppression comment: below a hashbang, because
+/// Node.js and the shell read a hashbang only on the first line.
+fn file_comment_line(file_lines: &[&str]) -> u32 {
+    u32::from(
+        file_lines
+            .first()
+            .is_some_and(|line| line.starts_with("#!")),
+    )
 }
 
 /// A zero-width insertion `TextEdit` at the start of `line`.
@@ -372,6 +385,82 @@ mod tests {
             first_edit_text(&actions[0]),
             "// fallow-ignore-file security-client-server-leak\n"
         );
+    }
+
+    #[test]
+    fn file_level_action_keeps_a_hashbang_on_the_first_line() {
+        let root = test_root();
+        let path = root.join("bin/cli.js");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(sink(path.clone(), 3));
+        let file_lines = vec!["#!/usr/bin/env node", "", "run(input);"];
+        let cursor = Range {
+            start: Position {
+                line: 2,
+                character: 0,
+            },
+            end: Position {
+                line: 2,
+                character: 0,
+            },
+        };
+
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
+        let CodeActionOrCommand::CodeAction(file_action) = &actions[1] else {
+            panic!("expected a CodeAction");
+        };
+        let edit = &file_action
+            .edit
+            .as_ref()
+            .and_then(|e| e.changes.as_ref())
+            .expect("edit has changes")[&uri][0];
+        assert_eq!(edit.new_text, "// fallow-ignore-file security-sink\n");
+        assert_eq!(
+            edit.range.start,
+            Position {
+                line: 1,
+                character: 0
+            }
+        );
+    }
+
+    fn file_action_line(first_line: &str) -> u32 {
+        let root = test_root();
+        let path = root.join("bin/cli.js");
+        let uri = Uri::from_file_path(&path).unwrap();
+        let mut results = AnalysisResults::default();
+        results.security_findings.push(leak(path.clone(), 2));
+        let file_lines = vec![first_line, "export { SECRET } from './server';"];
+        let cursor = Range {
+            start: Position {
+                line: 1,
+                character: 0,
+            },
+            end: Position {
+                line: 1,
+                character: 0,
+            },
+        };
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected a CodeAction");
+        };
+        action
+            .edit
+            .as_ref()
+            .and_then(|e| e.changes.as_ref())
+            .expect("edit has changes")[&uri][0]
+            .range
+            .start
+            .line
+    }
+
+    #[test]
+    fn file_level_action_goes_above_a_first_line_that_is_not_a_hashbang() {
+        assert_eq!(file_action_line("# not a hashbang"), 0);
     }
 
     #[test]

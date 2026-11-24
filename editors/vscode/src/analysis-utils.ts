@@ -352,6 +352,7 @@ const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
   "unused_class_members",
   "unused_namespace_members",
   "unused_protected_class_members",
+  "namespace_escapes",
   "unused_store_members",
   "unused_server_actions",
   "unused_load_data_keys",

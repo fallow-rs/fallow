@@ -78,15 +78,87 @@ package, so the source text stays unpinned and only the published copy carries
 a version. Both checks ignore the pinned version and refuse an unpinned
 launcher, so a release does not make the published copy drift.
 After a skill change lands on `main`, `node scripts/sync-skills-companion.mjs`
-prepares the signed companion commit. The companion `main` branch is
-protected, so the maintainer publishes the commit through a fallow-skills pull
-request. The script prints the commands.
+prepares the companion commit. The companion `main` branch is protected, so
+the commit lands through a fallow-skills pull request. The
+`skills-companion-sync.yml` workflow opens or updates that pull request (see
+[Skills companion sync](#skills-companion-sync)). Without its credential, the
+maintainer runs the script by hand. The script then signs the commit and prints
+the publish commands.
 Pull requests compare the published companion with their exact public base
 commit, while required generation checks validate the candidate contracts and
 adapters. Pushes compare the current source and keep failing on landed drift
 until the companion is synchronized.
 Protocol consumers pin the public crate in their lockfile and verify published
 sidecar parity.
+
+## Skills companion sync
+
+`.github/workflows/skills-companion-sync.yml` runs on each push to `main` that
+changes `npm/fallow/skills/**` or the sync scripts. A maintainer can also start
+it with `workflow_dispatch` on `main`. It has two jobs:
+
+1. The `prepare` job runs `node scripts/sync-skills-companion.mjs --pin
+   "$GITHUB_SHA" --no-gpg-sign` against a fresh checkout of the companion
+   `main` branch. The script runs the companion checks before it commits. The
+   job uploads the commit as a git bundle.
+2. The `publish` job checks the bundle against the companion `main` branch.
+   It force-pushes the commit to the `sync-fallow-skills` branch of
+   `fallow-rs/fallow-skills`. Then it opens a pull request from that branch,
+   or updates the title and body of the open one.
+3. When the companion already matches the pin, the `publish` job closes an
+   open sync pull request, because that pull request holds an older pin.
+
+When the companion `main` branch moves during the run, the job pushes nothing
+and gives a warning. Start the workflow again on `main` with
+`workflow_dispatch`. A queued run that a newer run replaces ends as
+`cancelled`. The release CI gate counts that as a failure, so do not merge a
+skill change while release validation runs.
+
+The pull request still needs its companion checks and a merge. After the
+merge, run the failed `Public skills contract` job on `main` again. Do not push
+your own commits to `sync-fallow-skills`, because the next run replaces
+the branch.
+
+The workflow is not a gate. The `Public skills contract` job stays the gate and
+fails closed. So the workflow passes with a notice when no credential is set,
+and `main` and the release gate do not turn red for a missing secret.
+
+### Credential
+
+`GITHUB_TOKEN` cannot write to another repository. The `publish` job uses the
+first credential that is set:
+
+| Name | Kind | Value |
+|---|---|---|
+| `SKILLS_SYNC_APP_CLIENT_ID` | Repository variable | Client ID of the GitHub App |
+| `SKILLS_SYNC_APP_PRIVATE_KEY` | Repository Actions secret | Private key of that App |
+| `SKILLS_SYNC_TOKEN` | Repository Actions secret | Fallback: a fine-grained personal access token |
+
+The App needs these repository permissions, and an installation on
+`fallow-rs/fallow-skills` only:
+
+- Contents: read and write
+- Pull requests: read and write
+- Metadata: read (GitHub adds it)
+
+The `publish` job asks `actions/create-github-app-token` for a token that is limited to
+`fallow-skills` with these two permissions. The fine-grained token needs the
+same scope: resource owner `fallow-rs`, the `fallow-skills` repository only,
+and the same two permissions. Give it an expiry date and rotate it.
+
+Credential boundaries:
+
+- Both jobs have `contents: read` on this repository and no `id-token`.
+- Every checkout uses `persist-credentials: false`.
+- The companion checks run code of the companion repository. That code can
+  change the runner, for example with `GITHUB_ENV` or git hooks. So the
+  `prepare` job gets no token. It only tests whether a secret is set.
+- The `publish` job runs on a fresh runner and runs no repository code. It
+  calls only git, with hooks and fsmonitor turned off, and `gh`.
+- The push sends the token in an HTTP header, not in the remote URL.
+- Without signing keys on the runner, the commit is unsigned. The companion
+  does not require signed commits. The commit carries the DCO sign-off of the
+  App bot account, or of the token owner.
 
 ## Adding or moving knowledge
 

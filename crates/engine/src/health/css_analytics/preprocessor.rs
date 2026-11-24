@@ -62,6 +62,7 @@ pub(super) fn merge_css_analytics(
         referenced_custom_properties,
         defined_keyframes,
         referenced_keyframes,
+        keyframe_reference_lines,
         registered_custom_properties,
         declared_layers,
         populated_layers,
@@ -99,6 +100,7 @@ pub(super) fn merge_css_analytics(
     );
     union_sorted(&mut into.defined_keyframes, defined_keyframes);
     union_sorted(&mut into.referenced_keyframes, referenced_keyframes);
+    merge_keyframe_reference_lines(&mut into.keyframe_reference_lines, keyframe_reference_lines);
     union_sorted(
         &mut into.registered_custom_properties,
         registered_custom_properties,
@@ -110,6 +112,13 @@ pub(super) fn merge_css_analytics(
     into.declaration_blocks.extend(declaration_blocks);
     into.declaration_blocks.sort_by_key(|block| block.line);
     into.declaration_blocks.truncate(MAX_DECLARATION_BLOCKS);
+}
+
+/// Keep the first line for each name, sorted by name.
+fn merge_keyframe_reference_lines(into: &mut Vec<(String, u32)>, from: Vec<(String, u32)>) {
+    into.extend(from);
+    into.sort_unstable();
+    into.dedup_by(|later, first| later.0 == first.0);
 }
 
 fn merge_raw_style_values(

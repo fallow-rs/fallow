@@ -144,6 +144,7 @@ fn config_with_rules(rules: RulesConfig) -> ResolvedConfig {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -236,6 +237,7 @@ fn apply_rules_all_off_clears_everything() {
         unused_class_members: Severity::Off,
         unused_namespace_members: Severity::Off,
         unused_protected_class_members: Severity::Off,
+        namespace_escapes: Severity::Off,
         unused_store_members: Severity::Off,
         unprovided_injects: Severity::Off,
         unrendered_components: Severity::Off,
@@ -405,6 +407,7 @@ fn warn_severity_with_issues_returns_false() {
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
         unused_protected_class_members: Severity::Off,
+        namespace_escapes: Severity::Off,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,
@@ -493,6 +496,7 @@ fn mixed_severity_returns_true_for_error_with_issues() {
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
         unused_protected_class_members: Severity::Off,
+        namespace_escapes: Severity::Off,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,
@@ -599,6 +603,7 @@ fn config_with_test_override() -> ResolvedConfig {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -663,6 +668,7 @@ fn config_with_circular_override(pattern: &str, severity: Severity) -> ResolvedC
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -727,6 +733,7 @@ fn config_with_boundary_override(pattern: &str, severity: Severity) -> ResolvedC
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -1097,197 +1104,6 @@ fn has_error_with_override_promotion_leaves_off_alone() {
 }
 
 #[test]
-fn promote_warns_to_errors_promotes_all_warns() {
-    let mut rules = RulesConfig {
-        unused_files: Severity::Warn,
-        unused_exports: Severity::Warn,
-        unused_types: Severity::Warn,
-        private_type_leaks: Severity::Warn,
-        private_type_leaks_configured: false,
-        deprecated_exports_in_use: Severity::Warn,
-        unused_dependencies: Severity::Warn,
-        unused_dev_dependencies: Severity::Warn,
-        unused_optional_dependencies: Severity::Warn,
-        unused_enum_members: Severity::Warn,
-        unused_class_members: Severity::Warn,
-        unused_namespace_members: Severity::Warn,
-        unused_protected_class_members: Severity::Off,
-        unused_store_members: Severity::Warn,
-        unprovided_injects: Severity::Warn,
-        unrendered_components: Severity::Warn,
-        unused_component_props: Severity::Warn,
-        absent_component_props: Severity::Off,
-        constant_parameters: Severity::Off,
-        unused_component_emits: Severity::Warn,
-        unused_component_inputs: Severity::Warn,
-        unused_component_outputs: Severity::Warn,
-        unused_svelte_events: Severity::Warn,
-        unused_effect_layers: Severity::Warn,
-        unused_tagged_errors: Severity::Warn,
-        unproduced_catch_tags: Severity::Warn,
-        unused_server_actions: Severity::Warn,
-        unused_load_data_keys: Severity::Warn,
-        prop_drilling: Severity::Off,
-        thin_wrapper: Severity::Off,
-        duplicate_prop_shape: Severity::Off,
-        css_token_drift: Severity::Off,
-        css_duplicate_block: Severity::Off,
-        css_selector_complexity: Severity::Off,
-        css_dead_surface: Severity::Off,
-        css_broken_reference: Severity::Off,
-        complexity_cyclomatic: Severity::Off,
-        complexity_cognitive: Severity::Off,
-        complexity_crap: Severity::Off,
-        complexity_file_lines: Severity::Off,
-        unresolved_imports: Severity::Warn,
-        unlisted_dependencies: Severity::Warn,
-        unlisted_binaries: Severity::Warn,
-        duplicate_exports: Severity::Warn,
-        duplicate_export_aliases: Severity::Warn,
-        type_only_dependencies: Severity::Warn,
-        test_only_dependencies: Severity::Warn,
-        dev_dependencies_in_production: Severity::Warn,
-        boundary_violation: Severity::Error,
-        circular_dependencies: Severity::Warn,
-        re_export_cycle: Severity::Warn,
-        package_cycle: Severity::Warn,
-        coverage_gaps: Severity::Warn,
-        feature_flags: Severity::Warn,
-        stale_suppressions: Severity::Warn,
-        require_suppression_reason: Severity::Warn,
-        unused_catalog_entries: Severity::Warn,
-        empty_catalog_groups: Severity::Warn,
-        unresolved_catalog_references: Severity::Error,
-        unused_dependency_overrides: Severity::Warn,
-        misconfigured_dependency_overrides: Severity::Error,
-        security_client_server_leak: Severity::Off,
-        security_sink: Severity::Off,
-        policy_violation: Severity::Warn,
-        invalid_client_export: Severity::Warn,
-        mixed_client_server_barrel: Severity::Warn,
-        misplaced_directive: Severity::Warn,
-        route_collision: Severity::Warn,
-        dynamic_segment_name_conflict: Severity::Warn,
-        weakened_tests: Severity::Warn,
-        added_suppression: Severity::Warn,
-        test_only_branch: Severity::Warn,
-        diverged_clone_sibling: Severity::Warn,
-        introduced_clone_group: Severity::Warn,
-        added_dependency: Severity::Warn,
-    };
-    promote_warns_to_errors(&mut rules);
-
-    assert_eq!(rules.unused_files, Severity::Error);
-    assert_eq!(rules.unused_exports, Severity::Error);
-    assert_eq!(rules.unused_types, Severity::Error);
-    assert_eq!(rules.private_type_leaks, Severity::Error);
-    assert_eq!(rules.deprecated_exports_in_use, Severity::Error);
-    assert_eq!(rules.unused_dependencies, Severity::Error);
-    assert_eq!(rules.unused_dev_dependencies, Severity::Error);
-    assert_eq!(rules.unused_optional_dependencies, Severity::Error);
-    assert_eq!(rules.unused_enum_members, Severity::Error);
-    assert_eq!(rules.unused_class_members, Severity::Error);
-    assert_eq!(rules.unused_store_members, Severity::Error);
-    assert_eq!(rules.unresolved_imports, Severity::Error);
-    assert_eq!(rules.unlisted_dependencies, Severity::Error);
-    assert_eq!(rules.duplicate_exports, Severity::Error);
-    assert_eq!(rules.type_only_dependencies, Severity::Error);
-    assert_eq!(rules.test_only_dependencies, Severity::Error);
-    assert_eq!(rules.circular_dependencies, Severity::Error);
-    assert_eq!(rules.coverage_gaps, Severity::Error);
-    assert_eq!(rules.unused_catalog_entries, Severity::Error);
-}
-
-#[test]
-fn promote_warns_to_errors_preserves_off() {
-    let mut rules = RulesConfig {
-        unused_files: Severity::Off,
-        unused_exports: Severity::Off,
-        unused_types: Severity::Off,
-        private_type_leaks: Severity::Off,
-        private_type_leaks_configured: false,
-        deprecated_exports_in_use: Severity::Off,
-        unused_dependencies: Severity::Off,
-        unused_dev_dependencies: Severity::Off,
-        unused_optional_dependencies: Severity::Off,
-        unused_enum_members: Severity::Off,
-        unused_class_members: Severity::Off,
-        unused_namespace_members: Severity::Off,
-        unused_protected_class_members: Severity::Off,
-        unused_store_members: Severity::Off,
-        unprovided_injects: Severity::Off,
-        unrendered_components: Severity::Off,
-        unused_component_props: Severity::Off,
-        absent_component_props: Severity::Off,
-        constant_parameters: Severity::Off,
-        unused_component_emits: Severity::Off,
-        unused_component_inputs: Severity::Off,
-        unused_component_outputs: Severity::Off,
-        unused_svelte_events: Severity::Off,
-        unused_effect_layers: Severity::Off,
-        unused_tagged_errors: Severity::Off,
-        unproduced_catch_tags: Severity::Off,
-        unused_server_actions: Severity::Off,
-        unused_load_data_keys: Severity::Off,
-        prop_drilling: Severity::Off,
-        thin_wrapper: Severity::Off,
-        duplicate_prop_shape: Severity::Off,
-        css_token_drift: Severity::Off,
-        css_duplicate_block: Severity::Off,
-        css_selector_complexity: Severity::Off,
-        css_dead_surface: Severity::Off,
-        css_broken_reference: Severity::Off,
-        complexity_cyclomatic: Severity::Off,
-        complexity_cognitive: Severity::Off,
-        complexity_crap: Severity::Off,
-        complexity_file_lines: Severity::Off,
-        unresolved_imports: Severity::Off,
-        unlisted_dependencies: Severity::Off,
-        unlisted_binaries: Severity::Off,
-        duplicate_exports: Severity::Off,
-        duplicate_export_aliases: Severity::Off,
-        type_only_dependencies: Severity::Off,
-        test_only_dependencies: Severity::Off,
-        dev_dependencies_in_production: Severity::Off,
-        boundary_violation: Severity::Error,
-        circular_dependencies: Severity::Off,
-        re_export_cycle: Severity::Warn,
-        package_cycle: Severity::Warn,
-        coverage_gaps: Severity::Off,
-        feature_flags: Severity::Off,
-        stale_suppressions: Severity::Off,
-        require_suppression_reason: Severity::Off,
-        unused_catalog_entries: Severity::Off,
-        empty_catalog_groups: Severity::Off,
-        unresolved_catalog_references: Severity::Off,
-        unused_dependency_overrides: Severity::Off,
-        misconfigured_dependency_overrides: Severity::Off,
-        security_client_server_leak: Severity::Off,
-        security_sink: Severity::Off,
-        policy_violation: Severity::Warn,
-        invalid_client_export: Severity::Warn,
-        mixed_client_server_barrel: Severity::Warn,
-        misplaced_directive: Severity::Warn,
-        route_collision: Severity::Warn,
-        dynamic_segment_name_conflict: Severity::Warn,
-        weakened_tests: Severity::Warn,
-        added_suppression: Severity::Warn,
-        test_only_branch: Severity::Warn,
-        diverged_clone_sibling: Severity::Warn,
-        introduced_clone_group: Severity::Warn,
-        added_dependency: Severity::Warn,
-    };
-    promote_warns_to_errors(&mut rules);
-
-    assert_eq!(rules.unused_files, Severity::Off);
-    assert_eq!(rules.unused_exports, Severity::Off);
-    assert_eq!(rules.unused_types, Severity::Off);
-    assert_eq!(rules.private_type_leaks, Severity::Off);
-    assert_eq!(rules.circular_dependencies, Severity::Off);
-    assert_eq!(rules.coverage_gaps, Severity::Off);
-}
-
-#[test]
 fn promote_warns_to_errors_preserves_existing_errors() {
     let mut rules = RulesConfig::default(); // all Error
     promote_warns_to_errors(&mut rules);
@@ -1462,6 +1278,7 @@ fn config_with_override_for_rule(
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -1546,6 +1363,8 @@ fn base_collection_re_export_cycle_off_clears_findings() {
                 PathBuf::from("/project/src/b.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
     let rules = RulesConfig {
         re_export_cycle: Severity::Off,
@@ -3265,6 +3084,7 @@ fn default_file_scoped_stale_suppression_missing_reason_warn_not_error() {
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
         unused_protected_class_members: Severity::Warn,
+        namespace_escapes: Severity::Warn,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,
@@ -3388,6 +3208,8 @@ fn project_level_re_export_cycle_error() {
                 PathBuf::from("/project/src/b.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
     let rules = RulesConfig {
         re_export_cycle: Severity::Error,
@@ -3771,3 +3593,6 @@ fn override_off_removes_a_finding_appended_after_the_first_pass() {
         .collect();
     assert_eq!(paths, vec![PathBuf::from("/project/src/lib/util.ts")]);
 }
+
+#[path = "rules_promote_tests.rs"]
+mod promote_tests;

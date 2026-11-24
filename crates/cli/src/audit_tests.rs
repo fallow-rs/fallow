@@ -1,3 +1,4 @@
+use super::cache::{BaseKeyRequest, config_file_fingerprint};
 use super::*;
 use std::fmt::Write as _;
 
@@ -110,28 +111,9 @@ use crate::base_worktree::{
     sweep_old_reusable_caches_in, sweep_reusable_caches_with_report,
 };
 use crate::exit_codes::exit_gate_failed;
-use std::{fs, process::Command};
+use std::fs;
 
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_engine::git_fixture::fixture_git as git;
 
 #[test]
 fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
@@ -205,9 +187,8 @@ fn registered_fallow_worktree_count(repo_root: &std::path::Path) -> usize {
 /// not filter to fallow-owned entries, so it can assert a user's own worktree
 /// stays registered.
 fn git_worktree_list_contains(repo_root: &std::path::Path, path: &Path) -> bool {
-    let output = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+    let output = fallow_engine::git_fixture::fixture_git_command(repo_root)
         .args(["worktree", "list", "--porcelain"])
-        .current_dir(repo_root)
         .output()
         .expect("git worktree list should run");
     String::from_utf8_lossy(&output.stdout)
@@ -1421,7 +1402,9 @@ fn reuse_or_create_stamps_sidecar_on_fresh_create() {
     assert_eq!(
         fs::read_to_string(reusable_worktree_sha_path(&cache_path))
             .expect(".sha sidecar should exist")
-            .trim(),
+            .lines()
+            .next()
+            .unwrap_or_default(),
         base_sha,
         "fresh-create must record the base SHA in the `.sha` sidecar",
     );
@@ -1552,7 +1535,11 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
         "mismatched .sha must force a rebuild (marker wiped)",
     );
     assert_eq!(
-        fs::read_to_string(&sha_path).expect("sha rewritten").trim(),
+        fs::read_to_string(&sha_path)
+            .expect("sha rewritten")
+            .lines()
+            .next()
+            .unwrap_or_default(),
         base_sha,
         "rebuild rewrites the .sha to the current base SHA",
     );
@@ -1565,6 +1552,42 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
         BaseWorktree::reuse_or_create(&repo, &base_sha, &[]).expect("missing .sha should rebuild");
     assert!(!marker.exists(), "missing .sha must force a rebuild");
     drop(rebuilt2);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// A reusable snapshot holds only the files of the sparse cone that it was
+/// built with. After a cone change at the same base SHA, a reuse would read
+/// the old working set, so a file of the new cone is missing at base and
+/// shows as added at head.
+#[test]
+fn reusable_cache_rebuilds_when_the_sparse_cone_changes_at_the_same_sha() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-sparse-cone-identity");
+    for dir in ["web", "api"] {
+        fs::create_dir_all(repo.join(dir)).expect("cone dir should be created");
+        fs::write(repo.join(dir).join("index.ts"), "export const a = 1;\n")
+            .expect("cone file should be written");
+    }
+    let base_sha = commit_file(&repo, "top.ts", "export const top = 1;\n");
+    git(&repo, &["sparse-checkout", "init", "--cone"]);
+    git(&repo, &["sparse-checkout", "set", "web"]);
+
+    let first = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("first reusable worktree should materialize");
+    let cache_path = first.path().to_path_buf();
+    assert!(cache_path.join("web/index.ts").is_file());
+    assert!(!cache_path.join("api/index.ts").exists());
+    drop(first);
+
+    git(&repo, &["sparse-checkout", "set", "web", "api"]);
+    let second = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("second reusable worktree should be ready");
+    assert_eq!(second.path(), cache_path);
+    assert!(
+        cache_path.join("api/index.ts").is_file(),
+        "a file of the new cone must be in the reused base snapshot"
+    );
+    drop(second);
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
@@ -1594,7 +1617,9 @@ fn reusable_cache_rebuilds_same_path_for_a_new_sha_and_publishes_new_content() {
     assert_eq!(
         fs::read_to_string(reusable_worktree_sha_path(&cache_path))
             .expect("readiness should exist")
-            .trim(),
+            .lines()
+            .next()
+            .unwrap_or_default(),
         second_sha,
         "readiness must publish the full replacement SHA",
     );
@@ -2045,11 +2070,23 @@ fn registered_current_cache_is_deregistered_and_reused_warm() {
     assert_eq!(
         fs::read_to_string(reusable_worktree_sha_path(&cache_path))
             .expect(".sha should be seeded")
-            .trim(),
+            .lines()
+            .next()
+            .unwrap_or_default(),
         base_sha,
         ".sha sidecar seeded from the legacy entry's HEAD",
     );
     drop(migrated);
+
+    // The scope that built the legacy cache is unknown, so the next run
+    // rebuilds the snapshot with the current scope.
+    let rebuilt = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("the next run should rebuild the migrated cache");
+    assert!(
+        !marker.exists(),
+        "a migrated cache is rebuilt by the next run"
+    );
+    drop(rebuilt);
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
@@ -2646,6 +2683,21 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         boundary_edges: std::iter::once("ui->-db".to_string()).collect(),
         cycles: std::iter::once("a.ts|b.ts".to_string()).collect(),
         public_api: std::iter::once("src/index.ts::foo".to_string()).collect(),
+        accepted_dupe_groups: vec![fallow_api::diff_risk::clones::AcceptedCloneGroup {
+            key: "dup:0bbbe8b1:2".to_string(),
+            instances: vec![
+                fallow_api::diff_risk::clones::CloneSpan {
+                    path: "src/c.ts".to_string(),
+                    start_line: 1,
+                    end_line: 10,
+                },
+                fallow_api::diff_risk::clones::CloneSpan {
+                    path: "src/d.ts".to_string(),
+                    start_line: 4,
+                    end_line: 13,
+                },
+            ],
+        }],
         dupe_groups: vec![fallow_api::diff_risk::clones::BaseCloneGroup {
             instances: vec![
                 fallow_api::diff_risk::clones::CloneSpan {
@@ -2707,6 +2759,10 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     assert_eq!(
         decoded.dupe_groups, snapshot.dupe_groups,
         "clone instance locations survive the cache round trip"
+    );
+    assert_eq!(
+        decoded.accepted_dupe_groups, snapshot.accepted_dupe_groups,
+        "the clone groups that ignoredClones hid survive the cache round trip"
     );
     assert_eq!(decoded.health, snapshot.health);
     assert_eq!(decoded.styling, snapshot.styling);
@@ -3076,6 +3132,14 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         boundary_edges: FxHashSet::default(),
         cycles: FxHashSet::default(),
         public_api: FxHashSet::default(),
+        accepted_dupe_groups: vec![fallow_api::diff_risk::clones::AcceptedCloneGroup {
+            key: "dup:0bbbe8b1:2".to_string(),
+            instances: vec![fallow_api::diff_risk::clones::CloneSpan {
+                path: "src/a.ts".to_string(),
+                start_line: 1,
+                end_line: 10,
+            }],
+        }],
         dupe_groups: Vec::new(),
         inherited_health: Vec::new(),
         own_config_unused_code: None,
@@ -3091,6 +3155,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
     assert_eq!(loaded.dead_code, snapshot.dead_code);
     assert_eq!(loaded.health, snapshot.health);
     assert_eq!(loaded.dupes, snapshot.dupes);
+    assert_eq!(loaded.accepted_dupe_groups, snapshot.accepted_dupe_groups);
 }
 
 #[test]
@@ -3155,6 +3220,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
     };
     let cached = CachedAuditKeySnapshot {
         branching: Vec::new(),
+        accepted_dupe_groups: Vec::new(),
         dupe_groups: Vec::new(),
         version: AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -3575,7 +3641,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
 
     let result = execute_audit(&opts).expect("audit should execute");
     let health = result.health.expect("health should run for changed files");
-    let timings = health.timings.expect("performance timings should be kept");
+    let timings = health.timings.as_ref().expect("performance timings");
     assert!(timings.discover_ms.abs() < f64::EPSILON);
     assert!(timings.parse_ms.abs() < f64::EPSILON);
     assert!(
@@ -4738,9 +4804,19 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
 
     let changed_files = fallow_engine::changed_files::get_changed_files(root, "HEAD")
         .expect("changed files should resolve");
-    let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files, &[])
-        .expect("cache key should compute")
-        .expect("cache key should exist");
+    let base_run = BaseRunInputs::resolve(&opts);
+    let head = runs::options_run(&opts).expect("head run should resolve");
+    let key = audit_base_snapshot_cache_key(&BaseKeyRequest {
+        opts: &opts,
+        base_run: &base_run,
+        base_ref: "HEAD",
+        changed_files: &changed_files,
+        workspace_patterns: &[],
+        head: &head,
+        type_aware: AuditTypeAwareOptions::default(),
+    })
+    .expect("cache key should compute")
+    .expect("cache key should exist");
     assert!(
         load_cached_base_snapshot(&opts, &key).is_some(),
         "first audit should store a reusable base snapshot"

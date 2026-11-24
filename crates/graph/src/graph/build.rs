@@ -9,10 +9,42 @@ use fallow_types::extract::{
     ExportName, ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact,
 };
 
+use super::entry_marks::untracked_load_targets;
 use super::narrowing::{AttachContext, ReferenceDedup, attach_symbol_reference};
 use super::types::{ExportSymbol, ReExportEdge};
 use super::types::{ModuleNode, ReferencePathInterner};
 use super::{EagerPackageImport, Edge, ImportedSymbol, ModuleGraph};
+
+impl ModuleGraph {
+    /// Build the effective export index and mark the entry points that
+    /// `includeEntryExports` covers.
+    ///
+    /// An entry point that a dynamic import, an import pattern or a
+    /// `require()` loads stays unmarked. The namespace re-export pass reads
+    /// only static ES import bindings, so it cannot list the member reads of
+    /// such a module object, and the entry keeps crediting its namespace
+    /// re-exports in full.
+    pub(super) fn index_exports(
+        &mut self,
+        resolved_modules: &[ResolvedModule],
+        consumer_checked: &FxHashSet<FileId>,
+    ) {
+        self.effective_exports =
+            super::effective_exports::EffectiveExportIndex::build(resolved_modules);
+        if consumer_checked.is_empty() {
+            return;
+        }
+        let untracked_loads = untracked_load_targets(resolved_modules);
+        for file_id in consumer_checked {
+            if untracked_loads.contains(file_id) {
+                continue;
+            }
+            if let Some(module) = self.modules.get_mut(file_id.0 as usize) {
+                module.set_consumer_checked();
+            }
+        }
+    }
+}
 
 pub(super) struct PopulateEdgesInput<'a> {
     pub(super) files: &'a [DiscoveredFile],
@@ -688,6 +720,7 @@ impl ModuleGraph {
                 reverse_deps,
                 namespace_imported: acc.namespace_imported,
                 re_export_cycles: Vec::new(),
+                namespace_escapes: Vec::new(),
                 effective_exports: super::effective_exports::EffectiveExportIndex::default(),
             },
             namespace_features,

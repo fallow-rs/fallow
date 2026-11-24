@@ -29,10 +29,9 @@ if [[ "${FALLOW_ROOT:-}" =~ \.\. ]]; then
 fi
 
 # Initialize two markers so downstream gates always see definitive values.
-# `post_skipped_reason` is only set to `pagination_failure` when we actually
-# skip POSTing (multi-comment dedup abort). `dedup_lookup_failed` is set to
-# `true` on any dedup-lookup failure, including the summary-only path where
-# we proceed and may post a duplicate.
+# A failed lookup of the existing review comments stops the post, and then
+# sets `post_skipped_reason` to `pagination_failure` and
+# `dedup_lookup_failed` to `true`.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "post_skipped_reason=none" >> "$GITHUB_OUTPUT"
   echo "dedup_lookup_failed=false" >> "$GITHUB_OUTPUT"
@@ -75,7 +74,8 @@ if render_review "$REVIEW_FILE"; then
       --provider github \
       --pr "$PR_NUMBER" \
       --repo "$GH_REPO" \
-      --envelope "$REVIEW_FILE" > "$POST_FILE" 2> "$POST_STDERR_FILE"; then
+      --api-url "${GITHUB_API_URL:-https://api.github.com}" \
+      --envelope "$REVIEW_FILE" --format json > "$POST_FILE" 2> "$POST_STDERR_FILE"; then
     if jq -e '((.apply_errors // []) | length > 0) or ((.post_errors // []) | length > 0)' "$POST_FILE" > /dev/null 2>&1; then
       HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' "$POST_FILE")
       UNAPPLIED=$(jq -r '(.unapplied_fingerprints // []) | join(", ")' "$POST_FILE")
@@ -96,8 +96,14 @@ if render_review "$REVIEW_FILE"; then
     if [ "$RESOLUTIONS" = "1" ]; then RESOLUTION_NOUN="resolution reply"; fi
     if [ "$THREADS" = "1" ]; then THREAD_NOUN="thread"; fi
     echo "Review action: ${ACTION} (${POSTED} ${COMMENT_NOUN} posted, ${RESOLUTIONS} ${RESOLUTION_NOUN} posted, ${THREADS} ${THREAD_NOUN} resolved)"
+  elif is_dedup_lookup_failure "$POST_FILE"; then
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then
+      echo "post_skipped_reason=pagination_failure" >> "$GITHUB_OUTPUT"
+      echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"
+    fi
+    echo "::warning::Skipped the review comments: fallow could not read the existing review comments, so new comments could be duplicates"
   else
-    echo "::warning::Failed to post review comments"
+    echo "::warning::Failed to post review comments: $(escape_command_data "$(post_error_message "$POST_FILE")")"
   fi
   exit 0
 fi

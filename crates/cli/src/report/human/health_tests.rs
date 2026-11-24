@@ -237,7 +237,7 @@ fn override_affected_finding_names_the_ceilings_in_force() {
 
     let text = plain(&build_health_human_lines(&report, &root));
     assert!(
-        text.contains("override: cyclomatic 500, cognitive 500, CRAP 30.0, unit size 60"),
+        text.contains("override (config): cyclomatic 500, cognitive 500, CRAP 30.0, unit size 60"),
         "{text}"
     );
 }

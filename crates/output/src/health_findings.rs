@@ -1241,6 +1241,7 @@ mod crap_action_tests {
             contributions: Vec::new(),
             effective_thresholds: None,
             threshold_source: None,
+            override_comment_line: None,
             max_file_lines: None,
         };
         let action = build_suppress_action(&violation, true, false);

@@ -138,6 +138,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-store-members` | Unused Pinia store members |
 | `--unused-namespace-members` | Namespace member is never referenced |
 | `--unused-protected-class-members` | Protected class member is never referenced |
+| `--namespace-escapes` | Namespace binding is used as a whole value, so its exports are not checked |
 | `--unprovided-injects` | inject() / getContext() reads a key that no provide() / setContext() supplies |
 | `--unrendered-components` | A Vue / Svelte component is reachable through a barrel but rendered nowhere |
 | `--unused-component-props` | A Vue defineProps prop or React component prop is referenced nowhere in its own component |
@@ -381,7 +382,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 
 - Unused exports (removes the `export` keyword; whole-enum block when every member is unused). In an `export { ... }` list, on one line or over several lines, it removes the unused names and keeps the layout and comments of the names that stay. It deletes the full statement when no name is left.
 - Unused dependencies (removed from `package.json`)
-- Unused enum members (removed from the declaration)
+- Unused enum members (removed from the declaration). A kept member that counts on from a removed member gets an initializer with its old value, as in `Medium = 1`, so no kept value changes. When that old value is not a known integer (a computed initializer, or an ambient enum: a `declare enum`, an enum in a `declare` block, or an enum in a `.d.ts` file), the whole enum stays as it is. Each unused member of that enum stays too, and the fix output has no entry for it.
 - Unused pnpm catalog entries (removed from `pnpm-workspace.yaml` by line-aware deletion). Object-form entries are removed as one block. By default, fallow also removes a contiguous YAML comment block immediately above the entry when it clearly belongs to that entry; configure this with `fix.catalog.deletePrecedingComments` (`"auto"`, `"always"`, or `"never"`). Two escape hatches keep curated comments safe regardless of policy: a `# fallow-keep` marker on any line in the block preserves it, and the `auto` policy additionally preserves section-banner blocks whose body starts with three or more `=`, `-`, `*`, `_`, `~`, `+`, or `#` characters (e.g. `# === React 18 production pins ===`). Other comments and stylistic choices are preserved. When the last entry of a catalog group is removed, the header is rewritten to `catalog: {}` / `<name>: {}` so pnpm doesn't reject the resulting null value. Entries with non-empty `hardcoded_consumers` are skipped to avoid breaking `pnpm install`; the skip is surfaced in the JSON fix output as `{"type": "remove_catalog_entry", "applied": false, "skipped": true, "skip_reason": "hardcoded_consumers", "consumers": [...]}`. The JSON action carries both `line` (first deleted line, the leading comment when policy absorbs one) and `entry_line` (the catalog entry's original 1-based line); use `entry_line` as a stable anchor across policy changes. After a successful catalog edit the CLI emits a one-line `Run pnpm install to refresh pnpm-lock.yaml` reminder, and the human stderr summary appends `(+M catalog comment lines)` to the fixed-issue count when comment lines were absorbed. The JSON envelope carries a top-level `"skipped"` count alongside `"total_fixed"` for partial-fix gating.
 - Duplicate exports (appends an `ignoreExports` rule to your fallow config file). When no fallow config file exists, `.fallowrc.json` is created using the same scaffolding `fallow init` would emit (framework detection, `$schema`, `entry`, `ignorePatterns`, etc.) and the rules are layered on top. Inside a monorepo subpackage (`pnpm-workspace.yaml`, `package.json#workspaces`, `turbo.json`, `lerna.json`, or `rush.json` above the invocation directory) the create-fallback refuses to fire and emits `skip_reason: "monorepo_subpackage"` with a relative `workspace_root` path pointing at the workspace root. The applied entry carries `created_files: [".fallowrc.json"]` so consumers can detect file-creation side effects programmatically.
 
@@ -408,6 +409,20 @@ Limit: the check reads the re-exports from the module graph. A file that `ignore
 ### Declarations that export more than one name
 
 One `export` keyword can export several names: `export const { a, b } = x;`, `export const [a, b] = x;` or `export const a = 1, b = 2;`. `fallow fix` removes that keyword only when every name of the declaration is unused. While one name is in use or kept, each unused name of the declaration is a `remove_export` entry with `applied: false`, `skipped: true` and `skip_reason: "shared_declaration_in_use"`, counted by the top-level `skipped_shared_declarations: number` (always present), disjoint from `skipped`. `fix` does not split the declaration, because a split evaluates the initializer twice and changes the value of a rest element. Move each unused name to a declaration without `export` by hand. This is intentional and does not change the exit code.
+
+### Post-edit check
+
+Before `fallow fix` writes a file, it applies the planned edits to the text and checks the result. It keeps an edit only when:
+
+- the edited file still parses;
+- each kept class member and enum member stays, in the same order;
+- each kept enum member keeps its constant value;
+- each name that the code uses still has a declaration or an import;
+- no import stays whose name only a removed export list used;
+- declarations that TypeScript merges (function overloads, a class with its interface or namespace, a function with its namespace) stay all exported or all local;
+- each removed export is an unused export, and no kept re-export reads it.
+
+`fix` keeps the code of an edit that fails the check, and the JSON output lists no entry for it. The human output prints `Kept <path>:<line> as it is: <reason>` on stderr, and no `Would remove` or `Removed` line for that edit. The finding stays in the next report. The editor quick fix and the `suggestion` blocks of the GitHub and GitLab review comments use the same check.
 
 ### Generated files
 
@@ -556,7 +571,7 @@ Human output groups paths under "Shared with your team (commit these)" and "Loca
 {
   "kind": "agent-install",
   "schema_version": 1,
-  "fallow_version": "3.45.0",
+  "fallow_version": "3.48.0",
   "root": "/abs/path",
   "mode": "install",
   "dry_run": false,
@@ -768,7 +783,7 @@ fallow health --format json --quiet --trend
 {
   "kind": "health",
   "schema_version": 7,
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -1245,7 +1260,7 @@ fallow audit \
 {
   "kind": "audit",
   "schema_version": 7,
-  "version": "3.45.0",
+  "version": "3.48.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -1333,7 +1348,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 7,
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1384,6 +1399,7 @@ The second rule family is a data-driven `tainted-sink` catalogue: syntactic dang
 | `unsafe-deserialization` | 502 | `js-yaml` `load` / `node-serialize` |
 | `angular-trusted-html` | 79 | Angular `bypassSecurityTrust*` |
 | `nextjs-open-redirect` | 601 | Next.js `redirect` / `permanentRedirect` |
+| `react-router-open-redirect` | 601 | React Router `redirect` / `redirectDocument` / `replace` |
 | `dom-document-write` | 79 | `document.write` / `document.writeln` |
 | `jquery-html` | 79 | jQuery `.html(value)` |
 | `route-send-file` | 22 | Express / Fastify / Hono route `sendFile` |
@@ -1434,7 +1450,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -1463,7 +1479,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -1786,7 +1802,7 @@ fallow license deactivate
 
 | Subcommand | Purpose |
 |------------|---------|
-| `activate` | Install a JWT or start a 30-day trial. JWT input precedence: positional arg > `--from-file` > `--stdin`. |
+| `activate` | Install a JWT or start a 30-day trial. Pass a JWT as an argument, read it with `--from-file`, or pipe it to `fallow license activate --stdin`. |
 | `status`   | Print tier, seats, features, days-until-expiry, and (when `refresh_after` has passed) a proactive refresh hint. |
 | `refresh`  | Fetch a fresh JWT using the currently stored one as identity proof, falling back to a full-access API key when that token is missing or too stale. Exit 7 on network failure. |
 | `deactivate` | Remove the local license file. |
@@ -2398,7 +2414,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 {
   "kind": "dead-code",
   "schema_version": 7,
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -2558,7 +2574,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 {
   "kind": "dupes",
   "schema_version": 7,
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -2602,11 +2618,11 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "kind": "combined",
   "schema_version": 7,
-  "version": "3.45.0",
+  "version": "3.48.0",
   "elapsed_ms": 159,
   "check": {
     "schema_version": 7,
-    "version": "3.45.0",
+    "version": "3.48.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],

@@ -5,9 +5,10 @@ use oxc_span::Span;
 
 use fallow_types::extract::{SecurityControlKind, SecurityControlSite, SinkLiteralValue};
 
+use super::visit_security_sinks::canonical_call::CallForm;
 use super::{
     ModuleInfoExtractor, callee_leaf_name, expression_has_boundary_validation_keys,
-    expression_has_fastify_schema, flatten_callee_path, unwrap_static_expr,
+    expression_has_fastify_schema, unwrap_static_expr,
 };
 
 pub(super) fn security_control_kind_for_callee(callee_path: &str) -> Option<SecurityControlKind> {
@@ -155,8 +156,10 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn capture_declarative_validation_control(&mut self, expr: &CallExpression<'_>) {
-        let Some(callee_path) =
-            flatten_callee_path(&expr.callee).or_else(|| callee_leaf_name(&expr.callee))
+        let Some(callee_path) = self
+            .canonical_call(&expr.callee, &expr.arguments, CallForm::Call, expr.span)
+            .map(|call| call.path)
+            .or_else(|| callee_leaf_name(&expr.callee))
         else {
             return;
         };
@@ -195,10 +198,12 @@ impl ModuleInfoExtractor {
         &mut self,
         expr: &NewExpression<'_>,
     ) {
-        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+        let Some(call) =
+            self.canonical_call(&expr.callee, &expr.arguments, CallForm::New, expr.span)
+        else {
             return;
         };
-        if callee_path.rsplit('.').next() == Some("ValidationPipe")
+        if call.method().unwrap_or(&call.path) == "ValidationPipe"
             && self.has_package_evidence("@nestjs/common")
         {
             self.record_validation_control_site("nestjs.validation-pipe", expr.span);

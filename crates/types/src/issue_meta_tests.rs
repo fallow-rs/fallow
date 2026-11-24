@@ -251,6 +251,7 @@ fn ts_alias_policy_is_explicit() {
                 "MisconfiguredDependencyOverride",
                 "MisconfiguredDependencyOverrideFinding",
             ),
+            ("NamespaceEscape", "NamespaceEscapeFinding"),
             ("PrivateTypeLeak", "PrivateTypeLeakFinding"),
             ("PackageCycle", "PackageCycleFinding"),
             ("ReExportCycle", "ReExportCycleFinding"),

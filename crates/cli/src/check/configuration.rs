@@ -1,7 +1,7 @@
 //! Configuration for dead-code and architecture requests.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use fallow_engine::resolved_run::{ResolveError, ResolvedRun};
+use fallow_engine::resolved_run::ResolvedRun;
 
 use super::*;
 
@@ -117,13 +117,15 @@ pub struct TypeAwareValues {
 ///
 /// # Errors
 ///
-/// Returns the input error of a `FALLOW_TYPE_AWARE` or
-/// `FALLOW_TYPE_AWARE_REQUIRE` value that the command cannot use.
+/// Returns the message of a `FALLOW_TYPE_AWARE` or
+/// `FALLOW_TYPE_AWARE_REQUIRE` value that the command cannot use, and of a
+/// `--type-aware-project` that has no effect (see [`given_project_error`]).
 pub fn type_aware_values(
     run: Option<&ResolvedRun>,
     request: &TypeAwareRequest<'_>,
     section: &fallow_config::TypeAwareConfig,
-) -> Result<TypeAwareValues, ResolveError> {
+    root: &Path,
+) -> Result<TypeAwareValues, String> {
     let inputs = fallow_config::TypeAwareInputs {
         enabled: request.enabled.map(|on| given(on, "--type-aware")),
         projects: (!request.projects.is_empty())
@@ -148,12 +150,41 @@ pub fn type_aware_values(
             audit: request.config_override,
             file: None,
         },
-    )?;
+    )
+    .map_err(|err| err.message())?;
+    if let Some(message) = given_project_error(request.projects, *settings.enabled.value(), root) {
+        return Err(message);
+    }
     Ok(TypeAwareValues {
         enabled: *settings.enabled.value(),
         projects: settings.projects.value().clone(),
         require: *settings.require.value(),
     })
+}
+
+/// The error of a `--type-aware-project` that has no effect. With type-aware
+/// analysis off for the run, from the flags, the environment and the config,
+/// the run reads no project. With it on, the type-aware run skips a project
+/// that does not exist in silence. `root` resolves a relative path.
+fn given_project_error(projects: &[PathBuf], enabled: bool, root: &Path) -> Option<String> {
+    if projects.is_empty() {
+        return None;
+    }
+    if !enabled {
+        return Some(format!(
+            "--type-aware-project {} has no effect, because type-aware analysis is off for this run. Pass --type-aware, set FALLOW_TYPE_AWARE=1, or set typeAware.enabled in the config.",
+            projects[0].display()
+        ));
+    }
+    projects
+        .iter()
+        .find(|project| !project.exists() && !root.join(project).exists())
+        .map(|project| {
+            format!(
+                "--type-aware-project {} does not exist. Pass the path of a tsconfig file, relative to the project root.",
+                project.display()
+            )
+        })
 }
 
 const fn given<T>(value: T, flag: &'static str) -> fallow_types::sourced::Given<T> {
@@ -176,8 +207,8 @@ pub fn apply_type_aware_overrides_from(
     request: &TypeAwareRequest<'_>,
     config: &mut ResolvedConfig,
 ) -> Result<(), ExitCode> {
-    let values = type_aware_values(run, request, &config.type_aware)
-        .map_err(|err| emit_input_error(&err.message(), output))?;
+    let values = type_aware_values(run, request, &config.type_aware, &config.root)
+        .map_err(|message| emit_input_error(&message, output))?;
     config.type_aware.enabled = values.enabled;
     config.type_aware.projects = values
         .projects

@@ -309,6 +309,7 @@ fn a_duplicate_test_id_is_reported_and_the_run_goes_on() {
         .expect("a duplicate test id is reported");
     assert!(issue.message.contains(&tid("t2")), "{}", issue.message);
     assert_eq!(outcome.results["m1"].status, MutantStatus::Survived);
+    assert_eq!(outcome.duplicate_test_ids, [tid("t2")]);
 }
 
 #[test]

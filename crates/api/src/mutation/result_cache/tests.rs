@@ -277,6 +277,7 @@ fn each_query_part_changes_the_key() {
 fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> ScheduleOutcome {
     ScheduleOutcome {
         test_files: FxHashMap::default(),
+        duplicate_test_ids: Vec::new(),
         ready: None,
         results: results
             .iter()

@@ -207,6 +207,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         docs_category: "source",
     },
     IssueKindMeta {
+        kind: Some(IssueKind::NamespaceEscape),
+        code: "namespace-escape",
+        aliases: &["namespace-escapes"],
+        label: "Namespace Escapes",
+        config_key: Some("namespace-escapes"),
+        filter_flag: Some("--namespace-escapes"),
+        mcp_issue_type: Some("namespace-escapes"),
+        suppress_token: Some("namespace-escape"),
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "source",
+    },
+    IssueKindMeta {
         kind: Some(IssueKind::UnusedNamespaceMember),
         code: "unused-namespace-member",
         aliases: &["unused-namespace-members"],
@@ -1141,6 +1154,13 @@ pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
         },
     },
     IssueTsAliasMeta {
+        code: "namespace-escape",
+        alias: TsAliasMeta {
+            name: "NamespaceEscape",
+            parent: "NamespaceEscapeFinding",
+        },
+    },
+    IssueTsAliasMeta {
         code: "unused-namespace-member",
         alias: TsAliasMeta {
             name: "UnusedMember",
@@ -1396,6 +1416,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Unused protected class members",
         docs_anchor: "unused-protected-class-members",
         result_key: "unused_protected_class_members",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "namespace-escape",
+        sarif_description: "Namespace binding is used as a whole value, so its exports are not checked",
+        meta_description: "Namespace imports that the code uses as a whole value. Fallow credits every export of the target module, so it does not check them.",
+        meta_docs_path: "rules/namespace-escape",
+        meta_name: "Namespace Escapes",
+        summary_label: "Namespace escapes",
+        docs_anchor: "namespace-escapes",
+        result_key: "namespace_escapes",
         counts_in_total: true,
     },
     IssueResultMeta {

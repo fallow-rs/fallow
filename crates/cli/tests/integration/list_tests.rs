@@ -59,11 +59,7 @@ fn run_fallow_combined_in_root(root: &std::path::Path, args: &[&str]) -> Command
         .output()
         .expect("failed to run fallow binary");
 
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 #[test]
@@ -1708,12 +1704,6 @@ fn entry_weight_baseline_save_keeps_the_saved_issue_counts() {
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved["check"]["total_issues"], 3);
     assert!(saved["entry_weight"]["entries"].is_array());
-}
-
-#[test]
-fn entry_weight_gate_without_a_baseline_file_exits_two() {
-    let output = run_entry_weight(&["--fail-on-regression"]);
-    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
 }
 
 #[test]

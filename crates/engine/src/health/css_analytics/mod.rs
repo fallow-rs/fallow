@@ -109,7 +109,9 @@ struct CssTokenSets {
     defined_keyframes: rustc_hash::FxHashSet<String>,
     referenced_keyframes: rustc_hash::FxHashSet<String>,
     keyframes_definers: rustc_hash::FxHashMap<String, String>,
-    keyframe_referencers: rustc_hash::FxHashMap<String, String>,
+    /// The first stylesheet that references each `@keyframes` name, with the
+    /// line of the referencing rule.
+    keyframe_referencers: rustc_hash::FxHashMap<String, (String, u32)>,
     /// `@keyframes` names that a Sass/Less source defines. Only these are
     /// skipped when an animation value that the scan cannot resolve exists.
     /// Sass can name a plain CSS `@keyframes` through a variable too, but
@@ -171,7 +173,12 @@ struct CssTokenSets {
     /// candidate hard-abstains on plugin projects (the DI blind spot).
     any_plugin_directive: bool,
     /// Located raw CSS declaration values from authored structural stylesheets.
+    /// The project vocabulary reads them from every scanned file.
     raw_style_values: Vec<fallow_output::RawStyleValue>,
+    /// The raw values of the reported files, when a deep run reports only the
+    /// changed files. The raw values of the other files would use up the
+    /// report limit. `None` when the run reports every scanned file.
+    reported_raw_style_values: Option<Vec<fallow_output::RawStyleValue>>,
 }
 
 #[derive(Clone, Debug)]
@@ -283,9 +290,13 @@ impl CssTokenSets {
     fn record_keyframes(&mut self, analytics: &fallow_types::extract::CssAnalytics, rel: &str) {
         for keyframes in &analytics.referenced_keyframes {
             self.referenced_keyframes.insert(keyframes.clone());
+            let line = analytics
+                .keyframe_reference_lines
+                .binary_search_by(|(name, _)| name.as_str().cmp(keyframes))
+                .map_or(0, |index| analytics.keyframe_reference_lines[index].1);
             self.keyframe_referencers
                 .entry(keyframes.clone())
-                .or_insert_with(|| rel.to_owned());
+                .or_insert_with(|| (rel.to_owned(), line));
         }
         for keyframes in &analytics.defined_keyframes {
             self.defined_keyframes.insert(keyframes.clone());
@@ -375,29 +386,25 @@ impl CssTokenSets {
         analytics: &fallow_types::extract::CssAnalytics,
         rel: &str,
     ) {
-        for raw in &analytics.raw_style_values {
-            if self.raw_style_values.len() >= MAX_REPORTED_RAW_STYLE_VALUES {
-                break;
-            }
-            self.raw_style_values.push(fallow_output::RawStyleValue {
-                axis: raw.axis.clone(),
-                property: raw.property.clone(),
-                value: raw.value.clone(),
-                path: rel.to_owned(),
-                line: raw.line,
-                nearest_token: None,
-                actions: vec![fallow_output::CssCandidateAction::replace_raw_style_value(
-                    &raw.axis, &raw.value,
-                )],
-            });
+        push_raw_style_values(&mut self.raw_style_values, analytics, rel);
+    }
+
+    /// Add the raw values of a file that the run reports.
+    fn record_reported_raw_style_values(
+        &mut self,
+        analytics: &fallow_types::extract::CssAnalytics,
+        rel: &str,
+    ) {
+        if let Some(values) = &mut self.reported_raw_style_values {
+            push_raw_style_values(values, analytics, rel);
         }
     }
 
     /// Fold one stylesheet's Tailwind v4 `@theme` tokens, `@apply` body tokens,
     /// and `@theme`-interior `var()` reads into the project-wide sets (the inputs
     /// to the unused-theme-token candidate). `scan_stylesheet_tokens` masks the
-    /// source once, and only when it has a `@theme`, `@apply` or `var(`, so this
-    /// is near-free for non-Tailwind stylesheets.
+    /// source once, and only when it has a `@theme`, `@apply`, `var(` or
+    /// `@plugin`, so this is near-free for non-Tailwind stylesheets.
     fn record_theme(&mut self, source: &str, rel: &str) {
         let tokens = crate::css::scan_stylesheet_tokens(source);
         let scan = tokens.theme;
@@ -433,9 +440,7 @@ impl CssTokenSets {
                 .into_iter()
                 .map(|(name, line)| (name, rel.to_owned(), line)),
         );
-        if source.contains("@plugin") {
-            self.any_plugin_directive = true;
-        }
+        self.any_plugin_directive |= tokens.has_plugin_directive;
     }
 
     /// Group unused CSS at-rule entities: `@property` registrations never read
@@ -544,10 +549,11 @@ impl CssTokenSets {
             &self.keyframe_referencers,
         )
         .into_iter()
-        .map(|(name, path)| UndefinedKeyframes {
+        .map(|(name, (path, line))| UndefinedKeyframes {
             actions: vec![CssCandidateAction::verify_undefined_keyframe(&name)],
             name,
             path,
+            line,
         })
         .collect();
         (unreferenced_keyframes, undefined_keyframes)
@@ -703,15 +709,15 @@ fn classify_font_size_unit(value: &str) -> Option<&'static str> {
     }
 }
 
-/// Build the sorted `(name, path)` set difference `present - absent`, locating
-/// each surviving name via `locator` (empty path when absent). Sorted by
-/// `(path, name)` for deterministic output.
-fn locate_keyframe_diff(
+/// Build the sorted `(name, location)` set difference `present - absent`,
+/// locating each surviving name via `locator` (the default location when
+/// absent). Sorted by `(location, name)` for deterministic output.
+fn locate_keyframe_diff<L: Clone + Default + Ord>(
     present: &rustc_hash::FxHashSet<String>,
     absent: &rustc_hash::FxHashSet<String>,
-    locator: &rustc_hash::FxHashMap<String, String>,
-) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = present
+    locator: &rustc_hash::FxHashMap<String, L>,
+) -> Vec<(String, L)> {
+    let mut out: Vec<(String, L)> = present
         .difference(absent)
         .map(|name| (name.clone(), locator.get(name).cloned().unwrap_or_default()))
         .collect();
@@ -720,6 +726,29 @@ fn locate_keyframe_diff(
 }
 
 /// Saturating `usize -> u32` for token counts.
+/// Add the raw values of one stylesheet to `values`, up to
+/// [`MAX_REPORTED_RAW_STYLE_VALUES`].
+fn push_raw_style_values(
+    values: &mut Vec<fallow_output::RawStyleValue>,
+    analytics: &fallow_types::extract::CssAnalytics,
+    rel: &str,
+) {
+    let room = MAX_REPORTED_RAW_STYLE_VALUES.saturating_sub(values.len());
+    values.extend(analytics.raw_style_values.iter().take(room).map(|raw| {
+        fallow_output::RawStyleValue {
+            axis: raw.axis.clone(),
+            property: raw.property.clone(),
+            value: raw.value.clone(),
+            path: rel.to_owned(),
+            line: raw.line,
+            nearest_token: None,
+            actions: vec![fallow_output::CssCandidateAction::replace_raw_style_value(
+                &raw.axis, &raw.value,
+            )],
+        }
+    }));
+}
+
 fn saturate_len(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
@@ -778,9 +807,21 @@ fn read_markup_scan_source(
     Some((rel, source))
 }
 
+/// The uses of one Tailwind arbitrary value across the markup files.
+struct ArbitraryValueUses {
+    count: u32,
+    path: String,
+    line: u32,
+    /// Whether `path` is a file that the report shows.
+    reported: bool,
+}
+
+/// `output_changed_files` names the files that a deep run reports. The scan
+/// itself reads every file of `ctx`.
 fn scan_markup_tailwind_arbitrary_values(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
+    output_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     summary: &mut fallow_output::CssAnalyticsSummary,
 ) -> Vec<fallow_output::TailwindArbitraryValue> {
     let HealthScanCtx { config, .. } = ctx;
@@ -790,21 +831,33 @@ fn scan_markup_tailwind_arbitrary_values(
     if !project_uses_tailwind(&config.root) {
         return Vec::new();
     }
-    // token -> (total count, first path, first line). First-seen wins for the
-    // location; files are path-sorted, so the first occurrence is deterministic.
-    let mut agg: rustc_hash::FxHashMap<String, (u32, String, u32)> =
+    // token -> total count and first location. Files are path-sorted, so the
+    // first occurrence is deterministic. A deep run scans every file but
+    // reports only the changed ones, so the first occurrence in a reported
+    // file replaces an earlier one in an unreported file.
+    let mut agg: rustc_hash::FxHashMap<String, ArbitraryValueUses> =
         rustc_hash::FxHashMap::default();
     let mut total_uses: u32 = 0;
     for file in files {
         let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
+        let reported = output_changed_files
+            .is_none_or(|changed| css_output_path_in_changed_scope(&rel, config, changed));
         for arb in crate::css::scan_tailwind_arbitrary_values(&source, config) {
             total_uses = total_uses.saturating_add(1);
-            let entry = agg
-                .entry(arb.value)
-                .or_insert_with(|| (0, rel.clone(), arb.line));
-            entry.0 = entry.0.saturating_add(1);
+            let entry = agg.entry(arb.value).or_insert_with(|| ArbitraryValueUses {
+                count: 0,
+                path: rel.clone(),
+                line: arb.line,
+                reported,
+            });
+            entry.count = entry.count.saturating_add(1);
+            if reported && !entry.reported {
+                entry.path.clone_from(&rel);
+                entry.line = arb.line;
+                entry.reported = true;
+            }
         }
     }
 
@@ -812,14 +865,14 @@ fn scan_markup_tailwind_arbitrary_values(
     summary.tailwind_arbitrary_value_uses = total_uses;
     let mut out: Vec<TailwindArbitraryValue> = agg
         .into_iter()
-        .map(|(value, (count, path, line))| TailwindArbitraryValue {
+        .map(|(value, uses)| TailwindArbitraryValue {
             actions: vec![fallow_output::CssCandidateAction::replace_arbitrary_value(
                 &value,
             )],
             value,
-            count,
-            path,
-            line,
+            count: uses.count,
+            path: uses.path,
+            line: uses.line,
         })
         .collect();
     out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
@@ -956,7 +1009,10 @@ fn walk_css_files(
     // Project-wide design-token + custom-property + @keyframes accumulator,
     // unioned across every analyzed stylesheet (including ones with no notable
     // rule, which are not listed individually), finalized after the walk.
-    let mut tokens = CssTokenSets::default();
+    let mut tokens = CssTokenSets {
+        reported_raw_style_values: ctx.output_changed_files.map(|_| Vec::new()),
+        ..CssTokenSets::default()
+    };
     let mut scoring = CssGradeScoring::default();
     for file in files {
         let Some((relative, kind)) = css_report_scan_target(file, ctx) else {
@@ -977,11 +1033,17 @@ fn walk_css_files(
         }
 
         let rel = relative.to_string_lossy().replace('\\', "/");
+        let reported = ctx
+            .output_changed_files
+            .is_none_or(|changed| css_output_path_in_changed_scope(&rel, ctx.config, changed));
         let mut file_had_sheet = false;
         for item in css_report_scan_items(&source, &file.path, kind) {
             file_had_sheet |= record_css_scan_item(
                 &item,
-                &rel,
+                ScanFile {
+                    rel: &rel,
+                    reported,
+                },
                 &mut file_reports,
                 &mut summary,
                 &mut tokens,
@@ -1002,14 +1064,23 @@ fn walk_css_files(
     }
 }
 
+/// The project-relative path of a scanned file, and whether the run reports
+/// the file.
+#[derive(Clone, Copy)]
+struct ScanFile<'a> {
+    rel: &'a str,
+    reported: bool,
+}
+
 fn record_css_scan_item(
     item: &CssScanItem<'_>,
-    rel: &str,
+    file: ScanFile<'_>,
     file_reports: &mut Vec<fallow_output::CssFileAnalytics>,
     summary: &mut fallow_output::CssAnalyticsSummary,
     tokens: &mut CssTokenSets,
     scoring: &mut CssGradeScoring,
 ) -> bool {
+    let ScanFile { rel, reported } = file;
     let Some(mut analytics) = crate::css::compute_css_analytics(&item.source) else {
         return false;
     };
@@ -1041,6 +1112,9 @@ fn record_css_scan_item(
                 analytics.declaration_blocks.clear();
             }
             tokens.record(&analytics, rel);
+            if reported {
+                tokens.record_reported_raw_style_values(&analytics, rel);
+            }
             scoring.add_non_atomic(&analytics);
             if item.report_notable && !analytics.notable_rules.is_empty() {
                 file_reports.push(fallow_output::CssFileAnalytics {
@@ -1164,7 +1238,11 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     let walk = css_report_walk(files, ctx, styling_artifacts, scan_css_in_js_sources);
     let walk_ref = walk.as_ref();
     let mut summary = walk_ref.summary.clone();
-    let mut raw_style_values = walk_ref.tokens.raw_style_values.clone();
+    let mut raw_style_values = walk_ref
+        .tokens
+        .reported_raw_style_values
+        .clone()
+        .unwrap_or_else(|| walk_ref.tokens.raw_style_values.clone());
     let styling_token_candidates =
         StylingTokenCandidateCache::new(&walk_ref.tokens, config, css_in_js_definers.as_ref());
     if !raw_style_values.is_empty() {
@@ -1524,3 +1602,10 @@ fn css_output_path_in_changed_scope(
     reason = "tests use unwrap to keep token-consumer assertions concise"
 )]
 mod token_consumer_tests;
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap to keep changed-scope assertions concise"
+)]
+mod changed_scope_tests;

@@ -73,6 +73,9 @@ fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
     }
 }
 
+#[path = "markdown_members.rs"]
+mod members;
+use members::push_markdown_member_sections;
 #[path = "markdown_architecture.rs"]
 mod architecture;
 pub use architecture::build_markdown;
@@ -297,49 +300,6 @@ fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults
                 &dep.reachability_caveats,
             )
         },
-    );
-}
-
-fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
-    markdown_grouped_section(
-        out,
-        &results.unused_enum_members,
-        "Unused enum members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedEnumMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_class_members,
-        "Unused class members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedClassMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_store_members,
-        "Unused store members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedStoreMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_namespace_members,
-        "Unused namespace members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedNamespaceMemberFinding| format_member(&m.member, &m.reachability_caveats),
-    );
-    markdown_grouped_section(
-        out,
-        &results.unused_protected_class_members,
-        "Unused protected class members",
-        root,
-        |m| m.member.path.as_path(),
-        |m: &UnusedProtectedClassMemberFinding| format_member(&m.member, &m.reachability_caveats),
     );
 }
 
@@ -1559,6 +1519,8 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
         && report.threshold_overrides.is_empty()
+        && report.inline_threshold_overrides.is_empty()
+        && report.inline_threshold_override_problems.is_empty()
         && report.css_analytics.is_none()
         && report.styling_findings.is_empty()
     {
@@ -1584,7 +1546,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
 
     write_findings_section(&mut out, report, root);
     write_styling_findings_section(&mut out, report, root);
-    write_threshold_overrides_section(&mut out, report, root);
+    crate::threshold_override_output::write_threshold_override_markdown(&mut out, report, root);
     write_runtime_coverage_section(&mut out, report, root);
     write_coverage_intelligence_section(&mut out, report, root);
     write_coverage_gaps_section(&mut out, report, root);
@@ -2255,106 +2217,6 @@ fn write_findings_row(out: &mut String, finding: &fallow_output::HealthFinding, 
         cog = finding.cognitive,
         lines = finding.line_count,
     );
-}
-
-fn write_threshold_overrides_section(
-    out: &mut String,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-) {
-    if report.threshold_overrides.is_empty() {
-        return;
-    }
-    if !out.is_empty() && !out.ends_with("\n\n") {
-        out.push('\n');
-    }
-    out.push_str("## Health Threshold Overrides\n\n");
-    out.push_str("| Override | Dimension | Status | Target | Metrics | Outstanding |\n");
-    out.push_str("|---------:|:----------|:-------|:-------|:--------|:------------|\n");
-    for entry in &report.threshold_overrides {
-        let status = match entry.status {
-            fallow_output::ThresholdOverrideStatus::Active => "active",
-            fallow_output::ThresholdOverrideStatus::Stale => "stale",
-            fallow_output::ThresholdOverrideStatus::Insufficient => "insufficient",
-            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
-        };
-        let dimension = threshold_override_dimension_label(entry.dimension);
-        let outstanding = if entry.outstanding.is_empty() {
-            "-".to_string()
-        } else {
-            entry
-                .outstanding
-                .iter()
-                .map(|value| threshold_override_dimension_label(*value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let target = entry.path.as_ref().map_or_else(
-            || "<no matching file or function>".to_string(),
-            |path| {
-                entry.target_label(&normalize_uri(
-                    &relative_path(path, root).display().to_string(),
-                ))
-            },
-        );
-        let metrics = entry.metrics.map_or_else(
-            || "-".to_string(),
-            |metrics| {
-                let crap = metrics
-                    .crap
-                    .map_or(String::new(), |value| format!(", CRAP {value:.1}"));
-                let line_count = metrics
-                    .line_count
-                    .map_or(String::new(), |value| format!(", {value} lines"));
-                format!(
-                    "cyclomatic {}, cognitive {}{}{}",
-                    metrics.cyclomatic, metrics.cognitive, line_count, crap
-                )
-            },
-        );
-        // Mirror of the human renderer's copy: a crap-dimension row against a
-        // template-family unit reports a dimension the unit is not scored on,
-        // so the row must read as removable, not as an unqualified success.
-        let metrics = if threshold_override_crap_not_applicable(entry) {
-            format!("{metrics}; not scored on CRAP (this entry can be removed)")
-        } else {
-            metrics
-        };
-        let _ = writeln!(
-            out,
-            "| {} | {} | {} | {} | {} | {} |",
-            entry.override_index,
-            dimension,
-            status,
-            markdown_table_code_span(&target),
-            metrics,
-            outstanding
-        );
-    }
-    out.push('\n');
-}
-
-fn threshold_override_dimension_label(
-    dimension: fallow_output::ThresholdOverrideDimension,
-) -> &'static str {
-    match dimension {
-        fallow_output::ThresholdOverrideDimension::Complexity => "complexity",
-        fallow_output::ThresholdOverrideDimension::Crap => "crap",
-    }
-}
-
-/// True for a crap-dimension override row recorded against a synthetic
-/// template-family unit: measured complexity metrics present, CRAP value
-/// absent because the unit is excluded from the CRAP dimension.
-fn threshold_override_crap_not_applicable(entry: &fallow_output::ThresholdOverrideState) -> bool {
-    matches!(
-        entry.dimension,
-        fallow_output::ThresholdOverrideDimension::Crap
-    ) && entry.metrics.is_some_and(|metrics| metrics.crap.is_none())
-        && entry
-            .function
-            .as_deref()
-            .is_some_and(fallow_types::extract::is_synthetic_template_unit)
 }
 
 /// Write the file health scores table to the output.

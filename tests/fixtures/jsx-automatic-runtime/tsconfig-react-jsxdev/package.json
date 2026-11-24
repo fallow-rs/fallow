@@ -1,0 +1,1 @@
+{ "name": "react-dev-app", "private": true, "main": "src/index.tsx", "dependencies": { "react": "^19.0.0" } }

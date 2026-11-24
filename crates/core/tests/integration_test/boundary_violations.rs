@@ -38,6 +38,7 @@ fn create_boundary_config_with_entry(
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -390,6 +391,7 @@ fn no_violations_when_rule_is_off() {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -464,6 +466,7 @@ fn preset_detects_boundary_violation() {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -580,6 +583,7 @@ fn root_field_classifies_per_subtree() {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -699,6 +703,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -787,6 +792,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
@@ -1531,3 +1537,49 @@ fn re_export_chain_violations_name_the_barrel_in_via_path() {
 
 #[path = "boundary_public_files.rs"]
 mod public_files;
+
+/// A barrel hop is judged by its own import kind. The consumer of
+/// `src/kit/index.ts` imports `Shape` as a type, but the barrel forwards it
+/// with a value re-export that the `kit` zone does not allow. The hop gets its
+/// own finding, and the consumer does not get a second one.
+#[test]
+fn barrel_hop_uses_its_own_import_kind() {
+    let root = fixture_path("boundary-reexport-hop-kind");
+    let boundaries = BoundaryConfig {
+        zones: vec![
+            zone("ui", &["src/ui/**"]),
+            zone("kit", &["src/kit/**"]),
+            zone("core", &["src/core/**"]),
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "ui".to_string(),
+                allow: vec!["kit".to_string()],
+                allow_type_only: vec![],
+            },
+            BoundaryRule {
+                from: "kit".to_string(),
+                allow: vec![],
+                allow_type_only: vec!["core".to_string()],
+            },
+        ],
+        ..BoundaryConfig::default()
+    };
+    let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/ui/App.ts");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let pairs: std::collections::BTreeSet<(String, String)> = results
+        .boundary_violations
+        .iter()
+        .map(|v| {
+            (
+                relative_to(&v.violation.from_path, &root),
+                relative_to(&v.violation.to_path, &root),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        pairs,
+        pair_set(&[("src/kit/index.ts", "src/core/shape.ts")])
+    );
+}

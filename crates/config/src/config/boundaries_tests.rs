@@ -2136,3 +2136,74 @@ fn auto_discover_escapes_child_directory_names() {
     assert!(matches(&plain.patterns, "app/i/page.tsx"));
     assert!(!matches(&plain.patterns, "app/[id]/page.tsx"));
 }
+
+#[test]
+fn same_named_discovered_zones_keep_each_root() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/a/src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/b/src/features/auth")).unwrap();
+
+    let declaration = |root: &str| BoundaryZone {
+        name: "features".to_string(),
+        root: Some(root.to_string()),
+        auto_discover: vec!["src/features".to_string()],
+        ..BoundaryZone::default()
+    };
+    let mut config = BoundaryConfig {
+        zones: vec![declaration("packages/a/"), declaration("packages/b/")],
+        ..BoundaryConfig::default()
+    };
+
+    config.expand_auto_discover(temp.path());
+    let resolved = config.resolve();
+
+    assert_eq!(
+        resolved.classify_zone("packages/a/src/features/auth/login.ts"),
+        Some("features/auth")
+    );
+    assert_eq!(
+        resolved.classify_zone("packages/b/src/features/auth/login.ts"),
+        Some("features/auth")
+    );
+    assert_eq!(
+        resolved.classify_zone("packages/c/src/features/auth/login.ts"),
+        None
+    );
+    let entries = resolved
+        .zones
+        .iter()
+        .filter(|zone| zone.name == "features/auth")
+        .count();
+    assert_eq!(entries, 1, "one zone name gives one zone entry");
+}
+
+#[test]
+fn same_named_zones_with_equivalent_roots_merge_without_folding() {
+    let declaration = |root: Option<&str>, pattern: &str| BoundaryZone {
+        name: "app".to_string(),
+        root: root.map(str::to_string),
+        patterns: vec![pattern.to_string()],
+        ..BoundaryZone::default()
+    };
+    let mut zones = Vec::new();
+    merge_zone_by_name(&mut zones, declaration(Some("packages/a"), "src/**"));
+    merge_zone_by_name(&mut zones, declaration(Some("./packages/a/"), "lib/**"));
+    assert_eq!(zones.len(), 1);
+    assert_eq!(zones[0].root.as_deref(), Some("packages/a"));
+    assert_eq!(zones[0].patterns, ["src/**", "lib/**"]);
+
+    let mut zones = Vec::new();
+    merge_zone_by_name(&mut zones, declaration(None, "src/**"));
+    merge_zone_by_name(&mut zones, declaration(Some("."), "lib/**"));
+    assert_eq!(zones[0].root, None);
+    assert_eq!(zones[0].patterns, ["src/**", "lib/**"]);
+
+    let mut zones = Vec::new();
+    merge_zone_by_name(&mut zones, declaration(Some("packages/[a]"), "src/**"));
+    merge_zone_by_name(&mut zones, declaration(Some("packages/b"), "src/**"));
+    assert_eq!(zones[0].root, None);
+    assert_eq!(
+        zones[0].patterns,
+        ["packages/[[]a[]]/src/**", "packages/b/src/**"]
+    );
+}

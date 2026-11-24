@@ -8,6 +8,8 @@ use rustc_hash::FxHashSet;
 use crate::duplicates::DuplicationReport;
 use crate::module_graph::RetainedModuleGraph;
 
+#[path = "trace_export_reason.rs"]
+mod trace_export_reason;
 #[path = "trace_impl.rs"]
 pub(crate) mod trace_impl;
 #[path = "trace_usage_impl.rs"]

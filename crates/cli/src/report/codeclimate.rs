@@ -11,11 +11,11 @@ use fallow_output::{
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
+use super::emit_json;
 use super::github::report_prefix;
 use super::github::{AnnotationLevel, resolve_render_options};
 use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::OwnershipResolver;
-use super::{emit_json, normalize_uri, relative_path};
 use crate::runtime_support::ConfigFlags;
 #[path = "codeclimate_saved_grouping.rs"]
 mod saved_grouping;
@@ -800,14 +800,6 @@ fn first_quoted_subject(message: &str) -> Option<&str> {
     let (_, remainder) = message.split_once('\'')?;
     let (subject, _) = remainder.split_once('\'')?;
     (!subject.is_empty()).then_some(subject)
-}
-
-/// Compute a relative path string with forward-slash normalization.
-///
-/// Uses `normalize_uri` to ensure forward slashes on all platforms
-/// and percent-encode brackets for Next.js dynamic routes.
-fn cc_path(path: &Path, root: &Path) -> String {
-    normalize_uri(&relative_path(path, root).display().to_string())
 }
 
 /// Fetch CodeClimate issues from the API-owned dead-code output builder.

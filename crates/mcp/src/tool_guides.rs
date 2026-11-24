@@ -118,7 +118,9 @@ The rollup's `suppress-line` action uses `placement: "above-component-worst-meth
         summary: "How to read one `threshold_overrides` state row.",
         detail: r"Each state row carries a `dimension` (`complexity` or `crap`). One configured override produces one row per dimension it participates in. Group on `override_index` to count configured overrides rather than rows.
 
-A row's `outstanding[]` names every dimension on which the matched unit still produces a finding after the override applies. An override can read `active` alongside a surviving finding when it leaves that dimension's ceiling unconfigured. A row reads `insufficient` when the override raises the ceiling to a value the unit still exceeds.",
+A row's `outstanding[]` names every dimension on which the matched unit still produces a finding after the override applies. An override can read `active` alongside a surviving finding when it leaves that dimension's ceiling unconfigured. A row reads `insufficient` when the override raises the ceiling to a value the unit still exceeds.
+
+A `// fallow-override-threshold-next-line maxCognitive=40 -- <reason>` comment sets the ceilings of the function on the next line. Its rows go to `inline_threshold_overrides[]`, keyed by `path` and `comment_line`, with the same `status` values. For each ceiling that it sets, the comment wins over a config entry. A finding that a comment ceiling applies to carries `override_comment_line`. A comment with a problem has no effect and goes to `inline_threshold_override_problems[]`. Do not add such a comment only to make a gate pass: `fallow audit` reports a new one as `added-suppression`.",
     },
     ToolGuideSection {
         topic: "gate_outcomes",
@@ -144,6 +146,11 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         topic: "constant_parameters",
         summary: "Parameters that each visible call passes in one way.",
         detail: r#"Select issue_types: ["constant-parameters"] to enable this default-off rule. Each candidate carries the function, the parameter, the reason (identical-argument or never-passed), the value, the call count, the condition reads and up to 20 inspected calls. The rule abstains when any caller can be invisible. Review the calls and the intent manually; a test caller counts unless production mode is on. Its actions are not auto-fixable."#,
+    },
+    ToolGuideSection {
+        topic: "namespace_escapes",
+        summary: "Namespace imports that hide exports from the unused-export check.",
+        detail: r#"Select issue_types: ["namespace-escapes"] to enable this default-off rule. Each finding carries the binding, the target module, the count of hidden exports and the reason (whole-object-use, re-exported-binding or no-member-read). Fallow credits every export of the target module while the binding escapes, so it does not check those exports. Read the members by name or import them by name. When the whole object is the intent, add // fallow-ignore-next-line namespace-escape above the import. Its actions are not auto-fixable."#,
     },
     ToolGuideSection {
         topic: "boundary_violations",

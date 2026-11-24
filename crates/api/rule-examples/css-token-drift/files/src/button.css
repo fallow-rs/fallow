@@ -1,3 +1,7 @@
+.button-row {
+  display: flex;
+}
+
 .button {
   color: #1a2b3c;
 }

@@ -147,6 +147,16 @@
       "$ref": "#/$defs/IgnoreExportsUsedInFileConfig",
       "default": false
     },
+    "keepExportTags": {
+      "description": "The JSDoc visibility tags that keep an export out of `unused-export`: `public` (also `@api public`), `internal`, `alpha` and `beta`, with or without a leading `@`. The default lists all four, so a tagged export never gets an `unused-export` finding and counts as public API for the re-exports that forward it. A tag that is not in the list has no effect: fallow checks the export like an untagged one. Set `[\"public\"]` when `@internal`, `@alpha` and `@beta` mark code that no consumer outside the project uses, for example `/** @internal Exported for tests. */`. `[]` also checks `@public` exports. `@expected-unused` is not configurable.",
+      "$ref": "#/$defs/KeepExportTags",
+      "default": [
+        "public",
+        "internal",
+        "alpha",
+        "beta"
+      ]
+    },
     "ignoreDecorators": {
       "description": "A list of decorator names that no longer grant a class member automatic exemption from `unused-class-member`: a member whose every decorator is in this set is checked normally, while a member carrying any decorator NOT listed here stays skipped (frameworks consume decorated members reflectively). Dotted entries match the full decorator path (`ns.foo`) and bare entries match the leftmost segment (so `\"decorators\"` collapses every `@decorators.*`); both `\"@step\"` and `\"step\"` are accepted (leading `@` stripped), and an unmatched entry emits a one-time warning.",
       "type": "array",
@@ -228,7 +238,8 @@
           "minSharedRevisions": 5,
           "minDegree": 0.3
         },
-        "suggestInlineSuppression": true
+        "suggestInlineSuppression": true,
+        "inlineThresholdOverrides": true
       }
     },
     "typeAware": {
@@ -251,6 +262,7 @@
         "unused-class-members": "error",
         "unused-namespace-members": "warn",
         "unused-protected-class-members": "off",
+        "namespace-escapes": "off",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
@@ -324,7 +336,7 @@
       "$ref": "#/$defs/CircularDependenciesConfig"
     },
     "effect": {
-      "description": "Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ \"schemaExportsAsTypes\": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand(\"Id\"))`) as an unused type under the `unused-types` rule, not as an unused export, so `\"unused-types\": \"off\"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand(\"Id\"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. Default `false` leaves every report unchanged.",
+      "description": "Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ \"schemaExportsAsTypes\": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand(\"Id\"))`) as an unused type under the `unused-types` rule, not as an unused export, so `\"unused-types\": \"off\"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand(\"Id\"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. A call of a function whose each `return` is a schema also counts (`export const User = makeUser()`), for a function of the same module or of an imported module. A conditional expression whose two branches are schemas (`flag ? Schema.String : Schema.Number`), a member of a namespace import (`Imported.makeUser()`), a call of a function that returns its schema argument (`identity(Schema.String)`), a member of a local `const` object or array literal (`schemas[0]`, `factories.make()`) and a destructured export of such a member also count. A call of a lowercase `Schema` member counts when its declared return type is a schema in effect 3 or effect 4 (`Schema.optional(...)`); decoders, encoders, guards and annotation ids such as `Schema.BrandSchemaId` do not. Default `false` leaves every report unchanged.",
       "$ref": "#/$defs/EffectConfig"
     },
     "boundaries": {
@@ -455,7 +467,7 @@
       "default": false
     },
     "includeEntryExports": {
-      "description": "When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (for example a misspelled `meatdata` in place of `metadata`) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.",
+      "description": "When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (for example a misspelled `meatdata` in place of `metadata`) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. A name that an entry file re-exports with `export *` needs an importer too: fallow reports an unused one at its declaration, and an `ignoreExports` rule on the entry file covers the names behind its `export *` lines. The setting also turns on the unused enum member, class member and namespace member checks for the exports that an entry file declares. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.",
       "type": "boolean",
       "default": false
     },
@@ -997,6 +1009,27 @@
           "default": false
         }
       }
+    },
+    "KeepExportTags": {
+      "description": "Value of the `keepExportTags` config key.\n\nThe default lists all four tags, so a tagged export never gets an\n`unused-export` finding. `[\"public\"]` makes fallow check `@internal`,\n`@alpha` and `@beta` exports like untagged exports.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/KeepExportTag"
+      }
+    },
+    "KeepExportTag": {
+      "description": "A JSDoc visibility tag name. A leading `@` is accepted. `public` also covers `@api public`.",
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "alpha",
+        "beta",
+        "@public",
+        "@internal",
+        "@alpha",
+        "@beta"
+      ]
     },
     "DuplicatesConfig": {
       "description": "Configuration for code duplication detection.",
@@ -1540,6 +1573,11 @@
           "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
           "type": "boolean",
           "default": true
+        },
+        "inlineThresholdOverrides": {
+          "description": "Whether `fallow-override-threshold-next-line` comments apply (default:\n`true`). Such a comment sets the health ceilings of the function on\nthe next line, as in\n`// fallow-override-threshold-next-line maxCognitive=40 -- reason`.\nSet to `false` to keep every exception in `thresholdOverrides`: each\ncomment then has no effect and the report lists it as `disabled`.",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false
@@ -1641,7 +1679,7 @@
       "type": "object",
       "properties": {
         "botPatterns": {
-          "description": "Glob patterns (matched against the author email local-part) that\nidentify bot or service-account commits to exclude from ownership\nsignals. Overrides the defaults entirely when set.",
+          "description": "Glob patterns that identify bot or service-account commits to exclude\nfrom ownership signals. A pattern matches the local part of the author\nemail or the full author value. Overrides the defaults entirely when set.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1823,6 +1861,11 @@
         },
         "unused-protected-class-members": {
           "description": "A `protected` class member that neither its class nor a subclass\nreads through `this` or `super`. Classes of the public API of a\npackage are not checked, because a consumer can subclass them.\nDefaults to `off`, so the default output does not change. Known\nlimits: a read through a string key (`this[\"member\"]()`) gives no\ncredit, and a constructor parameter property\n(`constructor(protected readonly x: X)`) is not checked.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "namespace-escapes": {
+          "description": "A namespace binding that the code uses as a whole value (a cast, a\ncall argument, a spread, a computed read, a re-export), so every\nexport of its target module gets credit and stays unchecked. The\nfinding is on the import of the binding. Defaults to `off`, so the\ndefault output does not change.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
@@ -2199,7 +2242,7 @@
       "type": "object",
       "properties": {
         "schemaExportsAsTypes": {
-          "description": "Report an unused exported Effect schema as an unused type, under the\n`unused-types` rule, and not as an unused export. An Effect schema\ndefines a runtime value and a type (`typeof User.Type`), so a team\nthat keeps exported types as contracts can keep schemas too. With\n`\"unused-types\": \"off\"`, fallow does not report them. A schema is a\nclass that extends a `Schema` class factory (`Schema.Class`,\n`Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,\n`Schema.Error`, `Schema.Opaque`), or a const whose\nvalue is a `Schema` constructor, member or pipe chain\n(`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand(\"Id\"))`).\nEach `pipe` argument must be a `Schema` transform, or a call of an\n`HttpApiSchema` transform such as `HttpApiSchema.status(201)`.\n`Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.\nDefault `false`.",
+          "description": "Report an unused exported Effect schema as an unused type, under the\n`unused-types` rule, and not as an unused export. An Effect schema\ndefines a runtime value and a type (`typeof User.Type`), so a team\nthat keeps exported types as contracts can keep schemas too. With\n`\"unused-types\": \"off\"`, fallow does not report them. A schema is a\nclass that extends a `Schema` class factory (`Schema.Class`,\n`Schema.TaggedClass`, `Schema.TaggedError`, `Schema.TaggedRequest`,\n`Schema.Error`, `Schema.Opaque`), or a const whose\nvalue is a `Schema` constructor, member or pipe chain\n(`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand(\"Id\"))`).\nEach `pipe` argument must be a `Schema` transform, or a call of an\n`HttpApiSchema` transform such as `HttpApiSchema.status(201)`.\nA const whose value is a call of a function is a schema when each\n`return` of the function is a schema (`const makeUser = () =>\nSchema.Struct({...})`, then `export const User = makeUser()`). The\nfunction can be in the same module or in an imported module. The\nexport of the function itself stays an unused export. A conditional\nexpression whose two branches are schemas, a member of a namespace\nimport, a call of a function that returns a schema argument, a member\nof a local `const` object or array literal, and a destructured export\nof such a member also count. A lowercase `Schema` member counts when\nits declared return type is a schema in effect 3 or effect 4\n(`Schema.optional(...)`, `Schema.mutable(...)`), and only as a call.\nDecoders, encoders, guards, filters and annotation ids do not count.\n`Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.\nDefault `false`.",
           "type": "boolean",
           "default": false
         }
@@ -2764,6 +2807,17 @@
         },
         "unused-protected-class-members": {
           "description": "Severity of the `unused-protected-class-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "namespace-escapes": {
+          "description": "Severity of the `namespace-escapes` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

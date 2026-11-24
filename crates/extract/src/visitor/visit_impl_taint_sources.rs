@@ -7,16 +7,17 @@ use fallow_types::extract::TaintedBinding;
 mod visit_env_reads;
 
 use super::super::{ModuleInfoExtractor, extract_destructured_names};
+use super::visit_security_sinks::canonical_call::CallForm;
 use super::{
     DIRECT_TAINT_HOP, FRAMEWORK_REQUEST_SOURCE, GRAPHQL_ARGS_SOURCE, MAX_TAINT_BINDING_HOPS,
     MAX_TAINTED_BINDINGS_PER_MODULE, MCP_TOOL_INPUT_SOURCE, NEXT_FORM_DATA_SOURCE,
     NEXT_REQUEST_SOURCE, QUEUE_JOB_SOURCE, TRPC_INPUT_SOURCE, apply_source_return_path,
     binding_source_path_candidates, callback_params, callee_method_name,
     collect_chained_taint_idents, destructure_source_path, extract_function_body_final_return_expr,
-    extract_object_pattern_bindings, flatten_callee_path, function_body_has_use_server,
-    function_like_params, is_framework_route_receiver_path, is_http_route_handler_name,
-    is_route_registration_method, is_trpc_procedure_callee, is_trpc_procedure_method,
-    last_callback_params, route_callback_params, source_returning_helper, unwrap_parens,
+    extract_object_pattern_bindings, function_body_has_use_server, function_like_params,
+    is_framework_route_receiver_path, is_http_route_handler_name, is_route_registration_method,
+    is_trpc_procedure_callee, is_trpc_procedure_method, last_callback_params,
+    route_callback_params, source_returning_helper, unwrap_parens,
 };
 
 /// The root operation types of a GraphQL schema.
@@ -440,7 +441,9 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_framework_callback_param_sources(&mut self, call: &CallExpression<'_>) {
-        let callee_path = flatten_callee_path(&call.callee);
+        let callee_path = self
+            .canonical_call(&call.callee, &call.arguments, CallForm::Call, call.span)
+            .map(|call| call.path);
         let Some(method) = callee_method_name(&call.callee, callee_path.as_deref()) else {
             return;
         };
@@ -480,10 +483,12 @@ impl ModuleInfoExtractor {
         &mut self,
         expr: &NewExpression<'_>,
     ) {
-        let Some(callee_path) = flatten_callee_path(&expr.callee) else {
+        let Some(call) =
+            self.canonical_call(&expr.callee, &expr.arguments, CallForm::New, expr.span)
+        else {
             return;
         };
-        if callee_path.rsplit('.').next() != Some("Worker") {
+        if call.method().unwrap_or(&call.path) != "Worker" {
             return;
         }
         if let Some(params) = expr.arguments.iter().skip(1).find_map(callback_params) {

@@ -369,6 +369,32 @@ test("public skill PR parity uses the exact base while push and candidate checks
     /working-directory: \$\{\{ github\.event_name == 'pull_request' && '\.fallow-skills-base' \|\| '\.' \}\}/u,
   );
   assert.match(job, /run: node scripts\/vendor-skills\.mjs --check/u);
+  const headWarning = job.match(
+    /- name: Warn when the pull request head needs the companion sync\n[\s\S]*?(?=\n\s+- name: )/u,
+  );
+  assert.ok(headWarning, "a pull request warns early about drift on its head");
+  assert.match(headWarning[0], /if: github\.event_name == 'pull_request'/u);
+  assert.doesNotMatch(headWarning[0], /working-directory:/u, "the warning checks the head tree");
+  assert.match(
+    headWarning[0],
+    /node scripts\/vendor-skills\.mjs --check \|\| status=\$\?\n\s+if \[ "\$status" -eq 1 \]; then\n\s+echo "::warning [^\n]*companion sync[^\n]*sync-skills-companion\.mjs --pin <merge commit>/u,
+    "head drift emits a warning with the sync command and does not fail the job",
+  );
+  assert.match(
+    headWarning[0],
+    /elif \[ "\$status" -ne 0 \]; then\n\s+echo "::warning [^\n]*could not run/u,
+    "a check error is not reported as drift",
+  );
+  assert.doesNotMatch(
+    headWarning[0],
+    /exit "?\$status"?\n/u,
+    "the warning step never fails the job",
+  );
+  assert.ok(
+    job.indexOf("Warn when the pull request head") <
+      job.indexOf("Check public skill matches the Fallow source contract"),
+    "the warning runs before the deciding base check",
+  );
   assert.match(job, /FALLOW_SKILLS_DIR: \$\{\{ github\.workspace \}\}\/\.fallow-skills-src/u);
   assert.doesNotMatch(job, /continue-on-error: true|contents: write|id-token: write/u);
   assert.match(aggregate, /needs: \[[^\n]*skills-vendor/u);
@@ -376,6 +402,181 @@ test("public skill PR parity uses the exact base while push and candidate checks
   assert.ok(rustPaths.includes("npm/fallow/skills/fallow-setup/**"));
   assert.match(lintJob, /run: CI=true npm run generate:contracts:check/u);
   assert.match(jsJob, /run: npm run check:agent-adapters/u);
+});
+
+/** The `run: |` script of the step `name` in `job`, without its indent. */
+const stepScript = (job, name) => {
+  const step = job.match(
+    new RegExp(
+      `- name: ${name}\\n[\\s\\S]*?run: \\|\\n([\\s\\S]*?)(?=\\n\\s+- (?:name|uses): |$)`,
+      "u",
+    ),
+  );
+  assert.ok(step, `missing step ${name}`);
+  return step[1].replace(/^ {10}/gmu, "");
+};
+
+test("the skills companion sync opens the companion pull request after a skill merge", () => {
+  const workflow = readWorkflow(".github/workflows/skills-companion-sync.yml");
+  const triggers = indentedBlock(workflow, "on", 0);
+  const prepare = indentedBlock(workflow, "prepare", 2);
+  const publish = indentedBlock(workflow, "publish", 2);
+  const step = (job, name) => {
+    const text = workflowSteps(job).find((candidate) => candidate.startsWith(`name: ${name}\n`));
+    assert.ok(text, `missing step ${name}`);
+    return text;
+  };
+
+  assert.match(triggers, /^  push:\n    branches: \[main\]\n    paths:\n/mu);
+  assert.deepEqual(
+    Array.from(indentedBlock(triggers, "  push", 0).matchAll(/^ {6}- (.+)$/gmu), (m) => m[1]),
+    [
+      "npm/fallow/skills/**",
+      "scripts/released-skills.mjs",
+      "scripts/sync-skills-companion.mjs",
+      "scripts/vendor-skills.mjs",
+      ".github/workflows/skills-companion-sync.yml",
+    ],
+  );
+  assert.doesNotMatch(triggers, /pull_request/u, "only a merged pin can be published");
+  assert.match(workflow, /^permissions: \{\}$/mu);
+  assert.match(
+    workflow,
+    /^concurrency:\n  group: skills-companion-sync-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false$/mu,
+  );
+  assert.deepEqual(
+    Array.from(indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([\w-]+):$/gmu), (m) => m[1]),
+    ["prepare", "publish"],
+  );
+  for (const job of [prepare, publish]) {
+    assert.match(job, /^ {4}permissions:\n {6}contents: read\n/mu);
+    assert.doesNotMatch(job, /^ {4}env:/mu);
+    assert.doesNotMatch(job, /GITHUB_ENV|GITHUB_PATH/u);
+    for (const uses of job.matchAll(/uses: ([^\s]+)/gu)) {
+      assert.match(uses[1], /@[0-9a-f]{40}$/u, `${uses[1]} must be pinned by SHA`);
+    }
+    assert.equal(
+      job.match(/persist-credentials: false/gu)?.length,
+      job.match(/uses: actions\/checkout@/gu)?.length,
+    );
+  }
+  assert.doesNotMatch(indentedBlock(workflow, "env", 0), /secrets\.|steps\./u);
+  assert.match(
+    prepare,
+    /if: github\.repository == 'fallow-rs\/fallow' && github\.ref == 'refs\/heads\/main'/u,
+  );
+
+  const credential = step(prepare, "Select the cross-repository credential");
+  assert.match(credential, /\n {10}APP_CLIENT_ID: \$\{\{ vars\.SKILLS_SYNC_APP_CLIENT_ID \}\}\n/u);
+  assert.match(
+    credential,
+    /\n {10}HAS_APP_KEY: \$\{\{ secrets\.SKILLS_SYNC_APP_PRIVATE_KEY != '' \}\}\n/u,
+  );
+  assert.match(credential, /\n {10}HAS_TOKEN: \$\{\{ secrets\.SKILLS_SYNC_TOKEN != '' \}\}\n/u);
+
+  // The prepare job runs companion code, so it may only test that a secret is set.
+  assert.equal(
+    prepare.match(/secrets\.[A-Z_]+/gu)?.join(","),
+    "secrets.SKILLS_SYNC_APP_PRIVATE_KEY,secrets.SKILLS_SYNC_TOKEN",
+  );
+  assert.doesNotMatch(prepare, /GH_TOKEN|create-github-app-token/u);
+  assert.match(
+    step(prepare, "Prepare the companion commit"),
+    /sync-skills-companion\.mjs --pin "\$GITHUB_SHA" --no-gpg-sign[\s\S]*bundle create "\$RUNNER_TEMP\/sync\.bundle" HEAD "\^\$before"/u,
+  );
+
+  // The publish job runs no repository code: no setup action, no node, python or npm.
+  assert.match(publish, /^ {4}needs: prepare$/mu);
+  assert.doesNotMatch(publish, /setup-node|setup-python|\bnode |\bpython3? |\bnpm |\bnpx /u);
+  const app = step(publish, "Create the GitHub App token");
+  assert.match(app, /client-id: \$\{\{ vars\.SKILLS_SYNC_APP_CLIENT_ID \}\}\n/u);
+  assert.match(app, /private-key: \$\{\{ secrets\.SKILLS_SYNC_APP_PRIVATE_KEY \}\}\n/u);
+  assert.match(app, /repositories: fallow-skills\n/u);
+  assert.match(app, /permission-contents: write\n\s+permission-pull-requests: write\s*$/u);
+  assert.doesNotMatch(app, /permission-workflows/u);
+
+  const open = step(publish, "Open or update the sync pull request");
+  assert.match(
+    open,
+    /GH_TOKEN: \$\{\{ steps\.app\.outputs\.token \|\| secrets\.SKILLS_SYNC_TOKEN \}\}/u,
+  );
+  assert.match(
+    open,
+    /if \[ "\$COMMITTED" != "true" \]; then[\s\S]*?gh pr close[\s\S]*?exit 0\n {10}fi/u,
+  );
+  assert.match(
+    open,
+    /safe_git\(\) \{ git -C companion -c core\.hooksPath=\/dev\/null -c core\.fsmonitor=false "\$@"; \}/u,
+  );
+  assert.doesNotMatch(
+    open.replace(/safe_git\(\) \{[^\n]*\}/u, ""),
+    /(^|[\s;(])git /mu,
+    "every git call goes through safe_git",
+  );
+  assert.match(open, /"\$\(safe_git rev-parse HEAD\)" != "\$BASE"/u);
+  assert.match(open, /"\$\(safe_git rev-parse FETCH_HEAD\)" != "\$COMMIT"/u);
+  assert.match(open, /"\$\(safe_git rev-parse FETCH_HEAD~1\)" != "\$BASE"/u);
+  assert.match(open, /commit --quiet --amend --reset-author --no-gpg-sign -s/u);
+  assert.match(open, /push --force --quiet "https:\/\/github\.com\/\$COMPANION_REPOSITORY\.git"/u);
+  assert.doesNotMatch(open, /x-access-token:\$\{?GH_TOKEN\}?@/u, "no token in a remote URL");
+});
+
+test("the skills companion sync passes with a notice when no credential is set", () => {
+  const workflow = readWorkflow(".github/workflows/skills-companion-sync.yml");
+  const prepare = indentedBlock(workflow, "prepare", 2);
+  const script = stepScript(prepare, "Select the cross-repository credential");
+  const dir = mkdtempSync(join(tmpdir(), "skills-sync-credential-"));
+  try {
+    const select = (env) => {
+      const output = join(dir, "output");
+      writeFileSync(output, "");
+      const result = runProcess("bash", ["-e", "-c", script], {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          GITHUB_OUTPUT: output,
+          GITHUB_SHA: "a".repeat(40),
+          COMPANION_REPOSITORY: "fallow-rs/fallow-skills",
+          APP_CLIENT_ID: "",
+          HAS_APP_KEY: "false",
+          HAS_TOKEN: "false",
+          ...env,
+        },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return { mode: readFileSync(output, "utf8").trim(), stdout: result.stdout };
+    };
+
+    const none = select({});
+    assert.equal(none.mode, "mode=none");
+    assert.match(
+      none.stdout,
+      /^::notice [^\n]*SKILLS_SYNC_APP_PRIVATE_KEY[^\n]*SKILLS_SYNC_TOKEN/mu,
+    );
+    assert.equal(select({ APP_CLIENT_ID: "Iv1.x", HAS_APP_KEY: "true" }).mode, "mode=app");
+    assert.equal(
+      select({ APP_CLIENT_ID: "Iv1.x", HAS_APP_KEY: "true", HAS_TOKEN: "true" }).mode,
+      "mode=app",
+    );
+    assert.equal(select({ HAS_TOKEN: "true" }).mode, "mode=token");
+    assert.equal(select({ APP_CLIENT_ID: "Iv1.x", HAS_TOKEN: "true" }).mode, "mode=token");
+    assert.equal(select({ APP_CLIENT_ID: "Iv1.x" }).mode, "mode=none");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Without a credential every later prepare step skips, and the publish job skips.
+  for (const text of workflowSteps(prepare).slice(1)) {
+    assert.match(
+      text,
+      /\n {8}if: steps\.(?:credential\.outputs\.mode != 'none'|sync\.outputs\.committed == 'true')\n/u,
+      text.split("\n")[0],
+    );
+  }
+  assert.match(
+    indentedBlock(workflow, "publish", 2),
+    /^ {4}if: needs\.prepare\.outputs\.mode != 'none' && needs\.prepare\.outputs\.mode != ''$/mu,
+  );
 });
 
 test("bundled skill validation uses the root lockfile without network fallback", () => {
@@ -2002,7 +2203,7 @@ test("the check job runs the end-to-end mutation tests instead of a skip", () =>
   // Without the env var, a missing install skips each test and CI stays green.
   assert.match(
     checkJob,
-    /FALLOW_MUTATION_E2E_REQUIRED: '1'\n\s+run: cargo nextest run --profile ci --workspace/u,
+    /FALLOW_MUTATION_E2E_REQUIRED: '1'\n\s+run: bash scripts\/hostile-host\.sh -- cargo nextest run --profile ci --workspace/u,
   );
   for (const file of [
     "tools/mutation-runner/src/companion.mjs",
@@ -3964,4 +4165,17 @@ test("release reads each platform package name from a path that Node resolves as
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the pull request title check lints the squash subject", () => {
+  const workflow = readWorkflow(".github/workflows/commitlint.yml");
+  const step = workflow.split("- name: Lint pull request title")[1]?.split("\n      - ")[0];
+  assert.ok(step, "commitlint.yml must lint the pull request title");
+  assert.match(step, /PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \}\}/u);
+  assert.match(step, /printf '%s \(#%s\)\\n' "\$PR_TITLE" "\$PR_NUMBER" \| npm run commitlint/u);
+  // With one commit, GitHub takes the commit subject as the squash subject.
+  assert.match(step, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
+  assert.match(step, /if \[ "\$PR_COMMITS" = "1" \]; then/u);
+  assert.match(step, /git log -1 --format=%s "\$PR_HEAD_SHA"/u);
+  assert.match(step, /printf '%s \(#%s\)\\n' "\$subject" "\$PR_NUMBER" \| npm run commitlint/u);
 });

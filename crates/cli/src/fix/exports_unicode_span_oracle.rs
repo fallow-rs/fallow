@@ -17,9 +17,10 @@ use super::*;
 
 const DEFAULT_SEED: u64 = 0x0001_f600;
 
-/// Leading whitespace. Each item except U+FEFF is whitespace for both
-/// JavaScript and `str::trim_start`. U+FEFF is JavaScript whitespace only,
-/// so the fix declines a line that starts with it.
+/// Leading whitespace. The parser decides whether a case is valid code: a
+/// line separator such as U+2028 ends a line comment, so the rest of that
+/// line is code and the file may not parse. The fix is made only for a file
+/// that parses.
 const INDENT: &[&str] = &[
     " ", "\t", "\u{a0}", "\u{3000}", "\u{2028}", "\u{2029}", "\u{1680}", "\u{2007}", "\u{202f}",
     "\u{205f}", "\u{feff}",
@@ -94,7 +95,6 @@ fn joined(set: &'static [&'static str], len: std::ops::Range<usize>) -> BoxedStr
 struct Case {
     lines: Vec<String>,
     target: usize,
-    indent: String,
     name: String,
     bom: bool,
     line_ending: &'static str,
@@ -125,7 +125,6 @@ fn case() -> impl Strategy<Value = Case> {
                 Case {
                     lines,
                     target,
-                    indent,
                     name,
                     bom,
                     line_ending,
@@ -190,19 +189,36 @@ fn check(case: &Case) -> Result<(), TestCaseError> {
     prop_assert!(outcome.failed.is_empty(), "the fix plan failed to commit");
 
     let actual = std::fs::read_to_string(&path).map_err(setup_error)?;
-    if fixes.is_empty() {
-        prop_assert!(
-            !case.indent.chars().all(char::is_whitespace),
-            "no fix for {:?}",
-            case.lines[case.target]
-        );
+    let parses = fallow_engine::source_edits::SourceEditIndex::parse(&path, analysed).is_some();
+    if !parses {
+        prop_assert!(fixes.is_empty(), "a fix for a file that does not parse");
         prop_assert_eq!(actual, original, "a declined fix changed the file");
         return Ok(());
     }
+    prop_assert!(
+        !fixes.is_empty(),
+        "no fix for {:?}",
+        case.lines[case.target]
+    );
     let mut expected_lines = case.lines.clone();
     expected_lines[case.target] = expected_lines[case.target].replacen("export ", "", 1);
     prop_assert_eq!(actual, file_text(case, &expected_lines));
     Ok(())
+}
+
+#[test]
+fn the_oracle_sees_a_parsed_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("module.ts");
+    let source = "export const helper = 1;\n";
+    std::fs::write(&path, source).unwrap();
+    assert!(fallow_engine::source_edits::SourceEditIndex::parse(&path, source).is_some());
+    let (_, fixes) = super::tests::fix_single(dir.path(), &path, "helper", 1, false);
+    assert_eq!(fixes.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "const helper = 1;\n"
+    );
 }
 
 proptest! {

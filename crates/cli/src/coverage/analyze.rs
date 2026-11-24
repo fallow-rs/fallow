@@ -2,8 +2,6 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
-use std::process::Command;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -160,10 +158,10 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         Ok(result) => result,
         Err(code) => return code,
     };
-    let Some(report) = result.report.runtime_coverage else {
+    let Some(report) = result.report.runtime_coverage.as_ref() else {
         return emit_input_error("runtime coverage report was not produced", ctx.output);
     };
-    print_runtime_report(&report, ctx, result.elapsed, args)
+    print_runtime_report(report, ctx, result.elapsed, args)
 }
 
 pub fn benchmark_local_json(
@@ -2048,20 +2046,18 @@ mod tests {
     #[test]
     fn resolve_repo_infers_origin_remote() {
         let dir = tempfile::TempDir::new().expect("temp dir should be created");
-        let init = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+        let init = fallow_engine::git_fixture::fixture_git_command(dir.path())
             .args(["init", "-b", "main"])
-            .current_dir(dir.path())
             .output()
             .expect("git init should run");
         assert!(init.status.success());
-        let remote = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
+        let remote = fallow_engine::git_fixture::fixture_git_command(dir.path())
             .args([
                 "remote",
                 "add",
                 "origin",
                 "git@github.com:fallow-rs/fallow.git",
             ])
-            .current_dir(dir.path())
             .output()
             .expect("git remote add should run");
         assert!(remote.status.success());

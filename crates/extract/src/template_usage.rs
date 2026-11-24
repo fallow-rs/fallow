@@ -1,4 +1,4 @@
-use fallow_types::extract::{SinkArgKind, SinkShape, SinkSite};
+use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkShape, SinkSite};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     BinaryOperator, CallExpression, Expression, ObjectExpression, ObjectPropertyKind, Statement,
@@ -9,8 +9,82 @@ use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::MemberAccess;
 use crate::visitor::ModuleInfoExtractor;
+use crate::{MemberAccess, ModuleInfo};
+
+/// The bindings that the script pass of a component declares and that its
+/// markup can call. The template-visible imports and bound targets reach the
+/// snippet scan as their own parameters; this context adds the bindings that
+/// the visitor needs to read a call in markup the same way as in script.
+#[derive(Debug, Default, Clone)]
+pub struct ScriptBindingContext {
+    /// Svelte `createEventDispatcher()` bindings.
+    pub(crate) event_dispatch_bindings: FxHashSet<String>,
+    /// Vue emit bindings: the `defineEmits()` return binding and `$emit`.
+    pub(crate) emit_bindings: FxHashSet<String>,
+    /// Script constants with a literal value (`const cmd = "ls"`). A security
+    /// sink in markup reads such an argument as a literal, as in script.
+    pub(crate) static_sink_literals: FxHashMap<String, SinkLiteralValue>,
+}
+
+impl ScriptBindingContext {
+    /// Whether `snippet` names a dispatch or emit binding of the context.
+    fn names_event_binding(&self, snippet: &str) -> (bool, bool) {
+        (
+            self.event_dispatch_bindings
+                .iter()
+                .any(|name| snippet.contains(name.as_str())),
+            self.emit_bindings
+                .iter()
+                .any(|name| snippet.contains(name.as_str())),
+        )
+    }
+}
+
+/// The module of a component while its markup snippets merge into it. Each
+/// snippet extractor merges through [`ModuleInfoExtractor::merge_into`], the
+/// same merge that the script blocks use. A markup snippet has no source
+/// position of its own, so each of its spans moves to `anchor`, the start of
+/// the markup tag that holds the snippet.
+#[derive(Debug, Clone)]
+pub struct MarkupFactSink {
+    context: std::sync::Arc<ScriptBindingContext>,
+    module: Box<ModuleInfo>,
+    anchor: u32,
+    /// The snippets that merged, by anchor and text. The Svelte scanner reads
+    /// the `{...}` of an attribute both as a brace section of the tag and as
+    /// the attribute value. The usage fields are sets, so a second read
+    /// changes nothing there, but a fact list such as the dispatched events
+    /// must get each snippet once.
+    absorbed: FxHashSet<(u32, String)>,
+}
+
+impl MarkupFactSink {
+    /// A snippet that does not parse can hide a dispatch or emit call. When it
+    /// names a dispatch or emit binding, the component abstains, as for a call
+    /// with no literal event name.
+    fn abstain_on_unparsed(&mut self, snippet: &str) {
+        let (dispatch, emit) = self.context.names_event_binding(snippet);
+        self.module.has_dynamic_dispatch |= dispatch;
+        self.module.has_dynamic_emit |= emit;
+    }
+
+    /// Whether the snippet `text` at the current anchor merges for the first time.
+    fn first_absorb(&mut self, text: &str) -> bool {
+        self.absorbed.insert((self.anchor, text.to_string()))
+    }
+
+    fn absorb(&mut self, mut extractor: ModuleInfoExtractor) {
+        extractor.clear_script_only_facts();
+        let anchor = self.anchor;
+        extractor.remap_spans_with(|_| oxc_span::Span::new(anchor, anchor));
+        let dispatch_base = self.module.svelte_dispatched_events.len();
+        extractor.merge_into(&mut self.module);
+        for event in &mut self.module.svelte_dispatched_events[dispatch_base..] {
+            event.span_start = anchor;
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct TemplateUsage {
@@ -20,10 +94,47 @@ pub struct TemplateUsage {
     /// PascalCase tag names that matched no import or local binding.
     pub(crate) unresolved_tag_names: FxHashSet<String>,
     pub(crate) security_sinks: Vec<SinkSite>,
+    /// The component module that the markup snippet facts merge into. `None`
+    /// for a scan that keeps only the usage fields above.
+    markup: Option<Box<MarkupFactSink>>,
 }
 
 impl TemplateUsage {
-    pub(crate) fn merge(&mut self, other: Self) {
+    /// A usage scan whose markup snippets merge all their facts into `module`.
+    pub(crate) fn with_markup_sink(context: ScriptBindingContext, module: ModuleInfo) -> Self {
+        Self {
+            markup: Some(Box::new(MarkupFactSink {
+                context: std::sync::Arc::new(context),
+                module: Box::new(module),
+                anchor: 0,
+                absorbed: FxHashSet::default(),
+            })),
+            ..Self::default()
+        }
+    }
+
+    /// Move the markup sink of `other` into this usage. A scanner that starts
+    /// a nested usage takes the sink first and gives it back with this call.
+    pub(crate) fn take_markup_sink_from(&mut self, other: &mut Self) {
+        if self.markup.is_none() {
+            self.markup = other.markup.take();
+        }
+    }
+
+    /// Set the source offset of the markup tag that holds the next snippets.
+    pub(crate) fn set_markup_anchor(&mut self, offset: usize) {
+        if let Some(sink) = self.markup.as_mut() {
+            sink.anchor = u32::try_from(offset).unwrap_or(u32::MAX);
+        }
+    }
+
+    /// Give back the component module with the markup snippet facts merged.
+    pub(crate) fn take_markup_module(&mut self) -> Option<ModuleInfo> {
+        self.markup.take().map(|sink| *sink.module)
+    }
+
+    pub(crate) fn merge(&mut self, mut other: Self) {
+        self.take_markup_sink_from(&mut other);
         self.used_bindings.extend(other.used_bindings);
         self.unresolved_tag_names.extend(other.unresolved_tag_names);
         self.security_sinks.extend(other.security_sinks);
@@ -64,7 +175,8 @@ pub enum TemplateSnippetKind {
     Statement,
 }
 
-pub fn analyze_template_snippet(
+#[cfg(test)]
+fn analyze_template_snippet(
     snippet: &str,
     kind: TemplateSnippetKind,
     imported_bindings: &FxHashSet<String>,
@@ -81,7 +193,8 @@ pub fn analyze_template_snippet(
     )
 }
 
-pub fn analyze_template_snippet_with_bound_targets(
+#[cfg(test)]
+fn analyze_template_snippet_with_bound_targets(
     snippet: &str,
     kind: TemplateSnippetKind,
     imported_bindings: &FxHashSet<String>,
@@ -89,38 +202,85 @@ pub fn analyze_template_snippet_with_bound_targets(
     locals: &[String],
     allow_dollar_prefixed_refs: bool,
 ) -> TemplateUsage {
-    let snippet = snippet.trim();
-    if snippet.is_empty() || (imported_bindings.is_empty() && bound_targets.is_empty()) {
-        return TemplateUsage::default();
+    let mut usage = TemplateUsage::default();
+    analyze_template_snippet_into(
+        &mut usage,
+        &TemplateSnippet {
+            source: snippet,
+            kind,
+            imported_bindings,
+            bound_targets,
+            locals,
+            allow_dollar_prefixed_refs,
+        },
+    );
+    usage
+}
+
+/// One markup snippet and the template-visible names it can read.
+pub struct TemplateSnippet<'a> {
+    pub(crate) source: &'a str,
+    pub(crate) kind: TemplateSnippetKind,
+    pub(crate) imported_bindings: &'a FxHashSet<String>,
+    pub(crate) bound_targets: &'a FxHashMap<String, String>,
+    pub(crate) locals: &'a [String],
+    pub(crate) allow_dollar_prefixed_refs: bool,
+}
+
+/// Analyze one markup snippet into `usage`. With a markup sink, the snippet
+/// extractor starts from the script binding context of the component, and
+/// every fact that is not script-only merges into the component module.
+/// Without a sink, only the usage fields of [`TemplateUsage`] are kept.
+pub fn analyze_template_snippet_into(usage: &mut TemplateUsage, input: &TemplateSnippet<'_>) {
+    let snippet = input.source.trim();
+    let has_sink = usage.markup.is_some();
+    if snippet.is_empty()
+        || (!has_sink && input.imported_bindings.is_empty() && input.bound_targets.is_empty())
+    {
+        return;
     }
 
-    let wrapped = wrap_snippet(snippet, kind, locals);
+    let wrapped = wrap_snippet(snippet, input.kind, input.locals);
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
 
     let semantic_ret = SemanticBuilder::new().build(&parser_return.program);
     let (used_bindings, unresolved_targets) = classify_unresolved_references(
         &semantic_ret,
-        imported_bindings,
-        bound_targets,
-        allow_dollar_prefixed_refs,
+        input.imported_bindings,
+        input.bound_targets,
+        input.allow_dollar_prefixed_refs,
     );
 
-    if unresolved_targets.is_empty() {
-        return TemplateUsage::default();
+    if unresolved_targets.is_empty() && !has_sink {
+        return;
     }
 
     let mut extractor = ModuleInfoExtractor::new();
+    if let Some(sink) = usage.markup.as_mut() {
+        if parser_return.fatal_error || !parser_return.diagnostics.is_empty() {
+            sink.abstain_on_unparsed(snippet);
+        }
+        extractor.use_script_binding_context(std::sync::Arc::clone(&sink.context), input.locals);
+    }
     extractor.register_template_object_locals(used_bindings.iter().cloned());
     extractor.visit_program(&parser_return.program);
 
-    build_template_usage(
+    let member_accesses = std::mem::take(&mut extractor.member_accesses);
+    let whole_object_uses = std::mem::take(&mut extractor.whole_object_uses);
+    if let Some(sink) = usage.markup.as_mut()
+        && sink.first_absorb(snippet)
+    {
+        sink.absorb(extractor);
+    }
+    usage.merge(build_template_usage(
         used_bindings,
         &unresolved_targets,
-        bound_targets,
-        allow_dollar_prefixed_refs,
-        extractor,
-    )
+        input.bound_targets,
+        input.allow_dollar_prefixed_refs,
+        member_accesses,
+        whole_object_uses,
+    ));
 }
 
 /// Split a parsed snippet's root unresolved references into the imported
@@ -169,13 +329,13 @@ fn build_template_usage(
     unresolved_targets: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
     allow_dollar_prefixed_refs: bool,
-    extractor: ModuleInfoExtractor,
+    member_accesses: Vec<MemberAccess>,
+    whole_object_uses: Vec<String>,
 ) -> TemplateUsage {
     TemplateUsage {
         used_bindings,
         member_accesses: dedup_member_accesses(
-            extractor
-                .member_accesses
+            member_accesses
                 .into_iter()
                 .filter_map(|access| {
                     remap_object_name(
@@ -192,8 +352,7 @@ fn build_template_usage(
                 .collect(),
         ),
         whole_object_uses: dedup_names(
-            extractor
-                .whole_object_uses
+            whole_object_uses
                 .into_iter()
                 .filter_map(|name| {
                     remap_object_name(
@@ -207,13 +366,14 @@ fn build_template_usage(
         ),
         unresolved_tag_names: FxHashSet::default(),
         security_sinks: Vec::new(),
+        markup: None,
     }
 }
 
 /// Collect both unresolved identifier references AND static member-access chains
 /// (`obj.member`) where `obj` is unresolved.
 ///
-/// Unlike [`analyze_template_snippet`], this does NOT filter against imported bindings.
+/// Unlike `analyze_template_snippet`, this does NOT filter against imported bindings.
 /// Returns `(identifiers, member_accesses)`. Used by the Angular template scanner
 /// for external templates where unresolved identifiers are potential component
 /// class member refs and member-access chains (`dataService.getTotal()`) must

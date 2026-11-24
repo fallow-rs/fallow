@@ -75,6 +75,7 @@ macro_rules! with_baseline_fields {
             unused_store_members,
             unused_namespace_members,
             unused_protected_class_members,
+            namespace_escapes,
             unprovided_injects,
             unrendered_components,
             unused_component_props,
@@ -125,19 +126,22 @@ mod install_state;
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
 mod caller_review_keys;
 mod health_categories;
-pub(crate) use health_categories::filter_new_health_findings;
 use health_categories::{
     FileLengthCounting, HEALTH_FINDING_DIMENSIONS, HealthFindingCategory, health_finding_counts,
-    health_overlap_entry_count, severity_counts_for_dimension, severity_index,
+    severity_counts_for_dimension, severity_index,
 };
+mod health_match;
+#[cfg(test)]
+pub(crate) use health_match::filter_new_health_findings;
+use health_match::{HealthMatch, match_health_baseline, match_severity_slots};
 mod identity_counts;
-use identity_counts::identity_counts_with_placeholder_allowance;
 
 #[cfg(test)]
 mod legacy_key_builders;
 use caller_review_keys::{absent_component_prop_baseline_keys, constant_parameter_baseline_keys};
 mod prune;
 mod saved_scope;
+mod stale_advice;
 #[cfg(test)]
 use legacy_key_builders::{
     baseline_catalog_keys, baseline_dependency_keys, baseline_file_export_keys,
@@ -398,23 +402,6 @@ pub enum BaselineKind {
 }
 
 impl BaselineKind {
-    /// The command that removes only the stale entries of the baseline at
-    /// `path`, in the mode that the file records. A prune in another mode
-    /// refuses the file.
-    #[must_use]
-    pub fn prune_command(self, path: &Path, mode: fallow_output::BaselineMode) -> String {
-        // The prune flags resolve a relative path against the project root,
-        // while `--baseline` resolves it against the working directory. An
-        // absolute path names the same file in both.
-        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        let quoted = crate::shell_quote::shell_quote(&absolute.display().to_string());
-        format!(
-            "fallow baselines prune{} --{}-baseline {quoted}",
-            mode.flags(),
-            self.as_str()
-        )
-    }
-
     /// The token this kind is written as, which is also the command to run.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -631,6 +618,9 @@ pub struct BaselineData {
     /// Unused protected class members, keyed by `file:parent.member`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     unused_protected_class_members: Vec<String>,
+    /// Namespace escapes, keyed by the canonical finding identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    namespace_escapes: Vec<String>,
     /// Unprovided injects, keyed by `file:key_name`.
     #[serde(default)]
     unprovided_injects: Vec<String>,
@@ -840,6 +830,7 @@ impl BaselineData {
             unused_store_members: member_imports.unused_store_members,
             unused_namespace_members: member_imports.unused_namespace_members,
             unused_protected_class_members: member_imports.unused_protected_class_members,
+            namespace_escapes: Vec::new(),
             unprovided_injects: member_imports.unprovided_injects,
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
@@ -907,6 +898,7 @@ impl BaselineData {
             + self.unused_store_members.len()
             + self.unused_namespace_members.len()
             + self.unused_protected_class_members.len()
+            + self.namespace_escapes.len()
             + self.unprovided_injects.len()
             + self.unrendered_components.len()
             + self.unused_component_props.len()
@@ -1151,26 +1143,6 @@ struct BaselineDependencyKeys {
     type_only: Vec<String>,
     test_only: Vec<String>,
     dev_in_prod: Vec<String>,
-}
-
-#[cfg(test)]
-struct BaselineGraphKeys {
-    circular_dependencies: Vec<String>,
-    re_export_cycles: Vec<String>,
-    package_cycles: Vec<String>,
-    boundary_violations: Vec<String>,
-    boundary_coverage_violations: Vec<String>,
-    boundary_call_violations: Vec<String>,
-    policy_violations: Vec<String>,
-}
-
-#[cfg(test)]
-struct BaselineCatalogKeys {
-    unused_catalog_entries: Vec<String>,
-    empty_catalog_groups: Vec<String>,
-    unresolved_catalog_references: Vec<String>,
-    unused_dependency_overrides: Vec<String>,
-    misconfigured_dependency_overrides: Vec<String>,
 }
 
 /// Generate a stable key for a boundary violation: `from_path->to_path`.
@@ -1975,7 +1947,6 @@ pub struct DuplicationBaselineData {
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     kind: Option<BaselineKind>,
     /// `production` when the saving run used production mode, absent otherwise.
-    /// Only `fallow baselines prune` reads it, through [`saved_scope_reasons`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     scope_reasons: Vec<String>,
     /// Legacy clone group keys: sorted list of `file:start-end` per group.
@@ -2147,8 +2118,8 @@ pub fn filter_new_clone_groups(
 
 /// Recompute duplication statistics after filtering (baseline or `--changed-since`).
 ///
-/// Uses per-file line deduplication (matching `compute_stats` in `detect.rs`)
-/// so overlapping clone instances don't inflate the duplicated line count.
+/// Covered lines are the union of the line ranges of each file, so
+/// overlapping clone instances do not count a line two times.
 pub fn recompute_stats(report: &DuplicationReport) -> crate::duplicates::DuplicationStats {
     crate::duplicates::recompute_stats(report)
 }
@@ -2173,7 +2144,6 @@ pub struct HealthBaselineData {
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub(crate) kind: Option<BaselineKind>,
     /// `production` when the saving run used production mode, absent otherwise.
-    /// Only `fallow baselines prune` reads it, through [`saved_scope_reasons`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) scope_reasons: Vec<String>,
     /// Legacy health baseline keys: `relative_path:function_name:line`.
@@ -2330,54 +2300,6 @@ impl HealthBaselineData {
             HealthBaselineMode::Identity => &self.identity_finding_counts,
         }
     }
-
-    pub(crate) fn overlap_entries(
-        &self,
-        findings: &[fallow_output::ComplexityViolation],
-        root: &Path,
-        mode: HealthBaselineMode,
-    ) -> HealthBaselineOverlap {
-        let baseline_counts = self.counts_for(mode);
-        if baseline_counts.is_empty() {
-            let baseline_keys: FxHashSet<&str> = self.findings.iter().map(String::as_str).collect();
-            HealthBaselineOverlap {
-                matched_entries: findings
-                    .iter()
-                    .filter(|finding| {
-                        baseline_keys.contains(health_finding_key(finding, root).as_str())
-                    })
-                    .count(),
-                moved_entries: 0,
-            }
-        } else {
-            let current_counts =
-                health_finding_counts(findings, root, mode, self.file_length_counting());
-            let direct = health_overlap_entry_count(&current_counts, baseline_counts);
-            if mode != HealthBaselineMode::Identity {
-                return HealthBaselineOverlap {
-                    matched_entries: direct,
-                    moved_entries: 0,
-                };
-            }
-            // `moved_entries` counts only followed file moves, so the overlap
-            // is computed before and after the placeholder transfer.
-            let moved = identity_counts_with_move_tolerance(baseline_counts, &current_counts, root);
-            let moved_matched = moved.as_ref().map_or(direct, |counts| {
-                health_overlap_entry_count(&current_counts, counts)
-            });
-            let matched = identity_counts_with_placeholder_allowance(
-                moved.as_ref().unwrap_or(baseline_counts),
-                &current_counts,
-            )
-            .map_or(moved_matched, |counts| {
-                health_overlap_entry_count(&current_counts, &counts)
-            });
-            HealthBaselineOverlap {
-                matched_entries: matched,
-                moved_entries: moved_matched.saturating_sub(direct),
-            }
-        }
-    }
 }
 
 /// Baseline entry overlap for one run, split so followed file moves stay
@@ -2488,53 +2410,6 @@ fn moved_identity_bucket_remaps(
         .filter(|(_, candidate)| claims.get(candidate) == Some(&1))
         .map(|(old, new)| (old.to_string(), new.to_string()))
         .collect()
-}
-
-/// A current identity bucket with a function name: the key and its counts.
-type NamedBucket<'a> = (&'a String, &'a BTreeMap<String, HealthBaselineCount>);
-
-fn bucket_category_count(counts: &HealthFindingCountMap, key: &str, category: &str) -> usize {
-    counts
-        .get(key)
-        .and_then(|bucket| bucket.get(category))
-        .map_or(0, |entry| entry.count)
-}
-
-/// Baseline identity counts after file-move tolerance and the placeholder
-/// allowance transfer. Returns `None` when neither changes the baseline.
-fn effective_identity_counts(
-    baseline_counts: &HealthFindingCountMap,
-    current_counts: &HealthFindingCountMap,
-    root: &Path,
-) -> Option<HealthFindingCountMap> {
-    let moved = identity_counts_with_move_tolerance(baseline_counts, current_counts, root);
-    identity_counts_with_placeholder_allowance(
-        moved.as_ref().unwrap_or(baseline_counts),
-        current_counts,
-    )
-    .or(moved)
-}
-
-/// Baseline identity counts with retired buckets re-keyed to moved files.
-///
-/// Returns `None` when no bucket qualifies, so callers can keep borrowing the
-/// original map.
-fn identity_counts_with_move_tolerance(
-    baseline_counts: &HealthFindingCountMap,
-    current_counts: &HealthFindingCountMap,
-    root: &Path,
-) -> Option<HealthFindingCountMap> {
-    let remaps = moved_identity_bucket_remaps(baseline_counts, current_counts, root);
-    if remaps.is_empty() {
-        return None;
-    }
-    let mut remapped = baseline_counts.clone();
-    for (old_key, new_key) in remaps {
-        if let Some(entry) = remapped.remove(&old_key) {
-            remapped.insert(new_key, entry);
-        }
-    }
-    Some(remapped)
 }
 
 fn runtime_coverage_finding_key(

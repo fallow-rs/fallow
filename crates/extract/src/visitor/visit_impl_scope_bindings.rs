@@ -491,8 +491,10 @@ impl ModuleInfoExtractor {
         {
             return None;
         }
+        let key = static_enum_member_key(object.name.as_str(), member);
         self.module_static_sink_literals
-            .get(&static_enum_member_key(object.name.as_str(), member))
+            .get(&key)
+            .or_else(|| self.markup.sink_literal(&key, object.name.as_str()))
             .cloned()
     }
 
@@ -518,8 +520,10 @@ impl ModuleInfoExtractor {
             Expression::Identifier(ident)
                 if !self.sink_literal_name_is_shadowed(ident.name.as_str()) =>
             {
+                let name = ident.name.as_str();
                 self.module_static_sink_literals
-                    .get(ident.name.as_str())
+                    .get(name)
+                    .or_else(|| self.markup.sink_literal(name, name))
                     .cloned()
             }
             Expression::StaticMemberExpression(member) => {

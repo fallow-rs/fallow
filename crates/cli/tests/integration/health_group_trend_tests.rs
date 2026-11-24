@@ -845,6 +845,45 @@ fn human_group_table_shows_critical_and_trend_columns() {
 }
 
 #[test]
+fn incompatible_trend_names_the_snapshot_and_current_mode_for_repair() {
+    let dir = crate::common::copy_fixture("complexity-project");
+    std::fs::write(dir.path().join("tsconfig.json"), r#"{"include":["src"]}"#).unwrap();
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{"typeAware":{"enabled":true}}"#,
+    )
+    .unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let root = root.to_str().unwrap();
+    let quoted_root = fallow_engine::shell_quote::shell_quote(root);
+    let snapshot = dir.path().join("health baseline.json");
+    let path = snapshot.to_str().unwrap();
+    let quoted = fallow_engine::shell_quote::shell_quote(path);
+    for (previous, current) in [
+        ("--type-aware", "--no-type-aware"),
+        ("--no-type-aware", "--type-aware"),
+    ] {
+        let run = |mode, action| {
+            crate::common::run_fallow_raw_with_type_aware_sidecar(&[
+                "health", "--root", root, mode, action, path, "--quiet",
+            ])
+        };
+        let saved = run(previous, "--save-snapshot");
+        assert!(matches!(saved.code, 0 | 1), "{}", saved.stderr);
+        let trend = run(current, "--trend-from");
+        assert_eq!(trend.code, 2, "{}", trend.stderr);
+
+        assert!(
+            trend.stderr.contains(&format!(
+                "--root {quoted_root} {current} --save-snapshot {quoted}`"
+            )),
+            "{}",
+            trend.stderr
+        );
+    }
+}
+
+#[test]
 fn trend_from_a_missing_file_is_invalid_input() {
     let dir = project();
     let output = run_fallow_in_root(

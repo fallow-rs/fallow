@@ -76,6 +76,10 @@ pub enum Command {
         #[arg(long, help_heading = "Issue types")]
         unused_protected_class_members: bool,
 
+        /// Only report namespace imports that the code uses as a whole value (enables this rule)
+        #[arg(long, help_heading = "Issue types")]
+        namespace_escapes: bool,
+
         /// Only report unprovided injects
         #[arg(long, help_heading = "Issue types")]
         unprovided_injects: bool,
@@ -988,7 +992,8 @@ pub enum Command {
         min_commits: Option<u32>,
 
         /// Save a vital signs snapshot for trend tracking.
-        /// Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given.
+        /// Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given,
+        /// with a `-2`, `-3` suffix when a snapshot of the same second exists.
         /// A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory.
         /// Forces file-scores, hotspot, and score computation for complete metrics.
         #[expect(

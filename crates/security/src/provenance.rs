@@ -34,9 +34,10 @@ pub enum ProvenanceBindings {
 /// Rows that must bind the provenance import to the leading identifier of the
 /// callee path. A module that only imports the source is not sufficient for
 /// these rows (the `child_process.fork()` precedent).
-const BINDING_TRACE_ROWS: [&str; 9] = [
+const BINDING_TRACE_ROWS: [&str; 10] = [
     "command-injection",
     "permissive-cors",
+    "react-router-open-redirect",
     "electron-unsafe-webpreferences",
     "insecure-temp-file",
     "jwt-alg-none",

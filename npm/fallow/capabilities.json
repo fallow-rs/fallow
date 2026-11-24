@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.45.0",
+  "version": "3.48.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -764,6 +764,16 @@
           "type": "bool",
           "required": false,
           "description": "Only report unused protected class members",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--namespace-escapes",
+          "type": "bool",
+          "required": false,
+          "description": "Only report namespace imports that the code uses as a whole value (enables this rule)",
           "possible_values": [
             "true",
             "false"
@@ -2321,7 +2331,7 @@
           "name": "--save-snapshot",
           "type": "string",
           "required": false,
-          "description": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory. Forces file-scores, hotspot, and score computation for complete metrics"
+          "description": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given, with a `-2`, `-3` suffix when a snapshot of the same second exists. A given path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory. Forces file-scores, hotspot, and score computation for complete metrics"
         },
         {
           "name": "--trend",
@@ -3393,7 +3403,7 @@
       "description": "Production dependency only used via type-only imports",
       "label": "Type-Only Dependencies",
       "config_key": "type-only-dependencies",
-      "registry_index": 19,
+      "registry_index": 20,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unused-deps",
@@ -3431,7 +3441,7 @@
       "description": "Production dependency only imported by test files",
       "label": "Test-Only Dependencies",
       "config_key": "test-only-dependencies",
-      "registry_index": 20,
+      "registry_index": 21,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unused-deps",
@@ -3469,7 +3479,7 @@
       "description": "devDependency imported by production code with a runtime import",
       "label": "Dev Dependencies Used in Production",
       "config_key": "dev-dependencies-in-production",
-      "registry_index": 21,
+      "registry_index": 22,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unused-deps",
@@ -3583,7 +3593,7 @@
       "description": "Store member is never accessed by any consumer",
       "label": "Unused Store Members",
       "config_key": "unused-store-members",
-      "registry_index": 13,
+      "registry_index": 14,
       "aliases": [
         "unused-store-members"
       ],
@@ -3656,6 +3666,46 @@
       "docs_url": "https://fallow.tools/docs/rules/unused-protected-class-member/"
     },
     {
+      "id": "namespace-escape",
+      "rule_id": "fallow/namespace-escape",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Namespace binding is used as a whole value, so its exports are not checked",
+      "label": "Namespace Escapes",
+      "config_key": "namespace-escapes",
+      "registry_index": 12,
+      "aliases": [
+        "namespace-escapes"
+      ],
+      "lsp": true,
+      "filter_flag": "--namespace-escapes",
+      "deprecated_filter_flag": null,
+      "result_key": "namespace_escapes",
+      "summary_label": "Namespace escapes",
+      "summary_docs_anchor": "namespace-escapes",
+      "sarif_rule_ids": [
+        "fallow/namespace-escape"
+      ],
+      "codeclimate_check_names": [
+        "fallow/namespace-escape"
+      ],
+      "ts_alias": {
+        "name": "NamespaceEscape",
+        "parent": "NamespaceEscapeFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line namespace-escape",
+      "default_severity": "off",
+      "opt_in": true,
+      "frameworks": [],
+      "note": "Opt-in coverage check of unused exports; the rule defaults to off",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/namespace-escape/"
+    },
+    {
       "id": "unused-namespace-member",
       "rule_id": "fallow/unused-namespace-member",
       "command": "dead-code",
@@ -3663,7 +3713,7 @@
       "description": "Namespace member is never referenced",
       "label": "Unused Namespace Members",
       "config_key": "unused-namespace-members",
-      "registry_index": 12,
+      "registry_index": 13,
       "aliases": [
         "unused-namespace-members"
       ],
@@ -3703,7 +3753,7 @@
       "description": "Import could not be resolved",
       "label": "Unresolved Imports",
       "config_key": "unresolved-imports",
-      "registry_index": 14,
+      "registry_index": 15,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unresolved-imports",
@@ -3741,7 +3791,7 @@
       "description": "Dependency used but not in package.json",
       "label": "Unlisted Dependencies",
       "config_key": "unlisted-dependencies",
-      "registry_index": 15,
+      "registry_index": 16,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unlisted-deps",
@@ -3779,7 +3829,7 @@
       "description": "Binary used but provided by no installed package",
       "label": "Unlisted Binaries",
       "config_key": "unlisted-binaries",
-      "registry_index": 16,
+      "registry_index": 17,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unlisted-binaries",
@@ -3817,7 +3867,7 @@
       "description": "Export name appears in multiple modules",
       "label": "Duplicate Exports",
       "config_key": "duplicate-exports",
-      "registry_index": 17,
+      "registry_index": 18,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--duplicate-exports",
@@ -3855,7 +3905,7 @@
       "description": "One module exports one binding under two or more names",
       "label": "Duplicate Export Aliases",
       "config_key": "duplicate-export-aliases",
-      "registry_index": 18,
+      "registry_index": 19,
       "aliases": [
         "duplicate-export-aliases"
       ],
@@ -3895,7 +3945,7 @@
       "description": "Circular dependency chain detected",
       "label": "Circular Dependencies",
       "config_key": "circular-dependencies",
-      "registry_index": 22,
+      "registry_index": 23,
       "aliases": [
         "circular-dependencies"
       ],
@@ -3935,7 +3985,7 @@
       "description": "Two or more barrel files re-export from each other in a loop",
       "label": "Re-Export Cycles",
       "config_key": "re-export-cycle",
-      "registry_index": 23,
+      "registry_index": 24,
       "aliases": [
         "re-export-cycles",
         "reexport-cycle",
@@ -3977,7 +4027,7 @@
       "description": "Two or more workspace packages import each other in a loop",
       "label": "Package Cycles",
       "config_key": "package-cycle",
-      "registry_index": 24,
+      "registry_index": 25,
       "aliases": [
         "package-cycles"
       ],
@@ -4017,7 +4067,7 @@
       "description": "Import crosses a configured architecture boundary",
       "label": "Boundary Violations",
       "config_key": "boundary-violation",
-      "registry_index": 25,
+      "registry_index": 26,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--boundaries",
@@ -4055,7 +4105,7 @@
       "description": "Source file matches no configured architecture boundary zone",
       "label": "Boundary Coverage",
       "config_key": "boundary-violation",
-      "registry_index": 26,
+      "registry_index": 27,
       "aliases": [
         "boundary-coverage-violations"
       ],
@@ -4092,7 +4142,7 @@
       "description": "Zoned file calls a callee its zone forbids",
       "label": "Boundary Call Violations",
       "config_key": "boundary-violation",
-      "registry_index": 27,
+      "registry_index": 28,
       "aliases": [
         "boundary-calls",
         "boundary-call-violations"
@@ -4130,7 +4180,7 @@
       "description": "Usage violates a configured rule-pack policy",
       "label": "Policy Violations",
       "config_key": "policy-violation",
-      "registry_index": 28,
+      "registry_index": 29,
       "aliases": [
         "policy-violations"
       ],
@@ -4167,7 +4217,7 @@
       "description": "Suppression comment or tag no longer matches any issue",
       "label": "Stale Suppressions",
       "config_key": "stale-suppressions",
-      "registry_index": 48,
+      "registry_index": 49,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--stale-suppressions",
@@ -4204,7 +4254,7 @@
       "description": "Suppression comment omits a required reason",
       "label": "Missing Suppression Reasons",
       "config_key": "require-suppression-reason",
-      "registry_index": 49,
+      "registry_index": 50,
       "aliases": [
         "missing-suppression-reasons"
       ],
@@ -4237,7 +4287,7 @@
       "description": "Catalog entry not referenced by any workspace package",
       "label": "Unused Catalog Entries",
       "config_key": "unused-catalog-entries",
-      "registry_index": 50,
+      "registry_index": 51,
       "aliases": [
         "catalog",
         "unused-catalog-entries"
@@ -4278,7 +4328,7 @@
       "description": "Named catalog group has no entries",
       "label": "Empty Catalog Groups",
       "config_key": "empty-catalog-groups",
-      "registry_index": 51,
+      "registry_index": 52,
       "aliases": [
         "empty-catalog",
         "empty-catalog-groups"
@@ -4319,7 +4369,7 @@
       "description": "package.json references a catalog that does not declare the package",
       "label": "Unresolved Catalog References",
       "config_key": "unresolved-catalog-references",
-      "registry_index": 52,
+      "registry_index": 53,
       "aliases": [
         "unresolved-catalog",
         "unresolved-catalog-references"
@@ -4360,7 +4410,7 @@
       "description": "Package-manager override target is not declared or resolved",
       "label": "Unused Dependency Overrides",
       "config_key": "unused-dependency-overrides",
-      "registry_index": 53,
+      "registry_index": 54,
       "aliases": [
         "unused-dependency-overrides",
         "unused-override",
@@ -4402,7 +4452,7 @@
       "description": "Package-manager override has an unparsable key or value",
       "label": "Misconfigured Dependency Overrides",
       "config_key": "misconfigured-dependency-overrides",
-      "registry_index": 54,
+      "registry_index": 55,
       "aliases": [
         "misconfigured-dependency-overrides",
         "misconfigured-override",
@@ -4444,7 +4494,7 @@
       "description": "\"use client\" file exports a server-only / route-config name",
       "label": "Invalid Client Exports",
       "config_key": "invalid-client-export",
-      "registry_index": 29,
+      "registry_index": 30,
       "aliases": [
         "invalid-client-exports"
       ],
@@ -4483,7 +4533,7 @@
       "description": "Barrel re-exports both a \"use client\" module and a server-only module",
       "label": "Mixed Client/Server Barrels",
       "config_key": "mixed-client-server-barrel",
-      "registry_index": 30,
+      "registry_index": 31,
       "aliases": [
         "mixed-client-server-barrels"
       ],
@@ -4520,7 +4570,7 @@
       "description": "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
       "label": "Misplaced Directives",
       "config_key": "misplaced-directive",
-      "registry_index": 31,
+      "registry_index": 32,
       "aliases": [
         "misplaced-directives"
       ],
@@ -4557,7 +4607,7 @@
       "description": "inject() / getContext() reads a key that no provide() / setContext() supplies",
       "label": "Unprovided Injects",
       "config_key": "unprovided-injects",
-      "registry_index": 32,
+      "registry_index": 33,
       "aliases": [
         "unprovided-injects"
       ],
@@ -4594,7 +4644,7 @@
       "description": "A component is reachable through a barrel but rendered nowhere",
       "label": "Unrendered Components",
       "config_key": "unrendered-components",
-      "registry_index": 33,
+      "registry_index": 34,
       "aliases": [
         "unrendered-components"
       ],
@@ -4631,7 +4681,7 @@
       "description": "Known reachable callers omit an optional prop consumed inside its component",
       "label": "Absent Optional Component Props",
       "config_key": "absent-component-props",
-      "registry_index": 35,
+      "registry_index": 36,
       "aliases": [
         "absent-component-props"
       ],
@@ -4668,7 +4718,7 @@
       "description": "Each visible call passes a function parameter in the same way",
       "label": "Constant Parameters",
       "config_key": "constant-parameters",
-      "registry_index": 36,
+      "registry_index": 37,
       "aliases": [
         "constant-parameters"
       ],
@@ -4705,7 +4755,7 @@
       "description": "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
       "label": "Unused Component Props",
       "config_key": "unused-component-props",
-      "registry_index": 34,
+      "registry_index": 35,
       "aliases": [
         "unused-component-props"
       ],
@@ -4742,7 +4792,7 @@
       "description": "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
       "label": "Unused Component Emits",
       "config_key": "unused-component-emits",
-      "registry_index": 37,
+      "registry_index": 38,
       "aliases": [
         "unused-component-emits"
       ],
@@ -4779,7 +4829,7 @@
       "description": "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
       "label": "Unused Component Inputs",
       "config_key": "unused-component-inputs",
-      "registry_index": 38,
+      "registry_index": 39,
       "aliases": [
         "unused-component-inputs"
       ],
@@ -4816,7 +4866,7 @@
       "description": "An Angular @Output() / signal output() output is emitted nowhere in its own component",
       "label": "Unused Component Outputs",
       "config_key": "unused-component-outputs",
-      "registry_index": 39,
+      "registry_index": 40,
       "aliases": [
         "unused-component-outputs"
       ],
@@ -4853,7 +4903,7 @@
       "description": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
       "label": "Unused Svelte Events",
       "config_key": "unused-svelte-events",
-      "registry_index": 40,
+      "registry_index": 41,
       "aliases": [
         "unused-svelte-events"
       ],
@@ -4890,7 +4940,7 @@
       "description": "An Effect layer is composed only into layers that nothing uses",
       "label": "Unused Effect Layers",
       "config_key": "unused-effect-layers",
-      "registry_index": 43,
+      "registry_index": 44,
       "aliases": [
         "unused-effect-layers"
       ],
@@ -4927,7 +4977,7 @@
       "description": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it",
       "label": "Unused Tagged Errors",
       "config_key": "unused-tagged-errors",
-      "registry_index": 44,
+      "registry_index": 45,
       "aliases": [
         "unused-tagged-errors"
       ],
@@ -4964,7 +5014,7 @@
       "description": "A catchTag handler names a project error tag that no code produces",
       "label": "Unproduced Catch Tags",
       "config_key": "unproduced-catch-tags",
-      "registry_index": 45,
+      "registry_index": 46,
       "aliases": [
         "unproduced-catch-tags"
       ],
@@ -5001,7 +5051,7 @@
       "description": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
       "label": "Unused Server Actions",
       "config_key": "unused-server-actions",
-      "registry_index": 41,
+      "registry_index": 42,
       "aliases": [
         "unused-server-actions"
       ],
@@ -5038,7 +5088,7 @@
       "description": "A SvelteKit load() return-object key is read by no consumer",
       "label": "Unused Load Data Keys",
       "config_key": "unused-load-data-keys",
-      "registry_index": 42,
+      "registry_index": 43,
       "aliases": [
         "unused-load-data-keys"
       ],
@@ -5075,7 +5125,7 @@
       "description": "A React/Preact prop is forwarded unchanged through 2 or more components to a distant consumer",
       "label": "Prop Drilling",
       "config_key": "prop-drilling",
-      "registry_index": 60,
+      "registry_index": 61,
       "aliases": [],
       "lsp": true,
       "filter_flag": null,
@@ -5110,7 +5160,7 @@
       "description": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
       "label": "Thin Wrappers",
       "config_key": "thin-wrapper",
-      "registry_index": 61,
+      "registry_index": 62,
       "aliases": [
         "thin-wrappers"
       ],
@@ -5147,7 +5197,7 @@
       "description": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
       "label": "Duplicate Prop Shapes",
       "config_key": "duplicate-prop-shape",
-      "registry_index": 62,
+      "registry_index": 63,
       "aliases": [
         "duplicate-prop-shapes"
       ],
@@ -5184,7 +5234,7 @@
       "description": "Two or more Next.js App Router route files resolve to the same URL",
       "label": "Route Collisions",
       "config_key": "route-collision",
-      "registry_index": 46,
+      "registry_index": 47,
       "aliases": [
         "route-collisions"
       ],
@@ -5223,7 +5273,7 @@
       "description": "Sibling Next.js dynamic route segments use different slug names at the same position",
       "label": "Dynamic Segment Conflicts",
       "config_key": "dynamic-segment-name-conflict",
-      "registry_index": 47,
+      "registry_index": 48,
       "aliases": [
         "dynamic-segment-name-conflicts"
       ],
@@ -5448,7 +5498,7 @@
       "description": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system",
       "label": "CSS Token Drift",
       "config_key": "css-token-drift",
-      "registry_index": 63,
+      "registry_index": 64,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5479,7 +5529,7 @@
       "description": "CSS or CSS-in-JS declaration block is duplicated across rules",
       "label": "CSS Duplicate Block",
       "config_key": "css-duplicate-block",
-      "registry_index": 64,
+      "registry_index": 65,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5510,7 +5560,7 @@
       "description": "CSS selector, nesting, or important usage is structurally complex",
       "label": "CSS Selector Complexity",
       "config_key": "css-selector-complexity",
-      "registry_index": 65,
+      "registry_index": 66,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5541,7 +5591,7 @@
       "description": "CSS or CSS-in-JS surface appears unused",
       "label": "CSS Dead Surface",
       "config_key": "css-dead-surface",
-      "registry_index": 66,
+      "registry_index": 67,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5572,7 +5622,7 @@
       "description": "CSS or CSS-in-JS reference resolves to no stylesheet definition",
       "label": "CSS Broken Reference",
       "config_key": "css-broken-reference",
-      "registry_index": 67,
+      "registry_index": 68,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5975,7 +6025,7 @@
       "description": "Detected feature flag pattern",
       "label": "Feature Flags",
       "config_key": "feature-flags",
-      "registry_index": 58,
+      "registry_index": 59,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7146,6 +7196,37 @@
       "docs_url": "https://fallow.tools/docs/rules/nextjs-open-redirect/"
     },
     {
+      "id": "react-router-open-redirect",
+      "rule_id": "security/react-router-open-redirect",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-601",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "deprecated_filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "default_severity": "off",
+      "opt_in": true,
+      "frameworks": [],
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/react-router-open-redirect/"
+    },
+    {
       "id": "dom-document-write",
       "rule_id": "security/dom-document-write",
       "command": "security",
@@ -7525,7 +7606,7 @@
       "description": "The change weakens tests or a coverage threshold",
       "label": "Weakened Tests",
       "config_key": "weakened-tests",
-      "registry_index": 68,
+      "registry_index": 69,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7556,7 +7637,7 @@
       "description": "The change adds a suppression comment",
       "label": "Added Suppressions",
       "config_key": "added-suppression",
-      "registry_index": 69,
+      "registry_index": 70,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7587,7 +7668,7 @@
       "description": "The change adds a test-environment branch to source code",
       "label": "Test-Only Branches",
       "config_key": "test-only-branch",
-      "registry_index": 70,
+      "registry_index": 71,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7618,7 +7699,7 @@
       "description": "The change edits one copy of duplicated code but not its siblings",
       "label": "Diverged Clone Siblings",
       "config_key": "diverged-clone-sibling",
-      "registry_index": 71,
+      "registry_index": 72,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7649,7 +7730,7 @@
       "description": "The change adds a dependency",
       "label": "Added Dependencies",
       "config_key": "added-dependency",
-      "registry_index": 72,
+      "registry_index": 73,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7740,7 +7821,7 @@
     "10": "Coverage inventory or static-findings upload input or project validation failed.",
     "11": "Coverage inventory or static-findings upload exceeded the server payload limit.",
     "12": "Coverage inventory or static-findings upload authentication or authorization was rejected.",
-    "13": "Coverage inventory or static-findings upload failed after retries or returned another server error."
+    "13": "Coverage inventory or static-findings upload got a server error (5xx), a timeout (408), a rate limit (429), or a response that fallow cannot read."
   },
   "environment_variables": {
     "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge/github-annotations/github-summary). CLI --format flag overrides this.",
@@ -7773,7 +7854,7 @@
     "FALLOW_TYPE_AWARE_BIN": "Trusted executable override for the type-aware companion that --type-aware runs. Relative paths resolve from the caller's working directory before --root is applied; project node_modules and PATH are intentionally not searched. Default: sibling of the active Fallow executable.",
     "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
     "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep). Each cache version keeps only its 32 newest snapshot files.",
-    "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+    "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "Expiry threshold in days for per-project fallow impact stores; a recorded run drops the history of stores older than this and keeps an explicit enable, disable or declined opt-in (unset/0 keeps every store forever).",
     "FALLOW_CLOCK_EPOCH": "Reference instant in unix seconds for commit recency and ownership staleness. Default: the committer timestamp of HEAD. Set it to compare two checkouts against one fixed instant. An empty or non-numeric value is ignored with a warning.",
     "FALLOW_ROOT": "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
     "FALLOW_LICENSE": "License JWT (full string) for Fallow Cloud; intended for shared CI runners.",
@@ -8168,6 +8249,12 @@
         "id": "prototype-pollution",
         "title": "Prototype pollution sink",
         "cwe": 1321,
+        "include_required": false
+      },
+      {
+        "id": "react-router-open-redirect",
+        "title": "React Router open redirect sink",
+        "cwe": 601,
         "include_required": false
       },
       {

@@ -247,6 +247,8 @@ impl ReachableNamespaceExports {
 pub(super) struct NamespacePropagationIndexes<'a> {
     re_exports_by_source: FxHashMap<FileId, ReExportTargets>,
     consumers_by_target: FxHashMap<FileId, FxHashMap<String, Vec<ConsumerImport<'a>>>>,
+    /// Per target file, the `import * as` bindings of it.
+    namespace_consumers_by_target: FxHashMap<FileId, Vec<ConsumerImport<'a>>>,
     consumer_namespaces: ExportNamespaces,
 }
 
@@ -291,6 +293,8 @@ impl<'a> NamespacePropagationIndexes<'a> {
 
         let mut consumers_by_target: FxHashMap<FileId, FxHashMap<String, Vec<ConsumerImport<'a>>>> =
             FxHashMap::default();
+        let mut namespace_consumers_by_target: FxHashMap<FileId, Vec<ConsumerImport<'a>>> =
+            FxHashMap::default();
         let mut consumer_namespaces = ExportNamespaces::default();
         for consumer in module_by_id.values() {
             for import in &consumer.resolved_imports {
@@ -298,15 +302,27 @@ impl<'a> NamespacePropagationIndexes<'a> {
                     continue;
                 };
                 let imported_name = match &import.info.imported_name {
-                    ImportedName::Named(name) => name.as_str(),
-                    ImportedName::Default => "default",
-                    _ => continue,
+                    ImportedName::Named(name) => Some(name.as_str()),
+                    ImportedName::Default => Some("default"),
+                    ImportedName::Namespace => None,
+                    ImportedName::SideEffect => continue,
                 };
                 let namespaces = consumer_import_namespaces(consumer, import);
                 if namespaces.is_empty() {
                     continue;
                 }
                 consumer_namespaces.extend(namespaces);
+                let Some(imported_name) = imported_name else {
+                    namespace_consumers_by_target
+                        .entry(target)
+                        .or_default()
+                        .push(ConsumerImport {
+                            consumer,
+                            import,
+                            namespaces,
+                        });
+                    continue;
+                };
                 consumers_by_target
                     .entry(target)
                     .or_default()
@@ -319,21 +335,24 @@ impl<'a> NamespacePropagationIndexes<'a> {
                     });
             }
         }
-        for by_name in consumers_by_target.values_mut() {
-            for consumers in by_name.values_mut() {
-                consumers.sort_unstable_by_key(|consumer| {
-                    (
-                        consumer.consumer.file_id.0,
-                        consumer.import.info.span.start,
-                        consumer.import.info.span.end,
-                    )
-                });
-            }
+        for consumers in consumers_by_target
+            .values_mut()
+            .flat_map(FxHashMap::values_mut)
+            .chain(namespace_consumers_by_target.values_mut())
+        {
+            consumers.sort_unstable_by_key(|consumer| {
+                (
+                    consumer.consumer.file_id.0,
+                    consumer.import.info.span.start,
+                    consumer.import.info.span.end,
+                )
+            });
         }
 
         Self {
             re_exports_by_source,
             consumers_by_target,
+            namespace_consumers_by_target,
             consumer_namespaces,
         }
     }
@@ -414,6 +433,13 @@ impl<'a> NamespacePropagationIndexes<'a> {
             .and_then(|by_name| by_name.get(imported_name))
             .map_or(&[], Vec::as_slice)
     }
+
+    /// The `import * as` bindings of `target`.
+    pub(super) fn namespace_consumers_for(&self, target: FileId) -> &[ConsumerImport<'a>] {
+        self.namespace_consumers_by_target
+            .get(&target)
+            .map_or(&[], Vec::as_slice)
+    }
 }
 
 fn consumer_import_namespaces(
@@ -483,6 +509,7 @@ mod tests {
         NamespacePropagationIndexes {
             re_exports_by_source: FxHashMap::default(),
             consumers_by_target: FxHashMap::default(),
+            namespace_consumers_by_target: FxHashMap::default(),
             consumer_namespaces: ExportNamespaces::default(),
         }
     }

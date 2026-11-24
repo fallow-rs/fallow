@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -112,4 +112,23 @@ test("styling corpus smoke passes when one fallow command of a project works", (
 
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stderr, /no project gave a usable fallow result/);
+});
+
+const tailwindCoverage = (dir) => {
+  const results = JSON.parse(readFileSync(join(dir, "out", "styling-corpus-smoke.json"), "utf8"));
+  return results.stack_coverage.find((item) => item.stack === "tailwind");
+};
+
+test("styling corpus smoke does not mark a stack covered when its project gave no result", () => {
+  const dir = makeTempDir("fallow-styling-corpus-smoke-");
+  runCachedProject(dir, fakeFallow(dir, 2));
+
+  assert.deepEqual(tailwindCoverage(dir), { stack: "tailwind", selected: true, covered: false });
+});
+
+test("styling corpus smoke marks a stack covered when its project was analyzed", () => {
+  const dir = makeTempDir("fallow-styling-corpus-smoke-");
+  runCachedProject(dir, fakeFallow(dir, 1));
+
+  assert.deepEqual(tailwindCoverage(dir), { stack: "tailwind", selected: true, covered: true });
 });

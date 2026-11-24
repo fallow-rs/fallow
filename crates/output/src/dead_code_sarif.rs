@@ -423,7 +423,7 @@ fn sarif_re_export_cycle_fields(
         level,
         message: format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
         uri: first_uri,
-        region: None,
+        region: (cycle.line > 0).then_some((cycle.line, cycle.col + 1)),
         source_path: first_path,
         properties: None,
     }

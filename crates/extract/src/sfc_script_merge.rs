@@ -13,6 +13,8 @@ pub(super) struct SfcScriptMergeInput<'a> {
     pub(super) template_visible_iterable_types: &'a mut FxHashMap<String, String>,
     pub(super) props_return_binding: &'a mut Option<String>,
     pub(super) emit_return_binding: &'a mut Option<String>,
+    /// The script bindings that the markup of the component can call.
+    pub(super) script_binding_context: &'a mut crate::template_usage::ScriptBindingContext,
     pub(super) need_complexity: bool,
     pub(super) mode: fallow_types::shared_state::ExtractionMode,
 }
@@ -104,6 +106,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
 
     if shares_template_scope(input.kind, input.script, input.has_setup_script) {
         harvest_template_visible_bindings(input, &extractor);
+        extractor.extend_script_binding_context(input.script_binding_context);
     }
 
     // Dispatched events recorded by the visitor carry body-relative spans, like
@@ -220,4 +223,37 @@ fn shares_template_scope(kind: SfcKind, script: &SfcScript, has_setup_script: bo
         SfcKind::Vue => script.is_setup || has_setup_script,
         SfcKind::Svelte => true,
     }
+}
+
+/// Score the functions of an SFC `<script>` or an Astro frontmatter
+/// (cyclomatic and cognitive complexity). The line and column of each function
+/// and of each of its contributions move from the script-body coordinates to
+/// the coordinates of the full source file.
+pub fn translate_script_complexity(
+    script: &SfcScript,
+    program: &oxc_ast::ast::Program<'_>,
+    sfc_line_offsets: &[u32],
+) -> Vec<FunctionComplexity> {
+    let script_line_offsets = compute_line_offsets(&script.body);
+    let mut complexity =
+        crate::complexity::compute_complexity(program, &script.body, &script_line_offsets);
+    let (body_start_line, body_start_col) = byte_offset_to_line_col(
+        sfc_line_offsets,
+        u32::try_from(script.byte_offset).unwrap_or(u32::MAX),
+    );
+    let shift = |line: &mut u32, col: &mut u32| {
+        if *line <= 1 {
+            *col += body_start_col;
+        }
+        *line = body_start_line + line.saturating_sub(1);
+    };
+
+    for function in &mut complexity {
+        shift(&mut function.line, &mut function.col);
+        for contribution in &mut function.contributions {
+            shift(&mut contribution.line, &mut contribution.col);
+        }
+    }
+
+    complexity
 }

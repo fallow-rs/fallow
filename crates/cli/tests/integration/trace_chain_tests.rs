@@ -1,0 +1,205 @@
+//! `fallow trace <file>:<symbol> --callers / --callees` chain output.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "integration tests keep fixture setup concise"
+)]
+
+use crate::common::{parse_json, run_fallow, run_fallow_in_root};
+use serde_json::Value;
+
+const FIXTURE: &str = "trace-chain-depth";
+
+fn trace(target: &str, extra: &[&str]) -> Value {
+    let mut args = vec![target, "--format", "json", "--quiet", "--no-cache"];
+    args.extend_from_slice(extra);
+    parse_json(&run_fallow("trace", FIXTURE, &args))
+}
+
+/// Each hop as `depth file local_name`.
+fn hops(value: &Value, key: &str) -> Vec<String> {
+    value[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key} must be an array, got {value}"))
+        .iter()
+        .map(|hop| {
+            format!(
+                "{} {} {}",
+                hop["depth"],
+                hop["file"].as_str().unwrap().replace('\\', "/"),
+                hop["local_name"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+/// `start.ts` imports `shared.ts` directly and through `a.ts`. The direct
+/// edge puts `shared.ts` at depth 1, so its own import of `leaf.ts` is at
+/// depth 2 and inside the depth limit.
+#[test]
+fn callees_visit_each_module_at_its_shortest_depth() {
+    let value = trace("src/start.ts:start", &["--callees", "--depth", "2"]);
+    let callees = hops(&value, "callees");
+    assert!(
+        callees.contains(&"2 src/leaf.ts leaf".to_string()),
+        "leaf.ts is two hops from start.ts, got {callees:?}"
+    );
+}
+
+/// The chains of a name that the file does not export are empty, as the
+/// `symbol_found` contract says. A namespace importer does not count as a
+/// caller of a missing name.
+#[test]
+fn missing_symbol_gives_empty_chains() {
+    let value = trace(
+        "src/hub.ts:hubValu",
+        &["--callers", "--callees", "--depth", "2"],
+    );
+    assert_eq!(value["symbol_found"], false, "got {value}");
+    assert_eq!(hops(&value, "callers"), Vec::<String>::new());
+    let value = trace("src/shared.ts:sharedd", &["--callees", "--depth", "2"]);
+    assert_eq!(value["symbol_found"], false, "got {value}");
+    assert_eq!(hops(&value, "callees"), Vec::<String>::new());
+}
+
+/// `zed.ts` imports `leaf.ts` as a namespace, so it is a direct caller of
+/// `value`. A longer path through `echo.ts` and back into `leaf.ts` also
+/// reaches it, and must not hide the direct hop at depth 1.
+#[test]
+fn callers_keep_each_binding_at_its_shortest_depth() {
+    let value = trace("src/callers/leaf.ts:value", &["--callers", "--depth", "3"]);
+    let callers = hops(&value, "callers");
+    assert!(
+        callers.contains(&"1 src/callers/zed.ts leaf".to_string()),
+        "zed.ts imports leaf.ts directly, got {callers:?}"
+    );
+}
+
+/// A name that colliding `export *` sources swallow is not exported, so its
+/// chains are empty too.
+#[test]
+fn ambiguous_star_name_gives_empty_chains() {
+    let args = [
+        "src/barrel.ts:foo",
+        "--callers",
+        "--callees",
+        "--depth",
+        "2",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ];
+    let value = parse_json(&run_fallow(
+        "trace",
+        "effective-export-ambiguous-star",
+        &args,
+    ));
+    assert_eq!(value["symbol_found"], false, "got {value}");
+    assert!(value["star_export_ambiguity"].is_object(), "got {value}");
+    assert_eq!(hops(&value, "callers"), Vec::<String>::new());
+    assert_eq!(hops(&value, "callees"), Vec::<String>::new());
+    assert_eq!(value["unresolved_callees"], serde_json::json!([]));
+}
+
+#[test]
+fn callees_stop_at_side_effect_only_imports() {
+    let value = parse_json(&run_fallow(
+        "trace",
+        "boundary-type-only",
+        &[
+            "src/ui/side_effect.ts:sideEffected",
+            "--callees",
+            "--depth",
+            "2",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(hops(&value, "callees"), ["1 src/shared/utils.ts helper"]);
+}
+
+#[test]
+fn callees_report_imported_calls_without_internal_edges() {
+    let value = parse_json(&run_fallow(
+        "trace",
+        "dev-dep-in-prod",
+        &[
+            "src/index.ts:load",
+            "--callees",
+            "--depth",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(hops(&value, "callees"), ["1 src/lib/pad.ts pad"]);
+    assert_eq!(
+        value["unresolved_callees"],
+        serde_json::json!([{"callee": "parse", "reason": "local-or-global"}])
+    );
+}
+
+fn through_barrel(declaration: &str) -> Value {
+    let project = tempfile::tempdir().unwrap();
+    for (file, source) in [
+        ("package.json", r#"{"name":"trace-barrel","type":"module"}"#),
+        (
+            "main.ts",
+            "import { x } from './barrel'; export function run() { x() }",
+        ),
+        ("barrel.ts", declaration),
+        (
+            "a.ts",
+            "import { foo } from './b'; export function x() { foo() } export { x as original }",
+        ),
+        ("b.ts", "export function foo() {}"),
+    ] {
+        std::fs::write(project.path().join(file), source).unwrap();
+    }
+    parse_json(&run_fallow_in_root(
+        "trace",
+        project.path(),
+        &[
+            "main.ts:run",
+            "--callees",
+            "--depth",
+            "3",
+            "--format",
+            "json",
+        ],
+    ))
+}
+
+#[test]
+fn callees_follow_named_barrel_re_exports() {
+    let trace = through_barrel("export { original as x } from './a'");
+    assert_eq!(
+        hops(&trace, "callees"),
+        ["1 barrel.ts x", "2 a.ts x", "3 b.ts foo"]
+    );
+    assert_eq!(trace["callees"][1]["imported_as"], "original");
+}
+
+#[test]
+fn callees_follow_star_barrel_re_exports() {
+    let trace = through_barrel("export * from './a'");
+    assert_eq!(
+        hops(&trace, "callees"),
+        ["1 barrel.ts x", "2 a.ts *", "3 b.ts foo"]
+    );
+}
+
+#[test]
+fn callees_count_a_binding_imported_and_forwarded_by_one_barrel_once() {
+    let trace = through_barrel("import { x } from './a'; export { x } from './a'");
+    assert_eq!(
+        hops(&trace, "callees"),
+        ["1 barrel.ts x", "2 a.ts x", "3 b.ts foo"]
+    );
+}

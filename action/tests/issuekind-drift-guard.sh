@@ -94,11 +94,20 @@ fallow_dead_code_schema_rows() {
     return
   fi
 
-  local repo_root bin rows
+  local repo_root bin rows target_dir
   repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
   bin="${FALLOW_BIN:-}"
   if [ -z "$bin" ]; then
-    for cand in "$repo_root/target/debug/fallow" "$repo_root/target/release/fallow"; do
+    # Cargo builds into $CARGO_TARGET_DIR when it is set, and into target/
+    # of the repository when it is not. A relative value is relative to the
+    # repository root, as in scripts/cargo-target.mjs.
+    target_dir="${CARGO_TARGET_DIR:-}"
+    case "$target_dir" in
+      "" | /*) ;;
+      *) target_dir="$repo_root/$target_dir" ;;
+    esac
+    for cand in ${target_dir:+"$target_dir/debug/fallow" "$target_dir/release/fallow"} \
+      "$repo_root/target/debug/fallow" "$repo_root/target/release/fallow"; do
       if [ -x "$cand" ]; then bin="$cand"; break; fi
     done
   fi
@@ -172,6 +181,7 @@ issuekind_json_key_fallback() {
     unused-class-member) echo "unused_class_members" ;;
     unused-namespace-member) echo "unused_namespace_members" ;;
     unused-protected-class-member) echo "unused_protected_class_members" ;;
+    namespace-escape) echo "namespace_escapes" ;;
     unused-store-member) echo "unused_store_members" ;;
     unresolved-import) echo "unresolved_imports" ;;
     unlisted-dependency) echo "unlisted_dependencies" ;;

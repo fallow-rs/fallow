@@ -39,6 +39,12 @@ fn seed_store_raw(root: &Path, bytes: &[u8]) {
     std::fs::write(&path, bytes).unwrap();
 }
 
+/// Write a store to the resolved store path, to seed a test.
+fn save(store: &ImpactStore, root: &Path) {
+    let path = store_path(root).expect("test config dir set");
+    write_store(store, &path).expect("seed store");
+}
+
 fn summary(dead: usize, complexity: usize, dupes: usize) -> AuditSummary {
     AuditSummary {
         dead_code_issues: dead,
@@ -502,7 +508,7 @@ fn containment_blocked_then_cleared_records_one_event() {
         "t0",
     );
     let store = load(root);
-    assert!(store.pending_containment.is_some());
+    assert!(!store.pending_by_worktree.is_empty());
     assert!(store.containment.is_empty());
 
     record_v1(
@@ -515,10 +521,74 @@ fn containment_blocked_then_cleared_records_one_event() {
         "t1",
     );
     let store = load(root);
-    assert!(store.pending_containment.is_none());
+    assert!(store.pending_by_worktree.is_empty());
     assert_eq!(store.containment.len(), 1);
     assert_eq!(store.containment[0].blocked_at, "t0");
     assert_eq!(store.containment[0].cleared_at, "t1");
+}
+
+fn linked_worktrees(dir: &Path) -> (PathBuf, PathBuf) {
+    use fallow_engine::git_fixture::fixture_git;
+    let first = dir.join("first");
+    let second = dir.join("second");
+    std::fs::create_dir(&first).unwrap();
+    fixture_git(&first, &["init", "-q"]);
+    fixture_git(&first, &["commit", "--allow-empty", "-qm", "base"]);
+    fixture_git(
+        &first,
+        &["worktree", "add", "--detach", second.to_str().unwrap()],
+    );
+    (first, second)
+}
+
+#[test]
+fn gate_pass_only_clears_the_pending_failure_in_its_worktree() {
+    let (_config, dir) = test_env();
+    let (first, second) = linked_worktrees(dir.path());
+    enable(&first).unwrap();
+    let gate = |root, verdict, timestamp| {
+        record_v1(
+            root,
+            &summary(0, 0, 0),
+            verdict,
+            true,
+            None,
+            "2.0.0",
+            timestamp,
+        );
+    };
+    gate(&first, AuditVerdict::Fail, "blocked A");
+    gate(&second, AuditVerdict::Pass, "passed B");
+    gate(&second, AuditVerdict::Fail, "blocked B");
+    gate(&first, AuditVerdict::Pass, "passed A");
+    gate(&second, AuditVerdict::Pass, "cleared B");
+    let store = load(&first);
+    let pairs: Vec<_> = store
+        .containment
+        .iter()
+        .map(|event| (event.blocked_at.as_str(), event.cleared_at.as_str()))
+        .collect();
+    assert_eq!(
+        pairs,
+        [("blocked A", "passed A"), ("blocked B", "cleared B")]
+    );
+}
+
+#[test]
+fn pending_gates_evict_the_oldest_failure_when_the_worktree_limit_is_reached() {
+    let mut store = ImpactStore::default();
+    let counts = ImpactCounts::default();
+    for i in 0..=MAX_CONTAINMENT {
+        let tree = format!("tree-{i}");
+        let timestamp = format!("{i:04}");
+        store.record_gate(&tree, AuditVerdict::Fail, None, &timestamp, &counts);
+    }
+    assert_eq!(store.pending_by_worktree.len(), MAX_CONTAINMENT);
+    for tree in ["tree-0", "tree-1"] {
+        store.record_gate(tree, AuditVerdict::Pass, None, "pass", &counts);
+    }
+    assert_eq!(store.containment_count(), 1);
+    assert_eq!(store.containment[0].blocked_at, "0001");
 }
 
 #[test]
@@ -536,7 +606,7 @@ fn non_gate_run_never_creates_containment() {
         "t0",
     );
     let store = load(root);
-    assert!(store.pending_containment.is_none());
+    assert!(store.pending_by_worktree.is_empty());
     assert!(store.containment.is_empty());
 }
 
@@ -548,15 +618,6 @@ fn corrupt_store_loads_as_default_no_panic() {
     let store = load(root);
     assert!(!store.enabled);
     assert!(store.records.is_empty());
-    record_v1(
-        root,
-        &summary(1, 0, 0),
-        AuditVerdict::Fail,
-        true,
-        None,
-        "2.0.0",
-        "t0",
-    );
 }
 
 #[test]
@@ -795,9 +856,12 @@ fn removed_finding_is_credited_as_resolved() {
     assert_eq!(store.resolved_total, 1);
     assert_eq!(store.suppressed_total, 0);
     assert_eq!(store.recent_resolved.len(), 1);
-    assert_eq!(store.recent_resolved[0].kind, "unused-export");
-    assert_eq!(store.recent_resolved[0].symbol.as_deref(), Some("foo"));
-    assert_eq!(store.recent_resolved[0].path, "src/a.ts");
+    assert_eq!(store.recent_resolved[0].event.kind, "unused-export");
+    assert_eq!(
+        store.recent_resolved[0].event.symbol.as_deref(),
+        Some("foo")
+    );
+    assert_eq!(store.recent_resolved[0].event.path, "src/a.ts");
 }
 
 #[test]
@@ -918,6 +982,135 @@ fn cross_file_move_in_same_run_is_not_resolved() {
 }
 
 #[test]
+fn one_appearance_only_uncredits_one_resolution_from_its_worktree() {
+    let (_config, dir) = test_env();
+    let (first, second) = linked_worktrees(dir.path());
+    enable(&first).unwrap();
+    let a = touch(&first, "a.ts");
+    let b = touch(&first, "b.ts");
+    let c = touch(&second, "c.ts");
+    let findings = |path: &Path| fi(path, "unused-export", "default");
+    run(
+        &first,
+        &[&a, &b],
+        vec![findings(&a), findings(&b)],
+        vec![],
+        &[],
+        "found",
+    );
+    run(&second, &[&c], vec![findings(&c)], vec![], &[], "found");
+    run(&first, &[&a], vec![], vec![], &[], "removed a");
+    run(&first, &[&b], vec![], vec![], &[], "removed b");
+    run(&second, &[&c], vec![], vec![], &[], "removed c");
+    let file = touch(&first, "d.ts");
+    run(
+        &first,
+        &[&file],
+        vec![fi(&file, "unused-export", "default")],
+        vec![],
+        &[],
+        "moved",
+    );
+    let report = build_report(&load(&first));
+    assert_eq!(report.resolved_total, 2);
+    assert!(
+        report
+            .recent_resolved
+            .iter()
+            .any(|event| event.path == "c.ts")
+    );
+}
+
+#[test]
+fn same_run_move_leaves_prior_credit_and_unmatched_disappearances() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    enable(root).unwrap();
+    let [a, b, c, d] = ["a.ts", "src/f0.ts", "src/f7.ts", "new.ts"].map(|path| touch(root, path));
+    let finding = |path: &Path| fi(path, "unused-export", "default");
+    run(
+        root,
+        &[&a, &b, &c],
+        vec![finding(&a), finding(&b), finding(&c)],
+        vec![],
+        &[],
+        "found",
+    );
+    run(root, &[&a], vec![], vec![], &[], "removed a");
+    run(root, &[&c, &b, &d], vec![finding(&d)], vec![], &[], "moved");
+    let report = build_report(&load(root));
+    assert_eq!(report.resolved_total, 2);
+    let paths: Vec<_> = report
+        .recent_resolved
+        .iter()
+        .map(|event| event.path.as_str())
+        .collect();
+    assert_eq!(paths, ["a.ts", "src/f7.ts"]);
+}
+
+#[test]
+fn explicit_suppression_is_counted_when_an_identical_symbol_moves() {
+    for suppressed_name in ["a.ts", "b.ts"] {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root).unwrap();
+        let [a, b, c] = ["a.ts", "b.ts", "c.ts"].map(|name| touch(root, name));
+        let finding = |path: &Path| fi(path, "unused-export", "default");
+        run(
+            root,
+            &[&a, &b],
+            vec![finding(&a), finding(&b)],
+            vec![],
+            &[],
+            "found",
+        );
+        let suppression = supp(&root.join(suppressed_name), "unused-export");
+        run(
+            root,
+            &[&a, &b, &c],
+            vec![finding(&c)],
+            vec![],
+            &[suppression],
+            "moved",
+        );
+        let report = build_report(&load(root));
+        assert_eq!(
+            (report.resolved_total, report.suppressed_total),
+            (0, 1),
+            "{suppressed_name}"
+        );
+    }
+}
+
+#[test]
+fn legacy_shared_history_keeps_credits_with_unknown_worktrees() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    let legacy = serde_json::json!({
+        "schema_version": 7,
+        "enabled": true,
+        "explicit_decision": true,
+        "resolved_total": 1,
+        "recent_resolved": [{"kind": "unused-export", "symbol": "default", "path": "old.ts", "timestamp": "t0"}],
+        "pending_containment": {"blocked_at": "t0", "blocked_counts": ImpactCounts::default()}
+    });
+    seed_store_raw(root, &serde_json::to_vec(&legacy).unwrap());
+    let a = touch(root, "a.ts");
+    run(
+        root,
+        &[&a],
+        vec![fi(&a, "unused-export", "default")],
+        vec![],
+        &[],
+        "t1",
+    );
+    let report = build_report(&load(root));
+    assert_eq!(report.resolved_total, 1);
+    assert_eq!(report.recent_resolved[0].path, "old.ts");
+    assert_eq!(report.containment_count, 0);
+}
+
+#[test]
 fn cross_run_move_uncredits_the_prior_resolution() {
     let (_config, dir) = test_env();
     let root = dir.path();
@@ -1004,7 +1197,7 @@ fn resolved_duplication_clone_group() {
     run(root, &[&a], vec![], vec![], &[], "t1");
     let store = load(root);
     assert_eq!(store.resolved_total, 1);
-    assert_eq!(store.recent_resolved[0].kind, "code-duplication");
+    assert_eq!(store.recent_resolved[0].event.kind, "code-duplication");
 }
 
 #[test]
@@ -1173,17 +1366,20 @@ fn recent_resolved_is_bounded() {
         ..Default::default()
     };
     for i in 0..(MAX_RECENT_RESOLVED + 25) {
-        store.recent_resolved.push(ResolutionEvent {
-            kind: "unused-export".into(),
-            path: format!("src/f{i}.ts"),
-            symbol: Some(format!("s{i}")),
-            git_sha: None,
-            timestamp: format!("t{i}"),
+        store.recent_resolved.push(StoredResolution {
+            worktree: None,
+            event: ResolutionEvent {
+                kind: "unused-export".into(),
+                path: format!("src/f{i}.ts"),
+                symbol: Some(format!("s{i}")),
+                git_sha: None,
+                timestamp: format!("t{i}"),
+            },
         });
     }
     bound_recent_resolved(&mut store);
     assert_eq!(store.recent_resolved.len(), MAX_RECENT_RESOLVED);
-    assert_eq!(store.recent_resolved[0].path, "src/f25.ts");
+    assert_eq!(store.recent_resolved[0].event.path, "src/f25.ts");
 }
 
 #[test]
@@ -1566,7 +1762,7 @@ fn resolve_enabled_precedence_table() {
     assert_eq!(resolve_enabled(&never), (false, EnabledSource::Default));
 
     // never-asked + global default on => on (User).
-    assert!(set_global_default(true));
+    assert!(set_global_default(true).unwrap());
     assert_eq!(resolve_enabled(&never), (true, EnabledSource::User));
     // a per-repo disable still wins over the global default.
     assert_eq!(
@@ -1578,7 +1774,7 @@ fn resolve_enabled_precedence_table() {
 #[test]
 fn human_report_explains_user_global_default() {
     let (_config, _dir) = test_env();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     // A never-asked store resolved on a project: enabled via the global default.
     let report = build_report(&ImpactStore::default());
     assert_eq!(report.enabled_source, EnabledSource::User);
@@ -1601,10 +1797,10 @@ fn human_report_explains_user_global_default() {
 fn global_default_round_trips() {
     let (_config, _dir) = test_env();
     assert!(!load_global_default());
-    assert!(set_global_default(true));
+    assert!(set_global_default(true).unwrap());
     assert!(load_global_default());
-    assert!(!set_global_default(true)); // unchanged
-    assert!(set_global_default(false));
+    assert!(!set_global_default(true).unwrap()); // unchanged
+    assert!(set_global_default(false).unwrap());
     assert!(!load_global_default());
 }
 
@@ -1612,7 +1808,7 @@ fn global_default_round_trips() {
 fn global_default_records_without_per_repo_enable() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     // No `enable(root)` call: the global default alone should activate.
     record_v1(
         root,
@@ -1630,7 +1826,7 @@ fn global_default_records_without_per_repo_enable() {
 }
 
 #[test]
-fn legacy_in_repo_store_is_migrated_on_first_load() {
+fn legacy_in_repo_store_is_shown_on_load_and_saved_on_first_write() {
     let (_config, dir) = test_env();
     let root = dir.path();
     // Seed a pre-relocation v3 store with a FLAT frontier in the repo.
@@ -1650,11 +1846,11 @@ fn legacy_in_repo_store_is_migrated_on_first_load() {
     assert_eq!(store.resolved_total, 2);
     // The flat frontier was wrapped under the worktree key (nested v4 shape).
     assert!(frontier_paths(&store).contains("src/a.ts"));
-    // The user store now exists, so a second load does NOT re-import (it
-    // reads the user store directly).
-    assert!(store_path(root).is_some_and(|p| p.exists()));
-    let again = load(root);
-    assert_eq!(again.records.len(), 1);
+    let user_store = store_path(root).unwrap();
+    assert!(!user_store.exists(), "a read does not save the import");
+    decline_onboarding(root).unwrap();
+    assert!(user_store.exists(), "the first write saves the import");
+    assert_eq!(load(root).records.len(), 1);
 }
 
 #[test]
@@ -1672,19 +1868,19 @@ fn reset_removes_only_this_project() {
         "t0",
     );
     assert_eq!(load(root).records.len(), 1);
-    assert!(reset(root));
+    assert!(reset(root).unwrap());
     assert!(load(root).records.is_empty());
-    assert!(!reset(root)); // already gone
+    assert!(!reset(root).unwrap()); // already gone
 }
 
 #[test]
 fn reset_all_clears_dir_but_keeps_global_default() {
     let (_config, dir) = test_env();
     let root = dir.path();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     enable(root).unwrap();
     assert!(load(root).enabled);
-    assert!(reset_all());
+    assert!(reset_all(root).unwrap());
     // The global default toggle survives a data wipe.
     assert!(load_global_default());
 }
@@ -1942,7 +2138,12 @@ fn store_lock_acquire_drop_then_record_roundtrips() {
 fn sweep_keeps_fresh_and_self_deletes_aged_out() {
     let _cfg = aggregate_env();
     seed_store("keepme", &store_with("keep", 1, 0, "t0", 1));
-    seed_store("oldone", &store_with("old", 1, 0, "t0", 1));
+    let undecided = ImpactStore {
+        enabled: false,
+        explicit_decision: false,
+        ..store_with("old", 1, 0, "t0", 1)
+    };
+    seed_store("oldone", &undecided);
     // A `.lock` sidecar must survive the sweep (lock-lifecycle invariant).
     let lock = impact_config_dir()
         .unwrap()
@@ -1960,6 +2161,76 @@ fn sweep_keeps_fresh_and_self_deletes_aged_out() {
         "aged-out store reclaimed"
     );
     assert!(lock.exists(), "lock sidecar never deleted by the sweep");
+}
+
+/// Read a seeded store back from `<config>/impact/<key>.json`.
+fn read_seeded(key: &str) -> Option<ImpactStore> {
+    let path = impact_config_dir()?
+        .join("impact")
+        .join(format!("{key}.json"));
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+#[test]
+fn sweep_keeps_an_explicit_decision_and_drops_the_history() {
+    let _cfg = aggregate_env();
+    seed_store("keepme", &store_with("keep", 1, 0, "t0", 1));
+    let disabled = ImpactStore {
+        enabled: false,
+        ..store_with("disabled", 3, 2, "t0", 4)
+    };
+    seed_store("disabled", &disabled);
+    seed_store("enabled", &store_with("enabled", 3, 2, "t0", 4));
+    let declined = ImpactStore {
+        enabled: false,
+        explicit_decision: false,
+        onboarding_declined: true,
+        ..store_with("declined", 3, 2, "t0", 4)
+    };
+    seed_store("declined", &declined);
+
+    sweep_old_stores("keepme", std::time::Duration::ZERO);
+
+    let disabled = read_seeded("disabled").expect("an explicit disable survives the sweep");
+    assert_eq!(resolve_enabled(&disabled), (false, EnabledSource::Project));
+    assert!(disabled.records.is_empty(), "the aged history is dropped");
+    assert!(disabled.containment.is_empty());
+    assert_eq!(disabled.resolved_total, 0);
+
+    let enabled = read_seeded("enabled").expect("an explicit enable survives the sweep");
+    assert_eq!(resolve_enabled(&enabled), (true, EnabledSource::Project));
+    assert!(enabled.records.is_empty());
+    assert_eq!(enabled.label.as_deref(), Some("enabled"));
+
+    let declined = read_seeded("declined").expect("a declined opt-in survives the sweep");
+    assert!(declined.onboarding_declined);
+    assert!(declined.records.is_empty());
+}
+
+#[test]
+fn sweep_removes_a_corrupt_store_and_keeps_a_newer_one() {
+    let _cfg = aggregate_env();
+    let dir = impact_config_dir().unwrap().join("impact");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("corrupt.json"), b"{ not json").unwrap();
+    let newer = format!(
+        r#"{{"schema_version": {}, "enabled": false, "explicit_decision": true}}"#,
+        STORE_SCHEMA_VERSION + 1
+    );
+    std::fs::write(dir.join("newer.json"), &newer).unwrap();
+
+    sweep_old_stores("keepme", std::time::Duration::ZERO);
+
+    assert!(
+        !dir.join("corrupt.json").exists(),
+        "a corrupt store is reclaimed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("newer.json")).unwrap(),
+        newer,
+        "a store of a newer Fallow stays as it is"
+    );
 }
 
 #[test]
@@ -2180,6 +2451,15 @@ fn containment_events_are_bounded_at_max_containment() {
         store.containment.len(),
         MAX_CONTAINMENT,
         "containment must be capped at MAX_CONTAINMENT"
+    );
+    assert_eq!(build_report(&store).containment_count, MAX_CONTAINMENT + 1);
+    assert_eq!(
+        take_due_digest(root).unwrap().containment_count,
+        MAX_CONTAINMENT + 1
+    );
+    assert_eq!(
+        aggregate(CrossRepoSort::Recent).totals.containment_count,
+        MAX_CONTAINMENT + 1
     );
     // The most recent event is at the end.
     assert_eq!(
@@ -2863,7 +3143,7 @@ fn render_cross_repo_markdown_includes_project_wide_totals_when_present() {
     );
 }
 
-// ----- migrate_legacy_store: corrupt legacy file falls back to default ---
+// ----- legacy_view: corrupt legacy file falls back to default ----------
 
 #[test]
 #[cfg_attr(miri, ignore)]
@@ -2873,7 +3153,7 @@ fn migrate_legacy_store_corrupt_file_returns_default() {
     // Write a corrupt legacy in-repo store.
     std::fs::create_dir_all(root.join(".fallow")).unwrap();
     std::fs::write(legacy_store_path(root), b"{ corrupted json ][").unwrap();
-    // load() tries the user store (missing) then migrate_legacy_store.
+    // load() finds no user store and reads the legacy store.
     let store = load(root);
     // A corrupt legacy file must return a default store without panicking.
     assert!(!store.enabled);
@@ -2962,7 +3242,7 @@ fn statusline_loader_reports_corrupt_legacy_store() {
 #[test]
 fn resolve_enabled_user_source_appears_in_report() {
     let (_config, _dir) = test_env();
-    set_global_default(true);
+    set_global_default(true).unwrap();
     let never_asked = ImpactStore::default();
     let (enabled, source) = resolve_enabled(&never_asked);
     assert!(enabled);
@@ -3263,4 +3543,359 @@ fn usable_temp_bases_drops_a_root_and_the_home_folder() {
     let bases = record_gate::usable_temp_bases(candidates, Some(home.path()));
 
     assert_eq!(bases, vec![home_parent, other.path().to_path_buf()]);
+}
+
+// ----- strict store read and the write transaction ----------------------
+
+/// A pre-relocation v3 in-repo store with one record.
+const LEGACY: &str = r#"{"schema_version":3,"enabled":true,"explicit_decision":true,
+            "records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,
+            "counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],
+            "resolved_total":2,
+            "frontier":{"src/a.ts":{"findings":[{"id":"x","kind":"unused-export","symbol":"foo"}],"suppressions":[]}},
+            "containment":[]}"#;
+
+fn write_legacy(root: &Path) {
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::write(legacy_store_path(root), LEGACY).unwrap();
+}
+
+#[test]
+fn cross_repo_skips_and_counts_a_newer_store_that_still_parses() {
+    let _cfg = aggregate_env();
+    seed_store("good", &store_with("good", 3, 0, "2026-06-10T00:00:00Z", 1));
+    let dir = impact_config_dir().unwrap().join("impact");
+    std::fs::write(
+        dir.join("newer.json"),
+        format!(
+            r#"{{"schema_version":{},"enabled":true,"resolved_total":5}}"#,
+            STORE_SCHEMA_VERSION + 1
+        ),
+    )
+    .unwrap();
+    let report = aggregate(CrossRepoSort::Recent);
+    assert_eq!(report.project_count, 1, "a newer store is not aggregated");
+    assert_eq!(report.unreadable_count, 1, "a newer store is counted");
+}
+
+#[test]
+fn statusline_reports_newer_schema_when_a_known_field_changed_shape() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(
+        root,
+        format!(
+            r#"{{"schema_version":{},"enabled":"per-worktree"}}"#,
+            STORE_SCHEMA_VERSION + 1
+        )
+        .as_bytes(),
+    );
+    assert!(matches!(
+        load_statusline(root),
+        Err(StatuslineLoadError::NewerSchema)
+    ));
+}
+
+#[test]
+fn load_does_not_import_the_legacy_store_over_an_unreadable_store() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, &[0xff, 0xfe]);
+    write_legacy(root);
+    assert!(load(root).records.is_empty());
+    assert_eq!(
+        std::fs::read(store_path(root).unwrap()).unwrap(),
+        [0xff, 0xfe]
+    );
+}
+
+#[test]
+fn legacy_view_is_absent_when_the_marker_exists() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    let store = store_path(root).unwrap();
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(migration_marker_path(&store), b"").unwrap();
+    assert!(load(root).records.is_empty());
+    assert!(load_statusline(root).unwrap().records.is_empty());
+}
+
+fn audit_record(root: &Path) -> Result<(), String> {
+    record_audit_run(
+        root,
+        &summary(1, 0, 0),
+        &AuditRunRecord {
+            verdict: AuditVerdict::Fail,
+            gate_source: Some(GateSource::Unknown),
+            git_sha: Some("abc1234"),
+            version: "2.0.0",
+            timestamp: "2026-10-02T00:00:00Z",
+            attribution: None,
+            analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        },
+    )
+}
+
+#[test]
+fn record_leaves_an_unparsable_store_unchanged() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    set_global_default(true).unwrap();
+    seed_store_raw(root, b"{not json");
+    assert!(audit_record(root).is_err());
+    assert_eq!(raw_store(root), "{not json");
+}
+
+/// Hold the store lock of a fresh project, run `change` on another thread, and
+/// check that `change` waits for the lock. `prepare` runs before the lock.
+fn assert_waits_for_store_lock(
+    prepare: impl FnOnce(&Path),
+    change: impl FnOnce(&Path) + Send + 'static,
+) -> (tempfile::TempDir, tempfile::TempDir) {
+    let (config, dir) = test_env();
+    let root = dir.path().to_path_buf();
+    prepare(&root);
+    let lock = ImpactStoreLock::acquire(&root).expect("lock");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let config_dir = config.path().to_path_buf();
+    let worker = std::thread::spawn(move || {
+        TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = Some(config_dir));
+        change(&root);
+        tx.send(()).unwrap();
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(300))
+            .is_err(),
+        "the change must wait for the store lock"
+    );
+    drop(lock);
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the change runs after the lock");
+    worker.join().unwrap();
+    (config, dir)
+}
+
+#[test]
+fn enable_waits_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            disable(root).unwrap();
+        },
+        |root| {
+            let _ = enable(root);
+        },
+    );
+    assert!(load(dir.path()).enabled);
+}
+
+#[test]
+fn record_keeps_the_file_when_tracking_is_off() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    assert_eq!(audit_record(root), Ok(()));
+    assert!(!store_path(root).unwrap().exists());
+}
+
+#[test]
+fn write_store_returns_the_io_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"").unwrap();
+    assert!(matches!(
+        write_store(&ImpactStore::default(), &blocker.join("x.json")),
+        Err(StoreWriteError::Io { .. })
+    ));
+}
+
+#[test]
+fn explicit_changes_fail_without_a_config_dir() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = None);
+    assert!(disable(root).is_err());
+    assert!(decline_onboarding(root).is_err());
+    assert_eq!(audit_record(root), Ok(()));
+    assert!(take_due_digest(root).is_none());
+    assert!(matches!(enable(root), Err(StoreWriteError::NoConfigDir)));
+    assert!(matches!(disable(root), Err(StoreWriteError::NoConfigDir)));
+    assert!(matches!(
+        decline_onboarding(root),
+        Err(StoreWriteError::NoConfigDir)
+    ));
+}
+
+#[test]
+fn unparsable_store_stops_disable_decline_and_digest() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, b"{not json");
+    assert!(disable(root).is_err());
+    assert!(decline_onboarding(root).is_err());
+    assert!(take_due_digest(root).is_none());
+    assert_eq!(raw_store(root), "{not json");
+    let err = disable(root).unwrap_err();
+    assert!(matches!(
+        err,
+        StoreWriteError::Read(StoreReadError::Invalid { .. })
+    ));
+    assert!(err.message().contains("fallow impact reset"));
+}
+
+#[test]
+fn disable_decline_and_digest_wait_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = disable(root);
+        },
+    );
+    assert!(!load(dir.path()).enabled);
+
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = decline_onboarding(root);
+        },
+    );
+    assert!(load(dir.path()).onboarding_declined);
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+            let mut store = load(root);
+            store.resolved_total = 3;
+            save(&store, root);
+        },
+        |root| {
+            let _ = take_due_digest(root);
+        },
+    );
+    assert!(load(dir.path()).last_digest_epoch.is_some());
+}
+
+#[test]
+fn digest_that_is_not_due_keeps_the_file() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    enable(root).unwrap();
+    let mut store = load(root);
+    store.resolved_total = 3;
+    store.containment.push(ContainmentEvent {
+        blocked_at: "2026-06-11T00:00:00Z".to_string(),
+        cleared_at: "2026-06-11T00:05:00Z".to_string(),
+        git_sha: None,
+        blocked_counts: ImpactCounts::default(),
+    });
+    save(&store, root);
+    assert!(take_due_digest(root).is_some());
+    let before = raw_store(root);
+    assert!(take_due_digest(root).is_none());
+    assert_eq!(raw_store(root), before);
+}
+
+#[test]
+fn enable_does_not_replace_a_store_that_is_not_utf8() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    seed_store_raw(root, &[0xff, 0xfe]);
+    assert!(matches!(
+        enable(root),
+        Err(StoreWriteError::Read(StoreReadError::Unreadable { .. }))
+    ));
+    assert_eq!(
+        std::fs::read(store_path(root).unwrap()).unwrap(),
+        [0xff, 0xfe]
+    );
+}
+
+#[test]
+fn global_default_fails_without_a_config_dir() {
+    let _cfg = aggregate_env();
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = None);
+    assert!(matches!(
+        set_global_default(true),
+        Err(StoreWriteError::NoConfigDir)
+    ));
+}
+
+#[test]
+fn reset_does_not_import_the_legacy_store_again() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    decline_onboarding(root).unwrap();
+    assert_eq!(load(root).records.len(), 1);
+    assert!(migration_marker_path(&store_path(root).unwrap()).exists());
+    assert!(reset(root).unwrap());
+    assert!(load(root).records.is_empty());
+    enable(root).unwrap();
+    record_v1(
+        root,
+        &summary(1, 0, 0),
+        AuditVerdict::Warn,
+        false,
+        None,
+        "2.0.0",
+        "t1",
+    );
+    assert_eq!(load(root).records.len(), 1);
+}
+
+#[test]
+fn reset_before_the_first_write_blocks_the_import() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    assert!(!reset(root).unwrap());
+    assert!(load(root).records.is_empty());
+}
+
+#[test]
+fn reset_all_keeps_markers_locks_and_the_global_default() {
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    set_global_default(true).unwrap();
+    enable(root).unwrap();
+    assert!(reset_all(root).unwrap());
+    let store = store_path(root).unwrap();
+    assert!(!store.exists());
+    assert!(migration_marker_path(&store).exists());
+    assert!(lock_path_for(&store).exists());
+    assert!(load_global_default());
+    assert!(load(root).records.is_empty());
+
+    let (_config, dir) = test_env();
+    let root = dir.path();
+    write_legacy(root);
+    assert!(!reset_all(root).unwrap());
+    assert!(load(root).records.is_empty());
+}
+
+#[test]
+fn reset_waits_for_the_store_lock() {
+    let (_config, dir) = assert_waits_for_store_lock(
+        |root| {
+            enable(root).unwrap();
+        },
+        |root| {
+            let _ = reset(root);
+        },
+    );
+    assert!(!store_path(dir.path()).unwrap().exists());
+}
+
+#[test]
+fn digest_on_an_untracked_project_creates_no_file() {
+    let (config, dir) = test_env();
+    let root = dir.path();
+    assert!(take_due_digest(root).is_none());
+    assert!(
+        !config.path().join("impact").exists(),
+        "a digest that is not due must not create the store folder or a lock"
+    );
 }

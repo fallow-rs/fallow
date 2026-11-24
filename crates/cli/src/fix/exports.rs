@@ -3,16 +3,16 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
 
-use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
-use super::export_declarations::{SharedDeclarations, remove_export_keyword_at};
+use super::enum_helpers::{EnumDeclarationRange, enum_statement_range};
 use super::export_list::{ExportListIndex, ExportListStatement, ListRewrite, ListRewriteOutcome};
 use super::list_imports::{ImportRemoval, plan_import_removals};
 use fallow_engine::module_graph::NamedReExport;
+use fallow_engine::source_edits::{ExportStatement, ExportStatementKind, SourceEditIndex};
 use fallow_types::output_dead_code::ReachabilityCaveat;
 
-use super::plan::{
-    CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, skip_generated_source,
-    stage_fixed_content,
+use super::plan::{CapturedHashes, FixPlan, SkipReason, skip_generated_source};
+use super::source_edits::{
+    QueueOutcome, SourceEdit, line_deletions, line_edit, read_source_snapshot,
 };
 
 /// Directory names whose contents are commonly consumed through paths
@@ -92,22 +92,14 @@ struct ExportFix {
 
 #[derive(Clone, Copy)]
 enum ExportEdit {
-    /// Remove the `export` (or `export default`) keyword on `line_idx`.
-    Keyword,
+    /// Remove the export of the statement whose `export` keyword is at
+    /// byte `start` of the file, on the 0-based line `line`.
+    Keyword { start: u32, line: usize },
     /// Delete the exported enum declaration.
     EnumDeclaration(EnumDeclarationRange),
     /// Remove the specifier from the list statement. The statement can span
     /// several lines.
     List(ExportListStatement),
-    /// Remove the `export` keyword of a declaration that exports more than
-    /// one name. The keyword is at byte `start_col` of `start_line`. The
-    /// removal happens only when every name of the declaration is removed
-    /// too.
-    SharedDeclaration {
-        start_line: usize,
-        start_col: usize,
-        index: usize,
-    },
 }
 
 impl ExportFix {
@@ -116,8 +108,8 @@ impl ExportFix {
     const fn edit_line(&self) -> usize {
         match self.edit {
             ExportEdit::List(statement) => statement.start_line,
-            ExportEdit::SharedDeclaration { start_line, .. } => start_line,
-            ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) => self.line_idx,
+            ExportEdit::Keyword { line, .. } => line,
+            ExportEdit::EnumDeclaration(_) => self.line_idx,
         }
     }
 }
@@ -140,21 +132,18 @@ pub(super) struct ExportFixInput<'a, 'export> {
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
-fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
+fn dry_run_export_line(relative: &Path, fix: &ExportFix) -> String {
     let relative_display = relative.to_string_lossy().replace('\\', "/");
-    if matches!(fix.edit, ExportEdit::EnumDeclaration(_)) {
-        eprintln!(
-            "Would remove enum declaration from {relative_display}:{} `{}`",
-            fix.line_idx + 1,
-            fix.export_name,
-        );
+    let what = if matches!(fix.edit, ExportEdit::EnumDeclaration(_)) {
+        "enum declaration"
     } else {
-        eprintln!(
-            "Would remove export from {relative_display}:{} `{}`",
-            fix.line_idx + 1,
-            fix.export_name,
-        );
-    }
+        "export"
+    };
+    format!(
+        "Would remove {what} from {relative_display}:{} `{}`",
+        fix.line_idx + 1,
+        fix.export_name,
+    )
 }
 
 fn push_export_fix_json(
@@ -185,8 +174,9 @@ struct FileExportPlan<'a> {
     meta: super::io::EncodingMetadata,
     /// The parsed export list statements of the file.
     lists: ExportListIndex,
-    /// The export declarations of the file that bind more than one name.
-    declarations: SharedDeclarations,
+    /// The export statements of the file, or `None` when the file does not
+    /// parse.
+    index: Option<SourceEditIndex>,
     fixes: Vec<ExportFix>,
     /// Removals withheld, with the reason of each.
     withheld: Vec<(ExportFix, SkipReason)>,
@@ -223,13 +213,18 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
             .withheld
             .sort_by_key(|(f, _)| std::cmp::Reverse(f.line_idx));
         for (fix, reason) in &file_plan.withheld {
-            push_withheld_export_entry(input, file_plan.relative, fix, *reason);
+            push_withheld_export_entry(input, (file_plan.path, file_plan.relative), fix, *reason);
         }
         let lines: Vec<&str> = file_plan
             .content
             .split(file_plan.meta.line_ending)
             .collect();
-        let rewrites = rewrite_list_statements(&file_plan.lists, &mut file_plan.fixes);
+        let from_declarations = declaration_only_names(input.re_exports, file_plan.path);
+        let rewrites = rewrite_list_statements(
+            &file_plan.lists,
+            (&lines, &from_declarations),
+            &mut file_plan.fixes,
+        );
         if file_plan.fixes.is_empty() {
             continue;
         }
@@ -246,30 +241,38 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
             )
         });
 
+        let edits = export_source_edits(
+            &file_plan.content,
+            file_plan.meta.line_ending,
+            file_plan.index.as_ref(),
+            &file_plan.fixes,
+            &rewrites,
+            &import_removals,
+        );
+        if input.plan.sources_mut().queue(file_plan.path, edits) != QueueOutcome::Queued {
+            continue;
+        }
         if input.dry_run {
             push_dry_run_export_fixes(
                 input.output,
-                input.fixes,
+                (input.fixes, &mut *input.plan),
                 file_plan.relative,
                 file_plan.path,
                 &file_plan.fixes,
             );
             if !matches!(input.output, OutputFormat::Json) {
-                emit_dry_run_import_removals(file_plan.relative, &import_removals);
+                preview_import_removals(input.plan, &file_plan, &import_removals);
             }
         } else {
-            apply_grouped_export_fixes(GroupedExportFixInput {
-                plan: input.plan,
-                path: file_plan.path,
-                fixes: input.fixes,
-                relative: file_plan.relative,
-                content: &file_plan.content,
-                meta: &file_plan.meta,
-                lines: &lines,
-                line_fixes: &file_plan.fixes,
-                rewrites,
-                import_removals,
-            });
+            for fix in &file_plan.fixes {
+                push_export_fix_json(
+                    input.fixes,
+                    file_plan.relative,
+                    file_plan.path,
+                    fix,
+                    Some(true),
+                );
+            }
         }
     }
 }
@@ -294,8 +297,7 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
             continue;
         }
 
-        let Some((content, meta)) =
-            read_source_with_hash_check(root, path, input.hashes, input.plan)
+        let Some((content, meta)) = read_source_snapshot(root, path, input.hashes, input.plan)
         else {
             continue;
         };
@@ -304,10 +306,11 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
         }
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
         let mut lists = ExportListIndex::default();
-        let declarations = SharedDeclarations::scan(path, &content, &lines);
-        let mut fixes = collect_export_line_fixes(&lines, file_exports, &mut lists, &declarations);
+        let index = SourceEditIndex::parse(path, &content);
+        let mut fixes = collect_export_line_fixes(&lines, file_exports, &mut lists, index.as_ref());
+        let from_declarations = declaration_only_names(input.re_exports, path);
+        rewrite_list_statements(&lists, (&lines, &from_declarations), &mut fixes);
         drop(lines);
-        rewrite_list_statements(&lists, &mut fixes);
         if fixes.is_empty() {
             continue;
         }
@@ -317,7 +320,7 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
             content,
             meta,
             lists,
-            declarations,
+            index,
             fixes,
             withheld: Vec::new(),
         });
@@ -386,27 +389,35 @@ fn withhold_removals_of_kept_exports(
 }
 
 /// Withhold each removal of a shared declaration that the file plan does not
-/// remove for every name of the declaration. Returns true when it withholds
-/// a removal.
+/// remove for every name of the declaration. A statement is shared when its
+/// `export` keyword exports more than one name. Returns true when it
+/// withholds a removal.
 fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> bool {
+    let Some(index) = file_plan.index.as_ref() else {
+        return false;
+    };
     let fixes = std::mem::take(&mut file_plan.fixes);
     let planned: FxHashSet<&str> = fixes.iter().map(|fix| fix.export_name.as_str()).collect();
-    let partial: FxHashSet<usize> = fixes
+    let partial: FxHashSet<u32> = fixes
         .iter()
         .filter_map(|fix| match fix.edit {
-            ExportEdit::SharedDeclaration { index, .. } => Some(index),
-            ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) | ExportEdit::List(_) => None,
+            ExportEdit::Keyword { start, .. } => Some(start),
+            ExportEdit::EnumDeclaration(_) | ExportEdit::List(_) => None,
         })
-        .filter(|index| {
-            let names = &file_plan.declarations.get(*index).names;
-            !names.iter().all(|name| planned.contains(name.as_str()))
+        .filter(|start| {
+            index.statement_at(*start).is_some_and(|statement| {
+                statement.names.len() > 1
+                    && !statement
+                        .names
+                        .iter()
+                        .all(|name| planned.contains(name.as_str()))
+            })
         })
         .collect();
     drop(planned);
-    let (withheld, kept): (Vec<ExportFix>, Vec<ExportFix>) =
-        fixes.into_iter().partition(|fix| {
-            matches!(fix.edit, ExportEdit::SharedDeclaration { index, .. } if partial.contains(&index))
-        });
+    let (withheld, kept): (Vec<ExportFix>, Vec<ExportFix>) = fixes.into_iter().partition(
+        |fix| matches!(fix.edit, ExportEdit::Keyword { start, .. } if partial.contains(&start)),
+    );
     file_plan.fixes = kept;
     let changed = !withheld.is_empty();
     file_plan.withheld.extend(
@@ -415,6 +426,30 @@ fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> b
             .map(|fix| (fix, SkipReason::SharedDeclarationInUse)),
     );
     changed
+}
+
+/// A test on the removed names of one list statement.
+type NamesFilter<'a> = dyn Fn(&[String]) -> bool + 'a;
+
+/// Whether every name that `path` re-exports comes from a declaration file
+/// (`.d.ts`, `.d.mts`, `.d.cts`), which has no module to load at run time.
+fn declaration_only_names<'a>(
+    re_exports: &'a [NamedReExport],
+    path: &'a Path,
+) -> impl Fn(&[String]) -> bool + 'a {
+    move |names| {
+        names.iter().all(|name| {
+            re_exports
+                .iter()
+                .find(|re_export| re_export.path == path && &re_export.exported_name == name)
+                .and_then(|re_export| re_export.source_path.file_name()?.to_str())
+                .is_some_and(|file| {
+                    [".d.ts", ".d.mts", ".d.cts"]
+                        .iter()
+                        .any(|ext| file.ends_with(ext))
+                })
+        })
+    }
 }
 
 /// Rewrite each list statement for the names that its fixes remove, and
@@ -426,6 +461,7 @@ fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> b
 /// Returns the rewrite of each statement, keyed by its first line.
 fn rewrite_list_statements(
     lists: &ExportListIndex,
+    (lines, declaration_only): (&[&str], &NamesFilter<'_>),
     fixes: &mut Vec<ExportFix>,
 ) -> FxHashMap<usize, ListRewriteOutcome> {
     let mut names_by_statement: FxHashMap<usize, (ExportListStatement, Vec<&str>)> =
@@ -439,7 +475,7 @@ fn rewrite_list_statements(
                 .push(fix.export_name.as_str());
         }
     }
-    let rewrites: FxHashMap<usize, ListRewriteOutcome> = names_by_statement
+    let mut rewrites: FxHashMap<usize, ListRewriteOutcome> = names_by_statement
         .into_iter()
         .filter_map(|(start, (statement, names))| {
             lists
@@ -447,13 +483,12 @@ fn rewrite_list_statements(
                 .map(|outcome| (start, outcome))
         })
         .collect();
+    lists.drop_redundant_module_loads(lines, &mut rewrites, declaration_only);
     fixes.retain(|fix| match fix.edit {
         ExportEdit::List(statement) => rewrites
             .get(&statement.start_line)
             .is_some_and(|outcome| outcome.removed.contains(&fix.export_name)),
-        ExportEdit::Keyword
-        | ExportEdit::EnumDeclaration(_)
-        | ExportEdit::SharedDeclaration { .. } => true,
+        ExportEdit::Keyword { .. } | ExportEdit::EnumDeclaration(_) => true,
     });
     rewrites
 }
@@ -473,14 +508,17 @@ fn removed_list_references(
     counts
 }
 
-fn emit_dry_run_import_removals(relative: &Path, removals: &[ImportRemoval]) {
-    let relative_display = relative.to_string_lossy().replace('\\', "/");
+fn preview_import_removals(
+    plan: &mut FixPlan,
+    file_plan: &FileExportPlan<'_>,
+    removals: &[ImportRemoval],
+) {
+    let relative_display = file_plan.relative.to_string_lossy().replace('\\', "/");
     for removal in removals {
         for name in &removal.names {
-            eprintln!(
-                "Would remove import from {relative_display}:{} `{name}`",
-                removal.start_line + 1,
-            );
+            let line = removal.start_line + 1;
+            let text = format!("Would remove import from {relative_display}:{line} `{name}`");
+            plan.preview(file_plan.path, line, text);
         }
     }
 }
@@ -490,7 +528,7 @@ fn emit_dry_run_import_removals(relative: &Path, removals: &[ImportRemoval]) {
 /// per-file skip list of the plan.
 fn push_withheld_export_entry(
     input: &mut ExportFixInput<'_, '_>,
-    relative: &Path,
+    (path, relative): (&Path, &Path),
     fix: &ExportFix,
     reason: SkipReason,
 ) {
@@ -501,11 +539,12 @@ fn push_withheld_export_entry(
         } else {
             "a re-export that this run keeps still names it"
         };
-        eprintln!(
+        let text = format!(
             "Would keep export in {relative_display}:{} `{}`: {why}",
             fix.line_idx + 1,
             fix.export_name,
         );
+        input.plan.note(path, fix.line_idx + 1, text);
     }
     input.fixes.push(serde_json::json!({
         "type": "remove_export",
@@ -523,11 +562,11 @@ fn collect_export_line_fixes(
     lines: &[&str],
     file_exports: &[&fallow_types::results::UnusedExport],
     lists: &mut ExportListIndex,
-    declarations: &SharedDeclarations,
+    index: Option<&SourceEditIndex>,
 ) -> Vec<ExportFix> {
     file_exports
         .iter()
-        .filter_map(|export| export_line_fix(lines, export, lists, declarations))
+        .filter_map(|export| export_line_fix(lines, export, lists, index))
         .collect()
 }
 
@@ -535,50 +574,86 @@ fn export_line_fix(
     lines: &[&str],
     export: &fallow_types::results::UnusedExport,
     lists: &mut ExportListIndex,
-    declarations: &SharedDeclarations,
+    index: Option<&SourceEditIndex>,
 ) -> Option<ExportFix> {
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
-    if let Some(index) = declarations.find(line_idx, &export.export_name) {
-        let declaration = declarations.get(index);
-        return Some(ExportFix {
-            line_idx,
-            export_name: export.export_name.clone(),
-            edit: ExportEdit::SharedDeclaration {
-                start_line: declaration.start_line,
-                start_col: declaration.start_col,
-                index,
-            },
-        });
-    }
-    let trimmed = line.trim_start();
-    let after_export = trimmed.strip_prefix("export ");
-
-    // The specifier of a list over several lines is on its own line, so the
-    // reported line does not start with `export`.
-    if after_export.is_none_or(is_export_list) {
+    let after_export = line.trim_start().strip_prefix("export ");
+    let list_fix = |lists: &mut ExportListIndex| {
         let statement = lists.statement_for_line(lines, line_idx)?;
-        return Some(ExportFix {
+        Some(ExportFix {
             line_idx,
             export_name: export.export_name.clone(),
             edit: ExportEdit::List(statement),
-        });
+        })
+    };
+    if after_export.is_some_and(is_export_list) {
+        return list_fix(lists);
     }
-
-    let after_export = after_export?;
-    let indent = line.len() - trimmed.len();
-    if !is_removable_default_export(after_export)
-        || !declarations.allows_line_start_removal(line_idx, indent)
-    {
-        return None;
-    }
-
-    let edit = removable_exported_enum_range(lines, line_idx, &export.export_name)
-        .map_or(ExportEdit::Keyword, ExportEdit::EnumDeclaration);
+    let statement = index.and_then(|index| {
+        index
+            .export_statement(&export.export_name, export.line, export.col)
+            .ok()
+    });
+    let (Some(index), Some(statement)) = (index, statement) else {
+        // The specifier of a list over several lines is on its own line, so
+        // the reported line does not start with `export`.
+        return if after_export.is_none() {
+            list_fix(lists)
+        } else {
+            None
+        };
+    };
+    let edit = statement_edit(index, lines, statement)?;
     Some(ExportFix {
         line_idx,
         export_name: export.export_name.clone(),
         edit,
+    })
+}
+
+/// The edit that removes the export of `statement`: the whole enum when no
+/// other text needs it, or else the `export` keyword.
+fn statement_edit(
+    index: &SourceEditIndex,
+    lines: &[&str],
+    statement: &ExportStatement,
+) -> Option<ExportEdit> {
+    if statement.kind == ExportStatementKind::Enum
+        && let Some(range) = enum_statement_range(index, lines, statement)
+    {
+        return Some(ExportEdit::EnumDeclaration(range));
+    }
+    statement.keyword_edit()?;
+    Some(ExportEdit::Keyword {
+        start: statement.start,
+        line: index.line_range(statement.start, statement.start + 1).0,
+    })
+}
+
+/// `statement`, and each other statement that exports only the one name of
+/// `statement` with a declaration that TypeScript merges with it, such as
+/// the overload signatures of a function or the namespace of a class.
+/// TypeScript requires all declarations of one merge to be exported, or
+/// none, so the fixer removes the `export` of each of them. A value and a
+/// type of one name, such as `const Foo` and `type Foo`, do not merge, so
+/// the type keeps its `export`.
+fn same_name_statements<'i>(
+    index: &'i SourceEditIndex,
+    statement: &'i ExportStatement,
+) -> impl Iterator<Item = &'i ExportStatement> {
+    let merge = match (statement.names.as_slice(), statement.merge) {
+        ([name], Some(kind)) => Some((name.as_str(), kind)),
+        _ => None,
+    };
+    index.statements().iter().filter(move |other| {
+        other.start == statement.start
+            || merge.is_some_and(|(name, kind)| {
+                matches!(other.names.as_slice(), [other_name] if other_name == name)
+                    && other
+                        .merge
+                        .is_some_and(|other_kind| kind.merges_with(other_kind))
+            })
     })
 }
 
@@ -589,185 +664,113 @@ fn is_export_list(after_export: &str) -> bool {
     s.starts_with('{')
 }
 
-fn is_removable_default_export(after_export: &str) -> bool {
-    if !after_export.starts_with("default ") {
-        return true;
-    }
-    let after_default = after_export
-        .strip_prefix("default ")
-        .unwrap_or(after_export);
-    after_default.starts_with("function ")
-        || after_default.starts_with("async function ")
-        || after_default.starts_with("class ")
-        || after_default.starts_with("abstract class ")
-}
-
 fn push_dry_run_export_fixes(
     output: OutputFormat,
-    fixes: &mut Vec<serde_json::Value>,
+    (fixes, plan): (&mut Vec<serde_json::Value>, &mut FixPlan),
     relative: &Path,
     path: &Path,
     line_fixes: &[ExportFix],
 ) {
     for fix in line_fixes {
         if !matches!(output, OutputFormat::Json) {
-            emit_dry_run_export_fix(relative, fix);
+            plan.preview(path, fix.line_idx + 1, dry_run_export_line(relative, fix));
         }
         push_export_fix_json(fixes, relative, path, fix, None);
     }
 }
 
-struct GroupedExportFixInput<'a> {
-    plan: &'a mut FixPlan,
-    path: &'a Path,
-    fixes: &'a mut Vec<serde_json::Value>,
-    relative: &'a Path,
-    content: &'a str,
-    meta: &'a super::io::EncodingMetadata,
-    lines: &'a [&'a str],
-    line_fixes: &'a [ExportFix],
-    /// The rewrite of each list statement, keyed by its first line.
-    rewrites: FxHashMap<usize, ListRewriteOutcome>,
-    /// The imports that only the removed list specifiers use. Their lines
-    /// never hold an export edit.
-    import_removals: Vec<ImportRemoval>,
-}
-
-fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
-    let GroupedExportFixInput {
-        plan,
-        path,
-        fixes,
-        relative,
-        content,
-        meta,
-        lines,
-        line_fixes,
-        mut rewrites,
-        import_removals,
-    } = input;
-
-    let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
-    let mut lines_to_delete = Vec::new();
+/// The byte edits of the planned export fixes of one file, against the
+/// analysed text `content`.
+///
+/// Fixes are grouped by their edit line. On one line, each keyword edit
+/// goes, and then the first other edit of the line.
+fn export_source_edits(
+    content: &str,
+    line_ending: &str,
+    index: Option<&SourceEditIndex>,
+    line_fixes: &[ExportFix],
+    rewrites: &FxHashMap<usize, ListRewriteOutcome>,
+    import_removals: &[ImportRemoval],
+) -> Vec<SourceEdit> {
+    let mut edits = Vec::new();
+    let mut line_indexes = Vec::new();
 
     let mut edit_lines: Vec<usize> = line_fixes.iter().map(ExportFix::edit_line).collect();
     edit_lines.dedup();
     for edit_line in edit_lines {
-        apply_export_line_group(
-            &mut new_lines,
-            &mut lines_to_delete,
-            line_fixes,
-            &mut rewrites,
-            edit_line,
-        );
+        let on_line = || line_fixes.iter().filter(|fix| fix.edit_line() == edit_line);
+        for fix in on_line() {
+            if let ExportEdit::Keyword { start, .. } = fix.edit
+                && let Some(index) = index
+                && let Some(statement) = index.statement_at(start)
+            {
+                edits.extend(
+                    same_name_statements(index, statement)
+                        .filter_map(ExportStatement::keyword_edit)
+                        .map(|edit| SourceEdit {
+                            start: edit.start as usize,
+                            end: edit.end as usize,
+                            replacement: edit.replacement,
+                        }),
+                );
+            }
+        }
+        let Some(edit) = on_line()
+            .map(|fix| fix.edit)
+            .find(|edit| !matches!(edit, ExportEdit::Keyword { .. }))
+        else {
+            continue;
+        };
+        match edit {
+            ExportEdit::EnumDeclaration(range) => {
+                line_indexes.extend(range.start_line..=range.end_line);
+            }
+            ExportEdit::List(statement) => {
+                match rewrites
+                    .get(&statement.start_line)
+                    .map(|outcome| &outcome.rewrite)
+                {
+                    Some(ListRewrite::Replace(rewritten)) if !rewritten.is_empty() => {
+                        edits.push(line_edit(
+                            content,
+                            line_ending,
+                            statement.start_line,
+                            statement.end_line,
+                            Some(rewritten),
+                        ));
+                    }
+                    Some(_) => line_indexes.extend(statement.start_line..=statement.end_line),
+                    None => {}
+                }
+            }
+            ExportEdit::Keyword { .. } => {}
+        }
     }
 
     for removal in import_removals {
-        let kept = removal.replacement.map_or(0, |replacement| {
-            let kept = replacement.len();
-            for (offset, line) in replacement.into_iter().enumerate() {
-                new_lines[removal.start_line + offset] = line;
-            }
-            kept
-        });
-        lines_to_delete.extend(removal.start_line + kept..=removal.end_line);
-    }
-
-    delete_export_lines(&mut new_lines, lines_to_delete);
-    stage_fixed_content(plan, path, &new_lines, meta, content);
-    for fix in line_fixes {
-        push_export_fix_json(fixes, relative, path, fix, Some(true));
-    }
-}
-
-fn apply_export_line_group(
-    new_lines: &mut [String],
-    lines_to_delete: &mut Vec<usize>,
-    line_fixes: &[ExportFix],
-    rewrites: &mut FxHashMap<usize, ListRewriteOutcome>,
-    edit_line: usize,
-) {
-    let on_line = || line_fixes.iter().filter(|fix| fix.edit_line() == edit_line);
-    // Several declarations can share a line. Each removal at a higher column
-    // goes first, so the columns of the others stay valid.
-    let mut columns: Vec<usize> = on_line()
-        .filter_map(|fix| match fix.edit {
-            ExportEdit::SharedDeclaration { start_col, .. } => Some(start_col),
-            ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) | ExportEdit::List(_) => None,
-        })
-        .collect();
-    columns.sort_unstable_by(|a, b| b.cmp(a));
-    columns.dedup();
-    for col in columns {
-        new_lines[edit_line] = remove_export_keyword_at(&new_lines[edit_line], col);
-    }
-    let Some(edit) = on_line()
-        .map(|fix| fix.edit)
-        .find(|edit| !matches!(edit, ExportEdit::SharedDeclaration { .. }))
-    else {
-        return;
-    };
-    match edit {
-        ExportEdit::EnumDeclaration(range) => {
-            lines_to_delete.extend(range.start_line..=range.end_line);
-        }
-        ExportEdit::List(statement) => {
-            match rewrites
-                .remove(&statement.start_line)
-                .map(|outcome| outcome.rewrite)
-            {
-                Some(ListRewrite::DeleteStatement) => {
-                    lines_to_delete.extend(statement.start_line..=statement.end_line);
-                }
-                Some(ListRewrite::Replace(rewritten)) => {
-                    let kept = rewritten.len();
-                    for (offset, line) in rewritten.into_iter().enumerate() {
-                        new_lines[statement.start_line + offset] = line;
-                    }
-                    lines_to_delete.extend(statement.start_line + kept..=statement.end_line);
-                }
-                None => {}
-            }
-        }
-        ExportEdit::SharedDeclaration { .. } => {}
-        ExportEdit::Keyword => {
-            let line = new_lines[edit_line].clone();
-            let trimmed = line.trim_start();
-            let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-            new_lines[edit_line] = remove_direct_export_keyword(&line, trimmed, after_export);
+        match &removal.replacement {
+            Some(replacement) if !replacement.is_empty() => edits.push(line_edit(
+                content,
+                line_ending,
+                removal.start_line,
+                removal.end_line,
+                Some(replacement),
+            )),
+            _ => line_indexes.extend(removal.start_line..=removal.end_line),
         }
     }
-}
 
-fn remove_direct_export_keyword(line: &str, trimmed: &str, after_export: &str) -> String {
-    let indent = line.len() - trimmed.len();
-    let replacement = if after_export.starts_with("default function ")
-        || after_export.starts_with("default async function ")
-        || after_export.starts_with("default class ")
-        || after_export.starts_with("default abstract class ")
-    {
-        after_export
-            .strip_prefix("default ")
-            .unwrap_or(after_export)
-    } else {
-        after_export
-    };
-
-    let prefix = &line[..indent];
-    format!("{prefix}{replacement}")
-}
-
-fn delete_export_lines(new_lines: &mut Vec<String>, mut delete_indices: Vec<usize>) {
-    delete_indices.sort_unstable();
-    delete_indices.dedup();
-    for &idx in delete_indices.iter().rev() {
-        new_lines.remove(idx);
-    }
+    edits.extend(line_deletions(content, line_ending, &line_indexes));
+    edits
 }
 
 #[cfg(test)]
 #[path = "exports_unicode_span_oracle.rs"]
 mod unicode_span_oracle;
+
+#[cfg(test)]
+#[path = "exports_syntax_tests.rs"]
+mod syntax_tests;
 
 #[cfg(test)]
 mod tests {
@@ -802,7 +805,7 @@ mod tests {
         });
     }
 
-    fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
+    pub(super) fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
         UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),
@@ -834,7 +837,7 @@ mod tests {
     }
 
     /// Run export fix for a single export. Returns (had_error, fixes).
-    fn fix_single(
+    pub(super) fn fix_single(
         root: &Path,
         file: &Path,
         name: &str,
@@ -1297,7 +1300,7 @@ mod tests {
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export const kept = 1;\n");
+        assert_eq!(content, "import './unused';\nexport const kept = 1;\n");
     }
 
     #[test]
@@ -1457,7 +1460,7 @@ mod tests {
         let fix = ExportFix {
             line_idx: 1,
             export_name: "removable".to_owned(),
-            edit: ExportEdit::Keyword,
+            edit: ExportEdit::Keyword { start: 0, line: 1 },
         };
 
         let mut fixes = Vec::new();
@@ -1515,7 +1518,7 @@ mod tests {
         let _ = plan.commit();
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export const x = 1;\n");
+        assert_eq!(content, "import \"./mod\";\nexport const x = 1;\n");
     }
 
     #[test]
@@ -1588,7 +1591,10 @@ mod tests {
         let (_, _) = fix_single(root, &file, "Foo", 1, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "export { Bar } from \"./bar\";\n");
+        assert_eq!(
+            content,
+            "import \"./foo\";\nexport { Bar } from \"./bar\";\n"
+        );
     }
 
     #[test]

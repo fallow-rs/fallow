@@ -17,90 +17,103 @@ import { inlineOption, readBenchCounts } from "../scripts/lib/options.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
-const args = process.argv.slice(2);
-const { runs: RUNS, samples: SAMPLE_COUNT } = readBenchCounts(
-  args,
-  { runs: "1", samples: "0" },
-  { flags: ["--skip-build"], values: ["--write-repros", "--projects"] },
-);
-const SKIP_BUILD = args.includes("--skip-build");
-const writeReprosArg = inlineOption(args, "--write-repros");
-const writeReprosDir = writeReprosArg ? resolve(writeReprosArg) : null;
-const projectsArg = inlineOption(args, "--projects");
-const projectFilter = projectsArg
-  ? new Set(
-      projectsArg
-        .split(",")
-        .map((project) => project.trim())
-        .filter(Boolean),
-    )
-  : null;
-
 const fallowBin = join(rootDir, "target", "release", "fallow");
+const ROLLING_ENV = "FALLOW_DUPES_ROLLING";
+// `fallow dupes --format compact` prints one line per clone instance:
+// code-duplication:<path>:<start>-<end>:fingerprint=...,group=N,tokens=N,...
+// The path may contain a colon, so the range anchors on the `fingerprint=` field.
+const COMPACT_LINE = /^code-duplication:(.+):(\d+)-(\d+):(fingerprint=.*)$/;
 
-if (!SKIP_BUILD) {
-  const build = spawnSync("cargo", ["build", "--release"], {
-    cwd: rootDir,
-    stdio: "pipe",
-    timeout: 300000,
-  });
-  if (build.status !== 0) {
-    console.error(build.stderr?.toString() ?? "release build failed");
-    process.exit(1);
-  }
-}
+let SAMPLE_COUNT = 0;
+let writeReprosDir = null;
 
-if (!existsSync(fallowBin)) {
-  console.error("release binary not found. Run without --skip-build first.");
+const fail = (message) => {
+  console.error(message);
   process.exit(1);
-}
+};
 
-const fixturesRoot = join(__dirname, "fixtures", "real-world");
-if (!existsSync(fixturesRoot)) {
-  console.error("real-world fixtures not found. Run: npm run download-fixtures");
-  process.exit(1);
-}
+const parseOptions = (args) => {
+  const counts = readBenchCounts(
+    args,
+    { runs: "1", samples: "0" },
+    { flags: ["--skip-build"], values: ["--write-repros", "--projects"] },
+  );
+  const writeReprosArg = inlineOption(args, "--write-repros");
+  const projectsArg = inlineOption(args, "--projects");
+  const projectNames = (projectsArg ?? "")
+    .split(",")
+    .map((project) => project.trim())
+    .filter(Boolean);
+  return {
+    runs: counts.runs,
+    samples: counts.samples,
+    skipBuild: args.includes("--skip-build"),
+    writeReprosDir: writeReprosArg ? resolve(writeReprosArg) : null,
+    projectFilter: projectsArg ? new Set(projectNames) : null,
+  };
+};
 
-const projects = readdirSync(fixturesRoot)
-  .filter((name) => existsSync(join(fixturesRoot, name, "package.json")))
-  .filter((name) => !projectFilter || projectFilter.has(name))
-  .toSorted();
-
-if (projects.length === 0) {
-  console.error("no projects matched");
-  process.exit(1);
-}
-
-const results = projects.map((project) => compareProject(project, join(fixturesRoot, project)));
-
-console.table(
-  results.map((result) => ({
-    Project: result.project,
-    Files: result.files,
-    "Default median": fmt(result.defaultMedian),
-    "Rolling median": fmt(result.rollingMedian),
-    Speedup: `${(result.defaultMedian / result.rollingMedian).toFixed(2)}x`,
-    "Exact missing": result.exactMissing,
-    "Exact extra": result.exactExtra,
-    "Coverage missing": result.coverageMissing,
-    "Coverage extra": result.coverageExtra,
-  })),
-);
-
-for (const result of results) {
-  if (SAMPLE_COUNT > 0 && result.samples.hasDrift) {
-    printSamples(result);
+const ensureBinary = (skipBuild) => {
+  if (!skipBuild) {
+    const build = spawnSync("cargo", ["build", "--release"], {
+      cwd: rootDir,
+      stdio: "pipe",
+      timeout: 300000,
+    });
+    if (build.status !== 0) fail(build.stderr?.toString() ?? "release build failed");
   }
-  if (writeReprosDir && result.samples.hasDrift) {
-    writeSampleRepro(result);
-  }
-}
+  if (!existsSync(fallowBin)) fail("release binary not found. Run without --skip-build first.");
+};
 
-function compareProject(project, dir) {
+const listProjects = (projectFilter) => {
+  const fixturesRoot = join(__dirname, "fixtures", "real-world");
+  if (!existsSync(fixturesRoot)) {
+    fail("real-world fixtures not found. Run: npm run download-fixtures");
+  }
+  const projects = readdirSync(fixturesRoot)
+    .filter((name) => existsSync(join(fixturesRoot, name, "package.json")))
+    .filter((name) => !projectFilter || projectFilter.has(name))
+    .toSorted();
+  if (projects.length === 0) fail("no projects matched");
+  return projects.map((project) => ({ project, dir: join(fixturesRoot, project) }));
+};
+
+const printResults = (results) => {
+  console.table(
+    results.map((result) => ({
+      Project: result.project,
+      Files: result.files,
+      "Default median": fmt(result.defaultMedian),
+      "Rolling median": fmt(result.rollingMedian),
+      Speedup: `${(result.defaultMedian / result.rollingMedian).toFixed(2)}x`,
+      "Exact missing": result.exactMissing,
+      "Exact extra": result.exactExtra,
+      "Coverage missing": result.coverageMissing,
+      "Coverage extra": result.coverageExtra,
+    })),
+  );
+  for (const result of results.filter((entry) => entry.samples.hasDrift)) {
+    if (SAMPLE_COUNT > 0) printSamples(result);
+    if (writeReprosDir) writeSampleRepro(result);
+  }
+};
+
+const main = () => {
+  const options = parseOptions(process.argv.slice(2));
+  SAMPLE_COUNT = options.samples;
+  writeReprosDir = options.writeReprosDir;
+  ensureBinary(options.skipBuild);
+  const results = listProjects(options.projectFilter).map(({ project, dir }) =>
+    compareProject(project, dir, options.runs),
+  );
+  printResults(results);
+};
+
+function compareProject(project, dir, runs) {
   const defaultRuns = [];
   const rollingRuns = [];
 
-  for (let index = 0; index < RUNS; index++) {
+  for (let index = 0; index < runs; index++) {
     defaultRuns.push(runFallow(dir, false));
     rollingRuns.push(runFallow(dir, true));
   }
@@ -123,15 +136,28 @@ function compareProject(project, dir) {
   };
 }
 
+/**
+ * Gives the environment of one run. The engine turns the rolling detector on
+ * when the variable exists, whatever its value, so the reference run removes it.
+ */
+export const fallowEnv = (rolling, baseEnv = process.env) => {
+  const env = { ...baseEnv };
+  if (rolling) {
+    env[ROLLING_ENV] = "1";
+  } else {
+    delete env[ROLLING_ENV];
+  }
+  return env;
+};
+
 function runFallow(dir, rolling) {
-  const env = rolling ? { ...process.env, FALLOW_DUPES_ROLLING: "1" } : process.env;
   const start = performance.now();
   const result = spawnSync(
     fallowBin,
     ["dupes", "--format", "compact", "--quiet", "--no-cache", "--root", dir],
     {
       cwd: rootDir,
-      env,
+      env: fallowEnv(rolling),
       stdio: "pipe",
       timeout: 600000,
       maxBuffer: 100 * 1024 * 1024,
@@ -145,26 +171,31 @@ function runFallow(dir, rolling) {
   return { elapsed, stdout: result.stdout?.toString() ?? "" };
 }
 
-function parseCompact(stdout) {
-  return stdout
+/**
+ * Reads the clone instances of a compact duplication report. The key leaves
+ * out the group number, because the two detectors can number groups apart.
+ */
+export const parseCompact = (stdout) =>
+  stdout
     .trim()
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const normalized = line.replace(/^clone-group-\d+:/, "");
-      const match = normalized.match(/^(.*):(\d+)-(\d+):(\d+)tokens$/);
-      if (!match) {
+      const match = line.match(COMPACT_LINE);
+      const fields = match ? new Map(match[4].split(",").map((field) => field.split("="))) : null;
+      const tokens = Number.parseInt(fields?.get("tokens") ?? "", 10);
+      if (!match || Number.isNaN(tokens)) {
         throw new Error(`unexpected compact line: ${line}`);
       }
+      const [, file, start, end] = match;
       return {
-        key: normalized,
-        file: match[1],
-        start: Number.parseInt(match[2]),
-        end: Number.parseInt(match[3]),
-        tokens: Number.parseInt(match[4]),
+        key: `${file}:${start}-${end}:${tokens}tokens`,
+        file,
+        start: Number.parseInt(start, 10),
+        end: Number.parseInt(end, 10),
+        tokens,
       };
     });
-}
 
 function compareLines(defaultLines, rollingLines) {
   const defaultSet = new Set(defaultLines.map((line) => line.key));
@@ -311,4 +342,8 @@ function median(values) {
 
 function fmt(ms) {
   return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`;
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
 }

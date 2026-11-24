@@ -3,6 +3,15 @@
 use super::{BaselineData, DuplicationBaselineData, HealthBaselineData};
 
 impl BaselineData {
+    pub(crate) const FINDING_FIELDS: &'static [&'static str] = {
+        macro_rules! field_names {
+            ($($field:ident),* $(,)?) => {
+                &[$(stringify!($field)),*]
+            };
+        }
+        with_baseline_fields!(field_names)
+    };
+
     /// Record the channels that narrowed the saving run.
     #[must_use]
     pub fn with_scope_reasons(mut self, reasons: fallow_output::BaselineScopeReasons) -> Self {
@@ -15,6 +24,12 @@ impl BaselineData {
 }
 
 impl DuplicationBaselineData {
+    /// The analysis mode recorded by the saving run.
+    #[must_use]
+    pub fn saved_mode(&self) -> fallow_output::BaselineMode {
+        fallow_output::BaselineMode::from_saved_names(&self.scope_reasons)
+    }
+
     /// Record whether the saving run used production mode.
     #[must_use]
     pub fn with_production(mut self, production: bool) -> Self {
@@ -24,6 +39,12 @@ impl DuplicationBaselineData {
 }
 
 impl HealthBaselineData {
+    /// The analysis mode recorded by the saving run.
+    #[must_use]
+    pub(crate) fn saved_mode(&self) -> fallow_output::BaselineMode {
+        fallow_output::BaselineMode::from_saved_names(&self.scope_reasons)
+    }
+
     /// Record whether the saving run used production mode.
     #[must_use]
     pub(crate) fn with_production(mut self, production: bool) -> Self {
@@ -32,8 +53,7 @@ impl HealthBaselineData {
     }
 }
 
-/// The reasons that a health or duplication file records: production mode only,
-/// because the prune guard reads that channel and no gate reads the file.
+/// Health and duplication baselines record only production mode.
 fn production_reason(production: bool) -> Vec<String> {
     if production {
         vec![fallow_output::ScopeReason::Production.as_str().to_owned()]
@@ -46,16 +66,12 @@ fn production_reason(production: bool) -> Vec<String> {
 /// name. Empty for a file that is not a JSON object.
 #[must_use]
 pub fn saved_finding_categories(json: &str) -> Vec<String> {
-    macro_rules! field_names {
-        ($($field:ident),* $(,)?) => {
-            [$(stringify!($field)),*]
-        };
-    }
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return Vec::new();
     };
-    with_baseline_fields!(field_names)
-        .into_iter()
+    BaselineData::FINDING_FIELDS
+        .iter()
+        .copied()
         .filter(|field| {
             value
                 .get(field)

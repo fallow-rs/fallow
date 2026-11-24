@@ -9,17 +9,20 @@ use serde_json::Value;
 
 use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
 use crate::coverage::upload_common::url_encode_path_segment;
-use crate::error::{emit_error_with_style, emit_input_error_with_style};
+use crate::error::{emit_coded_error_with_style, emit_input_error_with_style};
 use crate::exit_codes::NETWORK_FAILURE;
 #[path = "ci_check_run.rs"]
 mod check_run;
 #[path = "ci_pr_comment_post.rs"]
 mod pr_comment_post;
+#[path = "ci_provider_state.rs"]
+mod provider_state;
 #[path = "ci_review_post.rs"]
 mod review_post;
 
 use check_run::{PostCheckRunInput, post_check_run};
 use pr_comment_post::{PostPrCommentInput, post_pr_comment};
+use provider_state::{ProviderStateError, github_graphql_url, load_provider_state};
 use review_post::{PostReviewInput, post_review};
 
 pub enum CiCommand {
@@ -404,7 +407,7 @@ fn reconcile_review(
     let state = match load_provider_state(provider, target, opts) {
         Ok(state) => state,
         Err(e) if opts.dry_run => {
-            let plan = ReconcilePlan::without_provider(&current, e);
+            let plan = ReconcilePlan::without_provider(&current, e.message().to_owned());
             return emit_reconcile_result(
                 provider,
                 target,
@@ -417,7 +420,13 @@ fn reconcile_review(
             );
         }
         Err(e) => {
-            return emit_error_with_style(&e, NETWORK_FAILURE, output, json_style);
+            return emit_coded_error_with_style(
+                e.message(),
+                e.code(),
+                NETWORK_FAILURE,
+                output,
+                json_style,
+            );
         }
     };
     let plan = PlannedReconcile::new(&current, &legacy, &state);
@@ -431,19 +440,6 @@ fn reconcile_review(
     emit_reconcile_result(
         provider, target, &envelope, opts, &plan.plan, &applied, output, json_style,
     )
-}
-
-/// Load existing provider review state (comments + threads/discussions) for the
-/// reconcile plan, dispatching to the GitHub or GitLab loader.
-fn load_provider_state(
-    provider: CiProvider,
-    target: Option<&str>,
-    opts: ReconcileOptions<'_>,
-) -> Result<ProviderState, String> {
-    match provider {
-        CiProvider::Github => load_github_state(target, opts),
-        CiProvider::Gitlab => load_gitlab_state(target, opts),
-    }
 }
 
 /// Apply the reconcile plan against the live provider, dispatching to the
@@ -767,78 +763,6 @@ impl ApplyFailure {
     }
 }
 
-fn load_github_state(
-    target: Option<&str>,
-    opts: ReconcileOptions<'_>,
-) -> Result<ProviderState, String> {
-    let bot_login_var = std::env::var("FALLOW_BOT_LOGIN");
-    let bot_login = BotLogin::from_var(&bot_login_var);
-    let pr = require_target("GitHub pull request", target)?;
-    let repo = opts
-        .repo
-        .map(str::to_owned)
-        .or_else(|| std::env::var("GH_REPO").ok())
-        .or_else(|| std::env::var("GITHUB_REPOSITORY").ok())
-        .ok_or_else(|| {
-            "GitHub reconciliation requires --repo, GH_REPO, or GITHUB_REPOSITORY".to_owned()
-        })?;
-    let token = github_token()?;
-    let api = opts
-        .api_url
-        .unwrap_or("https://api.github.com")
-        .trim_end_matches('/');
-    let agent = try_api_agent().map_err(|err| err.to_string())?;
-    let mut state = ProviderState::default();
-    let mut review_comments = Vec::new();
-
-    for page in 1..=100 {
-        let url = format!(
-            "{api}/repos/{repo}/pulls/{pr}/comments?per_page=100&page={page}&sort=created&direction=asc"
-        );
-        let value = github_get_json(&agent, &url, &token)?;
-        let comments = value
-            .as_array()
-            .ok_or_else(|| "GitHub review comments response was not an array".to_owned())?;
-        if comments.is_empty() {
-            break;
-        }
-        review_comments.extend(comments.iter().cloned());
-        if comments.len() < 100 {
-            break;
-        }
-        if page == 100 {
-            return Err(
-                "GitHub review comments pagination exceeded 100 pages; refusing partial provider state"
-                    .to_owned(),
-            );
-        }
-    }
-
-    // Root comments establish lifecycle identity. Replies are processed only
-    // after every page is loaded so their markers can be tied to a root even
-    // if provider ordering or pagination places the reply first.
-    for (position, comment) in review_comments.iter().enumerate() {
-        record_github_review_root(&mut state, comment, opts.review_id, position, bot_login)?;
-    }
-    for (position, comment) in review_comments.iter().enumerate() {
-        record_github_resolution_marker(&mut state, comment, opts.review_id, position, bot_login)?;
-    }
-
-    load_github_review_threads(
-        &mut state,
-        GithubConnection {
-            agent: &agent,
-            repo: &repo,
-            pr,
-            token: &token,
-            api,
-        },
-        opts.review_id,
-    )?;
-    finalize_github_state(&mut state);
-    Ok(state)
-}
-
 fn record_github_review_root(
     state: &mut ProviderState,
     comment: &Value,
@@ -976,7 +900,7 @@ fn load_github_review_threads(
                 "cursor": cursor,
             }
         });
-        let value = github_post_json(agent, &format!("{api}/graphql"), token, &payload)?;
+        let value = github_post_json(agent, &github_graphql_url(api), token, &payload)?;
         if value.get("errors").is_some() {
             return Err(format!(
                 "GitHub GraphQL reviewThreads query failed: {value}"
@@ -1348,7 +1272,7 @@ fn preflight_github_operations(
             "variables": { "threadId": thread_id },
         });
         let value =
-            github_post_json(agent, &format!("{api}/graphql"), token, &payload).map_err(|err| {
+            github_post_json(agent, &github_graphql_url(api), token, &payload).map_err(|err| {
                 ApplyFailure::new(
                     fingerprint.clone(),
                     format!("GitHub preflight failed for review thread {thread_id}: {err}"),
@@ -1424,7 +1348,7 @@ fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), Ap
             });
             let value = github_post_json(
                 input.agent,
-                &format!("{}/graphql", input.api),
+                &github_graphql_url(input.api),
                 input.token,
                 &payload,
             )
@@ -1453,67 +1377,6 @@ fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), Ap
         }
     }
     Ok(())
-}
-
-fn load_gitlab_state(
-    target: Option<&str>,
-    opts: ReconcileOptions<'_>,
-) -> Result<ProviderState, String> {
-    let bot_login_var = std::env::var("FALLOW_BOT_LOGIN");
-    let bot_login = BotLogin::from_var(&bot_login_var);
-    let mr = require_target("GitLab merge request", target)?;
-    let project_id = opts
-        .project_id
-        .map(str::to_owned)
-        .or_else(|| std::env::var("CI_PROJECT_ID").ok())
-        .ok_or_else(|| "GitLab reconciliation requires --project-id or CI_PROJECT_ID".to_owned())?;
-    let token = std::env::var("GITLAB_TOKEN")
-        .map_err(|_| "GitLab reconciliation requires GITLAB_TOKEN".to_owned())?;
-    let api = opts
-        .api_url
-        .map(str::to_owned)
-        .or_else(|| std::env::var("CI_API_V4_URL").ok())
-        .unwrap_or_else(|| "https://gitlab.com/api/v4".to_owned());
-    let api = api.trim_end_matches('/').to_owned();
-    let agent = try_api_agent().map_err(|err| err.to_string())?;
-    let mut state = ProviderState::default();
-    let mut all_discussions = Vec::new();
-
-    for page in 1..=100 {
-        let url = format!(
-            "{api}/projects/{}/merge_requests/{mr}/discussions?per_page={GITLAB_PER_PAGE}&page={page}",
-            url_encode_path_segment(&project_id)
-        );
-        let (value, next_page) = gitlab_get_page(&agent, &url, &token)?;
-        let discussions = value
-            .as_array()
-            .ok_or_else(|| "GitLab discussions response was not an array".to_owned())?;
-        all_discussions.extend(discussions.iter().cloned());
-        if !gitlab_has_more_pages(next_page, discussions.len()) {
-            break;
-        }
-        if page == 100 {
-            return Err(
-                "GitLab discussions pagination exceeded 100 pages; refusing partial provider state"
-                    .to_owned(),
-            );
-        }
-    }
-    let authenticated_user = if needs_gitlab_authenticated_user(&all_discussions, bot_login) {
-        Some(load_gitlab_authenticated_user(&agent, &api, &token)?)
-    } else {
-        None
-    };
-    for discussion in &all_discussions {
-        collect_gitlab_discussion_fingerprints(
-            &mut state,
-            discussion,
-            opts.review_id,
-            authenticated_user.as_ref(),
-            bot_login,
-        )?;
-    }
-    Ok(state)
 }
 
 fn needs_gitlab_authenticated_user(discussions: &[Value], bot_login: BotLogin<'_>) -> bool {

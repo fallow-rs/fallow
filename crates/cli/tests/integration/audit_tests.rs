@@ -186,11 +186,7 @@ fn run_fallow_raw_with_env(
         cmd.arg(arg);
     }
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 fn audit_cache_paths(root: &Path, base_sha: &str) -> (std::path::PathBuf, std::path::PathBuf) {
@@ -2564,12 +2560,6 @@ fn audit_new_only_inherits_shifted_duplicate_group() {
         "--quiet",
         "--no-cache",
         "--performance",
-        "--dupes-mode",
-        "strict",
-        "--dupes-min-tokens",
-        "10",
-        "--dupes-min-lines",
-        "3",
     ]);
 
     assert_eq!(
@@ -3978,11 +3968,7 @@ fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> crate::common::CommandOu
         cmd.env(key, value);
     }
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 /// Regression test for issue #301. When git invokes hooks (`pre-commit`,
@@ -4834,11 +4820,7 @@ fn run_audit_string_env(
     cmd.args(["--format", "json", "--quiet"]);
     cmd.args(extra_args);
     let output = cmd.output().expect("failed to run fallow binary");
-    crate::common::CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    crate::common::CommandOutput::from_process(output)
 }
 
 /// Add a second commit so `HEAD~1` resolves, then return the fixture.
@@ -6752,19 +6734,19 @@ fn w2_walkthrough_json_is_byte_identical_to_guide() {
         "--format",
         "json",
         "--quiet",
+        "--mark-viewed",
+        "absent.ts",
     ]);
     assert_eq!(walkthrough_json.code, 0, "exits 0");
+    assert!(
+        walkthrough_json.stderr.contains("absent.ts"),
+        "{}",
+        walkthrough_json.stderr
+    );
     let guide_json = run_walkthrough_guide(tmp.path());
 
     let from_walkthrough = parse_json(&walkthrough_json);
-    // Same agent-contract kind + deterministic snapshot hash.
     assert_eq!(from_walkthrough["kind"], "review-walkthrough-guide");
-    assert_eq!(
-        from_walkthrough["graph_snapshot_hash"],
-        guide_json["graph_snapshot_hash"],
-    );
-    // The whole envelope matches once the random per-run id is stripped: the
-    // json branch reuses the one guide JSON path, no second serializer.
     assert_eq!(
         strip_run_id(from_walkthrough),
         strip_run_id(guide_json),
@@ -6986,15 +6968,15 @@ fn w2_walkthrough_mark_viewed_writes_local_ledger() {
         "--base",
         "main~1",
         "--walkthrough",
+        "--format",
+        "json",
         "--mark-viewed",
         "src/ui/page.ts",
     ]);
     assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
     let state_path = tmp.path().join(".fallow/walkthrough-state.json");
-    assert!(state_path.exists(), "--mark-viewed writes the ledger");
     let state: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
-    assert_eq!(state["version"], 1);
     assert_eq!(state["schema"], "walkthrough-viewed-marks");
     assert!(
         state["entries"]["src/ui/page.ts"].is_object(),
@@ -7128,7 +7110,7 @@ fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
         "main~1",
         "--walkthrough",
         "--mark-viewed",
-        "src/lib.ts",
+        "./src/../src/lib.ts",
     ]);
     assert_eq!(
         marked.code, 0,
@@ -7241,12 +7223,6 @@ fn run_rename_audit(dir: &Path) -> crate::common::CommandOutput {
         "json",
         "--quiet",
         "--no-cache",
-        "--dupes-mode",
-        "strict",
-        "--dupes-min-tokens",
-        "10",
-        "--dupes-min-lines",
-        "3",
     ])
 }
 
@@ -8964,7 +8940,7 @@ fn audit_cache_prune_reports_and_removes_aged_snapshot_files() {
     let root = fixture.path();
     let scan = TempDir::new().expect("scan root should be created");
     // The current `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` directory.
-    let snapshot_dir = root.join(".fallow/cache/audit-base-v23");
+    let snapshot_dir = root.join(".fallow/cache/audit-base-v25");
     fs::create_dir_all(&snapshot_dir).unwrap();
     let aged = snapshot_dir.join("00000000000000aa.bin");
     let fresh = snapshot_dir.join("00000000000000bb.bin");
@@ -9451,4 +9427,55 @@ fn audit_css_duplicate_block_survives_rename_of_a_group_file() {
         "a renamed group file keeps the finding inherited: {findings:#?}"
     );
     assert_eq!(json["attribution"]["styling_introduced"], 0);
+}
+
+/// With different production modes for dead code and health, the base pass
+/// does not share its parse with health. The brief still needs the base
+/// graph, or every export of a changed public file reads as newly added.
+#[test]
+fn audit_brief_with_split_production_modes_reports_only_new_public_exports() {
+    let tmp = TempDir::new().expect("temp dir should be created");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "brief-split-modes", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":true,"health":false,"dupes":false}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "export const existing = 1;\nexport const kept = 2;\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    fs::write(
+        root.join("src/index.ts"),
+        "export const existing = 1;\nexport const kept = 2;\nexport const added = 3;\n",
+    )
+    .unwrap();
+    let root_arg = root.to_str().expect("root should be utf-8");
+
+    let brief = run_fallow_raw(&[
+        "audit", "--root", root_arg, "--base", "HEAD", "--brief", "--format", "json", "--quiet",
+    ]);
+
+    assert!(brief.code <= 1, "brief audit failed: {}", brief.stderr);
+    let json = parse_json(&brief);
+    let added: Vec<&str> = json["deltas"]["public_api_added"]
+        .as_array()
+        .unwrap_or_else(|| panic!("brief must carry public_api_added: {json}"))
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(
+        added,
+        ["src/index.ts::added"],
+        "only the new export is public API growth: {json}"
+    );
 }

@@ -7,7 +7,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -113,14 +113,24 @@ export const parseOptions = (argv, promptSet, now = new Date()) => {
  */
 export const checkOutDir = (outDir, repoRoot = REPO_ROOT) => {
   const inside = relative(repoRoot, outDir);
-  if (inside.startsWith("..") || isAbsolute(inside)) return { ok: true, data: outDir };
-  const probe = join(inside, "results.jsonl");
-  const ignored = spawnSync("git", ["check-ignore", "-q", "--no-index", probe], {
-    cwd: repoRoot,
+  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    return { ok: true, data: outDir };
+  }
+  // Git ignores everything under an ignored folder. Probe from the top down,
+  // because git refuses a path past a symlink, such as a linked `.plans`.
+  const parts = [...inside.split(sep), "results.jsonl"];
+  const ignored = parts.some((_, index) => {
+    const probe = parts.slice(0, index + 1).join(sep);
+    return (
+      spawnSync("git", ["check-ignore", "-q", "--no-index", probe], { cwd: repoRoot }).status === 0
+    );
   });
-  return ignored.status === 0
+  return ignored
     ? { ok: true, data: outDir }
-    : { ok: false, error: `${inside} is inside the repository and git does not ignore it.` };
+    : {
+        ok: false,
+        error: `${inside || "."} is inside the repository and git does not ignore it.`,
+      };
 };
 
 const whichBinary = (binary) => {

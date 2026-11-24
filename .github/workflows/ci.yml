@@ -117,6 +117,7 @@ jobs:
               - 'scripts/select-miri-runner.mjs'
               - 'scripts/select-miri-runner.test.mjs'
               - 'scripts/workflow-policy.test.mjs'
+              - 'scripts/hostile-host.sh'
               - 'crates/**'
               - 'tests/**'
               - 'docs/output-schema.json'
@@ -186,6 +187,7 @@ jobs:
               - 'crates/core/tests/integration_test/workspaces.rs'
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
+              - 'crates/engine/src/churn_cache_path.rs'
               - 'crates/engine/src/repo_refs.rs'
               - 'crates/engine/src/repo_refs_linked_worktree.rs'
               - 'crates/engine/src/base_worktree_orphans.rs'
@@ -193,6 +195,8 @@ jobs:
               - 'crates/engine/src/write_guard.rs'
               - 'crates/graph/src/missed_probes.rs'
               - 'crates/graph/src/read_trace.rs'
+              - 'crates/api/src/mutation/run_dir.rs'
+              - 'crates/engine/tests/integration/cache_model/read_set.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/engine/src/health/scoring.rs'
               - 'crates/engine/src/health/scoring_tests.rs'
@@ -205,10 +209,13 @@ jobs:
               - 'crates/process/src/scoped_child.rs'
               - 'crates/process/src/process_tree.rs'
               - 'crates/process/src/registry.rs'
+              - 'crates/process/src/host_paths.rs'
               - 'crates/cli/tests/drift/**'
               - 'crates/cli/tests/integration/audit_tests.rs'
               - 'crates/cli/tests/integration/audit_orphaned_code_tests.rs'
               - 'crates/cli/tests/integration/exit_code_tests.rs'
+              - 'crates/cli/tests/integration/global_option_support_tests.rs'
+              - 'crates/cli/tests/integration/regression_flag_scope_tests.rs'
               - 'crates/cli/src/agent_install/mcp.rs'
               - 'crates/cli/src/agent_install/mod.rs'
               - 'crates/cli/src/agent_install/status.rs'
@@ -221,6 +228,7 @@ jobs:
               - 'crates/cli/src/coverage/mod_tests.rs'
               - 'crates/cli/src/coverage/upload_source_maps.rs'
               - 'crates/cli/src/health/coverage.rs'
+              - 'crates/cli/src/health/coverage_sidecar.rs'
               - 'crates/cli/src/report/sink.rs'
               - 'crates/cli/src/report/mutation_evidence.rs'
               - 'crates/cli/src/impact.rs'
@@ -615,9 +623,13 @@ jobs:
         # suite, about 48 CPU-minutes.
         # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
         # the end-to-end mutation tests instead of a skip.
+        # scripts/hostile-host.sh runs the tests with a home folder that holds
+        # a fake runtime coverage add-on and a global Git hook that fails. A
+        # test that reads the host paths instead of its own then fails here,
+        # and not only on a developer machine.
         env:
           FALLOW_MUTATION_E2E_REQUIRED: '1'
-        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/3
+        run: bash scripts/hostile-host.sh -- cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/3
 
       - name: Upload test report
         if: always()
@@ -838,6 +850,7 @@ jobs:
           -p fallow-graph -p fallow-api -p fallow-multicall
           -E '(package(fallow-engine) & (test(changed_files::tests) | test(churn::tests) | test(repo_refs::tests) | test(write_guard::tests)))
           | (binary_id(fallow-cli::integration) & test(/^exit_code_tests::.*null_device/))
+          | (binary_id(fallow-cli::integration) & test(regression_flag_scope_tests::file_only_commands_recover_their_own_baseline))
           | (package(fallow-core) & test(symlink))
           | (package(fallow-lsp) & test(windows_initialization_publishes_uri_safe_diagnostics))
           | (package(fallow-mcp) & test(completed_success_cleans_descendant_process_tree))
@@ -958,6 +971,20 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
+      # The base check below decides the job. Drift on the head does not fail
+      # the job, but main fails after the merge until the companion sync lands.
+      - name: Warn when the pull request head needs the companion sync
+        if: github.event_name == 'pull_request'
+        env:
+          FALLOW_SKILLS_DIR: ${{ github.workspace }}/.fallow-skills-src
+        run: |
+          status=0
+          node scripts/vendor-skills.mjs --check || status=$?
+          if [ "$status" -eq 1 ]; then
+            echo "::warning title=Public skills contract::This pull request changes the public skill contract. The merge needs the companion sync. After the merge, the Skills companion sync workflow opens the fallow-skills pull request. Without its credential, run node scripts/sync-skills-companion.mjs --pin <merge commit> and publish its commit with the commands that it prints."
+          elif [ "$status" -ne 0 ]; then
+            echo "::warning title=Public skills contract::The drift check of the pull request head could not run (exit $status)."
+          fi
       - name: Check public skill matches the Fallow source contract
         working-directory: ${{ github.event_name == 'pull_request' && '.fallow-skills-base' || '.' }}
         env:
@@ -1001,6 +1028,7 @@ jobs:
         run: |
           bash scripts/test-ci-add-swap.sh
           bash scripts/test-ci-with-resource-log.sh
+          bash scripts/test-hostile-host.sh
 
   js-lint:
     name: JS Lint and Format
@@ -1045,6 +1073,10 @@ jobs:
         run: npm run fmt:js:check
       - name: Narrator comment guard
         run: node scripts/check-comment-quality.mjs --all
+      - name: Host path reads
+        run: node scripts/check-host-reads.mjs
+      - name: Tsconfig option reads
+        run: node scripts/check-tsconfig-reads.mjs
       # check-temp-leaks.mjs fails a test step that leaves a `fallow-*`
       # folder in the system temp directory. A reused runner and a developer
       # machine keep such folders.

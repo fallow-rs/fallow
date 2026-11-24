@@ -76,11 +76,7 @@ fn run(root: &Path, args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
         .arg(root)
         .output()
         .expect("run fallow");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(output)
 }
 
 fn json(output: &CommandOutput) -> serde_json::Value {

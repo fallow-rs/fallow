@@ -32,7 +32,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "Export is never imported"
               },
               "fullDescription": {
-                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file."
+                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`."
               },
               "helpUri": "https://fallow.tools/docs/rules/unused-export/",
               "defaultConfiguration": {
@@ -152,6 +152,19 @@ expression: redact_sarif_version(&json_str)
                 "text": "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked."
               },
               "helpUri": "https://fallow.tools/docs/rules/unused-protected-class-member/",
+              "defaultConfiguration": {
+                "level": "none"
+              }
+            },
+            {
+              "id": "fallow/namespace-escape",
+              "shortDescription": {
+                "text": "Namespace binding is used as a whole value, so its exports are not checked"
+              },
+              "fullDescription": {
+                "text": "A namespace import (`import * as Ns`) that the code uses as a whole value: a cast, an assignment, a call argument, a spread, a computed member read, a reflective call such as `Object.keys(Ns)`, or a re-export with `export { Ns }`. Fallow cannot see which members such a use reads, so it credits every export of the target module and of the modules that the target re-exports from. These exports are then not checked by `unused-exports` and `unused-types`. The finding is on the import and gives the count of exports that the credit hides. A binding that hides no export is not reported. Defaults to off."
+              },
+              "helpUri": "https://fallow.tools/docs/rules/namespace-escape/",
               "defaultConfiguration": {
                 "level": "none"
               }

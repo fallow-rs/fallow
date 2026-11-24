@@ -20,7 +20,7 @@
 
 mod base_files;
 mod base_ref;
-mod clone_containment;
+mod clone_regions;
 mod outcome;
 mod own_config;
 mod scope;
@@ -43,10 +43,10 @@ pub use base_ref::{
     AuditBaseError, AuditBaseOrigin, audit_base_override, parse_audit_base_override,
     resolve_audit_base, resolve_audit_base_decided,
 };
+pub use clone_regions::{CloneChange, CloneRegion, CloneRegions, edits_base_clone};
 pub use outcome::{
-    DupeBase, DupeDemotionDiffSource, RunChange, SharedDiff, compare,
-    demote_preexisting_dupe_introductions, outcome, realign_styling_introductions,
-    styling_finding_gates, styling_rule_severity,
+    DupeBase, DupeDemotionDiffSource, RunChange, SharedDiff, attribute_clone_regions, compare,
+    outcome, realign_styling_introductions, styling_finding_gates, styling_rule_severity,
 };
 pub use own_config::{config_path_under_root, own_config_unused_code_keys};
 pub use scope::{
@@ -86,6 +86,8 @@ pub struct DeadCodeView<'a> {
 pub struct DuplicationView<'a> {
     /// Clone groups in output order.
     pub clone_groups: Vec<&'a CloneGroup>,
+    /// Clone groups that `duplicates.ignoredClones` hid.
+    pub ignored_groups: &'a [fallow_engine::duplicates::IgnoredCloneGroup],
     /// Root that key paths are relative to.
     pub root: &'a Path,
     /// Duplicated share of the analyzed code, in percent.
@@ -562,18 +564,28 @@ pub fn attribute<A: AuditAnalyses>(
         let degraded = degrade_reason.is_some();
         let mut comparison = compare(&view, base_snapshot.as_ref(), degraded, &change);
         comparison.clear_worsened_when_off(worsened);
-        let source = demote_preexisting_dupe_introductions(
+        // A skipped base reuses the head keys, so each group matches by key.
+        let no_groups = (&[][..], &[][..]);
+        let source = attribute_clone_regions(
             &mut comparison,
             &view,
             &change,
-            DupeBase {
-                // A skipped base reuses the head keys, so no group is introduced.
-                groups: base_snapshot
-                    .as_ref()
-                    .filter(|_| !skipped)
-                    .map_or(&[][..], |snapshot| snapshot.dupe_groups.as_slice()),
-                renames,
-            },
+            base_snapshot.as_ref().map(|snapshot| {
+                let (groups, accepted) = if skipped {
+                    no_groups
+                } else {
+                    (
+                        snapshot.dupe_groups.as_slice(),
+                        snapshot.accepted_dupe_groups.as_slice(),
+                    )
+                };
+                DupeBase {
+                    keys: &snapshot.dupes,
+                    groups,
+                    accepted,
+                    renames,
+                }
+            }),
         );
         realign_styling_introductions(&mut comparison, &view, base_snapshot.as_ref(), &change);
         let result = outcome(gate, worsened, &view, &comparison, base_snapshot.is_some());

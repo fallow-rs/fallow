@@ -58,7 +58,7 @@ pub fn find_dep_line_in_json(content: &str, package_name: &str) -> u32 {
 
 /// Read a package.json file's raw text for line-number scanning.
 pub fn read_pkg_json_content(pkg_path: &Path) -> Option<String> {
-    std::fs::read_to_string(pkg_path).ok()
+    PackageJson::read_source(pkg_path).ok()
 }
 
 /// Collect every package name declared across the root `package.json` and each

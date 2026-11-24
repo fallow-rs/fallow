@@ -7,11 +7,14 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-const GIT_LOCATION_VARIABLES = new Set([
+// The ship scripts keep a `CARGO_TARGET_DIR` of the caller, so a value from
+// the shell of the person who runs the tests would replace the fixture target.
+const DROPPED_VARIABLES = new Set([
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_COMMON_DIR",
   "GIT_INDEX_FILE",
+  "CARGO_TARGET_DIR",
 ]);
 
 // A private global config keeps the signing and rerere settings of the
@@ -34,7 +37,7 @@ export const createShipRepo = (prefix) => {
   const globalConfig = join(root, "gitconfig");
   writeFileSync(globalConfig, GLOBAL_CONFIG);
   const env = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => !GIT_LOCATION_VARIABLES.has(name)),
+    Object.entries(process.env).filter(([name]) => !DROPPED_VARIABLES.has(name)),
   );
   // `TMPDIR` puts the temporary worktrees of the scripts in `root`, so the
   // cleanup removes them too.

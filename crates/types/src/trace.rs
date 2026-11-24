@@ -64,6 +64,12 @@ pub struct ExportTrace {
     /// plugin credits the export.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_credits: Vec<PluginExportCredit>,
+    /// The JSDoc visibility tag that keeps an export with no consumer out
+    /// of `unused-export`: `public`, `internal`, `alpha` or `beta`. The
+    /// `keepExportTags` config key selects the tags that do this. Absent
+    /// when the export is used, or when no kept tag is on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_by_tag: Option<String>,
     /// Human-readable reason summary.
     pub reason: String,
     /// Exact checker-backed references when type-aware tracing is enabled.
@@ -585,6 +591,7 @@ impl ExportTrace {
                 }
             }
             self.is_used = true;
+            self.kept_by_tag = None;
             self.reason = format!(
                 "Used by the framework: the {} plugin marks this export as used",
                 plugins.join(", ")
@@ -1036,6 +1043,7 @@ mod tests {
             star_export_ambiguity: None,
             re_export_chains: Vec::new(),
             plugin_credits: Vec::new(),
+            kept_by_tag: None,
             reason: "No references".to_string(),
             semantic: None,
         }

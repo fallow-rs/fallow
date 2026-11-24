@@ -14,6 +14,7 @@ use fallow_output::{EntryWeightDelta, EntryWeightListing, EntryWeightRegression}
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::counts::{REGRESSION_SCHEMA_VERSION, RegressionBaseline};
+use super::recovery::{BaselineCommand, RegressionArgs};
 use super::tolerance::Tolerance;
 use crate::error::emit_input_error;
 
@@ -64,6 +65,7 @@ impl EntryWeightCounts {
 
 /// Where a `list --entry-weight` run reads and writes its regression baseline.
 pub struct EntryWeightGate<'a> {
+    pub args: RegressionArgs<'a>,
     /// Fail the run when an entry grew more than the tolerance.
     pub fail_on_regression: bool,
     /// Allowed growth of `eager_bytes` per entry: bytes or a percentage.
@@ -94,8 +96,11 @@ impl EntryWeightGate<'_> {
         }
         if self.fail_on_regression && self.baseline_file.is_none() {
             return Err(emit_input_error(
-                "list --entry-weight --fail-on-regression needs --regression-baseline <PATH>; \
-                 create one with list --entry-weight --save-regression-baseline <PATH>",
+                &format!(
+                    "list --entry-weight --fail-on-regression needs --regression-baseline <PATH>.\n\
+                     Create the file with: {}",
+                    BaselineCommand::EntryWeight(self.args).save(None)
+                ),
                 output,
             ));
         }
@@ -111,15 +116,19 @@ impl EntryWeightGate<'_> {
 pub fn load_entry_weight_baseline(
     path: &Path,
     output: OutputFormat,
+    args: RegressionArgs<'_>,
 ) -> Result<EntryWeightCounts, ExitCode> {
-    let baseline = super::load_regression_baseline(path, output)?;
+    let baseline = super::baseline::load_regression_baseline_for(
+        path,
+        output,
+        BaselineCommand::EntryWeight(args),
+    )?;
     baseline.entry_weight.ok_or_else(|| {
         emit_input_error(
             &format!(
-                "regression baseline '{}' has no entry weight data; save one with \
-                 fallow list --entry-weight --save-regression-baseline {}",
+                "regression baseline '{}' has no entry weight data; save one with {}",
                 path.display(),
-                path.display()
+                BaselineCommand::EntryWeight(args).save(Some(path))
             ),
             output,
         )
@@ -220,8 +229,13 @@ pub fn save_entry_weight_baseline(
     root: &Path,
     counts: EntryWeightCounts,
     output: OutputFormat,
+    args: RegressionArgs<'_>,
 ) -> Result<(), ExitCode> {
-    let existing = super::baseline::existing_baseline_for_merge(path, output)?;
+    let existing = super::baseline::existing_baseline_for_merge(
+        path,
+        output,
+        BaselineCommand::EntryWeight(args),
+    )?;
     let baseline = RegressionBaseline {
         schema_version: REGRESSION_SCHEMA_VERSION,
         fallow_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -292,6 +306,7 @@ mod tests {
             dir.path(),
             EntryWeightCounts::from_listing(&listing(&[("src/main.ts", 10, &[])])),
             fallow_config::OutputFormat::Human,
+            RegressionArgs::default(),
         );
         (saved, std::fs::read(&path).unwrap())
     }

@@ -496,6 +496,7 @@ fn make_finding(name: &str, exceeded: ExceededThreshold) -> ComplexityViolation 
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        override_comment_line: None,
         max_file_lines: None,
     }
 }
@@ -809,6 +810,7 @@ fn filter_complexity_findings_by_diff_keeps_hotspot_overlapping_diff_line() {
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        override_comment_line: None,
         max_file_lines: None,
     }];
     let diff = build_diff(
@@ -852,6 +854,7 @@ fn filter_complexity_findings_by_diff_drops_finding_outside_diff() {
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        override_comment_line: None,
         max_file_lines: None,
     }];
     let diff = build_diff(
@@ -895,6 +898,7 @@ fn filter_complexity_findings_by_diff_handles_zero_line_count() {
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        override_comment_line: None,
         max_file_lines: None,
     }];
     let diff = build_diff(
@@ -2238,6 +2242,7 @@ fn make_class_finding(
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        override_comment_line: None,
         max_file_lines: None,
     }
 }
@@ -2275,6 +2280,7 @@ fn make_template_finding(
         contributions: Vec::new(),
         effective_thresholds: None,
         threshold_source: None,
+        override_comment_line: None,
         max_file_lines: None,
     }
 }

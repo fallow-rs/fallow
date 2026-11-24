@@ -6,6 +6,7 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::discover::StableFileKey;
+use fallow_types::results::SecurityFinding;
 
 pub use crate::results::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
@@ -23,6 +24,9 @@ pub use crate::effective_severity::{
 mod config_patterns;
 pub use config_patterns::config_pattern_diagnostics;
 
+use crate::result_scope::{
+    Anchor, ComponentRule, OwnerRule, ProjectFinding, ResultScope, SiteRule,
+};
 use crate::{
     EngineResult, change_scope::ChangeScope,
     session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
@@ -498,21 +502,61 @@ fn finding_id_rule_is_off(id: &str, config: &ResolvedConfig) -> bool {
 /// The full cross-workspace graph is still built before this helper runs, so
 /// cross-package imports are resolved. Only reported findings are narrowed.
 pub fn filter_to_workspaces(results: &mut AnalysisResults, scope: &WorkspaceScope) {
-    let any_under = |path: &Path| scope.contains(path);
-    if let Some(inventory) = &mut results.shared_state {
-        inventory.retain_sites(|site| any_under(&site.path));
-    }
-    let pkg_jsons = scope
-        .roots()
-        .iter()
-        .map(|root| root.join("package.json"))
-        .collect::<Vec<_>>();
-    let in_pkg_jsons = |path: &Path| pkg_jsons.iter().any(|pkg| path == pkg);
+    let members = WorkspaceMembers {
+        scope,
+        manifests: scope
+            .roots()
+            .iter()
+            .map(|root| root.join("package.json"))
+            .collect(),
+    };
+    crate::result_scope::retain_in_scope(results, &members);
+}
 
-    filter_workspace_source_findings(results, &any_under);
-    filter_workspace_dependency_findings(results, &any_under, &in_pkg_jsons);
-    filter_workspace_graph_findings(results, &any_under);
-    filter_workspace_policy_findings(results, &any_under);
+/// A workspace selection as a result scope.
+struct WorkspaceMembers<'a> {
+    scope: &'a WorkspaceScope,
+    /// The `package.json` of each selected root.
+    manifests: Vec<PathBuf>,
+}
+
+impl ResultScope for WorkspaceMembers<'_> {
+    fn keeps(&self, anchor: Anchor<'_>) -> bool {
+        match anchor {
+            Anchor::Line { path, .. } | Anchor::File { path } => self.scope.contains(path),
+        }
+    }
+
+    /// A dependency finding stays when its manifest is the manifest of a
+    /// selected root. Catalogs and overrides belong to the whole project, so a
+    /// workspace selection drops them.
+    fn keeps_project_finding(&self, finding: ProjectFinding<'_>) -> bool {
+        match finding {
+            ProjectFinding::ManifestDependency { manifest } => {
+                self.manifests.iter().any(|pkg| manifest == pkg)
+            }
+            ProjectFinding::CatalogReference { path } => self.scope.contains(path),
+            ProjectFinding::CatalogEntry
+            | ProjectFinding::EmptyCatalogGroup { .. }
+            | ProjectFinding::DependencyOverride { .. } => false,
+        }
+    }
+
+    fn keeps_security_finding(&self, finding: &SecurityFinding) -> bool {
+        self.scope.contains(&finding.path)
+    }
+
+    fn site_rule(&self) -> SiteRule {
+        SiteRule::AnySite
+    }
+
+    fn owner_rule(&self) -> OwnerRule {
+        OwnerRule::TrimOwners
+    }
+
+    fn component_rule(&self) -> ComponentRule {
+        ComponentRule::All
+    }
 }
 
 /// The scope of one dead-code run, as the surface resolved it.
@@ -546,8 +590,10 @@ pub fn apply_scope(
     scope: &DeadCodeScope<'_>,
     config: &ResolvedConfig,
 ) {
-    // Chain scopes depend on source-owned enforcement, which must resolve before filtering.
+    // The component scopes read source-owned enforcement (prop-drilling chains, thin
+    // wrappers, duplicate prop shapes), so the severities must resolve before filtering.
     crate::effective_severity::apply_prop_drilling_severities(results, config);
+    crate::effective_severity::apply_component_shape_severities(results, config);
     if let Some(roots) = scope.workspace_roots {
         filter_to_workspaces(results, roots);
     }
@@ -595,214 +641,6 @@ pub fn filter_configured_ignored_findings(results: &mut AnalysisResults, config:
     results.remove_ignored_dead_code_findings(|path| {
         config.ignore_findings.is_ignored_path(&config.root, path)
     });
-}
-
-fn filter_workspace_source_findings(
-    results: &mut AnalysisResults,
-    any_under: &dyn Fn(&Path) -> bool,
-) {
-    results
-        .unused_files
-        .retain(|finding| any_under(&finding.file.path));
-    results
-        .unused_exports
-        .retain(|finding| any_under(&finding.export.path));
-    results
-        .unused_types
-        .retain(|finding| any_under(&finding.export.path));
-    results
-        .private_type_leaks
-        .retain(|finding| any_under(&finding.leak.path));
-    results
-        .deprecated_exports_in_use
-        .retain(|finding| any_under(&finding.export.path));
-    results
-        .unused_enum_members
-        .retain(|finding| any_under(&finding.member.path));
-    results
-        .unused_class_members
-        .retain(|finding| any_under(&finding.member.path));
-    results
-        .unused_store_members
-        .retain(|finding| any_under(&finding.member.path));
-    results
-        .unused_namespace_members
-        .retain(|finding| any_under(&finding.member.path));
-    results
-        .unused_protected_class_members
-        .retain(|finding| any_under(&finding.member.path));
-    results
-        .unprovided_injects
-        .retain(|finding| any_under(&finding.inject.path));
-    results
-        .unrendered_components
-        .retain(|finding| any_under(&finding.component.path));
-    results
-        .unused_component_props
-        .retain(|finding| any_under(&finding.prop.path));
-    results
-        .absent_component_props
-        .retain(|finding| any_under(&finding.prop.path));
-    results
-        .constant_parameters
-        .retain(|finding| any_under(&finding.parameter.path));
-    results
-        .unused_component_emits
-        .retain(|finding| any_under(&finding.emit.path));
-    results
-        .unused_component_inputs
-        .retain(|finding| any_under(&finding.input.path));
-    results
-        .unused_component_outputs
-        .retain(|finding| any_under(&finding.output.path));
-    results
-        .unused_svelte_events
-        .retain(|finding| any_under(&finding.event.path));
-    results
-        .unused_effect_layers
-        .retain(|finding| any_under(&finding.layer.path));
-    results
-        .duplicate_export_aliases
-        .retain(|finding| any_under(&finding.alias.path));
-    results
-        .unused_tagged_errors
-        .retain(|finding| any_under(&finding.error.path));
-    results
-        .unproduced_catch_tags
-        .retain(|finding| any_under(&finding.catch_tag.path));
-    results
-        .unused_server_actions
-        .retain(|finding| any_under(&finding.action.path));
-    results
-        .unused_load_data_keys
-        .retain(|finding| any_under(&finding.key.path));
-    results
-        .unresolved_imports
-        .retain(|finding| any_under(&finding.import.path));
-}
-
-fn filter_workspace_dependency_findings(
-    results: &mut AnalysisResults,
-    any_under: &dyn Fn(&Path) -> bool,
-    in_pkg_jsons: &dyn Fn(&Path) -> bool,
-) {
-    results
-        .unused_dependencies
-        .retain(|finding| in_pkg_jsons(&finding.dep.path));
-    results
-        .unused_dev_dependencies
-        .retain(|finding| in_pkg_jsons(&finding.dep.path));
-    results
-        .unused_optional_dependencies
-        .retain(|finding| in_pkg_jsons(&finding.dep.path));
-    results
-        .type_only_dependencies
-        .retain(|finding| in_pkg_jsons(&finding.dep.path));
-    results
-        .test_only_dependencies
-        .retain(|finding| in_pkg_jsons(&finding.dep.path));
-    results
-        .dev_dependencies_in_production
-        .retain(|finding| in_pkg_jsons(&finding.dep.path));
-
-    results.unlisted_dependencies.retain(|finding| {
-        finding
-            .dep
-            .imported_from
-            .iter()
-            .any(|source| any_under(&source.path))
-    });
-    results.unlisted_binaries.retain(|finding| {
-        finding
-            .binary
-            .used_in
-            .iter()
-            .any(|site| any_under(&site.path))
-    });
-    results.unused_dependency_overrides.clear();
-    results.misconfigured_dependency_overrides.clear();
-}
-
-fn filter_workspace_graph_findings(
-    results: &mut AnalysisResults,
-    any_under: &dyn Fn(&Path) -> bool,
-) {
-    for duplicate in &mut results.duplicate_exports {
-        duplicate
-            .export
-            .locations
-            .retain(|location| any_under(&location.path));
-    }
-    results
-        .duplicate_exports
-        .retain(|duplicate| duplicate.export.locations.len() >= 2);
-
-    results
-        .circular_dependencies
-        .retain(|cycle| cycle.cycle.files.iter().any(|path| any_under(path)));
-
-    results
-        .re_export_cycles
-        .retain(|cycle| cycle.cycle.files.iter().any(|path| any_under(path)));
-
-    results
-        .package_cycles
-        .retain(|cycle| cycle.cycle.edges.iter().any(|edge| any_under(&edge.path)));
-}
-
-fn filter_workspace_policy_findings(
-    results: &mut AnalysisResults,
-    any_under: &dyn Fn(&Path) -> bool,
-) {
-    results
-        .boundary_violations
-        .retain(|finding| any_under(&finding.violation.from_path));
-    results
-        .boundary_coverage_violations
-        .retain(|finding| any_under(&finding.violation.path));
-    results
-        .boundary_call_violations
-        .retain(|finding| any_under(&finding.violation.path));
-    results
-        .policy_violations
-        .retain(|finding| any_under(&finding.violation.path));
-
-    results
-        .stale_suppressions
-        .retain(|finding| any_under(&finding.path));
-
-    results
-        .security_findings
-        .retain(|finding| any_under(&finding.path));
-    results
-        .security_unresolved_callee_diagnostics
-        .retain(|finding| any_under(&finding.path));
-
-    results.unused_catalog_entries.clear();
-    results.empty_catalog_groups.clear();
-    results
-        .unresolved_catalog_references
-        .retain(|finding| any_under(&finding.reference.path));
-
-    results
-        .invalid_client_exports
-        .retain(|finding| any_under(&finding.export.path));
-
-    results
-        .mixed_client_server_barrels
-        .retain(|finding| any_under(&finding.barrel.path));
-
-    results
-        .misplaced_directives
-        .retain(|finding| any_under(&finding.directive_site.path));
-
-    results
-        .route_collisions
-        .retain(|finding| any_under(&finding.collision.path));
-
-    results
-        .dynamic_segment_name_conflicts
-        .retain(|finding| any_under(&finding.conflict.path));
 }
 
 /// Remove findings whose effective severity is `Off` from an analysis result.
@@ -999,6 +837,12 @@ fn apply_core_dead_code_override_rules(results: &mut AnalysisResults, config: &R
         config
             .resolve_rules_for_path(&m.member.path)
             .unused_protected_class_members
+            != Severity::Off
+    });
+    results.namespace_escapes.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.escape.path)
+            .namespace_escapes
             != Severity::Off
     });
     results.unprovided_injects.retain(|f| {
@@ -1220,6 +1064,9 @@ fn clear_base_core_dead_code(results: &mut AnalysisResults, rules: &RulesConfig)
     }
     if rules.unused_protected_class_members == Severity::Off {
         results.unused_protected_class_members.clear();
+    }
+    if rules.namespace_escapes == Severity::Off {
+        results.namespace_escapes.clear();
     }
     if rules.unprovided_injects == Severity::Off {
         results.unprovided_injects.clear();

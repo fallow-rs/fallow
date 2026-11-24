@@ -26,7 +26,9 @@ an exit code.
 A decision that more than one command or surface makes has one implementation.
 The scope filters are `fallow_engine::dead_code::apply_scope`,
 `fallow_engine::duplicates::apply_scope` and `fallow_engine::diff_scope`. The
-change scope of a run is `fallow_engine::change_scope::ChangeScope`. Every
+three dead-code scope filters share one visitor, `retain_in_scope` in
+`crates/engine/src/result_scope.rs`, and each scope is a `ResultScope` type.
+The change scope of a run is `fallow_engine::change_scope::ChangeScope`. Every
 surface describes its inputs with a `ChangeScopeRequest` (the owner, whether a
 global ref was requested, the changed files, and the run-wide
 `PackageBaselineCache`) and calls `ChangeScope::resolve`, which owns the
@@ -290,8 +292,9 @@ line states exit code 0.
 - `crates/cli/src/viz/mod.rs`: the self-contained HTML map, plus the DOT and
   Mermaid text renderings of the import graph.
 - `crates/cli/src/telemetry.rs`: local opt-in telemetry state and spooling.
-- `crates/cli/src/cli_impact.rs` and `impact.rs`: local Impact history,
-  attribution, aggregation, and the status-bar surface.
+- `crates/cli/src/cli_impact.rs`, `impact.rs` and `impact_store.rs`: local
+  Impact history, attribution, aggregation, and the status-bar surface. Each
+  change of a project store goes through `transact` in `impact_store.rs`.
 - `crates/cli/src/runtime_support.rs`: shared config and ownership helpers.
 
 ## Invariants
@@ -335,10 +338,16 @@ line states exit code 0.
     import site of a package that the base already reports stays inherited.
     A change to
     the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
-    `crates/cli/src/audit_cache.rs`. Each option that changes what the base
-    pass puts in the snapshot must be part of the cache key. For example,
-    only a `--brief` base pass computes the public-export set, so `brief`
-    is a key field.
+    `crates/cli/src/audit_cache.rs`. The cache key comes from the inputs of
+    the base pass. `BaseRunInputs` in `crates/cli/src/audit_base_run.rs`
+    holds the inputs that the base pass and the key share, and the key reads
+    the options that `BaseRunInputs::options` builds. An option that the
+    base pass reads from the head options must be a named key field. For
+    example, only a `--brief` base pass computes the public-export set, so
+    `brief` is a key field. The key also holds each coverage file that the
+    coverage reader selects
+    (`fallow_engine::health::coverage_input::selected_coverage_files`) and
+    the effective type-aware selection.
 - The unused-file cascade filter is
   `fallow_engine::dead_code::hide_cascade_findings`. It runs inside
   `apply_rule_severities`, so the CLI, the programmatic API, MCP, the Node
@@ -669,6 +678,53 @@ line states exit code 0.
   options forward the same choice to the engine findings builder.
 - `fix` remains preview-first. Non-interactive mutation requires explicit
   confirmation.
+- Source edits of `fallow fix`: each source fixer (class members, exports,
+  enum members) reads a file through `read_source_snapshot`
+  (`crates/cli/src/fix/source_edits.rs`) and gets the text that the analysis
+  read, also after another fixer queued edits for the file. The fixer queues
+  byte edits against that text, and `FixPlan::commit` applies the edits of a
+  file one time. An edit that overlaps a queued edit is not applied and gets
+  no fix record. The fixers of `package.json`, `pnpm-workspace.yaml` and the
+  config file still stage whole files.
+- Post-edit check of `fallow fix`: before the plan writes, or before a
+  preview prints its JSON, `SourceSnapshots::check_edits`
+  (`crates/cli/src/fix/source_edits_post_edit.rs`) applies the queued edits
+  of each file and compares the facts of the text before and after
+  (`fallow_engine::post_edit::SourceFacts`). Each `queue` call is one group.
+  The check drops a group when the edited text does not parse, when a kept
+  class or enum member is lost, when a kept enum member gets another constant
+  value, when a reference that resolved before is unresolved after, when an
+  import stays whose binding only a removed export list used, when
+  declarations that TypeScript merges become partly exported
+  (`MergeKind::merges_with`: function overloads, and the merges of a class,
+  function or enum with a namespace and of a class with an interface; a
+  named `export default function` or `class` counts as exported), or when the
+  group removes an export that is not an unused-export finding or that a kept
+  re-export still reads. A kept member is a member outside each deletion of
+  the group. When the groups of a file fail together, the check splits them
+  in halves until each failing group is alone, for at most `MAX_BISECT_RUNS`
+  checks; after that, each group of a failing half goes. It also drops each group that
+  shares a line with a dropped group, because the fix entries are matched to
+  a group by their path and line. A file of a parsed type that does not parse
+  before the edit keeps all its text. The JSON output lists no entry for a
+  dropped group, and a human format prints one `Kept <path>:<line>` line on
+  stderr. The source fixers keep their `Would remove` and `Removed` lines
+  (`FixPlan::preview`) and their `Would keep` and `Kept` lines
+  (`FixPlan::note`) in the plan. The orchestrator prints them after the
+  check in path and line order, without the edit lines of dropped edits.
+  The export fixer removes the `export` of each statement that exports the
+  same single name with a declaration that merges with the reported one,
+  such as the overload signatures of a function. A value and a type of one
+  name, such as `const Foo` and `type Foo`, do not merge, so the type keeps
+  its `export`. The enum fixer removes a whole enum only
+  when the enum itself is an unused export; another enum with all members
+  unused keeps an empty body. The language server quick fix and the CI suggestion blocks call
+  `fallow_engine::post_edit::check_edits`, which is the same rule for one
+  file. A guard before an edit (`KeptReExport`, `SharedDeclarationInUse`, the
+  enum value pins) stays: it gives a skip record or a safe edit, and the
+  post-edit check catches each shape that no guard knows.
+  `fix_output_keeps_program_meaning` runs `fix --yes` on each fixture with a
+  planned source fix and checks the result.
 - `fallow impact statusline` stays path-free, read-only, plain text, and
   epilogue-free. Its trend compares only whole-project scans.
 - `fallow doctor` stays path-free, local, read-only, and epilogue-free. It may
@@ -679,19 +735,20 @@ line states exit code 0.
 - New output fields must move schemas, generated TypeScript contracts, MCP,
   LSP, VS Code, GitHub Action, and GitLab consumers together.
 - New-only duplication demotion (issues #2164, #2220): under `--gate new-only`
-  an introduced clone group none of whose instances overlap an added line is
-  demoted to inherited. Without an opt-in shared diff, the merge-base worktree
-  diff decides (`crates/api/src/audit_run/outcome.rs`,
-  `demote_preexisting_dupe_introductions`). The CLI and the programmatic
+  a clone group with a new key, none of whose instances overlap an added
+  line, is demoted to inherited. Without an opt-in shared diff, the
+  merge-base worktree diff decides (`attribute_clone_regions` in
+  `crates/api/src/audit_run/outcome.rs`). The CLI and the programmatic
   runtime run the same function.
   When an opt-in shared diff (`--diff-file`, `--diff-stdin`, or
   `$FALLOW_DIFF_FILE`) is active, it has already filtered the head duplication
   report with the same added-line overlap predicate. Every retained clone group
   therefore vetoes demotion, so a shared diff can prevent a demotion but cannot
-  produce a rendered shared-source demotion note. Demoted groups stay counted
+  produce a rendered shared-source demotion note. Demoted regions stay counted
   as inherited and are also reported through
-  `attribution.duplication_demoted` and a per-group `demotion_reason` field;
-  human output names the deciding diff source in the demotion note.
+  `attribution.duplication_demoted` and a `demotion_reason` field on the
+  region and on each demoted group; human output names the deciding diff
+  source in the demotion note.
 - Unified diffs: `fallow_output::unified_diff_events` is the one reader of
   unified diff text (`crates/output/src/unified_diff.rs`). It reads a file
   header only outside a hunk, decodes a quoted path of git, and removes the
@@ -699,26 +756,50 @@ line states exit code 0.
   and the change anchors of the walkthrough consume its events. One audit run
   reads its merge-base worktree diff at most one time (`RunChange::diff_index`
   in `crates/api/src/audit_run/outcome.rs`).
-- Clone groups inside a base clone group: after the demotion, the same
-  function marks an introduced clone group as inherited when each instance
-  lies inside a different instance of one base clone group
-  (`crates/api/src/audit_run/clone_containment.rs`). The check maps each head
-  instance to its base path through the rename list and the diff renames,
-  and to its base lines through the line changes of the diff
-  (`DiffIndex::base_line_range`). A rewritten line at the start or end of an
-  instance maps to the replaced base line next to the unchanged lines of the
-  instance, so a block that turns several lines into fewer does not move the
-  span outside its base instance. An edit inside one copy of a base clone
-  splits the base group into smaller groups with new keys, and this rule
-  keeps them inherited. The rule records no demotion, because the group
-  matches a base group. A file that the diff adds has no base lines, so a
-  pasted copy stays introduced. At least one instance must hold no added
-  line: when every copy holds an added line, the change wrote the same text
-  into each copy, and the group stays introduced.
+- Clone regions (issues #4967, #4968): the audit grades clone regions, not
+  clone groups (`crates/api/src/audit_run/clone_regions.rs`). The detector
+  keeps each maximal repeat, so one paste can give a long group with fewer
+  copies and a short group with more copies. The groups whose instances
+  overlap in a file are one region. Each member group gets one state:
+  - unchanged: the base has its key, or the change moved it to other files
+    with its text (issue #4670);
+  - demoted: the key is new, and no instance holds an added line (#2164);
+  - edited: each instance maps to a different instance of one base group,
+    and each instance grows by fewer lines than `duplicates.minLines` (its
+    head line count minus the line count of its mapped base span). The rule
+    reads the line count only: a rewrite that keeps the size of every copy
+    is an edit, also when it rewrites many lines with new identical text;
+  - new: every other group.
+  The mapping takes each head instance to its base path through the rename
+  list and the diff renames, and to its base lines through the line changes
+  of the diff (`DiffIndex::base_line_range`). A rewritten line at the start
+  or end of an instance maps to the replaced base line next to the unchanged
+  lines of the instance. A file that the diff adds has no base lines, so a
+  pasted copy is new. A region with a new member is `introduced`. A region
+  with an edited member and no new member is `inherited-edited`, also when
+  the change made the same edit in every copy. Every other region is
+  `inherited`. Only an `introduced` region fails the gate, and the
+  attribution counts regions.
+  An `ignoredClones` entry follows the audit match, and its engine key does
+  not change. The engine returns the groups that the entry hid
+  (`IgnoredCloneGroup`), and the base snapshot keeps them
+  (`accepted_dupe_groups`). An edited member that fits an accepted base group
+  keeps the region accepted: `accepted_by` names the entry, and
+  `ignore_hint` names the new keys of those members for the config. A new
+  member is accepted when a hidden head group holds each of its new copies
+  and its other instances hold no added line. The base pass reports only the
+  groups in the changed files, so the old copies are not in the base
+  snapshot; equal text without an edit shows that the base had the clone.
+  An edited member must sit at the same relative place in each base copy,
+  with a tolerance of its growth plus one line, so one new block
+  at two places of an old clone is a new member. The
+  `introduced` flag of a group is its own state: an old group that overlaps a
+  new group stays `false`, and its rule severity does not take part in the
+  gate.
 - Audit clone-group gate: the `introduced-clone-group` rule decides how a
   clone group takes part in the verdict (`duplication_verdict_flags` in
   `crates/api/src/audit_run/outcome.rs`). Under `new-only`, only an
-  introduced group counts; under `all`, every group in the changed files
+  introduced group counts, and the attribution counts each region one time; under `all`, every group in the changed files
   counts. `error` fails the verdict, `warn` (the default) gives `warn`, and
   `off` removes the group from the verdict but keeps it in the report. With
   `overrides`, the rule resolves for each instance file and the most severe
@@ -910,12 +991,10 @@ line states exit code 0.
    omits, with the same gates as `assembly.rs`. Thus a `--score` run keeps
    the score and counts of each group, but no group findings. The group
    duplication penalty counts each clone group with two or more instances in
-   total and one or more in the group. The group counts only the lines and a
-   share of the tokens of its own instances. Thus a clone that spans two
-   groups lowers the score of each group, and the group `duplicated_lines`
-   sum to the project value when the groups partition the files. Each
-   instance carries `token_count * (total - 1) / total` redundant tokens,
-   rounded down, so the group token values do not exceed the project value.
+   total and one or more in the group. The group counts only the lines of
+   its own instances. Thus a clone that spans two groups lowers the score of
+   each group, and the group `duplicated_lines` sum to the project value when
+   the groups partition the files.
 
    The three scoped duplication lenses use different rules:
    - `health --group-by` measures the lines of each group, as above.
@@ -1467,6 +1546,73 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   of each consumer site from the first member (`R.useSelector()` gives
   `useSelector`).
 
+## Global option support
+
+clap propagates each global option (`global = true`) to every subcommand, so
+`fallow init --save-baseline x` parses. `GLOBAL_OPTION_SUPPORT` in
+`crates/cli/src/global_option_support.rs` has one row per global option. A
+row states for each command whether the command uses the option, ignores
+it, or rejects it. A row names a command by its path, such as `dupes` or
+`impact statusline`. A subcommand without an entry of its own has the support
+of its parent command. The command line of a rejected pair exits with code 2
+before a command runs, and the run records a `Validation` failure in the
+telemetry. The check reads the clap matches, so an option counts only when
+the command line sets it, also before the subcommand. It reads the rows in
+table order and reports the first rejected option. `--tolerance` follows the
+other regression options in that order.
+
+An option that names a file is never ignored: the command writes or reads
+the file, or the command line fails. A command that does not read
+`--churn-file`, `--type-aware-project`, `--config` or `--diff-file` rejects
+it with "`fallow <command>` does not read `<option>`". Two exceptions are on
+purpose: a command that reads no project accepts `--root`, because a caller
+can pass it to each command, and `audit-cache` ignores `--config`, so a config
+that does not load cannot block the cleanup. With `--type-aware` on the
+command line, a `--type-aware-project` path that does not exist fails at
+startup, also when no command reads the project. A command that reads
+`--type-aware-project` also fails with exit 2 when type-aware analysis is
+off for the run, and, when `FALLOW_TYPE_AWARE` or `typeAware.enabled` turns
+it on, for a project path that does not exist. The type-aware run skips a
+missing project in silence. A command that prints its output to
+stdout, such as `recommend` or `impact`, rejects `--output-file`. A command
+that writes the file only with some output formats has the status
+`supported_with_formats`: `agent` and `rule-pack list` with `--format json`,
+and `fix` with `--format github-summary`. With another format, the command
+line fails with exit 2.
+
+The help of `fallow security` hides each global option that the table does
+not mark as supported for `security`. `fallow schema --cli-reference` exports
+the table as the `command_support` field of each global option.
+
+A command keeps its own check for a rule that depends on more than the
+command and the option. Examples: `similar-code` checks the options of each
+subcommand, `architecture --shared-state` rejects `--sarif-file`, and a bare
+run without the dead-code analysis rejects `--sarif-file` and the regression
+options. With `--only` or `--skip`, a bare run without the duplication analysis
+rejects the global `--dupes-*` options, a bare run without the health
+analysis rejects `--churn-file`, and a bare run without the dead-code and the
+health analysis rejects `--type-aware-project`. With `duplicates.enabled:
+false` in the config, a global `--dupes-*` option gives an inert-flag notice
+and keeps the exit code, as `--dupes-baseline` does. The options of the
+bare run that are not global (`--only`, `--score`, `--dupes-baseline` and the
+others) are not in the table. `doctor` and `similar-code` reject them through
+`first_bare_run_option`.
+
+Tests guard the table. A unit test walks `Cli::command()` and fails for a
+global option without a row, a row without a global option, or a row that
+names an unknown command path. Another unit test fails when a row ignores an
+option that names a file. An integration test runs each supported pair of a
+command path and an option that writes a file (`--save-baseline`,
+`--save-regression-baseline`, `--sarif-file`, `--output-file`) with
+`--format json`. The pair passes when the command exits with code 0 or 1 and
+the file has content. For a format that a command does not support for
+`--output-file`, the test requires exit 2 and the message of the table. A
+third test runs each supported pair of an option that reads a path with a
+path that does not exist. The pair passes when the command exits with code 2
+or names the path in its output, and when the same command line without the
+option exits with code 0 or 1. It runs `--type-aware-project` with type-aware
+analysis on from the flag, the environment and the config, and with it off.
+
 ## CLI reference contract
 
 `fallow schema` prints the capability manifest for agents. `fallow schema
@@ -1484,8 +1630,16 @@ The document has these top-level fields:
 - `version`, `name`, `about`, `usage`: the binary and its root usage line.
 - `root_command`: the positionals and the options of bare `fallow` that are
   not global.
-- `global_options[]`: the options that every command accepts. A command does
-  not repeat them in its own `options[]`.
+- `global_options[]`: the options that clap propagates to every command. A
+  command does not repeat them in its own `options[]`. Each global option
+  has a `command_support` object: `default` is the support of each command
+  that `commands[]` does not name, and `commands[]` gives the support of the
+  other commands, each with `command`. A support has a `status` of
+  `supported`, `supported_with_formats` (with the `formats` that the command
+  supports the option with, and the error `message` for another format),
+  `ignored` (with a `reason`) or `rejected` (with the error `message`). In a message, `<option>` stands for the long option and
+  `<command>` for the command name. The command name `fallow` stands for a
+  run without a subcommand.
 - `commands[]`: the top-level commands in the order and with the
   `help_group` heading of the root `--help`, then the hidden commands with a
   null `help_group`. Each command has `name`, `path` (for example

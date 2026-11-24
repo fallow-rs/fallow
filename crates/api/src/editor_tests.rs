@@ -452,6 +452,7 @@ fn merge_results_covers_all_fields() {
     assert_eq!(target.unused_class_members.len(), 1);
     assert_eq!(target.unused_namespace_members.len(), 1);
     assert_eq!(target.unused_protected_class_members.len(), 1);
+    assert_eq!(target.namespace_escapes.len(), 1);
     assert_eq!(target.unused_store_members.len(), 1);
     assert_eq!(target.unresolved_imports.len(), 1);
     assert_eq!(target.unlisted_dependencies.len(), 1);
@@ -715,6 +716,17 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
         unused_protected_class_members: vec![UnusedProtectedClassMemberFinding::with_actions(
             merge_test_unused_member("P", "h", super::editor_extract::MemberKind::ClassMethod, 7),
         )],
+        namespace_escapes: vec![super::editor_results::NamespaceEscapeFinding::with_actions(
+            super::editor_results::NamespaceEscape {
+                path: "/f.ts".into(),
+                line: 7,
+                col: 0,
+                local_name: "Ns".to_string(),
+                module: "/g.ts".into(),
+                hidden_exports: 1,
+                reason: super::editor_results::NamespaceEscapeReason::WholeObjectUse,
+            },
+        )],
         unresolved_imports: vec![
             super::editor_results::UnresolvedImportFinding::with_actions(
                 super::editor_results::UnresolvedImport {
@@ -879,6 +891,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             super::editor_results::ReExportCycle {
                 files: vec!["/barrel.ts".into()],
                 kind: super::editor_results::ReExportCycleKind::SelfLoop,
+                line: 0,
+                col: 0,
             },
         )],
         package_cycles: vec![super::editor_results::PackageCycleFinding::with_actions(

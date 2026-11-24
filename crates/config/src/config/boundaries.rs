@@ -867,20 +867,48 @@ fn authored_rules_for_logical_groups<'a>(
 }
 
 /// Merge a discovered zone into `zones[]` by name.
-fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone) {
-    if let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) {
-        for glob in zone.public_files {
-            if !existing.public_files.contains(&glob) {
-                existing.public_files.push(glob);
-            }
-        }
-        for pattern in zone.patterns {
-            if !existing.patterns.contains(&pattern) {
-                existing.patterns.push(pattern);
-            }
-        }
-    } else {
+///
+/// Patterns and `publicFiles` globs are relative to the zone root. When the
+/// two zones have different roots, both move their roots into their globs
+/// first, so the merged zone keeps the files under each root.
+fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, mut zone: BoundaryZone) {
+    let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) else {
         expanded_zones.push(zone);
+        return;
+    };
+    if effective_zone_root(existing) != effective_zone_root(&zone) {
+        fold_root_into_globs(existing);
+        fold_root_into_globs(&mut zone);
+    }
+    for glob in zone.public_files {
+        if !existing.public_files.contains(&glob) {
+            existing.public_files.push(glob);
+        }
+    }
+    for pattern in zone.patterns {
+        if !existing.patterns.contains(&pattern) {
+            existing.patterns.push(pattern);
+        }
+    }
+}
+
+/// The normalized root of a zone; no root is the empty root.
+fn effective_zone_root(zone: &BoundaryZone) -> String {
+    zone.root
+        .as_deref()
+        .map(normalize_zone_root)
+        .unwrap_or_default()
+}
+
+/// Prefix each glob of the zone with its literal root and clear the root.
+fn fold_root_into_globs(zone: &mut BoundaryZone) {
+    let root = effective_zone_root(zone);
+    zone.root = None;
+    if root.is_empty() {
+        return;
+    }
+    for glob in zone.patterns.iter_mut().chain(zone.public_files.iter_mut()) {
+        *glob = literal_dir_glob(&root, glob.trim_start_matches("./"));
     }
 }
 

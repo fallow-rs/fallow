@@ -18,6 +18,23 @@ fn make_hashed_tokens(hashes: &[u64]) -> Vec<HashedToken> {
         .collect()
 }
 
+fn compute_stats(
+    groups: &[crate::duplicates::types::CloneGroup],
+    files: usize,
+    lines: usize,
+    tokens: usize,
+) -> DuplicationStats {
+    crate::duplicates::duplication_stats(
+        groups,
+        CorpusTotals {
+            files,
+            lines,
+            tokens,
+        },
+        crate::duplicates::CarriedCounters::default(),
+    )
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "test span values are trivially small"
@@ -322,7 +339,7 @@ fn stats_computation() {
         similarity: None,
     }];
 
-    let stats = statistics::compute_stats(&groups, 10, 200, 1000);
+    let stats = compute_stats(&groups, 10, 200, 1000);
     assert_eq!(stats.total_files, 10);
     assert_eq!(stats.files_with_clones, 2);
     assert_eq!(stats.clone_groups, 1);
@@ -1050,7 +1067,7 @@ fn rank_reduce_distinct_hashes_get_distinct_ranks() {
 
 #[test]
 fn stats_empty_groups() {
-    let stats = statistics::compute_stats(&[], 5, 100, 500);
+    let stats = compute_stats(&[], 5, 100, 500);
     assert_eq!(stats.total_files, 5);
     assert_eq!(stats.files_with_clones, 0);
     assert_eq!(stats.clone_groups, 0);
@@ -1090,7 +1107,7 @@ fn stats_zero_total_lines() {
         similarity: None,
     }];
 
-    let stats = statistics::compute_stats(&groups, 2, 0, 100);
+    let stats = compute_stats(&groups, 2, 0, 100);
     assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
 }
 
@@ -1133,7 +1150,7 @@ fn stats_duplicated_tokens_capped() {
         similarity: None,
     }];
 
-    let stats = statistics::compute_stats(&groups, 3, 30, 50);
+    let stats = compute_stats(&groups, 3, 30, 50);
     assert_eq!(
         stats.duplicated_tokens, 50,
         "duplicated_tokens must be capped to total_tokens"
@@ -1197,7 +1214,7 @@ fn stats_multiple_groups_same_file() {
         },
     ];
 
-    let stats = statistics::compute_stats(&groups, 2, 100, 500);
+    let stats = compute_stats(&groups, 2, 100, 500);
     assert_eq!(stats.files_with_clones, 2);
     assert_eq!(stats.clone_groups, 2);
     assert_eq!(stats.clone_instances, 4);
@@ -1237,7 +1254,7 @@ fn stats_coalesces_nested_adjacent_and_disjoint_ranges_per_file() {
         },
     ];
 
-    let stats = statistics::compute_stats(&groups, 2, 100, 100);
+    let stats = compute_stats(&groups, 2, 100, 100);
 
     assert_eq!(stats.files_with_clones, 2);
     assert_eq!(stats.clone_instances, 6);
@@ -1263,7 +1280,7 @@ fn stats_single_instance_no_duplicated_tokens() {
         similarity: None,
     }];
 
-    let stats = statistics::compute_stats(&groups, 1, 100, 500);
+    let stats = compute_stats(&groups, 1, 100, 500);
     assert_eq!(stats.duplicated_tokens, 0);
 }
 
@@ -1523,7 +1540,7 @@ mod proptests {
                 similarity: None,
             }];
 
-            let stats = statistics::compute_stats(&groups, 1, 300, 300);
+            let stats = compute_stats(&groups, 1, 300, 300);
             prop_assert_eq!(stats.duplicated_lines, expected);
         }
 

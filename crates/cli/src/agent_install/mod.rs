@@ -22,7 +22,6 @@ use serde::Serialize;
 
 use crate::exit_codes::exit_invalid_input;
 pub use crate::setup_hooks::Mode;
-use crate::setup_hooks::home_dir;
 
 pub use status::run_agent_status;
 
@@ -359,7 +358,7 @@ impl Ctx {
     pub fn scope_base(&self) -> Result<&Path, String> {
         if self.user {
             self.home.as_deref().ok_or_else(|| {
-                "Cannot resolve the user home directory; unset --user or set $HOME.".to_string()
+                "Cannot resolve the user home directory; unset --user or set $HOME (or %USERPROFILE% on Windows).".to_string()
             })
         } else {
             Ok(&self.root)
@@ -449,7 +448,7 @@ pub fn run_agent_install(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let root = resolve_root(opts.root, opts.root_explicit);
-    let home = home_dir();
+    let home = fallow_process::HostPaths::from_env().home;
     let (harnesses, detected, evidence) = select_harnesses(opts.harnesses, &root, home.as_deref());
     let ctx = Ctx {
         root: root.clone(),
@@ -481,7 +480,14 @@ pub fn run_agent_install(
         steps.extend(hooks::install(&ctx, &harnesses));
     }
 
-    let mut next_actions = next_actions(&ctx, &harnesses, detected, mcp_command.as_ref(), &steps);
+    let mut next_actions = next_actions(
+        &ctx,
+        FollowUp { opts, root: &root },
+        &harnesses,
+        detected,
+        mcp_command.as_ref(),
+        &steps,
+    );
     if let Some(apply) = apply_dry_run_action(opts, &root, &harnesses, &steps) {
         next_actions.insert(0, apply);
     }
@@ -508,7 +514,7 @@ pub fn run_agent_uninstall(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let root = resolve_root(opts.root, opts.root_explicit);
-    let home = home_dir();
+    let home = fallow_process::HostPaths::from_env().home;
     let (harnesses, detected, evidence) = select_harnesses(opts.harnesses, &root, home.as_deref());
     let ctx = Ctx {
         root: root.clone(),
@@ -594,17 +600,55 @@ fn apply_command(opts: &AgentInstallOptions<'_>, root: &Path, harnesses: &[Harne
             words.push(flag.into());
         }
     }
+    let mut command = words.join(" ");
     if opts.root_explicit {
-        words.push("--root".into());
-        words.push(fallow_engine::shell_quote::shell_quote(
-            &root.to_string_lossy(),
-        ));
+        command.push_str(&root_arg(root));
     }
-    words.join(" ")
+    command
+}
+
+/// The ` --root <path>` suffix that keeps a follow-up command on `root` when
+/// it runs from another directory.
+pub fn root_arg(root: &Path) -> String {
+    format!(
+        " --root {}",
+        fallow_engine::shell_quote::shell_quote(&root.to_string_lossy())
+    )
+}
+
+/// The options of an install run that its follow-up commands repeat, so a
+/// command that runs from another shell acts on the same project and steps.
+#[derive(Clone, Copy)]
+struct FollowUp<'a> {
+    opts: &'a AgentInstallOptions<'a>,
+    root: &'a Path,
+}
+
+impl FollowUp<'_> {
+    /// `fallow agent install --harness claude` with the scope of the run.
+    fn claude_install(self, approve: bool) -> String {
+        let opts = AgentInstallOptions {
+            approve: approve || self.opts.approve,
+            force: !approve && self.opts.force,
+            dry_run: false,
+            ..*self.opts
+        };
+        apply_command(&opts, self.root, &[Harness::Claude])
+    }
+
+    /// The ` --root <path>` suffix when the run named its root.
+    fn root_arg(self) -> String {
+        if self.opts.root_explicit {
+            root_arg(self.root)
+        } else {
+            String::new()
+        }
+    }
 }
 
 fn next_actions(
     ctx: &Ctx,
+    follow_up: FollowUp<'_>,
     harnesses: &[Harness],
     detected: bool,
     mcp_command: Option<&mcp::McpCommand>,
@@ -614,7 +658,7 @@ fn next_actions(
     if detected && harnesses.is_empty() {
         next.push(NextAction {
             id: "choose-harness",
-            command: "fallow agent install --harness claude".to_string(),
+            command: follow_up.claude_install(false),
             reason: "No harness was detected; pass --harness claude, codex, or cursor to wire one explicitly."
                 .to_string(),
             mutating: true,
@@ -647,7 +691,7 @@ fn next_actions(
         if approval_skipped {
             next.push(NextAction {
                 id: "claude-approve-mcp",
-                command: "fallow agent install --harness claude --approve".to_string(),
+                command: follow_up.claude_install(true),
                 reason: "Claude Code asks before starting a project-scoped MCP server; --approve records that approval for you in .claude/settings.local.json."
                     .to_string(),
                 mutating: true,
@@ -657,7 +701,7 @@ fn next_actions(
     if !has_config_file(&ctx.root) {
         next.push(NextAction {
             id: "recommend-config",
-            command: "fallow recommend --format json".to_string(),
+            command: format!("fallow recommend --format json{}", follow_up.root_arg()),
             reason: "No fallow config was found; recommend proposes one from the detected stack without writing anything."
                 .to_string(),
             mutating: false,

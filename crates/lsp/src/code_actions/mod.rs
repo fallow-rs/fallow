@@ -1,5 +1,6 @@
 mod absent_props;
 mod constant_parameters;
+mod namespace_escapes;
 mod quick_fix;
 mod suppress;
 #[cfg(test)]
@@ -13,8 +14,24 @@ use ls_types::*;
 
 pub use absent_props::*;
 pub use constant_parameters::*;
+pub use namespace_escapes::*;
 pub use quick_fix::*;
 pub use suppress::*;
+
+/// The text of the document of a code action request, as one string and as
+/// its lines.
+#[derive(Clone, Copy)]
+pub struct DocumentText<'a> {
+    pub source: &'a str,
+    pub lines: &'a [&'a str],
+}
+
+impl<'a> DocumentText<'a> {
+    #[must_use]
+    pub const fn new(source: &'a str, lines: &'a [&'a str]) -> Self {
+        Self { source, lines }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct CodeActionInput<'a> {
@@ -24,6 +41,7 @@ pub struct CodeActionInput<'a> {
     uri: &'a Uri,
     range: &'a Range,
     file_lines: &'a [&'a str],
+    source: &'a str,
     absent_prop_source: Option<&'a str>,
 }
 
@@ -35,7 +53,7 @@ impl<'a> CodeActionInput<'a> {
         file_path: &'a Path,
         uri: &'a Uri,
         range: &'a Range,
-        file_lines: &'a [&'a str],
+        document: DocumentText<'a>,
     ) -> Self {
         Self {
             results,
@@ -43,7 +61,8 @@ impl<'a> CodeActionInput<'a> {
             file_path,
             uri,
             range,
-            file_lines,
+            file_lines: document.lines,
+            source: document.source,
             absent_prop_source: None,
         }
     }
@@ -64,12 +83,13 @@ pub fn build_code_action_response(input: CodeActionInput<'_>) -> Option<CodeActi
         uri,
         range,
         file_lines,
+        source,
         absent_prop_source,
     } = input;
     let mut actions = Vec::new();
 
     actions.extend(build_remove_export_actions(RemoveExportActionInput::new(
-        results, file_path, uri, range, file_lines,
+        results, file_path, uri, range, source,
     )));
     actions.extend(build_delete_file_actions(DeleteFileActionInput::new(
         results, file_path, uri, range,
@@ -91,6 +111,11 @@ pub fn build_code_action_response(input: CodeActionInput<'_>) -> Option<CodeActi
         actions.extend(build_suppress_constant_parameter_actions(
             results, file_path, uri, range, source,
         ));
+        if let Some(root) = root {
+            actions.extend(build_suppress_namespace_escape_actions(
+                results, root, file_path, uri, range, source,
+            ));
+        }
     }
 
     actions.extend(build_suppress_security_actions(

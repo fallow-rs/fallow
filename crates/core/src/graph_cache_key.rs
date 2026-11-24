@@ -50,6 +50,8 @@ pub fn plugin_resolve_input<'a>(
 /// instead.
 ///
 /// `cache_config_hash` covers external plugin names and custom flag settings.
+/// `keepExportTags` keys the mode too: the graph build credits re-exports
+/// through the visibility tags that the key keeps.
 /// [`plugin_config_hash`] includes tsconfig-derived aliases through [`hash_path_aliases`].
 ///
 /// `production` and `ignore_patterns` intentionally stay out of this hash:
@@ -64,6 +66,7 @@ pub fn resolver_options_hash(
     let mut hasher = rustc_hash::FxHasher::default();
     config.cache_config_hash.hash(&mut hasher);
     config.resolve.conditions.hash(&mut hasher);
+    config.keep_export_tags.canonical().hash(&mut hasher);
     resolution_inputs::resolution_inputs_hash(&config.root, workspaces, files).hash(&mut hasher);
     hasher.finish()
 }
@@ -82,10 +85,15 @@ fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
 /// in reachability roots misses the cache. The declaration files the graph
 /// does not seed are reachability roots too: they depend on package.json,
 /// tsconfig and sibling files the manifest does not track.
+/// `consumer_checked` holds the entry points that `includeEntryExports`
+/// covers: their `export *` lines credit fewer names in the graph. The
+/// fixture-only entry files are hashed too, because the graph build checks
+/// the exports of each one that a module imports.
 pub fn entry_points_hash(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
     unseeded_declaration_files: &FxHashSet<discover::FileId>,
+    consumer_checked: &FxHashSet<discover::FileId>,
     root: &std::path::Path,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -112,6 +120,11 @@ pub fn entry_points_hash(
     for path in excluded {
         root_relative_key(root, path).hash(&mut hasher);
     }
+    let fixtures = entry_points.fixture_only();
+    fixtures.len().hash(&mut hasher);
+    for path in fixtures {
+        root_relative_key(root, path).hash(&mut hasher);
+    }
     let mut unseeded: Vec<String> = files
         .iter()
         .filter(|file| unseeded_declaration_files.contains(&file.id))
@@ -120,6 +133,16 @@ pub fn entry_points_hash(
     unseeded.sort_unstable();
     unseeded.len().hash(&mut hasher);
     for key in unseeded {
+        key.hash(&mut hasher);
+    }
+    let mut checked: Vec<String> = files
+        .iter()
+        .filter(|file| consumer_checked.contains(&file.id))
+        .map(|file| root_relative_key(root, &file.path))
+        .collect();
+    checked.sort_unstable();
+    checked.len().hash(&mut hasher);
+    for key in checked {
         key.hash(&mut hasher);
     }
     hasher.finish()

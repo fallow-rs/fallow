@@ -778,3 +778,91 @@ fn cascade_hidden_serializes_only_when_not_zero() {
     assert_eq!(after["cascade_hidden"], 4);
     assert!(after.get("cascade").is_none());
 }
+
+#[test]
+fn apply_scope_resolves_component_severities_before_the_diff() {
+    let config = resolve(
+        serde_json::from_str(r#"{ "rules": { "thin-wrapper": "error" } }"#).expect("config parses"),
+    );
+    let diff = fallow_output::DiffIndex::from_unified_diff(
+        "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,0 +1,1 @@\n+x\n",
+    );
+    let mut results = AnalysisResults::default();
+    for (file, line) in [("/project/src/old.ts", 3), ("/project/src/a.ts", 1)] {
+        results.thin_wrappers.push(
+            fallow_types::output_dead_code::ThinWrapperFinding::with_actions(
+                fallow_types::results::ThinWrapper {
+                    file: PathBuf::from(file),
+                    line,
+                    component: "Wrapper".to_owned(),
+                    child_component: "Child".to_owned(),
+                },
+            ),
+        );
+    }
+    let scope = DeadCodeScope {
+        workspace_roots: None,
+        changes: None,
+        diff: Some((&diff, std::path::Path::new("/project"))),
+        files: None,
+    };
+    apply_scope(&mut results, &scope, &config);
+    let kept: Vec<_> = results
+        .thin_wrappers
+        .iter()
+        .map(|finding| finding.wrapper.file.clone())
+        .collect();
+    assert_eq!(kept, vec![PathBuf::from("/project/src/a.ts")]);
+}
+
+#[test]
+fn filter_to_workspaces_narrows_component_findings() {
+    let root = PathBuf::from("/repo/packages/app");
+    let mut results = AnalysisResults::default();
+    for path in [
+        root.join("src/x.ts"),
+        PathBuf::from("/repo/packages/docs/src/x.ts"),
+    ] {
+        results.thin_wrappers.push(
+            fallow_types::output_dead_code::ThinWrapperFinding::with_actions(
+                fallow_types::results::ThinWrapper {
+                    file: path.clone(),
+                    line: 5,
+                    component: "Wrapper".to_owned(),
+                    child_component: "Child".to_owned(),
+                },
+            ),
+        );
+        results.duplicate_prop_shapes.push(
+            fallow_types::output_dead_code::DuplicatePropShapeFinding::with_actions(
+                fallow_types::results::DuplicatePropShape {
+                    file: path.clone(),
+                    line: 5,
+                    component: "Card".to_owned(),
+                    shape: vec!["title".to_owned()],
+                    group_size: 2,
+                    sharing_components: Vec::new(),
+                },
+            ),
+        );
+        results.prop_drilling_chains.push(
+            fallow_types::output_dead_code::PropDrillingChainFinding::with_actions(
+                fallow_types::results::PropDrillingChain {
+                    prop: "user".to_owned(),
+                    depth: 1,
+                    hops: vec![fallow_types::results::PropDrillHop {
+                        file: path,
+                        line: 5,
+                        component: "Hop".to_owned(),
+                    }],
+                },
+            ),
+        );
+    }
+
+    filter_to_workspaces(&mut results, &vec![root].into());
+
+    assert_eq!(results.thin_wrappers.len(), 1);
+    assert_eq!(results.duplicate_prop_shapes.len(), 1);
+    assert_eq!(results.prop_drilling_chains.len(), 1);
+}

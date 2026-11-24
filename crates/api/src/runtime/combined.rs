@@ -373,7 +373,14 @@ fn run_combined_with_project_artifacts(
     let pre_computed_duplication_for_health =
         should_precompute_duplication_for_combined_health(options, prepared, share_health)
             .then(|| project.duplication.clone());
-    let duplication = run_project_artifact_duplication(&run, project.duplication, section_start)?;
+    let duplication = run_project_artifact_duplication(
+        &run,
+        super::duplication::DuplicationRunReport {
+            report: project.duplication,
+            ignored_clone_groups: project.ignored_clone_groups,
+        },
+        section_start,
+    )?;
     let super::dead_code::DeadCodeProgrammaticRunWithArtifacts {
         output: dead_code,
         artifacts,
@@ -405,7 +412,7 @@ fn run_combined_with_project_artifacts(
 
 fn run_project_artifact_duplication(
     run: &CombinedProjectArtifactRun<'_>,
-    duplication: fallow_engine::duplicates::DuplicationReport,
+    duplication: super::duplication::DuplicationRunReport,
     section_start: Instant,
 ) -> ProgrammaticResult<Option<crate::DuplicationProgrammaticOutput>> {
     let CombinedProjectArtifactRun {

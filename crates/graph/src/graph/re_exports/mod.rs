@@ -90,6 +90,11 @@ pub struct GraphReExportCycle {
     /// `true` for single-file self-re-exports (`export * from './'`), `false`
     /// for multi-node strongly connected components.
     pub is_self_loop: bool,
+    /// Byte offset of the `export ... from` statement in `files[0]` that
+    /// re-exports from a member of the cycle. `None` when every such
+    /// statement was synthesized inside the graph layer and has no span.
+    #[serde(default)]
+    pub anchor_span_start: Option<u32>,
 }
 
 /// A single re-export edge collected from the module graph.
@@ -117,7 +122,7 @@ impl ReExportTuple {
 }
 
 struct ReExportContext<'a> {
-    entry_star_targets: &'a FxHashSet<FileId>,
+    open_star_barrels: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     binding_usage: &'a ImportBindingUsageIndex,
     effective_exports: &'a super::effective_exports::EffectiveExportIndex,
@@ -155,12 +160,29 @@ pub(in crate::graph) struct WholeModuleObservations {
     ambient: FxHashMap<FileId, Exposure>,
     /// Targets a consumer in this graph observes as a whole object.
     observed: FxHashSet<FileId>,
+    /// The namespace bindings that got the full credit in this pass.
+    escapes: Vec<super::namespace_escapes::NamespaceEscape>,
 }
 
 impl WholeModuleObservations {
     /// Record a whole-object observation made by a consumer in this graph.
     pub(in crate::graph) fn observe(&mut self, target: FileId) {
         self.observed.insert(target);
+    }
+
+    /// Record a namespace binding that got the full credit of its target.
+    pub(in crate::graph) fn record_escape(
+        &mut self,
+        escape: super::namespace_escapes::NamespaceEscape,
+    ) {
+        self.escapes.push(escape);
+    }
+
+    /// Move the recorded escapes out.
+    pub(in crate::graph) fn take_escapes(
+        &mut self,
+    ) -> Vec<super::namespace_escapes::NamespaceEscape> {
+        std::mem::take(&mut self.escapes)
     }
 
     /// Record the target of an ambient plain `export *`.
@@ -405,7 +427,7 @@ impl<'a> ExposedNameSearch<'a> {
             &mut may_reach,
             modules
                 .iter()
-                .filter(|m| m.is_entry_point())
+                .filter(|m| m.exposes_entry_surface())
                 .map(|m| m.file_id)
                 .chain(whole_object_names.keys().copied()),
         );
@@ -506,7 +528,8 @@ impl<'a> ExposedNameSearch<'a> {
 /// graph cannot enumerate, with no further re-export hop needed.
 ///
 /// An entry point exposes every name it exports, `default` included: it is the
-/// public API. A closure member exposes what its own exposure allows. A name
+/// public API. An entry point that `includeEntryExports` covers exposes
+/// nothing here, because its exports need an importer in the project. A closure member exposes what its own exposure allows. A name
 /// some importer uses as a whole object is observed in full by that importer.
 fn exposes_here(
     graph: &ModuleGraph,
@@ -515,7 +538,7 @@ fn exposes_here(
     file: FileId,
     name: &str,
 ) -> bool {
-    graph.is_entry_point_file(file)
+    graph.exposes_entry_surface_file(file)
         || closure.exposes_name(file, name)
         || whole_object_names
             .get(&file)
@@ -524,7 +547,7 @@ fn exposes_here(
 
 struct ReExportFixpointInput<'a> {
     re_export_info: &'a [ReExportTuple],
-    entry_star_targets: &'a FxHashSet<FileId>,
+    open_star_barrels: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     reference_paths: &'a mut ReferencePathInterner,
@@ -535,7 +558,7 @@ struct LegacyReExportFullScan<'a> {
     modules: &'a mut [super::types::ModuleNode],
     edges: &'a [Edge],
     re_export_info: &'a [ReExportTuple],
-    entry_star_targets: &'a FxHashSet<FileId>,
+    open_star_barrels: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
     module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     effective_exports: &'a super::effective_exports::EffectiveExportIndex,
@@ -603,6 +626,7 @@ impl ModuleGraph {
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
         exposed_namespace_targets: &ExposedNamespaceTargets,
+        consumer_checked: &FxHashSet<FileId>,
         reference_paths: &mut ReferencePathInterner,
     ) -> Vec<GraphReExportCycle> {
         let re_export_info = self.collect_re_export_tuples();
@@ -613,12 +637,13 @@ impl ModuleGraph {
 
         let cycles = find_re_export_cycles(&self.modules, &re_export_info);
 
-        let entry_star_targets = self.collect_entry_star_targets(exposed_namespace_targets);
+        let open_star_barrels =
+            self.collect_open_star_barrels(exposed_namespace_targets, consumer_checked);
         let edges_by_target = self.build_edges_by_target();
 
         self.run_re_export_fixpoint(ReExportFixpointInput {
             re_export_info: &re_export_info,
-            entry_star_targets: &entry_star_targets,
+            open_star_barrels: &open_star_barrels,
             edges_by_target: &edges_by_target,
             module_by_id,
             reference_paths,
@@ -676,26 +701,28 @@ impl ModuleGraph {
         asset_loaded
     }
 
-    /// Compute the transitive closure of `export *` source files whose every
-    /// named export is credited: star sources of entry-point barrels, closed
-    /// over plain `export *` chains, plus every member of the exposed
-    /// namespace closure (`collect_exposed_namespace_targets`, computed once
-    /// per build and threaded in).
-    fn collect_entry_star_targets(
+    /// The modules whose plain `export *` credits every named export of its
+    /// source, because a consumer that the graph cannot list reads the names.
+    ///
+    /// The members are the entry points, their star sources closed over plain
+    /// `export *` chains, and every member of the exposed namespace closure
+    /// (`collect_exposed_namespace_targets`, computed once per build and
+    /// threaded in). An entry point in `consumer_checked` is not a member on
+    /// its own: its `export *` credits only the names that an importer uses.
+    fn collect_open_star_barrels(
         &self,
         exposed_namespace_targets: &ExposedNamespaceTargets,
+        consumer_checked: &FxHashSet<FileId>,
     ) -> FxHashSet<FileId> {
-        let mut entry_star_targets: FxHashSet<FileId> = exposed_namespace_targets.files().collect();
-        entry_star_targets.extend(self.modules.iter().filter(|m| m.is_entry_point()).flat_map(
-            |m| {
-                m.re_exports
-                    .iter()
-                    .filter(|re| re.exported_name == "*")
-                    .map(|re| re.source_file)
-            },
-        ));
-        self.extend_plain_star_closure(&mut entry_star_targets);
-        entry_star_targets
+        let mut open_star_barrels: FxHashSet<FileId> = exposed_namespace_targets.files().collect();
+        open_star_barrels.extend(
+            self.modules
+                .iter()
+                .filter(|m| m.is_entry_point() && !consumer_checked.contains(&m.file_id))
+                .map(|m| m.file_id),
+        );
+        self.extend_plain_star_closure(&mut open_star_barrels);
+        open_star_barrels
     }
 
     /// Every module whose full namespace object is handed to consumers the
@@ -867,11 +894,12 @@ impl ModuleGraph {
         false
     }
 
-    /// Whether the file is an entry point of this graph.
-    fn is_entry_point_file(&self, file_id: FileId) -> bool {
+    /// Whether the file is an entry point whose exports reach consumers that
+    /// the graph cannot list.
+    fn exposes_entry_surface_file(&self, file_id: FileId) -> bool {
         self.modules
             .get(file_id.0 as usize)
-            .is_some_and(super::types::ModuleNode::is_entry_point)
+            .is_some_and(super::types::ModuleNode::exposes_entry_surface)
     }
 
     /// Extend `targets` with every module its members reach through plain
@@ -907,7 +935,7 @@ impl ModuleGraph {
     fn run_re_export_fixpoint(&mut self, input: ReExportFixpointInput<'_>) {
         let ReExportFixpointInput {
             re_export_info,
-            entry_star_targets,
+            open_star_barrels,
             edges_by_target,
             module_by_id,
             reference_paths,
@@ -949,7 +977,7 @@ impl ModuleGraph {
             processed += 1;
 
             let mut context = ReExportContext {
-                entry_star_targets,
+                open_star_barrels,
                 edges_by_target,
                 binding_usage: &binding_usage,
                 effective_exports: &self.effective_exports,
@@ -979,7 +1007,7 @@ impl ModuleGraph {
                     modules: legacy_modules,
                     edges: &self.edges,
                     re_export_info,
-                    entry_star_targets,
+                    open_star_barrels,
                     edges_by_target,
                     module_by_id,
                     effective_exports: &self.effective_exports,
@@ -1067,7 +1095,7 @@ impl ModuleGraph {
                 barrel_idx,
                 source_id: entry.source,
                 source_idx,
-                entry_star_targets: context.entry_star_targets,
+                open_star_barrels: context.open_star_barrels,
                 triggering_is_type_only: entry.is_type_only,
                 synthetic_stubs: context.synthetic_stubs,
                 reference_paths: context.reference_paths,
@@ -1098,7 +1126,7 @@ impl ModuleGraph {
             modules,
             edges,
             re_export_info,
-            entry_star_targets,
+            open_star_barrels,
             edges_by_target,
             module_by_id,
             effective_exports,
@@ -1115,7 +1143,7 @@ impl ModuleGraph {
             let mut changed = false;
             for entry in re_export_info {
                 let mut context = ReExportContext {
-                    entry_star_targets,
+                    open_star_barrels,
                     edges_by_target,
                     binding_usage: &binding_usage,
                     effective_exports,
@@ -1165,7 +1193,30 @@ fn find_re_export_cycles(
         cycles.push(build_multi_node_cycle(scc, &nodes, modules));
     }
 
+    for cycle in &mut cycles {
+        cycle.anchor_span_start = cycle_anchor_span_start(&cycle.file_ids, modules);
+    }
+
     cycles
+}
+
+/// The byte offset of the first `export ... from` statement in the first
+/// member that re-exports from a member of the cycle. A namespace re-export
+/// (`export * as ns`) is not part of the cycle, and a re-export without a
+/// source span cannot anchor a line.
+fn cycle_anchor_span_start(
+    file_ids: &[FileId],
+    modules: &[super::types::ModuleNode],
+) -> Option<u32> {
+    let anchor = modules.get(file_ids.first()?.0 as usize)?;
+    anchor
+        .re_exports
+        .iter()
+        .filter(|re| file_ids.contains(&re.source_file))
+        .filter(|re| !is_namespace_re_export(re))
+        .filter(|re| re.span.end > re.span.start)
+        .map(|re| re.span.start)
+        .min()
 }
 
 /// Assign a dense node index to every distinct barrel / source file id.
@@ -1236,6 +1287,7 @@ fn build_self_loop_cycle(
         files: vec![path_buf],
         file_ids: vec![barrel],
         is_self_loop: true,
+        anchor_span_start: None,
     }
 }
 
@@ -1279,6 +1331,7 @@ fn build_multi_node_cycle(
         files,
         file_ids,
         is_self_loop: false,
+        anchor_span_start: None,
     }
 }
 

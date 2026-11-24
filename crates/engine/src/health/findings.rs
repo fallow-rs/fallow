@@ -82,6 +82,9 @@ pub(super) fn collect_findings_with_resolver(
         };
 
         files_analyzed += 1;
+        input
+            .threshold_state_tracker
+            .record_inline_module(path, module, input.threshold_resolver);
         // Precompute the per-function React hook profile ONCE per module from the
         // cached `hook_uses` IR (the sole reader of `module.hook_uses`). Aligned
         // by index to `module.complexity`; all-`None` at zero cost for non-React
@@ -109,22 +112,33 @@ pub(super) fn collect_findings_with_resolver(
                 // a `no_match` row (issue #2163 follow-up). The `is_empty`
                 // guard keeps the common no-override run at zero extra work.
                 if !input.threshold_resolver.is_empty() {
-                    let (applied, matched) = input.threshold_resolver.resolve(relative, &fc.name);
+                    let (applied, matched, comment) = input
+                        .threshold_resolver
+                        .resolve_unit(relative, &fc.name, fc.line);
+                    let context = ComplexityFunctionContext {
+                        path,
+                        function: &fc.name,
+                        line: fc.line,
+                        col: fc.col,
+                        cyclomatic: input.threshold_resolver.gate_cyclomatic(fc),
+                        cognitive: fc.cognitive,
+                        line_count: Some(fc.line_count),
+                        suppressed: true,
+                    };
                     input.threshold_state_tracker.record_complexity(
-                        ComplexityFunctionContext {
-                            path,
-                            function: &fc.name,
-                            line: fc.line,
-                            col: fc.col,
-                            cyclomatic: input.threshold_resolver.gate_cyclomatic(fc),
-                            cognitive: fc.cognitive,
-                            line_count: Some(fc.line_count),
-                            suppressed: true,
-                        },
+                        context,
                         &matched,
                         input.threshold_resolver.global,
                         applied.effective,
                     );
+                    if let Some(comment) = comment {
+                        input.threshold_state_tracker.record_inline_complexity(
+                            context,
+                            comment,
+                            input.threshold_resolver.global,
+                            applied.effective,
+                        );
+                    }
                 }
                 continue;
             }
@@ -169,25 +183,35 @@ fn collect_complexity_finding(
     fc: &fallow_types::extract::FunctionComplexity,
     react_hook_profile: Option<fallow_output::ReactHookProfile>,
 ) -> Option<ComplexityViolation> {
-    let (applied_thresholds, matched_overrides) =
-        input.threshold_resolver.resolve(relative, &fc.name);
+    let (applied_thresholds, matched_overrides, comment) = input
+        .threshold_resolver
+        .resolve_unit(relative, &fc.name, fc.line);
     let policy = input.threshold_resolver.cyclomatic_policy();
     let cyclomatic = cyclomatic_policy::gate_cyclomatic(fc, policy);
+    let context = ComplexityFunctionContext {
+        path,
+        function: &fc.name,
+        line: fc.line,
+        col: fc.col,
+        cyclomatic,
+        cognitive: fc.cognitive,
+        line_count: Some(fc.line_count),
+        suppressed: false,
+    };
     input.threshold_state_tracker.record_complexity(
-        ComplexityFunctionContext {
-            path,
-            function: &fc.name,
-            line: fc.line,
-            col: fc.col,
-            cyclomatic,
-            cognitive: fc.cognitive,
-            line_count: Some(fc.line_count),
-            suppressed: false,
-        },
+        context,
         &matched_overrides,
         input.threshold_resolver.global,
         applied_thresholds.effective,
     );
+    if let Some(comment) = comment {
+        input.threshold_state_tracker.record_inline_complexity(
+            context,
+            comment,
+            input.threshold_resolver.global,
+            applied_thresholds.effective,
+        );
+    }
     let (exceeds_cyclomatic, exceeds_cognitive) =
         complexity_exceeded(fc, policy, applied_thresholds.effective)?;
 
@@ -225,11 +249,12 @@ fn collect_complexity_finding(
         component_rollup: None,
         contributions: contributions_for(input.complexity_breakdown, fc, policy),
         effective_thresholds: applied_thresholds
-            .override_index
-            .map(|_| applied_thresholds.effective),
+            .is_overridden()
+            .then_some(applied_thresholds.effective),
         threshold_source: applied_thresholds
-            .override_index
-            .map(|_| fallow_output::ThresholdSource::Override),
+            .is_overridden()
+            .then_some(fallow_output::ThresholdSource::Override),
+        override_comment_line: applied_thresholds.comment_line,
         max_file_lines: None,
     })
 }
@@ -348,9 +373,29 @@ fn process_crap_findings_for_path(input: CrapPathProcessingInput<'_, '_, '_>) {
             continue;
         };
         let relative = path.strip_prefix(merge.config_root).unwrap_or(path);
-        let (applied_thresholds, matched_overrides) =
-            merge.threshold_resolver.resolve(relative, &fc.name);
+        let (applied_thresholds, matched_overrides, comment) = merge
+            .threshold_resolver
+            .resolve_unit(relative, &fc.name, pf.line);
         let suppressed = crap_is_suppressed(path, pf, &maps.suppressions_by_path);
+        if let Some(comment) = comment {
+            merge.threshold_state_tracker.record_inline_crap(
+                CrapFunctionContext {
+                    path,
+                    function: &fc.name,
+                    line: pf.line,
+                    col: pf.col,
+                    suppressed,
+                },
+                (
+                    merge.threshold_resolver.gate_cyclomatic(fc),
+                    fc.cognitive,
+                    Some(pf.crap),
+                ),
+                comment,
+                merge.threshold_resolver.global,
+                applied_thresholds.effective,
+            );
+        }
         // Recorded before the guards, not behind them: `record_crap` is what
         // registers the entry as matched, so skipping it for a suppressed or
         // below-threshold unit turns a glob that did match into a `no_match`
@@ -538,8 +583,28 @@ pub(super) fn record_template_crap_override_rows(input: &mut CrapFindingMergeInp
             if !fallow_types::extract::is_synthetic_template_unit(&fc.name) {
                 continue;
             }
-            let (applied_thresholds, matched_overrides) =
-                input.threshold_resolver.resolve(relative, &fc.name);
+            let (applied_thresholds, matched_overrides, comment) = input
+                .threshold_resolver
+                .resolve_unit(relative, &fc.name, fc.line);
+            if let Some(comment) = comment {
+                input.threshold_state_tracker.record_inline_crap(
+                    CrapFunctionContext {
+                        path,
+                        function: &fc.name,
+                        line: fc.line,
+                        col: fc.col,
+                        suppressed: false,
+                    },
+                    (
+                        input.threshold_resolver.gate_cyclomatic(fc),
+                        fc.cognitive,
+                        None,
+                    ),
+                    comment,
+                    input.threshold_resolver.global,
+                    applied_thresholds.effective,
+                );
+            }
             input.threshold_state_tracker.record_crap_not_applicable(
                 CrapFunctionContext {
                     path,
@@ -603,9 +668,10 @@ fn merge_existing_crap_finding(
     let exceeds_cyclomatic = finding.exceeded.includes_cyclomatic();
     let exceeds_cognitive = finding.exceeded.includes_cognitive();
     finding.exceeded = ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
-    if applied_thresholds.override_index.is_some() {
+    if applied_thresholds.is_overridden() {
         finding.effective_thresholds = Some(applied_thresholds.effective);
         finding.threshold_source = Some(fallow_output::ThresholdSource::Override);
+        finding.override_comment_line = applied_thresholds.comment_line;
     }
     finding.severity = compute_finding_severity(
         finding.cognitive,
@@ -662,12 +728,13 @@ fn new_crap_finding(args: NewCrapFindingInput<'_, '_>) -> ComplexityViolation {
         contributions: contributions_for(args.merge.complexity_breakdown, args.fc, policy),
         effective_thresholds: args
             .applied_thresholds
-            .override_index
-            .map(|_| args.applied_thresholds.effective),
+            .is_overridden()
+            .then_some(args.applied_thresholds.effective),
         threshold_source: args
             .applied_thresholds
-            .override_index
-            .map(|_| fallow_output::ThresholdSource::Override),
+            .is_overridden()
+            .then_some(fallow_output::ThresholdSource::Override),
+        override_comment_line: args.applied_thresholds.comment_line,
         max_file_lines: None,
     }
 }

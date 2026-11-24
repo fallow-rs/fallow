@@ -29,6 +29,10 @@ use fallow_types::extract::MemberKind;
 use fallow_types::output_dead_code::*;
 use fallow_types::results::*;
 
+#[path = "snapshot_sample_results.rs"]
+mod sample;
+use sample::sample_results;
+
 fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
     let def = fallow_cli::explain::rule_by_id(id);
     let short_description = def.map_or(fallback_short, |def| def.short);
@@ -141,293 +145,6 @@ fn api_grouped_duplication_json_document(
         }),
         telemetry_analysis_run_id: None,
     })
-}
-
-/// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
-#[expect(
-    clippy::too_many_lines,
-    reason = "One block per issue type used across the snapshot suite; the line count grows with new issue types and the structure is intentional."
-)]
-fn sample_results(root: &Path) -> AnalysisResults {
-    let mut r = AnalysisResults::default();
-
-    r.unused_files
-        .push(UnusedFileFinding::with_actions(UnusedFile {
-            path: root.join("src/dead.ts"),
-        }));
-    r.unused_exports
-        .push(UnusedExportFinding::with_actions(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-            deprecated: false,
-            deprecated_reason: None,
-        }));
-    r.unused_types
-        .push(UnusedTypeFinding::with_actions(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "OldType".to_string(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 60,
-            is_re_export: false,
-            deprecated: false,
-            deprecated_reason: None,
-        }));
-    r.unused_dependencies
-        .push(UnusedDependencyFinding::with_actions(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        }));
-    r.unused_dev_dependencies
-        .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 5,
-            used_in_workspaces: Vec::new(),
-            declared_and_imported_in: Vec::new(),
-        }));
-    r.unused_enum_members
-        .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 2,
-        }));
-    r.unused_class_members
-        .push(UnusedClassMemberFinding::with_actions(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacyMethod".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 4,
-        }));
-    r.unused_store_members
-        .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
-            path: root.join("src/stores/counter.ts"),
-            parent_name: "useCounterStore".to_string(),
-            member_name: "legacyAction".to_string(),
-            kind: MemberKind::StoreMember,
-            line: 24,
-            col: 2,
-        }));
-    r.unresolved_imports
-        .push(UnresolvedImportFinding::with_actions(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        }));
-    r.unlisted_dependencies
-        .push(UnlistedDependencyFinding::with_actions(
-            UnlistedDependency {
-                package_name: "chalk".to_string(),
-                imported_from: vec![ImportSite {
-                    path: root.join("src/cli.ts"),
-                    line: 2,
-                    col: 0,
-                }],
-            },
-        ));
-    r.duplicate_exports
-        .push(DuplicateExportFinding::with_actions(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/config.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/types.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        }));
-    r.unused_optional_dependencies
-        .push(UnusedOptionalDependencyFinding::with_actions(
-            UnusedDependency {
-                package_name: "fsevents".to_string(),
-                location: DependencyLocation::OptionalDependencies,
-                path: root.join("package.json"),
-                line: 5,
-                used_in_workspaces: Vec::new(),
-                declared_and_imported_in: Vec::new(),
-            },
-        ));
-    r.type_only_dependencies
-        .push(TypeOnlyDependencyFinding::with_actions(
-            TypeOnlyDependency {
-                package_name: "zod".to_string(),
-                path: root.join("package.json"),
-                line: 8,
-            },
-        ));
-    r.test_only_dependencies
-        .push(TestOnlyDependencyFinding::with_actions(
-            TestOnlyDependency {
-                package_name: "msw".to_string(),
-                path: root.join("package.json"),
-                line: 12,
-            },
-        ));
-    r.circular_dependencies
-        .push(CircularDependencyFinding::with_actions(
-            CircularDependency {
-                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-                length: 2,
-                line: 3,
-                col: 0,
-                edges: Vec::new(),
-                is_cross_package: false,
-            },
-        ));
-    r.re_export_cycles
-        .push(ReExportCycleFinding::with_actions(ReExportCycle {
-            files: vec![
-                root.join("src/api/index.ts"),
-                root.join("src/api/internal/index.ts"),
-            ],
-            kind: ReExportCycleKind::MultiNode,
-        }));
-    r.unused_catalog_entries
-        .push(UnusedCatalogEntryFinding::with_actions(
-            UnusedCatalogEntry {
-                entry_name: "is-even".to_string(),
-                catalog_name: "default".to_string(),
-                path: PathBuf::from("pnpm-workspace.yaml"),
-                line: 6,
-                hardcoded_consumers: vec![],
-            },
-        ));
-    r.unused_catalog_entries
-        .push(UnusedCatalogEntryFinding::with_actions(
-            UnusedCatalogEntry {
-                entry_name: "old-thing".to_string(),
-                catalog_name: "legacy".to_string(),
-                path: PathBuf::from("pnpm-workspace.yaml"),
-                line: 12,
-                hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
-            },
-        ));
-    r.empty_catalog_groups
-        .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
-            catalog_name: "react17".to_string(),
-            path: PathBuf::from("pnpm-workspace.yaml"),
-            line: 10,
-        }));
-    r.unresolved_catalog_references
-        .push(UnresolvedCatalogReferenceFinding::with_actions(
-            UnresolvedCatalogReference {
-                entry_name: "old-react".to_string(),
-                catalog_name: "react17".to_string(),
-                path: root.join("packages/app/package.json"),
-                line: 14,
-                available_in_catalogs: vec!["react18".to_string()],
-            },
-        ));
-    r.unused_dependency_overrides.push(
-        UnusedDependencyOverrideFinding::with_actions(
-            UnusedDependencyOverride {
-                raw_key: "axios".to_string(),
-                target_package: "axios".to_string(),
-                parent_package: None,
-                version_constraint: None,
-                version_range: "^1.6.0".to_string(),
-                source: DependencyOverrideSource::PnpmWorkspaceYaml,
-                path: root.join("pnpm-workspace.yaml"),
-                line: 9,
-                hint: Some(
-                    "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth"
-                        .to_string(),
-                ),
-            },
-        ),
-    );
-    r.misconfigured_dependency_overrides.push(
-        MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
-            raw_key: "@types/react@<<18".to_string(),
-            target_package: None,
-            raw_value: "18.0.0".to_string(),
-            reason: DependencyOverrideMisconfigReason::UnparsableKey,
-            source: DependencyOverrideSource::PnpmPackageJson,
-            path: root.join("package.json"),
-            line: 3,
-        }),
-    );
-    r.invalid_client_exports
-        .push(InvalidClientExportFinding::with_actions(
-            InvalidClientExport {
-                path: root.join("app/page.tsx"),
-                export_name: "metadata".to_string(),
-                directive: "use client".to_string(),
-                line: 3,
-                col: 0,
-            },
-        ));
-    r.mixed_client_server_barrels
-        .push(MixedClientServerBarrelFinding::with_actions(
-            MixedClientServerBarrel {
-                path: root.join("app/components/index.ts"),
-                client_origin: "./Button".to_string(),
-                server_origin: "./fetchUser".to_string(),
-                line: 2,
-                col: 0,
-            },
-        ));
-    r.unprovided_injects
-        .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
-            path: root.join("src/useTheme.ts"),
-            key_name: "THEME_KEY".to_string(),
-            framework: "vue".to_string(),
-            line: 5,
-            col: 2,
-        }));
-    r.unused_component_inputs
-        .push(UnusedComponentInputFinding::with_actions(
-            UnusedComponentInput {
-                path: root.join("src/user-card.component.ts"),
-                component_name: "UserCardComponent".to_string(),
-                input_name: "variant".to_string(),
-                line: 12,
-                col: 2,
-            },
-        ));
-    r.unused_component_outputs
-        .push(UnusedComponentOutputFinding::with_actions(
-            UnusedComponentOutput {
-                path: root.join("src/user-card.component.ts"),
-                component_name: "UserCardComponent".to_string(),
-                output_name: "selected".to_string(),
-                line: 15,
-                col: 2,
-            },
-        ));
-    r.unused_svelte_events
-        .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
-            path: root.join("src/Child.svelte"),
-            component_name: "Child".to_string(),
-            event_name: "dead".to_string(),
-            line: 6,
-            col: 2,
-        }));
-
-    r
 }
 
 #[test]
@@ -896,6 +613,7 @@ fn sarif_mixed_severity_snapshot() {
         unused_class_members: fallow_config::Severity::Warn,
         unused_namespace_members: fallow_config::Severity::Warn,
         unused_protected_class_members: fallow_config::Severity::Off,
+        namespace_escapes: fallow_config::Severity::Off,
         unused_store_members: fallow_config::Severity::Warn,
         unprovided_injects: fallow_config::Severity::Warn,
         unrendered_components: fallow_config::Severity::Warn,
@@ -1864,6 +1582,7 @@ fn codeclimate_mixed_severity_snapshot() {
         unused_class_members: fallow_config::Severity::Warn,
         unused_namespace_members: fallow_config::Severity::Warn,
         unused_protected_class_members: fallow_config::Severity::Off,
+        namespace_escapes: fallow_config::Severity::Off,
         unused_store_members: fallow_config::Severity::Warn,
         unprovided_injects: fallow_config::Severity::Warn,
         unrendered_components: fallow_config::Severity::Warn,
@@ -2372,12 +2091,16 @@ fn re_export_cycles_results(root: &Path) -> AnalysisResults {
                 root.join("src/api/internal/index.ts"),
             ],
             kind: ReExportCycleKind::MultiNode,
+            line: 1,
+            col: 0,
         }));
     results
         .re_export_cycles
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![root.join("src/utils/index.ts")],
             kind: ReExportCycleKind::SelfLoop,
+            line: 3,
+            col: 0,
         }));
     results
 }
@@ -3007,6 +2730,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
                 contributions: Vec::new(),
                 effective_thresholds: None,
                 threshold_source: None,
+                override_comment_line: None,
                 max_file_lines: None,
             },
             &action_ctx,
@@ -3040,6 +2764,8 @@ fn sample_health_report(root: &Path) -> HealthReport {
         file_scores: vec![],
         coverage_gaps: None,
         threshold_overrides: vec![],
+        inline_threshold_overrides: vec![],
+        inline_threshold_override_problems: vec![],
         prop_drilling_chains: vec![],
         hotspots: vec![],
         hotspot_summary: None,
@@ -3327,6 +3053,8 @@ fn empty_health_report() -> HealthReport {
         file_scores: vec![],
         coverage_gaps: None,
         threshold_overrides: vec![],
+        inline_threshold_overrides: vec![],
+        inline_threshold_override_problems: vec![],
         prop_drilling_chains: vec![],
         hotspots: vec![],
         hotspot_summary: None,
@@ -3881,34 +3609,30 @@ fn grouped_duplication_json_directory_snapshot() {
 
 #[test]
 fn grouped_duplication_codeclimate_directory_snapshot() {
-    let root = PathBuf::from("/project");
-    let report = sample_grouped_duplication_report(&root);
+    let project = tempfile::tempdir().expect("project root");
+    let root = project.path();
+    let report = sample_grouped_duplication_report(root);
     let resolver = fallow_cli::report::OwnershipResolver::Directory;
-    let mut issues = build_duplication_codeclimate(&report, &root);
-    let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
-    for group in &report.clone_groups {
-        let owner = fallow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
-        for instance in &group.instances {
-            let rel = instance
-                .file
-                .strip_prefix(&root)
-                .unwrap_or(&instance.file)
-                .to_string_lossy()
-                .replace('\\', "/");
-            path_to_owner.insert(rel, owner.clone());
-        }
-    }
-    fallow_output::annotate_codeclimate_issues(
-        &mut issues,
-        fallow_output::CodeClimateAnnotationField::Group,
-        |path| {
-            path_to_owner
-                .get(path)
-                .cloned()
-                .unwrap_or_else(|| "(unowned)".to_string())
-        },
+    let grouping =
+        fallow_cli::report::dupes_grouping::build_duplication_grouping(&report, root, &resolver);
+    let saved =
+        api_grouped_duplication_json_document(&report, &grouping, root, Duration::ZERO, false)
+            .expect("serialize duplication report");
+    let path = root.join("dupes.json");
+    std::fs::write(&path, saved.to_string()).expect("save duplication report");
+    let rendered = crate::common::run_fallow_in_root(
+        "report",
+        root,
+        &[
+            "--from",
+            path.to_str().expect("path"),
+            "--group-by",
+            "directory",
+            "--format",
+            "codeclimate",
+        ],
     );
-    let value = codeclimate_issues_to_value(&issues);
+    let value = crate::common::parse_json(&rendered);
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("grouped_duplication_codeclimate_directory", json_str);
 }

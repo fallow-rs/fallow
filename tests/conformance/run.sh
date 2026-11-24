@@ -95,11 +95,27 @@ KNIP_OUT="${TMPDIR_CONFORM}/knip.json"
 # knip is pinned so the tracked agreement trend measures fallow changes,
 # not knip releases; bump KNIP_VERSION deliberately and note it in the run.
 
-# Install knip locally in the project if needed (for npx to find it)
-# We use npx which will auto-download if needed
+# Both tools must analyze the same dependency tree, so the install runs
+# before either tool. Some fixtures list a package that does not exist on
+# purpose, so a failed install removes the partial tree and both tools run
+# without node_modules.
+cd "${PROJECT_DIR}"
+if [[ ! -d "node_modules" ]]; then
+    echo "Installing node_modules..." >&2
+    # Prefer the project's lockfile so the install is reproducible. Projects
+    # without a package-lock.json keep the plain install.
+    INSTALL_CMD=(npm install --ignore-scripts --no-audit --no-fund)
+    if [[ -f "package-lock.json" ]]; then
+        INSTALL_CMD=(npm ci --ignore-scripts --no-audit --no-fund)
+    fi
+    if ! "${INSTALL_CMD[@]}" >/dev/null 2>&1; then
+        rm -rf node_modules
+        echo "Warning: dependency install failed (${INSTALL_CMD[*]}); both tools run without node_modules" >&2
+    fi
+fi
+
 echo "Running fallow..." >&2
 FALLOW_EXIT=0
-cd "${PROJECT_DIR}"
 "${FALLOW_BIN}" dead-code --format json > "${FALLOW_OUT}" 2>/dev/null || FALLOW_EXIT=$?
 
 # fallow exits 1 when issues are found (expected), 2 on error
@@ -114,18 +130,6 @@ echo "  fallow completed (exit ${FALLOW_EXIT})" >&2
 echo "Running knip..." >&2
 KNIP_EXIT=0
 cd "${PROJECT_DIR}"
-
-# Ensure node_modules exists for knip to analyze
-if [[ ! -d "node_modules" ]]; then
-    echo "  Installing node_modules for knip..." >&2
-    # Prefer the project's lockfile so the install is reproducible. Projects
-    # without a package-lock.json keep the plain install.
-    if [[ -f "package-lock.json" ]]; then
-        npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
-    else
-        npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
-    fi
-fi
 
 npx --yes "knip@${KNIP_VERSION:-6.32.0}" --reporter json > "${KNIP_OUT}" 2>/dev/null || KNIP_EXIT=$?
 

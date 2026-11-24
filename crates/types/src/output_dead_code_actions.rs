@@ -54,11 +54,8 @@ pub(super) fn build_duplicate_exports_ignore_rules(
     for loc in &export.locations {
         // Normalize separators to forward slashes so pasting the action value
         // into `.fallowrc.json` produces a portable rule. On Windows
-        // `to_string_lossy` preserves backslashes, which the old
-        // `inject_actions` post-pass implicitly normalized because it read
-        // the path AFTER `strip_root_prefix` had already run through
-        // `normalize_uri`; the typed wrapper builds the value before
-        // serialization, so the normalization has to be explicit here.
+        // `to_string_lossy` preserves backslashes, and the typed wrapper
+        // builds the value before `strip_root_prefix` runs.
         let path = loc.path.to_string_lossy().replace('\\', "/");
         if path.is_empty() {
             continue;

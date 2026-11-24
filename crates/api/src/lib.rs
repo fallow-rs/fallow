@@ -83,6 +83,7 @@ pub mod schemas;
 pub mod security_output;
 /// Local-only advisory similar-code discovery and provider status.
 pub mod similar_code;
+mod threshold_override_output;
 mod type_aware;
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
@@ -110,9 +111,9 @@ pub use dead_code_sarif::build_sarif;
 pub use doctor::{DoctorOptions, run_doctor, run_doctor_with_cache_dir};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneDemotionReason,
-    CloneFamilyFinding, CloneGroupFinding, CombinedDupesSection, DupesReportPayload,
-    DuplicationGroup, DuplicationGrouping, build_duplication_codeclimate,
-    set_duplication_audit_attribution,
+    CloneFamilyFinding, CloneGroupFinding, CloneRegionFinding, CloneRegionGrade, CloneRegionSpan,
+    CombinedDupesSection, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
+    build_duplication_codeclimate, set_duplication_audit_attribution,
 };
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,
@@ -132,7 +133,7 @@ pub use explain::{
     rule_guide, rule_has_guide, rule_rationale, rule_severity_key, security_meta,
     serialize_explain_programmatic_json, unknown_explain_error,
 };
-pub use explain_examples::{ExampleFile, RuleExample, rule_example, rule_examples};
+pub use explain_examples::{ExampleAnchor, ExampleFile, RuleExample, rule_example, rule_examples};
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{
     AuditGate, AuditWorsened, HealthConfig, ProductionAnalysis, ProductionEnv, TypeAwareRequire,
@@ -143,8 +144,18 @@ pub use fallow_engine::change_scope::{
     ChangeScope, ChangeScopeOwner, ChangeScopeRequest, first_package_baselines,
     package_baseline_statuses,
 };
+/// Source extensions a client watches to keep analysis current.
+pub use fallow_engine::discover::SOURCE_EXTENSIONS;
+/// Git commands for test fixtures. The LSP and MCP crates do not depend on
+/// the engine, so their tests take the commands from here.
+#[cfg(any(test, feature = "testing"))]
+pub use fallow_engine::git_fixture;
 /// Engine-owned per-workspace Git baseline state used by analysis surfaces.
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
+/// Byte spans of the export statements of a file, for a surface that edits
+/// source text, such as the quick fix of the language server.
+pub use fallow_engine::post_edit;
+pub use fallow_engine::source_edits;
 /// Stack size for threads that run analysis, and the registration that lets a
 /// bounded parse stay on such a thread.
 ///
@@ -498,6 +509,9 @@ pub struct DeadCodeFilters {
     pub unused_namespace_members: bool,
     /// `protected` class members that neither the class nor a subclass reads.
     pub unused_protected_class_members: bool,
+    /// Namespace bindings that the code uses as a whole value, so their
+    /// exports are not checked.
+    pub namespace_escapes: bool,
     /// Store members (for example Pinia) never used outside the store.
     pub unused_store_members: bool,
     /// `inject` calls with no matching `provide`.
@@ -582,6 +596,7 @@ impl DeadCodeFilters {
             || self.unused_class_members
             || self.unused_namespace_members
             || self.unused_protected_class_members
+            || self.namespace_escapes
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -652,6 +667,7 @@ impl DeadCodeFilters {
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-protected-class-members" => self.unused_protected_class_members = true,
+            "--namespace-escapes" => self.namespace_escapes = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,

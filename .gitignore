@@ -124,7 +124,9 @@ AGENTS.md
 
 # In-flight feature plans written by /fallow-implement and re-read by /panel-review,
 # the implementation phase, and /fallow-review. Transient; promoted concepts go to decisions/.
-.plans/
+# No trailing slash: maintainer worktrees link .plans to a shared folder, and a
+# pattern with a slash does not match a symlink.
+.plans
 # Stray undotted variant: research/plan scratch docs belong in the gitignored
 # .plans/, never committed. Ignored so `git add -A` cannot sweep one in again.
 plans/

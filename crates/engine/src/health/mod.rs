@@ -25,8 +25,10 @@ use branching::branching_by_file;
 mod change_coupling_section;
 mod churn_file;
 mod component_rollup;
+mod contributor;
 mod core_pipeline;
 mod coverage_gaps;
+pub mod coverage_input;
 mod coverage_intelligence;
 mod coverage_settings;
 pub mod coverage_v8;
@@ -79,7 +81,7 @@ use derived_sections::{
     HealthDerivedSectionInput, HealthDerivedSections, prepare_health_derived_sections,
 };
 use execute::HealthOptions;
-pub use execute::execute_health_inner;
+pub use execute::{execute_health_inner, execute_health_inner_with_baseline};
 use file_scores::{
     FileScoresAndChurnInput, compute_file_scores_and_churn, health_file_scores_slice,
     print_slow_churn_note,
@@ -174,15 +176,23 @@ pub fn should_precompute_dead_code_analysis(
 /// Command-neutral grouping resolver contract for `--group-by` health output.
 ///
 /// The CLI owns the concrete resolver (CODEOWNERS parsing, package discovery);
-/// the engine grouping pass only needs these three read operations, so it stays
-/// generic over the resolver instead of depending on the CLI type.
+/// the engine grouping pass only needs the mode label and the group of a path,
+/// so it stays generic over the resolver instead of depending on the CLI type.
 pub trait HealthGroupResolver {
     /// Stable label for the active grouping mode (`owner` / `directory` / ...).
     fn mode_label(&self) -> &'static str;
-    /// Resolve a repo-relative path to its group key and the matching rule.
-    fn resolve_with_rule(&self, rel_path: &Path) -> (String, Option<String>);
-    /// Section owners for the group a path belongs to, when known.
-    fn section_owners_of(&self, rel_path: &Path) -> Option<&[String]>;
+    /// Resolve a repo-relative path to its group.
+    fn group_of<'a>(&'a self, rel_path: &'a Path) -> PathGroup<'a>;
+}
+
+/// Group of one path, borrowed from the resolver or from the path.
+#[derive(Debug, Clone, Copy)]
+pub struct PathGroup<'a> {
+    /// Group key, as the JSON `key` field shows it.
+    pub key: &'a str,
+    /// Default owners of the section. `Some` only in section mode, for a
+    /// path that an owning rule matches.
+    pub section_owners: Option<&'a [String]>,
 }
 
 /// Placeholder grouping resolver for runs without `--group-by` (the programmatic
@@ -202,10 +212,7 @@ impl HealthGroupResolver for NoGroupResolver {
     fn mode_label(&self) -> &'static str {
         match *self {}
     }
-    fn resolve_with_rule(&self, _rel_path: &Path) -> (String, Option<String>) {
-        match *self {}
-    }
-    fn section_owners_of(&self, _rel_path: &Path) -> Option<&[String]> {
+    fn group_of<'a>(&'a self, _rel_path: &'a Path) -> PathGroup<'a> {
         match *self {}
     }
 }

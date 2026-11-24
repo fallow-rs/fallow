@@ -18,6 +18,33 @@
 # matches `el.innerHTML` and `this.node.innerHTML`. sink_shape is one of:
 # call | member-call | member-assign | tagged-template | jsx-attr |
 # new-expression.
+#
+# The extractor reads every call and `new` expression through one canonical
+# call (crates/extract/src/visitor/canonical_call.rs). A callee path keeps a
+# `this` root and a call-result segment with a `()` suffix, so `*.html`
+# matches `$("#p").html(x)` (path `$().html`) and `*.bypassSecurityTrustHtml`
+# matches `this.sanitizer.bypassSecurityTrustHtml(x)`.
+#
+# Optional `forms` says which call forms a call row accepts: `call`, `new`, or
+# both. Unset means the form of sink_shape (`new` for new-expression rows,
+# `call` for the others). The callee pattern alone tells a bare call from a
+# member call.
+#
+# Optional `this_receiver = true` lets a call of a member of `this` itself
+# (`this.whereRaw(x)`) match the row. A class method of that name runs code of
+# the class or of its base in most cases, so only rows with a method name that
+# belongs to a library set it. A member of a field (`this.db.query(x)`) matches
+# every row.
+#
+# Optional `arguments` says which argument positions the row reads: `index`
+# (only arg_index, the default), `variadic` (arg_index and every later
+# position), or `any-non-literal` (every non-literal argument, for log calls
+# with a leading label). A row that reads several positions reports at most
+# one candidate per call.
+#
+# crates/core/tests/integration_test/security_shape_matrix.rs generates each
+# equivalent form of every call row and checks that each accepted form gives
+# the same candidate.
 # Optional import_provenance narrows a matcher to bindings traceable to a
 # specific import source (trades one FN for fewer FPs on same-named locals).
 # When import_provenance is set and the module has no matching import, the
@@ -76,10 +103,6 @@
 # Optional context_keywords matches zero-arg sinks that were captured only
 # because the surrounding variable or property name is security sensitive.
 #
-# Optional variadic = true makes a row also match every argument after
-# arg_index (for example each `path.join` segment). A variadic row reports at
-# most one candidate per call.
-#
 # Multiple [[matcher]] rows may share an `id` (e.g. dangerous-html spans three
 # shapes). Uniqueness is keyed on the full row (id + sink_shape +
 # callee_patterns), not on `id` alone.
@@ -102,6 +125,7 @@ title = "Dangerous HTML sink"
 effect = "dom"
 sink_shape = "member-call"
 callee_patterns = ["*.insertAdjacentHTML"]
+this_receiver = true
 arg_index = 1
 evidence_template = "Non-literal HTML passed to {callee}(). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
 
@@ -114,6 +138,7 @@ title = "Dangerous HTML sink"
 effect = "dom"
 sink_shape = "member-call"
 callee_patterns = ["*.createContextualFragment"]
+this_receiver = true
 arg_index = 0
 evidence_template = "Non-literal HTML passed to {callee}(). Candidate for verification: confirm the markup is not attacker-controlled or is sanitized."
 
@@ -165,6 +190,7 @@ cwe = 79
 title = "Template escape bypass sink"
 effect = "dom"
 sink_shape = "member-call"
+forms = ["call", "new"]
 callee_patterns = ["*.SafeString"]
 arg_index = 0
 evidence_template = "Non-literal value wrapped by {callee}() (marks the string as pre-escaped). Candidate for verification: confirm the value is sanitized before bypassing the template engine's HTML escaping."
@@ -543,6 +569,7 @@ callee_patterns = [
   "sequelize.literal",
   "Sequelize.literal",
 ]
+this_receiver = true
 arg_index = 0
 evidence_template = "Non-literal value passed to {callee}(). Candidate for verification: raw SQL escape hatches bypass parameterization; confirm the fragment is not attacker-controlled."
 
@@ -694,7 +721,7 @@ effect = "storage"
 sink_shape = "member-call"
 callee_patterns = ["path.join", "path.resolve"]
 arg_index = 0
-variadic = true
+arguments = "variadic"
 import_provenance = "node:path"
 requires_module_source = true
 ignored_source_kinds = ["process-argv"]
@@ -1452,6 +1479,39 @@ import_provenance = "next/navigation"
 enabler = "next"
 evidence_template = "Non-literal target passed to Next.js {callee}(). Candidate for verification: confirm the redirect target is a relative path or allowlisted host, not attacker-controlled."
 
+# ── React Router: redirect() / redirectDocument() / replace() (CWE-601) ─────
+# Each helper builds a redirect Response with a Location header and accepts an
+# absolute URL, so a non-literal target in a loader or an action is an
+# open-redirect candidate. The callee must be the binding of an import from
+# react-router (a binding-trace row), so a local `redirect` or `replace` stays
+# out even in a module that imports another react-router export. One row per
+# enabler: the `react-router` runtime package, or `@react-router/dev`, which
+# also enables the React Router plugin. Remix v2 (`@remix-run/*`) is a
+# separate plugin and has no row here.
+[[matcher]]
+id = "react-router-open-redirect"
+cwe = 601
+title = "React Router open redirect sink"
+effect = "network"
+sink_shape = "call"
+callee_patterns = ["redirect", "redirectDocument", "replace"]
+arg_index = 0
+import_provenance = "react-router"
+enabler = "react-router"
+evidence_template = "Non-literal target passed to React Router {callee}(). Candidate for verification: confirm the redirect target is a relative path or allowlisted host, not attacker-controlled."
+
+[[matcher]]
+id = "react-router-open-redirect"
+cwe = 601
+title = "React Router open redirect sink"
+effect = "network"
+sink_shape = "call"
+callee_patterns = ["redirect", "redirectDocument", "replace"]
+arg_index = 0
+import_provenance = "react-router"
+enabler = "@react-router/dev"
+evidence_template = "Non-literal target passed to React Router {callee}(). Candidate for verification: confirm the redirect target is a relative path or allowlisted host, not attacker-controlled."
+
 # ── DOM: document.write / document.writeln (CWE-79) ─────────────────────────
 # A global DOM sink (no framework enabler): document.write of a non-literal value
 # is an XSS candidate. Still non-literal-gated, so `document.write("<p>x</p>")`
@@ -1945,6 +2005,7 @@ callee_patterns = [
   "*.log.debug",
 ]
 arg_index = 0
+arguments = "any-non-literal"
 requires_source = true
 secret_sources = true
 evidence_template = "Source-backed value passed to {callee}(). Candidate for verification: confirm no secret or PII reaches logs, observability pipelines, or telemetry."

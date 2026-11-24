@@ -12,23 +12,10 @@
 //! order, so `FALLOW_CHANGED_SINCE` does not replace its base either.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::typed_route_env_coverage::McpServer;
 
-fn git(root: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+use fallow_api::git_fixture::fixture_git as git;
 
 fn commit(root: &Path, message: &str) {
     git(root, &["add", "."]);

@@ -1,7 +1,6 @@
 use super::*;
 use crate::coverage::COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION;
 use std::path::PathBuf;
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -183,6 +182,12 @@ fn classify_upload_error_maps_400_payload_too_large_to_dedicated_exit() {
 }
 
 #[test]
+fn classify_upload_error_maps_413_to_payload_too_large() {
+    let err = classify_upload_error(413, None, "stub".to_owned()).expect_err("413 must error");
+    assert!(matches!(err, UploadError::PayloadTooLarge(_)));
+}
+
+#[test]
 fn classify_upload_error_falls_back_to_validation_on_other_400_codes() {
     let err = classify_upload_error(400, Some("bad_request"), "stub".to_owned())
         .expect_err("400 must error");
@@ -199,6 +204,27 @@ fn classify_upload_error_maps_auth_codes_to_auth_rejected() {
             .expect_err("auth status must error");
         assert!(
             matches!(err, UploadError::AuthRejected(_)),
+            "status={status}"
+        );
+    }
+}
+
+#[test]
+fn classify_upload_error_keeps_permanent_client_errors_out_of_server_error() {
+    for status in [404, 409, 410, 422] {
+        let err = classify_upload_error(status, None, "stub".to_owned())
+            .expect_err("client error must error");
+        assert!(matches!(err, UploadError::Validation(_)), "status={status}");
+    }
+}
+
+#[test]
+fn classify_upload_error_maps_timeout_and_rate_limit_to_server_error() {
+    for status in [408, 429] {
+        let err = classify_upload_error(status, None, "stub".to_owned())
+            .expect_err("transient status must error");
+        assert!(
+            matches!(err, UploadError::ServerError(_)),
             "status={status}"
         );
     }
@@ -260,14 +286,7 @@ fn format_upload_error_message_preserves_malformed_body() {
     assert!(message.contains("malformed error envelope"));
 }
 
-fn run_git(root: &Path, args: &[&str]) {
-    let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-        .args(args)
-        .current_dir(root)
-        .status()
-        .expect("run git");
-    assert!(status.success(), "git {args:?} failed");
-}
+use fallow_engine::git_fixture::fixture_git as run_git;
 
 fn sample_entry() -> InventoryEntry {
     InventoryEntry {

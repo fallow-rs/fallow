@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   PROJECTS,
   failedRun,
+  isPreparedAt,
   missedTargets,
   parseArgs,
   parseTime,
   summarize,
   verdictDifferences,
 } from "./mutation-bench.mjs";
+import { makeTempDir } from "./lib/temp-dir.mjs";
 
 test("parseTime reads the POSIX output of time -p", () => {
   assert.deepEqual(parseTime("real 12.50\nuser 20.25\nsys 3.75\n"), {
@@ -105,4 +110,51 @@ test("failedRun fails a verdict change, and a missed target only under --check",
   assert.equal(failedRun(slow, false), false);
   assert.equal(failedRun(slow, true), true);
   assert.equal(failedRun(changed, false), true);
+});
+
+const gitIn = (dir, ...args) =>
+  execFileSync("git", ["-C", dir, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  }).trim();
+
+const commitIn = (dir, message) => {
+  writeFileSync(join(dir, "file.txt"), message);
+  gitIn(dir, "add", ".");
+  gitIn(dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", message);
+  return gitIn(dir, "rev-parse", "HEAD");
+};
+
+test("isPreparedAt accepts a prepared checkout at the pinned commit", () => {
+  const dir = makeTempDir("fallow-mutation-bench-");
+  gitIn(dir, "init", "-q");
+  const pinned = commitIn(dir, "pinned");
+  mkdirSync(join(dir, "node_modules"));
+
+  assert.equal(isPreparedAt(dir, pinned.slice(0, 7)), true);
+});
+
+test("isPreparedAt rejects a prepared checkout at another commit", () => {
+  const dir = makeTempDir("fallow-mutation-bench-");
+  gitIn(dir, "init", "-q");
+  const pinned = commitIn(dir, "pinned");
+  commitIn(dir, "later");
+  mkdirSync(join(dir, "node_modules"));
+
+  assert.equal(isPreparedAt(dir, pinned.slice(0, 7)), false);
+});
+
+test("isPreparedAt rejects a checkout without node_modules", () => {
+  const dir = makeTempDir("fallow-mutation-bench-");
+  gitIn(dir, "init", "-q");
+  const pinned = commitIn(dir, "pinned");
+
+  assert.equal(isPreparedAt(dir, pinned), false);
+});
+
+test("isPreparedAt rejects a folder that is not a git checkout", () => {
+  const dir = makeTempDir("fallow-mutation-bench-");
+  mkdirSync(join(dir, "node_modules"));
+
+  assert.equal(isPreparedAt(dir, "82632b6"), false);
 });

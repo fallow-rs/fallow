@@ -132,6 +132,21 @@ const FAST_COMMANDS = [
     command: "npm",
     args: ["run", "check:miri-fs-tests"],
   },
+  {
+    // A direct read of HOME, PATH or the XDG folders in production code
+    // makes a unit test depend on the machine. HostPaths is the one reader.
+    label: "Host path reads",
+    command: "npm",
+    args: ["run", "check:host-reads"],
+  },
+  {
+    // A direct read of the tsconfig `compilerOptions` key sees one file and
+    // misses the settings of its `extends` chain. MergedTsconfig is the one
+    // reader.
+    label: "Tsconfig option reads",
+    command: "npm",
+    args: ["run", "check:tsconfig-reads"],
+  },
 ];
 
 const FULL_ONLY_COMMANDS = [

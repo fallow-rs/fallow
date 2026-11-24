@@ -21,8 +21,8 @@ use crate::source_map::{ExtractionResult, ScriptSection};
 use crate::suppress_literals::program_literal_spans;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{
-    AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ImportInfo,
-    ImportedName, MemberAccess, ModuleInfo, SemanticFact,
+    AngularTemplateMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleInfo,
+    SemanticFact,
 };
 use fallow_types::discover::FileId;
 
@@ -134,24 +134,19 @@ pub fn page_script_sections(source: &str) -> Vec<ScriptSection> {
         .collect()
 }
 
-/// The imports of the inline scripts of a page, with spans in the page, the
-/// uses of the imported bindings (`m.default` in
-/// `import("./a.js").then((m) => m.default)`), and the spans of the string
-/// and template literals when the caller asks for them.
+/// The parsed inline scripts of a page, with spans in the page, and the spans
+/// of the string and template literals when the caller asks for them.
 #[derive(Default)]
 struct InlineScriptFacts {
-    imports: Vec<ImportInfo>,
-    dynamic_imports: Vec<DynamicImportInfo>,
-    dynamic_import_patterns: Vec<DynamicImportPattern>,
-    member_accesses: Vec<MemberAccess>,
-    whole_object_uses: Vec<String>,
-    semantic_facts: Vec<SemanticFact>,
+    extractors: Vec<ModuleInfoExtractor>,
     literal_spans: Vec<(u32, u32)>,
 }
 
 /// Parse each inline script body of the page. A module script can import
 /// modules, and a classic or module script can call `import()`. The browser
-/// loads these modules, so they are part of the graph of the page.
+/// loads these modules, so they are part of the graph of the page. Each
+/// extractor later merges into the page through `merge_into`, the same merge
+/// that SFC scripts use, so the page gets every fact of its scripts.
 ///
 /// With `collect_literal_spans`, the same parse also gives the spans of the
 /// string and template literals, so a suppression marker inside a literal
@@ -164,7 +159,7 @@ fn collect_inline_script_facts(source: &str, collect_literal_spans: bool) -> Inl
         // the HTML text can hide the brackets of a script body. Each body
         // therefore gets its own bounded parse. A too-deep body adds no facts
         // and no literal spans, so its markers keep their effect.
-        let Some((info, literal_spans)) = crate::parse_bounded(body_text, || {
+        let Some((extractor, literal_spans)) = crate::parse_bounded(body_text, || {
             let allocator = Allocator::default();
             let parsed = Parser::new(&allocator, body_text, section.source_type).parse();
             let literal_spans = if collect_literal_spans {
@@ -175,47 +170,24 @@ fn collect_inline_script_facts(source: &str, collect_literal_spans: bool) -> Inl
             let mut extractor = ModuleInfoExtractor::new();
             extractor.visit_program(&parsed.program);
             extractor.remap_spans_with(|span| section.extraction.remap_span(span));
-            let info = extractor.into_module_info(
-                FileId(0),
-                0,
-                crate::suppress::ParsedSuppressions::default(),
-            );
-            (info, literal_spans)
+            (extractor, literal_spans)
         }) else {
             continue;
         };
         found.literal_spans.extend(literal_spans);
+        let mut extractor = extractor;
         // A classic script with an `import` declaration is a syntax error in
         // the browser, so only a module script gives static imports.
         // A server template can put a placeholder such as `{{ STATIC_URL }}`
         // in a specifier. The `src` and `href` values skip these, so the
         // script specifiers skip them too.
-        if section.source_type.is_module() {
-            found.imports.extend(
-                info.imports
-                    .into_iter()
-                    .filter(|import| !is_template_placeholder(&import.source)),
-            );
-        }
-        found.dynamic_imports.extend(
-            info.dynamic_imports
-                .into_iter()
-                .filter(|import| !is_template_placeholder(&import.source)),
-        );
-        found.dynamic_import_patterns.extend(
-            info.dynamic_import_patterns
-                .into_iter()
-                .filter(|pattern| !is_template_placeholder(&pattern.prefix)),
-        );
-        found
-            .member_accesses
-            .extend(info.member_accesses.iter().cloned());
-        found
-            .whole_object_uses
-            .extend(info.whole_object_uses.iter().cloned());
-        found
-            .semantic_facts
-            .extend(info.semantic_facts.iter().cloned());
+        extractor.retain_import_specifiers(section.source_type.is_module(), |specifier| {
+            !is_template_placeholder(specifier)
+        });
+        // A page has no exports, and a top-level declaration of a classic
+        // script is a global of the page, not an export.
+        extractor.clear_script_only_facts();
+        found.extractors.push(extractor);
     }
     found
 }
@@ -440,8 +412,7 @@ fn collect_html_module_parts(
 
     imports.sort_unstable_by(|a, b| a.source.cmp(&b.source));
     imports.dedup_by(|a, b| a.source == b.source);
-    let mut inline_scripts = collect_inline_script_facts(source, collect_literal_spans);
-    imports.append(&mut inline_scripts.imports);
+    let inline_scripts = collect_inline_script_facts(source, collect_literal_spans);
 
     let angular::AngularTemplateRefs {
         identifiers,
@@ -449,16 +420,14 @@ fn collect_html_module_parts(
         security_sinks,
     } = angular::collect_angular_template_refs(source);
     let identifiers: Vec<String> = identifiers.into_iter().collect();
-    let mut semantic_facts: Vec<SemanticFact> = identifiers
+    let semantic_facts: Vec<SemanticFact> = identifiers
         .iter()
         .cloned()
         .map(|member| {
             SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact { member })
         })
         .collect();
-    semantic_facts.append(&mut inline_scripts.semantic_facts);
-    let mut member_accesses = template_member_accesses;
-    member_accesses.append(&mut inline_scripts.member_accesses);
+    let member_accesses = template_member_accesses;
 
     // Angular external template (`templateUrl`): harvest the custom element
     // selector tags rendered here so the Angular `unrendered-component` detector
@@ -525,33 +494,22 @@ fn html_module_info(
         complexity,
     } = parts;
 
-    let contracts = crate::sfc_template::component_contracts::collect(
-        source,
-        &imports,
-        fallow_types::extract::ComponentFramework::Angular,
-        0,
-        &[],
-        &[],
-    );
     let function_contracts = has_inline_script(source).then(|| {
         Box::new(fallow_types::extract::FunctionContractFacts {
             template_callers: true,
             ..Default::default()
         })
     });
-    ModuleInfo {
-        component_contracts: Some(Box::new(contracts)),
+    let mut info = ModuleInfo {
         function_contracts,
         imports,
-        dynamic_imports: inline_scripts.dynamic_imports,
-        dynamic_import_patterns: inline_scripts.dynamic_import_patterns,
-        whole_object_uses: inline_scripts.whole_object_uses.into(),
         member_accesses: member_accesses.into(),
         semantic_facts: semantic_facts.into(),
         content_hash,
         suppressions: parsed_suppressions.suppressions,
         unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
         range_marker_problems: parsed_suppressions.range_problems,
+        inline_threshold_overrides: parsed_suppressions.inline_thresholds,
         line_offsets: fallow_types::extract::compute_line_offsets(source),
         complexity,
         security_sinks,
@@ -563,7 +521,20 @@ fn html_module_info(
         angular_used_selectors,
         has_dynamic_component_render,
         ..ModuleInfo::empty(file_id)
+    };
+    for extractor in inline_scripts.extractors {
+        extractor.merge_into(&mut info);
     }
+    let contracts = crate::sfc_template::component_contracts::collect(
+        source,
+        &info.imports,
+        fallow_types::extract::ComponentFramework::Angular,
+        0,
+        &[],
+        &[],
+    );
+    info.component_contracts = Some(Box::new(contracts));
+    info
 }
 
 #[cfg(test)]

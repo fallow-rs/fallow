@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
+use crate::json_paths::uri_to_path;
 use crate::markdown_prose::markdown_table_prose;
 use crate::review_envelopes::{default_marker_regex, default_marker_regex_flags};
 use crate::{
@@ -105,7 +106,7 @@ pub struct PrCommentRenderInput<'a> {
     pub command: &'a str,
     /// CI provider whose comment conventions apply.
     pub provider: CiProvider,
-    /// Findings to summarize, pre-sorted by severity and location.
+    /// Findings to summarize in location order.
     pub issues: &'a [CiIssue],
     /// Identity token embedded so reruns update the same sticky comment.
     pub marker_id: String,
@@ -198,8 +199,7 @@ pub const MARKER_SUFFIX_V3: &str = " -->";
 pub const MAX_COMMENT_BODY_BYTES: usize = 65_536;
 const TRUNCATION_SUFFIX: &str = "\n\n<!-- fallow-truncated -->\n> Body truncated by fallow.";
 
-/// Extract normalized CI issues from a raw CodeClimate JSON array, sorted by
-/// severity then location.
+/// Extract normalized CI issues from a raw CodeClimate JSON array in location order.
 #[must_use]
 pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
     let mut issues = value
@@ -212,8 +212,7 @@ pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
     issues
 }
 
-/// Normalize typed CodeClimate issues into CI issues, sorted by severity then
-/// location.
+/// Normalize typed CodeClimate issues into CI issues in location order.
 #[must_use]
 pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssue> {
     let mut issues = issues
@@ -225,7 +224,7 @@ pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssu
 }
 
 fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
-    let path = value.pointer("/location/path")?.as_str()?.to_string();
+    let path = uri_to_path(value.pointer("/location/path")?.as_str()?);
     let line = value
         .pointer("/location/lines/begin")
         .and_then(Value::as_u64)
@@ -244,7 +243,7 @@ fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
                 .filter(|end| *end >= line)
                 .unwrap_or(line);
             Some(CiLocation {
-                path: location.get("path")?.as_str()?.to_owned(),
+                path: uri_to_path(location.get("path")?.as_str()?),
                 line,
                 end_line,
             })
@@ -286,7 +285,7 @@ fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
         .other_locations
         .iter()
         .map(|location| CiLocation {
-            path: location.path.clone(),
+            path: uri_to_path(&location.path),
             line: u64::from(location.lines.begin),
             end_line: u64::from(
                 location
@@ -302,7 +301,7 @@ fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
         rule_id: issue.check_name.clone(),
         description: issue.description.clone(),
         severity: codeclimate_severity_label(issue.severity).to_owned(),
-        path: issue.location.path.clone(),
+        path: uri_to_path(&issue.location.path),
         line: u64::from(issue.location.lines.begin),
         end_line: issue.location.lines.end.map(u64::from),
         other_locations,
@@ -400,9 +399,11 @@ pub fn render_pr_comment_with_verdict(
                 open: input.layout == crate::PrCommentLayout::Details,
                 docs_url_for_rule: input.docs_url_for_rule,
             };
-            for (category, group_issues) in &groups {
+            for (category, mut group_issues) in groups {
+                group_issues
+                    .sort_by_key(|issue| review_label_from_codeclimate(&issue.severity) != "error");
                 let label = summary_label(category, group_issues.len(), input.max_comments);
-                render_findings_table(&mut out, group_issues, &table, &label);
+                render_findings_table(&mut out, &group_issues, &table, &label);
             }
         }
     }
@@ -1292,6 +1293,45 @@ mod tests {
     }
 
     #[test]
+    fn ci_issues_carry_the_filesystem_path_of_an_encoded_codeclimate_path() {
+        let typed = vec![CodeClimateIssue {
+            kind: CodeClimateIssueKind::Issue,
+            check_name: "fallow/high-complexity".to_owned(),
+            description: "Function is complex".to_owned(),
+            categories: vec!["Complexity".to_owned()],
+            severity: CodeClimateSeverity::Major,
+            fingerprint: "fp".to_owned(),
+            location: CodeClimateLocation {
+                path: "app/%5Bid%5D/page.tsx".to_owned(),
+                lines: CodeClimateLines {
+                    begin: 7,
+                    end: None,
+                },
+            },
+            other_locations: vec![CodeClimateLocation {
+                path: "app/%5Blang%5D/peer.tsx".to_owned(),
+                lines: CodeClimateLines {
+                    begin: 2,
+                    end: None,
+                },
+            }],
+            owner: None,
+            group: None,
+            legacy_fingerprint: None,
+            audit: None,
+        }];
+        let value = serde_json::to_value(&typed).expect("typed fixture serializes");
+
+        for issues in [
+            issues_from_codeclimate_issues(&typed),
+            issues_from_codeclimate(&value),
+        ] {
+            assert_eq!(issues[0].path, "app/[id]/page.tsx");
+            assert_eq!(issues[0].other_locations[0].path, "app/[lang]/peer.tsx");
+        }
+    }
+
+    #[test]
     fn typed_codeclimate_issues_extract_like_json_codeclimate() {
         let severities = [
             (CodeClimateSeverity::Info, "info"),
@@ -1692,10 +1732,12 @@ mod tests {
     }
 
     #[test]
-    fn a_capped_table_says_how_many_it_shows() {
-        let issues: Vec<CiIssue> = (0..3)
-            .map(|index| pr_comment_issue("fallow/a", &format!("x{index}"), "minor", "src/a.ts"))
-            .collect();
+    fn a_capped_table_shows_errors_before_warnings_and_reports_the_total() {
+        let issues = [
+            pr_comment_issue("fallow/a", "first warning", "minor", "src/a.ts"),
+            pr_comment_issue("fallow/a", "second warning", "minor", "src/b.ts"),
+            pr_comment_issue("fallow/a", "last error", "major", "src/c.ts"),
+        ];
         let body = render_pr_comment(&PrCommentRenderInput {
             command: "check",
             provider: CiProvider::Github,
@@ -1708,6 +1750,9 @@ mod tests {
             status_note: None,
             layout: crate::PrCommentLayout::Default,
         });
+        assert!(body.contains("last error"), "{body}");
+        assert!(body.contains("first warning"), "{body}");
+        assert!(!body.contains("second warning"), "{body}");
         assert!(
             body.contains(
                 "The table shows 2 of 3 findings. Run fallow locally to see each finding."
@@ -1835,6 +1880,7 @@ mod tests {
             "fallow/unused-store-member",
             "fallow/unused-namespace-member",
             "fallow/unused-protected-class-member",
+            "fallow/namespace-escape",
             "fallow/unresolved-import",
             "fallow/unlisted-dependency",
             "fallow/unlisted-binary",

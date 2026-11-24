@@ -87,9 +87,16 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="fallow-mr-comment-envelope.json" \
     --body fallow-mr-comment.md
   )
   [ -f fallow-mr-comment-envelope.json ] && POST_COMMENT_ARGS+=(--envelope fallow-mr-comment-envelope.json)
+  # JSON format puts a failure on stdout as an error document with a code.
+  POST_COMMENT_ARGS+=(--format json)
   POST_COMMENT_ARGS+=(--marker-id "$COMMENT_MARKER_ID")
   if ! fallow "${POST_COMMENT_ARGS[@]}" > fallow-mr-comment-plan.json; then
-    echo "WARNING: Failed to post MR comment"
+    if is_dedup_lookup_failure fallow-mr-comment-plan.json; then
+      printf 'true\n' > fallow-dedup-lookup-failed.txt
+      echo "WARNING: Skipped the MR comment: fallow could not read the existing notes, so a new note could be a duplicate"
+    else
+      echo "WARNING: Failed to post MR comment: $(post_error_message fallow-mr-comment-plan.json)"
+    fi
     exit 0
   fi
   ACTION=$(jq -r '.action' fallow-mr-comment-plan.json)

@@ -3,7 +3,7 @@
 //! Generated from that directory. Do not edit by hand. To write the file again, run
 //! `FALLOW_UPDATE_RULE_EXAMPLES=1 cargo test -p fallow-api --lib explain_examples`.
 
-use super::{ExampleFile, RuleExample};
+use super::{ExampleAnchor, ExampleFile, RuleExample};
 
 macro_rules! file {
     ($rule:literal, $part:literal, $path:literal, $hidden:literal) => {
@@ -20,6 +20,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "absent-component-prop",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("absent-component-prop", "files", ".fallowrc.json", false),
@@ -31,6 +32,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "added-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[
             file!("added-dependency", "base", ".fallowrc.json", false),
             file!("added-dependency", "base", "package.json", false),
@@ -45,6 +47,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "added-suppression",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[
             file!("added-suppression", "base", "package.json", true),
             file!("added-suppression", "base", "src/cart.ts", false),
@@ -57,6 +60,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "angular-trusted-html",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("angular-trusted-html", "files", "package.json", true),
@@ -66,6 +70,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "boundary-call-violation",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("boundary-call-violation", "files", ".fallowrc.json", false),
@@ -76,6 +81,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "boundary-coverage",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("boundary-coverage", "files", ".fallowrc.json", false),
@@ -87,6 +93,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "boundary-violation",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("boundary-violation", "files", ".fallowrc.json", false),
@@ -98,6 +105,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "circular-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("circular-dependency", "files", "package.json", true),
@@ -108,6 +116,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "cleartext-transport",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("cleartext-transport", "files", "package.json", true),
@@ -117,6 +126,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "client-server-leak",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("client-server-leak", "files", "package.json", true),
@@ -128,6 +138,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "code-duplication",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("code-duplication", "files", "package.json", true),
@@ -139,6 +150,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "code-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("code-injection", "files", "package.json", true),
@@ -148,6 +160,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "command-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("command-injection", "files", "package.json", true),
@@ -157,6 +170,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "constant-parameter",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("constant-parameter", "files", ".fallowrc.json", false),
@@ -166,8 +180,20 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "css-broken-reference",
+        args: &["--css"],
+        anchor: ExampleAnchor::Line,
+        base: &[],
+        files: &[
+            file!("css-broken-reference", "files", "package.json", true),
+            file!("css-broken-reference", "files", "src/app.css", false),
+            file!("css-broken-reference", "files", "src/index.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "css-dead-surface",
         args: &["--css"],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("css-dead-surface", "files", "package.json", true),
@@ -178,6 +204,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "css-duplicate-block",
         args: &["--css"],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("css-duplicate-block", "files", "package.json", true),
@@ -189,6 +216,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "css-selector-complexity",
         args: &["--css"],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("css-selector-complexity", "files", "package.json", true),
@@ -199,6 +227,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "css-token-drift",
         args: &["--css"],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("css-token-drift", "files", "package.json", true),
@@ -210,6 +239,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "dangerous-html",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("dangerous-html", "files", "package.json", true),
@@ -219,6 +249,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "deprecated-cipher",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("deprecated-cipher", "files", "package.json", true),
@@ -228,6 +259,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "deprecated-export-in-use",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("deprecated-export-in-use", "files", ".fallowrc.json", false),
@@ -241,6 +273,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "dev-dependency-in-production",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("dev-dependency-in-production", "files", "package.json", false),
@@ -250,6 +283,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "diverged-clone-sibling",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[
             file!("diverged-clone-sibling", "base", ".fallowrc.json", false),
             file!("diverged-clone-sibling", "base", "package.json", true),
@@ -268,6 +302,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "dom-document-write",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("dom-document-write", "files", "package.json", true),
@@ -277,6 +312,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "duplicate-export",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("duplicate-export", "files", "package.json", true),
@@ -288,6 +324,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "duplicate-export-alias",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("duplicate-export-alias", "files", "package.json", true),
@@ -298,6 +335,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "duplicate-prop-shape",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("duplicate-prop-shape", "files", ".fallowrc.json", false),
@@ -312,6 +350,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "dynamic-module-load",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("dynamic-module-load", "files", "package.json", true),
@@ -321,6 +360,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "dynamic-regex",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("dynamic-regex", "files", "package.json", true),
@@ -330,6 +370,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "dynamic-segment-name-conflict",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("dynamic-segment-name-conflict", "files", "app/blog/[id]/page.tsx", false),
@@ -341,6 +382,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "electron-unsafe-webpreferences",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("electron-unsafe-webpreferences", "files", "package.json", true),
@@ -350,6 +392,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "empty-catalog-group",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("empty-catalog-group", "files", "package.json", true),
@@ -361,6 +404,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "feature-flag",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("feature-flag", "files", "package.json", true),
@@ -370,6 +414,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "flag-retirement-candidate",
         args: &["--retirement"],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("flag-retirement-candidate", "files", "package.json", true),
@@ -379,6 +424,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "hardcoded-secret",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("hardcoded-secret", "files", ".fallowrc.json", false),
@@ -389,6 +435,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "header-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("header-injection", "files", "package.json", true),
@@ -398,6 +445,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "high-cognitive-complexity",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("high-cognitive-complexity", "files", ".fallowrc.json", false),
@@ -409,6 +457,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "high-complexity",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("high-complexity", "files", ".fallowrc.json", false),
@@ -420,6 +469,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "high-crap-score",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("high-crap-score", "files", "package.json", true),
@@ -429,6 +479,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "high-cyclomatic-complexity",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("high-cyclomatic-complexity", "files", ".fallowrc.json", false),
@@ -440,6 +491,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "insecure-cookie",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("insecure-cookie", "files", "package.json", true),
@@ -449,6 +501,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "insecure-randomness",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("insecure-randomness", "files", "package.json", true),
@@ -458,6 +511,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "insecure-temp-file",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("insecure-temp-file", "files", "package.json", true),
@@ -467,6 +521,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "invalid-client-export",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("invalid-client-export", "files", "app/page.tsx", false),
@@ -476,6 +531,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "jquery-html",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("jquery-html", "files", "package.json", true),
@@ -485,6 +541,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "jwt-alg-none",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("jwt-alg-none", "files", "package.json", true),
@@ -494,6 +551,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "jwt-verify-missing-algorithms",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("jwt-verify-missing-algorithms", "files", "package.json", true),
@@ -503,6 +561,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "llm-call-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("llm-call-injection", "files", "package.json", true),
@@ -512,6 +571,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "long-file",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("long-file", "files", ".fallowrc.json", false),
@@ -522,6 +582,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "mass-assignment",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("mass-assignment", "files", "package.json", true),
@@ -531,6 +592,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "misconfigured-dependency-override",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("misconfigured-dependency-override", "files", "package.json", false),
@@ -540,6 +602,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "misplaced-directive",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("misplaced-directive", "files", "app/cart-button.tsx", false),
@@ -550,6 +613,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "missing-suppression-reason",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("missing-suppression-reason", "files", ".fallowrc.json", false),
@@ -561,6 +625,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "mixed-client-server-barrel",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("mixed-client-server-barrel", "files", "app/layout.tsx", true),
@@ -574,6 +639,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "mysql-multiple-statements",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("mysql-multiple-statements", "files", "package.json", true),
@@ -581,8 +647,21 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "namespace-escape",
+        args: &[],
+        anchor: ExampleAnchor::Line,
+        base: &[],
+        files: &[
+            file!("namespace-escape", "files", ".fallowrc.json", false),
+            file!("namespace-escape", "files", "package.json", true),
+            file!("namespace-escape", "files", "src/formats.ts", false),
+            file!("namespace-escape", "files", "src/index.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "nextjs-open-redirect",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("nextjs-open-redirect", "files", "app/login/route.ts", false),
@@ -592,6 +671,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "nosql-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("nosql-injection", "files", "package.json", true),
@@ -601,6 +681,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "open-redirect",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("open-redirect", "files", "package.json", true),
@@ -610,6 +691,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "package-cycle",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("package-cycle", "files", "package.json", true),
@@ -623,6 +705,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "path-traversal",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("path-traversal", "files", "package.json", true),
@@ -632,6 +715,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "permissive-cors",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("permissive-cors", "files", "package.json", true),
@@ -641,6 +725,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "policy-violation",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("policy-violation", "files", ".fallowrc.json", false),
@@ -652,6 +737,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "postmessage-wildcard-origin",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("postmessage-wildcard-origin", "files", "package.json", true),
@@ -661,6 +747,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "private-type-leak",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("private-type-leak", "files", ".fallowrc.json", false),
@@ -672,6 +759,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "prop-drilling",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("prop-drilling", "files", ".fallowrc.json", false),
@@ -686,6 +774,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "prototype-pollution",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("prototype-pollution", "files", "package.json", true),
@@ -695,6 +784,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "re-export-cycle",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("re-export-cycle", "files", "package.json", true),
@@ -705,8 +795,19 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "react-router-open-redirect",
+        args: &[],
+        anchor: ExampleAnchor::Line,
+        base: &[],
+        files: &[
+            file!("react-router-open-redirect", "files", "app/routes/login.tsx", false),
+            file!("react-router-open-redirect", "files", "package.json", true),
+        ],
+    },
+    RuleExample {
         rule: "redos-regex",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("redos-regex", "files", "package.json", true),
@@ -716,6 +817,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "refactoring-target",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("refactoring-target", "files", "package.json", true),
@@ -726,6 +828,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "resource-amplification",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("resource-amplification", "files", "package.json", true),
@@ -735,6 +838,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "route-collision",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("route-collision", "files", "app/(marketing)/about/page.tsx", false),
@@ -746,6 +850,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "route-send-file",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("route-send-file", "files", "package.json", true),
@@ -755,6 +860,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "secret-pii-log",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("secret-pii-log", "files", "package.json", true),
@@ -764,6 +870,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "secret-to-network",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("secret-to-network", "files", ".fallowrc.json", false),
@@ -774,6 +881,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "sql-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("sql-injection", "files", "package.json", true),
@@ -783,6 +891,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "ssrf",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("ssrf", "files", "package.json", true),
@@ -792,6 +901,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "ssti",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("ssti", "files", "package.json", true),
@@ -801,6 +911,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "stale-suppression",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("stale-suppression", "files", "package.json", true),
@@ -809,8 +920,19 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "template-escape-bypass",
+        args: &[],
+        anchor: ExampleAnchor::Line,
+        base: &[],
+        files: &[
+            file!("template-escape-bypass", "files", "package.json", true),
+            file!("template-escape-bypass", "files", "src/profile.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "test-only-branch",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[
             file!("test-only-branch", "base", "package.json", true),
             file!("test-only-branch", "base", "src/pricing.ts", false),
@@ -823,6 +945,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "test-only-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("test-only-dependency", "files", "package.json", false),
@@ -833,6 +956,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "thin-wrapper",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("thin-wrapper", "files", ".fallowrc.json", false),
@@ -845,6 +969,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "tls-validation-disabled",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("tls-validation-disabled", "files", "package.json", true),
@@ -854,6 +979,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "type-only-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("type-only-dependency", "files", ".fallowrc.json", false),
@@ -864,6 +990,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unlisted-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unlisted-dependency", "files", "package.json", false),
@@ -875,6 +1002,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unproduced-catch-tag",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unproduced-catch-tag", "files", "package.json", true),
@@ -885,6 +1013,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unprovided-inject",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unprovided-inject", "files", "package.json", true),
@@ -896,6 +1025,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unrendered-component",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("unrendered-component", "files", "package.json", true),
@@ -909,6 +1039,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unresolved-catalog-reference",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unresolved-catalog-reference", "files", "package.json", true),
@@ -920,6 +1051,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unresolved-import",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unresolved-import", "files", "package.json", true),
@@ -930,6 +1062,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unsafe-buffer-alloc",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unsafe-buffer-alloc", "files", "package.json", true),
@@ -939,6 +1072,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unsafe-deserialization",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unsafe-deserialization", "files", "package.json", true),
@@ -948,6 +1082,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "untested-export",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("untested-export", "files", ".fallowrc.json", false),
@@ -960,6 +1095,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "untested-file",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("untested-file", "files", ".fallowrc.json", false),
@@ -972,6 +1108,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-catalog-entry",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-catalog-entry", "files", "package.json", true),
@@ -983,6 +1120,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-class-member",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-class-member", "files", "package.json", true),
@@ -993,6 +1131,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-component-emit",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-component-emit", "files", "package.json", true),
@@ -1004,6 +1143,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-component-input",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-component-input", "files", "package.json", true),
@@ -1015,6 +1155,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-component-output",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-component-output", "files", "package.json", true),
@@ -1026,6 +1167,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-component-prop",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-component-prop", "files", "package.json", true),
@@ -1037,6 +1179,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-dependency", "files", "package.json", false),
@@ -1046,6 +1189,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-dependency-override",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-dependency-override", "files", "package.json", false),
@@ -1055,6 +1199,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-dev-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-dev-dependency", "files", "package.json", false),
@@ -1064,6 +1209,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-effect-layer",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-effect-layer", "files", "package.json", true),
@@ -1074,6 +1220,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-enum-member",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-enum-member", "files", "package.json", true),
@@ -1084,6 +1231,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-export",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-export", "files", "package.json", true),
@@ -1094,6 +1242,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-file",
         args: &[],
+        anchor: ExampleAnchor::FileLevel,
         base: &[],
         files: &[
             file!("unused-file", "files", "package.json", true),
@@ -1104,6 +1253,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-load-data-key",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-load-data-key", "files", "package.json", true),
@@ -1115,6 +1265,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-namespace-member",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-namespace-member", "files", "package.json", true),
@@ -1125,6 +1276,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-optional-dependency",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-optional-dependency", "files", "package.json", false),
@@ -1134,6 +1286,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-protected-class-member",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-protected-class-member", "files", ".fallowrc.json", false),
@@ -1145,6 +1298,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-server-action",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-server-action", "files", "app/actions.ts", false),
@@ -1156,6 +1310,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-store-member",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-store-member", "files", "package.json", false),
@@ -1166,6 +1321,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-svelte-event",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-svelte-event", "files", "package.json", true),
@@ -1177,6 +1333,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-tagged-error",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-tagged-error", "files", "package.json", true),
@@ -1187,6 +1344,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "unused-type",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("unused-type", "files", "package.json", true),
@@ -1197,6 +1355,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "weak-crypto",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("weak-crypto", "files", "package.json", true),
@@ -1206,6 +1365,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "weakened-tests",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[
             file!("weakened-tests", "base", "package.json", true),
             file!("weakened-tests", "base", "src/tax.ts", true),
@@ -1220,6 +1380,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "webview-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("webview-injection", "files", "package.json", true),
@@ -1229,6 +1390,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "world-writable-permission",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("world-writable-permission", "files", "package.json", true),
@@ -1238,6 +1400,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "xpath-injection",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("xpath-injection", "files", "package.json", true),
@@ -1247,6 +1410,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "xxe",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("xxe", "files", "package.json", true),
@@ -1256,6 +1420,7 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
     RuleExample {
         rule: "zip-slip",
         args: &[],
+        anchor: ExampleAnchor::Line,
         base: &[],
         files: &[
             file!("zip-slip", "files", "package.json", true),

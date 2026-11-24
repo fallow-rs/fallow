@@ -503,6 +503,11 @@ pub struct ComplexityViolation {
     /// Source of the effective thresholds. Omitted when thresholds are global.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_source: Option<ThresholdSource>,
+    /// 1-based line of the `fallow-override-threshold-next-line` comment that
+    /// set a cyclomatic, cognitive or CRAP ceiling of this finding. Absent
+    /// when only config entries or the global thresholds apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub override_comment_line: Option<u32>,
     /// File-length ceiling in physical lines that the file exceeded. Present
     /// only on a file-level finding (`exceeded: "file_lines"`), where
     /// `line_count` holds the physical line count of the file.
@@ -541,6 +546,7 @@ impl Default for ComplexityViolation {
             contributions: Vec::new(),
             effective_thresholds: None,
             threshold_source: None,
+            override_comment_line: None,
             max_file_lines: None,
         }
     }
@@ -625,7 +631,9 @@ pub struct HealthConfiguredThresholds {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ThresholdSource {
-    /// A `thresholdOverrides` config entry changed at least one ceiling.
+    /// A `thresholdOverrides` config entry or a
+    /// `fallow-override-threshold-next-line` comment changed at least one
+    /// ceiling. `override_comment_line` is present when a comment did.
     Override,
 }
 

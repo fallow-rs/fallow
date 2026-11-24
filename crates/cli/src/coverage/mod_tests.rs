@@ -601,6 +601,7 @@ fn run_setup_json_does_not_write_state_lock_or_recipe() {
         },
         dir.path(),
         crate::json_style::JsonStyle::Compact,
+        &isolated_sidecar_search(dir.path()),
     );
 
     assert_eq!(exit, std::process::ExitCode::SUCCESS);
@@ -630,11 +631,13 @@ fn sidecar_state_requires_matching_file_checksum() {
     let mut state = super::CoverageSetupState::default();
     record_sidecar_state(&mut state, sidecar.clone()).expect("sidecar state should record");
 
-    assert!(sidecar_state_is_current(&state, dir.path()));
+    let search = isolated_sidecar_search(dir.path());
+
+    assert!(sidecar_state_is_current(&state, dir.path(), &search));
 
     std::fs::write(&sidecar, b"second").expect("sidecar should be mutated");
 
-    assert!(!sidecar_state_is_current(&state, dir.path()));
+    assert!(!sidecar_state_is_current(&state, dir.path(), &search));
 }
 
 #[test]
@@ -783,6 +786,7 @@ fn run_setup_resumes_valid_recipe_state_without_rewriting() {
         },
         root,
         crate::json_style::JsonStyle::Compact,
+        &isolated_sidecar_search(root),
     );
 
     let mut restored = std::fs::metadata(&docs_dir)
@@ -828,6 +832,49 @@ fn setup_json_explain_includes_meta_without_bumping_schema_version() {
             .as_object()
             .is_some_and(|enums| enums.contains_key("runtime_targets"))
     );
+}
+
+/// Sidecar discovery inputs with an empty home in `root` and no `PATH`, so
+/// that an add-on on the host does not change the result.
+fn isolated_sidecar_search(root: &Path) -> crate::health::coverage::SidecarSearch {
+    crate::health::coverage::SidecarSearch {
+        host: fallow_process::HostPaths::with_home(root.join("isolated-home")),
+        ..crate::health::coverage::SidecarSearch::default()
+    }
+}
+
+#[test]
+fn sidecar_state_ignores_a_sidecar_in_the_host_home() {
+    let dir = tempdir().expect("tempdir should be created");
+    let sidecar = write_fake_sidecar(dir.path(), b"project");
+    let mut state = super::CoverageSetupState::default();
+    record_sidecar_state(&mut state, sidecar).expect("sidecar state should record");
+    let search = isolated_sidecar_search(dir.path());
+    assert!(sidecar_state_is_current(&state, dir.path(), &search));
+
+    let canonical = search.canonical_sidecar_path();
+    std::fs::create_dir_all(canonical.parent().expect("canonical parent"))
+        .expect("canonical dir should be created");
+    std::fs::write(&canonical, b"installed").expect("canonical sidecar should be written");
+
+    assert!(
+        !sidecar_state_is_current(&state, dir.path(), &search),
+        "a sidecar in the given home wins over the unsigned project wrapper"
+    );
+}
+
+#[test]
+fn sidecar_state_is_stale_when_an_env_override_is_set() {
+    let dir = tempdir().expect("tempdir should be created");
+    let sidecar = write_fake_sidecar(dir.path(), b"project");
+    let mut state = super::CoverageSetupState::default();
+    record_sidecar_state(&mut state, sidecar.clone()).expect("sidecar state should record");
+    let search = crate::health::coverage::SidecarSearch {
+        cov_bin: Some(sidecar.display().to_string()),
+        ..isolated_sidecar_search(dir.path())
+    };
+
+    assert!(!sidecar_state_is_current(&state, dir.path(), &search));
 }
 
 fn write_fake_sidecar(root: &Path, bytes: &[u8]) -> PathBuf {

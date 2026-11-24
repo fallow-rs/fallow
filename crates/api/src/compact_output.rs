@@ -82,8 +82,9 @@ fn compact_re_export_cycle_line(
         fallow_types::results::ReExportCycleKind::MultiNode => "",
     };
     format!(
-        "re-export-cycle:{}:{}{}",
+        "re-export-cycle:{}:{}:{}{}",
         first_file,
+        cycle.cycle.line,
         chain.join(" <-> "),
         kind_tag
     )
@@ -377,6 +378,15 @@ impl<'a> CompactLineBuilder<'a> {
                 &member.member,
                 "unused-protected-class-member",
                 &member.reachability_caveats,
+            ));
+        }
+        for finding in &self.results.namespace_escapes {
+            let escape = &finding.escape;
+            self.lines.push(format!(
+                "namespace-escape:{}:{}:{}",
+                self.rel(&escape.path),
+                escape.line,
+                escape.local_name
             ));
         }
         for import in &self.results.unresolved_imports {
@@ -765,6 +775,9 @@ pub fn build_health_compact_lines(
     push_health_findings_compact(&mut lines, &report.findings, root);
     push_styling_findings_compact(&mut lines, &report.styling_findings, root);
     push_threshold_overrides_compact(&mut lines, &report.threshold_overrides, root);
+    crate::threshold_override_output::push_inline_threshold_compact(&mut lines, report, |path| {
+        compact_path(path, root)
+    });
     push_file_scores_compact(&mut lines, &report.file_scores, root);
     push_coverage_gaps_compact(&mut lines, report, root);
     push_runtime_sections_compact(&mut lines, report, root);
@@ -1428,23 +1441,35 @@ mod tests {
                 });
             assert_eq!(build_compact_lines(&results, root), vec![expected]);
         }
-        for (files, kind, expected) in [
-            (vec![], ReExportCycleKind::MultiNode, "re-export-cycle::"),
+        for (files, kind, line, expected) in [
+            (
+                vec![],
+                ReExportCycleKind::MultiNode,
+                0,
+                "re-export-cycle::0:",
+            ),
             (
                 vec![root.join("src/a.ts")],
                 ReExportCycleKind::SelfLoop,
-                "re-export-cycle:src/a.ts:src/a.ts (self-loop)",
+                1,
+                "re-export-cycle:src/a.ts:1:src/a.ts (self-loop)",
             ),
             (
                 vec![root.join("src/a.ts"), root.join("src/b.ts")],
                 ReExportCycleKind::MultiNode,
-                "re-export-cycle:src/a.ts:src/a.ts <-> src/b.ts",
+                4,
+                "re-export-cycle:src/a.ts:4:src/a.ts <-> src/b.ts",
             ),
         ] {
             let mut results = AnalysisResults::default();
             results.re_export_cycles.push(ReExportCycleFinding {
                 finding_id: None,
-                cycle: ReExportCycle { files, kind },
+                cycle: ReExportCycle {
+                    files,
+                    kind,
+                    line,
+                    col: 0,
+                },
                 actions: vec![],
                 introduced: None,
                 effective_severity: None,
@@ -1792,6 +1817,30 @@ mod tests {
             vec![
                 "css-token-drift:src/app.css:6:tailwind-arbitrary-value:severity=warn,value=--color-brand rgb(240 90 41)"
             ]
+        );
+    }
+
+    #[test]
+    fn namespace_escape_compact_line_has_four_fields() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.namespace_escapes.push(
+            fallow_types::output_dead_code::NamespaceEscapeFinding::with_actions(
+                fallow_types::results::NamespaceEscape {
+                    path: root.join("src/app.ts"),
+                    line: 3,
+                    col: 7,
+                    local_name: "Formats".to_string(),
+                    module: root.join("src/formats.ts"),
+                    hidden_exports: 2,
+                    reason: fallow_types::results::NamespaceEscapeReason::WholeObjectUse,
+                },
+            ),
+        );
+
+        assert_eq!(
+            build_compact_lines(&results, &root),
+            vec!["namespace-escape:src/app.ts:3:Formats".to_owned()]
         );
     }
 }

@@ -167,7 +167,9 @@ pub fn discover_runtime(
 ) -> Result<JsRuntime, String> {
     let cwd = std::env::current_dir()
         .map_err(|error| format!("cannot read the working directory: {error}"))?;
-    let search_path = std::env::var_os("PATH").unwrap_or_default();
+    let search_path = fallow_process::HostPaths::from_env()
+        .search_path
+        .unwrap_or_default();
     discover_runtime_in(explicit, kinds, &cwd, &search_path)
 }
 

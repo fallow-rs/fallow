@@ -232,7 +232,7 @@ fn find_config_in_npm_package(
 ) -> Result<PathBuf, miette::Report> {
     let pkg_json_path = package_dir.join("package.json");
     if pkg_json_path.exists() {
-        let content = std::fs::read_to_string(&pkg_json_path)
+        let content = crate::PackageJson::read_source(&pkg_json_path)
             .map_err(|e| miette::miette!("Failed to read {}: {}", pkg_json_path.display(), e))?;
         let pkg: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| miette::miette!("Failed to parse {}: {}", pkg_json_path.display(), e))?;

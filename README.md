@@ -164,7 +164,7 @@ To keep an intentional export, add a suppression comment:
 export const keepThis = 1;
 ```
 
-`// fallow-ignore-file <issue-type>` suppresses a whole file. JSDoc tags (`@public`, `@internal`) keep intentional library API quiet. `npx fallow suppressions` lists every suppression in the project.
+`// fallow-ignore-file <issue-type>` suppresses a whole file. JSDoc tags (`@public`, `@internal`) keep intentional library API quiet; `keepExportTags` selects which tags do. `npx fallow suppressions` lists every suppression in the project.
 
 The [adoption guide](https://fallow.tools/docs/adoption/) shows the staged path. [Configuration](https://fallow.tools/docs/configuration/overview/) has the full reference.
 
@@ -185,7 +185,7 @@ GitLab CI:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.45.0/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.48.0/ci/gitlab-ci.yml'
 
 fallow:
   extends: .fallow

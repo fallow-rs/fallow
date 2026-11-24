@@ -28,17 +28,18 @@ pub use fallow_types::output_dead_code::{
     BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
     DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
     InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding,
-    UnusedOptionalDependencyFinding, UnusedProtectedClassMemberFinding, UnusedServerActionFinding,
-    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
+    MixedClientServerBarrelFinding, NamespaceEscapeFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
+    UnusedProtectedClassMemberFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 pub use fallow_types::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -185,6 +186,9 @@ pub struct ProjectAnalysisArtifacts {
     pub dead_code: DeadCodeAnalysisArtifacts,
     /// Duplication report for the same file set.
     pub duplication: duplicates::DuplicationReport,
+    /// The clone groups that `duplicates.ignoredClones` hid from
+    /// `duplication`.
+    pub ignored_clone_groups: Vec<duplicates::IgnoredCloneGroup>,
     /// Diff scope the run was limited to, when one was resolved.
     pub changed_files: Option<FxHashSet<PathBuf>>,
     /// Per-file source fingerprints for downstream cache invalidation.
@@ -209,8 +213,12 @@ impl ProjectAnalysisArtifacts {
 /// Typed duplication analysis result.
 #[derive(Debug)]
 pub struct DuplicationAnalysis {
+    /// The clone groups after every filter, with statistics.
     pub report: duplicates::DuplicationReport,
+    /// Files that the built-in duplication ignores skipped, per pattern.
     pub default_ignore_skips: duplicates::DefaultIgnoreSkips,
+    /// The clone groups that `duplicates.ignoredClones` hid from `report`.
+    pub ignored_clone_groups: Vec<duplicates::IgnoredCloneGroup>,
 }
 
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.

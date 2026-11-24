@@ -715,3 +715,133 @@ fn impact_status_human_output_is_a_short_view() {
         on.stdout
     );
 }
+
+/// The config folder bases that the store path can resolve to.
+fn config_bases(home: &Path) -> [PathBuf; 3] {
+    [
+        home.join("Library").join("Application Support"),
+        home.join(".config"),
+        home.join("AppData"),
+    ]
+}
+
+#[test]
+fn impact_changes_exit_2_when_the_store_folder_is_a_file() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    for base in config_bases(home.path()) {
+        std::fs::create_dir_all(base.join("fallow")).expect("config dir");
+        std::fs::write(base.join("fallow").join("impact"), b"").expect("blocker file");
+    }
+    for args in [
+        ["impact", "disable", "--root", root],
+        ["impact", "enable", "--root", root],
+        ["init", "--decline", "--root", root],
+    ] {
+        let output = run_isolated(home.path(), &args);
+        assert_eq!(
+            output.code, 2,
+            "{args:?} must fail when the store cannot be saved: {} {}",
+            output.stdout, output.stderr
+        );
+        for word in ["disabled", "enabled", "hints"] {
+            assert!(
+                !output.stdout.contains(word),
+                "{args:?} must not print success: {}",
+                output.stdout
+            );
+        }
+    }
+}
+
+#[test]
+fn impact_default_exits_2_when_the_config_folder_is_a_file() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    for base in config_bases(home.path()) {
+        std::fs::create_dir_all(&base).expect("config base");
+        std::fs::write(base.join("fallow"), b"").expect("blocker file");
+    }
+    let output = run_isolated(home.path(), &["impact", "default", "on"]);
+    assert_eq!(
+        output.code, 2,
+        "impact default must fail when the setting cannot be saved: {} {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        !output.stdout.contains("default"),
+        "impact default must not print success: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn reset_history_is_not_imported_again() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    let legacy_path = project.path().join(".fallow").join("impact.json");
+    std::fs::create_dir_all(legacy_path.parent().unwrap()).expect("legacy dir");
+    let legacy = r#"{"schema_version":3,"enabled":true,"explicit_decision":true,"records":[{"timestamp":"t0","version":"2.0.0","verdict":"warn","gate":false,"counts":{"total_issues":1,"dead_code":1,"complexity":0,"duplication":0}}],"containment":[]}"#;
+    std::fs::write(&legacy_path, legacy).expect("legacy store");
+    let record_count = || {
+        let output = run_isolated(
+            home.path(),
+            &["impact", "--root", root, "--format", "json", "--quiet"],
+        );
+        assert_eq!(output.code, 0, "impact report failed: {}", output.stderr);
+        let value: serde_json::Value = serde_json::from_str(&output.stdout).expect("json");
+        value["record_count"].as_u64().expect("record_count")
+    };
+
+    assert_eq!(record_count(), 1, "the legacy history is shown");
+    let decline = run_isolated(
+        home.path(),
+        &["init", "--decline", "--root", root, "--quiet"],
+    );
+    assert_eq!(decline.code, 0, "init --decline failed: {}", decline.stderr);
+    let reset = run_isolated(home.path(), &["impact", "reset", "--root", root, "--quiet"]);
+    assert_eq!(reset.code, 0, "impact reset failed: {}", reset.stderr);
+    assert_eq!(record_count(), 0, "a reset stays reset");
+    assert_eq!(read(&legacy_path), legacy, "the legacy file is unchanged");
+}
+
+#[cfg(unix)]
+#[test]
+fn impact_disable_exits_2_when_the_store_folder_is_read_only() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    let enable = run_isolated(
+        home.path(),
+        &["impact", "enable", "--root", root, "--quiet"],
+    );
+    assert_eq!(enable.code, 0, "seed enable failed: {}", enable.stderr);
+    let store = find_store(home.path());
+    let dir = store.parent().expect("store folder").to_path_buf();
+    let mode = |bits| std::fs::Permissions::from_mode(bits);
+    std::fs::set_permissions(&dir, mode(0o555)).expect("read-only folder");
+    let probe = dir.join("probe");
+    if std::fs::write(&probe, b"").is_ok() {
+        // The root user can write a read-only folder, so the input does not apply.
+        let _ = std::fs::remove_file(&probe);
+        std::fs::set_permissions(&dir, mode(0o755)).expect("restore folder");
+        return;
+    }
+    let before = read(&store);
+    let output = run_isolated(home.path(), &["impact", "disable", "--root", root]);
+    std::fs::set_permissions(&dir, mode(0o755)).expect("restore folder");
+    assert_eq!(
+        output.code, 2,
+        "disable must fail when the store cannot be written: {} {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        output.stderr.contains("could not write"),
+        "the error names the failed write: {}",
+        output.stderr
+    );
+    assert!(!output.stdout.contains("disabled"), "{}", output.stdout);
+    assert_eq!(read(&store), before, "the store is unchanged");
+}

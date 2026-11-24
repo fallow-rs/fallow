@@ -35,6 +35,12 @@ mod declaration_siblings;
 use declaration_siblings::{
     DeclarationSiblingCredit, declaration_sibling_credit, runtime_sibling_path,
 };
+#[path = "unused_exports_entry_star.rs"]
+mod entry_star;
+use entry_star::{EntryStarCredit, EntryStarCreditInput};
+#[path = "unused_exports_namespace_escapes.rs"]
+mod namespace_escapes;
+pub(super) use namespace_escapes::find_namespace_escape_candidates;
 #[path = "unused_exports_manual_mocks.rs"]
 mod manual_mocks;
 use manual_mocks::drop_manual_mocks_of_group_modules;
@@ -67,6 +73,11 @@ struct UnusedExportModuleContext<'a> {
     /// Export names of each declaration file that the importers of its JS
     /// sibling use (`lib.d.mts` next to `lib.mjs`).
     declaration_sibling_credit: &'a DeclarationSiblingCredit,
+    entry_star_credit: &'a EntryStarCredit<'a>,
+    /// Treat every export as having no import reference. The namespace
+    /// escape pass sets it to ask which escape-credited exports would be
+    /// findings without the escape credit.
+    assume_unreferenced: bool,
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
@@ -420,6 +431,17 @@ fn record_expected_unused_stale(
     }
 }
 
+/// The inputs of the unused-export pass.
+#[derive(Clone, Copy)]
+pub(super) struct UnusedExportInput<'a> {
+    pub(super) graph: &'a ModuleGraph,
+    pub(super) modules: &'a [ModuleInfo],
+    pub(super) config: &'a ResolvedConfig,
+    pub(super) plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    pub(super) suppressions: &'a SuppressionContext<'a>,
+    pub(super) line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 /// Find exports that are never imported by other files.
 pub fn find_unused_exports(
     graph: &ModuleGraph,
@@ -429,10 +451,47 @@ pub fn find_unused_exports(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> (Vec<UnusedExport>, Vec<UnusedExport>, Vec<StaleSuppression>) {
-    let mut unused_exports = Vec::new();
-    let mut unused_types = Vec::new();
-    let mut stale_expected_unused = Vec::new();
+    let input = UnusedExportInput {
+        graph,
+        modules,
+        config,
+        plugin_result,
+        suppressions,
+        line_offsets_by_file,
+    };
+    with_unused_export_context(input, false, |module_context| {
+        let module_results: Vec<UnusedExportModuleResult> = graph
+            .modules
+            .par_iter()
+            .map(|module| find_unused_exports_for_module(module, module_context, None))
+            .collect();
 
+        let mut unused_exports = Vec::new();
+        let mut unused_types = Vec::new();
+        let mut stale_expected_unused = Vec::new();
+        for (exports, types, stale_expected) in module_results {
+            unused_exports.extend(exports);
+            unused_types.extend(types);
+            stale_expected_unused.extend(stale_expected);
+        }
+        (unused_exports, unused_types, stale_expected_unused)
+    })
+}
+
+/// Build the shared state of the unused-export pass and run `run` with it.
+fn with_unused_export_context<R>(
+    input: UnusedExportInput<'_>,
+    assume_unreferenced: bool,
+    run: impl FnOnce(&UnusedExportModuleContext<'_>) -> R,
+) -> R {
+    let UnusedExportInput {
+        graph,
+        modules,
+        config,
+        plugin_result,
+        suppressions,
+        line_offsets_by_file,
+    } = input;
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
     let plugin_matchers = compile_plugin_matchers(plugin_result);
     let config_export_credit = ConfigExportCredit::new(
@@ -451,6 +510,13 @@ pub fn find_unused_exports(
     let ambiguity = graph.ambiguity_participants();
     let declaration_sibling_credit =
         declaration_sibling_credit(graph, modules, module_info_by_id.as_ref());
+    let entry_star_credit = EntryStarCredit::build(&EntryStarCreditInput {
+        graph,
+        config,
+        ignore_matchers,
+        plugin_matchers: &plugin_matchers,
+        config_export_credit: &config_export_credit,
+    });
     let module_context = UnusedExportModuleContext {
         graph,
         config,
@@ -463,26 +529,17 @@ pub fn find_unused_exports(
         ambiguity: &ambiguity,
         schema_exports: schema_exports.as_ref(),
         declaration_sibling_credit: &declaration_sibling_credit,
+        entry_star_credit: &entry_star_credit,
+        assume_unreferenced,
     };
-
-    let module_results: Vec<UnusedExportModuleResult> = graph
-        .modules
-        .par_iter()
-        .map(|module| find_unused_exports_for_module(module, &module_context))
-        .collect();
-
-    for (exports, types, stale_expected) in module_results {
-        unused_exports.extend(exports);
-        unused_types.extend(types);
-        stale_expected_unused.extend(stale_expected);
-    }
-
-    (unused_exports, unused_types, stale_expected_unused)
+    run(&module_context)
 }
 
+/// `only` limits the pass to the exports at these indexes.
 fn find_unused_exports_for_module(
     module: &ModuleNode,
     ctx: &UnusedExportModuleContext<'_>,
+    only: Option<&FxHashSet<usize>>,
 ) -> UnusedExportModuleResult {
     let mut stale_expected_unused = Vec::new();
 
@@ -499,7 +556,7 @@ fn find_unused_exports_for_module(
     if should_skip_module(
         module,
         !matching_plugin.is_empty(),
-        ctx.config.include_entry_exports_for(&module.path),
+        module.is_consumer_checked() || ctx.config.include_entry_exports_for(&module.path),
     ) {
         return (Vec::new(), Vec::new(), stale_expected_unused);
     }
@@ -518,7 +575,8 @@ fn find_unused_exports_for_module(
         .map(|re| re.exported_name.as_str())
         .collect();
 
-    let config_credited_exports = config_credited_exports(module, ctx);
+    let config_credited_exports =
+        config_credited_exports(module, ctx.config, ctx.config_export_credit);
     let mut match_ctx = UnusedExportMatchContext {
         same_file_used_exports: &same_file_used_exports,
         re_export_names: &re_export_names,
@@ -528,7 +586,7 @@ fn find_unused_exports_for_module(
         stale_expected_unused: &mut stale_expected_unused,
     };
     let (unused_exports, unused_types) =
-        collect_module_unused_export_findings(module, ctx, &mut match_ctx);
+        collect_module_unused_export_findings(module, ctx, &mut match_ctx, only);
 
     (unused_exports, unused_types, stale_expected_unused)
 }
@@ -537,6 +595,7 @@ fn collect_module_unused_export_findings(
     module: &ModuleNode,
     ctx: &UnusedExportModuleContext<'_>,
     match_ctx: &mut UnusedExportMatchContext<'_>,
+    only: Option<&FxHashSet<usize>>,
 ) -> (Vec<UnusedExport>, Vec<UnusedExport>) {
     let mut unused_exports = Vec::new();
     let mut unused_types = Vec::new();
@@ -546,7 +605,10 @@ fn collect_module_unused_export_findings(
         .and_then(|by_file| by_file.get(&module.file_id))
         .map_or(&[][..], Vec::as_slice);
 
-    for export in &module.exports {
+    for (index, export) in module.exports.iter().enumerate() {
+        if only.is_some_and(|only| !only.contains(&index)) {
+            continue;
+        }
         let is_schema = !export.is_type_only
             && schema_exports
                 .binary_search_by(|name| name.as_str().cmp(export_name_str(&export.name)))
@@ -580,14 +642,15 @@ fn collect_module_unused_export_findings(
 /// The export names that a tool reads from `module` as its config file.
 fn config_credited_exports<'a>(
     module: &ModuleNode,
-    ctx: &UnusedExportModuleContext<'a>,
+    config: &ResolvedConfig,
+    credit: &ConfigExportCredit<'a>,
 ) -> Vec<&'a [String]> {
-    if ctx.config_export_credit.is_empty() || !ctx.config.include_entry_exports_for(&module.path) {
+    if credit.is_empty() || !config.include_entry_exports_for(&module.path) {
         return Vec::new();
     }
-    let relative_path = module.path.strip_prefix(&ctx.config.root);
+    let relative_path = module.path.strip_prefix(&config.root);
     let file_str = relative_path.unwrap_or(&module.path).to_string_lossy();
-    ctx.config_export_credit.exports_for(file_str.as_ref())
+    credit.exports_for(file_str.as_ref())
 }
 
 fn same_file_used_exports(
@@ -631,6 +694,9 @@ fn unused_export_for_module(
 ) -> Option<UnusedExport> {
     let mut match_ctx = match_ctx;
     let export_str = export_name_str(&export.name);
+    if module.is_fixture_entry() && matches!(export.name, ExportName::Default) {
+        return None;
+    }
 
     if unused_export_candidate_is_skipped(module, export, ctx, export_str, &mut match_ctx) {
         return None;
@@ -674,7 +740,8 @@ fn unused_export_candidate_is_skipped(
     export_str: &str,
     match_ctx: &mut UnusedExportMatchContext<'_>,
 ) -> bool {
-    let has_cross_file_ref = export_has_reachable_reference(ctx.graph, module, export)
+    let has_cross_file_ref = (!ctx.assume_unreferenced
+        && export_has_reachable_reference(ctx.graph, module, export))
         || ctx
             .declaration_sibling_credit
             .get(&module.file_id)
@@ -719,6 +786,7 @@ fn unused_export_candidate_is_skipped(
     }
 
     cjs::is_credited(module, export_str, match_ctx)
+        || ctx.entry_star_credit.credits(module.file_id, export_str)
 }
 
 fn build_unused_export(

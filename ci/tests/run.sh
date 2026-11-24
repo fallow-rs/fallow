@@ -1574,7 +1574,11 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--envelope" "comment.sh pass
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
 assert_contains "$GITLAB_COMMON" "curl_retry" "wraps GitLab API calls with retry"
 assert_not_contains "$GITLAB_COMMON" "source fallow-analysis-args" "legacy render fallback does not source workspace shell"
-assert_contains "$GITLAB_COMMON" "rate limit response; retrying" "retries GitLab rate-limit responses"
+if node "$DIR/gitlab-retry.mjs"; then
+  pass "GitLab retries transient HTTP errors and returns the successful response"
+else
+  fail "GitLab HTTP retry policy" "see the HTTP fixture output"
+fi
 
 TMP_CLEANUP_WORK=$(mktemp -d)
 TMP_CLEANUP_REGISTRY="$TMP_CLEANUP_WORK/registry"
@@ -2026,6 +2030,14 @@ write_ci_api_fail_mocks() {
   cat > "$CI_API_FAIL_BIN/fallow" <<'SH'
 #!/usr/bin/env bash
 printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "ci" ] && [ "${MOCK_LOOKUP_FAIL:-}" = "apply" ]; then
+  printf '{"error":true,"message":"GitLab request failed: HTTP 403 on create","exit_code":7}\n'
+  exit 7
+fi
+if [ "${1:-}" = "ci" ] && [ -n "${MOCK_LOOKUP_FAIL:-}" ]; then
+  printf '{"error":true,"message":"GitLab request failed: HTTP 502","exit_code":7,"code":"FALLOW_CI_DEDUP_LOOKUP_FAILED"}\n'
+  exit 7
+fi
 if [ "${1:-}" = "ci" ]; then
   if [ "${2:-}" = "post-pr-comment" ]; then
     printf '{"action":"update","marker_id":"fallow-results","comment_id":"777","body":"ok"}\n'
@@ -2298,6 +2310,64 @@ else
   fail "comment.sh: leaves fallow-dedup-lookup-failed.txt false" \
     "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
 fi
+
+# Test 10: a failed lookup of the existing notes makes the Rust post command
+# exit with the FALLOW_CI_DEDUP_LOOKUP_FAILED code. The scripts then set the
+# markers to the degraded values.
+write_ci_api_fail_mocks
+printf '{"kind":"dead-code","schema_version":9}\n' > "$CI_API_FAIL_WORK/fallow-results.json"
+rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
+for step in comment review; do
+  : > "$CI_API_FAIL_WORK/mock.log"
+  (cd "$CI_API_FAIL_WORK" \
+    && PATH="$CI_API_FAIL_BIN:$PATH" \
+    MOCK_LOG="$CI_API_FAIL_WORK/mock.log" \
+    MOCK_LOOKUP_FAIL=1 \
+    GITLAB_TOKEN=test \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID=18 CI_MERGE_REQUEST_IID=123 CI_COMMIT_SHA=abcdef1234567890 \
+    FALLOW_GITLAB_BASE_SHA=base FALLOW_GITLAB_HEAD_SHA=head \
+    FALLOW_COMMAND=check FALLOW_ROOT=. MAX_COMMENTS=5 \
+    bash "$SCRIPTS_DIR/${step}.sh" > "$CI_API_FAIL_WORK/${step}-lookup.out" 2>&1) || true
+  if grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null; then
+    pass "${step}.sh: a failed lookup sets fallow-dedup-lookup-failed.txt to true"
+  else
+    fail "${step}.sh: a failed lookup sets fallow-dedup-lookup-failed.txt to true" \
+      "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent); $(cat "$CI_API_FAIL_WORK/${step}-lookup.out")"
+  fi
+  assert_contains "$(cat "$CI_API_FAIL_WORK/${step}-lookup.out")" "could not read the existing" \
+    "${step}.sh: a failed lookup explains the skipped post"
+done
+if grep -q '^pagination_failure$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null; then
+  pass "review.sh: a failed lookup sets fallow-skip-reason.txt to pagination_failure"
+else
+  fail "review.sh: a failed lookup sets fallow-skip-reason.txt to pagination_failure" \
+    "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
+fi
+
+# A post failure without the lookup code keeps the markers and names its
+# reason in the job log.
+rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
+for step in comment review; do
+  (cd "$CI_API_FAIL_WORK" \
+    && PATH="$CI_API_FAIL_BIN:$PATH" \
+    MOCK_LOG="$CI_API_FAIL_WORK/mock.log" \
+    MOCK_LOOKUP_FAIL=apply \
+    GITLAB_TOKEN=test \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID=18 CI_MERGE_REQUEST_IID=123 CI_COMMIT_SHA=abcdef1234567890 \
+    FALLOW_GITLAB_BASE_SHA=base FALLOW_GITLAB_HEAD_SHA=head \
+    FALLOW_COMMAND=check FALLOW_ROOT=. MAX_COMMENTS=5 \
+    bash "$SCRIPTS_DIR/${step}.sh" > "$CI_API_FAIL_WORK/${step}-apply.out" 2>&1) || true
+  assert_contains "$(cat "$CI_API_FAIL_WORK/${step}-apply.out")" "HTTP 403 on create" \
+    "${step}.sh: a failed post names its reason"
+  if grep -q '^false$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null; then
+    pass "${step}.sh: a failed post without the lookup code keeps the marker false"
+  else
+    fail "${step}.sh: a failed post without the lookup code keeps the marker false" \
+      "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
+  fi
+done
 
 rm -rf "$CI_API_FAIL_WORK"
 

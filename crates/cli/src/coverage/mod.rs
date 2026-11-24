@@ -388,7 +388,12 @@ impl CoverageSetupContext {
 /// Dispatch a `fallow coverage <sub>` invocation.
 pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
     match subcommand {
-        CoverageSubcommand::Setup(args) => run_setup(args, ctx.root, ctx.json_style),
+        CoverageSubcommand::Setup(args) => run_setup(
+            args,
+            ctx.root,
+            ctx.json_style,
+            &runtime_coverage::SidecarSearch::from_process(),
+        ),
         CoverageSubcommand::SetupCloud(args) => setup_cloud::run(&args, ctx.root, ctx.json_style),
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
         CoverageSubcommand::UploadInventory(args) => {
@@ -502,14 +507,18 @@ fn record_current_license_state(state: &mut CoverageSetupState) {
     }
 }
 
-fn sidecar_state_is_current(state: &CoverageSetupState, root: &Path) -> bool {
+fn sidecar_state_is_current(
+    state: &CoverageSetupState,
+    root: &Path,
+    search: &runtime_coverage::SidecarSearch,
+) -> bool {
     let Some(recorded) = state.sidecar.as_ref() else {
         return false;
     };
-    if sidecar_env_override_is_set() || !recorded.path.is_file() {
+    if search.has_env_override() || !recorded.path.is_file() {
         return false;
     }
-    if runtime_coverage::discover_sidecar(Some(root))
+    if runtime_coverage::discover_sidecar_with(Some(root), search)
         .ok()
         .as_deref()
         != Some(recorded.path.as_path())
@@ -517,12 +526,6 @@ fn sidecar_state_is_current(state: &CoverageSetupState, root: &Path) -> bool {
         return false;
     }
     hash_file(&recorded.path).as_deref() == Some(recorded.checksum.as_str())
-}
-
-fn sidecar_env_override_is_set() -> bool {
-    ["FALLOW_COV_BIN", "FALLOW_COV_BINARY_PATH"]
-        .iter()
-        .any(|key| std::env::var_os(key).is_some_and(|value| !value.is_empty()))
 }
 
 fn record_sidecar_state(state: &mut CoverageSetupState, path: PathBuf) -> Result<(), String> {
@@ -603,7 +606,12 @@ fn hash_bytes(bytes: &[u8]) -> String {
     output
 }
 
-fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonStyle) -> ExitCode {
+fn run_setup(
+    args: SetupArgs,
+    root: &Path,
+    json_style: crate::json_style::JsonStyle,
+    search: &runtime_coverage::SidecarSearch,
+) -> ExitCode {
     if args.json {
         return run_setup_json(root, args.explain, json_style);
     }
@@ -624,7 +632,7 @@ fn run_setup(args: SetupArgs, root: &Path, json_style: crate::json_style::JsonSt
     }
 
     let context = detect_setup_context(root);
-    if let Err(exit) = run_setup_sidecar_step(root, args, &context, &mut setup_state) {
+    if let Err(exit) = run_setup_sidecar_step(root, args, &context, &mut setup_state, search) {
         return exit;
     }
 
@@ -687,16 +695,17 @@ fn run_setup_sidecar_step(
     args: SetupArgs,
     context: &CoverageSetupContext,
     setup_state: &mut CoverageSetupState,
+    search: &runtime_coverage::SidecarSearch,
 ) -> Result<(), ExitCode> {
-    if sidecar_state_is_current(setup_state, root) {
+    if sidecar_state_is_current(setup_state, root, search) {
         print_resumed_sidecar_step(setup_state);
         return Ok(());
     }
 
-    if let Some(exit) = handle_sidecar_step(root, args, context.package_manager) {
+    if let Some(exit) = handle_sidecar_step(root, args, context.package_manager, search) {
         return Err(exit);
     }
-    let path = runtime_coverage::discover_sidecar(Some(root))
+    let path = runtime_coverage::discover_sidecar_with(Some(root), search)
         .map_err(|message| setup_error_exit(&message, RUNTIME_COVERAGE_SIDECAR))?;
     record_sidecar_state(setup_state, path)
         .and_then(|()| save_setup_state(root, setup_state))
@@ -1271,8 +1280,9 @@ fn handle_sidecar_step(
     root: &Path,
     args: SetupArgs,
     package_manager: Option<PackageManager>,
+    search: &runtime_coverage::SidecarSearch,
 ) -> Option<ExitCode> {
-    match runtime_coverage::discover_sidecar(Some(root)) {
+    match runtime_coverage::discover_sidecar_with(Some(root), search) {
         Ok(path) => {
             println!("Step 2/4: Sidecar check... ok ({})", path.to_string_lossy());
             None
@@ -1309,12 +1319,12 @@ fn handle_sidecar_step(
                 println!("  -> Run: {install_command}");
                 println!(
                     "  -> Manual fallback: install a signed binary and place it at {}",
-                    runtime_coverage::canonical_sidecar_path().display()
+                    search.canonical_sidecar_path().display()
                 );
                 return Some(ExitCode::SUCCESS);
             }
 
-            match install_sidecar(root, package_manager) {
+            match install_sidecar(root, package_manager, search) {
                 Ok(path) => {
                     println!("  -> Installed at {}", path.display());
                     None
@@ -1457,6 +1467,7 @@ fn default_license_display(root: &Path) -> String {
 fn install_sidecar(
     root: &Path,
     package_manager: Option<PackageManager>,
+    search: &runtime_coverage::SidecarSearch,
 ) -> Result<PathBuf, String> {
     let (program, args, current_dir, display_command) =
         if let Some(package_manager) = package_manager {
@@ -1479,11 +1490,11 @@ fn install_sidecar(
     if !status.success() {
         return Err(format!(
             "{display_command} failed. Install it manually or place the binary in {}",
-            runtime_coverage::canonical_sidecar_path().display()
+            search.canonical_sidecar_path().display()
         ));
     }
 
-    runtime_coverage::discover_sidecar(Some(root)).map_err(|message| {
+    runtime_coverage::discover_sidecar_with(Some(root), search).map_err(|message| {
         format!("sidecar install finished but fallow still could not find fallow-cov. {message}")
     })
 }

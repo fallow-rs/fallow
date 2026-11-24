@@ -124,8 +124,11 @@ fn run_inner(
         LOG_PREFIX,
         "upload-static-findings",
         "the findings come",
-        args.dry_run,
-        args.allow_dirty,
+        upload_common::WorktreeFlags {
+            dry_run: args.dry_run,
+            allow_dirty: args.allow_dirty,
+            explicit_git_sha: args.git_sha.is_some(),
+        },
         root,
     )?;
 
@@ -318,7 +321,8 @@ fn classify_upload_error(
         413 => Err(UploadError::PayloadTooLarge(message)),
         400 => Err(UploadError::Validation(message)),
         401 | 403 => Err(UploadError::AuthRejected(message)),
-        _ => Err(UploadError::ServerError(message)),
+        _ if upload_common::is_transient_status(status) => Err(UploadError::ServerError(message)),
+        _ => Err(UploadError::Validation(message)),
     }
 }
 
@@ -578,6 +582,27 @@ mod tests {
                 .expect_err("auth status must error");
             assert!(
                 matches!(err, UploadError::AuthRejected(_)),
+                "status={status}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_upload_error_keeps_permanent_client_errors_out_of_server_error() {
+        for status in [404, 409, 410, 422] {
+            let err = classify_upload_error(status, None, "stub".to_owned())
+                .expect_err("client error must error");
+            assert!(matches!(err, UploadError::Validation(_)), "status={status}");
+        }
+    }
+
+    #[test]
+    fn classify_upload_error_maps_timeout_and_rate_limit_to_server_error() {
+        for status in [408, 429] {
+            let err = classify_upload_error(status, None, "stub".to_owned())
+                .expect_err("transient status must error");
+            assert!(
+                matches!(err, UploadError::ServerError(_)),
                 "status={status}"
             );
         }

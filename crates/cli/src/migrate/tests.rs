@@ -96,6 +96,92 @@ fn auto_detect_stylelintrc_json() {
 }
 
 #[test]
+fn custom_filenames_use_tool_specific_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let style = temp.path().join("style.json");
+    std::fs::write(
+        &style,
+        r#"{"extends":"stylelint-config-standard","rules":{"selector-max-combinators":3}}"#,
+    )
+    .unwrap();
+    let css = migrate_from_file(&style).unwrap();
+    assert_eq!(css.config["rules"]["css-selector-complexity"], "warn");
+
+    let cpd = temp.path().join("cpd.json");
+    std::fs::write(&cpd, r#"{"minTokens":80,"ignore":["build/**"]}"#).unwrap();
+    let duplication = migrate_from_file(&cpd).unwrap();
+    assert_eq!(duplication.config["duplicates"]["minTokens"], 80);
+}
+
+#[test]
+fn custom_filename_detects_stylelint_without_extends() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    for (key, value) in [
+        ("plugins", serde_json::json!(["./plugin.js"])),
+        ("overrides", serde_json::json!([{"files": "*.scss"}])),
+        ("customSyntax", serde_json::json!("postcss-scss")),
+        ("ignoreFiles", serde_json::json!(["build/**"])),
+    ] {
+        let rule = if key == "ignoreFiles" {
+            "plugin/custom"
+        } else {
+            "indentation"
+        };
+        let config = serde_json::json!({(key): value, "rules": {(rule): 2}});
+        std::fs::write(&path, config.to_string()).unwrap();
+        let migrated = migrate_from_file(&path).unwrap();
+        assert!(
+            migrated
+                .sources
+                .iter()
+                .any(|source| source.ends_with("(stylelint config)")),
+            "{key}"
+        );
+    }
+}
+
+#[test]
+fn custom_filename_preserves_knip_rules_with_ignore_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    std::fs::write(
+        &path,
+        r#"{"rules":{"files":"off"},"ignoreFiles":["build/**"]}"#,
+    )
+    .unwrap();
+    let migrated = migrate_from_file(&path).unwrap();
+    assert_eq!(migrated.config["rules"]["unused-files"], "off");
+}
+
+#[test]
+fn custom_filename_recognizes_a_known_stylelint_rule_on_its_own() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    std::fs::write(&path, r#"{"rules":{"selector-max-id":0}}"#).unwrap();
+    let migrated = migrate_from_file(&path).unwrap();
+    assert_eq!(migrated.config["rules"]["css-selector-complexity"], "warn");
+}
+
+#[test]
+fn custom_filename_keeps_knip_warnings_with_empty_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("lint.json");
+    std::fs::write(
+        &path,
+        r#"{"rules":{},"ignoreFiles":["build/**"],"ignoreMembers":["id"]}"#,
+    )
+    .unwrap();
+    let migrated = migrate_from_file(&path).unwrap();
+    assert!(
+        migrated
+            .warnings
+            .iter()
+            .any(|warning| warning.source == "knip" && warning.field == "ignoreMembers")
+    );
+}
+
+#[test]
 fn migrate_package_json_stylelint_key() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let tmpdir = temp.path();
@@ -346,6 +432,42 @@ fn jsonc_comments_stripped() {
     let value = load_json_or_jsonc(&path).unwrap();
     assert_eq!(value["entry"], serde_json::json!(["src/index.ts"]));
     assert_eq!(value["ignore"], serde_json::json!(["dist/**"]));
+}
+
+#[test]
+fn package_knip_and_standalone_stylelint_keep_both_rule_sets() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::write(
+        root.join(".stylelintrc.json"),
+        r#"{"rules":{"selector-max-combinators":3}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"knip":{"rules":{"files":"off"}}}"#,
+    )
+    .unwrap();
+
+    let result = migrate_auto_detect(root).unwrap();
+    assert_eq!(result.config["rules"]["unused-files"], "off");
+    assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
+}
+
+#[test]
+fn standalone_jscpd_preserves_package_knip_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::write(root.join(".jscpd.json"), r#"{"minTokens":80}"#).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"knip":{"entry":["src/main.ts"]},"jscpd":{"minTokens":10}}"#,
+    )
+    .unwrap();
+
+    let result = migrate_auto_detect(root).unwrap();
+    assert_eq!(result.config["entry"], serde_json::json!(["src/main.ts"]));
+    assert_eq!(result.config["duplicates"]["minTokens"], 80);
 }
 
 #[test]

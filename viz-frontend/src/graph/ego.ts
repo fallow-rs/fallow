@@ -167,7 +167,7 @@ const buildColumn = (
         });
         continue;
       }
-      rows.push({ kind: "header", label: `${key}/`, groupKey: expandKey });
+      rows.push({ kind: "header", label: `${key}/`, groupKey: collapse ? expandKey : undefined });
     }
     for (const fileIndex of members) rows.push(fileRow(fileIndex));
   }
@@ -574,6 +574,19 @@ const drawStageColumn = (
     };
     y += rowH;
 
+    if (row.kind === "file" || row.groupKey !== undefined) {
+      const rectW = Math.min(maxTextW + 40, 460);
+      gvs.stageRects.push({
+        x: side === "left" ? colX - rectW : colX - 8,
+        y: geom.rowY - rowH / 2,
+        w: rectW + 8,
+        h: rowH,
+        kind: row.kind === "file" ? "file" : "group",
+        fileIndex: row.fileIndex,
+        groupKey: row.groupKey,
+      });
+    }
+
     if (row.kind === "file" || row.kind === "group") {
       drawRowConnector(state, row, geom, cardEdgeX, cy, colX - dirSign * 6 + slide);
     }
@@ -614,17 +627,6 @@ const drawStageColumn = (
       drawFileRowLabel(state, row, geom);
     }
     drawRowLeader(state, gvs, row, geom);
-
-    const rectW = Math.min(maxTextW + 40, 460);
-    gvs.stageRects.push({
-      x: side === "left" ? colX - rectW : colX - 8,
-      y: geom.rowY - rowH / 2,
-      w: rectW + 8,
-      h: rowH,
-      kind: row.kind === "group" ? "group" : "file",
-      fileIndex: row.fileIndex,
-      groupKey: row.groupKey,
-    });
   }
 };
 

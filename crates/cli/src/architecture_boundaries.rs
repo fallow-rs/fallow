@@ -1028,7 +1028,6 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
 
 /// Each CLI file that spawns git, and the git fact it owns. The engine owns ref
 /// and root detection, so a CLI spawn is for work `repo_refs` does not model.
-/// Two entries are test-only helpers that build repository fixtures.
 const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     (
         "crates/cli/src/agent_install/mcp.rs",
@@ -1049,10 +1048,6 @@ const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     (
         "crates/cli/src/coverage/upload_common.rs",
         "the origin remote and working-tree state of a coverage upload",
-    ),
-    (
-        "crates/cli/src/coverage/upload_inventory/tests.rs",
-        "repository fixtures in its own tests",
     ),
     (
         "crates/cli/src/coverage/upload_source_maps.rs",
@@ -1516,12 +1511,12 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // Plugin used-export rules have one compiler, in fallow-core, so the
         // mutation plan and the unused-export check agree on them.
         "fallow_core::plugins::UsedExportNames",
-        // The built-in plugin roster has one source, in fallow-core. The
-        // engine mirrored it by hand once and the copy drifted.
+        // The built-in plugin roster has one source, in fallow-core: a copy drifted.
         "fallow_core::plugins::registry::builtin_config_", // `_lookup`, `_patterns`
         "fallow_core::plugins::registry::builtin_always_used_patterns",
         "fallow_core::plugins::registry::builtin_plugin_names",
         "fallow_core::plugins::registry::is_external_plugin_active",
+        "fallow_core::plugins::registry::workspace_activation_dependencies",
         // The `@types/X` naming rule has one source, in fallow-core, so the
         // dependency trace and the unused devDependency check agree on it.
         "fallow_core::plugins::types_package_target",

@@ -26,9 +26,9 @@ import {
   clusterBounds,
   fitTransform,
   getGVS,
-  lensFlagsStandalone,
   shouldShowIntro,
   stageSize,
+  standaloneVisible,
 } from "./shared";
 import { renderGraph } from "./render";
 
@@ -99,8 +99,7 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
       if (bucket) bucket.push(index);
       else groups.set(key, [index]);
     }
-    // Nothing to gain: one child, or everything sits directly in `prefix`.
-    if (groups.size <= 1) {
+    if (groups.size === 1 && groups.has(prefix)) {
       emit(prefix, indices);
       return;
     }
@@ -110,7 +109,9 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
     const residual: number[] = [];
     for (const [key, groupIndices] of groups) {
       if (key !== prefix && groupIndices.length >= MIN_CHILD) substantial.push([key, groupIndices]);
-      else residual.push(...groupIndices);
+      else {
+        for (const index of groupIndices) residual.push(index);
+      }
     }
     if (substantial.length === 0) {
       emit(prefix, indices);
@@ -834,12 +835,7 @@ const markTangles = (clusters: ClusterInfo[], meta: MetaEdge[]): number[] => {
  * park them in a standalone strip below the map instead of polluting
  * the entry/shared columns.
  */
-const markIsolated = (
-  state: AppState,
-  gvs: GraphViewState,
-  clusters: ClusterInfo[],
-  meta: MetaEdge[],
-): void => {
+const markIsolated = (gvs: GraphViewState, clusters: ClusterInfo[], meta: MetaEdge[]): void => {
   const connected = new Set<number>();
   for (const edge of meta) {
     connected.add(edge.src);
@@ -848,10 +844,8 @@ const markIsolated = (
   clusters.forEach((cluster, index) => {
     cluster.isolated = !connected.has(index);
   });
-  // An edge-free project marks every cluster isolated; the standalone
-  // strip must then open by default or the map renders as an empty canvas.
-  if (!clusters.some((cluster) => !cluster.isolated)) gvs.standaloneOpen = true;
-  else if (lensFlagsStandalone(state, clusters)) gvs.standaloneOpen = true;
+  // The isolated flags are new, so the strip state of the previous layout is void.
+  gvs.standalone = null;
 };
 
 /** Hub floor: p95 of importer counts, min 25 (spec: badge, never suppress). */
@@ -892,14 +886,28 @@ const fitClusters = (state: AppState, gvs: GraphViewState): GraphViewState["tran
   const { clusters } = gvs;
   const { w: width, h: height } = stageSize(state);
   const anyConnected = clusters.some((cluster) => !cluster.isolated);
+  const standaloneShown = standaloneVisible(state, gvs);
   return fitTransform(
     width,
     height,
-    clusterBounds(
-      clusters,
-      (cluster) => !(cluster.isolated && anyConnected && !gvs.standaloneOpen),
-    ),
+    clusterBounds(clusters, (cluster) => !(cluster.isolated && anyConnected && !standaloneShown)),
   );
+};
+
+/**
+ * Store a camera transform from d3 zoom. The graph and the treemap share one
+ * canvas, so a camera move that ends after a switch to the map view must not
+ * paint the graph.
+ */
+export const applyZoom = (
+  state: AppState,
+  gvs: GraphViewState,
+  transform: GraphViewState["transform"],
+  byUser: boolean,
+): void => {
+  if (byUser) gvs.userMoved = true;
+  gvs.transform = { x: transform.x, y: transform.y, k: transform.k };
+  if (state.view === "graph") renderGraph(state);
 };
 
 /** Attach the d3 pan and zoom behavior to the canvas, starting at `fit`. */
@@ -924,9 +932,7 @@ const attachZoom = (
       return !(event as MouseEvent).button;
     })
     .on("zoom", (event: D3ZoomEvent<HTMLCanvasElement, unknown>) => {
-      if (event.sourceEvent) gvs.userMoved = true;
-      gvs.transform = { x: event.transform.x, y: event.transform.y, k: event.transform.k };
-      renderGraph(state);
+      applyZoom(state, gvs, event.transform, event.sourceEvent != null);
     });
   const initialTransform = zoomIdentity.translate(fit.x, fit.y).scale(fit.k);
   select(state.canvas).call(zoomBehavior).call(zoomBehavior.transform, initialTransform);
@@ -974,7 +980,7 @@ export function* graphInitSteps(state: AppState): Generator<BuildProgress, void>
   yield { label: "Placing folders", fraction: PREPARE_SHARE / 2 };
   const meta = buildMetaGraph(state, clusterOf, clusters.length);
   const sccOf = markTangles(clusters, meta);
-  markIsolated(state, gvs, clusters, meta);
+  markIsolated(gvs, clusters, meta);
 
   const layers = assignLayers(clusters.length, meta, sccOf);
   clusters.forEach((cluster, index) => {

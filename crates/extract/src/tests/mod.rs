@@ -6,11 +6,14 @@ mod effect;
 mod graphql;
 mod js_ts;
 mod linear_cost;
+mod markup_events;
+mod markup_parity;
 mod mdx;
 mod nesting;
 mod object_pattern_defaults;
 mod regex_compile;
 mod sfc;
+mod sfc_complexity;
 mod store_aliases;
 mod suppress_literals;
 

@@ -51,11 +51,15 @@ pub fn run_decision_surface(
     let head = resolved
         .install(|| run_decision_analysis(&resolved, &analysis, Some(&changed_files), None))?;
     let manifests = changed_manifests(&resolved.root, &changed_files);
+    let old_paths = renamed_old_paths(&resolved.root, &resolved_base.git_ref);
     let base = compute_base_decision_snapshot(
         options,
         &resolved.root,
         &resolved_base.git_ref,
-        &manifests,
+        &BaseManifests {
+            manifests: &manifests,
+            old_paths: &old_paths,
+        },
         &head.config,
     )?;
     let manifest_pairs = manifest_pairs(&resolved.root, &manifests, &base);
@@ -64,7 +68,7 @@ pub fn run_decision_surface(
         head.package_importers.as_ref(),
     );
     let deltas = build_decision_deltas(&head, &base, &dependency_anchors);
-    let surface = build_surface(options, &head, &deltas, &dependency_anchors);
+    let surface = build_surface(options, &head, &deltas, &dependency_anchors, &old_paths);
 
     Ok(DecisionSurfaceProgrammaticOutput {
         surface,
@@ -114,6 +118,30 @@ fn changed_manifests(root: &Path, changed_files: &FxHashSet<PathBuf>) -> Vec<Str
         .collect();
     manifests.sort();
     manifests
+}
+
+/// The base-relative path of each file that the change renamed, keyed by its
+/// root-relative head path.
+///
+/// Best effort: when git fails, a renamed file reads as new.
+fn renamed_old_paths(root: &Path, base_ref: &str) -> FxHashMap<String, String> {
+    fallow_engine::changed_files::try_get_renamed_files(root, base_ref)
+        .unwrap_or_default()
+        .iter()
+        .map(|rename| {
+            (
+                crate::audit_keys::relative_key_path(&rename.to, root),
+                crate::audit_keys::relative_key_path(&rename.from, root),
+            )
+        })
+        .filter(|(to, from)| to != from)
+        .collect()
+}
+
+/// The changed manifests, by head path, and the base path of each renamed one.
+struct BaseManifests<'a> {
+    manifests: &'a [String],
+    old_paths: &'a FxHashMap<String, String>,
 }
 
 /// Pair each changed manifest's head text with the base text captured from the
@@ -257,7 +285,7 @@ fn compute_base_decision_snapshot(
     options: &DecisionSurfaceOptions,
     current_root: &Path,
     base_ref: &str,
-    manifests: &[String],
+    manifests: &BaseManifests<'_>,
     head_config: &fallow_config::ResolvedConfig,
 ) -> ProgrammaticResult<DecisionSnapshot> {
     let worktree =
@@ -275,11 +303,15 @@ fn compute_base_decision_snapshot(
         repo_refs::BaseAnalysisRoot::NewInHead(_) => return Ok(DecisionSnapshot::default()),
     };
     // The base manifests are read while the worktree still exists; a manifest
-    // absent at base stays absent (it is new in this change).
+    // absent at base stays absent (it is new in this change). A renamed
+    // manifest is read under its base path and keyed by its head path, so a
+    // move compares the same dependencies.
     let base_manifests: FxHashMap<String, String> = manifests
+        .manifests
         .iter()
         .filter_map(|manifest| {
-            std::fs::read_to_string(base_root.join(manifest))
+            let base_path = manifests.old_paths.get(manifest).unwrap_or(manifest);
+            std::fs::read_to_string(base_root.join(base_path))
                 .ok()
                 .map(|text| (manifest.clone(), text))
         })
@@ -353,6 +385,7 @@ fn build_surface(
     head: &DecisionAnalysis,
     deltas: &ReviewDeltas,
     dependency_anchors: &[crate::decision_surface::DependencyAnchor],
+    old_paths: &FxHashMap<String, String>,
 ) -> fallow_output::DecisionSurface {
     let boundary_anchors = boundary_anchors(head, deltas);
     let mut coordination = coordination_anchors(head.impact_closure.as_ref());
@@ -372,7 +405,7 @@ fn build_surface(
         .map_or(0, |closure| closure.affected_not_shown.len() as u64);
     let root = head.root.clone();
     let head_source = move |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    let rename_old_path = |_rel: &str| -> Option<String> { None };
+    let rename_old_path = |rel: &str| old_paths.get(rel).cloned();
     let internal_consumers_map = head.internal_consumers.as_ref();
     let internal_consumers = |rel: &str| -> u64 {
         internal_consumers_map
@@ -556,12 +589,5 @@ mod tests {
         );
     }
 
-    fn git(root: &Path, args: &[&str]) {
-        let status = fallow_engine::changed_files::clear_ambient_git_env(&mut Command::new("git"))
-            .args(args)
-            .current_dir(root)
-            .status()
-            .expect("git command");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    use fallow_engine::git_fixture::fixture_git as git;
 }

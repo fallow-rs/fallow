@@ -212,8 +212,25 @@ error by suppressing a downstream detector.
   `class Sub extends mixin(Base)` is not an escape. A class field alias (`levels = Level`) is an
   escape for a namespace but not for an enum: the fact carries
   `class_field`, and the visitor follows the reads of the field through
-  `this.levels` and the component template. A declaration file, an export of an entry point, and a
-  member of a namespace that is reported itself are never reported.
+  `this.levels` and the component template. A declaration file and a member of a
+  namespace that is reported itself are never reported. The member scan of an
+  entry point reads only store members, so its enum, class and namespace
+  members are not reported either, unless `includeEntryExports` covers the
+  file (issue #4990).
+- A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
+  of Vitest, Jest and Playwright) seeds each matching file as a support entry
+  point, so the file is never an unused file. Discovery records the files that
+  only a fixture pattern seeds in `CategorizedEntryPoints::fixture_only`, and
+  drops a file when a directory between it and its outermost fixture
+  directory holds a `package.json`. The graph build (`graph_build::imported_fixture_entries`)
+  marks such a file consumer-checked, like an entry point that
+  `includeEntryExports` covers, when a module outside the fixture directories
+  imports a binding from it with a static ES import or re-exports it. A
+  fixture file that a checked fixture imports by name is checked too. A
+  side-effect import does not count. A file that a dynamic import, an import
+  pattern or `require()` loads stays unmarked, and so do the files that only
+  it imports (`graph::untracked_load_targets`). The default export of a checked fixture file stays used, because a
+  tool can also load the file by path (issue #5082).
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the
@@ -498,10 +515,26 @@ error by suppressing a downstream detector.
   (`ModuleInfo::env_reads`) in three forms: `process.env.X` (also
   `import.meta.env.X`), `process.env['X']` with a static key, and
   `const { X } = process.env`. A read inside a dead range does not count.
+- The text of a `server-only-import` finding follows the origin of its sink.
+  A React Router `.server` sink gets React Router advice: move the call into
+  `loader`, `action`, `middleware` or `headers`. Every other sink gets the
+  Next.js advice about `next/dynamic` with `ssr: false` and Server Action
+  modules. `fallow_types::security_next_step::REACT_ROUTER_SERVER_SINK` is
+  the phrase that the evidence contains for a `.server` sink. The `Next:` step
+  of the human output and of the LSP hover reads that phrase, so the two
+  texts agree.
 - A `client-server-leak` finding points at the first secret read of the
   module, or at its first server-only import. The `secret-source` trace hop
   lists every read in `secret_reads`, and `fallow security --gate new` keeps
   the finding when one of these lines is added.
+- A non-terminal hop of a `client-server-leak` trace points at the import of
+  the next hop. `fallow security --gate new` keeps the finding when the line
+  of an `intermediate` hop is on an added line, because an added import there
+  joins the client cone to the sink. The gate has no base graph, so an edit
+  of an import line that already existed also keeps the finding. The finding
+  stays on the client boundary, so its
+  `finding_id` does not change. The `intermediate` hop of a taint trace stays
+  a pass-through hop for the gate.
 - A route module is a file that the route config names, the root route, a
   file directly in a route directory, a `route.*` file, or a deeper file
   that exports a route module export and is not in a folder with a
@@ -817,6 +850,37 @@ its deepest bound workspace. An unused dependency uses the workspace of its
 `package.json`, and an unlisted dependency checks each import site. The global
 list runs first, so a workspace list gets credit only for a finding that the
 global list did not hide.
+
+`includeEntryExports` also changes the graph. A plain `export *` of an entry
+point credits every named export of its source, because the consumers of an
+entry point are not in the graph. `consumer_checked_entries`
+(`crates/core/src/graph_build/mod.rs`) gives the graph build the entry points
+that the option covers. `collect_open_star_barrels` leaves those out, so their
+`export *` lines credit only the names that an importer uses, like the
+`export *` of any other module, and the unused names are reported at their
+declarations (issue #4986). The function binds `workspaces.settings` itself,
+because the graph build runs before the dead-code pass. `entry_points_hash`
+keys the graph cache on the set. The entry file has no export symbol for a
+name behind its star, so `EntryStarCredit`
+(`crates/core/src/analyze/unused_exports_entry_star.rs`) applies the
+`ignoreExports`, plugin `usedExports` and config-file credit rules of the
+entry file to the files that its plain `export *` chains reach.
+
+The same set limits Phase 2c (`namespace_re_exports.rs`) and the exposed
+namespace closure. `ModuleNode::exposes_entry_surface` is false for an entry
+point that the option covers, so its `export * as Name` lines credit only the
+members that consumers read (issue #5053). An entry point that a dynamic
+import, an import pattern or a `require()` loads stays unmarked
+(`ModuleGraph::index_exports`), because Phase 2c reads only static ES import
+bindings. Phase 2c reads the member accesses
+and the `NamespaceMemberUse` facts of each consumer binding. A nested chain
+(`Name.Inner.x`) moves to the source of the namespace object that each
+segment resolves to. A chain that `import * as Root` starts
+(`Root.Name.x`) counts when its first segment is the re-exported name. An
+escaped value or a computed key credits every export at that point and
+every export behind its `export *` and `export * as` lines.
+`EntryStarCredit` gives an `ignoreExports` rule that covers `Name` every
+export of the files behind `Name`.
 
 In production mode, a file that only user entry rules with an explicit
 `"entryPointRole": "support"` match (inline `framework[]` entries and plugin
@@ -1177,6 +1241,36 @@ marks an alias to a directory that its config names as checked
 (`PluginResult::push_checked_path_alias`). An unresolved import under a checked
 prefix reports, also when a virtual module prefix such as the Nuxt `#` covers
 it.
+`fallow_config::MergedTsconfig` (`crates/config/src/workspace/tsconfig_merged.rs`)
+is the one reader of tsconfig compiler options and file sets. It follows a
+local, package, package-subpath (`exports`) and array `extends`, with the merge
+rules of TypeScript: a later array entry overrides an earlier one, a key that a
+config sets replaces the inherited value, and a relative path resolves against
+the config that sets it. `paths` resolves against `baseUrl`, else against the
+config that sets `paths`. A leading `${configDir}` in a path option or an
+`include` or `exclude` pattern names the folder of the config that the caller
+reads. A missing, unparsable or cyclic parent adds an issue and the rest of
+the chain still applies. The resolver passes its JSON cache as the loader of
+the reader, so a shared base config is parsed once per run. The TypeScript plugin (`jsx`,
+`jsxImportSource`, `types`, `paths`), the alias replacement check, the orphan
+declaration check (`files`, `include`, `exclude`, `typeRoots`), the
+`rootDir` reader of boundary presets, the tsconfig output map and the resolver
+fallbacks read through it. The resolver chain of a file holds the configs
+that contain the file, as TypeScript decides ownership: `files` and `include`
+add up, and `exclude` removes only `include` matches. The nearest tsconfig
+comes first when it contains the file. A solution-style nearest config
+(`files: []`) does not, so the referenced configs that contain the file count,
+and the `paths` that the solution config inherits do not hide theirs. When no
+config contains the file, the nearest config is the fallback. Each config of
+the chain reads its own `extends` chain. A `paths` target resolves against
+`baseUrl` (TypeScript 5), then against the config that sets `paths`
+(TypeScript 7, which has no `baseUrl`), in each reader that checks that the
+target exists. Every target of a pattern is tried against `baseUrl` before
+any target against the config folder, as TypeScript 5 orders them. Plugin path aliases use only the first folder. The orphan check keeps every file when a parent does not
+parse, and the output map maps nothing when the chain is not complete.
+`scripts/check-tsconfig-reads.mjs` fails on a `"compilerOptions"` key read
+outside the reader and test code. A read that needs the syntax tree of one
+file, for a finding span, carries a `tsconfig-reads: allow` comment.
 A bare specifier that a `paths` pattern of the nearest tsconfig matches is an
 alias, also when its scope is lowercase or a real package has the same name.
 When it resolves into `node_modules`, the package of the resolved file gets the
@@ -1224,7 +1318,11 @@ each reason:
 - `parse-incomplete`: a module of the project has a parse error or a panic.
 - `open-contract`: the contract has an `incomplete` reason.
 - `public-api`: the value surface of a package entry point, or an export with
-  a visibility tag such as `@public`.
+  a visibility tag that `keepExportTags` keeps, such as `@public`. The rule
+  reads the extraction results, which hold each tag as written, so it applies
+  the key itself. The graph build clears the other tags before it runs
+  (`crates/core/src/graph_build/visibility_scope.rs`), so the unused-export
+  check, the re-export credit and the trace see only the kept tags.
 - `entry-export`: the value surface of an entry point (this covers
   `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
   or a side-effect registration.

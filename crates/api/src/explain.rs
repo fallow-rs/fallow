@@ -44,7 +44,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dead code",
         name: "Unused Exports",
         short: "Export is never imported",
-        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file.",
+        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`.",
         docs_path: "rules/unused-export",
     },
     RuleDef {
@@ -150,6 +150,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         short: "Protected class member is never referenced",
         full: "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked.",
         docs_path: "rules/unused-protected-class-member",
+    },
+    RuleDef {
+        id: "fallow/namespace-escape",
+        category: "Dead code",
+        name: "Namespace Escapes",
+        short: "Namespace binding is used as a whole value, so its exports are not checked",
+        full: "A namespace import (`import * as Ns`) that the code uses as a whole value: a cast, an assignment, a call argument, a spread, a computed member read, a reflective call such as `Object.keys(Ns)`, or a re-export with `export { Ns }`. Fallow cannot see which members such a use reads, so it credits every export of the target module and of the modules that the target re-exports from. These exports are then not checked by `unused-exports` and `unused-types`. The finding is on the import and gives the count of exports that the credit hides. A binding that hides no export is not reported. Defaults to off.",
+        docs_path: "rules/namespace-escape",
     },
     RuleDef {
         id: "fallow/unused-namespace-member",
@@ -891,6 +899,10 @@ fn member_rule_guide(id: &str) -> Option<RuleGuide> {
             example: "class Shape declares protected unusedHelper(), and neither Shape nor a subclass calls this.unusedHelper() or super.unusedHelper().",
             how_to_fix: "Remove the member, or make it private when only the class reads it. If a subclass outside the project reads it, suppress the line with // fallow-ignore-next-line unused-protected-class-member.",
         },
+        "fallow/namespace-escape" => RuleGuide {
+            example: "src/index.ts has import * as formats from \"./formats\" and spreads formats into an object, so formatDate and formatPrice are not checked.",
+            how_to_fix: "Read the members by name (formats.formatDate) or import them by name, so fallow can check the other exports. When the whole object is the intent, add // fallow-ignore-next-line namespace-escape above the import.",
+        },
         "fallow/unused-namespace-member" => RuleGuide {
             example: "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",
             how_to_fix: "Remove the unused member, or remove its export keyword when only the namespace body uses it. For generated code, turn the rule off for those files in overrides. Suppress an intentional member with // fallow-ignore-next-line unused-namespace-member.",
@@ -1124,7 +1136,7 @@ fn security_rule_guide(id: &str) -> Option<RuleGuide> {
         },
         "security/client-server-leak" => RuleGuide {
             example: "A module marked `use client` imports code that reads a non-public `process.env` or `import.meta.env` value through a static path.",
-            how_to_fix: "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix.",
+            how_to_fix: "Keep non-public env reads on the server side, move the value behind an API boundary, or rename only intentionally public values to the framework's public prefix. For a `server-only-import` candidate, the fix depends on the sink. For a React Router `.server` module, move the call into `loader`, `action`, `middleware` or `headers`, or move the code that the client needs out of the `.server` module. For other server-only code in Next.js, keep the import out of the `use client` cone; a module that only `next/dynamic(..., { ssr: false })` loads is a false positive.",
         },
         "security/hardcoded-secret" => RuleGuide {
             example: "A provider-prefixed token-shaped literal is assigned to a secret-shaped variable, and the hardcoded-secret category is explicitly included.",
@@ -1166,6 +1178,26 @@ fn fallback_rule_guide() -> RuleGuide {
 pub fn explain_issue_type(
     issue_type: &str,
 ) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
+    explain_with_labels(issue_type, |rule| {
+        (rule_explain_name(rule), rule_explain_summary(rule))
+    })
+}
+
+/// Build an explanation with the name and short description used in terminal reports.
+///
+/// # Errors
+///
+/// Returns a structured error for an unknown issue token.
+pub fn explain_issue_type_for_display(
+    issue_type: &str,
+) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
+    explain_with_labels(issue_type, |rule| (rule.name, rule.short))
+}
+
+fn explain_with_labels(
+    issue_type: &str,
+    labels: impl FnOnce(&RuleDef) -> (&'static str, &'static str),
+) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
     if matches!(issue_type, "shared-state" | "fallow/shared-state") {
         return Ok(crate::shared_state_explain::explain());
     }
@@ -1174,10 +1206,11 @@ pub fn explain_issue_type(
     };
     let guide = rule_guide(rule);
     let (example_files, example_base_files) = crate::explain_examples::visible_example_files(rule);
+    let (name, summary) = labels(rule);
     Ok(fallow_output::ExplainOutput {
         id: rule.id.to_string(),
-        name: rule_explain_name(rule).to_string(),
-        summary: rule_explain_summary(rule).to_string(),
+        name: name.to_string(),
+        summary: summary.to_string(),
         rationale: rule_rationale(rule).to_string(),
         example: guide.example.to_string(),
         example_files,
@@ -1460,7 +1493,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Added Suppressions",
         short: "The change adds a suppression comment",
-        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Files below a fixture or generated directory (`fixture`, `fixtures`, `__fixtures__`, `__snapshots__`, `generated`, `__generated__`) do not report, because a tool writes them or a test reads them as data. Defaults to `warn`.",
+        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore`, `fallow-override-threshold-next-line` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Files below a fixture or generated directory (`fixture`, `fixtures`, `__fixtures__`, `__snapshots__`, `generated`, `__generated__`) do not report, because a tool writes them or a test reads them as data. Defaults to `warn`.",
         docs_path: "rules/added-suppression",
     },
     RuleDef {
@@ -1651,6 +1684,11 @@ pub const SECURITY_RULES: &[RuleDef] = &[
         "79"
     ),
     security_catalogue_rule!("nextjs-open-redirect", "Next.js open redirect sink", "601"),
+    security_catalogue_rule!(
+        "react-router-open-redirect",
+        "React Router open redirect sink",
+        "601"
+    ),
     security_catalogue_rule!("dom-document-write", "DOM document.write sink", "79"),
     security_catalogue_rule!("jquery-html", "jQuery .html() sink", "79"),
     security_catalogue_rule!(

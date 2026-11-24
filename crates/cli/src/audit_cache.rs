@@ -5,15 +5,17 @@ use std::time::{Duration, SystemTime};
 
 use fallow_output::{ExceededThreshold, FindingSeverity};
 use fallow_types::audit_cache::{
-    AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
+    AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFileFingerprint,
+    AuditCoverageFingerprint, AuditTypeAwareFingerprint,
 };
 use fallow_types::path_guard::CacheTarget;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
+use super::base_run::BaseRunInputs;
 use super::keys::{ComplexityBaseline, ComplexityMetrics};
-use super::{AuditKeySnapshot, AuditOptions};
+use super::{AuditKeySnapshot, AuditOptions, AuditTypeAwareOptions};
 use crate::base_worktree::{
     SECONDS_PER_DAY, SweepDecision, SweepDisposition, SweepEntry, SweepMode, SweepPass,
     git_rev_parse, git_toplevel,
@@ -21,6 +23,7 @@ use crate::base_worktree::{
 use crate::error::emit_input_error;
 use crate::runtime_support::{load_config_file, loaded_config};
 use fallow_engine::project_config::{ConfigFile, ConfigFileOptions};
+use fallow_engine::resolved_run::ResolvedRun;
 
 /// Version 11: complexity keys hold path and function name only, and each
 /// complexity entry carries its metric values (#3277). A version-10 snapshot
@@ -62,7 +65,14 @@ use fallow_engine::project_config::{ConfigFile, ConfigFileOptions};
 /// Version 23 makes the fragment hash of a clone-group key independent of
 /// the instance order. A version-22 snapshot holds hashes in instance order,
 /// so its clone groups with unequal fragments would not match the head keys.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 23;
+/// Version 24 changes the key payload. The key holds each coverage file
+/// that the base pass reads and the effective type-aware selection, and
+/// it holds no saved-baseline path. A version-23 snapshot of a type-aware
+/// base could serve a syntactic run.
+/// Version 25 keeps the clone groups that `duplicates.ignoredClones` hid at
+/// the base. A version-24 snapshot has no such groups, so an accepted clone
+/// that the change edited in every copy would look introduced.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 25;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -111,8 +121,35 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) branching: Vec<CachedFileBranching>,
     /// Instance locations of each base clone group, in snapshot order.
     pub(super) dupe_groups: Vec<Vec<CachedCloneSpan>>,
+    /// The base clone groups that `duplicates.ignoredClones` hid, each with
+    /// the entry that hid it, in snapshot order.
+    pub(super) accepted_dupe_groups: Vec<CachedAcceptedCloneGroup>,
     /// Unused-code keys of the base under its own config, sorted.
     pub(super) own_config_unused_code: Option<Vec<String>>,
+}
+
+fn cached_span(span: &fallow_api::diff_risk::clones::CloneSpan) -> CachedCloneSpan {
+    CachedCloneSpan {
+        path: span.path.clone(),
+        start_line: span.start_line,
+        end_line: span.end_line,
+    }
+}
+
+fn span_from_cached(span: CachedCloneSpan) -> fallow_api::diff_risk::clones::CloneSpan {
+    fallow_api::diff_risk::clones::CloneSpan {
+        path: span.path,
+        start_line: span.start_line,
+        end_line: span.end_line,
+    }
+}
+
+/// One base clone group that an `ignoredClones` entry hid, in the cached
+/// snapshot.
+#[derive(bitcode::Encode, bitcode::Decode)]
+pub(super) struct CachedAcceptedCloneGroup {
+    pub(super) key: String,
+    pub(super) instances: Vec<CachedCloneSpan>,
 }
 
 /// One clone instance location in the cached snapshot.
@@ -197,6 +234,14 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
                     .collect(),
             })
             .collect(),
+        accepted_dupe_groups: cached
+            .accepted_dupe_groups
+            .into_iter()
+            .map(|group| fallow_api::diff_risk::clones::AcceptedCloneGroup {
+                key: group.key,
+                instances: group.instances.into_iter().map(span_from_cached).collect(),
+            })
+            .collect(),
         inherited_health: Vec::new(),
         own_config_unused_code: cached
             .own_config_unused_code
@@ -246,6 +291,14 @@ pub(super) fn cached_from_snapshot(
                         end_line: span.end_line,
                     })
                     .collect()
+            })
+            .collect(),
+        accepted_dupe_groups: snapshot
+            .accepted_dupe_groups
+            .iter()
+            .map(|group| CachedAcceptedCloneGroup {
+                key: group.key.clone(),
+                instances: group.instances.iter().map(cached_span).collect(),
             })
             .collect(),
         own_config_unused_code: snapshot.own_config_unused_code.as_ref().map(sorted_keys),
@@ -608,25 +661,36 @@ pub(super) fn audit_workspace_patterns(opts: &AuditOptions<'_>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn config_file_fingerprint(
     opts: &AuditOptions<'_>,
 ) -> Result<AuditConfigFingerprint, ExitCode> {
+    config_identity(opts).map(|(fingerprint, _)| fingerprint)
+}
+
+fn config_identity(
+    opts: &AuditOptions<'_>,
+) -> Result<(AuditConfigFingerprint, fallow_config::TypeAwareConfig), ExitCode> {
     let file = load_config_file(
         opts.root,
         opts.config_path.as_deref(),
         opts.allow_remote_extends,
         opts.output,
     )?;
+    let section = file.config.type_aware.clone();
     let ConfigFile {
         config,
         path: Some(path),
         ..
     } = file
     else {
-        return Ok(AuditConfigFingerprint {
-            path: None,
-            resolved_hash: None,
-        });
+        return Ok((
+            AuditConfigFingerprint {
+                path: None,
+                resolved_hash: None,
+            },
+            section,
+        ));
     };
     let bytes = serde_json::to_vec(&config).map_err(|e| {
         emit_input_error(
@@ -634,36 +698,77 @@ pub(super) fn config_file_fingerprint(
             opts.output,
         )
     })?;
-    Ok(AuditConfigFingerprint {
-        path: Some(path.to_string_lossy().to_string()),
-        resolved_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
-    })
+    Ok((
+        AuditConfigFingerprint {
+            path: Some(path.to_string_lossy().to_string()),
+            resolved_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+        },
+        section,
+    ))
 }
 
-fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> AuditCoverageFingerprint {
-    let resolved = crate::health::scoring::resolve_relative_to_root(path, Some(project_root));
-    let file_path = if resolved.is_dir() {
-        resolved.join("coverage-final.json")
-    } else {
-        resolved
+/// The type-aware selection of the base pass, from the resolver of the
+/// dead-code pass. `Err` when the run cannot use a type-aware variable or a
+/// given project. The head pass reports that error, so this function stays
+/// silent. `root` resolves a relative project path.
+fn type_aware_fingerprint(
+    head: &ResolvedRun,
+    type_aware: AuditTypeAwareOptions<'_>,
+    section: &fallow_config::TypeAwareConfig,
+    root: &Path,
+) -> Result<Option<AuditTypeAwareFingerprint>, String> {
+    let request = crate::check::TypeAwareRequest {
+        enabled: type_aware.enabled,
+        config_override: type_aware.config_default,
+        projects: type_aware.projects,
+        require: type_aware.require,
     };
-    match std::fs::read(&file_path) {
-        Ok(bytes) => {
-            let source = std::fs::metadata(&file_path)
+    let values = crate::check::type_aware_values(Some(head), &request, section, root)?;
+    Ok(values.enabled.then(|| AuditTypeAwareFingerprint {
+        projects: values
+            .projects
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect(),
+        require: format!("{:?}", values.require),
+    }))
+}
+
+/// `path` is the coverage path of the base pass. It is absolute.
+fn coverage_fingerprint(path: &Path) -> AuditCoverageFingerprint {
+    let (files, error) = match fallow_engine::health::coverage_input::selected_coverage_files(path)
+    {
+        Ok(files) => (
+            files
+                .iter()
+                .map(PathBuf::as_path)
+                .map(coverage_file_fingerprint)
+                .collect(),
+            None,
+        ),
+        Err(message) => (Vec::new(), Some(message)),
+    };
+    AuditCoverageFingerprint {
+        path: path.to_string_lossy().to_string(),
+        files,
+        error,
+    }
+}
+
+fn coverage_file_fingerprint(file: &Path) -> AuditCoverageFileFingerprint {
+    let path = file.to_string_lossy().to_string();
+    match std::fs::read(file) {
+        Ok(bytes) => AuditCoverageFileFingerprint {
+            path,
+            source: std::fs::metadata(file)
                 .ok()
-                .map(|metadata| SourceFingerprint::from_metadata(&metadata));
-            AuditCoverageFingerprint {
-                path: path.to_string_lossy().to_string(),
-                resolved_path: file_path.to_string_lossy().to_string(),
-                source,
-                content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
-                len: Some(bytes.len()),
-                error: None,
-            }
-        }
-        Err(err) => AuditCoverageFingerprint {
-            path: path.to_string_lossy().to_string(),
-            resolved_path: file_path.to_string_lossy().to_string(),
+                .map(|metadata| SourceFingerprint::from_metadata(&metadata)),
+            content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+            len: Some(bytes.len()),
+            error: None,
+        },
+        Err(err) => AuditCoverageFileFingerprint {
+            path,
             source: None,
             content_hash: None,
             len: None,
@@ -672,28 +777,48 @@ fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> AuditCoverageF
     }
 }
 
-/// `workspace_patterns` must be the patterns that the base checkout gets, so
-/// the key covers each context directory that the checkout links.
+/// The inputs of one base snapshot cache key.
+pub(super) struct BaseKeyRequest<'a> {
+    /// The head options.
+    pub(super) opts: &'a AuditOptions<'a>,
+    pub(super) base_run: &'a BaseRunInputs,
+    pub(super) base_ref: &'a str,
+    pub(super) changed_files: &'a FxHashSet<PathBuf>,
+    /// The patterns that the base checkout gets, so the key covers each
+    /// context directory that the checkout links.
+    pub(super) workspace_patterns: &'a [String],
+    /// The resolved run of the head side. Its environment snapshot holds
+    /// the type-aware variables.
+    pub(super) head: &'a ResolvedRun,
+    pub(super) type_aware: AuditTypeAwareOptions<'a>,
+}
+
 pub(super) fn audit_base_snapshot_cache_key(
-    opts: &AuditOptions<'_>,
-    base_ref: &str,
-    changed_files: &FxHashSet<PathBuf>,
-    workspace_patterns: &[String],
+    request: &BaseKeyRequest<'_>,
 ) -> Result<Option<AuditBaseSnapshotCacheKey>, ExitCode> {
+    let BaseKeyRequest {
+        opts,
+        base_run,
+        base_ref,
+        changed_files,
+        workspace_patterns,
+        head,
+        type_aware,
+    } = *request;
     if opts.no_cache {
         return Ok(None);
     }
     let Some(base_sha) = git_rev_parse(opts.root, base_ref) else {
         return Ok(None);
     };
-    let config_file = config_file_fingerprint(opts)?;
-    // Auto-detected coverage feeds the base pass too (#2347), so its content
-    // must invalidate cached base snapshots exactly like explicit `--coverage`.
-    let coverage_file = opts
-        .coverage
-        .map(Path::to_path_buf)
-        .or_else(|| fallow_engine::health::scoring::auto_detect_coverage(opts.root))
-        .map(|p| coverage_file_fingerprint(&p, opts.root));
+    let (config_file, section) = config_identity(opts)?;
+    let Ok(type_aware) = type_aware_fingerprint(head, type_aware, &section, opts.root) else {
+        return Ok(None);
+    };
+    // The options of the base pass. The key reads only the fields that do
+    // not depend on the base worktree, so the head root stands in for it.
+    let base = base_run.options(opts, opts.root, &base_run.config_path, opts.cache_dir);
+    let coverage = base.coverage.map(coverage_fingerprint);
     let materialized_context = fallow_engine::repo_refs::audit_materialized_context_fingerprint(
         opts.root,
         workspace_patterns,
@@ -707,40 +832,35 @@ pub(super) fn audit_base_snapshot_cache_key(
         materialized_context,
     )
     .production(
-        opts.production,
-        opts.production_dead_code,
-        opts.production_health,
-        opts.production_dupes,
+        base.production,
+        base.production_dead_code,
+        base.production_health,
+        base.production_dupes,
     )
-    .scope(
-        opts.workspace.map(<[String]>::to_vec),
-        opts.changed_workspaces.map(str::to_string),
-        opts.group_by.map(|g| format!("{g:?}")),
-        opts.include_entry_exports,
-    )
-    .show_cascade(opts.show_cascade)
-    // Only a brief base pass computes the public-export set of the snapshot,
-    // so a non-brief snapshot must never serve a brief run.
+    // The base pass reads these two from the head options: only a brief
+    // base pass computes the public-export set of the snapshot, and the
+    // workspace scope of the head run reaches the base run.
     .brief(opts.brief)
+    .scope(
+        base.workspace.map(<[String]>::to_vec),
+        opts.changed_workspaces.map(str::to_string),
+        base.group_by.map(|g| format!("{g:?}")),
+        base.include_entry_exports,
+    )
+    .show_cascade(base.show_cascade)
     .health(
-        opts.max_crap,
-        coverage_file,
-        opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
+        base.max_crap,
+        coverage,
+        base.coverage_root.map(|p| p.to_string_lossy().to_string()),
     )
     .analyses(
-        opts.analyses.dead_code,
-        opts.analyses.health,
-        opts.analyses.dupes,
-        opts.analyses.architecture_label(),
+        base.analyses.dead_code,
+        base.analyses.health,
+        base.analyses.dupes,
+        base.analyses.architecture_label(),
     )
-    .styling(opts.css, opts.css_deep)
-    .baselines(
-        opts.dead_code_baseline
-            .map(|p| p.to_string_lossy().to_string()),
-        opts.health_baseline
-            .map(|p| p.to_string_lossy().to_string()),
-        opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
-    )
+    .styling(base.css, base.css_deep)
+    .type_aware(type_aware)
     .type_aware_backend(
         std::env::var("FALLOW_TYPE_AWARE_BACKEND")
             .ok()

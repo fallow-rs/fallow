@@ -11,7 +11,7 @@
       "region_a": { "start_line": 1, "end_line": 130 },
       "region_b": { "start_line": 1, "end_line": 130 },
       "min_overlap_lines": 80,
-      "expected_in_modes": ["strict", "mild", "weak", "semantic"]
+      "expected_in_modes": ["strict", "mild", "weak", "semantic", "defaults"]
     },
     {
       "id": "T1-cache",
@@ -22,7 +22,7 @@
       "region_a": { "start_line": 1, "end_line": 120 },
       "region_b": { "start_line": 1, "end_line": 120 },
       "min_overlap_lines": 60,
-      "expected_in_modes": ["strict", "mild", "weak", "semantic"]
+      "expected_in_modes": ["strict", "mild", "weak", "semantic", "defaults"]
     },
     {
       "id": "T2-http",
@@ -55,7 +55,7 @@
       "region_a": { "start_line": 1, "end_line": 115 },
       "region_b": { "start_line": 1, "end_line": 145 },
       "min_overlap_lines": 30,
-      "expected_in_modes": ["strict", "mild", "weak", "semantic"],
+      "expected_in_modes": ["strict", "mild", "weak", "semantic", "defaults"],
       "notes": "Strict/mild should find partial overlaps in the shared switch cases"
     },
     {
@@ -67,7 +67,7 @@
       "region_a": { "start_line": 1, "end_line": 95 },
       "region_b": { "start_line": 1, "end_line": 125 },
       "min_overlap_lines": 20,
-      "expected_in_modes": ["strict", "mild", "weak", "semantic"],
+      "expected_in_modes": ["strict", "mild", "weak", "semantic", "defaults"],
       "notes": "Strict/mild should find the binary search insertion and updatePriority blocks"
     },
     {

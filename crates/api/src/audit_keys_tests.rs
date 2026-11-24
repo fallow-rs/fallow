@@ -379,6 +379,8 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![source.clone()],
             kind: ReExportCycleKind::SelfLoop,
+            line: 0,
+            col: 0,
         }));
     results.package_cycles.push(
         fallow_types::output_dead_code::PackageCycleFinding::with_actions(
@@ -835,6 +837,8 @@ fn dead_code_keys_cover_re_export_cycle_multi_node_variant() {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![b, a],
             kind: ReExportCycleKind::MultiNode,
+            line: 0,
+            col: 0,
         }));
 
     let keys = dead_code_keys(&results, &root);
@@ -905,33 +909,6 @@ fn unused_namespace_member_results(root: &Path) -> AnalysisResults {
             col: 15,
         }));
     results
-}
-
-fn unused_protected_class_member_results(root: &Path) -> AnalysisResults {
-    let mut results = AnalysisResults::default();
-    results
-        .unused_protected_class_members
-        .push(UnusedProtectedClassMemberFinding::with_actions(
-            UnusedMember {
-                path: root.join("src/shapes.ts"),
-                parent_name: "Shape".to_string(),
-                member_name: "unusedHelper".to_string(),
-                kind: MemberKind::ClassMethod,
-                line: 12,
-                col: 2,
-            },
-        ));
-    results
-}
-
-#[test]
-fn dead_code_keys_cover_unused_protected_class_member() {
-    let root = root();
-    let keys = dead_code_keys(&unused_protected_class_member_results(&root), &root);
-    assert!(
-        keys.contains("unused-protected-class-member:src/shapes.ts:Shape:unusedHelper"),
-        "{keys:?}"
-    );
 }
 
 #[test]
@@ -1379,26 +1356,6 @@ fn dupe_group_key_is_stable_for_sorted_deduplicated_files() {
 }
 
 #[test]
-fn preexisting_dupe_group_keys_collects_only_groups_outside_added_lines() {
-    let root = root();
-    let a = root.join("src/a.ts");
-    let b = root.join("src/b.ts");
-    let c = root.join("src/c.ts");
-    // Instances span lines 1..=5. The diff adds line 3 in src/c.ts only.
-    let untouched = make_clone_group(&[a.clone(), b], "shared scaffolding");
-    let touched = make_clone_group(&[a, c], "pasted block");
-    let diff = fallow_output::DiffIndex::from_unified_diff(
-        "diff --git a/src/c.ts b/src/c.ts\n--- a/src/c.ts\n+++ b/src/c.ts\n@@ -3,0 +3,1 @@\n+const added = 1;\n",
-    );
-
-    let demote = super::preexisting_dupe_group_keys([&untouched, &touched], &root, &diff);
-
-    assert!(demote.contains(&dupe_group_key(&untouched, &root)));
-    assert!(!demote.contains(&dupe_group_key(&touched, &root)));
-    assert_eq!(demote.len(), 1);
-}
-
-#[test]
 fn demote_introductions_moves_introduced_keys_to_inherited() {
     let base: FxHashSet<String> = std::iter::once("dupe:old".to_string()).collect();
     let mut ledger = AuditDomainLedger::compare(
@@ -1594,6 +1551,8 @@ fn retain_introduced_dead_code_filters_graph_findings() {
         .push(ReExportCycleFinding::with_actions(ReExportCycle {
             files: vec![a],
             kind: ReExportCycleKind::SelfLoop,
+            line: 0,
+            col: 0,
         }));
 
     // The circular dep is in the base; the re-export cycle is new.
@@ -2104,6 +2063,7 @@ fn audit_ledger_errors_match_the_exit_code_rule_for_every_collection() {
         unused_store_member_results(&root),
         unused_namespace_member_results(&root),
         unused_protected_class_member_results(&root),
+        namespace_escape_results(&root),
         production_and_directive_results(&root),
         AnalysisResults {
             prop_drilling_chains: vec![PropDrillingChainFinding::with_actions(PropDrillingChain {
@@ -2357,3 +2317,78 @@ fn a_renamed_file_keeps_its_findings_and_occurrences_inherited() {
 
     assert_eq!(base, dead_code_keys(&head, &root));
 }
+
+#[test]
+fn a_renamed_file_with_an_escaped_path_keeps_its_findings_inherited() {
+    let root = root();
+    let finding = |path: &str| {
+        let mut suppression = audit_suppression(&root, 3, None);
+        suppression.path = root.join(path);
+        suppression
+    };
+    let base_results = AnalysisResults {
+        stale_suppressions: vec![finding("src/100%old.ts")],
+        ..AnalysisResults::default()
+    };
+    let head = AnalysisResults {
+        stale_suppressions: vec![finding("src/100%new.ts")],
+        ..AnalysisResults::default()
+    };
+    let renames = rustc_hash::FxHashMap::from_iter([(
+        "src/100%old.ts".to_string(),
+        "src/100%new.ts".to_string(),
+    )]);
+
+    let base = remap_keys_for_renames(&dead_code_keys(&base_results, &root), &renames);
+
+    assert_eq!(base, dead_code_keys(&head, &root));
+}
+
+fn cycle_results(root: &Path, files: &[&str]) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results
+        .circular_dependencies
+        .push(CircularDependencyFinding::with_actions(
+            CircularDependency {
+                files: files.iter().map(|file| root.join(file)).collect(),
+                length: files.len(),
+                line: 1,
+                col: 0,
+                edges: Vec::new(),
+                is_cross_package: false,
+            },
+        ));
+    results
+}
+
+#[test]
+fn a_renamed_cycle_member_with_an_escaped_path_keeps_the_cycle_inherited() {
+    let root = root();
+    let base = cycle_results(&root, &["src/100%old.ts", "src/b.ts"]);
+    let head = cycle_results(&root, &["src/100%new.ts", "src/b.ts"]);
+    let renames = rustc_hash::FxHashMap::from_iter([(
+        "src/100%old.ts".to_string(),
+        "src/100%new.ts".to_string(),
+    )]);
+
+    let remapped = remap_keys_for_renames(&dead_code_keys(&base, &root), &renames);
+
+    assert_eq!(remapped, dead_code_keys(&head, &root));
+}
+
+#[test]
+fn a_renamed_cycle_member_sorts_like_the_head_key() {
+    let root = root();
+    let base = cycle_results(&root, &["src/a/old.ts", "src/a:x.ts"]);
+    let head = cycle_results(&root, &["src/a/y.ts", "src/a:x.ts"]);
+    let renames =
+        rustc_hash::FxHashMap::from_iter([("src/a/old.ts".to_string(), "src/a/y.ts".to_string())]);
+
+    let remapped = remap_keys_for_renames(&dead_code_keys(&base, &root), &renames);
+
+    assert_eq!(remapped, dead_code_keys(&head, &root));
+}
+
+#[path = "audit_keys_member_tests.rs"]
+mod member_fixtures;
+use member_fixtures::{namespace_escape_results, unused_protected_class_member_results};

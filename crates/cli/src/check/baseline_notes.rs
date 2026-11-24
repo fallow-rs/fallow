@@ -31,6 +31,7 @@ impl IssueFilters {
             "unused_class_members" => self.unused_class_members,
             "unused_namespace_members" => self.unused_namespace_members,
             "unused_protected_class_members" => self.unused_protected_class_members,
+            "namespace_escapes" => self.namespace_escapes,
             "unused_store_members" => self.unused_store_members,
             "unlisted_dependencies" => self.unlisted_deps,
             "unlisted_binaries" => self.unlisted_binaries,
@@ -241,42 +242,6 @@ pub(super) fn run_notes(
     );
     notes.extend(loaded.and_then(|loaded| loaded.install_state.clone()));
     notes
-}
-
-/// Warn when a loaded baseline no longer describes the current project: either
-/// nothing in it matched, or a large enough share of it matched nothing.
-///
-/// Every guard lives in the shared decision, so `dead-code`, `dupes` and
-/// `health` are silent in the same situations: a run narrowed to part of the
-/// project (re-saving from one would drop every entry the run never looked at)
-/// and a run that produced no findings at all (where a cleaned project and a
-/// rotted baseline are indistinguishable from here).
-pub(super) fn warn_on_staleness(
-    staleness: crate::baseline::BaselineStaleness,
-    baseline_path: &std::path::Path,
-    saved_mode: fallow_output::BaselineMode,
-) {
-    let baseline_entries = staleness.entries;
-    let stale_entries = staleness.stale_entries();
-    match staleness.warning() {
-        crate::baseline::BaselineStalenessWarning::None => {}
-        crate::baseline::BaselineStalenessWarning::ZeroOverlap => eprintln!(
-            "Warning: baseline has {baseline_entries} entries but matched \
-             0 current issues. Your paths may have changed, or the baseline \
-             was saved on a different machine. Re-save with: \
-             --save-baseline {}",
-            baseline_path.display(),
-        ),
-        crate::baseline::BaselineStalenessWarning::Partial => eprintln!(
-            "Warning: baseline is partially stale: {stale_entries} of \
-             {baseline_entries} entries matched no current issue, so the \
-             gate protects less than what was saved. Remove only the stale \
-             entries with: {}, or re-save with: --save-baseline {}",
-            fallow_engine::baseline::BaselineKind::DeadCode
-                .prune_command(baseline_path, saved_mode),
-            baseline_path.display(),
-        ),
-    }
 }
 
 #[cfg(test)]

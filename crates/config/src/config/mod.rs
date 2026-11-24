@@ -9,6 +9,7 @@ mod format;
 pub mod glob_validation;
 mod health;
 mod ignore_patterns;
+mod keep_export_tags;
 mod legacy_glob;
 mod markup_extensions;
 mod mutation;
@@ -49,6 +50,7 @@ pub use health::{
     OwnershipConfig,
 };
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
+pub use keep_export_tags::{KeepExportTag, KeepExportTags};
 pub use legacy_glob::{
     LegacyGlobGroup, LegacyGlobNarrowing, find_legacy_glob_narrowings, has_single_segment_wildcard,
     suggest_cross_directory_rewrite,
@@ -290,6 +292,18 @@ pub struct EffectConfig {
     /// (`Schema.Struct({...})`, `Schema.String.pipe(Schema.brand("Id"))`).
     /// Each `pipe` argument must be a `Schema` transform, or a call of an
     /// `HttpApiSchema` transform such as `HttpApiSchema.status(201)`.
+    /// A const whose value is a call of a function is a schema when each
+    /// `return` of the function is a schema (`const makeUser = () =>
+    /// Schema.Struct({...})`, then `export const User = makeUser()`). The
+    /// function can be in the same module or in an imported module. The
+    /// export of the function itself stays an unused export. A conditional
+    /// expression whose two branches are schemas, a member of a namespace
+    /// import, a call of a function that returns a schema argument, a member
+    /// of a local `const` object or array literal, and a destructured export
+    /// of such a member also count. A lowercase `Schema` member counts when
+    /// its declared return type is a schema in effect 3 or effect 4
+    /// (`Schema.optional(...)`, `Schema.mutable(...)`), and only as a call.
+    /// Decoders, encoders, guards, filters and annotation ids do not count.
     /// `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`.
     /// Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -509,6 +523,10 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
 
+    /// The JSDoc visibility tags that keep an export out of `unused-export`: `public` (also `@api public`), `internal`, `alpha` and `beta`, with or without a leading `@`. The default lists all four, so a tagged export never gets an `unused-export` finding and counts as public API for the re-exports that forward it. A tag that is not in the list has no effect: fallow checks the export like an untagged one. Set `["public"]` when `@internal`, `@alpha` and `@beta` mark code that no consumer outside the project uses, for example `/** @internal Exported for tests. */`. `[]` also checks `@public` exports. `@expected-unused` is not configurable.
+    #[serde(default)]
+    pub keep_export_tags: KeepExportTags,
+
     /// A list of decorator names that no longer grant a class member automatic exemption from `unused-class-member`: a member whose every decorator is in this set is checked normally, while a member carrying any decorator NOT listed here stays skipped (frameworks consume decorated members reflectively). Dotted entries match the full decorator path (`ns.foo`) and bare entries match the leftmost segment (so `"decorators"` collapses every `@decorators.*`); both `"@step"` and `"step"` are accepted (leading `@` stripped), and an unmatched entry emits a one-time warning.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(extend("default" = []))]
@@ -566,7 +584,7 @@ pub struct FallowConfig {
     pub circular_dependencies: CircularDependenciesConfig,
 
     #[serde(default, skip_serializing_if = "EffectConfig::is_default")]
-    /// Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ "schemaExportsAsTypes": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand("Id"))`) as an unused type under the `unused-types` rule, not as an unused export, so `"unused-types": "off"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand("Id"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. Default `false` leaves every report unchanged.
+    /// Options for projects that use the Effect library. Its one key is `schemaExportsAsTypes`. Set `{ "schemaExportsAsTypes": true }` to report an unused exported Effect schema (a class that extends `Schema.Class`, `Schema.TaggedClass`, `Schema.TaggedError` and the other `Schema` class factories, or a const such as `Schema.Struct({...})` or `Schema.String.pipe(Schema.brand("Id"))`) as an unused type under the `unused-types` rule, not as an unused export, so `"unused-types": "off"` hides it. `Schema` must come from `effect`, `effect/Schema` or `@effect/schema`. A re-export of a schema from another module also counts. In a module that imports Effect, a chain on an imported schema (`Imported.pipe(Schema.brand("Id"))`, `Imported.annotations({...})`) and an alias (`export const Copy = Imported`) also count. A call of a function whose each `return` is a schema also counts (`export const User = makeUser()`), for a function of the same module or of an imported module. A conditional expression whose two branches are schemas (`flag ? Schema.String : Schema.Number`), a member of a namespace import (`Imported.makeUser()`), a call of a function that returns its schema argument (`identity(Schema.String)`), a member of a local `const` object or array literal (`schemas[0]`, `factories.make()`) and a destructured export of such a member also count. A call of a lowercase `Schema` member counts when its declared return type is a schema in effect 3 or effect 4 (`Schema.optional(...)`); decoders, encoders, guards and annotation ids such as `Schema.BrandSchemaId` do not. Default `false` leaves every report unchanged.
     pub effect: EffectConfig,
 
     /// Configures architecture boundary enforcement: which source directories belong to which named zone and which zones may import which others, reported as boundary-violation, boundary-coverage-violation, and boundary-call-violation findings (severity via rules.boundary-violation, default error). Set to enforce a layered/module architecture; the object holds `preset` (one of layered, hexagonal, feature-sliced, bulletproof, whose default zones/rules are merged in with the user-declared zones/rules taking precedence), `zones` (each with `name`, `patterns`, `autoDiscover`, optional `root`), `rules` (each with `from`, `allow`, `allowTypeOnly` target-zone lists), `coverage` (`requireAllFiles` plus `allowUnmatched` globs for files matching no zone), and `calls` (a `forbidden` list of `{from, callee}` banned-call rules per zone).
@@ -647,7 +665,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub sealed: bool,
 
-    /// When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (for example a misspelled `meatdata` in place of `metadata`) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.
+    /// When true, fallow checks the exports of every entry-point file for unused exports. When false, fallow credits all exports of an entry file as used, unless a plugin `usedExports` rule matches the file: then fallow checks the other exports of that file, so a stray export in a framework route (for example a misspelled `meatdata` in place of `metadata`) is flagged without this setting. The setting extends the check to package entries and other entry files that no plugin rule matches; the names in plugin `usedExports` lists stay credited. A name that an entry file re-exports with `export *` needs an importer too: fallow reports an unused one at its declaration, and an `ignoreExports` rule on the entry file covers the names behind its `export *` lines. The setting also turns on the unused enum member, class member and namespace member checks for the exports that an entry file declares. Boolean, defaults to false; the CLI flag --include-entry-exports applies the same behavior for one run.
     #[serde(default)]
     pub include_entry_exports: bool,
 

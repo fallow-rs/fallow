@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 
 use fallow_api::{
     AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
-    DuplicationOptions, FeatureFlagsOptions, ListBoundariesOptions, MutationRunOptions,
-    MutationRunScope, ProgrammaticError, ProjectInfoOptions, load_health_config, plan_mutation,
-    run_audit, run_combined, run_dead_code, run_duplication, run_feature_flags, run_health,
-    run_list_boundaries, run_project_info,
+    DuplicationOptions, FeatureFlagsOptions, FeatureFlagsRetirementOptions, ListBoundariesOptions,
+    MutationRunOptions, MutationRunScope, ProgrammaticError, ProjectInfoOptions,
+    load_health_config, plan_mutation, run_audit, run_combined, run_dead_code, run_duplication,
+    run_feature_flags, run_health, run_list_boundaries, run_project_info,
 };
 
 use crate::common::{commit, git, write};
@@ -283,4 +283,33 @@ fn the_health_config_layer_reads_a_config_that_does_not_validate() {
         .expect("the health section loads")
         .expect("the project has a config file");
     assert_eq!(config.max_cyclomatic, 7);
+}
+
+#[test]
+fn two_vendor_keys_with_one_flag_name_keep_the_flag_state_code() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = project(dir.path(), Some(r#"{"flags":{"vendorKeyPrefix":"app."}}"#));
+    let state = root.join("state.json");
+    write(
+        &root,
+        "state.json",
+        r#"{"schema_version":1,"source":"x","exported_at":"2026-01-01","flags":[{"key":"checkout","state":"on"},{"key":"app.checkout","state":"off"}]}"#,
+    );
+    let err = run_feature_flags(&FeatureFlagsOptions {
+        analysis: analysis(&root),
+        retirement: Some(FeatureFlagsRetirementOptions {
+            flag_state: Some(state),
+            ..FeatureFlagsRetirementOptions::default()
+        }),
+        ..FeatureFlagsOptions::default()
+    })
+    .expect_err("two keys name `checkout`");
+    assert_pair(
+        "feature flags",
+        &err,
+        (
+            "FALLOW_FLAG_STATE_INVALID",
+            "feature-flags.retirement.flagState",
+        ),
+    );
 }

@@ -9,7 +9,7 @@ pub use crate::complexity_contribution::{
     ComplexityContribution, ComplexityContributionKind, ComplexityMetric,
 };
 use crate::discover::FileId;
-use crate::suppress::{Suppression, UnknownSuppressionKind};
+use crate::{inline_threshold::InlineThresholdOverrides, suppress::Suppression};
 #[path = "extract_playwright_facts.rs"]
 mod playwright_facts;
 use playwright_facts::{
@@ -76,13 +76,12 @@ pub struct ModuleInfo {
     pub parse_nesting_too_deep: bool,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
-    /// Suppression tokens that did not parse to any known `IssueKind`.
-    /// Surfaced as `StaleSuppression` findings via `find_stale` so users see
-    /// typos or obsolete kind names instead of having the entire marker
-    /// silently discarded. See issue #449.
-    pub unknown_suppression_kinds: Vec<UnknownSuppressionKind>,
+    /// Suppression tokens that parse to no `IssueKind`, reported as stale (issue #449).
+    pub unknown_suppression_kinds: Vec<crate::suppress::UnknownSuppressionKind>,
     /// Range suppression markers with a problem. They have no effect.
     pub range_marker_problems: Vec<crate::suppress::RangeMarkerProblem>,
+    /// `fallow-override-threshold-next-line` comments and their problems.
+    pub inline_threshold_overrides: InlineThresholdOverrides,
     /// Local names of import bindings that are never referenced in this file.
     /// Populated via `oxc_semantic` scope analysis. Used at graph-build time
     /// to skip adding references for imports whose binding is never read,
@@ -472,6 +471,7 @@ impl ModuleInfo {
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
             range_marker_problems: Vec::new(),
+            inline_threshold_overrides: InlineThresholdOverrides::default(),
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -1374,6 +1374,9 @@ pub struct CssAnalytics {
     pub defined_keyframes: Vec<String>,
     /// Distinct `@keyframes` names referenced via `animation` / `animation-name`.
     pub referenced_keyframes: Vec<String>,
+    /// First 1-based rule line per `referenced_keyframes` name, sorted (internal staging).
+    #[serde(skip)]
+    pub keyframe_reference_lines: Vec<(String, u32)>,
     /// Distinct custom properties registered via an `@property` rule, sorted.
     pub registered_custom_properties: Vec<String>,
     /// Distinct cascade layers declared (via `@layer a, b;` statements or named
@@ -1390,12 +1393,9 @@ pub struct CssAnalytics {
     /// Distinct font families referenced via `font-family` / `font` in the
     /// stylesheet, sorted (generic keywords like `serif` excluded).
     pub referenced_font_families: Vec<String>,
-    /// Per-rule declaration-block fingerprints for rules at or above the minimum
-    /// block size, used to detect duplicate declaration blocks across the
-    /// project. Internal staging consumed by the health layer; never serialized
-    /// (the public output is the grouped `duplicate_declaration_blocks`).
+    /// Declaration-block fingerprints of rules at or above the minimum block size.
+    /// Internal staging for duplicate-block detection, never serialized.
     #[serde(skip)]
-    #[cfg_attr(feature = "schema", schemars(skip))]
     pub declaration_blocks: Vec<CssDeclarationBlock>,
 }
 
@@ -3487,7 +3487,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1576);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1624);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]

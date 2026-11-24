@@ -1,0 +1,238 @@
+name: Skills companion sync
+
+# A merge that changes the released skills makes the "Public skills contract"
+# job on main fail until fallow-rs/fallow-skills publishes the change. This
+# workflow prepares that companion commit with
+# scripts/sync-skills-companion.mjs and opens or updates one sync pull request
+# in fallow-skills. GITHUB_TOKEN cannot write to another repository, so the
+# publish job needs the SKILLS_SYNC_APP_CLIENT_ID variable and the
+# SKILLS_SYNC_APP_PRIVATE_KEY secret, or the SKILLS_SYNC_TOKEN secret. Without
+# them, the workflow prints a notice and passes. See "Skills companion sync" in
+# docs/development/knowledge-architecture.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - npm/fallow/skills/**
+      - scripts/released-skills.mjs
+      - scripts/sync-skills-companion.mjs
+      - scripts/vendor-skills.mjs
+      - .github/workflows/skills-companion-sync.yml
+  workflow_dispatch:
+
+permissions: {}
+
+# One run at a time on main. A queued run replaces an older queued run, and
+# each run syncs to its own commit, so the newest merge always ends up in the
+# pull request. The ref keeps a dispatch on another branch out of the group.
+concurrency:
+  group: skills-companion-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COMPANION_REPOSITORY: fallow-rs/fallow-skills
+  # One branch for every sync, so open pull requests never compete.
+  SYNC_BRANCH: sync-fallow-skills
+
+jobs:
+  # This job runs the companion checks, which execute code from the companion
+  # repository. That code can change the runner and the files of later steps,
+  # so this job has no credential and hands over only a git bundle.
+  prepare:
+    name: Prepare the companion commit
+    if: github.repository == 'fallow-rs/fallow' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.credential.outputs.mode }}
+      committed: ${{ steps.sync.outputs.committed }}
+      base: ${{ steps.sync.outputs.base }}
+      commit: ${{ steps.sync.outputs.commit }}
+    steps:
+      - name: Select the cross-repository credential
+        id: credential
+        env:
+          APP_CLIENT_ID: ${{ vars.SKILLS_SYNC_APP_CLIENT_ID }}
+          HAS_APP_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY != '' }}
+          HAS_TOKEN: ${{ secrets.SKILLS_SYNC_TOKEN != '' }}
+        run: |
+          if [ -n "$APP_CLIENT_ID" ] && [ "$HAS_APP_KEY" = "true" ]; then
+            mode=app
+          elif [ "$HAS_TOKEN" = "true" ]; then
+            mode=token
+          else
+            mode=none
+            echo "::notice title=Skills companion sync::No credential for $COMPANION_REPOSITORY. Set the SKILLS_SYNC_APP_CLIENT_ID variable and the SKILLS_SYNC_APP_PRIVATE_KEY secret, or the SKILLS_SYNC_TOKEN secret (docs/development/knowledge-architecture.md). Until then, sync by hand with node scripts/sync-skills-companion.mjs --pin $GITHUB_SHA."
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      # The pin must be on origin/main, and the sync reads the history from the
+      # published pin to this commit, so the checkout needs the full history.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.credential.outputs.mode != 'none'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.credential.outputs.mode != 'none'
+        with:
+          repository: fallow-rs/fallow-skills
+          ref: main
+          path: .fallow-skills-src
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.credential.outputs.mode != 'none'
+        with:
+          node-version: '26'
+
+      # The companion checks import PyYAML. The user site leaves the system
+      # distribution in place, as the companion validate workflow does.
+      - name: Install the companion check dependencies
+        if: steps.credential.outputs.mode != 'none'
+        run: |
+          python3 -c 'import yaml' 2>/dev/null ||
+            python3 -m pip install --quiet --disable-pip-version-check \
+              --user --break-system-packages pyyaml
+          python3 -c 'import yaml'
+
+      # The publish job sets the real author.
+      - name: Prepare the companion commit
+        id: sync
+        if: steps.credential.outputs.mode != 'none'
+        env:
+          FALLOW_SKILLS_DIR: ${{ github.workspace }}/.fallow-skills-src
+        run: |
+          set -euo pipefail
+          git -C "$FALLOW_SKILLS_DIR" config user.name "Fallow skills sync"
+          git -C "$FALLOW_SKILLS_DIR" config user.email "skills-sync@invalid"
+          before=$(git -C "$FALLOW_SKILLS_DIR" rev-parse HEAD)
+          node scripts/sync-skills-companion.mjs --pin "$GITHUB_SHA" --no-gpg-sign
+          after=$(git -C "$FALLOW_SKILLS_DIR" rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git -C "$FALLOW_SKILLS_DIR" bundle create "$RUNNER_TEMP/sync.bundle" HEAD "^$before"
+          {
+            echo "committed=true"
+            echo "base=$before"
+            echo "commit=$after"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.sync.outputs.committed == 'true'
+        with:
+          name: skills-companion-sync
+          path: ${{ runner.temp }}/sync.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  # This job holds the token on a fresh runner. It runs no repository code:
+  # only git and gh, with the hooks of git turned off.
+  publish:
+    name: Open or update the sync pull request
+    needs: prepare
+    if: needs.prepare.outputs.mode != 'none' && needs.prepare.outputs.mode != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Create the GitHub App token
+        id: app
+        if: needs.prepare.outputs.mode == 'app'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.SKILLS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+          owner: fallow-rs
+          repositories: fallow-skills
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.prepare.outputs.committed == 'true'
+        with:
+          repository: fallow-rs/fallow-skills
+          ref: main
+          path: companion
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.prepare.outputs.committed == 'true'
+        with:
+          name: skills-companion-sync
+          path: ${{ runner.temp }}/bundle
+
+      - name: Open or update the sync pull request
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.SKILLS_SYNC_TOKEN }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          COMMITTED: ${{ needs.prepare.outputs.committed }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          open_pr=$(gh pr list --repo "$COMPANION_REPOSITORY" --base main --head "$SYNC_BRANCH" \
+            --state open --json number --jq '.[0].number // empty')
+          if [ "$COMMITTED" != "true" ]; then
+            # A sync pull request for an older commit would roll the companion back.
+            if [ -n "$open_pr" ]; then
+              gh pr close "$open_pr" --repo "$COMPANION_REPOSITORY" \
+                --comment "The companion already publishes fallow-rs/fallow@${GITHUB_SHA:0:9}. Closed by $RUN_URL."
+            fi
+            echo "The companion needs no sync for $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          safe_git() { git -C companion -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+          if [ "$(safe_git rev-parse HEAD)" != "$BASE" ]; then
+            echo "::warning title=Skills companion sync::The main branch of $COMPANION_REPOSITORY moved during this run. Start this workflow again on main."
+            exit 0
+          fi
+          safe_git fetch --quiet "$RUNNER_TEMP/bundle/sync.bundle" HEAD
+          # The commit must be one commit on top of the companion main branch.
+          if [ "$(safe_git rev-parse FETCH_HEAD)" != "$COMMIT" ] ||
+            [ "$(safe_git rev-parse FETCH_HEAD~1)" != "$BASE" ]; then
+            echo "::error title=Skills companion sync::The bundle does not hold the prepared commit on $BASE."
+            exit 1
+          fi
+          safe_git checkout --quiet --detach "$COMMIT"
+          # The DCO check needs a sign-off that matches the author, so the
+          # account that pushes becomes the author of the commit.
+          if [ -n "$APP_SLUG" ]; then
+            login="${APP_SLUG}[bot]"
+            id=$(gh api "users/$login" --jq .id)
+          else
+            login=$(gh api user --jq .login)
+            id=$(gh api user --jq .id)
+          fi
+          safe_git config user.name "$login"
+          safe_git config user.email "$id+$login@users.noreply.github.com"
+          message=$(safe_git log -1 --format=%B | grep -v '^Signed-off-by: ')
+          safe_git commit --quiet --amend --reset-author --no-gpg-sign -s -m "$message"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          # The branch holds only commits of this workflow, and each run
+          # rebuilds it from the companion main branch.
+          safe_git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push --force --quiet "https://github.com/$COMPANION_REPOSITORY.git" \
+            "HEAD:refs/heads/$SYNC_BRANCH"
+          title=$(safe_git log -1 --format=%s)
+          body="Syncs the released Fallow skill from fallow-rs/fallow@${GITHUB_SHA:0:9}. The fallow workflow run $RUN_URL prepared this commit with scripts/sync-skills-companion.mjs."
+          if [ -n "$open_pr" ]; then
+            gh pr edit "$open_pr" --repo "$COMPANION_REPOSITORY" --title "$title" --body "$body"
+            url=$(gh pr view "$open_pr" --repo "$COMPANION_REPOSITORY" --json url --jq .url)
+          else
+            url=$(gh pr create --repo "$COMPANION_REPOSITORY" --base main --head "$SYNC_BRANCH" \
+              --title "$title" --body "$body")
+          fi
+          echo "Sync pull request: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "After the merge, run the failed \"Public skills contract\" job on main again." >> "$GITHUB_STEP_SUMMARY"

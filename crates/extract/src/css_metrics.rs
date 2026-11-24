@@ -29,7 +29,7 @@ use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use lightningcss::traits::{Parse, ToCss};
 use lightningcss::values::color::CssColor;
 use lightningcss::visitor::{VisitTypes, Visitor};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
     CssAnalytics, CssCustomPropertyDefinition, CssDeclarationBlock, CssRawStyleValue, CssRuleMetric,
@@ -107,6 +107,10 @@ fn css_analytics_unbounded(source: &str) -> Option<CssAnalytics> {
     analytics.defined_custom_properties = sorted_vec(acc.defined_custom_properties);
     analytics.defined_keyframes = sorted_vec(acc.defined_keyframes);
     analytics.referenced_keyframes = sorted_vec(acc.referenced_keyframes);
+    let mut keyframe_reference_lines: Vec<(String, u32)> =
+        acc.keyframe_reference_lines.into_iter().collect();
+    keyframe_reference_lines.sort_unstable();
+    analytics.keyframe_reference_lines = keyframe_reference_lines;
     analytics.registered_custom_properties = sorted_vec(acc.registered_custom_properties);
     analytics.declared_layers = sorted_vec(acc.declared_layers);
     analytics.populated_layers = sorted_vec(acc.populated_layers);
@@ -128,6 +132,7 @@ struct Accumulator {
     defined_custom_properties: FxHashSet<String>,
     defined_keyframes: FxHashSet<String>,
     referenced_keyframes: FxHashSet<String>,
+    keyframe_reference_lines: FxHashMap<String, u32>,
     registered_custom_properties: FxHashSet<String>,
     declared_layers: FxHashSet<String>,
     populated_layers: FxHashSet<String>,
@@ -507,15 +512,21 @@ fn collect_property_tokens(property: &Property<'_>, acc: &mut Accumulator, rule_
             collect_custom_property_tokens(custom, property, acc, rule_line);
         }
         Property::AnimationName(names, _) => {
-            collect_animation_references(names, &mut acc.referenced_keyframes);
+            let mut found = FxHashSet::default();
+            collect_animation_references(names, &mut found);
+            record_keyframe_references(acc, found, rule_line);
         }
         Property::Animation(animations, _) => {
+            let mut found = FxHashSet::default();
             for animation in animations {
-                collect_animation_name(&animation.name, &mut acc.referenced_keyframes);
+                collect_animation_name(&animation.name, &mut found);
             }
+            record_keyframe_references(acc, found, rule_line);
         }
         Property::Unparsed(unparsed) => {
-            collect_unparsed_animation_references(unparsed, &mut acc.referenced_keyframes);
+            let mut found = FxHashSet::default();
+            collect_unparsed_animation_references(unparsed, &mut found);
+            record_keyframe_references(acc, found, rule_line);
         }
         Property::FontFamily(families) => {
             collect_font_family_references(families, &mut acc.referenced_font_families);
@@ -637,6 +648,18 @@ fn collect_box_shadow_tokens(shadows: &[BoxShadow], acc: &mut Accumulator) {
         .collect();
     if !rendered.is_empty() && rendered.len() == shadows.len() {
         acc.box_shadows.insert(rendered.join(", "));
+    }
+}
+
+/// Add the `@keyframes` names of one declaration to `acc`, with the first
+/// rule line that references each name.
+fn record_keyframe_references(acc: &mut Accumulator, names: FxHashSet<String>, rule_line: u32) {
+    for name in names {
+        acc.keyframe_reference_lines
+            .entry(name.clone())
+            .and_modify(|line| *line = (*line).min(rule_line))
+            .or_insert(rule_line);
+        acc.referenced_keyframes.insert(name);
     }
 }
 
@@ -1211,6 +1234,18 @@ mod tests {
             !a.referenced_custom_properties
                 .contains(&"--unused".to_string()),
             "--unused has no var() reference"
+        );
+    }
+
+    #[test]
+    fn keyframe_references_have_the_line_of_the_first_rule() {
+        let a = analytics(
+            ".a {\n  color: red;\n}\n\n.toast {\n  animation: fade-in 1s;\n}\n\
+             .b { animation-name: fade-in, spin; }\n",
+        );
+        assert_eq!(
+            a.keyframe_reference_lines,
+            vec![("fade-in".to_string(), 5), ("spin".to_string(), 8)]
         );
     }
 

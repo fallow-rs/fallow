@@ -628,6 +628,7 @@ mod tests {
             compiled_ignore_catalog_references: vec![],
             compiled_ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            keep_export_tags: fallow_config::KeepExportTags::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props_ignore: None,

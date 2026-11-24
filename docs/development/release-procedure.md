@@ -219,7 +219,10 @@ invariants in this file.
    Keep that base contract synchronized before opening the release pull
    request. Review and validate the candidate generated contract locally;
    synchronize its merged content after the protected merge, then require
-   the main contract check to pass. Do not bypass either check.
+   the main contract check to pass. Do not bypass either check. The job also
+   compares the pull request head with the companion. Drift there gives a
+   warning, not a failure: the merge needs the companion sync, which the
+   `skills-companion-sync.yml` workflow opens when its credential is set.
 
    Three version-bearing manifests sit outside the workspace bump.
    `scripts/sync-npm-versions.sh` rewrites each of them and is wired to no
@@ -315,7 +318,10 @@ invariants in this file.
     `main`. Capture the actual merged SHA, not the signed local commit or
     pull request head.
 
-    Synchronize `fallow-skills` against that merged tree with
+    Synchronize `fallow-skills` against that merged tree. When the release
+    commit changes the released skills and the `skills-companion-sync.yml`
+    workflow has its credential, the workflow opens the companion pull
+    request: review and merge it. Otherwise run
     `node scripts/sync-skills-companion.mjs --pin "$RELEASE_COMMIT"`.
     The helper reads committed content, checks that the pin is on
     `origin/main`, and prepares a companion commit only when released skill

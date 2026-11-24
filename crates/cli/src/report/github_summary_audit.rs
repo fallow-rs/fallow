@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// The duplication findings of the summary table: the clone regions when the
+/// audit graded them, so the row counts the same unit as its introduced and
+/// inherited columns, else the clone groups.
+fn duplication_findings(env: &Value, summary: &Value) -> String {
+    env.get("duplication")
+        .and_then(|duplication| duplication.get("clone_regions"))
+        .and_then(Value::as_array)
+        .map_or_else(
+            || num(summary, "duplication_clone_groups"),
+            |regions| regions.len().to_string(),
+        )
+}
+
 /// Port of `summary-audit.jq`.
 #[must_use]
 pub(super) fn render_audit_summary(env: &Value) -> String {
@@ -45,7 +58,7 @@ pub(super) fn render_audit_summary(env: &Value) -> String {
             "Duplication",
             &summary,
             "duplication_skipped",
-            &num(&summary, "duplication_clone_groups"),
+            &duplication_findings(env, &summary),
             &attribution,
             "duplication",
         ),

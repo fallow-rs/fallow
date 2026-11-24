@@ -172,6 +172,9 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    if let Err(code) = check_vendor_key_prefix(vendor_export.as_ref(), &config, opts) {
+        return code;
+    }
     let session = match crate::cli_production::open_session(run, &config) {
         Ok(session) => session,
         Err(err) => return analysis_error(&err, opts.output),
@@ -292,10 +295,11 @@ fn run_regression_gate(
         .as_ref()
         .map(|args| args.reasons.iter().map(|&reason| reason.into()).collect())
         .unwrap_or_default();
-    let regression = RegressionOpts {
+    let mut regression = RegressionOpts {
         scoped: !scope.is_whole_project(),
         ..opts.regression
     };
+    regression.args.retirement = opts.retirement.as_ref();
     report.regression = compare_flags_regression(&regression, &counts, &reasons)?;
     match regression.save_target {
         SaveRegressionTarget::None => Ok(()),
@@ -314,7 +318,7 @@ fn run_regression_gate(
             Ok(())
         }
         SaveRegressionTarget::File(path) => {
-            save_flags_regression_baseline(path, opts.root, &counts, opts.output)
+            save_flags_regression_baseline(path, opts.root, &counts, opts.output, regression.args)
         }
     }
 }
@@ -436,12 +440,31 @@ fn load_vendor_export(opts: &FlagsOptions<'_>) -> Result<Option<VendorExport>, E
     };
     fallow_engine::flag_vendor::load_flag_state(path, opts.root)
         .map(Some)
-        .map_err(|error| {
-            let error = fallow_api::ProgrammaticError::new(error.message, 2)
-                .with_code(FLAG_STATE_ERROR_CODE)
-                .with_help(error.help);
-            crate::error::emit_programmatic_error(&error, opts.output, opts.json_style)
-        })
+        .map_err(|error| emit_flag_state_error(error, opts))
+}
+
+/// Check the export keys against `flags.vendorKeyPrefix` once the config is
+/// known.
+fn check_vendor_key_prefix(
+    export: Option<&VendorExport>,
+    config: &ResolvedConfig,
+    opts: &FlagsOptions<'_>,
+) -> Result<(), ExitCode> {
+    export.map_or(Ok(()), |export| {
+        export
+            .check_key_prefix(config.flags.vendor_key_prefix.as_deref())
+            .map_err(|error| emit_flag_state_error(error, opts))
+    })
+}
+
+fn emit_flag_state_error(
+    error: fallow_engine::flag_vendor::FlagStateError,
+    opts: &FlagsOptions<'_>,
+) -> ExitCode {
+    let error = fallow_api::ProgrammaticError::new(error.message, 2)
+        .with_code(FLAG_STATE_ERROR_CODE)
+        .with_help(error.help);
+    crate::error::emit_programmatic_error(&error, opts.output, opts.json_style)
 }
 
 /// The flag sites and the scope that the retirement report reads.
@@ -608,6 +631,7 @@ fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
             .cmp(&b.path)
             .then(a.line.cmp(&b.line))
             .then(a.flag_name.cmp(&b.flag_name))
+            .then(a.col.cmp(&b.col))
     });
 
     if let Some(top) = top {
@@ -1305,6 +1329,7 @@ fn print_flags_codeclimate(
     config: &ResolvedConfig,
     retirement: Option<&FlagRetirementReport>,
 ) {
+    let mut previous = None;
     let mut issues: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
@@ -1322,12 +1347,19 @@ fn print_flags_codeclimate(
                     f.guarded_dead_exports.len()
                 );
             }
-            let fingerprint = codeclimate_fingerprint_hash(&[
+            let line_fingerprint = codeclimate_fingerprint_hash(&[
                 "feature-flag",
                 &path,
                 &f.line.to_string(),
                 &f.flag_name,
             ]);
+            // The first read keeps the existing CodeClimate identity for this line.
+            let key = (&f.path, f.line, &f.flag_name);
+            let fingerprint = if previous.replace(key) == Some(key) {
+                codeclimate_fingerprint_hash(&[&line_fingerprint, &f.col.to_string()])
+            } else {
+                line_fingerprint
+            };
             serde_json::json!({
                 "type": "issue",
                 "check_name": "fallow/feature-flag",
@@ -1459,6 +1491,7 @@ mod tests {
             regression: RegressionOpts {
                 fail_on_regression: false,
                 tolerance: crate::regression::Tolerance::Absolute(0),
+                args: crate::regression::RegressionArgs::default(),
                 regression_baseline_file: None,
                 save_target: SaveRegressionTarget::None,
                 scoped: false,

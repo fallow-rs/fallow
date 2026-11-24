@@ -36,16 +36,16 @@ use fallow_types::output_dead_code::{
     DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EffectiveSeverity,
     EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
     MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
-    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-    UnlistedBinaryFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
+    MixedClientServerBarrelFinding, NamespaceEscapeFinding, PackageCycleFinding,
+    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    TypeOnlyDependencyFinding, UnlistedBinaryFinding, UnlistedDependencyFinding,
+    UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
+    UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
+    UnusedComponentEmitFinding, UnusedComponentInputFinding, UnusedComponentOutputFinding,
+    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDependencyOverrideFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
     UnusedProtectedClassMemberFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -187,6 +187,7 @@ file_scoped! {
     UnusedClassMemberFinding => member.path, unused_class_members;
     UnusedNamespaceMemberFinding => member.path, unused_namespace_members;
     UnusedProtectedClassMemberFinding => member.path, unused_protected_class_members;
+    NamespaceEscapeFinding => escape.path, namespace_escapes;
     UnusedStoreMemberFinding => member.path, unused_store_members;
     UnprovidedInjectFinding => inject.path, unprovided_injects;
     UnresolvedImportFinding => import.path, unresolved_imports;
@@ -334,7 +335,7 @@ pub fn apply_prop_drilling_severities(results: &mut AnalysisResults, config: &Re
 }
 
 /// Resolve source-owned component health severities without promoting warnings.
-fn apply_component_shape_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
+pub fn apply_component_shape_severities(results: &mut AnalysisResults, config: &ResolvedConfig) {
     let source = SeveritySource::from_config(config);
     retain_component_findings(&mut results.thin_wrappers, &source);
     retain_component_findings(&mut results.duplicate_prop_shapes, &source);
@@ -525,6 +526,7 @@ fn for_each_gated_finding(
         unused_class_members,
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -605,6 +607,7 @@ fn for_each_gated_finding(
     visit(unused_class_members, f);
     visit(unused_namespace_members, f);
     visit(unused_protected_class_members, f);
+    visit(namespace_escapes, f);
     visit(unused_store_members, f);
     visit(unresolved_imports, f);
     visit(unlisted_dependencies, f);
@@ -671,6 +674,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         unused_class_members,
         unused_namespace_members,
         unused_protected_class_members,
+        namespace_escapes,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -747,6 +751,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unused_class_members)
         || tally.add(unused_namespace_members)
         || tally.add(unused_protected_class_members)
+        || tally.add(namespace_escapes)
         || tally.add(unused_store_members)
         || tally.add(unresolved_imports)
         || tally.add(unlisted_dependencies)

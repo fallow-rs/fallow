@@ -22,6 +22,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         ignore_catalog_references: vec![],
         ignore_dependency_overrides: vec![],
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
         unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),

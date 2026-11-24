@@ -274,6 +274,8 @@ pub struct DupesResult {
     pub package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     pub report: DuplicationReport,
     pub default_ignore_skips: DefaultIgnoreSkips,
+    /// The clone groups that `duplicates.ignoredClones` hid from `report`.
+    pub ignored_clone_groups: Vec<fallow_engine::duplicates::IgnoredCloneGroup>,
     pub config: ResolvedConfig,
     pub elapsed: Duration,
     pub threshold: f64,
@@ -482,19 +484,19 @@ fn execute_dupes_inner(
     let change_scope_request = change_scope_request(opts, effective_changed_files);
 
     let mut workspace_diagnostics = Vec::new();
-    let (mut report, default_ignore_skips, change_scope) = match pre_discovered {
+    let (analysis, change_scope) = match pre_discovered {
         Some(files) => {
             let change_scope =
                 resolve_change_scope_for_pre_discovered_files(opts, &config, change_scope_request)?;
             crate::requests::measure_changed_since_scope(&files);
-            let (report, skips) = run_duplication_analysis(
+            let analysis = run_duplication_analysis(
                 opts,
                 &config,
                 &files,
                 &dupes_config,
                 effective_changed_files,
             );
-            (report, skips, change_scope)
+            (analysis, change_scope)
         }
         None => {
             let session = match crate::cli_production::open_session(opts.run, &config) {
@@ -509,16 +511,21 @@ fn execute_dupes_inner(
             crate::requests::measure_changed_since_scope(session.files());
             let change_scope =
                 resolve_change_scope(opts, &config, change_scope_request, session.workspaces())?;
-            let (report, skips) = run_duplication_analysis_with_session(
+            let analysis = run_duplication_analysis_with_session(
                 opts,
                 &session,
                 &dupes_config,
                 effective_changed_files,
             );
             workspace_diagnostics = session.workspace_diagnostics().to_vec();
-            (report, skips, change_scope)
+            (analysis, change_scope)
         }
     };
+    let fallow_engine::duplicates::DuplicationAnalysis {
+        mut report,
+        default_ignore_skips,
+        ignored_clone_groups,
+    } = analysis;
 
     if let Some(trace_spec) = opts.trace {
         fallow_engine::duplicates::apply_scope(
@@ -568,6 +575,7 @@ fn execute_dupes_inner(
         package_baselines: change_scope.package_baselines(),
         report,
         default_ignore_skips,
+        ignored_clone_groups,
         config,
         elapsed,
         threshold: dupes_config.threshold,
@@ -652,6 +660,7 @@ fn apply_duplication_baseline(
 
     let (baseline_data, saved_by, unrecognised_format) =
         read_duplication_baseline(path, opts.output)?;
+    let saved_mode = baseline_data.saved_mode();
     let baseline_entries = baseline_data.entry_count();
     let legacy_keys = baseline_data.has_unparsed_collision_keys();
     let before = report.clone_groups.len();
@@ -673,7 +682,12 @@ fn apply_duplication_baseline(
                 path.display()
             );
         }
-        warn_on_duplication_baseline_staleness(staleness, path);
+        fallow_engine::baseline::BaselineKind::Dupes.warn_on_staleness(
+            staleness,
+            path,
+            saved_mode,
+            &config.root,
+        );
     }
     crate::baseline_gate::note_unrecognised_baseline(
         Some(path),
@@ -691,7 +705,7 @@ fn apply_duplication_baseline(
         scope_reasons,
     });
     Ok(Some(crate::baseline_gate::LoadedBaselineStaleness {
-        saved_mode: fallow_output::BaselineMode::default(),
+        saved_mode,
         uncovered_categories: Vec::new(),
         staleness,
         path: path.to_path_buf(),
@@ -740,35 +754,6 @@ fn read_duplication_baseline(
     Ok((data, saved_by, unrecognised_format))
 }
 
-/// Warn when a loaded duplication baseline no longer describes the current
-/// project, using the same decision as `dead-code` and `health`.
-fn warn_on_duplication_baseline_staleness(
-    staleness: fallow_engine::baseline::BaselineStaleness,
-    path: &std::path::Path,
-) {
-    let baseline_entries = staleness.entries;
-    let stale_entries = staleness.stale_entries();
-    match staleness.warning() {
-        fallow_engine::baseline::BaselineStalenessWarning::None => {}
-        fallow_engine::baseline::BaselineStalenessWarning::ZeroOverlap => eprintln!(
-            "Warning: duplication baseline has {baseline_entries} entries but \
-             matched 0 current clone groups. Your paths may have changed, or \
-             the baseline was saved on a different machine. Re-save with: \
-             --save-baseline {}",
-            path.display(),
-        ),
-        fallow_engine::baseline::BaselineStalenessWarning::Partial => eprintln!(
-            "Warning: duplication baseline is partially stale: {stale_entries} \
-             of {baseline_entries} entries matched no current clone group, so \
-             the gate protects less than what was saved. Remove only the stale \
-             entries with: {}, or re-save with: --save-baseline {}",
-            fallow_engine::baseline::BaselineKind::Dupes
-                .prune_command(path, fallow_output::BaselineMode::default()),
-            path.display(),
-        ),
-    }
-}
-
 /// Resolve `--changed-since` to a concrete file set up front so the focused
 /// fast path engages (shingle prefilter + extraction-time interval pruning)
 /// instead of a full-corpus scan followed by a redundant post-filter.
@@ -788,53 +773,9 @@ fn resolve_changed_since(
 
 use fallow_engine::duplicates::apply_top;
 
-fn run_duplication_analysis(
-    opts: &DupesOptions<'_>,
-    config: &ResolvedConfig,
-    files: &[fallow_types::discover::DiscoveredFile],
-    dupes_config: &fallow_config::DuplicatesConfig,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let cache_dir = (!opts.no_cache).then_some(config.cache_dir.as_path());
-    let analysis = if let Some(changed_files) = changed_files {
-        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-        fallow_engine::duplicates::find_duplicates_touching_files_with_defaults(
-            &config.root,
-            files,
-            dupes_config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        fallow_engine::duplicates::find_duplicates_with_defaults(
-            &config.root,
-            files,
-            dupes_config,
-            cache_dir,
-        )
-    };
-    (analysis.report, analysis.default_ignore_skips)
-}
-
-fn run_duplication_analysis_with_session(
-    opts: &DupesOptions<'_>,
-    session: &fallow_engine::session::AnalysisSession,
-    dupes_config: &fallow_config::DuplicatesConfig,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> (DuplicationReport, DefaultIgnoreSkips) {
-    let cache_dir = (!opts.no_cache).then_some(session.config().cache_dir.as_path());
-    let analysis = if let Some(changed_files) = changed_files {
-        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-        session.find_duplicates_touching_files_with_defaults(
-            dupes_config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        session.find_duplicates_with_defaults(dupes_config, cache_dir)
-    };
-    (analysis.report, analysis.default_ignore_skips)
-}
+#[path = "dupes_analysis.rs"]
+mod analysis;
+use analysis::{run_duplication_analysis, run_duplication_analysis_with_session};
 
 /// The presentation choices a mode hands the duplication renderer.
 ///
@@ -1086,6 +1027,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::Dupes,
+        &result.config.root,
     );
 
     // `--fail-on-issues` and `--ci` fail on any clone group the report shows.

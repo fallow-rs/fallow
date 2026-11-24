@@ -378,6 +378,14 @@ echo "=== Install script: type-aware sidecar ==="
 mkdir -p "$INSTALL_TMP/ta-jsonc" "$INSTALL_TMP/ta-toml" "$INSTALL_TMP/ta-off" \
   "$INSTALL_TMP/ta-audit" "$INSTALL_TMP/ta-pinned" "$INSTALL_TMP/ta-explicit"
 
+# These tests check the root config file reader. A mock CLI that cannot
+# resolve the config keeps a fallow on the PATH of the machine out of them.
+SIDECAR_SAVED_PATH="$PATH"
+mkdir -p "$INSTALL_TMP/no-resolver"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$INSTALL_TMP/no-resolver/fallow"
+chmod +x "$INSTALL_TMP/no-resolver/fallow"
+PATH="$INSTALL_TMP/no-resolver:$PATH"
+
 cat > "$INSTALL_TMP/ta-jsonc/.fallowrc.jsonc" <<'JSONC'
 {
   // semantic evidence for dead-code candidates
@@ -445,6 +453,54 @@ else
   fail "sidecar: invalid type-aware input fails" "expected non-zero exit"
 fi
 assert_contains "$OUT" "Invalid 'type-aware' input" "sidecar: invalid type-aware input explains failure"
+
+# The auto decision reads the config that the fallow CLI resolves, so a
+# typeAware setting in an `extends` base or a parent config counts. A mock CLI
+# stands in for the installed one.
+mkdir -p "$INSTALL_TMP/ta-extends" "$INSTALL_TMP/mock-enabled" \
+  "$INSTALL_TMP/mock-disabled" "$INSTALL_TMP/mock-old"
+cat > "$INSTALL_TMP/ta-extends/.fallowrc.json" <<'JSON'
+{"extends":["./base.json"]}
+JSON
+cat > "$INSTALL_TMP/ta-extends/base.json" <<'JSON'
+{"typeAware":{"enabled":true}}
+JSON
+write_mock_config_cli() {
+  local dir="$1" payload="$2"
+  cat > "$dir/fallow" <<SH
+#!/usr/bin/env bash
+[ "\${1:-}" = "config" ] || exit 2
+printf '%s\n' '$payload'
+SH
+  chmod +x "$dir/fallow"
+}
+write_mock_config_cli "$INSTALL_TMP/mock-enabled" '{"typeAware":{"enabled":true}}'
+write_mock_config_cli "$INSTALL_TMP/mock-disabled" '{"typeAware":{"enabled":false}}'
+printf '#!/usr/bin/env bash\necho "unrecognized subcommand" >&2\nexit 2\n' > "$INSTALL_TMP/mock-old/fallow"
+chmod +x "$INSTALL_TMP/mock-old/fallow"
+
+OUT=$(PATH="$INSTALL_TMP/mock-enabled:$PATH" INPUT_ROOT="$INSTALL_TMP/ta-extends" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Type-aware sidecar enabled via the project fallow config" "sidecar: auto follows typeAware from an extends base"
+
+OUT=$(PATH="$INSTALL_TMP/mock-disabled:$PATH" INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_not_contains "$OUT" "fallow-type-aware@" "sidecar: the resolved config wins over the root config file"
+
+OUT=$(PATH="$INSTALL_TMP/mock-old:$PATH" INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "fallow-type-aware@" "sidecar: a CLI that cannot resolve the config falls back to the root config file"
+
+# Windows cannot start the .mjs sidecar as a program. The CLI then starts Node
+# with the sidecar as its script.
+OUT=$(RUNNER_OS=Windows INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=true FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_BIN=$(node -p 'process.execPath')" "sidecar: Windows starts the sidecar through Node"
+assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_SCRIPT=<tool-dir>/node_modules/fallow-type-aware/fallow-type-aware.mjs" "sidecar: Windows passes the sidecar as the Node script"
+
+OUT=$(RUNNER_OS=Linux INPUT_ROOT="$INSTALL_TMP/empty" INPUT_TYPE_AWARE=true FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: env FALLOW_TYPE_AWARE_BIN=<tool-dir>/node_modules/fallow-type-aware/fallow-type-aware.mjs" "sidecar: Linux starts the sidecar directly"
+assert_not_contains "$OUT" "FALLOW_TYPE_AWARE_SCRIPT" "sidecar: Linux sets no sidecar script"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/ta-jsonc" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "::warning::fallow config could not resolve the project config" "sidecar: a failed config resolution warns before the fallback"
+PATH="$SIDECAR_SAVED_PATH"
 
 # --- Binary verification integration ---
 #
@@ -1410,6 +1466,13 @@ assert_contains "$OUT_ICE" "metadata" "ice: shows export name in section"
 OUT_ICE_ANN=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 2, "export_name": "metadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
 assert_contains "$OUT_ICE_ANN" "::warning file=src/app.ts,line=5,col=3,title=Invalid client export::" "ice: warning-severity annotation"
 
+OUT_NSE_ONE=$(jq '.namespace_escapes = [{"path": "src/app.ts", "line": 3, "col": 7, "local_name": "Formats", "module": "src/formats.ts", "hidden_exports": 1, "reason": "whole-object-use", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_NSE_ONE" "::warning file=src/app.ts,line=3,col=8,title=Namespace escape::namespace Formats is used as a whole value; 1 export of src/formats.ts is not checked." "namespace escape: singular text for one export"
+
+OUT_NSE_MANY=$(jq '.namespace_escapes = [{"path": "src/app.ts", "line": 3, "col": 7, "local_name": "Formats", "module": "src/formats.ts", "hidden_exports": 2, "reason": "re-exported-binding", "actions": []}, {"path": "src/b.ts", "line": 1, "col": 7, "local_name": "Lib", "module": "src/lib.ts", "hidden_exports": 3, "reason": "no-member-read", "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_NSE_MANY" "namespace Formats is re-exported as a whole object; 2 exports of src/formats.ts are not checked." "namespace escape: re-exported binding text"
+assert_contains "$OUT_NSE_MANY" "namespace Lib has no member read by name; 3 exports of src/lib.ts are not checked." "namespace escape: no member read text"
+
 OUT_ICE_FILTERED=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/other.ts", "line": 3, "col": 0, "export_name": "generateMetadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_ICE_FILTERED" '.invalid_client_exports | length' "1" "ice: filter-changed keeps only changed-file findings"
 
@@ -1832,7 +1895,7 @@ assert_contains "$OUT_AUDIT" "Matched 8/10" "audit: shows istanbul match rate"
 assert_contains "$OUT_AUDIT" "### Styling" "audit: has styling details"
 assert_contains "$OUT_AUDIT" "css-selector-complexity" "audit: lists styling rule"
 assert_contains "$OUT_AUDIT" "src/styles.css:4" "audit: lists styling location"
-assert_contains "$OUT_AUDIT" "1 introduced clone group demoted to inherited" "audit: shows demotion footnote"
+assert_contains "$OUT_AUDIT" "1 introduced clone region demoted to inherited" "audit: shows demotion footnote"
 
 OUT_AUDIT_STYLE_NEW=$(jq -n '{
   command: "audit", verdict: "fail", changed_files_count: 1, elapsed_ms: 4,
@@ -2512,6 +2575,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
     GITHUB_SHA="abc123" \
+    GITHUB_API_URL="https://ghe.example/api/v3" \
     PR_HEAD_SHA="head456" \
     FALLOW_COMMAND="check" \
     FALLOW_RENDER_PATH_PREFIX_SET="1" \
@@ -2525,6 +2589,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     GH_REPO="owner/repo" \
     FALLOW_COMMAND="check" \
     FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    GITHUB_API_URL="https://ghe.example/api/v3" \
     FALLOW_RENDER_PATH_PREFIX="custom/base" \
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
@@ -2638,6 +2703,10 @@ assert_contains "$(cat "$ACTION_V3_POSTED" 2>/dev/null)" "fallow-fingerprint:v3:
   "review.sh keeps the v3 marker in the posted comment body"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-pr-comment --provider github" "comment.sh invokes GitHub PR comment post command"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-check-run --provider github" "comment.sh invokes GitHub Check Run post command"
+for operation in post-pr-comment post-review post-check-run; do
+  assert_contains "$(grep -F "fallow ci $operation " <<< "$ACTION_TYPED_OUT")" "--api-url https://ghe.example/api/v3" \
+    "$operation uses the GitHub runner API URL"
+done
 assert_contains "$ACTION_TYPED_OUT" "--head-sha head456" "comment.sh posts Check Run against the PR head SHA"
 assert_contains "$(cat "$ACTION_TYPED_WORK/comment-render-failure.out")" \
   'saved audit envelope is missing required field `version`' \
@@ -3064,6 +3133,63 @@ else
   pass "comment.sh: does not call gh api for summary posting"
 fi
 
+# A failed lookup of the existing comments makes the Rust post command exit
+# with the FALLOW_CI_DEDUP_LOOKUP_FAILED error code. Both steps then report
+# the failed lookup through their outputs.
+cat > "$API_FAIL_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
+if [ "${1:-}" = "ci" ]; then
+  case "${2:-}" in
+    post-pr-comment|post-review)
+      printf '{"error":true,"message":"GitHub request failed: HTTP 502","exit_code":7,"code":"FALLOW_CI_DEDUP_LOOKUP_FAILED"}\n'
+      exit 7
+      ;;
+  esac
+  exit 0
+fi
+format=""; previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--format" ]; then format="$arg"; break; fi
+  previous="$arg"
+done
+case "$format" in
+  pr-comment-github)
+    printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
+    ;;
+  review-github)
+    printf '%s\n' '{"event":"COMMENT","body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"github"}}'
+    ;;
+esac
+SH
+chmod +x "$API_FAIL_BIN/fallow"
+
+for step in comment review; do
+  : > "$API_FAIL_OUTPUT"
+  : > "$API_FAIL_WORK/mock.log"
+  LOOKUP_OUT=$(cd "$API_FAIL_WORK" \
+    && PATH="$API_FAIL_BIN:$PATH" \
+    MOCK_LOG="$API_FAIL_WORK/mock.log" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    bash "$SCRIPTS_DIR/${step}.sh" 2>&1)
+  LOOKUP_STATUS=$?
+  [ "$LOOKUP_STATUS" -eq 0 ] && pass "${step}.sh: a failed lookup exits 0" \
+    || fail "${step}.sh: a failed lookup exits 0" "got $LOOKUP_STATUS"
+  assert_contains "$(tail -n 1 "$API_FAIL_OUTPUT")" "dedup_lookup_failed=true" \
+    "${step}.sh: a failed lookup sets dedup_lookup_failed=true"
+  assert_contains "$(cat "$API_FAIL_WORK/mock.log")" "--format json" \
+    "${step}.sh: asks the post command for a JSON error document"
+  assert_contains "$LOOKUP_OUT" "could not read the existing" \
+    "${step}.sh: a failed lookup explains the skipped post"
+done
+assert_contains "$(cat "$API_FAIL_OUTPUT")" "post_skipped_reason=pagination_failure" \
+  "review.sh: a failed lookup sets post_skipped_reason=pagination_failure"
+
 rm -rf "$API_FAIL_WORK"
 
 # --- Pre-computed changed files (shallow clone fallback) tests ---
@@ -3326,12 +3452,20 @@ FASTPATH_SCRIPTS="$DIR/../scripts"
 FASTPATH_ENVELOPE="$FIXTURES/dead-code-envelope.json"
 
 # Resolve a report-capable binary the same way issuekind-drift-guard.sh does:
-# explicit $FALLOW_BIN, else a locally built target/{release,debug}/fallow, else
-# a PATH lookup. Absolute so the check survives the cwd changes above.
+# explicit $FALLOW_BIN, else a locally built {debug,release}/fallow in
+# $CARGO_TARGET_DIR or in target/ of the repository, else a PATH lookup. A
+# relative $CARGO_TARGET_DIR is relative to the repository root. Absolute so
+# the check survives the cwd changes above.
 FASTPATH_REPO_ROOT="$(cd "$DIR/../.." && pwd)"
 FASTPATH_BIN="${FALLOW_BIN:-}"
 if [ -z "$FASTPATH_BIN" ]; then
-  for FASTPATH_CAND in "$FASTPATH_REPO_ROOT/target/release/fallow" "$FASTPATH_REPO_ROOT/target/debug/fallow"; do
+  FASTPATH_TARGET_DIR="${CARGO_TARGET_DIR:-}"
+  case "$FASTPATH_TARGET_DIR" in
+    "" | /*) ;;
+    *) FASTPATH_TARGET_DIR="$FASTPATH_REPO_ROOT/$FASTPATH_TARGET_DIR" ;;
+  esac
+  for FASTPATH_CAND in ${FASTPATH_TARGET_DIR:+"$FASTPATH_TARGET_DIR/debug/fallow" "$FASTPATH_TARGET_DIR/release/fallow"} \
+    "$FASTPATH_REPO_ROOT/target/debug/fallow" "$FASTPATH_REPO_ROOT/target/release/fallow"; do
     if [ -x "$FASTPATH_CAND" ]; then FASTPATH_BIN="$FASTPATH_CAND"; break; fi
   done
 fi

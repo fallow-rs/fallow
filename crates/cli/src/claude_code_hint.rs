@@ -127,13 +127,9 @@ fn claude_config_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(dir));
     }
     // Claude Code on Windows resolves the home directory from `USERPROFILE`
-    // when `HOME` is not set.
-    crate::setup_hooks::home_dir()
-        .or_else(|| {
-            std::env::var_os("USERPROFILE")
-                .filter(|dir| !dir.is_empty())
-                .map(PathBuf::from)
-        })
+    // when `HOME` is not set. `HostPaths` has the same fallback.
+    fallow_process::HostPaths::from_env()
+        .home
         .map(|home| home.join(".claude"))
 }
 

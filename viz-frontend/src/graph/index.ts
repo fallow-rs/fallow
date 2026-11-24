@@ -8,7 +8,6 @@ export { graphInitSteps, initGraphNodes } from "./build";
 export { renderGraph } from "./render";
 export { minimapHit, minimapPan } from "./minimap";
 export {
-  centerOnFile,
   clearGraphFocus,
   clearRoadHover,
   dismissIntro,
@@ -18,11 +17,12 @@ export {
   graphHoverTarget,
   graphPathTrace,
   nodeScreenPos,
+  reconcileGraphView,
   refitOnResize,
-  syncStandaloneForLens,
   resetEgoTrail,
   resetGraphView,
   roadFacts,
+  selectRoad,
   setClusterMode,
   startGraphLensFade,
 } from "./interact";

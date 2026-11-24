@@ -23,9 +23,10 @@ use super::*;
 
 const DEFAULT_SEED: u64 = 0x0001_f600;
 
-/// Leading whitespace. Each item except U+FEFF is whitespace for both
-/// JavaScript and `str::trim_start`. U+FEFF is JavaScript whitespace only,
-/// so the quick fix declines a line that starts with it.
+/// Leading whitespace. The parser decides whether a case is valid code: a
+/// line separator such as U+2028 ends a line comment, so the rest of that
+/// line is code and the document may not parse. The quick fix is offered
+/// only for a document that parses.
 const INDENT: &[&str] = &[
     " ", "\t", "\u{a0}", "\u{3000}", "\u{2028}", "\u{2029}", "\u{1680}", "\u{2007}", "\u{202f}",
     "\u{205f}", "\u{feff}",
@@ -107,7 +108,6 @@ fn joined(set: &'static [&'static str], len: std::ops::Range<usize>) -> BoxedStr
 struct Case {
     lines: Vec<String>,
     target: usize,
-    indent: String,
     name: String,
     /// Byte column of the name on the target line.
     name_col: usize,
@@ -136,7 +136,6 @@ fn case() -> impl Strategy<Value = Case> {
                 Case {
                     lines,
                     target,
-                    indent,
                     name,
                     name_col,
                 }
@@ -234,14 +233,15 @@ fn check_file(case: &Case, disk_prefix: &str) -> Result<(), TestCaseError> {
             character: 0,
         },
     };
+    let source = line_refs.join("\n");
     let actions = build_remove_export_actions(RemoveExportActionInput::new(
-        &results, &path, &uri, &cursor, &line_refs,
+        &results, &path, &uri, &cursor, &source,
     ));
 
-    if !case.indent.chars().all(char::is_whitespace) {
+    if fallow_api::source_edits::SourceEditIndex::parse(&path, &source).is_none() {
         prop_assert!(
             actions.is_empty(),
-            "a quick fix for a line that `str::trim_start` does not trim"
+            "a quick fix for a document that does not parse"
         );
         return Ok(());
     }
@@ -266,6 +266,12 @@ fn check_file(case: &Case, disk_prefix: &str) -> Result<(), TestCaseError> {
     expected[case.target] = expected[case.target].replacen("export ", "", 1);
     prop_assert_eq!(edited, expected);
 
+    // A U+FEFF at the start of the file is a byte order mark. The analysis
+    // gives the columns of the text after the mark, so the byte column of
+    // this case is not a column that an analysis reports.
+    if case.target == 0 && case.lines[0].starts_with('\u{feff}') {
+        return Ok(());
+    }
     let diagnostic = &action.diagnostics.as_ref().expect("a diagnostic")[0];
     let line = &case.lines[case.target];
     let name_start = utf16_len(&line[..case.name_col]);
@@ -286,6 +292,17 @@ proptest! {
     }
 }
 
+#[test]
+fn the_oracle_sees_a_parsed_case() {
+    let path = std::path::PathBuf::from(if cfg!(windows) {
+        "C:\\project\\parsed.ts"
+    } else {
+        "/project/parsed.ts"
+    });
+    let source = "\u{a0}export const helper = 1;";
+    assert!(fallow_api::source_edits::SourceEditIndex::parse(&path, source).is_some());
+}
+
 /// U+00A0 is two UTF-8 bytes and one UTF-16 unit, so a byte count gives
 /// the edit range `2..9` instead of `1..8`.
 #[test]
@@ -293,7 +310,6 @@ fn nbsp_indentation() {
     let case = Case {
         lines: vec!["\u{a0}export const helper = 1;".to_string()],
         target: 0,
-        indent: "\u{a0}".to_string(),
         name: "helper".to_string(),
         name_col: "\u{a0}export const ".len(),
     };
@@ -309,7 +325,6 @@ fn byte_order_mark_on_disk() {
     let case = Case {
         lines: vec!["export const helper = 1;".to_string()],
         target: 0,
-        indent: String::new(),
         name: "helper".to_string(),
         name_col: "export const ".len(),
     };
@@ -323,7 +338,6 @@ fn combining_mark_in_name() {
     let case = Case {
         lines: vec!["export const cafe\u{301} = 1;".to_string()],
         target: 0,
-        indent: String::new(),
         name: "cafe\u{301}".to_string(),
         name_col: "export const ".len(),
     };

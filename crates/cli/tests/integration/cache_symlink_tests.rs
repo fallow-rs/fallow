@@ -47,9 +47,8 @@ fn project() -> Project {
             "init",
         ][..],
     ] {
-        let status = std::process::Command::new("git")
+        let status = crate::common::git_command(&root)
             .args(args)
-            .current_dir(&root)
             .status()
             .expect("git");
         assert!(status.success(), "git {args:?}");

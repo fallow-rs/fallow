@@ -10,6 +10,43 @@ pub struct CommandOutput {
     pub code: i32,
 }
 
+/// The exit code of a finished process.
+///
+/// # Panics
+///
+/// Panics when a signal ended the process, so an abort cannot pass an
+/// assertion such as `code <= 1`.
+pub fn exit_code(output: &std::process::Output) -> i32 {
+    output.status.code().unwrap_or_else(|| {
+        panic!(
+            "the process was ended by a signal: {}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+impl CommandOutput {
+    /// Convert the output of a finished process. Panics on a signal exit,
+    /// see [`exit_code`].
+    pub fn from_process(output: std::process::Output) -> Self {
+        let code = exit_code(&output);
+        let std::process::Output { stdout, stderr, .. } = output;
+        Self {
+            code,
+            stdout: lossy_string(stdout),
+            stderr: lossy_string(stderr),
+        }
+    }
+}
+
+/// Convert process output to a string, and replace each invalid UTF-8
+/// sequence with U+FFFD.
+fn lossy_string(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+}
+
 /// How long one sweep of [`remove_orphaned_audit_caches`] holds for the later
 /// test processes. The scan reads the whole temp directory, so each test
 /// process must not repeat it.
@@ -135,18 +172,22 @@ pub fn copy_fixture(name: &str) -> tempfile::TempDir {
     dir
 }
 
-/// Copy a fixture tree without its `.fallow` cache directory. Other tests run
-/// fallow directly on the shared fixture and write cache files there in
-/// parallel, so a cache file can disappear between the listing and the copy.
+/// Copy a fixture tree without its `.fallow` cache directory and without
+/// symlinks. Other tests run fallow directly on the shared fixture and write
+/// cache files there in parallel, so a cache file can disappear between the
+/// listing and the copy. The fixtures track no symlinks, but some `fallow-core`
+/// tests link workspace packages into the `node_modules` folder of a shared
+/// fixture. Such a link points at a folder, which `fs::copy` cannot copy.
 pub fn copy_fixture_tree(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).expect("create fixture copy dir");
     for entry in std::fs::read_dir(from).expect("read fixture dir") {
         let entry = entry.expect("fixture entry");
-        if entry.file_name() == ".fallow" {
+        let file_type = entry.file_type().expect("fixture entry type");
+        if entry.file_name() == ".fallow" || file_type.is_symlink() {
             continue;
         }
         let target = to.join(entry.file_name());
-        if entry.file_type().expect("fixture entry type").is_dir() {
+        if file_type.is_dir() {
             copy_fixture_tree(&entry.path(), &target);
         } else {
             std::fs::copy(entry.path(), &target).expect("copy fixture file");
@@ -156,12 +197,16 @@ pub fn copy_fixture_tree(from: &Path, to: &Path) {
 
 /// Drop the variables a developer shell may export that change what a run
 /// analyzes: the Istanbul coverage inputs (`FALLOW_COVERAGE`,
-/// `FALLOW_COVERAGE_ROOT`) and `FALLOW_PACKAGE_BASELINES`, which turns the
-/// package map off. Call before applying a test's own env.
+/// `FALLOW_COVERAGE_ROOT`), `FALLOW_PACKAGE_BASELINES`, which turns the
+/// package map off, and the diff inputs that a CI shell exports
+/// (`FALLOW_DIFF_FILE`, `FALLOW_DIFF_FILTER`). Call before applying a test's
+/// own env.
 pub fn scrub_analysis_env(cmd: &mut Command) {
     cmd.env_remove("FALLOW_COVERAGE")
         .env_remove("FALLOW_COVERAGE_ROOT")
         .env_remove("FALLOW_PACKAGE_BASELINES")
+        .env_remove("FALLOW_DIFF_FILE")
+        .env_remove("FALLOW_DIFF_FILTER")
         // A key that `fallow cloud login` stored on the developer machine must
         // not reach a test.
         .env("FALLOW_CREDENTIAL_STORE", "none")
@@ -178,7 +223,7 @@ pub fn scrub_analysis_env(cmd: &mut Command) {
 ///
 /// Sets `NO_COLOR=1` and `RUST_LOG=""` and removes the ambient coverage
 /// variables. A test applies its own env after this setup.
-fn fallow_command() -> Command {
+pub fn fallow_command() -> Command {
     let mut cmd = Command::new(fallow_bin());
     cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
     scrub_analysis_env(&mut cmd);
@@ -187,12 +232,7 @@ fn fallow_command() -> Command {
 
 /// Run a prepared command and convert its output to [`CommandOutput`].
 fn execute(mut cmd: Command) -> CommandOutput {
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    CommandOutput::from_process(cmd.output().expect("failed to run fallow binary"))
 }
 
 /// Run an arbitrary fallow command against a fixture, returning structured output.
@@ -225,12 +265,34 @@ pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
 /// Run fallow with raw args (no --root injection) in the working directory
 /// `dir`, so that a relative path argument resolves against `dir`.
 pub fn run_fallow_raw_in_dir(dir: &Path, args: &[&str]) -> CommandOutput {
+    run_fallow_raw_in_dir_with_env(dir, args, &[])
+}
+
+/// Run fallow with raw args in the working directory `dir` and with string
+/// environment variables.
+pub fn run_fallow_raw_in_dir_with_env(
+    dir: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> CommandOutput {
     let mut cmd = fallow_command();
-    cmd.current_dir(dir).args(args);
+    cmd.current_dir(dir).envs(env.iter().copied()).args(args);
     execute(cmd)
 }
 
 /// Run fallow with raw args and string environment variables.
+/// Run fallow with an empty global and system Git config, for a command
+/// that reads Git settings such as `core.hooksPath`. A developer machine and
+/// the hostile-home CI job can set such a setting.
+pub fn run_fallow_raw_with_clean_git(args: &[&str]) -> CommandOutput {
+    let config = tempfile::NamedTempFile::new().expect("create an empty Git config");
+    let path = config.path().to_str().expect("UTF-8 temp path");
+    run_fallow_raw_with_env(
+        args,
+        &[("GIT_CONFIG_GLOBAL", path), ("GIT_CONFIG_SYSTEM", path)],
+    )
+}
+
 pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
     let mut cmd = fallow_command();
     cmd.envs(env.iter().copied()).args(args);
@@ -265,21 +327,18 @@ pub fn configure_type_aware_sidecar(cmd: &mut Command) {
     cmd.env("FALLOW_TYPE_AWARE_SCRIPT", sidecar);
 }
 
+/// A fallow command with the repository's real type-aware sidecar and the
+/// scrubbed analysis environment.
+pub fn type_aware_sidecar_command(args: &[&str]) -> Command {
+    let mut cmd = fallow_command();
+    configure_type_aware_sidecar(&mut cmd);
+    cmd.args(args);
+    cmd
+}
+
 /// Run fallow with the repository's real type-aware sidecar.
 pub fn run_fallow_raw_with_type_aware_sidecar(args: &[&str]) -> CommandOutput {
-    let bin = fallow_bin();
-    let mut cmd = Command::new(&bin);
-    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-    configure_type_aware_sidecar(&mut cmd);
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        code: output.status.code().unwrap_or(-1),
-    }
+    execute(type_aware_sidecar_command(args))
 }
 
 /// Parse stdout as JSON, panicking with the raw output on failure.
@@ -290,6 +349,19 @@ pub fn parse_json(output: &CommandOutput) -> serde_json::Value {
             output.stdout, output.stderr
         )
     })
+}
+
+/// The array at the JSON pointer `pointer` (RFC 6901, for example
+/// `/dead_code/unused_files`).
+///
+/// # Panics
+///
+/// Panics when the value is absent or is not an array, so a report that lost
+/// a section cannot pass as an empty list.
+pub fn required_array<'a>(json: &'a serde_json::Value, pointer: &str) -> &'a [serde_json::Value] {
+    json.pointer(pointer)
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("no array at `{pointer}` in:\n{json:#}"))
 }
 
 /// Fields a report is allowed to change between two runs over the same commit.
@@ -388,50 +460,20 @@ pub fn redact_all(s: &str, root: &Path) -> String {
     redact_version(&s)
 }
 
-/// Null device for the git config variables. Git for Windows also accepts it.
-const GIT_NULL_CONFIG: &str = "/dev/null";
-/// Fixed identity for fixture commits.
-const GIT_TEST_NAME: &str = "test";
-const GIT_TEST_EMAIL: &str = "test@test.com";
-
-/// Build a `git` command for a test fixture in `dir`.
-///
-/// The command removes the ambient repository variables (`GIT_DIR`,
-/// `GIT_WORK_TREE`, `GIT_INDEX_FILE` and more) that a git hook sets, ignores the
-/// global and system config, and uses a fixed author and committer. A developer
-/// environment thus cannot change or redirect the fixture repository.
+/// Build a `git` command for a test fixture in `dir`. See
+/// [`fallow_engine::git_fixture::fixture_git_command`].
 pub fn git_command(dir: &Path) -> Command {
-    let mut cmd = Command::new("git");
-    fallow_engine::changed_files::clear_ambient_git_env(&mut cmd);
-    cmd.current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", GIT_NULL_CONFIG)
-        .env("GIT_CONFIG_SYSTEM", GIT_NULL_CONFIG)
-        .env("GIT_AUTHOR_NAME", GIT_TEST_NAME)
-        .env("GIT_AUTHOR_EMAIL", GIT_TEST_EMAIL)
-        .env("GIT_COMMITTER_NAME", GIT_TEST_NAME)
-        .env("GIT_COMMITTER_EMAIL", GIT_TEST_EMAIL);
-    cmd
+    fallow_engine::git_fixture::fixture_git_command(dir)
 }
 
-/// Run git in `dir` and return trimmed stdout. Panics with stdout and stderr
-/// when git fails.
+/// Run git in `dir` and return trimmed stdout. Panics when git fails.
 pub fn git_capture(dir: &Path, args: &[&str]) -> String {
-    let output = git_command(dir)
-        .args(args)
-        .output()
-        .expect("git command failed");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    fallow_engine::git_fixture::fixture_git_capture(dir, args)
 }
 
-/// Run git in `dir`. Panics with stdout and stderr when git fails.
+/// Run git in `dir`. Panics when git fails.
 pub fn git(dir: &Path, args: &[&str]) {
-    git_capture(dir, args);
+    fallow_engine::git_fixture::fixture_git(dir, args);
 }
 
 /// Stage every file in `dir` and commit it without a signature.

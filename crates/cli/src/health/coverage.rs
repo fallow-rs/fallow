@@ -272,31 +272,11 @@ pub(super) fn analyze_with_transport(
     Ok(report)
 }
 
+pub use super::coverage_sidecar::{SidecarSearch, discover_sidecar_with};
+
+/// Find the sidecar with the discovery inputs of this process.
 pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
-    if let Some(path) = env_non_empty("FALLOW_COV_BIN") {
-        let candidate = PathBuf::from(&path);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-        return Err(format!(
-            "FALLOW_COV_BIN is set to {path} but no file exists there. Unset FALLOW_COV_BIN to let fallow find the runtime coverage add-on, or point it at the fallow-cov binary."
-        ));
-    }
-
-    if let Some(path) = env_non_empty("FALLOW_COV_BINARY_PATH") {
-        let candidate = PathBuf::from(&path);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-        return Err(format!(
-            "FALLOW_COV_BINARY_PATH is set to {path} but no file exists there. Unset FALLOW_COV_BINARY_PATH to let fallow find the runtime coverage add-on, or point it at the fallow-cov binary."
-        ));
-    }
-
-    discover_sidecar_in(root, &canonical_sidecar_path(), || {
-        find_on_path("fallow-cov")
-    })
-    .ok_or_else(|| sidecar_missing_message(root))
+    discover_sidecar_with(root, &SidecarSearch::from_process())
 }
 
 /// Resolve the sidecar from fixed install locations only.
@@ -310,7 +290,7 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
 /// no `.sig` file, and the signature check refuses it. Discovery takes it
 /// only when no other location has a sidecar, so that the user sees the
 /// signature error for the file that exists.
-fn discover_sidecar_in(
+pub(super) fn discover_sidecar_in(
     root: Option<&Path>,
     canonical: &Path,
     find_on_path: impl FnOnce() -> Option<PathBuf>,
@@ -339,41 +319,7 @@ fn signature_path(binary: &Path) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key).ok().and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
-    })
-}
-
-pub fn canonical_sidecar_path() -> PathBuf {
-    let home = fallow_license::user_home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let binary = if cfg!(windows) {
-        "fallow-cov.exe"
-    } else {
-        "fallow-cov"
-    };
-    home.join(".fallow").join("bin").join(binary)
-}
-
-fn find_on_path(binary: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var).find_map(|dir| {
-        for candidate_name in path_binary_candidates(binary) {
-            let candidate = dir.join(candidate_name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-        None
-    })
-}
-
-fn path_binary_candidates(binary: &str) -> Vec<String> {
+pub(super) fn path_binary_candidates(binary: &str) -> Vec<String> {
     let mut candidates = vec![binary.to_owned()];
     if cfg!(windows) {
         candidates.push(format!("{binary}.exe"));
@@ -521,11 +467,8 @@ fn project_local_sidecar_names() -> &'static [&'static str] {
     }
 }
 
-fn sidecar_missing_message(root: Option<&Path>) -> String {
-    let mut checks = vec![
-        canonical_sidecar_path().display().to_string(),
-        "PATH".to_owned(),
-    ];
+pub(super) fn sidecar_missing_message(root: Option<&Path>, canonical: &Path) -> String {
+    let mut checks = vec![canonical.display().to_string(), "PATH".to_owned()];
     let mut install_example = "npm install --save-dev @fallow-cli/fallow-cov".to_owned();
     if let Some(root) = root {
         checks.splice(
@@ -2033,11 +1976,11 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 mod tests {
     use super::{
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, InnerIterations, RemappedFnKey,
-        RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
-        build_request, build_static_signal_index, convert_response, discover_sidecar,
-        looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
-        prepare_coverage_sources, sidecar_binary_name, static_function, tracking_state_label,
-        verify_sidecar_signature, write_istanbul_coverage_file,
+        RemappedFunction, RuntimeCoverageAnalysisInput, SidecarSearch, StaticFunctionInput,
+        StaticSignalIndex, build_request, build_static_signal_index, convert_response,
+        discover_sidecar_with, looks_like_istanbul, merge_remapped_functions,
+        path_binary_candidates, prepare_coverage_sources, sidecar_binary_name, static_function,
+        tracking_state_label, verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
@@ -2438,7 +2381,7 @@ mod tests {
         std::fs::write(super::signature_path(&sidecar), [0_u8; 64])
             .unwrap_or_else(|err| panic!("failed to write sidecar signature: {err}"));
 
-        let resolved = discover_sidecar(Some(&root))
+        let resolved = discover_sidecar_with(Some(&root), &isolated_search(&root))
             .unwrap_or_else(|err| panic!("failed to discover local sidecar: {err}"));
 
         assert_eq!(resolved, sidecar);
@@ -2476,7 +2419,7 @@ mod tests {
         std::fs::write(&wrapper, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", wrapper.display()));
 
-        let resolved = discover_sidecar(Some(&root))
+        let resolved = discover_sidecar_with(Some(&root), &isolated_search(&root))
             .unwrap_or_else(|err| panic!("failed to discover platform sidecar: {err}"));
 
         assert_eq!(
@@ -2515,7 +2458,7 @@ mod tests {
         std::fs::write(&wrapper, "#!/usr/bin/env node\n")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", wrapper.display()));
 
-        let resolved = discover_sidecar(Some(&root))
+        let resolved = discover_sidecar_with(Some(&root), &isolated_search(&root))
             .unwrap_or_else(|err| panic!("failed to discover bun sidecar: {err}"));
 
         assert_eq!(resolved, real_binary);
@@ -2531,7 +2474,7 @@ mod tests {
         let stale_binary = write_bun_store_sidecar(&store, "0.1.8");
         let current_binary = write_bun_store_sidecar(&store, "0.1.10");
 
-        let resolved = discover_sidecar(Some(&root))
+        let resolved = discover_sidecar_with(Some(&root), &isolated_search(&root))
             .unwrap_or_else(|err| panic!("failed to discover bun sidecar: {err}"));
 
         assert_eq!(
@@ -2572,7 +2515,7 @@ mod tests {
         std::fs::write(&wrapper, "#!/usr/bin/env node\n")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", wrapper.display()));
 
-        let resolved = discover_sidecar(Some(&root))
+        let resolved = discover_sidecar_with(Some(&root), &isolated_search(&root))
             .unwrap_or_else(|err| panic!("failed to discover pnpm sidecar: {err}"));
 
         assert_eq!(resolved, real_binary);
@@ -3893,6 +3836,14 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
     }
 
+    /// Discovery inputs that point only into the temporary `root` folder.
+    fn isolated_search(root: &Path) -> SidecarSearch {
+        SidecarSearch {
+            host: fallow_process::HostPaths::with_home(root.join("home")),
+            ..SidecarSearch::default()
+        }
+    }
+
     fn make_temp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -3987,7 +3938,8 @@ mod tests {
     #[test]
     fn sidecar_missing_message_lists_checked_locations() {
         // Without a project root: canonical path, PATH, and the default npm hint.
-        let generic = super::sidecar_missing_message(None);
+        let generic =
+            super::sidecar_missing_message(None, Path::new("isolated-home/.fallow/bin/fallow-cov"));
         assert!(generic.contains("PATH"), "got: {generic}");
         assert!(generic.contains("npm install --save-dev @fallow-cli/fallow-cov"));
         assert!(generic.contains("FALLOW_COV_BIN"));
@@ -3999,7 +3951,10 @@ mod tests {
             r#"{"name":"p","packageManager":"pnpm@9.0.0"}"#,
         )
         .unwrap();
-        let scoped = super::sidecar_missing_message(Some(dir.path()));
+        let scoped = super::sidecar_missing_message(
+            Some(dir.path()),
+            Path::new("isolated-home/.fallow/bin/fallow-cov"),
+        );
         assert!(
             scoped.contains("node_modules/.bin/fallow-cov"),
             "got: {scoped}"
@@ -4050,7 +4005,10 @@ mod tests {
             std::fs::write(dir.path().join(lockfile), "")
                 .unwrap_or_else(|err| panic!("failed to write {lockfile}: {err}"));
 
-            let message = super::sidecar_missing_message(Some(dir.path()));
+            let message = super::sidecar_missing_message(
+                Some(dir.path()),
+                Path::new("isolated-home/.fallow/bin/fallow-cov"),
+            );
 
             assert!(
                 message.contains("node_modules/.bin/fallow-cov"),

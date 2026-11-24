@@ -62,7 +62,13 @@ pub fn inline_complexity(
             unit_size: config.health.max_unit_size,
         },
     )
-    .with_cyclomatic_policy(config.health.cyclomatic_policy);
+    .with_cyclomatic_policy(config.health.cyclomatic_policy)
+    .with_inline_overrides(
+        config.health.inline_threshold_overrides,
+        modules,
+        &file_paths,
+        &config.root,
+    );
     let mut findings = Vec::new();
 
     for module in modules {
@@ -87,7 +93,7 @@ pub fn inline_complexity(
             {
                 continue;
             }
-            let (applied, _) = resolver.resolve(relative, &function.name);
+            let (applied, _, _) = resolver.resolve_unit(relative, &function.name, function.line);
             let Some((exceeds_cyclomatic, exceeds_cognitive)) =
                 super::findings::complexity_exceeded(
                     function,

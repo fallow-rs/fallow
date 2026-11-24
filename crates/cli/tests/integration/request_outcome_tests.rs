@@ -726,6 +726,53 @@ fn an_applied_diff_filter_publishes_the_scope_it_left() {
     );
 }
 
+/// A pure rename adds no line but touches a file. The filter keeps a finding
+/// on a whole touched file, so the scope is not empty and `scope_size` must
+/// not be `0`, or every consumer says that no finding could survive while the
+/// report holds one (issue #4974).
+#[test]
+fn a_rename_only_diff_filter_keeps_a_non_empty_scope() {
+    let project = project();
+    let root_path = project.path();
+    let root = root_arg(&project);
+
+    let rename = root_path.join("rename.diff");
+    std::fs::write(
+        &rename,
+        "diff --git a/src/old.ts b/src/orphan.ts\n\
+         similarity index 100%\n\
+         rename from src/old.ts\n\
+         rename to src/orphan.ts\n",
+    )
+    .expect("rename-only diff");
+    let envelope = parse_json(&run(&[
+        "dead-code",
+        "--root",
+        root,
+        "--diff-file",
+        rename.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]));
+    let unused: Vec<&str> = envelope["unused_files"]
+        .as_array()
+        .expect("unused_files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert!(
+        unused.iter().any(|path| path.ends_with("src/orphan.ts")),
+        "the renamed unused file survives the filter: {unused:?}"
+    );
+    let entry = request(&envelope, "diff-filter");
+    assert_eq!(entry["status"], "applied", "{entry}");
+    assert_eq!(
+        entry["scope_size"], 1,
+        "the renamed file is in scope, so the scope is not empty: {entry}"
+    );
+}
+
 /// `changed-since` sizes its scope in changed files that the run analyzed, not
 /// in the raw git count. A change to a file that discovery drops (here a
 /// README) narrows the run to nothing, and `0` is the only place the envelope

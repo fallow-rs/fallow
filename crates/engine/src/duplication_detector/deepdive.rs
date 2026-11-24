@@ -84,6 +84,17 @@ impl CloneFingerprintSet {
         Self::from_hashed_entries(&entries)
     }
 
+    /// Assign collision-free fingerprints for borrowed clone groups, with the
+    /// same result as [`Self::from_groups`] for the same groups.
+    #[must_use]
+    pub fn from_group_refs(groups: &[&CloneGroup]) -> Self {
+        let entries: Vec<_> = groups
+            .iter()
+            .map(|group| (*group, hash_instances(&group.instances)))
+            .collect();
+        Self::from_hashed_entries(&entries)
+    }
+
     /// Return the assigned fingerprint for a clone group.
     #[must_use]
     pub fn fingerprint_for_group(&self, group: &CloneGroup) -> String {

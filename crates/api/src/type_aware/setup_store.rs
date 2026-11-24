@@ -112,18 +112,18 @@ pub fn bundle_platform(platform: &str, arch: &str) -> Result<BundlePlatform, Str
 /// home or data directory.
 #[must_use]
 pub fn store_root() -> Option<PathBuf> {
-    store_root_from(&|key| std::env::var_os(key).map(PathBuf::from))
+    store_root_in(&fallow_process::HostPaths::from_env())
 }
 
-fn store_root_from(env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
-    let absolute = |key: &str| env(key).filter(|path| path.is_absolute());
+fn store_root_in(host: &fallow_process::HostPaths) -> Option<PathBuf> {
+    let absolute = |path: &Option<PathBuf>| path.clone().filter(|path| path.is_absolute());
     let base = if cfg!(windows) {
-        absolute("LOCALAPPDATA")
+        absolute(&host.local_app_data)
     } else if cfg!(target_os = "macos") {
-        absolute("HOME").map(|home| home.join("Library").join("Application Support"))
+        absolute(&host.home).map(|home| home.join("Library").join("Application Support"))
     } else {
-        absolute("XDG_DATA_HOME")
-            .or_else(|| absolute("HOME").map(|home| home.join(".local").join("share")))
+        absolute(&host.data_dir)
+            .or_else(|| absolute(&host.home).map(|home| home.join(".local").join("share")))
     }?;
     Some(base.join("fallow").join(SIDECAR_PACKAGE))
 }

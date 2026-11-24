@@ -6,9 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// Number of seconds in one day.
-const SECS_PER_DAY: u64 = 86_400;
-
 /// Fraction of the file population used for hotspot concentration.
 const HOTSPOT_TOP_FILE_FRACTION: f64 = 0.01;
 
@@ -683,43 +680,10 @@ pub(crate) fn build_snapshot(
     }
 }
 
-/// ISO 8601 UTC timestamp without external chrono dependency.
-pub fn chrono_timestamp() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-
-    let days = secs / SECS_PER_DAY;
-    let time_secs = secs % SECS_PER_DAY;
-    let hours = time_secs / 3600;
-    let minutes = (time_secs % 3600) / 60;
-    let seconds = time_secs % 60;
-
-    let (year, month, day) = days_to_ymd(days);
-
-    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
-}
-
-/// Convert days since Unix epoch to (year, month, day).
-const fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
-}
-
 /// Save a snapshot to disk.
 ///
-/// If `path` is `None`, writes to `.fallow/snapshots/{timestamp}.json`.
+/// If `path` is `None`, writes to `.fallow/snapshots/{timestamp}.json`, with a
+/// numeric suffix when a snapshot of the same second exists.
 /// Creates parent directories as needed.
 pub(crate) fn save_snapshot(
     snapshot: &VitalSignsSnapshot,
@@ -729,8 +693,10 @@ pub(crate) fn save_snapshot(
     let path = if let Some(path) = explicit_path {
         path.to_path_buf()
     } else {
-        let name = format!("{}.json", snapshot.timestamp.replace(':', "-"));
-        let path = root.join(".fallow").join("snapshots").join(name);
+        let path = free_snapshot_path(
+            &root.join(".fallow").join("snapshots"),
+            &snapshot.timestamp.replace(':', "-"),
+        );
         fallow_types::path_guard::ensure_no_outside_link(root, &path)
             .map_err(|e| format!("failed to write snapshot: {e}"))?;
         path
@@ -799,7 +765,12 @@ fn load_snapshots_with_paths(root: &Path) -> Vec<(PathBuf, VitalSignsSnapshot)> 
         }
     }
 
-    snapshots.sort_by(|a, b| a.1.timestamp.cmp(&b.1.timestamp));
+    snapshots.sort_by(|a, b| {
+        a.1.timestamp
+            .cmp(&b.1.timestamp)
+            .then_with(|| save_order(&a.0).cmp(&save_order(&b.0)))
+            .then_with(|| a.0.cmp(&b.0))
+    });
     snapshots
 }
 
@@ -1297,6 +1268,17 @@ impl RoundTo for f64 {
         (self * factor).round() / factor
     }
 }
+
+#[path = "vital_signs_snapshot_names.rs"]
+mod snapshot_names;
+pub use snapshot_names::chrono_timestamp;
+#[cfg(test)]
+use snapshot_names::days_to_ymd;
+use snapshot_names::{free_snapshot_path, save_order};
+
+#[cfg(test)]
+#[path = "vital_signs_snapshot_tests.rs"]
+mod snapshot_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2321,7 +2303,7 @@ mod tests {
         }
     }
 
-    fn make_test_snapshot(timestamp: &str, score: Option<f64>) -> VitalSignsSnapshot {
+    pub(super) fn make_test_snapshot(timestamp: &str, score: Option<f64>) -> VitalSignsSnapshot {
         VitalSignsSnapshot {
             groups: None,
             snapshot_schema_version: SNAPSHOT_SCHEMA_VERSION,

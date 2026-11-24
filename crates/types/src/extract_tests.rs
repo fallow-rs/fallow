@@ -413,6 +413,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         suppressions: Vec::new(),
         unknown_suppression_kinds: Vec::new(),
         range_marker_problems: Vec::new(),
+        inline_threshold_overrides: crate::inline_threshold::InlineThresholdOverrides::default(),
         unused_import_bindings: vec!["unused".to_string()],
         type_referenced_import_bindings: vec!["TypeOnly".to_string()],
         value_referenced_import_bindings: vec!["Value".to_string()],

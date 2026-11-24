@@ -368,6 +368,26 @@ test(
 );
 
 test(
+  "--no-gpg-sign commits with the DCO sign-off and without a signature",
+  withFixture((fixture) => {
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    // No signing key: a commit with -S fails, so only an unsigned commit passes.
+    git(fixture.skills, "config", "user.signingkey", join(fixture.root, "missing-key"));
+
+    const { code, output } = sync(fixture, ["--no-gpg-sign"]);
+    assert.equal(code, 0, output);
+
+    const skills = fixture.skills;
+    assert.doesNotMatch(git(skills, "cat-file", "commit", "HEAD"), /^gpgsig /mu);
+    // The companion DCO check needs a sign-off with the email of the author.
+    const author = git(skills, "log", "-1", "--format=%ae");
+    const signOff = /^Signed-off-by: .+ <(.+)>$/mu.exec(git(skills, "log", "-1", "--format=%B"));
+    assert.equal(signOff?.[1], author);
+    assert.equal(git(skills, "status", "--porcelain"), "");
+  }),
+);
+
+test(
   "--pin vendors the tree of that commit, not the working tree",
   withFixture((fixture) => {
     const pin = changeSkill(fixture, "two\n", "fix: update the reference (#42)");

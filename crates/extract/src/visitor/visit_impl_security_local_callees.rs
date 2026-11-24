@@ -38,7 +38,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::Cell;
 
 use super::super::super::ModuleInfoExtractor;
-use super::{SinkBinding, unwrap_static_expr};
+use super::{ReceiverPath, SinkBinding, unwrap_static_expr};
 use crate::js_text::JsText;
 use fallow_types::extract::ModuleInfo;
 
@@ -592,11 +592,14 @@ impl ModuleInfoExtractor {
     /// The root name of the callee when it is an inert local function, or an
     /// inert inline method of a local object literal (`controller` for
     /// `controller.merge` and `const controller = { merge() {} }`).
-    pub(super) fn inert_local_callee_root(&self, callee: &Expression<'_>) -> Option<String> {
-        let path = self.static_callee_path(callee)?;
+    pub(super) fn inert_local_callee_root(&self, receiver: &ReceiverPath) -> Option<String> {
+        if !receiver.is_static() {
+            return None;
+        }
+        let path = receiver.path.as_str();
         let (root, rest) = match path.split_once('.') {
             Some((root, rest)) => (root, Some(rest)),
-            None => (path.as_str(), None),
+            None => (path, None),
         };
         let inert = match (self.sink_binding(root), rest) {
             (Some(SinkBinding::InertFunction), None) => true,
@@ -626,6 +629,22 @@ impl ModuleInfoExtractor {
         program: &Program<'_>,
     ) {
         walk::walk_program(self, program);
+        let mut dropped = vec![false; self.security_sinks.len()];
+        self.mark_inert_callee_sinks(program, &mut dropped);
+        if !dropped.contains(&true) {
+            return;
+        }
+        let mut index = 0;
+        self.security_sinks.retain(|_| {
+            let keep = !dropped[index];
+            index += 1;
+            keep
+        });
+    }
+
+    /// Mark the deferred sink sites of the inert callees that the module
+    /// never writes, and record the inert function exports.
+    fn mark_inert_callee_sinks(&mut self, program: &Program<'_>, dropped: &mut [bool]) {
         let deferred = std::mem::take(&mut self.sink_aliases.inert_callee_sinks);
         let exports = inert_export_candidates(program);
         if deferred.is_empty() && exports.is_empty() {
@@ -645,10 +664,6 @@ impl ModuleInfoExtractor {
             })
             .map(|(exported, _)| exported)
             .collect();
-        if deferred.is_empty() {
-            return;
-        }
-        let mut dropped = vec![false; self.security_sinks.len()];
         for sinks in deferred
             .iter()
             .filter(|sinks| !written.names.contains(&sinks.root))
@@ -657,12 +672,6 @@ impl ModuleInfoExtractor {
                 *flag = true;
             }
         }
-        let mut index = 0;
-        self.security_sinks.retain(|_| {
-            let keep = !dropped[index];
-            index += 1;
-            keep
-        });
     }
 
     /// Record the inert function declarations of a statement list. A

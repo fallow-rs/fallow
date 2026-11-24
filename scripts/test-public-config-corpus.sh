@@ -63,6 +63,11 @@ assert "Candidate workaround comments: 3" in report
 assert "Review `entry` usage across 2 config(s)." in report
 assert "cache miss in offline mode" in report
 assert "Comment hits are candidate evidence only" in report
+for hidden in ("secret/internal", "unknown/visibility"):
+    assert hidden not in report, f"{hidden} must not reach the report"
+    assert hidden not in json.dumps(manifest), f"{hidden} must not reach the manifest"
+assert manifest["skipped_non_public"] == 2
+assert "Skipped results without public visibility: 2" in report
 PY
 
 echo "public config corpus fixture test passed"

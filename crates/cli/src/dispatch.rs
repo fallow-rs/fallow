@@ -20,7 +20,6 @@ use crate::cli_args::{
 use crate::cli_hooks::run_hooks_command;
 use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
 use crate::cli_production::{DeadCodeRun, ProductionModes};
-use crate::cli_startup::cli_global_baseline_flag;
 use crate::dupes::{DupesOptions, DupesOverrides};
 use crate::health::HealthOptions;
 use crate::list::ListOptions;
@@ -29,9 +28,9 @@ use crate::{
     DEFAULT_MIN_INVOCATIONS_HOT, DispatchContext, audit, audit_cache_prune, base_worktree,
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
     config, coverage, dupes, explain, fix, flags, guard, health, init, json_style, license, list,
-    migrate, onboarding, plugin_check, regression, regression_save_targets, report,
-    resolve_audit_baseline_path, rule_pack, security, setup_hooks, suppressions, telemetry,
-    trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
+    migrate, onboarding, plugin_check, regression, report, resolve_audit_baseline_path, rule_pack,
+    security, setup_hooks, suppressions, telemetry, trace_chain, trace_dependency, trace_error,
+    trace_path, viz, watch,
 };
 use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
 use fallow_config::PlannedAnalysis;
@@ -458,17 +457,10 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
     };
 
     let gate = gate.map(security::SecurityGateArg::into_mode);
-    let cli = dispatch.cli;
-    let (output, _quiet, fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
+    let output = dispatch.output;
     let derived_flags = SecurityDerivedFlagState {
         output,
         json_style: dispatch.json_style,
-        ci: cli.ci,
-        fail_on_issues,
-        sarif_file: cli.sarif_file.as_deref(),
-        summary: cli.summary,
-        explain: cli.explain,
         runtime_coverage: runtime_coverage.as_deref(),
         min_invocations_hot,
         file: file.as_slice(),
@@ -608,11 +600,6 @@ fn scoped_security_files(
 struct SecurityDerivedFlagState<'a> {
     output: fallow_config::OutputFormat,
     json_style: json_style::JsonStyle,
-    ci: bool,
-    fail_on_issues: bool,
-    sarif_file: Option<&'a Path>,
-    summary: bool,
-    explain: bool,
     runtime_coverage: Option<&'a Path>,
     min_invocations_hot: u64,
     file: &'a [PathBuf],
@@ -621,17 +608,7 @@ struct SecurityDerivedFlagState<'a> {
 }
 
 fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
-    let flag = if flags.ci {
-        Some("--ci")
-    } else if flags.fail_on_issues {
-        Some("--fail-on-issues")
-    } else if flags.sarif_file.is_some() {
-        Some("--sarif-file")
-    } else if flags.summary {
-        Some("--summary")
-    } else if flags.explain {
-        Some("--explain")
-    } else if flags.runtime_coverage.is_some() {
+    let flag = if flags.runtime_coverage.is_some() {
         Some("--runtime-coverage")
     } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
         Some("--min-invocations-hot")
@@ -651,17 +628,7 @@ fn validate_security_survivors_flags(flags: &SecurityDerivedFlagState<'_>) -> Op
 }
 
 fn validate_security_blind_spots_flags(flags: &SecurityDerivedFlagState<'_>) -> Option<ExitCode> {
-    let flag = if flags.ci {
-        Some("--ci")
-    } else if flags.fail_on_issues {
-        Some("--fail-on-issues")
-    } else if flags.sarif_file.is_some() {
-        Some("--sarif-file")
-    } else if flags.summary {
-        Some("--summary")
-    } else if flags.explain {
-        Some("--explain")
-    } else if flags.runtime_coverage.is_some() {
+    let flag = if flags.runtime_coverage.is_some() {
         Some("--runtime-coverage")
     } else if flags.min_invocations_hot != DEFAULT_MIN_INVOCATIONS_HOT {
         Some("--min-invocations-hot")
@@ -1101,7 +1068,7 @@ fn dispatch_flags_command(
 }
 
 /// The first regression-gate option on the command line, if any.
-fn first_regression_flag(cli: &Cli) -> Option<&'static str> {
+pub fn first_regression_flag(cli: &Cli) -> Option<&'static str> {
     [
         (cli.fail_on_regression, "--fail-on-regression"),
         (cli.regression_baseline.is_some(), "--regression-baseline"),
@@ -1461,7 +1428,6 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
 
 fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let (save_regression_file, save_to_config) = regression_save_targets(cli);
     // Only the entry weight gate reads the global `--tolerance`, so a plain
     // listing does not fail on a value it never uses.
     let entry_weight_gate = if args.entry_weight {
@@ -1478,8 +1444,9 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
             fail_on_regression: cli.fail_on_regression,
             tolerance,
             baseline_file: cli.regression_baseline.as_deref(),
-            save_file: save_regression_file.as_deref(),
-            save_to_config,
+            save_file: dispatch.save_regression_file.map(PathBuf::as_path),
+            save_to_config: dispatch.save_to_config,
+            args: cli.into(),
         })
     } else {
         None
@@ -1731,14 +1698,6 @@ struct AuditDispatchArgs {
 
 fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let output = dispatch.output;
-
-    if cli.baseline.is_some() || cli.save_baseline.is_some() {
-        return emit_input_error(
-            "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
-            output,
-        );
-    }
 
     let mut inputs = match resolve_audit_inputs(dispatch, args) {
         Ok(inputs) => inputs,
@@ -2269,7 +2228,7 @@ fn run_health_dispatch(
             ownership_emails: run.ownership_emails,
             targets: sections.targets,
             css: sections.css,
-            css_deep: false,
+            css_deep: sections.css,
             force_full: sections.force_full,
             score_only_output: sections.score_only_output,
             enforce_coverage_gap_gate: true,

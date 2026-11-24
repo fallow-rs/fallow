@@ -59,6 +59,7 @@ pub struct IssueFilters {
     pub unused_class_members: bool,
     pub unused_namespace_members: bool,
     pub unused_protected_class_members: bool,
+    pub namespace_escapes: bool,
     pub unused_store_members: bool,
     pub unprovided_injects: bool,
     pub unrendered_components: bool,
@@ -155,6 +156,7 @@ impl IssueFilters {
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-protected-class-members" => self.unused_protected_class_members = true,
+            "--namespace-escapes" => self.namespace_escapes = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,
@@ -205,6 +207,7 @@ impl IssueFilters {
             || self.unused_class_members
             || self.unused_namespace_members
             || self.unused_protected_class_members
+            || self.namespace_escapes
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -273,6 +276,9 @@ impl IssueFilters {
         {
             rules.unused_protected_class_members = Severity::Warn;
         }
+        if self.namespace_escapes && rules.namespace_escapes == Severity::Off {
+            rules.namespace_escapes = Severity::Warn;
+        }
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
@@ -329,6 +335,9 @@ impl IssueFilters {
         }
         if !self.unused_protected_class_members {
             results.unused_protected_class_members.clear();
+        }
+        if !self.namespace_escapes {
+            results.namespace_escapes.clear();
         }
         if !self.unlisted_deps {
             results.unlisted_dependencies.clear();
@@ -1021,11 +1030,15 @@ fn resolve_check_regression(
     config: &ResolvedConfig,
     results: &AnalysisResults,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    syntactic_fallback: bool,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     warn_scoped_regression_save(opts);
 
     let just_saved_baseline = save_check_regression_baseline(opts, results, analysis_identity)?;
 
+    if !opts.regression_opts.fail_on_regression {
+        return Ok(None);
+    }
     let config_baseline_ref = just_saved_baseline.as_ref().map(|counts| {
         let mut baseline = counts.to_config_baseline();
         baseline.analysis_identity = analysis_identity.clone();
@@ -1034,9 +1047,19 @@ fn resolve_check_regression(
     let config_baseline = config_baseline_ref
         .as_ref()
         .or_else(|| config.regression.as_ref().and_then(|r| r.baseline.as_ref()));
+    let mut selectors = opts.surface.requested_flags(opts.filters);
+    if opts.filters.shared_state {
+        selectors.push("--shared-state");
+    }
+    let mut regression_opts = opts.regression_opts;
+    regression_opts.args.selectors = &selectors;
+    if config.production {
+        regression_opts.args.production = Some(true);
+    }
+    regression_opts.args.syntactic_fallback = syntactic_fallback;
     regression::compare_check_regression_with_identity(
         results,
-        &opts.regression_opts,
+        &regression_opts,
         config_baseline,
         analysis_identity,
         opts.surface.command(),
@@ -1371,8 +1394,16 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     // the report only. Health keeps the findings a run without it would see.
     let health_results = select_architecture_findings(opts.filters, &mut data.results);
 
-    let regression_outcome =
-        resolve_check_regression(opts, &config, &data.results, &analysis_identity)?;
+    let syntactic_fallback = type_aware
+        .as_ref()
+        .is_some_and(|outcome| outcome.meta.identity.is_none());
+    let regression_outcome = resolve_check_regression(
+        opts,
+        &config,
+        &data.results,
+        &analysis_identity,
+        syntactic_fallback,
+    )?;
 
     let finding_id_query = finding_id_trace.map(|mut trace| {
         trace.end_stage(&mut data.results);
@@ -1626,6 +1657,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         result.baseline_staleness.as_ref(),
         result.fail_on_stale_baseline,
         fallow_engine::baseline::BaselineKind::DeadCode,
+        &result.config.root,
     );
     let parse_error_failed = prepared
         .parse_error

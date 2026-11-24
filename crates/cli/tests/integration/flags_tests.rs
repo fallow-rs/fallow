@@ -360,6 +360,27 @@ fn retirement_groups_sites_into_one_row_per_flag() {
 }
 
 #[test]
+fn retirement_records_the_local_guard_of_an_unimported_vercel_flag() {
+    use std::io::Write as _;
+
+    let project = crate::common::copy_fixture("flags-retirement");
+    let mut flags = std::fs::OpenOptions::new()
+        .append(true)
+        .open(project.path().join("src/vercel.ts"))
+        .expect("open flag definitions");
+    writeln!(flags, "if (await showLegacy()) console.info('legacy');").expect("append guard");
+
+    let report = retirement_in(project.path(), &["--flag-age", "off"]);
+    let flag = retirement_row(&report, "legacy-banner");
+    assert_eq!(flag["sites"][0]["role"], "definition");
+    assert_eq!(flag["sites"][0]["line"], 4);
+    assert_eq!(flag["sites"][1]["role"], "read");
+    assert_eq!(flag["sites"][1]["line"], 5);
+    assert_eq!(flag["read_sites"], 1);
+    assert_eq!(reasons(flag), ["single-read-site"]);
+}
+
+#[test]
 fn retirement_leaves_the_rest_of_the_envelope_unchanged() {
     let plain = run_fallow(
         "flags",
@@ -973,6 +994,45 @@ fn a_malformed_flag_state_exits_2_with_an_error_code() {
 }
 
 #[test]
+fn two_vendor_keys_with_one_code_name_exit_2() {
+    // With `vendorKeyPrefix` "web.", both keys name the code flag
+    // `old-banner`, so the export cannot say which state that flag has.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = dir.path().join("state.json");
+    std::fs::write(
+        &state,
+        r#"{"schema_version":1,"source":"launchdarkly","exported_at":"2026-09-20","flags":[{"key":"web.old-banner","state":"archived"},{"key":"old-banner","state":"on"}]}"#,
+    )
+    .expect("write");
+    let out = run_fallow(
+        "flags",
+        "flags-vendor",
+        &[
+            "--no-cache",
+            "--format",
+            "json",
+            "--retirement",
+            "--flag-age",
+            "off",
+            "--flag-state",
+            state.to_str().expect("utf-8 path"),
+        ],
+    );
+    assert_eq!(
+        out.code, 2,
+        "stdout: {}\nstderr: {}",
+        out.stdout, out.stderr
+    );
+    let error: serde_json::Value = serde_json::from_str(&out.stdout).expect("JSON error");
+    assert_eq!(error["code"], "FALLOW_FLAG_STATE_INVALID", "{error}");
+    let message = error["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("\"web.old-banner\"") && message.contains("\"old-banner\""),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_narrowed_run_adds_no_vendor_only_rows() {
     let json = vendor_json(&["--changed-since", "HEAD"]);
     let has_vendor_only = json["retirement"]["flags"]
@@ -1100,6 +1160,55 @@ fn gate_run(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutp
     let mut all = vec!["--no-cache", "--flag-age", "off"];
     all.extend_from_slice(args);
     run_fallow_in_root("flags", root, &all)
+}
+
+#[test]
+fn flags_recovery_keeps_the_vendor_counts_and_age_mode() {
+    check_flags_recovery(&["--regression-baseline", "missing.json"]);
+}
+
+#[test]
+fn flags_recovery_without_a_baseline_path_keeps_the_vendor_counts_and_age_mode() {
+    check_flags_recovery(&[]);
+}
+
+fn check_flags_recovery(baseline_option: &[&str]) {
+    use crate::common::{copy_fixture, parse_json, run_fallow_raw_in_dir};
+
+    let project = copy_fixture("flags-vendor");
+    let root = project.path();
+    let mut args = vec![
+        "flags",
+        "--retirement",
+        "--flag-state",
+        "flag-state.json",
+        "--flag-age",
+        "off",
+        "--fail-on-regression",
+        "--format",
+        "json",
+    ];
+    args.extend_from_slice(baseline_option);
+    let output = run_fallow_raw_in_dir(root, &args);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    let error = parse_json(&output);
+    let (_, command) = error["message"]
+        .as_str()
+        .unwrap()
+        .rsplit_once(": fallow ")
+        .expect("recovery command");
+    let command = command.replace("<PATH>", "missing.json");
+    let mut args: Vec<_> = command.split_whitespace().collect();
+    args.extend(["--format", "json"]);
+    let replay = run_fallow_raw_in_dir(root, &args);
+    assert_eq!(replay.code, 0, "{}", replay.stderr);
+    assert_eq!(parse_json(&replay)["retirement"]["age_mode"], "off");
+    let baseline: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("missing.json")).unwrap()).unwrap();
+    assert_eq!(
+        baseline["flags"]["by_reason"]["vendor-only"], 1,
+        "{baseline}"
+    );
 }
 
 #[test]

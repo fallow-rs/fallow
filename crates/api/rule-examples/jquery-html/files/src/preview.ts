@@ -5,6 +5,5 @@ interface Comment {
 }
 
 export const showPreview = (comment: Comment): void => {
-  const preview = $("#preview");
-  preview.html(comment.body);
+  $("#preview").html(comment.body);
 };

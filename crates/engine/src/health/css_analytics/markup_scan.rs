@@ -74,6 +74,7 @@ fn scan_markup_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Mark
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
             input.files,
             ctx,
+            input.output_changed_files,
             input.summary,
         ),
         cva_duplicate_variant_blocks: scan_cva_duplicate_variant_blocks(input.files, ctx),
@@ -223,16 +224,17 @@ pub(super) fn record_scoped_unused_classes(
     summary: &mut fallow_output::CssAnalyticsSummary,
     scoped_unused: &mut Vec<fallow_output::ScopedUnusedClasses>,
 ) {
-    let classes = crate::css::scoped_unused_classes(source);
-    if classes.is_empty() {
+    let Some(found) = crate::css::scoped_unused_classes_at(source) else {
         return;
-    }
+    };
+    let classes = found.classes;
 
     summary.scoped_unused_classes = summary
         .scoped_unused_classes
         .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
     scoped_unused.push(fallow_output::ScopedUnusedClasses {
         path: relative.to_string_lossy().replace('\\', "/"),
+        line: found.line,
         classes,
         actions: vec![fallow_output::CssCandidateAction::verify_scoped_classes()],
     });

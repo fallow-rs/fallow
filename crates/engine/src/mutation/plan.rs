@@ -48,12 +48,13 @@ const PURE_CALLEE_PREFIXES: [&str; 1] = ["path."];
 /// response or a navigation in the process: a redirect, a header, a cookie,
 /// a CORS policy. A test runs them against a stub or a test server, so a
 /// mutant there writes nothing outside the process.
-pub(super) const RESPONSE_SHAPING_ROWS: [&str; 5] = [
+pub(super) const RESPONSE_SHAPING_ROWS: [&str; 6] = [
     "header-injection",
     "insecure-cookie",
     "nextjs-open-redirect",
     "open-redirect",
     "permissive-cors",
+    "react-router-open-redirect",
 ];
 
 /// Import sources of database clients, ORMs and query builders. A subpath
@@ -868,10 +869,10 @@ fn is_side_effect_sink(module: &ModuleInfo, site: &SinkSite) -> bool {
         .matchers()
         .iter()
         .any(|matcher| {
-            matcher.sink_shape == site.sink_shape
+            matcher.admits_sink_shape(site.sink_shape)
                 && SIDE_EFFECTS.contains(&matcher.effect)
                 && !RESPONSE_SHAPING_ROWS.contains(&matcher.id.as_str())
-                && matcher.first_matching_pattern(&site.callee_path).is_some()
+                && matcher.admits_callee(site.sink_shape, &site.callee_path)
                 && matcher.provenance_satisfied(
                     module,
                     &site.callee_path,

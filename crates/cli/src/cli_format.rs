@@ -5,7 +5,7 @@ use super::{Cli, Command, CoverageCli, ImpactCli, RulePackCli};
 use crate::cli_hooks::HooksCli;
 use crate::json_style::{JsonStyle, LeanStyle};
 
-#[derive(Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Format {
     Human,
     Json,
@@ -172,20 +172,18 @@ pub fn json_presentation_error(cli: &Cli, fmt: &FormatConfig) -> Option<&'static
     unsupported_lean_use(cli)
 }
 
-/// `--lean` changes only the dead-code, health and combined envelopes, so
-/// another command rejects it instead of writing its full shape.
+/// `--full-tables` keeps every row of the health tables, so it conflicts with
+/// the `--top` cut of `fallow health`. [`crate::global_option_support`]
+/// decides `--lean` for each command.
 fn unsupported_lean_use(cli: &Cli) -> Option<&'static str> {
-    if !cli.json.lean {
-        return None;
-    }
     match cli.command.as_ref() {
-        None | Some(Command::Check { .. }) => None,
-        Some(Command::Health { top, .. }) => (cli.json.full_tables && top.is_some()).then_some(
+        Some(Command::Health { top, .. }) => (cli.json.lean
+            && cli.json.full_tables
+            && top.is_some())
+        .then_some(
             "--full-tables keeps every table row, but --top cuts the tables. Remove one of them.",
         ),
-        Some(_) => Some(
-            "--lean applies to `fallow dead-code`, `fallow health` and bare `fallow`. Remove --lean.",
-        ),
+        _ => None,
     }
 }
 
@@ -292,7 +290,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lean_is_accepted_only_on_commands_with_a_lean_envelope() {
+    fn full_tables_conflicts_with_the_health_top_cut() {
         let parse = |command: &[&str]| {
             let mut argv = vec!["fallow"];
             argv.extend_from_slice(command);
@@ -307,12 +305,6 @@ mod tests {
             &["health", "--top", "3"],
         ] {
             assert_eq!(unsupported_lean_use(&parse(accepted)), None, "{accepted:?}");
-        }
-        for rejected in [&["dupes"][..], &["audit"], &["architecture"], &["list"]] {
-            assert!(
-                unsupported_lean_use(&parse(rejected)).is_some(),
-                "{rejected:?}"
-            );
         }
         assert!(
             unsupported_lean_use(&parse(&["health", "--top", "3", "--full-tables"])).is_some(),

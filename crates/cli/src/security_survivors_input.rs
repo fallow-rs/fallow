@@ -40,7 +40,8 @@ pub fn unknown_verdict_message(verdict_id: &str, stable_ids: &BTreeMap<String, S
         "The candidate file has no stable_finding_id values. Regenerate it with \
          `fallow security --format json` from this fallow version."
     } else if verdict_id.starts_with(&stable_prefix) {
-        "A stable_finding_id changes when the sink text, the rule or the file path changes. \
+        "A stable_finding_id changes when the sink text, the rule, the file path or the \
+         names of the env secrets that a client-server leak reads change. \
          An inline suppression comment also removes the candidate of its sink. \
          Review the candidate again and store a new verdict, or remove the verdict."
     } else {

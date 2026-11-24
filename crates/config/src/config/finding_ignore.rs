@@ -187,6 +187,15 @@ impl FindingIgnoreMatcher {
     /// Empty when nothing was configured or when the matcher was never
     /// consulted, because a run without candidate paths says nothing about
     /// whether a pattern is a typo.
+    ///
+    /// The list never holds a set of patterns whose joint removal changes
+    /// which paths are hidden, because the diagnostic advises the removal of
+    /// each pattern. Without every positive pattern, every path outside the
+    /// exceptions is hidden. Without every negated pattern, no path is
+    /// hidden. So an unmatched positive pattern beside negated patterns is
+    /// listed only when another positive pattern matched, and an unmatched
+    /// negated pattern without positive patterns only when another negated
+    /// pattern matched.
     #[must_use]
     pub fn unmatched_patterns(&self) -> Vec<&str> {
         let Some(usage) = self.usage.as_deref() else {
@@ -195,12 +204,28 @@ impl FindingIgnoreMatcher {
         if !usage.consulted.load(Ordering::Relaxed) {
             return Vec::new();
         }
+        let any_matched = |origins: &[usize]| {
+            origins
+                .iter()
+                .any(|&origin| usage.matched[origin].load(Ordering::Relaxed))
+        };
+        let list_positives =
+            usage.reported_origins.is_empty() || any_matched(&usage.hidden_origins);
+        let list_negatives =
+            !usage.hidden_origins.is_empty() || any_matched(&usage.reported_origins);
         usage
             .patterns
             .iter()
             .zip(&usage.matched)
             .filter(|(_, matched)| !matched.load(Ordering::Relaxed))
             .map(|(pattern, _)| pattern.as_str())
+            .filter(|pattern| {
+                if pattern.starts_with('!') {
+                    list_negatives
+                } else {
+                    list_positives
+                }
+            })
             .collect()
     }
 }
@@ -342,6 +367,70 @@ mod tests {
         assert!(matcher.is_ignored("src/private/app.ts"));
         assert!(!matcher.is_ignored("src/public/app.ts"));
         assert_eq!(matcher.unmatched_patterns(), vec!["!src/publik/**"]);
+    }
+
+    #[test]
+    fn sole_positive_pattern_beside_exceptions_is_not_reported() {
+        let matcher = matcher(&["legacy/**", "!**/*.test.ts"]);
+
+        assert!(!matcher.is_ignored("src/app.test.ts"));
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "removing the only positive pattern would hide every path outside the exceptions"
+        );
+    }
+
+    #[test]
+    fn sole_exception_without_positive_patterns_is_not_reported() {
+        let matcher = matcher(&["!src/keep.ts"]);
+
+        assert!(matcher.is_ignored("src/app.ts"));
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "removing the only exception would stop hiding every path"
+        );
+    }
+
+    #[test]
+    fn one_of_several_exceptions_without_positive_patterns_is_reported() {
+        let matcher = matcher(&["!src/keep.ts", "!src/publik/**"]);
+
+        assert!(!matcher.is_ignored("src/keep.ts"));
+        assert_eq!(matcher.unmatched_patterns(), vec!["!src/publik/**"]);
+    }
+
+    #[test]
+    fn all_unmatched_positive_patterns_beside_exceptions_are_not_reported() {
+        let matcher = matcher(&["legacy/**", "old/**", "!**/*.test.ts"]);
+
+        assert!(!matcher.is_ignored("src/app.ts"));
+        assert!(!matcher.is_ignored("src/app.test.ts"));
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "removing every listed pattern would hide every path outside the exceptions"
+        );
+    }
+
+    #[test]
+    fn all_unmatched_exceptions_without_positive_patterns_are_not_reported() {
+        let matcher = matcher(&["!src/a/**", "!src/b/**"]);
+
+        assert!(matcher.is_ignored("src/app.ts"));
+        assert!(
+            matcher.unmatched_patterns().is_empty(),
+            "removing every listed exception would stop hiding every path"
+        );
+    }
+
+    #[test]
+    fn unmatched_positive_pattern_beside_a_matched_one_is_reported() {
+        let matcher = matcher(&["src/**", "legacy/**", "!**/*.test.ts"]);
+
+        assert!(matcher.is_ignored("src/app.ts"));
+        assert_eq!(
+            matcher.unmatched_patterns(),
+            vec!["legacy/**", "!**/*.test.ts"]
+        );
     }
 
     #[test]

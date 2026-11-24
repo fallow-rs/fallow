@@ -12,7 +12,7 @@
 
 use std::sync::LazyLock;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ExportName;
 use crate::css::extract_css_module_exports;
@@ -78,12 +78,30 @@ fn block_escapes_scope(body: &str) -> bool {
         || body.contains("@apply")
 }
 
+/// The scoped classes of one SFC that appear nowhere else in the component.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedUnusedClasses {
+    /// The class names, sorted.
+    pub classes: Vec<String>,
+    /// The 1-based line of the first definition of one of the classes in the
+    /// SFC source.
+    pub line: u32,
+}
+
 /// Returns class names defined in `<style scoped>` blocks of an SFC that appear
 /// nowhere else in the component (cleanup candidates), sorted. Returns an empty
 /// vec when the source has no analyzable scoped block.
 #[must_use]
 pub fn scoped_unused_classes(source: &str) -> Vec<String> {
-    let mut scoped_classes: FxHashSet<String> = FxHashSet::default();
+    scoped_unused_classes_at(source).map_or_else(Vec::new, |found| found.classes)
+}
+
+/// [`scoped_unused_classes`] with the line of the first definition. `None`
+/// when no scoped class is unused.
+#[must_use]
+pub fn scoped_unused_classes_at(source: &str) -> Option<ScopedUnusedClasses> {
+    // The byte offset in `source` of the first definition of each class.
+    let mut scoped_classes: FxHashMap<String, usize> = FxHashMap::default();
     // Byte ranges of every `<style>` block, blanked out of the search text so a
     // class's own definition does not count as a use of itself.
     let mut style_ranges: Vec<(usize, usize)> = Vec::new();
@@ -93,29 +111,47 @@ pub fn scoped_unused_classes(source: &str) -> Vec<String> {
             style_ranges.push((whole.start(), whole.end()));
         }
         let attrs = caps.name("attrs").map_or("", |m| m.as_str());
-        let body = caps.name("body").map_or("", |m| m.as_str());
-        if !has_scoped_attr(attrs) || has_non_css_lang(attrs) || block_escapes_scope(body) {
+        let Some(body) = caps.name("body") else {
+            continue;
+        };
+        if !has_scoped_attr(attrs) || has_non_css_lang(attrs) || block_escapes_scope(body.as_str())
+        {
             continue;
         }
-        for export in extract_css_module_exports(body, false) {
+        for export in extract_css_module_exports(body.as_str(), false) {
             if let ExportName::Named(name) = export.name {
-                scoped_classes.insert(name);
+                let offset = body.start() + export.span.start as usize;
+                scoped_classes
+                    .entry(name)
+                    .and_modify(|first| *first = (*first).min(offset))
+                    .or_insert(offset);
             }
         }
     }
 
     if scoped_classes.is_empty() {
-        return Vec::new();
+        return None;
     }
 
     let search = blank_ranges(source, &style_ranges);
     let transition_classes = vue_transition_classes(&search);
-    let mut candidates: Vec<String> = scoped_classes
+    let mut candidates: Vec<(String, usize)> = scoped_classes
         .into_iter()
-        .filter(|class| !transition_classes.contains(class) && !class_token_appears(&search, class))
+        .filter(|(class, _)| {
+            !transition_classes.contains(class) && !class_token_appears(&search, class)
+        })
         .collect();
+    let first_offset = candidates.iter().map(|(_, offset)| *offset).min()?;
     candidates.sort_unstable();
-    candidates
+    let line_offsets = fallow_types::extract::compute_line_offsets(source);
+    let (line, _) = fallow_types::extract::byte_offset_to_line_col(
+        &line_offsets,
+        u32::try_from(first_offset).unwrap_or(u32::MAX),
+    );
+    Some(ScopedUnusedClasses {
+        classes: candidates.into_iter().map(|(class, _)| class).collect(),
+        line,
+    })
 }
 
 /// Matches an opening Vue `<Transition>` / `<TransitionGroup>` tag in
@@ -364,6 +400,19 @@ fn is_identifier_byte(byte: u8) -> bool {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scoped_unused_classes_have_the_line_of_the_first_definition() {
+        let found = scoped_unused_classes_at(
+            "<template>\n  <div class=\"card\"></div>\n</template>\n\n<style scoped>\n\
+             .card {\n  padding: 16px;\n}\n.card__badge {\n  color: green;\n}\n\
+             .card__old {\n  color: red;\n}\n</style>\n",
+        )
+        .expect("two classes are unused");
+        assert_eq!(found.classes, vec!["card__badge", "card__old"]);
+        assert_eq!(found.line, 9);
+        assert!(scoped_unused_classes_at("<style scoped>.a {}</style><p class=\"a\">").is_none());
+    }
 
     #[test]
     fn flags_unused_scoped_class() {

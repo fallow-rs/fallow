@@ -35,10 +35,9 @@ source "${SCRIPT_DIR}/gitlab_common.sh"
 # Initialize two sidecar markers so downstream jobs always see definitive
 # values. GitLab CI lacks an equivalent of $GITHUB_OUTPUT for cross-job
 # propagation; these greppable text files serve the same role when added to
-# `artifacts: paths:`. `fallow-skip-reason.txt` is `pagination_failure` only
-# when the inline-review POST is actually skipped (multi-discussion abort);
-# `fallow-dedup-lookup-failed.txt` is `true` on any dedup-lookup failure
-# (including the summary-only path where we post a potential duplicate).
+# `artifacts: paths:`. A failed lookup of the existing discussions stops the
+# post, and then sets `fallow-skip-reason.txt` to `pagination_failure` and
+# `fallow-dedup-lookup-failed.txt` to `true`.
 #
 # IMPORTANT: comment.sh runs BEFORE review.sh in the default template
 # (ci/gitlab-ci.yml). If comment.sh hit its dedup-lookup failure path it
@@ -125,7 +124,7 @@ if render_with_fallow review-gitlab fallow-review.json; then
       --mr "$CI_MERGE_REQUEST_IID" \
       --project-id "$CI_PROJECT_ID" \
       --api-url "$CI_API_V4_URL" \
-      --envelope fallow-review.json > fallow-review-post.json 2> fallow-review-post-stderr.log; then
+      --envelope fallow-review.json --format json > fallow-review-post.json 2> fallow-review-post-stderr.log; then
     if jq -e '((.apply_errors // []) | length > 0) or ((.post_errors // []) | length > 0)' fallow-review-post.json > /dev/null 2>&1; then
       HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-post.json)
       UNAPPLIED=$(jq -r '(.unapplied_fingerprints // []) | join(", ")' fallow-review-post.json)
@@ -146,8 +145,12 @@ if render_with_fallow review-gitlab fallow-review.json; then
     if [ "$RESOLUTIONS" = "1" ]; then RESOLUTION_NOUN="resolution reply"; fi
     if [ "$THREADS" = "1" ]; then THREAD_NOUN="thread"; fi
     echo "Review action: ${ACTION} (${POSTED} ${COMMENT_NOUN} posted, ${RESOLUTIONS} ${RESOLUTION_NOUN} posted, ${THREADS} ${THREAD_NOUN} resolved)"
+  elif is_dedup_lookup_failure fallow-review-post.json; then
+    printf 'pagination_failure\n' > fallow-skip-reason.txt
+    printf 'true\n' > fallow-dedup-lookup-failed.txt
+    echo "WARNING: Skipped the review comments: fallow could not read the existing discussions, so new comments could be duplicates"
   else
-    echo "WARNING: Failed to post review comments"
+    echo "WARNING: Failed to post review comments: $(post_error_message fallow-review-post.json)"
   fi
   exit 0
 fi

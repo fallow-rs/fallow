@@ -6,6 +6,9 @@
 
 use oxc_ast::ast::Comment;
 
+use fallow_types::inline_threshold::{
+    INLINE_THRESHOLD_MARKER, InlineThresholdOverrides, parse_inline_threshold_override,
+};
 pub use fallow_types::suppress::{
     IssueKind, RangeMarkerProblem, RangeMarkerProblemKind, Suppression, SuppressionScope,
     SuppressionTarget, UnknownSuppressionKind, parse_suppression_target,
@@ -29,6 +32,8 @@ pub struct ParsedSuppressions {
     /// Where each `fallow-ignore-file` and `fallow-ignore-next-line` marker
     /// is, so that a caller with token spans can drop a marker in a string.
     pub line_markers: Vec<LineMarkerAt>,
+    /// `fallow-override-threshold-next-line` comments.
+    pub inline_thresholds: InlineThresholdOverrides,
 }
 
 /// The place of one `fallow-ignore-file` or `fallow-ignore-next-line` marker.
@@ -170,6 +175,7 @@ impl ParsedSuppressions {
             .retain(|unknown| !comment_lines.contains(&unknown.comment_line));
         self.line_markers
             .retain(|marker| !comment_lines.contains(&marker.comment_line));
+        self.inline_thresholds.drop_comment_lines(comment_lines);
     }
 
     fn push_kind_problems(&mut self, marker: &RangeMarker) {
@@ -353,7 +359,7 @@ pub(crate) fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSu
             [content_span.start as usize..content_span.end.min(source.len() as u32) as usize];
         // Most comments hold no marker. Skip them before the line lookup,
         // which scans the source from its start.
-        if !text.contains(MARKER_PREFIX) {
+        if !text.contains(MARKER_PREFIX) && !text.contains(INLINE_THRESHOLD_MARKER) {
             continue;
         }
 
@@ -415,6 +421,8 @@ enum Marker<'a> {
     NextLine(&'a str),
     RangeStart(&'a str),
     RangeEnd(&'a str),
+    /// A `fallow-override-threshold-next-line` comment.
+    ThresholdNextLine(&'a str),
 }
 
 impl<'a> Marker<'a> {
@@ -423,7 +431,8 @@ impl<'a> Marker<'a> {
             Self::File(rest)
             | Self::NextLine(rest)
             | Self::RangeStart(rest)
-            | Self::RangeEnd(rest) => rest,
+            | Self::RangeEnd(rest)
+            | Self::ThresholdNextLine(rest) => rest,
         }
     }
 }
@@ -434,6 +443,8 @@ fn split_marker(text: &str) -> Option<Marker<'_>> {
         Some(Marker::File(rest.trim()))
     } else if let Some(rest) = text.strip_prefix("fallow-ignore-next-line") {
         Some(Marker::NextLine(rest.trim()))
+    } else if let Some(rest) = strip_marker_word(text, INLINE_THRESHOLD_MARKER) {
+        Some(Marker::ThresholdNextLine(rest.trim()))
     } else if let Some(rest) = strip_marker_word(text, "fallow-ignore-start") {
         Some(Marker::RangeStart(rest.trim()))
     } else {
@@ -471,6 +482,11 @@ fn match_block_marker(line: &str) -> Option<Marker<'_>> {
         .trim();
     let marker = split_marker(text)?;
     let (targets, _reason) = split_suppression_reason(marker.rest());
+    if matches!(marker, Marker::ThresholdNextLine(_)) {
+        // A threshold comment has `key=value` targets. A prose line that
+        // starts with the marker word has none, so it is not a marker.
+        return targets.contains('=').then_some(marker);
+    }
     let is_marker = targets
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|token| !token.is_empty())
@@ -504,7 +520,7 @@ fn push_marker(
     comment_line: u32,
     suppressed_line: u32,
 ) {
-    if let Marker::File(rest) | Marker::NextLine(rest) = marker {
+    if let Marker::File(rest) | Marker::NextLine(rest) | Marker::ThresholdNextLine(rest) = marker {
         parsed.line_markers.push(LineMarkerAt {
             comment_line,
             offset: site.offset_of(rest),
@@ -513,6 +529,13 @@ fn push_marker(
     match marker {
         Marker::File(rest) => push_suppressions(parsed, 0, comment_line, rest),
         Marker::NextLine(rest) => push_suppressions(parsed, suppressed_line, comment_line, rest),
+        Marker::ThresholdNextLine(rest) => {
+            let (targets, reason) = split_suppression_reason(rest);
+            match parse_inline_threshold_override(suppressed_line, comment_line, targets, reason) {
+                Ok(entry) => parsed.inline_thresholds.entries.push(entry),
+                Err(problem) => parsed.inline_thresholds.problems.push(problem),
+            }
+        }
         Marker::RangeStart(rest) | Marker::RangeEnd(rest) => push_range_marker(
             parsed,
             RangeMarkerAt {
@@ -704,6 +727,10 @@ fn scan_source_block(
 #[cfg(test)]
 #[path = "suppress_range_tests.rs"]
 mod range_tests;
+
+#[cfg(test)]
+#[path = "suppress_threshold_tests.rs"]
+mod threshold_tests;
 
 #[cfg(test)]
 mod tests {

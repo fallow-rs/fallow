@@ -22,6 +22,16 @@ pub struct BaseCloneGroup {
     pub instances: Vec<CloneSpan>,
 }
 
+/// A base clone group that a `duplicates.ignoredClones` entry hid. The paths
+/// are base paths.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AcceptedCloneGroup {
+    /// The `ignoredClones` entry that matched the group.
+    pub key: String,
+    /// Instance locations in the base tree.
+    pub instances: Vec<CloneSpan>,
+}
+
 /// One edited clone copy whose siblings did not change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DivergedClone {

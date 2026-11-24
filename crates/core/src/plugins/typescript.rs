@@ -16,7 +16,7 @@ use fallow_extract::JsText;
 use rustc_hash::FxHashSet;
 
 use super::config_parser;
-use super::registry::ConfigCandidateIndex;
+use super::registry::{ConfigCandidateIndex, TsconfigJsxDir};
 use super::{Plugin, PluginResult, RequiredDependency};
 
 const ENABLERS: &[&str] = &["typescript"];
@@ -125,54 +125,12 @@ impl Plugin for TypeScriptPlugin {
             }
         }
 
-        let types = config_parser::extract_config_string_array(
-            &parse_source,
-            parse_path,
-            &["compilerOptions", "types"],
-        );
-        for ty in &types {
-            let base = crate::resolve::extract_package_name(ty);
-            if !base.starts_with('@') {
-                result
-                    .referenced_dependencies
-                    .push(format!("@types/{base}"));
-            }
-            result.referenced_dependencies.push(base);
-        }
-
-        if let Some(jsx_source) = config_parser::extract_config_string(
-            &parse_source,
-            parse_path,
-            &["compilerOptions", "jsxImportSource"],
-        ) {
-            result.referenced_dependencies.push(jsx_source);
-            mark_tsconfig_jsx_dir(&mut result, config_path);
-        }
-        // Vite reads these tsconfig settings for TypeScript files when the
-        // Vite config sets no JSX import source.
-        if config_parser::extract_config_string(
-            &parse_source,
-            parse_path,
-            &["compilerOptions", "jsx"],
-        )
-        .is_some_and(|mode| matches!(mode.as_str(), "preserve" | "react" | "react-native"))
-        {
-            mark_tsconfig_jsx_dir(&mut result, config_path);
-        }
-
-        for (find, replacement) in config_parser::extract_config_path_aliases(
-            &parse_source,
-            parse_path,
-            &["compilerOptions", "paths"],
-        ) {
-            let Some((normalized_find, normalized_replacement)) =
-                normalize_tsconfig_path_alias(&find, &replacement, parse_path, root)
-            else {
-                continue;
-            };
-            result
-                .path_aliases
-                .push((normalized_find, normalized_replacement));
+        // TypeScript reads `types`, `jsx`, `jsxImportSource` and `paths`
+        // through the `extends` chain, so the plugin reads the merged config.
+        if let Some(merged) = fallow_config::MergedTsconfig::read_with_source(config_path, source) {
+            parse_tsconfig_types(&merged, &mut result);
+            parse_tsconfig_jsx(&merged, config_path, &mut result);
+            parse_tsconfig_paths(&merged, root, &mut result);
         }
 
         let plugin_site = TsconfigSite {
@@ -190,15 +148,102 @@ impl Plugin for TypeScriptPlugin {
     }
 }
 
-/// Record the directory of a tsconfig that sets the JSX runtime of the
-/// TypeScript files below it.
-fn mark_tsconfig_jsx_dir(result: &mut PluginResult, config_path: &Path) {
-    if let Some(dir) = config_path.parent()
-        && !result.tsconfig_jsx_dirs.iter().any(|known| known == dir)
-    {
-        result.tsconfig_jsx_dirs.push(dir.to_path_buf());
+/// Credit the packages of the merged `compilerOptions.types`, with the
+/// `@types/` package of each unscoped name.
+fn parse_tsconfig_types(merged: &fallow_config::MergedTsconfig, result: &mut PluginResult) {
+    let Some(types) = merged
+        .compiler_option("types")
+        .and_then(fallow_config::TsconfigValue::strings)
+    else {
+        return;
+    };
+    for ty in types {
+        let base = crate::resolve::extract_package_name(ty);
+        if !base.starts_with('@') {
+            result
+                .referenced_dependencies
+                .push(format!("@types/{base}"));
+        }
+        result.referenced_dependencies.push(base);
     }
 }
+
+/// Read the merged JSX settings of a tsconfig: credit a `jsxImportSource`
+/// package, and record the runtime that the tsconfig selects for its
+/// directory.
+fn parse_tsconfig_jsx(
+    merged: &fallow_config::MergedTsconfig,
+    config_path: &Path,
+    result: &mut PluginResult,
+) {
+    let jsx_import_source = merged.compiler_option_str("jsxImportSource");
+    let has_jsx_import_source = jsx_import_source.is_some();
+    if let Some(jsx_source) = jsx_import_source {
+        result.referenced_dependencies.push(jsx_source.to_owned());
+    }
+    let automatic_react = match merged.compiler_option_str("jsx") {
+        // The automatic runtime imports `react/jsx-runtime` when no
+        // `jsxImportSource` names another package. The analysis credits the
+        // package only when it finds a file with JSX.
+        Some(mode) if AUTOMATIC_JSX_MODES.contains(&mode) => !has_jsx_import_source,
+        // Vite reads these tsconfig settings for TypeScript files when the
+        // Vite config sets no JSX import source.
+        Some("preserve" | "react" | "react-native") => false,
+        _ if has_jsx_import_source => false,
+        _ => return,
+    };
+    let Some(dir) = config_path.parent() else {
+        return;
+    };
+    let entry = TsconfigJsxDir {
+        dir: dir.to_path_buf(),
+        automatic_react,
+    };
+    if !result.tsconfig_jsx_dirs.contains(&entry) {
+        result.tsconfig_jsx_dirs.push(entry);
+    }
+}
+
+/// Register the merged `compilerOptions.paths` as project path aliases. The
+/// first target of each pattern resolves against `baseUrl`, or against the
+/// config that sets `paths`.
+fn parse_tsconfig_paths(
+    merged: &fallow_config::MergedTsconfig,
+    root: &Path,
+    result: &mut PluginResult,
+) {
+    let Some(paths) = merged.paths() else {
+        return;
+    };
+    // `normalize_tsconfig_path_alias` reads a relative target against the
+    // folder of its config path, here the project root.
+    let root_config = root.join("tsconfig.json");
+    let root_config = root_config.as_path();
+    for (find, targets) in paths.patterns {
+        let Some(target) = targets
+            .as_array()
+            .and_then(|targets| targets.iter().find_map(serde_json::Value::as_str))
+        else {
+            continue;
+        };
+        // The alias table holds project-relative targets, so a target
+        // outside `root` gives no alias.
+        let Some(replacement) = merged
+            .resolve_path(target, &paths.base_dir)
+            .and_then(|replacement| replacement.strip_prefix(root).ok().map(Path::to_path_buf))
+        else {
+            continue;
+        };
+        let Some(alias) = normalize_tsconfig_path_alias(find, &replacement, root_config, root)
+        else {
+            continue;
+        };
+        result.path_aliases.push(alias);
+    }
+}
+
+/// The tsconfig `jsx` modes that select the automatic JSX runtime.
+const AUTOMATIC_JSX_MODES: &[&str] = &["react-jsx", "react-jsxdev"];
 
 /// Whether a `tsconfig.json` / `tsconfig.*.json` is present under `root`.
 ///
@@ -331,6 +376,9 @@ fn parse_tsconfig_plugins(
             return;
         };
 
+        // A finding points to a span of this file, so the reader walks the
+        // syntax tree of this file. A parent config that matches the config
+        // patterns gets its own pass. tsconfig-reads: allow
         let Some(compiler_opts) = find_object_property_object(obj, "compilerOptions") else {
             return;
         };
@@ -759,6 +807,80 @@ mod tests {
         assert!(deps.contains(&"node".to_string()));
         assert!(deps.contains(&"@types/jest".to_string()));
         assert!(deps.contains(&"jest".to_string()));
+    }
+
+    fn resolve_project_tsconfig(root: &Path) -> PluginResult {
+        let config_path = root.join("tsconfig.json");
+        let source = std::fs::read_to_string(&config_path).expect("read tsconfig");
+        TypeScriptPlugin.resolve_config(&config_path, &source, root)
+    }
+
+    #[test]
+    fn jsx_setting_from_extends_records_the_automatic_runtime() {
+        // Issue #4980: `jsx` comes only from the config that tsconfig.json
+        // extends.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::write(
+            root.join("base.json"),
+            r#"{"compilerOptions":{"jsx":"react-jsx"}}"#,
+        )
+        .expect("write base");
+        std::fs::write(root.join("tsconfig.json"), r#"{"extends":"./base.json"}"#)
+            .expect("write tsconfig");
+        let result = resolve_project_tsconfig(root);
+        assert_eq!(
+            result.tsconfig_jsx_dirs,
+            vec![TsconfigJsxDir {
+                dir: root.to_path_buf(),
+                automatic_react: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn paths_target_at_or_outside_the_root_gives_no_alias() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dunce::canonicalize(dir.path()).expect("canonical root");
+        std::fs::create_dir_all(root.join("packages/app")).expect("package folder");
+        std::fs::write(
+            root.join("packages/app/tsconfig.json"),
+            r#"{"compilerOptions":{"paths":{"@/*":["./*"],"@shared/*":["../../../shared/*"],"@lib/*":["./lib/*"]}}}"#,
+        )
+        .expect("write tsconfig");
+        let config_path = root.join("packages/app/tsconfig.json");
+        let source = std::fs::read_to_string(&config_path).expect("read tsconfig");
+        let result =
+            TypeScriptPlugin.resolve_config(&config_path, &source, &root.join("packages/app"));
+        assert_eq!(
+            result.path_aliases,
+            vec![("@lib/".to_string(), "lib".to_string())]
+        );
+    }
+
+    #[test]
+    fn every_extends_shape_gives_the_jsx_setting_and_paths() {
+        for shape in fallow_config::TsconfigExtendsShape::ALL {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let root = dir.path();
+            shape.write(root);
+            let result = resolve_project_tsconfig(root);
+            assert_eq!(
+                result.tsconfig_jsx_dirs,
+                vec![TsconfigJsxDir {
+                    dir: root.to_path_buf(),
+                    automatic_react: true,
+                }],
+                "{}: jsx",
+                shape.name()
+            );
+            assert_eq!(
+                result.path_aliases,
+                vec![("@app/".to_string(), "src".to_string())],
+                "{}: paths",
+                shape.name()
+            );
+        }
     }
 
     #[test]

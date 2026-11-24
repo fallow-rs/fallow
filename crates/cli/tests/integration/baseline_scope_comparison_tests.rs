@@ -234,7 +234,7 @@ fn the_command_in_the_gate_failure_removes_only_the_fixed_entry() {
         .map(unquote_shell_word)
         .collect();
     args.extend_from_slice(&["--format", "json"]);
-    let pruned = fallow(&dir, &args);
+    let pruned = run_fallow_raw(&args);
 
     assert_eq!(pruned.code, 0, "{printed}: {}", pruned.stdout);
     let json = parse_json(&pruned);

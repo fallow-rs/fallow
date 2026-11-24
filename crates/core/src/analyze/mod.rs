@@ -2,7 +2,9 @@ mod absent_component_prop;
 mod constant_parameter;
 mod cycle_allow;
 mod cycle_finding;
+mod structural_cycle_detectors;
 pub(crate) use constant_parameter::release_resolution_payloads;
+use structural_cycle_detectors::{run_package_cycle_detector, run_re_export_cycle_detector};
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
@@ -25,6 +27,7 @@ mod jsx_runtime_credits;
 mod members;
 mod misplaced_directive;
 mod mixed_barrel;
+mod namespace_escape_detector;
 mod package_cycles;
 mod package_json_utils;
 mod package_manager;
@@ -594,36 +597,6 @@ fn run_boundary_aux_detectors(
     )
 }
 
-/// Thin wrapper around [`re_export_cycles::find_re_export_cycles`] that gates
-/// on `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
-fn run_re_export_cycle_detector(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-    suppressions: &crate::suppress::SuppressionContext<'_>,
-) -> Vec<ReExportCycleFinding> {
-    if config.rules.re_export_cycle == Severity::Off {
-        return Vec::new();
-    }
-    find_re_export_cycles(graph, suppressions)
-}
-
-/// Thin wrapper around [`package_cycles::find_package_cycles`] that gates on
-/// `Severity::Off`. Extracted alongside [`run_circular_dep_detector`].
-fn run_package_cycle_detector(input: DeadCodeDetectorInput<'_>) -> Vec<PackageCycleFinding> {
-    if input.config.rules.package_cycle == Severity::Off {
-        return Vec::new();
-    }
-    package_cycles::find_package_cycles(
-        input.graph,
-        input.resolved_modules,
-        input.workspaces,
-        &input.config.root,
-        input.line_offsets_by_file,
-        input.suppressions,
-        &|path| input.config.resolve_rules_for_path(path).package_cycle == Severity::Off,
-    )
-}
-
 /// Re-export cycles and package cycles, computed on one worker.
 type StructuralCycleResults = (Vec<ReExportCycleFinding>, Vec<PackageCycleFinding>);
 
@@ -829,7 +802,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     let (virtual_prefixes, generated_patterns, generated_type_prefixes) =
         plugin_slices::derive_plugin_string_slices(plugin_result);
 
-    let mut results = run_parallel_dead_code_detectors(DeadCodeDetectorInput {
+    let detector_input = DeadCodeDetectorInput {
         graph: input.graph,
         config: input.config,
         resolved_modules: input.resolved_modules,
@@ -847,7 +820,10 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         generated_type_prefixes: &generated_type_prefixes,
         declared_deps: input.declared_deps,
         collect_usages: input.collect_usages,
-    });
+    };
+    let mut results = run_parallel_dead_code_detectors(detector_input);
+    results.namespace_escapes =
+        namespace_escape_detector::run_namespace_escape_detector(detector_input);
     semantic_scope::attach(&mut results, input.graph, input.config, plugin_result);
     results
 }
@@ -1852,7 +1828,7 @@ fn run_cycle_and_usage_detectors(
             rayon::join(
                 || {
                     (
-                        run_re_export_cycle_detector(input.graph, input.config, input.suppressions),
+                        run_re_export_cycle_detector(input),
                         run_package_cycle_detector(input),
                     )
                 },

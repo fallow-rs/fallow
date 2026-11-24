@@ -16,7 +16,17 @@ fn header() -> JournalHeader {
         kill_matrix: false,
         kill_matrix_targets: Vec::new(),
         kill_matrix_full: false,
+        run_id: String::new(),
     }
+}
+
+/// The header line that the run `run_id` writes for [`header`].
+fn header_line(run_id: &str) -> String {
+    serde_json::to_string(&JournalHeader {
+        run_id: run_id.to_owned(),
+        ..header()
+    })
+    .unwrap()
 }
 
 fn keys(dir: &Path) -> Arc<ResultCache> {
@@ -61,7 +71,7 @@ fn a_run_without_resume_starts_a_new_journal_and_appends_each_result() {
     let next = open(dir.path(), &header(), false).unwrap();
     assert_eq!(
         lines(dir.path()),
-        vec![serde_json::to_string(&header()).unwrap()],
+        vec![header_line(next.journal.run_id())],
         "a run without --resume replaces the journal"
     );
     assert_eq!(next.journal.resumed("m1", "k1"), None);
@@ -158,7 +168,11 @@ fn a_resume_in_the_other_target_mode_is_refused() {
 #[test]
 fn a_resume_with_another_fingerprint_names_each_input_that_differs() {
     let dir = tempfile::tempdir().unwrap();
-    drop(open(dir.path(), &header(), false).unwrap());
+    let first = open(dir.path(), &header(), false)
+        .unwrap()
+        .journal
+        .run_id()
+        .to_owned();
 
     let mut changed = header();
     changed.runtime = "node 22.18.0".to_owned();
@@ -180,7 +194,7 @@ fn a_resume_with_another_fingerprint_names_each_input_that_differs() {
     );
     assert_eq!(
         lines(dir.path()),
-        vec![serde_json::to_string(&header()).unwrap()],
+        vec![header_line(&first)],
         "a refused resume keeps the journal"
     );
 }
@@ -329,4 +343,28 @@ fn matrix_resume_preserves_all_killers_and_refuses_another_mode() {
         mismatch.differences,
         ["kill matrix (journal: true, this run: false)"]
     );
+}
+
+/// A run removes only the journal that it wrote. A newer run that started
+/// meanwhile owns the journal file, and its journal stays.
+#[test]
+fn a_run_removes_only_its_own_journal() {
+    let dir = tempfile::tempdir().unwrap();
+    let older = open(dir.path(), &header(), false).unwrap().journal;
+    let older_id = older.run_id().to_owned();
+    drop(older);
+    let newer = open(dir.path(), &header(), false).unwrap().journal;
+    let newer_id = newer.run_id().to_owned();
+    drop(newer);
+    assert_ne!(older_id, newer_id, "each run gets its own id");
+
+    assert!(!Journal::remove_owned(dir.path(), &older_id).unwrap());
+    assert!(
+        Journal::path(dir.path()).is_file(),
+        "the newer journal stays"
+    );
+    assert!(!Journal::remove_owned(dir.path(), "").unwrap());
+    assert!(Journal::remove_owned(dir.path(), &newer_id).unwrap());
+    assert!(!Journal::path(dir.path()).exists());
+    assert!(!Journal::remove_owned(dir.path(), &newer_id).unwrap());
 }

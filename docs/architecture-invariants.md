@@ -18,7 +18,7 @@ The core crates are:
 | `fallow-types` | Shared typed contracts, issue metadata, suppressions, and envelope data. |
 | `fallow-report-protocol` | Language-neutral report contract: the JSON error document, gate outcome types, exit codes, and the wire version. It depends on no workspace crate and on no JavaScript type. |
 | `fallow-config` | Config loading and typed configuration. |
-| `fallow-process` | Shared child-process lifecycle and process-tree termination. |
+| `fallow-process` | Shared child-process lifecycle, process-tree termination, and `HostPaths`, the one reader of the home folder, the per-user folders and `PATH`. |
 | `fallow-mutation` | Pure mutant site discovery, mutant ids, and mutation-switching instrumentation. It depends only on Oxc crates. |
 | `fallow-extract` | Parser-facing facts from source files. |
 | `fallow-graph` | Module graph, dependency traversal, cycles, and impact facts. |

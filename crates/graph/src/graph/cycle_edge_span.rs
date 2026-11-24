@@ -2,7 +2,18 @@
 
 use fallow_types::discover::FileId;
 
-use super::ModuleGraph;
+use super::{ModuleGraph, ModuleNode};
+
+impl ModuleNode {
+    pub(super) fn re_export_span_start(&self, target: FileId, type_only: bool) -> Option<u32> {
+        self.re_exports
+            .iter()
+            .find(|re| {
+                re.source_file == target && re.is_type_only == type_only && !re.span.is_empty()
+            })
+            .map(|re| re.span.start)
+    }
+}
 
 impl ModuleGraph {
     /// Find the byte offset of the import statement from `source` to `target`.
@@ -29,16 +40,10 @@ impl ModuleGraph {
                     .find(|s| s.is_eager_value())
                     .or_else(|| edge.symbols.iter().find(|s| !s.is_type_only))
                     .or_else(|| edge.symbols.first())?;
-                if symbol.import_span.is_empty() {
-                    // A re-export adds a side-effect symbol without a span to
-                    // the edge. The re-export edge of the module has the span.
-                    if let Some(re_export) = module.re_exports.iter().find(|re| {
-                        re.source_file == target
-                            && re.is_type_only == symbol.is_type_only
-                            && !re.span.is_empty()
-                    }) {
-                        return Some(re_export.span.start);
-                    }
+                if symbol.import_span.is_empty()
+                    && let Some(start) = module.re_export_span_start(target, symbol.is_type_only)
+                {
+                    return Some(start);
                 }
                 return Some(symbol.import_span.start);
             }

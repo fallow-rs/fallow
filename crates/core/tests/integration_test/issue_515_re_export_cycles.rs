@@ -103,3 +103,28 @@ fn type_only_re_export_cycle_still_fires_as_finding() {
         "type-only re-export cycle should still produce a finding"
     );
 }
+
+/// The line and column of a cycle finding point at the `export ... from`
+/// statement in `files[0]` that re-exports from another member. A SARIF or
+/// CI annotation without them can only name the file.
+#[test]
+fn cycle_finding_points_at_the_re_export_that_closes_the_cycle() {
+    let root = fixture_path("re-export-cycle-anchor-line");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let anchor = |kind: ReExportCycleKind| {
+        let finding = results
+            .re_export_cycles
+            .iter()
+            .find(|c| c.cycle.kind == kind)
+            .unwrap_or_else(|| panic!("expected a {kind:?} cycle"));
+        let value = serde_json::to_value(&finding.cycle).expect("cycle serializes");
+        (value["line"].as_u64(), value["col"].as_u64())
+    };
+
+    // `barrel-a.ts` line 2 re-exports from `helper.ts`, which is not a member.
+    // Line 3 re-exports from `barrel-b.ts` after two spaces of indent.
+    assert_eq!(anchor(ReExportCycleKind::MultiNode), (Some(3), Some(2)));
+    assert_eq!(anchor(ReExportCycleKind::SelfLoop), (Some(3), Some(0)));
+}

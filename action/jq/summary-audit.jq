@@ -38,6 +38,7 @@ def dead_code_rows:
    [ (.dead_code.unused_class_members // [])[] | {kind:"Unused class member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_namespace_members // [])[] | {kind:"Unused namespace member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_protected_class_members // [])[] | {kind:"Unused protected class member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
+   [ (.dead_code.namespace_escapes // [])[] | {kind:"Namespace escape", location:path_line, item:("`\(.local_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unused_store_members // [])[] | {kind:"Unused store member", location:path_line, item:("`\(.parent_name).\(.member_name)`"), introduced:.introduced} ] +
    [ (.dead_code.unresolved_imports // [])[] | {kind:"Unresolved import", location:path_line, item:("`\(.specifier)`"), introduced:.introduced} ] +
    [ (.dead_code.unlisted_dependencies // [])[] | {kind:"Unlisted dependency", location:first_import_site, item:("`\(.package_name)`"), introduced:.introduced} ] +
@@ -104,7 +105,8 @@ def styling_rows:
 (.attribution // {}) as $attr |
 ($summary.dead_code_issues // 0) as $dead |
 ($summary.complexity_findings // 0) as $complex |
-($summary.duplication_clone_groups // 0) as $dupes |
+(if (.duplication.clone_regions // null) != null then (.duplication.clone_regions | length)
+ else ($summary.duplication_clone_groups // 0) end) as $dupes |
 ((.complexity.styling_findings // []) | length) as $styling |
 (.changed_files_count // 0) as $files |
 (.elapsed_ms // 0) as $elapsed |
@@ -125,7 +127,7 @@ styling_rows as $styling_rows |
 (if ($summary.complexity_skipped // false) then "| Styling | skipped | - | - |\n\n"
  else "| Styling | \($styling) | \($attr.styling_introduced // 0) | \($attr.styling_inherited // 0) |\n\n" end) +
 (if ($attr.duplication_demoted // 0) > 0 then
-  "> \(plural($attr.duplication_demoted; "introduced clone group")) demoted to inherited (not written by this changeset)\n\n"
+  "> \(plural($attr.duplication_demoted; "introduced clone region")) demoted to inherited (not written by this changeset)\n\n"
 else "" end) +
 (if ($dead_rows | length) > 0 then
   "### Dead Code\n\n" +

@@ -7,7 +7,7 @@ use fallow_config::PlannedAnalysis;
 use fallow_engine::resolved_run::ResolvedRun;
 use rustc_hash::FxHashSet;
 
-use super::{AuditOptions, AuditTypeAwareOptions, build_base_audit_options, runs};
+use super::{AuditOptions, AuditTypeAwareOptions, BaseRunInputs, runs};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 
 /// One dead-code pass of an audit side.
@@ -117,6 +117,7 @@ pub(super) fn run_audit_check<'a>(
         regression_opts: crate::regression::RegressionOpts {
             fail_on_regression: false,
             tolerance: crate::regression::Tolerance::Absolute(0),
+            args: crate::regression::RegressionArgs::default(),
             regression_baseline_file: None,
             save_target: crate::regression::SaveRegressionTarget::None,
             scoped: true,
@@ -188,7 +189,7 @@ pub(super) struct BaseOwnConfigInput<'a> {
     pub(super) current_config_path: Option<&'a Path>,
     pub(super) base_root: &'a Path,
     pub(super) base_cache_dir: &'a Path,
-    pub(super) base_coverage: &'a fallow_api::audit_run::BaseCoverageInputs,
+    pub(super) base_run: &'a BaseRunInputs,
     pub(super) focus: Option<&'a FxHashSet<PathBuf>>,
     /// The dead-code pass of the base under the head config.
     pub(super) base_check: Option<&'a CheckResult>,
@@ -215,7 +216,7 @@ pub(super) fn base_own_config_unused_code(
         current_config_path,
         base_root,
         base_cache_dir,
-        base_coverage,
+        base_run,
         focus,
         base_check,
     } = *input;
@@ -228,13 +229,7 @@ pub(super) fn base_own_config_unused_code(
     // file that the change added has no base version, so discovery decides.
     let run = runs::own_config_run(head, base_root, opts.no_cache)?;
     let base_config_path = run.config_file().value().clone();
-    let own_opts = build_base_audit_options(
-        opts,
-        base_root,
-        &base_config_path,
-        base_cache_dir,
-        base_coverage,
-    );
+    let own_opts = base_run.options(opts, base_root, &base_config_path, base_cache_dir);
     // A syntactic pass reports at least the unused code of a type-aware pass,
     // so it can only make fewer head findings look introduced.
     let syntactic = AuditTypeAwareOptions {

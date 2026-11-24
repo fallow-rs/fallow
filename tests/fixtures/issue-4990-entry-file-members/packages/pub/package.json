@@ -1,0 +1,1 @@
+{ "name": "@p/pub", "private": true, "exports": { ".": "./src/index.ts" } }

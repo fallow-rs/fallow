@@ -16,11 +16,14 @@
  * pin, not from the working tree.
  *
  * Usage:
- *   node scripts/sync-skills-companion.mjs [--pin <sha>] [--message <text>] [--dry-run]
+ *   node scripts/sync-skills-companion.mjs [--pin <sha>] [--message <text>] [--dry-run] [--no-gpg-sign]
  *   node scripts/sync-skills-companion.mjs --help
  *
  * `FALLOW_SKILLS_DIR` may point to the companion checkout, as for
  * `scripts/vendor-skills.mjs`.
+ *
+ * `--no-gpg-sign` is for `.github/workflows/skills-companion-sync.yml`. The CI
+ * runner has no signing key, and the companion does not require signatures.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -82,12 +85,13 @@ const CHECK_PREREQUISITES = [
 ];
 
 const USAGE = `Usage:
-  node scripts/sync-skills-companion.mjs [--pin <sha>] [--message <text>] [--dry-run]
+  node scripts/sync-skills-companion.mjs [--pin <sha>] [--message <text>] [--dry-run] [--no-gpg-sign]
 
 Options:
   --pin <sha>       publish the skill of this commit on origin/main (default: HEAD)
   --message <text>  use this commit message in the companion
   --dry-run         do the checks, show the changes, and write nothing
+  --no-gpg-sign     commit without a signature (the DCO sign-off stays)
   -h, --help        show this help`;
 
 class UsageError extends Error {}
@@ -96,7 +100,7 @@ class UsageError extends Error {}
 class Refusal extends Error {}
 
 const parseArgs = (argv) => {
-  const options = { pin: undefined, message: undefined, dryRun: false, help: false };
+  const options = { pin: undefined, message: undefined, dryRun: false, sign: true, help: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--pin" || arg === "--message") {
@@ -108,6 +112,8 @@ const parseArgs = (argv) => {
       index += 1;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--no-gpg-sign") {
+      options.sign = false;
     } else if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else {
@@ -455,7 +461,7 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     if (!skipChecks) {
       runChecks(companion, source, version.old, env, log);
     }
-    git(companion, "commit", "-S", "-s", "--quiet", "-m", message);
+    git(companion, "commit", options.sign ? "-S" : "--no-gpg-sign", "-s", "--quiet", "-m", message);
     log(`${PREFIX}: committed ${git(companion, "rev-parse", "--short", "HEAD")} in ${companion}.`);
     // The companion main branch is protected, so the commit lands through a pull request.
     const branch = `docs/sync-fallow-${pin.slice(0, 9)}`;

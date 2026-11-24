@@ -11,8 +11,9 @@ use fallow_types::flag_retirement::{
     FlagRegressionMetric, FlagRegressionResult, RetirementReason, RetirementSummary,
 };
 
-use super::baseline::{RegressionOpts, load_regression_baseline};
+use super::baseline::{RegressionOpts, load_regression_baseline_for};
 use super::counts::FlagsCounts;
+use super::recovery::BaselineCommand;
 use super::tolerance::Tolerance;
 use crate::error::emit_input_error;
 
@@ -71,21 +72,25 @@ pub fn compare_flags_regression(
             reason: Some(reason.to_string()),
         }));
     }
+    let command = BaselineCommand::Flags(opts.args);
     let Some(path) = opts.regression_baseline_file else {
         return Err(emit_input_error(
-            "fallow flags --fail-on-regression needs --regression-baseline <PATH>.\n\
-             Create the file with: fallow flags --retirement --save-regression-baseline <PATH>",
+            &format!(
+                "fallow flags --fail-on-regression needs --regression-baseline <PATH>.\n\
+                 Create the file with: {}",
+                command.save(None)
+            ),
             opts.output,
         ));
     };
-    let baseline = load_regression_baseline(path, opts.output)?;
+    let baseline = load_regression_baseline_for(path, opts.output, command)?;
     let Some(stored) = baseline.flags else {
         return Err(emit_input_error(
             &format!(
                 "regression baseline '{}' has no flags data.\n\
-                 Create it with: fallow flags --retirement --save-regression-baseline {}",
+                 Create it with: {}",
                 path.display(),
-                path.display()
+                command.save(Some(path))
             ),
             opts.output,
         ));
@@ -193,6 +198,7 @@ mod tests {
         RegressionOpts {
             fail_on_regression: true,
             tolerance,
+            args: crate::regression::RegressionArgs::default(),
             regression_baseline_file: Some(path),
             save_target: SaveRegressionTarget::None,
             scoped: false,
@@ -203,8 +209,14 @@ mod tests {
 
     fn saved(dir: &std::path::Path, stored: &FlagsCounts) -> std::path::PathBuf {
         let path = dir.join("flags-baseline.json");
-        crate::regression::save_flags_regression_baseline(&path, dir, stored, OutputFormat::Json)
-            .expect("save");
+        crate::regression::save_flags_regression_baseline(
+            &path,
+            dir,
+            stored,
+            OutputFormat::Json,
+            crate::regression::RegressionArgs::default(),
+        )
+        .expect("save");
         path
     }
 

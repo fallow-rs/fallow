@@ -7,7 +7,7 @@ use dashmap::DashMap;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
-use fallow_config::TsconfigOutputMap;
+use fallow_config::{MergedTsconfig, SourceLoader, TsconfigOutputMap};
 use fallow_types::discover::FileId;
 
 use crate::read_trace::Resolver;
@@ -71,7 +71,7 @@ impl ResolveResult {
 
     /// Return whether this edge originated from CommonJS `require()`.
     #[must_use]
-    pub(crate) const fn is_commonjs_require(&self) -> bool {
+    pub const fn is_commonjs_require(&self) -> bool {
         matches!(
             self,
             Self::CommonJsInternalModule(_)
@@ -484,6 +484,7 @@ impl CanonicalizeCache {
 pub(super) struct TsconfigCache {
     json: DashMap<PathBuf, Option<Arc<Value>>, FxBuildHasher>,
     chains: DashMap<PathBuf, Arc<[PathBuf]>, FxBuildHasher>,
+    merged: DashMap<PathBuf, Option<Arc<MergedTsconfig>>, FxBuildHasher>,
     output_maps: DashMap<PathBuf, Arc<TsconfigOutputMap>, FxBuildHasher>,
 }
 
@@ -506,6 +507,17 @@ impl TsconfigCache {
         let value = load(path).map(Arc::new);
         self.json.insert(path.to_path_buf(), value.clone());
         value
+    }
+
+    /// Return the merged settings of a tsconfig and its `extends` chain,
+    /// reading them through `load` on first miss.
+    pub fn merged(&self, path: &Path, load: &SourceLoader<'_>) -> Option<Arc<MergedTsconfig>> {
+        if let Some(merged) = self.merged.get(path) {
+            return merged.clone();
+        }
+        let merged = MergedTsconfig::read_with_loader(path, load).map(Arc::new);
+        self.merged.insert(path.to_path_buf(), merged.clone());
+        merged
     }
 
     /// Return the cached tsconfig chain for a source file, if one exists.

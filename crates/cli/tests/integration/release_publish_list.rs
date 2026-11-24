@@ -157,6 +157,12 @@ fn release_publish_list_orders_workspace_dependencies_first() {
             continue;
         };
         for dependency in local_publishable_dependencies(&manifest, &publishable) {
+            // A crate can name itself as a path-only dev-dependency to turn on
+            // a test feature. Cargo drops that entry at publish, so it sets no
+            // publish order.
+            if dependency == crate_name {
+                continue;
+            }
             let dependency_index = sequence
                 .iter()
                 .position(|name| name == &dependency)
