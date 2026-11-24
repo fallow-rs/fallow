@@ -322,6 +322,8 @@ mod css_modules_unused;
 mod dev_dep_in_prod;
 #[path = "integration_test/invalid_client_exports.rs"]
 mod invalid_client_exports;
+#[path = "integration_test/macro_import_build_time.rs"]
+mod macro_import_build_time;
 #[path = "integration_test/misplaced_directive.rs"]
 mod misplaced_directive;
 #[path = "integration_test/mixed_client_server_barrel.rs"]
