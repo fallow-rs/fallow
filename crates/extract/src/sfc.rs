@@ -78,16 +78,6 @@ static HTML_COMMENT_RE: LazyLock<regex::Regex> =
 static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r#"v-bind\s*=\s*["'](?:\$attrs|\$props|props)["']"#));
 
-/// FP-1 (unused-load-data-key): a SvelteKit route component passing the whole
-/// `data` prop opaquely in MARKUP, where a child reads arbitrary keys the
-/// detector cannot see. Matches `data={data}` (whole-prop pass to a child) and
-/// `{...data}` (Svelte template spread). The script-side `const x = {...data}` /
-/// `fn(data)` / `const X = data` forms are captured by the JS visitor instead.
-/// Only a whole-`data` pass forces the abstain; `data.x` member access stays a
-/// credited consumer.
-static SVELTE_TEMPLATE_DATA_WHOLE_USE_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r"(?:=\s*\{\s*data\s*\}|\{\s*\.\.\.\s*data\s*\})"));
-
 /// Static asset references in SFC markup: `<img src="./logo.png">`,
 /// `<source src="...">`, `<video poster="...">`, etc.
 ///
@@ -978,7 +968,6 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
         template_visible_imports,
         props_return_binding,
         credit_load_data,
-        source,
         combined,
     );
     let file_id = combined.file_id;
@@ -1006,7 +995,10 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
     if let Some(module) = module {
         *combined = module;
     }
-    combined.has_load_data_whole_use |= credit_load_data && template_usage.has_load_data_whole_use;
+    // A route component that passes the whole `data` prop in markup
+    // (`{data}`, `data={data}`, `{...data}`, `fn(data)`) lets a child read any
+    // load key, so the unused-load-data-key detector must abstain.
+    combined.has_load_data_whole_use |= credit_load_data && template_usage.uses_whole("data");
     apply_prop_template_credit(&template_usage, props_return_binding, combined);
     merge_template_usage_into_combined(template_usage, combined);
 }
@@ -1014,14 +1006,12 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
 /// Build the set of template-credited names: the template-visible imports plus
 /// each harvested prop name / destructure local, Vue's implicit `$props`, the
 /// `defineProps` return binding, and (for SvelteKit route components) the `data`
-/// load prop. Crediting a prop name against an import is inert. Also sets
-/// `has_load_data_whole_use` when a route spreads / passes the whole `data` prop.
+/// load prop. Crediting a prop name against an import is inert.
 fn build_template_credited_set(
     template_visible_imports: FxHashSet<String>,
     props_return_binding: Option<&str>,
     credit_load_data: bool,
-    source: &str,
-    combined: &mut ModuleInfo,
+    combined: &ModuleInfo,
 ) -> FxHashSet<String> {
     let mut credited = template_visible_imports;
     // unused-load-data-key Primitive B: a SvelteKit route component receives a
@@ -1030,9 +1020,6 @@ fn build_template_credited_set(
     // emitted for the cross-file load-data-key join, gated to route components.
     if credit_load_data {
         credited.insert("data".to_string());
-        // FP-1: a route component spreading / passing the whole `data` prop in
-        // markup consumes arbitrary keys opaquely; force the detector to abstain.
-        combined.has_load_data_whole_use |= SVELTE_TEMPLATE_DATA_WHOLE_USE_RE.is_match(source);
     }
     if !combined.component_props.is_empty() {
         for prop in &combined.component_props {

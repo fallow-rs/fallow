@@ -91,9 +91,6 @@ pub struct TemplateUsage {
     pub(crate) used_bindings: FxHashSet<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     pub(crate) whole_object_uses: Vec<String>,
-    /// True when Svelte markup passes the route `data` prop via shorthand
-    /// attribute (`<View {data} />`).
-    pub(crate) has_load_data_whole_use: bool,
     /// PascalCase tag names that matched no import or local binding.
     pub(crate) unresolved_tag_names: FxHashSet<String>,
     pub(crate) security_sinks: Vec<SinkSite>,
@@ -139,7 +136,6 @@ impl TemplateUsage {
     pub(crate) fn merge(&mut self, mut other: Self) {
         self.take_markup_sink_from(&mut other);
         self.used_bindings.extend(other.used_bindings);
-        self.has_load_data_whole_use |= other.has_load_data_whole_use;
         self.unresolved_tag_names.extend(other.unresolved_tag_names);
         self.security_sinks.extend(other.security_sinks);
         for access in other.member_accesses {
@@ -163,12 +159,18 @@ impl TemplateUsage {
         }
     }
 
+    /// Whether the template mentions `name` other than as the object of a
+    /// member access, for example in a shorthand attribute, a spread or a
+    /// call argument.
+    pub(crate) fn uses_whole(&self, name: &str) -> bool {
+        self.whole_object_uses.iter().any(|whole| whole == name)
+    }
+
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.used_bindings.is_empty()
             && self.member_accesses.is_empty()
             && self.whole_object_uses.is_empty()
-            && !self.has_load_data_whole_use
             && self.unresolved_tag_names.is_empty()
             && self.security_sinks.is_empty()
     }
@@ -370,7 +372,6 @@ fn build_template_usage(
                 .collect(),
         ),
         unresolved_tag_names: FxHashSet::default(),
-        has_load_data_whole_use: false,
         security_sinks: Vec::new(),
         markup: None,
     }
