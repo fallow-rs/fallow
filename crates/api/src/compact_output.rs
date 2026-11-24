@@ -783,6 +783,7 @@ pub fn build_health_compact_lines(
     push_runtime_sections_compact(&mut lines, report, root);
     push_hotspots_compact(&mut lines, &report.hotspots, root);
     push_change_coupling_compact(&mut lines, report.change_coupling.as_ref(), root);
+    push_shallow_directories_compact(&mut lines, report.shallow_directories.as_ref());
     push_health_trend_compact(&mut lines, report);
     push_refactoring_targets_compact(&mut lines, &report.targets, root);
     lines
@@ -1152,6 +1153,28 @@ fn push_change_coupling_compact(
             pair.revisions_a,
             pair.revisions_b,
             pair.strong,
+        ));
+    }
+}
+
+/// One line per shallow directory, on its anchor file:
+/// `shallow-directory:<anchor_file>:dir=..,shown=..,hidden=..,files=..`. The
+/// paths of the section are already relative to the root.
+fn push_shallow_directories_compact(
+    lines: &mut Vec<String>,
+    section: Option<&fallow_output::ShallowDirectoriesReport>,
+) {
+    let Some(section) = section else {
+        return;
+    };
+    for dir in &section.directories {
+        lines.push(format!(
+            "shallow-directory:{}:dir={},shown={},hidden={},files={}",
+            dir.anchor_file.display().to_string().replace('\\', "/"),
+            dir.path.display().to_string().replace('\\', "/"),
+            dir.shown_count,
+            dir.hidden_count,
+            dir.shown_files,
         ));
     }
 }

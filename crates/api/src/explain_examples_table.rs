@@ -879,6 +879,20 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "shallow-directory",
+        args: &["--shallow-directories"],
+        anchor: ExampleAnchor::FileLevel,
+        base: &[],
+        files: &[
+            file!("shallow-directory", "files", "package.json", true),
+            file!("shallow-directory", "files", "src/main.ts", false),
+            file!("shallow-directory", "files", "src/report.ts", false),
+            file!("shallow-directory", "files", "src/utils/index.ts", false),
+            file!("shallow-directory", "files", "src/utils/text.ts", false),
+            file!("shallow-directory", "files", "src/utils/time.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "sql-injection",
         args: &[],
         anchor: ExampleAnchor::Line,

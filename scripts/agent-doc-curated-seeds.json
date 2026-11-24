@@ -1954,6 +1954,12 @@
     },
     {
       "section": "flags:health",
+      "row": "--shallow-directories",
+      "column": "Description",
+      "seed": "Show only shallow directories: directories whose interface is as large as what they hide. Advisory, no health score weight. Requires full analysis pipeline"
+    },
+    {
+      "section": "flags:health",
       "row": "--since",
       "column": "Description",
       "seed": "Git history window for hotspot analysis (default: 6m). Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01)"
@@ -2443,6 +2449,12 @@
       "row": "route-collision",
       "column": "Description",
       "seed": "Two or more Next.js App Router route files resolve to the same URL"
+    },
+    {
+      "section": "issue-types",
+      "row": "shallow-directory",
+      "column": "Description",
+      "seed": "Directory shows as many interface items as it hides"
     },
     {
       "section": "issue-types",

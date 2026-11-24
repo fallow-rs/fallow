@@ -774,7 +774,7 @@ fn check_rules_count() {
 
 #[test]
 fn health_rules_count() {
-    assert_eq!(HEALTH_RULES.len(), 22);
+    assert_eq!(HEALTH_RULES.len(), 23);
 }
 
 #[test]

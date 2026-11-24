@@ -1100,6 +1100,10 @@ fn health_runtime_rule_guide(id: &str) -> Option<RuleGuide> {
             example: "A file combines high complexity density, churn, fan-in, and dead-code signals.",
             how_to_fix: "Start with the listed evidence: remove dead exports, extract complex functions, then reduce fan-out or cycles in small steps.",
         },
+        "fallow/shallow-directory" => RuleGuide {
+            example: "`src/utils` holds 10 functions in 2 files. `src/main.ts` and `src/report.ts` use 8 of them through the barrel, and `src/utils` keeps 2 helpers inside.",
+            how_to_fix: "Group the items by the concern of their callers, and move each group into a module with a small interface, or next to its only caller. When the width is on purpose, for example a published helper set, add the directory to `health.shallowDirectories.ignore`.",
+        },
         "fallow/untested-file" => RuleGuide {
             example: "`src/routes/checkout.ts` imports `src/billing/invoice.ts`, but no test file imports either module, directly or through other modules.",
             how_to_fix: UNTESTED_FIX,
@@ -1337,6 +1341,14 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         short: "File identified as a high-priority refactoring candidate",
         full: "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling.",
         docs_path: "rules/refactoring-target",
+    },
+    RuleDef {
+        id: "fallow/shallow-directory",
+        category: "Health",
+        name: "Shallow Directory",
+        short: "Directory shows as many interface items as it hides",
+        full: "Files outside the directory use at least as many of its interface items as it keeps inside, and it shows at least `health.shallowDirectories.minInterface` items (default 8). An interface item is a module-scope function or an exported class with a method; types, constants, enums, UI components and exports that a package entry publishes are no items. Only runtime imports from files that are not tests or stories count. A catalog (about one item per file), a family of functions with one parameter list, and items with about one outside user are not reported. The section is opt-in with `fallow health --shallow-directories`, advisory, and has no health score weight.",
+        docs_path: "rules/shallow-directory",
     },
     RuleDef {
         id: "fallow/css-token-drift",

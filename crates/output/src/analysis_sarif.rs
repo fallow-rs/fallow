@@ -187,6 +187,7 @@ fn append_health_sarif_results(
     }
 
     append_refactoring_target_sarif_results(sarif_results, report, root);
+    append_shallow_directory_sarif_results(sarif_results, report);
     append_coverage_gap_sarif_results(sarif_results, report, root, snippets);
     append_styling_sarif_results(sarif_results, report, root);
 }
@@ -307,6 +308,11 @@ fn health_complexity_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<ser
             "fallow/refactoring-target",
             "File identified as a high-priority refactoring candidate",
             "warning",
+        ),
+        rule_builder(
+            "fallow/shallow-directory",
+            "Directory shows as many interface items as it hides",
+            "note",
         ),
     ]
 }
@@ -541,6 +547,33 @@ fn append_refactoring_target_sarif_results(
         sarif_results.push(sarif_result(
             "fallow/refactoring-target",
             "warning",
+            &message,
+            &uri,
+            None,
+        ));
+    }
+}
+
+/// One `note` per shallow directory, on its anchor file. The paths of the
+/// section are already relative to the root.
+fn append_shallow_directory_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    report: &HealthReport,
+) {
+    let Some(ref section) = report.shallow_directories else {
+        return;
+    };
+    for dir in &section.directories {
+        let message = format!(
+            "{} is shallow: files outside it use {} interface items, and it hides {}",
+            normalize_uri(&dir.path.display().to_string()),
+            dir.shown_count,
+            dir.hidden_count,
+        );
+        let uri = normalize_uri(&dir.anchor_file.display().to_string());
+        sarif_results.push(sarif_result(
+            "fallow/shallow-directory",
+            "note",
             &message,
             &uri,
             None,

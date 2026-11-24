@@ -59,6 +59,13 @@ const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
 This analysis is opt-in because it parses every project stylesheet. Standard CSS is parsed structurally. Sass/Less sources are scanned only where fallow can stay conservative without expanding preprocessor semantics.",
     },
     ToolGuideSection {
+        topic: "shallow_directories",
+        summary: "When a directory is shallow, and how to act on one.",
+        detail: r"Set shallow_directories=true to add a `shallow_directories` section. A directory is shallow when files outside it use at least as many of its interface items as it keeps inside, and it shows at least `health.shallowDirectories.minInterface` items (default 8). An interface item is a module-scope function or an exported class with a method. Types, constants, enums, UI components and exports that a package entry publishes are no items. Catalogs (about one item per file), families of functions with one parameter list, and items with about one outside user are not reported.
+
+Each entry lists the 7 items with the most outside users. Act on it with `narrow-interface`: move the logic behind fewer items, or merge the directory into its callers. When the width is on purpose, add the `ignore-directory` config entry. The section is advisory: no score weight, never a gate.",
+    },
+    ToolGuideSection {
         topic: "complexity_breakdown",
         summary: "What a `contributions[]` entry names, and how JSX depth is carried.",
         detail: r"Set complexity_breakdown=true to add a `contributions[]` array to each complexity finding. The array breaks down cyclomatic and cognitive scores per decision point. Each entry names the construct (if, else-if, ternary, boolean operator, loop, case, or catch), its source line, and its weight. React/Preact component entries also include hook-density and prop-count contributions. Use these entries to identify why a function scored high and which lines to refactor.

@@ -85,6 +85,10 @@ pub struct HealthParams {
     /// selected.
     pub coverage_gaps: Option<bool>,
 
+    /// Show only shallow directories: directories whose interface is as large
+    /// as what they hide. Advisory: no health score weight, never gates.
+    pub shallow_directories: Option<bool>,
+
     /// Show only the project health score (0–100) with letter grade (A/B/C/D/F).
     /// Runs duplication analysis automatically; pair with `hotspots=true` (or
     /// `targets=true`) for the churn-backed hotspot penalty.

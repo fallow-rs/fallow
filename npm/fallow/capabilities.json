@@ -2206,6 +2206,16 @@
           ]
         },
         {
+          "name": "--shallow-directories",
+          "type": "bool",
+          "required": false,
+          "description": "Show only shallow directories: directories whose interface is as large as what they hide. Advisory, no health score weight. Requires full analysis pipeline",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--hotspots",
           "type": "bool",
           "required": false,
@@ -5489,6 +5499,37 @@
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/rules/refactoring-target/"
+    },
+    {
+      "id": "shallow-directory",
+      "rule_id": "fallow/shallow-directory",
+      "command": "health",
+      "category": "Health",
+      "description": "Directory shows as many interface items as it hides",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "deprecated_filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "default_severity": null,
+      "opt_in": null,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/shallow-directory/"
     },
     {
       "id": "css-token-drift",

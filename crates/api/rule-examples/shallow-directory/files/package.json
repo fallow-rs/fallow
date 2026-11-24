@@ -1,0 +1,5 @@
+{
+  "name": "shallow-directory-example",
+  "type": "module",
+  "main": "src/main.ts"
+}
