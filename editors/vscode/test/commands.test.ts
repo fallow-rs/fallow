@@ -1328,6 +1328,73 @@ describe("applyFixes", () => {
     );
   });
 
+  it("shows available fixes in the preview with recovery advice when dry run exits with code 2", async () => {
+    const help = "Normalize this file to consistent LF or CRLF line endings.";
+    await withFixWorkspace(
+      async () => {
+        const result = await runFix(workspaceContext, true);
+        expect(result?.fixes).toHaveLength(3);
+        expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
+        expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+          expect.stringContaining(`src/b.ts ${help}`),
+        );
+        expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({ detail: "src/a.ts:1" }),
+            expect.objectContaining({ detail: "src/a.ts:4" }),
+            expect.objectContaining({ action: "apply-all", description: "2 fixes" }),
+          ]),
+          expect.objectContaining({
+            title: "Fallow: 2 fixes available, skipped 1",
+            placeHolder: expect.stringContaining(`src/b.ts ${help}`),
+          }),
+        );
+      },
+      {
+        dry_run: true,
+        total_fixed: 0,
+        fixes: [
+          { type: "remove_export", name: "unusedA", path: "src/a.ts", line: 1 },
+          { type: "remove_export", name: "unusedB", path: "src/a.ts", line: 4 },
+          { ...skipped, path: "src/b.ts", skip_reason: "mixed_line_endings", help },
+        ],
+      },
+      2,
+    );
+  });
+
+  it("falls back to the CLI error text as the preview note when exit code 2 report lacks recovery help", async () => {
+    await withFixWorkspace(
+      async () => {
+        const result = await runFix(workspaceContext, true);
+        expect(result?.fixes).toHaveLength(2);
+        expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
+        expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+          expect.stringContaining("fallow exited with code 2"),
+        );
+        expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({ detail: "src/a.ts:1" }),
+            expect.objectContaining({ action: "apply-all", description: "1 fix" }),
+          ]),
+          expect.objectContaining({
+            title: "Fallow: 1 fix available, skipped 1",
+            placeHolder: expect.stringContaining("fallow exited with code 2"),
+          }),
+        );
+      },
+      {
+        dry_run: true,
+        total_fixed: 0,
+        fixes: [
+          { type: "remove_export", name: "unusedA", path: "src/a.ts", line: 1 },
+          { ...skipped, path: "src/b.ts", skip_reason: "content_changed" },
+        ],
+      },
+      2,
+    );
+  });
+
   it("offers no apply action for a preview that contains only skips", async () => {
     await withFixWorkspace(
       async () => {

@@ -674,8 +674,10 @@ const RECOVERABLE_SKIP_REASONS: ReadonlySet<string> = new Set([
   "mixed_line_endings",
 ]);
 
-const partialFixSummary = (error: unknown): string => {
-  if (!(error instanceof FallowExecError) || error.exitCode !== 2) return "";
+const parsePartialFixResult = (error: unknown): FallowFixResult | null => {
+  if (!(error instanceof FallowExecError) || error.exitCode !== 2) {
+    return null;
+  }
   try {
     const result = JSON.parse(error.stdout) as FallowFixResult;
     if (
@@ -683,28 +685,51 @@ const partialFixSummary = (error: unknown): string => {
       Number.isInteger(result.total_fixed) &&
       Array.isArray(result.fixes)
     ) {
-      const recovery = result.fixes.find(
-        (fix) =>
-          fix.skipped &&
-          fix.help &&
-          fix.skip_reason !== undefined &&
-          RECOVERABLE_SKIP_REASONS.has(fix.skip_reason),
-      );
-      const advice = recovery?.help ? ` ${recovery.path ?? ""} ${recovery.help}`.trim() : "";
-      return ` (${fixSummary(result)})${advice ? `. ${advice}` : ""}`;
+      return result;
     }
   } catch {
     // The CLI can fail before it emits a fix report.
   }
-  return "";
+  return null;
 };
 
-const showDryRunPreview = async (root: string, result: FallowFixResult): Promise<void> => {
+const formatRecoverableSkipAdvice = (result: FallowFixResult): string => {
+  const entries = result.fixes
+    .filter(
+      (fix) =>
+        fix.skipped &&
+        fix.help &&
+        fix.skip_reason !== undefined &&
+        RECOVERABLE_SKIP_REASONS.has(fix.skip_reason),
+    )
+    .map((fix) => `${fix.path ?? ""} ${fix.help}`.trim())
+    .filter((entry) => entry.length > 0);
+  return [...new Set(entries)].join("; ");
+};
+
+const partialFixSummary = (error: unknown): string => {
+  const result = parsePartialFixResult(error);
+  if (!result) {
+    return "";
+  }
+  const advice = formatRecoverableSkipAdvice(result);
+  return ` (${fixSummary(result)})${advice ? `. ${advice}` : ""}`;
+};
+
+const showDryRunPreview = async (
+  root: string,
+  result: FallowFixResult,
+  warningNote?: string,
+): Promise<void> => {
   const available = result.fixes.filter((fix) => !fix.skipped);
   const skipped = skippedFixLabel(result.fixes.length - available.length);
   if (available.length === 0) {
     void vscode.window.showInformationMessage(`Fallow: no fixes available${skipped}.`);
     return;
+  }
+
+  if (warningNote) {
+    void vscode.window.showWarningMessage(`Fallow fix preview skipped files: ${warningNote}`);
   }
 
   const quickPickItems: FixQuickPickItem[] = [];
@@ -734,7 +759,9 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
     title: `Fallow: ${fixCountLabel(available.length)} available${skipped}`,
-    placeHolder: "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
+    placeHolder: warningNote
+      ? `${warningNote} — Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate`
+      : "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
   if (!picked) {
@@ -1185,6 +1212,14 @@ export const runFix = async (
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (dryRun) {
+      const partial = parsePartialFixResult(err);
+      if (partial && partial.fixes.some((fix) => !fix.skipped)) {
+        const note = formatRecoverableSkipAdvice(partial) || message;
+        await showDryRunPreview(root, partial, note);
+        return partial;
+      }
+    }
     void vscode.window.showErrorMessage(`Fallow fix failed: ${message}${partialFixSummary(err)}`);
     return null;
   } finally {
