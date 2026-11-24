@@ -76,7 +76,36 @@ fn const_string_value(init: &Expression<'_>) -> Option<String> {
     }
 }
 
+/// Whether the import has the attribute `type: "macro"`. The bundler runs the
+/// target of such an import at build time and inlines the result.
+fn is_macro_import(decl: &ImportDeclaration<'_>) -> bool {
+    decl.with_clause.as_ref().is_some_and(|clause| {
+        clause.with_entries.iter().any(|attribute| {
+            attribute.key.as_js_str() == "type" && attribute.value.value == "macro"
+        })
+    })
+}
+
 impl<'a> ModuleInfoExtractor {
+    /// Mark each binding of a macro import as a build-time import. Every
+    /// binding of one declaration shares the source span of the declaration,
+    /// and the bindings are the last imports recorded.
+    pub(in crate::visitor) fn mark_macro_import_bindings(&mut self, decl: &ImportDeclaration<'_>) {
+        if !is_macro_import(decl) {
+            return;
+        }
+        let spans: Vec<Span> = self
+            .imports
+            .iter()
+            .rev()
+            .take_while(|import| import.source_span == decl.source.span)
+            .map(|import| import.span)
+            .collect();
+        for span in spans {
+            self.mark_import_load_kind(span, ImportLoadKind::BuildTime);
+        }
+    }
+
     /// Record `const name = 'specifier'` in the frame of the declaration.
     pub(in crate::visitor) fn record_const_specifier(
         &mut self,
