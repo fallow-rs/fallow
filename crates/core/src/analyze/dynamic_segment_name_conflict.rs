@@ -92,7 +92,7 @@ fn collect_occurrences_by_position<'a>(
     pkg_root_refs: &[&Path],
 ) -> FxHashMap<PositionKey, Vec<Occurrence<'a>>> {
     let mut by_position: FxHashMap<PositionKey, Vec<Occurrence<'_>>> = FxHashMap::default();
-    for module in &graph.modules {
+    for module in graph.modules() {
         let Some(classified) = classify_route_file(module.path.as_path(), pkg_root_refs) else {
             continue;
         };

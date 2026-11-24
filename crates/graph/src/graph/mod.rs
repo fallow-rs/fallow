@@ -163,10 +163,10 @@ pub struct ModuleGraph {
     /// `FileId` in the graph. Holds because `discover/walk.rs` assigns FileIds
     /// sequentially via `.enumerate()` after path-sorting, and
     /// `build::populate_edges` pushes one `ModuleNode` per file in iteration
-    /// order. Detectors rely on this for O(1) FileId-to-module lookup
-    /// (`graph.modules.get(file_id.0 as usize)`) instead of building a
-    /// per-call `FxHashMap<FileId, &ModuleNode>`.
-    pub modules: Vec<ModuleNode>,
+    /// order. [`ModuleGraph::module`] relies on this for O(1) FileId-to-module
+    /// lookup, so callers do not build a per-call `FxHashMap<FileId, &ModuleNode>`.
+    /// The field is private so that only this crate can break the invariant.
+    modules: Vec<ModuleNode>,
     /// Flat edge storage for cache-friendly iteration.
     edges: Vec<Edge>,
     /// Maps npm package names to the `FileId`s that import them, with one
@@ -920,6 +920,29 @@ impl ModuleGraph {
     #[must_use]
     pub const fn module_count(&self) -> usize {
         self.modules.len()
+    }
+
+    /// All modules, in `FileId` order: the module at index `i` has
+    /// `file_id == FileId(i)`.
+    #[inline]
+    #[must_use]
+    pub fn modules(&self) -> &[ModuleNode] {
+        &self.modules
+    }
+
+    /// The module of `file_id`, or `None` when the id is not in the graph.
+    #[inline]
+    #[must_use]
+    pub fn module(&self, file_id: FileId) -> Option<&ModuleNode> {
+        self.modules.get(file_id.0 as usize)
+    }
+
+    /// Mutable access to the modules, for tests in other crates that patch
+    /// a built graph.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn modules_mut(&mut self) -> &mut Vec<ModuleNode> {
+        &mut self.modules
     }
 
     /// Total number of edges.

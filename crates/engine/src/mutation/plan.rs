@@ -257,7 +257,7 @@ fn skipped_tests(context: &Context<'_>) -> Vec<super::SkippedTest> {
         .test_entry_points
         .iter()
         .filter(|&&entry| is_runner_test_entry(context.graph, root, entry))
-        .filter_map(|&entry| context.graph.modules.get(entry.0 as usize))
+        .filter_map(|&entry| context.graph.module(entry))
         .filter(|node| {
             diff.key_for(&node.path, root)
                 .is_some_and(|key| diff.changes_path(&key))
@@ -294,7 +294,7 @@ fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<Unmatched
     };
     let mut candidates: Vec<Candidate<'a>> = context
         .graph
-        .modules
+        .modules()
         .iter()
         .filter_map(|node| {
             let rel = relative_key_path(&node.path, root);
@@ -753,7 +753,7 @@ fn attach_test_reach(
     let root = context.inputs.root;
     let mut is_test_file = |file_id: FileId| -> bool {
         graph.test_entry_points.contains(&file_id)
-            || graph.modules.get(file_id.0 as usize).is_some_and(|node| {
+            || graph.module(file_id).is_some_and(|node| {
                 crate::test_paths::is_test_code_path_str(root, &relative_key_path(&node.path, root))
             })
     };
@@ -1020,7 +1020,7 @@ fn static_test_files(context: &Context<'_>, file_id: FileId) -> Vec<String> {
         .get(&file_id)
         .into_iter()
         .flatten()
-        .filter_map(|&entry| graph.modules.get(entry.0 as usize))
+        .filter_map(|&entry| graph.module(entry))
         .map(|node| relative_key_path(&node.path, context.inputs.root))
         .collect();
     tests.into_iter().collect()
@@ -1047,7 +1047,7 @@ const TEST_FILE_PREFIXES: &[&str] = &["test.", "test-"];
 /// but `vitest run`, `node --test` and `bun test` do not run them, so they
 /// never cover a mutant and the runner never lists them.
 fn is_runner_test_entry(graph: &ModuleGraph, root: &Path, entry: FileId) -> bool {
-    let Some(node) = graph.modules.get(entry.0 as usize) else {
+    let Some(node) = graph.module(entry) else {
         return false;
     };
     let path = relative_key_path(&node.path, root);

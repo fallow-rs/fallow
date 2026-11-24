@@ -46,11 +46,11 @@ pub(super) fn run_namespace_escape_detector(
                 return None;
             }
             let path = graph
-                .modules
+                .modules()
                 .get(candidate.consumer.0 as usize)?
                 .path
                 .clone();
-            let module = graph.modules.get(candidate.target.0 as usize)?.path.clone();
+            let module = graph.module(candidate.target)?.path.clone();
             Some(NamespaceEscapeFinding::with_actions(
                 NamespaceEscapeResult {
                     path,

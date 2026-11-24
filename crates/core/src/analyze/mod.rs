@@ -335,7 +335,7 @@ fn add_exportless_package_source_indexes(
         roots.push(canonical);
     }
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         if roots
             .iter()
             .any(|root| is_source_index_under_package(&module.path, root))
@@ -842,7 +842,7 @@ fn collect_federation_runtime_remotes(
         .iter()
         .filter(|m| !input.excluded.contains(&m.file_id));
     let sources = included.filter_map(|module| {
-        let node = input.graph.modules.get(module.file_id.0 as usize)?;
+        let node = input.graph.module(module.file_id)?;
         Some((node.path.as_path(), &*module.semantic_facts))
     });
     let remotes = crate::plugins::runtime_remotes(sources, &input.config.root, input.workspaces);
@@ -1385,7 +1385,7 @@ fn collect_prop_drilling_findings(
 /// This avoids filesystem probes for every module when the raw index is sufficient.
 fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
     graph
-        .modules
+        .modules()
         .iter()
         .map(|node| (node.path.as_path(), node.file_id))
         .collect()

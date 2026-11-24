@@ -85,7 +85,7 @@ pub fn find_unprovided_injects(input: UnprovidedInjectInput<'_>) -> Vec<Unprovid
         input.modules.iter().map(|m| (m.file_id, m)).collect();
     let path_by_id: FxHashMap<FileId, &std::path::Path> = input
         .graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();
@@ -362,7 +362,7 @@ fn key_is_public_api(
     key: &ExportKey,
     public_export_origins: &FxHashSet<ExportKey>,
 ) -> bool {
-    let Some(module) = graph.modules.get(key.file_id.0 as usize) else {
+    let Some(module) = graph.module(key.file_id) else {
         return false;
     };
     if !module

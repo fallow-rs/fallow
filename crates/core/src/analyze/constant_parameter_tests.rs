@@ -26,7 +26,11 @@ pub(super) fn record(
     stats: Option<&GateStats>,
 ) {
     if let Some(stats) = stats {
-        let paths = graph.modules.iter().map(|node| node.path.clone()).collect();
+        let paths = graph
+            .modules()
+            .iter()
+            .map(|node| node.path.clone())
+            .collect();
         STATS
             .lock()
             .expect("recorder lock")
@@ -35,7 +39,7 @@ pub(super) fn record(
     let by_file: FxHashMap<_, _> = modules.iter().map(|m| (m.file_id, m)).collect();
     let mut rows = ABSTAINED.lock().expect("recorder lock");
     for (&(file, index), reason) in abstained {
-        let Some(node) = graph.modules.get(file.0 as usize) else {
+        let Some(node) = graph.module(file) else {
             continue;
         };
         let Some(name) = by_file

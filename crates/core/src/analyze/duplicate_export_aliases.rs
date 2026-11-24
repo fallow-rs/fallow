@@ -134,7 +134,7 @@ fn is_candidate_module(graph: &ModuleGraph, module: &ResolvedModule) -> bool {
         return false;
     }
     graph
-        .modules
+        .modules()
         .get(module.file_id.0 as usize)
         .is_some_and(|node| node.file_id == module.file_id && node.is_reachable())
 }

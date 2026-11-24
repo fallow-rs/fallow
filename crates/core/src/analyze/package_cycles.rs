@@ -255,7 +255,7 @@ fn collect_cross_imports(
     rule_off_for: &dyn Fn(&Path) -> bool,
 ) -> Vec<CrossImport> {
     let module_packages: Vec<Option<usize>> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| packages.package_of(&module.path))
         .collect();
@@ -266,7 +266,7 @@ fn collect_cross_imports(
         .collect();
 
     let mut imports = Vec::new();
-    for (index, module) in graph.modules.iter().enumerate() {
+    for (index, module) in graph.modules().iter().enumerate() {
         let Some(from_pkg) = module_packages[index] else {
             continue;
         };
@@ -405,7 +405,7 @@ impl HopTable {
         let sort_key = |import: &CrossImport| {
             (
                 import.type_only,
-                graph.modules[import.file_id.0 as usize].path.as_path(),
+                graph.modules()[import.file_id.0 as usize].path.as_path(),
                 import.line,
                 import.col,
             )
@@ -478,7 +478,7 @@ impl HopTable {
 }
 
 fn module_path(graph: &ModuleGraph, file_id: FileId) -> PathBuf {
-    graph.modules[file_id.0 as usize].path.clone()
+    graph.modules()[file_id.0 as usize].path.clone()
 }
 
 /// Strongly connected groups of packages with two or more members.

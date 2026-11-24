@@ -23,8 +23,8 @@ fn module_named<'a>(modules: &'a [ModuleNode], suffix: &str) -> &'a ModuleNode {
 
 /// The load kinds on the edge from `from` to `to`, sorted and deduplicated.
 fn edge_kinds(graph: &ModuleGraph, from: &str, to: &str) -> Vec<ImportLoadKind> {
-    let source = module_named(&graph.modules, from).file_id;
-    let target = module_named(&graph.modules, to).file_id;
+    let source = module_named(graph.modules(), from).file_id;
+    let target = module_named(graph.modules(), to).file_id;
     let mut kinds: Vec<ImportLoadKind> = graph
         .outgoing_symbol_edges(source)
         .filter(|(edge_target, _)| *edge_target == target)

@@ -66,7 +66,7 @@ fn macro_import_target_is_not_runtime_reachable() {
     let graph = output.graph.as_ref().expect("graph is retained");
     let module = |suffix: &str| {
         graph
-            .modules
+            .modules()
             .iter()
             .find(|module| {
                 module

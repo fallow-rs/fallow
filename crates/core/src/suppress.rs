@@ -316,7 +316,7 @@ impl<'a> SuppressionContext<'a> {
 
         for (&file_id, supps) in &self.by_file {
             let used = &self.used[&file_id];
-            let path = &graph.modules[file_id.0 as usize].path;
+            let path = &graph.modules()[file_id.0 as usize].path;
             let file_rules = config.resolve_rules_for_path(path);
             let source: std::cell::OnceCell<Option<String>> = std::cell::OnceCell::new();
 
@@ -347,7 +347,7 @@ impl<'a> SuppressionContext<'a> {
         }
 
         for (&file_id, unknowns) in &self.unknown_kinds {
-            let path = &graph.modules[file_id.0 as usize].path;
+            let path = &graph.modules()[file_id.0 as usize].path;
             for u in *unknowns {
                 stale.push(unknown_kind_stale_entry(path, u, false));
             }
@@ -363,7 +363,7 @@ impl<'a> SuppressionContext<'a> {
         let mut seen: FxHashSet<(FileId, u32)> = FxHashSet::default();
 
         for (&file_id, supps) in &self.by_file {
-            let path = &graph.modules[file_id.0 as usize].path;
+            let path = &graph.modules()[file_id.0 as usize].path;
             for s in *supps {
                 if s.reason.is_some() || !seen.insert((file_id, s.comment_line)) {
                     continue;
@@ -391,7 +391,7 @@ impl<'a> SuppressionContext<'a> {
         }
 
         for (&file_id, unknowns) in &self.unknown_kinds {
-            let path = &graph.modules[file_id.0 as usize].path;
+            let path = &graph.modules()[file_id.0 as usize].path;
             for u in *unknowns {
                 if u.reason.is_some() || !seen.insert((file_id, u.comment_line)) {
                     continue;
@@ -444,7 +444,7 @@ impl<'a> SuppressionContext<'a> {
     pub(crate) fn all_suppressions(&self, graph: &ModuleGraph) -> Vec<ActiveSuppression> {
         let mut active = Vec::new();
         for (&file_id, supps) in &self.by_file {
-            let path = &graph.modules[file_id.0 as usize].path;
+            let path = &graph.modules()[file_id.0 as usize].path;
             for s in *supps {
                 active.push(ActiveSuppression {
                     path: path.clone(),
@@ -458,7 +458,7 @@ impl<'a> SuppressionContext<'a> {
             }
         }
         for (&file_id, problems) in &self.range_problems {
-            let path = &graph.modules[file_id.0 as usize].path;
+            let path = &graph.modules()[file_id.0 as usize].path;
             active.extend(problems.iter().map(|problem| ActiveSuppression {
                 path: path.clone(),
                 kind: range_problem_kind_token(problem),

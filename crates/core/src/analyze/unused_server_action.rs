@@ -80,7 +80,7 @@ fn server_action_indexes<'a>(
     }
 
     let file_id_by_path: FxHashMap<&Path, FileId> = graph
-        .modules
+        .modules()
         .iter()
         .map(|node| (node.path.as_path(), node.file_id))
         .collect();

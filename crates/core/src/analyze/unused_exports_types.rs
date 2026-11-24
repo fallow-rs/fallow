@@ -181,7 +181,7 @@ fn forward_candidates(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<ForwardCa
             })
         }));
     }
-    if let Some(node) = graph.modules.get(file_id.0 as usize) {
+    if let Some(node) = graph.module(file_id) {
         candidates.extend(
             node.re_exports
                 .iter()
@@ -236,7 +236,7 @@ pub fn suppress_signature_backing_types(
     }
 
     let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();

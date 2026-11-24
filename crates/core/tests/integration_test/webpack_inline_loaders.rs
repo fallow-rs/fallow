@@ -524,14 +524,14 @@ fn thread_loader_resources_load_out_of_thread() {
     let output = fallow_core::analyze_with_trace(&config).expect("analysis should succeed");
     let graph = output.graph.as_ref().expect("graph is retained");
     let module_path = |id: fallow_types::discover::FileId| -> String {
-        let path = &graph.modules[id.0 as usize].path;
+        let path = &graph.modules()[id.0 as usize].path;
         path.strip_prefix(&config.root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/")
     };
     let entry = graph
-        .modules
+        .modules()
         .iter()
         .find(|module| module_path(module.file_id) == "src/index.ts")
         .expect("entry in the graph")

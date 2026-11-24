@@ -148,7 +148,7 @@ impl<'a> UsageContext<'a> {
             .map(|module| (module.file_id, module))
             .collect();
         let files_by_path = graph
-            .modules
+            .modules()
             .iter()
             .map(|node| (relativize(&node.path, root), node.file_id))
             .collect();
@@ -167,7 +167,7 @@ impl<'a> UsageContext<'a> {
 
     fn file_path(&self, id: FileId) -> Option<String> {
         self.graph
-            .modules
+            .modules()
             .get(id.0 as usize)
             .map(|node| relativize(&node.path, self.root))
     }
@@ -694,7 +694,7 @@ impl Scan {
         importers.dedup();
         for importer in importers {
             let (Some(node), Some(module), Some(file)) = (
-                ctx.graph.modules.get(importer.0 as usize),
+                ctx.graph.module(importer),
                 ctx.modules_by_id.get(&importer),
                 ctx.file_path(importer),
             ) else {
@@ -1420,7 +1420,7 @@ fn consumer_closure(
     let mut files: Vec<ClosureFile> = found
         .into_iter()
         .filter_map(|(id, level)| {
-            graph.modules.get(id.0 as usize).map(|node| ClosureFile {
+            graph.module(id).map(|node| ClosureFile {
                 file: relativize(&node.path, root),
                 depth: level,
             })

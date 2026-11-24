@@ -7,7 +7,7 @@
 //! resolution shape all three consumers need.
 //!
 //! Pure static analysis (ADR-001): no type resolution. The constructor builds
-//! `components_per_file` / `sole_component` directly from `graph.modules` plus
+//! `components_per_file` / `sole_component` directly from `graph.modules()` plus
 //! `ModuleInfo.component_functions`, so it carries NO dependency on any
 //! analyzer-specific state map. This is the strictly more reusable shape (the
 //! render-fan-in computation only has the graph + modules + resolved modules).
@@ -64,7 +64,7 @@ fn component_import_target(target: &ResolveResult) -> Option<FileId> {
 impl<'a> ChildResolver<'a> {
     /// Build the resolver over every reachable React module. The
     /// `components_per_file` / `sole_component` maps come straight from
-    /// `graph.modules` + `ModuleInfo.component_functions`, so the resolver has no
+    /// `graph.modules()` + `ModuleInfo.component_functions`, so the resolver has no
     /// dependency on any analyzer-specific per-component state.
     pub(super) fn new(
         graph: &'a ModuleGraph,
@@ -73,7 +73,7 @@ impl<'a> ChildResolver<'a> {
     ) -> Self {
         let mut components_per_file: FxHashMap<FileId, FxHashSet<&'a str>> = FxHashMap::default();
         let mut sole_component: FxHashMap<FileId, &'a str> = FxHashMap::default();
-        for node in &graph.modules {
+        for node in graph.modules() {
             let Some(module) = modules_by_id.get(&node.file_id) else {
                 continue;
             };

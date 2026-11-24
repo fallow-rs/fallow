@@ -31,7 +31,7 @@ pub(super) fn build_tool_reach(
     exports: &FrameworkConfigExports,
 ) -> BuildToolReach {
     let config_files: FxHashSet<FileId> = graph
-        .modules
+        .modules()
         .iter()
         .filter(|node| exports.is_config_file(&relative_key_path(&node.path, root)))
         .map(|node| node.file_id)

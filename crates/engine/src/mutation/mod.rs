@@ -641,7 +641,7 @@ fn framework_config_exports(
         .collect();
     let config_files = config_file_globs(&patterns);
     let mut exports = FrameworkConfigExports::default();
-    for node in &graph.as_graph().modules {
+    for node in graph.as_graph().modules() {
         let rel = crate::module_graph::relative_key_path(&node.path, session.root());
         for name in names.names_for(&rel) {
             exports.insert(rel.clone(), name);

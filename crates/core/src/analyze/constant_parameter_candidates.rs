@@ -58,7 +58,7 @@ impl Gate<'_> {
             files: self
                 .input
                 .graph
-                .modules
+                .modules()
                 .iter()
                 .map(|node| node.path.clone())
                 .collect(),
@@ -68,7 +68,7 @@ impl Gate<'_> {
     fn path_of(&self, file: FileId) -> std::path::PathBuf {
         self.input
             .graph
-            .modules
+            .modules()
             .get(file.0 as usize)
             .map(|node| node.path.clone())
             .unwrap_or_default()
@@ -77,7 +77,7 @@ impl Gate<'_> {
     fn reachable(&self, file: FileId) -> bool {
         self.input
             .graph
-            .modules
+            .modules()
             .get(file.0 as usize)
             .is_some_and(|node| node.is_runtime_reachable())
     }

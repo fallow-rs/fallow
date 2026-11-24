@@ -500,7 +500,7 @@ fn collect_source_uses(
         if module.command_invocations.is_empty() {
             continue;
         }
-        let Some(node) = input.graph.modules.get(module.file_id.0 as usize) else {
+        let Some(node) = input.graph.module(module.file_id) else {
             continue;
         };
         let package_dir = package_dirs

@@ -31,7 +31,7 @@ pub(super) fn implicit_default_references(
         .iter()
         .filter(|importer| seen.insert(**importer))
         .filter_map(|&importer| {
-            let module = graph.modules.get(importer.0 as usize)?;
+            let module = graph.module(importer)?;
             if !module.is_reachable() {
                 return None;
             }
@@ -73,7 +73,7 @@ fn direct_export_references(
         .into_iter()
         .filter(|reference| {
             graph
-                .modules
+                .modules()
                 .get(reference.from_file.0 as usize)
                 .is_some_and(crate::graph::ModuleNode::is_reachable)
         })

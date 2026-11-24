@@ -61,7 +61,7 @@ pub fn annotate_dead_code_cross_links(
         .map(|module| (module.file_id, module))
         .collect();
     let module_by_path: FxHashMap<&Path, &ModuleInfo> = graph
-        .modules
+        .modules()
         .iter()
         .filter_map(|node| {
             modules_by_id
@@ -308,7 +308,7 @@ impl<'a> SecurityRankingContext<'a> {
         let graph = input.graph;
         let modules = input.modules;
         let path_to_id = graph
-            .modules
+            .modules()
             .iter()
             .map(|node| (node.path.as_path(), node.file_id))
             .collect();
@@ -324,7 +324,7 @@ impl<'a> SecurityRankingContext<'a> {
             .map(|module| (module.file_id, module))
             .collect();
         let modules_by_path = graph
-            .modules
+            .modules()
             .iter()
             .filter_map(|node| {
                 modules_by_id
@@ -414,7 +414,7 @@ fn compute_reachability(
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> SecurityReachability {
     let reachable_from_entry = graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)
         .is_some_and(|node| node.is_runtime_reachable());
     let source_trace = source_index.trace_for(graph, file_id, finding, line_offsets_by_file);
@@ -607,11 +607,11 @@ impl UntrustedSourceIndex {
             .iter()
             .map(|module| (module.file_id, module))
             .collect();
-        let mut source_for = vec![None; graph.modules.len()];
-        let mut parent = vec![None; graph.modules.len()];
+        let mut source_for = vec![None; graph.module_count()];
+        let mut parent = vec![None; graph.module_count()];
         let mut queue: VecDeque<FileId> = VecDeque::new();
 
-        for node in &graph.modules {
+        for node in graph.modules() {
             let Some(module) = modules_by_id.get(&node.file_id) else {
                 continue;
             };
@@ -722,7 +722,7 @@ impl UntrustedSourceIndex {
     ) -> Option<Vec<TraceHop>> {
         let mut trace = Vec::with_capacity(ids.len().saturating_add(1));
         for (idx, &file_id) in ids.iter().enumerate() {
-            let path = graph.modules.get(file_id.0 as usize)?.path.clone();
+            let path = graph.module(file_id)?.path.clone();
             if idx == ids.len() - 1 {
                 trace.push(TraceHop {
                     path,

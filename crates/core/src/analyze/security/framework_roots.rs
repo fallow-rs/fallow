@@ -142,7 +142,7 @@ impl FrameworkClientRoots {
             .collect();
         let rules = RouteRules::new(plugin_result);
         let relative_paths: Vec<String> = graph
-            .modules
+            .modules()
             .iter()
             .map(|node| relative_path(&node.path, root))
             .collect();
@@ -150,7 +150,7 @@ impl FrameworkClientRoots {
 
         let mut roots = Self::default();
         let mut route_files: Vec<&ModuleNode> = Vec::new();
-        for (node, relative) in graph.modules.iter().zip(&relative_paths) {
+        for (node, relative) in graph.modules().iter().zip(&relative_paths) {
             let path = Path::new(relative);
             let in_scope = is_in_scope(relative, &scopes);
             if in_scope && has_marker(path, SERVER_MARKER) {

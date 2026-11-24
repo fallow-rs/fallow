@@ -66,7 +66,7 @@ impl<'a> EntryStarCredit<'a> {
         if no_rules {
             return credit;
         }
-        for module in &input.graph.modules {
+        for module in input.graph.modules() {
             if !module.is_entry_point()
                 || !module.re_exports.iter().any(|re| re.imported_name == "*")
                 || !input.config.include_entry_exports_for(&module.path)
@@ -161,7 +161,7 @@ fn extend_namespace_object_files(
         if !files.insert(file) {
             continue;
         }
-        if let Some(module) = graph.modules.get(file.0 as usize) {
+        if let Some(module) = graph.module(file) {
             stack.extend(
                 module
                     .re_exports
@@ -180,7 +180,7 @@ fn plain_star_sources(graph: &ModuleGraph, entry: &ModuleNode) -> FxHashSet<File
     while let Some(module) = stack.pop() {
         for re_export in module.re_exports.iter().filter(|re| is_plain_star(re)) {
             if sources.insert(re_export.source_file)
-                && let Some(source) = graph.modules.get(re_export.source_file.0 as usize)
+                && let Some(source) = graph.module(re_export.source_file)
             {
                 stack.push(source);
             }

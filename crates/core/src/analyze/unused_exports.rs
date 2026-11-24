@@ -253,7 +253,7 @@ fn is_route_referenced_by_tanstack_generated_tree(
         && has_route_path_segment(&module.path, config_root)
         && export.references.iter().any(|reference| {
             graph
-                .modules
+                .modules()
                 .get(reference.from_file.0 as usize)
                 .is_some_and(|from| is_route_tree_generated_file(&from.path))
         })
@@ -362,7 +362,7 @@ fn export_has_reachable_reference(
         return !export.references.is_empty();
     }
     export.references.iter().any(|r| {
-        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
+        graph.module(r.from_file).is_some_and(|m| {
             debug_assert_eq!(
                 m.file_id, r.from_file,
                 "ModuleGraph::modules FileId-as-index invariant broken"
@@ -465,7 +465,7 @@ pub fn find_unused_exports(
     };
     with_unused_export_context(input, false, |module_context| {
         let module_results: Vec<UnusedExportModuleResult> = graph
-            .modules
+            .modules()
             .par_iter()
             .map(|module| find_unused_exports_for_module(module, module_context, None))
             .collect();
@@ -934,7 +934,7 @@ pub fn find_private_type_leaks(
         {
             continue;
         }
-        let Some(module) = graph.modules.get(module_info.file_id.0 as usize) else {
+        let Some(module) = graph.module(module_info.file_id) else {
             continue;
         };
         debug_assert_eq!(
@@ -1026,7 +1026,7 @@ fn collect_dynamic_reexport_sources(
 
     for resolved in resolved_modules {
         let wrapper_idx = resolved.file_id.0 as usize;
-        let Some(wrapper) = graph.modules.get(wrapper_idx) else {
+        let Some(wrapper) = graph.modules().get(wrapper_idx) else {
             continue;
         };
         debug_assert_eq!(
@@ -1051,7 +1051,7 @@ fn collect_dynamic_reexport_sources(
             }
 
             let source_idx = source_file_id.0 as usize;
-            if source_idx >= graph.modules.len() {
+            if source_idx >= graph.module_count() {
                 continue;
             }
             re_export_sources
@@ -1284,7 +1284,7 @@ fn collect_duplicate_export_locations(
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
 
-    for (idx, module) in graph.modules.iter().enumerate() {
+    for (idx, module) in graph.modules().iter().enumerate() {
         collect_module_duplicate_export_locations(
             &mut export_locations,
             DuplicateExportModuleInput {
@@ -1691,14 +1691,14 @@ pub fn collect_export_usages(
     let mut usages = Vec::new();
 
     let file_paths: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
+        .modules()
         .iter()
         .map(|m| (m.file_id, m.path.as_path()))
         .collect();
 
     let mut source_cache: FxHashMap<FileId, (String, Vec<u32>)> = FxHashMap::default();
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         if !module.is_reachable() {
             continue;
         }

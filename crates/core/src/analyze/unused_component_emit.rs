@@ -52,7 +52,7 @@ pub fn find_unused_component_emits(
         modules.iter().map(|m| (m.file_id, m)).collect();
 
     let mut findings = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() {
             continue;
         }

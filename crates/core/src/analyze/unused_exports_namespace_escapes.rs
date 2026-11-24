@@ -110,7 +110,7 @@ fn hides_from_a_check(
         return true;
     }
     graph
-        .modules
+        .modules()
         .get(escape.consumer.0 as usize)
         .is_some_and(|consumer| !is_public_entry(config, consumer))
 }
@@ -137,7 +137,7 @@ fn hidden_exports(
             files
                 .par_iter()
                 .filter_map(|&(&file_id, only)| {
-                    let module = graph.modules.get(file_id.0 as usize)?;
+                    let module = graph.module(file_id)?;
                     let rules = input.config.resolve_rules_for_path(&module.path);
                     let (exports, types, _) =
                         find_unused_exports_for_module(module, ctx, Some(only));
@@ -183,7 +183,7 @@ fn export_index(
 
 fn is_reachable(graph: &ModuleGraph, file_id: FileId) -> bool {
     graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)
         .is_some_and(ModuleNode::is_reachable)
 }
@@ -198,7 +198,7 @@ fn closure_of(graph: &ModuleGraph, target: FileId) -> Vec<FileId> {
             continue;
         }
         order.push(file_id);
-        if let Some(module) = graph.modules.get(file_id.0 as usize) {
+        if let Some(module) = graph.module(file_id) {
             stack.extend(module.re_exports.iter().map(|edge| edge.source_file));
         }
     }
@@ -274,7 +274,7 @@ impl<'a> EscapeLineage<'a> {
         files.sort_unstable_by_key(|file_id| file_id.0);
         let mut credited: FxHashMap<FileId, FxHashSet<usize>> = FxHashMap::default();
         for file_id in files {
-            let Some(module) = self.graph.modules.get(file_id.0 as usize) else {
+            let Some(module) = self.graph.module(file_id) else {
                 continue;
             };
             for index in 0..module.exports.len() {
@@ -301,7 +301,7 @@ impl<'a> EscapeLineage<'a> {
         let graph = self.graph;
         let quantifier = self.quantifier;
         let credited = graph
-            .modules
+            .modules()
             .get(file_id.0 as usize)
             .and_then(|module| module.exports.get(index))
             .is_some_and(|export| {
@@ -335,7 +335,7 @@ impl<'a> EscapeLineage<'a> {
                 self.closure.contains(&barrel)
                     && self
                         .graph
-                        .modules
+                        .modules()
                         .get(barrel.0 as usize)
                         .is_some_and(|module| !is_public_entry(self.config, module))
             }
@@ -352,16 +352,16 @@ impl<'a> EscapeLineage<'a> {
                 if !self.closure.contains(&barrel) {
                     return false;
                 }
-                let barrel_export = self
-                    .graph
-                    .modules
-                    .get(barrel.0 as usize)
-                    .and_then(|module| {
-                        module.exports.iter().position(|candidate| {
-                            candidate.is_type_only == export.is_type_only
-                                && candidate.name.to_string() == name
-                        })
-                    });
+                let barrel_export =
+                    self.graph
+                        .modules()
+                        .get(barrel.0 as usize)
+                        .and_then(|module| {
+                            module.exports.iter().position(|candidate| {
+                                candidate.is_type_only == export.is_type_only
+                                    && candidate.name.to_string() == name
+                            })
+                        });
                 match barrel_export {
                     Some(index) => self.is_credited(barrel, index),
                     None => {
@@ -402,7 +402,7 @@ impl<'a> EscapeLineage<'a> {
             return Some(FxHashSet::default());
         }
         let outer_cut = std::mem::take(cut);
-        let module = self.graph.modules.get(barrel.0 as usize)?;
+        let module = self.graph.module(barrel)?;
         let readers = if is_public_entry(self.config, module) {
             None
         } else {
@@ -455,7 +455,7 @@ fn named_imports_from(graph: &ModuleGraph, importer: FileId, barrel: FileId) -> 
 
 /// Whether `importer` forwards every name of `barrel` with `export *`.
 fn forwards_star_of(graph: &ModuleGraph, importer: FileId, barrel: FileId) -> bool {
-    graph.modules.get(importer.0 as usize).is_some_and(|outer| {
+    graph.module(importer).is_some_and(|outer| {
         outer.re_exports.iter().any(|edge| {
             edge.source_file == barrel && edge.imported_name == "*" && edge.exported_name == "*"
         })

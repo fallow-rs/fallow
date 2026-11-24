@@ -132,7 +132,7 @@ pub fn elysia_routes(graph: &RetainedModuleGraph) -> Vec<CodeRoute> {
 
     let mut files: FxHashMap<FileId, ElysiaFile> = FxHashMap::default();
     for file_id in file_ids {
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+        let Some(module) = graph.module(file_id) else {
             continue;
         };
         let Ok(source) = std::fs::read_to_string(&module.path) else {

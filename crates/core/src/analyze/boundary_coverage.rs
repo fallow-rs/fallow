@@ -18,7 +18,7 @@ pub fn find_boundary_coverage_violations(
     }
 
     let mut violations = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if suppressions.is_file_suppressed(node.file_id, IssueKind::BoundaryViolation)
             || suppressions.is_suppressed(node.file_id, 1, IssueKind::BoundaryViolation)
         {

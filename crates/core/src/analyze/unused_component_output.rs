@@ -69,7 +69,7 @@ pub fn find_unused_component_outputs(
     };
 
     let mut findings = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() {
             continue;
         }

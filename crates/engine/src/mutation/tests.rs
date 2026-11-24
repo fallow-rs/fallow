@@ -1085,7 +1085,7 @@ fn a_graph_file_without_module_facts_is_skipped_with_a_reason() {
     let graph = artifacts.graph.as_ref().expect("graph");
     let math = graph
         .as_graph()
-        .modules
+        .modules()
         .iter()
         .find(|node| node.path.ends_with("src/math.ts"))
         .expect("math.ts is in the graph")

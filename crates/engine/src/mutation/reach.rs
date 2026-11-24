@@ -58,7 +58,7 @@ fn reached(graph: &ModuleGraph, starts: &[FileId], seen: &mut [bool]) -> Vec<usi
 /// The root-relative path of each graph module, by graph index.
 fn relative_paths(graph: &ModuleGraph, root: &Path) -> Vec<String> {
     graph
-        .modules
+        .modules()
         .iter()
         .map(|node| relative_key_path(&node.path, root))
         .collect()
@@ -77,7 +77,7 @@ pub(super) fn test_reach(graph: &ModuleGraph, root: &Path, test_files: &[String]
         .filter(|(_, path)| wanted.contains(path.as_str()))
         .map(|(index, path)| (path.as_str(), index))
         .collect();
-    let mut seen = vec![false; graph.modules.len()];
+    let mut seen = vec![false; graph.module_count()];
     let per_test: Vec<(&String, Vec<usize>)> = test_files
         .iter()
         .map(|test| {
@@ -118,7 +118,7 @@ pub(super) fn test_reach(graph: &ModuleGraph, root: &Path, test_files: &[String]
 /// source extension.
 fn setup_module(graph: &ModuleGraph, resolved: &Path) -> Option<FileId> {
     graph
-        .modules
+        .modules()
         .iter()
         .find(|node| node.path == resolved || node.path.with_extension("") == resolved)
         .map(|node| node.file_id)
@@ -131,7 +131,7 @@ fn config_modules(graph: &ModuleGraph, root: &Path) -> Vec<FileId> {
         .map(|name| root.join(name))
         .collect();
     graph
-        .modules
+        .modules()
         .iter()
         .filter(|node| configs.contains(&node.path))
         .map(|node| node.file_id)
@@ -160,10 +160,10 @@ pub(super) fn support_files(
     if starts.is_empty() {
         return Vec::new();
     }
-    let mut seen = vec![false; graph.modules.len()];
+    let mut seen = vec![false; graph.module_count()];
     let files: BTreeSet<String> = reached(graph, &starts, &mut seen)
         .into_iter()
-        .filter_map(|index| graph.modules.get(index))
+        .filter_map(|index| graph.modules().get(index))
         .map(|node| relative_key_path(&node.path, root))
         .collect();
     files.into_iter().collect()

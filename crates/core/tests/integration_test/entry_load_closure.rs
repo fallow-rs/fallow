@@ -24,7 +24,7 @@ fn relative(graph: &ModuleGraph, ids: &[FileId]) -> Vec<String> {
     let root = fixture_path(FIXTURE);
     ids.iter()
         .map(|id| {
-            graph.modules[id.0 as usize]
+            graph.modules()[id.0 as usize]
                 .path
                 .strip_prefix(&root)
                 .expect("module inside the fixture")
@@ -35,7 +35,7 @@ fn relative(graph: &ModuleGraph, ids: &[FileId]) -> Vec<String> {
 }
 
 fn size_of(graph: &ModuleGraph, id: FileId) -> u64 {
-    std::fs::metadata(&graph.modules[id.0 as usize].path).map_or(0, |metadata| metadata.len())
+    std::fs::metadata(&graph.modules()[id.0 as usize].path).map_or(0, |metadata| metadata.len())
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn entry_closure_splits_eager_deferred_and_out_of_thread_modules() {
     let output = fallow_core::analyze_with_trace(&create_config(fixture_path(FIXTURE)))
         .expect("analysis should succeed");
     let graph = output.graph.as_ref().expect("graph is retained");
-    let entry = module_named(&graph.modules, "src/index.ts").file_id;
+    let entry = module_named(graph.modules(), "src/index.ts").file_id;
 
     let closure = graph.entry_load_closure(entry);
 
@@ -89,7 +89,7 @@ fn dominating_imports_rank_single_edges_by_exclusive_weight() {
     let output = fallow_core::analyze_with_trace(&create_config(fixture_path(FIXTURE)))
         .expect("analysis should succeed");
     let graph = output.graph.as_ref().expect("graph is retained");
-    let entry = module_named(&graph.modules, "src/index.ts").file_id;
+    let entry = module_named(graph.modules(), "src/index.ts").file_id;
     let closure = graph.entry_load_closure(entry);
 
     let imports = graph.eager_dominating_imports(entry, &closure.eager, |id| size_of(graph, id));
@@ -142,7 +142,7 @@ fn dominating_imports_rank_single_edges_by_exclusive_weight() {
         "src/heavy/formatters.ts",
     ]
     .iter()
-    .map(|path| size_of(graph, module_named(&graph.modules, path).file_id))
+    .map(|path| size_of(graph, module_named(graph.modules(), path).file_id))
     .sum();
     assert_eq!(view.exclusive_weight, expected_view_weight);
     assert!(

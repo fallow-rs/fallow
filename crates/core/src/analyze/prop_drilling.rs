@@ -136,7 +136,7 @@ pub fn find_prop_drilling_chains(
     // Build per-component state across every reachable JSX module.
     let mut states: FxHashMap<CompKey, CompState<'_>> = FxHashMap::default();
     let mut components_scanned = 0usize;
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }
@@ -152,7 +152,7 @@ pub fn find_prop_drilling_chains(
 
     // Resolve every render edge's child component name to a CompKey once, so the
     // chain walk is pure map lookups. The shared resolver builds
-    // `components_per_file` from graph.modules + component_functions (the same
+    // `components_per_file` from graph.modules() + component_functions (the same
     // set the `states` map's keys are derived from), so the migration off the
     // old states-based constructor is behavior-preserving.
     let resolver = ChildResolver::new(graph, &modules_by_id, &resolved_by_id);

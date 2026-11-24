@@ -981,7 +981,7 @@ impl MemberReportContext<'_, '_> {
     fn collect(&self) -> Vec<MemberScanBuckets> {
         self.input
             .graph
-            .modules
+            .modules()
             .par_iter()
             .map(|module| self.collect_module(module))
             .collect()
@@ -1516,7 +1516,7 @@ fn propagate_computed_enum_key_accesses(
     if used_property_names.is_empty() {
         return;
     }
-    for module in &graph.modules {
+    for module in graph.modules() {
         for export in &module.exports {
             for member in &export.members {
                 if matches!(
@@ -1758,7 +1758,7 @@ fn record_seen_ignore_decorators(graph: &ModuleGraph, ignore_decorators: &Ignore
     if ignore_decorators.is_empty() {
         return;
     }
-    for module in &graph.modules {
+    for module in graph.modules() {
         for export in &module.exports {
             for member in &export.members {
                 for decorator in &member.decorator_names {
@@ -1800,7 +1800,7 @@ fn namespace_re_export_targets(graph: &ModuleGraph, key: &ExportKey) -> Vec<File
         .iter()
         .filter_map(|origin| {
             graph
-                .modules
+                .modules()
                 .get(origin.file_id.0 as usize)
                 .map(|m| (m, origin))
         })

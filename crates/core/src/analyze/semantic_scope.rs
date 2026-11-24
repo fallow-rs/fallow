@@ -13,7 +13,7 @@ pub(super) fn attach(
     plugins: Option<&AggregatedPluginResult>,
 ) {
     results.semantic_reachable_files = graph
-        .modules
+        .modules()
         .iter()
         .filter(|module| module.is_reachable())
         .map(|module| module.path.clone())

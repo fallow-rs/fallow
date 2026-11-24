@@ -15,7 +15,7 @@ use crate::suppress::SuppressionContext;
 /// Add a declared `export * from` edge for each `(module, source)` pair.
 fn add_star_re_exports(graph: &mut ModuleGraph, pairs: &[(usize, u32)]) {
     for &(module, source) in pairs {
-        graph.modules[module].re_exports.push(ReExportEdge {
+        graph.modules_mut()[module].re_exports.push(ReExportEdge {
             source_file: FileId(source),
             imported_name: "*".to_string(),
             exported_name: "*".to_string(),
@@ -153,7 +153,7 @@ fn duplicate_exports_synthesized_star_edge_is_not_an_overlay() {
             (1, 2, "helper", false),
         ],
     );
-    graph.modules[1].re_exports.push(ReExportEdge {
+    graph.modules_mut()[1].re_exports.push(ReExportEdge {
         source_file: FileId(2),
         imported_name: "*".to_string(),
         exported_name: "*".to_string(),
@@ -182,7 +182,7 @@ fn duplicate_exports_namespace_re_export_is_not_an_overlay() {
             (1, 2, "helper", false),
         ],
     );
-    graph.modules[1].re_exports.push(ReExportEdge {
+    graph.modules_mut()[1].re_exports.push(ReExportEdge {
         source_file: FileId(2),
         imported_name: "*".to_string(),
         exported_name: "core".to_string(),

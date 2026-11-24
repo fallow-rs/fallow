@@ -40,7 +40,7 @@ fn lib_export_public_entries(with_lib_on_disk: bool) -> Vec<std::path::PathBuf> 
     );
     let mut paths: Vec<std::path::PathBuf> = entries
         .into_iter()
-        .map(|file_id| graph.modules[file_id.0 as usize].path.clone())
+        .map(|file_id| graph.modules()[file_id.0 as usize].path.clone())
         .collect();
     paths.sort();
     paths
@@ -290,8 +290,8 @@ mod orchestration {
             })
             .collect();
         let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![ExportSymbol {
+        graph.modules_mut()[1].set_reachable(true);
+        graph.modules_mut()[1].exports = vec![ExportSymbol {
             name: ExportName::Named("unusedHelper".to_string()),
             is_type_only: false,
             is_side_effect_used: false,
@@ -377,7 +377,7 @@ mod orchestration {
             missing_export_targets: vec![],
         }];
         let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
-        graph.modules[0].exports = vec![ExportSymbol {
+        graph.modules_mut()[0].exports = vec![ExportSymbol {
             name: ExportName::Named("myExport".to_string()),
             is_type_only: false,
             is_side_effect_used: false,

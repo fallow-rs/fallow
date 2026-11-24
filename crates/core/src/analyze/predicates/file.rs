@@ -207,7 +207,7 @@ impl<'a> TestImporters<'a> {
             .get_or_init(|| {
                 let reach = self.graph.support_reachable();
                 self.graph
-                    .modules
+                    .modules()
                     .iter()
                     .map(|module| module.file_id)
                     .filter(|id| reach.contains(id.0 as usize))
@@ -224,7 +224,7 @@ impl<'a> TestImporters<'a> {
     /// also match a production file that a script runs, so a support entry
     /// point keeps its reach production code.
     pub(in crate::analyze) fn contains(&self, id: crate::discover::FileId) -> bool {
-        let Some(module) = self.graph.modules.get(id.0 as usize) else {
+        let Some(module) = self.graph.module(id) else {
             return false;
         };
         let relative = module.path.strip_prefix(self.root).unwrap_or(&module.path);
@@ -279,7 +279,7 @@ pub(in crate::analyze) fn is_barrel_with_reachable_sources(
     module.re_exports.iter().any(|re| {
         let source_idx = re.source_file.0 as usize;
         graph
-            .modules
+            .modules()
             .get(source_idx)
             .is_some_and(|m| m.is_reachable())
     })
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn barrel_no_re_exports_returns_false() {
         let graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
-        let module = &graph.modules[1];
+        let module = &graph.modules()[1];
         assert!(!is_barrel_with_reachable_sources(module, &graph));
     }
 
@@ -600,15 +600,15 @@ mod tests {
             ("/src/index.ts", false),
             ("/src/utils.ts", false),
         ]);
-        graph.modules[2].set_reachable(true);
-        graph.modules[1].re_exports = vec![ReExportEdge {
+        graph.modules_mut()[2].set_reachable(true);
+        graph.modules_mut()[1].re_exports = vec![ReExportEdge {
             source_file: FileId(2),
             imported_name: "helper".to_string(),
             exported_name: "helper".to_string(),
             is_type_only: false,
             span: oxc_span::Span::default(),
         }];
-        graph.modules[1].exports = vec![ExportSymbol {
+        graph.modules_mut()[1].exports = vec![ExportSymbol {
             name: crate::extract::ExportName::Named("localFn".to_string()),
             is_type_only: false,
             is_side_effect_used: false,
@@ -621,7 +621,10 @@ mod tests {
             deprecated: false,
             deprecated_reason: None,
         }];
-        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+        assert!(!is_barrel_with_reachable_sources(
+            &graph.modules()[1],
+            &graph
+        ));
     }
 
     /// Module with re-exports and CJS exports is not a pure barrel.
@@ -632,16 +635,19 @@ mod tests {
             ("/src/index.ts", false),
             ("/src/utils.ts", false),
         ]);
-        graph.modules[2].set_reachable(true);
-        graph.modules[1].re_exports = vec![ReExportEdge {
+        graph.modules_mut()[2].set_reachable(true);
+        graph.modules_mut()[1].re_exports = vec![ReExportEdge {
             source_file: FileId(2),
             imported_name: "helper".to_string(),
             exported_name: "helper".to_string(),
             is_type_only: false,
             span: oxc_span::Span::default(),
         }];
-        graph.modules[1].set_cjs_exports(true);
-        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+        graph.modules_mut()[1].set_cjs_exports(true);
+        assert!(!is_barrel_with_reachable_sources(
+            &graph.modules()[1],
+            &graph
+        ));
     }
 
     /// Pure barrel with reachable source returns true.
@@ -652,15 +658,15 @@ mod tests {
             ("/src/index.ts", false),
             ("/src/utils.ts", false),
         ]);
-        graph.modules[2].set_reachable(true);
-        graph.modules[1].re_exports = vec![ReExportEdge {
+        graph.modules_mut()[2].set_reachable(true);
+        graph.modules_mut()[1].re_exports = vec![ReExportEdge {
             source_file: FileId(2),
             imported_name: "helper".to_string(),
             exported_name: "helper".to_string(),
             is_type_only: false,
             span: oxc_span::Span::default(),
         }];
-        graph.modules[1].exports = vec![ExportSymbol {
+        graph.modules_mut()[1].exports = vec![ExportSymbol {
             name: crate::extract::ExportName::Named("helper".to_string()),
             is_type_only: false,
             is_side_effect_used: false,
@@ -673,7 +679,10 @@ mod tests {
             deprecated: false,
             deprecated_reason: None,
         }];
-        assert!(is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+        assert!(is_barrel_with_reachable_sources(
+            &graph.modules()[1],
+            &graph
+        ));
     }
 
     /// Pure barrel where all sources are unreachable returns false.
@@ -684,28 +693,34 @@ mod tests {
             ("/src/index.ts", false),
             ("/src/utils.ts", false),
         ]);
-        graph.modules[1].re_exports = vec![ReExportEdge {
+        graph.modules_mut()[1].re_exports = vec![ReExportEdge {
             source_file: FileId(2),
             imported_name: "helper".to_string(),
             exported_name: "helper".to_string(),
             is_type_only: false,
             span: oxc_span::Span::default(),
         }];
-        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+        assert!(!is_barrel_with_reachable_sources(
+            &graph.modules()[1],
+            &graph
+        ));
     }
 
     /// Barrel with out-of-bounds source FileId doesn't panic, returns false.
     #[test]
     fn barrel_out_of_bounds_source_returns_false() {
         let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/index.ts", false)]);
-        graph.modules[1].re_exports = vec![ReExportEdge {
+        graph.modules_mut()[1].re_exports = vec![ReExportEdge {
             source_file: FileId(999), // out of bounds
             imported_name: "helper".to_string(),
             exported_name: "helper".to_string(),
             is_type_only: false,
             span: oxc_span::Span::default(),
         }];
-        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+        assert!(!is_barrel_with_reachable_sources(
+            &graph.modules()[1],
+            &graph
+        ));
     }
 
     #[test]

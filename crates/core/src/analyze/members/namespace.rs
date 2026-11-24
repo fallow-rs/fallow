@@ -324,7 +324,7 @@ fn credit_whole_module_namespaces(
         if !visited.insert(file_id) {
             continue;
         }
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+        let Some(module) = graph.module(file_id) else {
             continue;
         };
         for export in &module.exports {

@@ -807,7 +807,7 @@ fn nearest_declaration_at_or_above(
     file_id: FileId,
     line: u32,
 ) -> Option<(String, u32)> {
-    let module = graph.modules.get(file_id.0 as usize)?;
+    let module = graph.module(file_id)?;
     let offsets = read_line_offsets(graph, file_id, &mut context.line_offsets)?;
     let declaration_line =
         |start: u32| fallow_types::extract::byte_offset_to_line_col(offsets, start).0;
@@ -849,7 +849,7 @@ fn read_line_offsets<'a>(
         .entry(file_id)
         .or_insert_with(|| {
             graph
-                .modules
+                .modules()
                 .get(file_id.0 as usize)
                 .and_then(|module| std::fs::read_to_string(&module.path).ok())
                 .map(|source| fallow_types::extract::compute_line_offsets(&source))
@@ -875,7 +875,7 @@ fn collect_candidates(
 ) -> Vec<LocatedCandidate> {
     let mut candidates: Vec<LocatedCandidate> = Vec::new();
     for &index in module_indexes {
-        let Some(module) = graph.modules.get(index) else {
+        let Some(module) = graph.modules().get(index) else {
             continue;
         };
         let file = relativize(&module.path, root);
