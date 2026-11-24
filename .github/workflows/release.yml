@@ -1510,10 +1510,14 @@ jobs:
           retention-days: 30
           include-hidden-files: false
 
-  # One CycloneDX SBOM per target. `cargo cyclonedx` resolves features over the
-  # whole workspace, so its SBOM also lists crates that only other members
-  # enable. `filter-sbom.mjs` keeps only the crates that `cargo tree` gives for
-  # the fallow-cli build of that target, and it fails when a crate of that tree
+  # One CycloneDX SBOM per target. It covers each binary of the
+  # `fallow-<target>` archive: fallow, fallow-lsp, fallow-mcp and the
+  # similar-code sidecar, which is a separate Cargo workspace (#5190).
+  # `cargo cyclonedx` writes one SBOM per package and resolves features over
+  # the whole workspace, so each SBOM also lists crates that only other members
+  # enable. `filter-sbom.mjs` merges the package SBOMs and keeps only the crates
+  # that `cargo tree` gives for the builds of that target. It removes the bin
+  # components that the archive does not ship. It fails when a crate of a tree
   # has no component (#5131). The `fallow-*` artifact name makes
   # `release-assets` stage it with the binaries.
   sbom:
@@ -1554,15 +1558,32 @@ jobs:
           FALLOW_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          cargo cyclonedx --manifest-path crates/cli/Cargo.toml \
-            --format json --spec-version 1.5 --target "$FALLOW_TARGET" \
-            --override-filename "fallow-${FALLOW_TARGET}.cdx"
-          cargo tree -p fallow-cli --target "$FALLOW_TARGET" -e normal,build \
+          sidecar=tools/similar-code-sidecar/Cargo.toml
+          for manifest in crates/cli/Cargo.toml "$sidecar"; do
+            cargo cyclonedx --manifest-path "$manifest" \
+              --format json --spec-version 1.5 --target "$FALLOW_TARGET" \
+              --override-filename "fallow-${FALLOW_TARGET}.cdx"
+          done
+          # The build job builds these packages with fallow-multicall in one
+          # cargo invocation on most targets. One tree of the shipped packages
+          # gives the same crates as that build. fallow-multicall is not in the
+          # archive, so the tree leaves it out.
+          cargo tree -p fallow-cli -p fallow-lsp -p fallow-mcp \
+            --target "$FALLOW_TARGET" -e normal,build \
             --prefix none --format '{p}' --locked > "$RUNNER_TEMP/cargo-tree.txt"
-          node .github/scripts/filter-sbom.mjs \
-            "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" "$RUNNER_TEMP/cargo-tree.txt"
+          cargo tree --manifest-path "$sidecar" \
+            --target "$FALLOW_TARGET" -e normal,build \
+            --prefix none --format '{p}' --locked > "$RUNNER_TEMP/cargo-tree-similar-code.txt"
           mkdir sbom
-          cp "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" sbom/
+          node .github/scripts/filter-sbom.mjs \
+            --out "sbom/fallow-${FALLOW_TARGET}.cdx.json" \
+            --tree "$RUNNER_TEMP/cargo-tree.txt" \
+            --tree "$RUNNER_TEMP/cargo-tree-similar-code.txt" \
+            --bin fallow --bin fallow-lsp --bin fallow-mcp --bin fallow-similar-code \
+            "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" \
+            "crates/lsp/fallow-${FALLOW_TARGET}.cdx.json" \
+            "crates/mcp/fallow-${FALLOW_TARGET}.cdx.json" \
+            "tools/similar-code-sidecar/fallow-${FALLOW_TARGET}.cdx.json"
 
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
