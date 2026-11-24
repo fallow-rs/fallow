@@ -5222,7 +5222,7 @@ fn status_line_names_deprecated_exports_in_use() {
 
 /// The `(kind, pattern)` pairs of the unmatched ignore list entries in a
 /// dead-code envelope (issue #5167).
-fn unmatched_ignore_list_entries(json: &serde_json::Value) -> Vec<(String, String)> {
+pub fn unmatched_ignore_list_entries(json: &serde_json::Value) -> Vec<(String, String)> {
     const KINDS: [&str; 4] = [
         "ignore-exports-file-unmatched",
         "ignore-exports-name-unmatched",
@@ -5245,7 +5245,7 @@ fn unmatched_ignore_list_entries(json: &serde_json::Value) -> Vec<(String, Strin
 
 /// The project of issue #5167: each ignore list has one entry that matches
 /// nothing next to one entry that matches a file or an export.
-fn stale_ignore_list_project() -> tempfile::TempDir {
+pub fn stale_ignore_list_project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("temporary project");
     let root = dir.path();
     std::fs::create_dir_all(root.join("src/gen")).expect("create directory");

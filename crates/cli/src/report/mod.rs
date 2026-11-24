@@ -930,7 +930,7 @@ fn print_duplication_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
-            config_patterns: &[],
+            config_patterns: ctx.workspace_diagnostics,
         },
     )
     .unwrap_or_else(|| {
@@ -1312,7 +1312,7 @@ fn print_health_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
-            config_patterns: &[],
+            config_patterns: ctx.workspace_diagnostics,
         },
     )
     .unwrap_or_else(|| {
