@@ -72,7 +72,7 @@ pub(super) fn write_shallow_directories_section(
     if section.directories.is_empty() {
         let _ = writeln!(
             out,
-            "\n### Shallow Directories\n\nNo directory shows at least {} interface items and as many as it hides.",
+            "\n### Shallow Directories\n\nNo shallow directories (threshold: {} interface items).",
             section.min_interface
         );
         return;

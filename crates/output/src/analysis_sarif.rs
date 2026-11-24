@@ -570,14 +570,18 @@ fn append_shallow_directory_sarif_results(
             dir.shown_count,
             dir.hidden_count,
         );
+        let directory = normalize_uri(&dir.path.display().to_string());
         let uri = normalize_uri(&dir.anchor_file.display().to_string());
-        sarif_results.push(sarif_result(
-            "fallow/shallow-directory",
-            "note",
-            &message,
-            &uri,
-            None,
-        ));
+        let mut result = sarif_result("fallow/shallow-directory", "note", &message, &uri, None);
+        // The fingerprint reads the directory, not the anchor file, so a new
+        // first file of the directory keeps the alert identity.
+        let fingerprint =
+            crate::codeclimate_fingerprint_hash(&["fallow/shallow-directory", &directory]);
+        result["partialFingerprints"][crate::SARIF_FINGERPRINT_KEY] =
+            serde_json::Value::from(fingerprint.clone());
+        result["partialFingerprints"][crate::GHAS_SARIF_FINGERPRINT_KEY] =
+            serde_json::Value::from(fingerprint);
+        sarif_results.push(result);
     }
 }
 
@@ -948,5 +952,39 @@ mod tests {
         );
         assert_eq!(crap_rule, "fallow/high-crap-score");
         assert!(crap_message.contains("threshold: 500.0"), "{crap_message}");
+    }
+
+    fn shallow_report(anchor: &str) -> HealthReport {
+        HealthReport {
+            shallow_directories: Some(crate::ShallowDirectoriesReport {
+                min_interface: 8,
+                total: 1,
+                directories: vec![crate::ShallowDirectoryFinding {
+                    path: PathBuf::from("src/utils"),
+                    anchor_file: PathBuf::from(anchor),
+                    shown_count: 9,
+                    shown_files: 2,
+                    hidden_count: 1,
+                    items: Vec::new(),
+                    more_items: 0,
+                    actions: Vec::new(),
+                }],
+            }),
+            ..HealthReport::default()
+        }
+    }
+
+    #[test]
+    fn a_new_anchor_file_keeps_the_shallow_directory_fingerprint() {
+        let fingerprint = |anchor: &str| {
+            let mut results = Vec::new();
+            append_shallow_directory_sarif_results(&mut results, &shallow_report(anchor));
+            assert_eq!(
+                results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+                anchor
+            );
+            results[0]["partialFingerprints"][crate::SARIF_FINGERPRINT_KEY].clone()
+        };
+        assert_eq!(fingerprint("src/utils/a.ts"), fingerprint("src/utils/0.ts"));
     }
 }

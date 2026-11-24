@@ -19,7 +19,7 @@ pub(super) fn render_shallow_directories(
             "{} {}",
             "\u{2713}".green(),
             format!(
-                "No shallow directories (at least {} interface items)",
+                "No shallow directories (threshold: {} interface items)",
                 section.min_interface
             )
             .dimmed()
@@ -85,7 +85,7 @@ fn item_list(dir: &fallow_output::ShallowDirectoryFinding) -> String {
                 "{} {}",
                 item.name,
                 format!(
-                    "({} file{})",
+                    "(used in {} file{})",
                     item.outside_files,
                     plural(item.outside_files as usize)
                 )

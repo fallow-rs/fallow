@@ -1471,7 +1471,7 @@ fn exported_contracts<'m>(
 
 /// `true` when the rule is on for the project or for an override.
 fn rule_enabled(config: &ResolvedConfig) -> bool {
-    config.reads_call_facts()
+    config.constant_parameters_enabled()
 }
 
 /// Release the extraction payload that resolution copied, before analysis.

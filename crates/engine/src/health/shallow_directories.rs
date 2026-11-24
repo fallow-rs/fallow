@@ -123,7 +123,11 @@ pub(super) fn find_shallow_directories(
         .graph
         .modules
         .iter()
-        .filter(|node| !is_excluded_file(input.root, &relative_paths[&node.file_id]))
+        .filter(|node| {
+            relative_paths
+                .get(&node.file_id)
+                .is_some_and(|path| !is_excluded_file(input.root, path))
+        })
         .filter_map(|node| {
             let module = modules_by_id.get(&node.file_id)?;
             Some(collect_file_items(
@@ -159,14 +163,14 @@ fn published_exports(graph: &ModuleGraph) -> FxHashSet<(FileId, String)> {
         nodes: &nodes,
         published: FxHashSet::default(),
         star_seen: FxHashSet::default(),
-        queue: graph
+        stack: graph
             .modules
             .iter()
             .filter(|node| node.is_entry_point())
             .map(|node| (node.file_id, None))
             .collect(),
     };
-    while let Some((file, name)) = walk.queue.pop() {
+    while let Some((file, name)) = walk.stack.pop() {
         let Some(node) = nodes.get(&file) else {
             continue;
         };
@@ -192,8 +196,9 @@ struct PublishWalk<'a> {
     /// Modules whose exports are all published already.
     star_seen: FxHashSet<FileId>,
     /// Modules to visit, with the one export name to follow, or `None` for
-    /// all exports.
-    queue: Vec<(FileId, Option<String>)>,
+    /// all exports. A module and name go on it only once, so a cycle of
+    /// re-exports ends.
+    stack: Vec<(FileId, Option<String>)>,
 }
 
 impl PublishWalk<'_> {
@@ -203,7 +208,7 @@ impl PublishWalk<'_> {
                 .published
                 .insert((edge.source_file, edge.imported_name.clone()))
             {
-                self.queue
+                self.stack
                     .push((edge.source_file, Some(edge.imported_name.clone())));
             }
             return;
@@ -213,8 +218,9 @@ impl PublishWalk<'_> {
         // of the source module.
         match name.filter(|_| edge.exported_name == STAR) {
             Some(name) => {
-                self.published.insert((edge.source_file, name.to_string()));
-                self.queue.push((edge.source_file, Some(name.to_string())));
+                if self.published.insert((edge.source_file, name.to_string())) {
+                    self.stack.push((edge.source_file, Some(name.to_string())));
+                }
             }
             None => self.publish_all(edge.source_file),
         }
@@ -229,13 +235,25 @@ impl PublishWalk<'_> {
                 self.published.insert((file, export.name.to_string()));
             }
         }
-        self.queue.push((file, None));
+        self.stack.push((file, None));
     }
 }
 
 /// The name that a star re-export edge carries.
 const STAR: &str = "*";
 
+/// Whether a glob set matches a directory. A pattern such as `src/gen/**`
+/// matches the files below `src/gen` but not the path `src/gen` itself, so the
+/// check also tries a path one level below the directory.
+pub(super) fn matches_directory(set: &GlobSet, dir: &Path) -> bool {
+    set.is_match(dir) || set.is_match(dir.join(DIRECTORY_PROBE))
+}
+
+/// The file name that [`matches_directory`] puts below a directory.
+const DIRECTORY_PROBE: &str = "_";
+
+/// Config validation rejects an invalid pattern before the run, so a pattern
+/// that does not compile here cannot occur, and skipping it is safe.
 fn build_ignore_set(patterns: &[String]) -> GlobSet {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
@@ -298,6 +316,11 @@ fn collect_file_items(
     let mut items = Vec::new();
     let mut exported_bindings: FxHashSet<&str> = FxHashSet::default();
     for symbol in node.exports.iter().filter(|symbol| !symbol.is_type_only) {
+        // An exported binding is never a hidden module-scope function, also
+        // when the export is no item (published, a component, a constant).
+        if let Some(binding) = export_bindings.get(&symbol.name) {
+            exported_bindings.insert(binding);
+        }
         if published.contains(&(node.file_id, symbol.name.to_string())) {
             continue;
         }
@@ -312,9 +335,6 @@ fn collect_file_items(
             export_bindings.get(&symbol.name).copied(),
         ) {
             continue;
-        }
-        if let Some(binding) = export_bindings.get(&symbol.name) {
-            exported_bindings.insert(binding);
         }
         let members = (kind == ShallowDirectoryItemKind::Class).then(|| {
             let count = symbol
@@ -537,6 +557,7 @@ fn evaluate_directories(
     ignore: &GlobSet,
     config: &ShallowDirectoriesConfig,
 ) -> Vec<ShallowDirectoryFinding> {
+    let anchors = anchor_candidates(root, relative_paths);
     let mut items_by_dir: FxHashMap<PathBuf, Vec<usize>> = FxHashMap::default();
     for (index, item) in items.iter().enumerate() {
         for dir in item
@@ -580,11 +601,11 @@ fn evaluate_directories(
         for &index in &members {
             claimed[index] = true;
         }
-        if ignore.is_match(dir) {
+        if matches_directory(ignore, dir) {
             continue;
         }
         findings.push(build_finding(
-            root,
+            &anchors,
             dir,
             &shown,
             hidden_count,
@@ -601,7 +622,7 @@ fn evaluate_directories(
 }
 
 fn build_finding(
-    root: &Path,
+    anchors: &[&PathBuf],
     dir: &Path,
     shown: &[usize],
     hidden_count: u32,
@@ -636,25 +657,39 @@ fn build_finding(
     let shown_files: FxHashSet<FileId> = shown.iter().map(|&index| items[index].file).collect();
     ShallowDirectoryFinding {
         path: dir.to_path_buf(),
-        anchor_file: anchor_file(dir, relative_paths, root),
+        anchor_file: anchor_file(dir, anchors),
         shown_count: u32::try_from(shown.len()).unwrap_or(u32::MAX),
         shown_files: u32::try_from(shown_files.len()).unwrap_or(u32::MAX),
         hidden_count,
         items: listed,
         more_items,
-        actions: ShallowDirectoryFinding::actions_for(&relative_dir),
+        actions: ShallowDirectoryFinding::actions_for(&globset::escape(&relative_dir)),
     }
 }
 
 /// The `index` file directly in the directory, else the first file below it.
-fn anchor_file(dir: &Path, relative_paths: &FxHashMap<FileId, PathBuf>, root: &Path) -> PathBuf {
-    let mut below: Vec<&PathBuf> = relative_paths
+/// The script files that can be an anchor file, sorted by path.
+fn anchor_candidates<'a>(
+    root: &Path,
+    relative_paths: &'a FxHashMap<FileId, PathBuf>,
+) -> Vec<&'a PathBuf> {
+    let mut candidates: Vec<&PathBuf> = relative_paths
         .values()
-        .filter(|path| {
-            path.starts_with(dir) && !is_excluded_file(root, path) && is_script_file(path)
-        })
+        .filter(|path| is_script_file(path) && !is_excluded_file(root, path))
         .collect();
-    below.sort();
+    candidates.sort();
+    candidates
+}
+
+/// A path sorts after its directory and before the next sibling directory, so
+/// the files below `dir` are one range of the sorted candidates.
+fn anchor_file(dir: &Path, anchors: &[&PathBuf]) -> PathBuf {
+    let start = anchors.partition_point(|path| path.as_path() < dir);
+    let below: Vec<&PathBuf> = anchors[start..]
+        .iter()
+        .take_while(|path| path.starts_with(dir))
+        .copied()
+        .collect();
     below
         .iter()
         .find(|path| {

@@ -242,6 +242,11 @@ fn reports_a_directory_that_shows_as_much_as_it_hides() {
     assert_eq!(cache["outside_files"], 2, "a type-only import is no use");
     assert_eq!(utils["actions"][0]["type"], "narrow-interface");
     assert_eq!(utils["actions"][1]["type"], "ignore-directory");
+    assert_eq!(
+        utils["actions"][1]["config_key"],
+        "health.shallowDirectories.ignore"
+    );
+    assert_eq!(utils["actions"][1]["value"], "src/utils");
     assert_eq!(report["shallow_directories"]["min_interface"], 8);
 }
 
@@ -253,6 +258,15 @@ fn min_interface_raises_the_bar() {
     let report = shallow_report(dir.path(), &[]);
     assert!(directory_paths(&report).is_empty(), "{report:#}");
     assert_eq!(report["shallow_directories"]["min_interface"], 11);
+}
+
+#[test]
+fn a_recursive_ignore_glob_hides_the_directory_itself() {
+    let dir = project(Some(
+        r#"{"health":{"shallowDirectories":{"ignore":["src/utils/**"]}}}"#,
+    ));
+    let report = shallow_report(dir.path(), &[]);
+    assert!(directory_paths(&report).is_empty(), "{report:#}");
 }
 
 #[test]
@@ -374,4 +388,55 @@ fn exports_that_the_package_entry_publishes_are_no_items() {
     );
     let report = shallow_report(dir.path(), &[]);
     assert!(directory_paths(&report).is_empty(), "{report:#}");
+}
+
+/// The package entry publishes 12 functions of `src/utils/api.ts`. They are
+/// no items, so they do not count as hidden either: without that rule the
+/// 13 hidden functions outweigh the 10 shown items.
+#[test]
+fn published_functions_do_not_count_as_hidden() {
+    let dir = project(None);
+    let root = dir.path();
+    let api: Vec<String> = (1..=12).map(|n| format!("api{n}")).collect();
+    let api: Vec<&str> = api.iter().map(String::as_str).collect();
+    write_file(&root.join("src/utils/api.ts"), &functions(&api));
+    write_file(
+        &root.join("src/index.ts"),
+        &format!(
+            "export {{ {} }} from './utils/api';\nimport './main';\n",
+            api.join(", ")
+        ),
+    );
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"shallow","type":"module","main":"src/index.ts"}"#,
+    );
+    let report = shallow_report(root, &[]);
+    assert_eq!(directory_paths(&report), ["src/utils"], "{report:#}");
+    assert_eq!(
+        report["shallow_directories"]["directories"][0]["hidden_count"],
+        1
+    );
+}
+
+/// A star re-export cycle behind a named entry re-export must end the walk.
+#[test]
+fn a_star_re_export_cycle_ends() {
+    let dir = project(None);
+    let root = dir.path();
+    write_file(
+        &root.join("src/index.ts"),
+        "export { trim } from './cycle/a';\nimport './main';\n",
+    );
+    write_file(&root.join("src/cycle/a.ts"), "export * from './b';\n");
+    write_file(
+        &root.join("src/cycle/b.ts"),
+        "export * from './a';\nexport * from '../utils';\n",
+    );
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"shallow","type":"module","main":"src/index.ts"}"#,
+    );
+    let report = shallow_report(root, &[]);
+    assert!(report["shallow_directories"].is_object(), "{report:#}");
 }

@@ -234,7 +234,7 @@ fn scope_shallow_directories(
     report.directories.retain(|dir| {
         let absolute = root.join(&dir.path);
         ws_roots.is_none_or(|ws| ws.contains(&absolute))
-            && !ignore_set.is_match(&dir.path)
+            && !super::shallow_directories::matches_directory(ignore_set, &dir.path)
             && changed_files
                 .is_none_or(|changed| changed.iter().any(|file| file.starts_with(&absolute)))
     });

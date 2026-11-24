@@ -10925,7 +10925,8 @@ shown_files: number
  */
 hidden_count: number
 /**
- * The shown items with the most outside users, at most 7. Sorted by
+ * The shown items with the most outside users, at most 7 (the cap of the
+ * engine). Sorted by
  * `outside_files` (descending), then by `name`, then by `path`.
  */
 items: ShallowDirectoryItem[]
@@ -10984,9 +10985,16 @@ auto_fixable: boolean
  */
 description: string
 /**
- * The config entry for `ignore-directory`. Absent for other actions.
+ * For `ignore-directory`: the config key that takes the pattern,
+ * `health.shallowDirectories.ignore`. Absent for other actions.
  */
-config?: (string | null)
+config_key?: (string | null)
+/**
+ * For `ignore-directory`: the glob pattern to add to `config_key`. The
+ * pattern escapes the glob characters of the directory path. Absent for
+ * other actions.
+ */
+value?: (string | null)
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by

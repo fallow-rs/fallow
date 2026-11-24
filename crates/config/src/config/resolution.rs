@@ -1271,8 +1271,15 @@ impl ResolvedConfig {
     /// reads them parses only the files whose entry lacks them.
     #[must_use]
     pub fn reads_call_facts(&self) -> bool {
-        self.call_facts_requested
-            || self.rules.constant_parameters != crate::Severity::Off
+        self.call_facts_requested || self.constant_parameters_enabled()
+    }
+
+    /// Whether the `constant-parameter` rule is on, globally or in an
+    /// override. A section that requests the call facts does not turn the
+    /// rule on.
+    #[must_use]
+    pub fn constant_parameters_enabled(&self) -> bool {
+        self.rules.constant_parameters != crate::Severity::Off
             || self.overrides.iter().any(|overrides| {
                 overrides
                     .rules

@@ -42,7 +42,8 @@ pub struct ShallowDirectoryFinding {
     /// Function items and classes of the directory that no file outside the
     /// directory uses.
     pub hidden_count: u32,
-    /// The shown items with the most outside users, at most 7. Sorted by
+    /// The shown items with the most outside users, at most 7 (the cap of the
+    /// engine). Sorted by
     /// `outside_files` (descending), then by `name`, then by `path`.
     pub items: Vec<ShallowDirectoryItem>,
     /// Shown items that `items` leaves out.
@@ -99,9 +100,15 @@ pub struct ShallowDirectoryAction {
     pub auto_fixable: bool,
     /// What the action does.
     pub description: String,
-    /// The config entry for `ignore-directory`. Absent for other actions.
+    /// For `ignore-directory`: the config key that takes the pattern,
+    /// `health.shallowDirectories.ignore`. Absent for other actions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config: Option<String>,
+    pub config_key: Option<String>,
+    /// For `ignore-directory`: the glob pattern to add to `config_key`. The
+    /// pattern escapes the glob characters of the directory path. Absent for
+    /// other actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 /// The kind of a shallow directory action.
@@ -116,10 +123,14 @@ pub enum ShallowDirectoryActionType {
     IgnoreDirectory,
 }
 
+/// The config key of the `ignore-directory` action.
+const IGNORE_CONFIG_KEY: &str = "health.shallowDirectories.ignore";
+
 impl ShallowDirectoryFinding {
-    /// Build the `actions` list for a directory path relative to the root.
+    /// Build the `actions` list. `ignore_pattern` is the glob pattern that
+    /// matches the directory, relative to the root.
     #[must_use]
-    pub fn actions_for(relative_path: &str) -> Vec<ShallowDirectoryAction> {
+    pub fn actions_for(ignore_pattern: &str) -> Vec<ShallowDirectoryAction> {
         vec![
             ShallowDirectoryAction {
                 kind: ShallowDirectoryActionType::NarrowInterface,
@@ -127,16 +138,16 @@ impl ShallowDirectoryFinding {
                 description: "Move the logic behind fewer interface items, or merge the \
                               directory into the code that calls it"
                     .to_string(),
-                config: None,
+                config_key: None,
+                value: None,
             },
             ShallowDirectoryAction {
                 kind: ShallowDirectoryActionType::IgnoreDirectory,
                 auto_fixable: false,
                 description: "Exclude this directory when its wide interface is on purpose"
                     .to_string(),
-                config: Some(format!(
-                    "{{\"health\":{{\"shallowDirectories\":{{\"ignore\":[\"{relative_path}\"]}}}}}}"
-                )),
+                config_key: Some(IGNORE_CONFIG_KEY.to_string()),
+                value: Some(ignore_pattern.to_string()),
             },
         ]
     }

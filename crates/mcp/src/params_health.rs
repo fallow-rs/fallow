@@ -85,8 +85,9 @@ pub struct HealthParams {
     /// selected.
     pub coverage_gaps: Option<bool>,
 
-    /// Show only shallow directories: directories whose interface is as large
-    /// as what they hide. Advisory: no health score weight, never gates.
+    /// Add the `shallow_directories` section: directories whose interface is
+    /// as large as what they hide. Advisory: no health score weight, never
+    /// gates. The `fallow://tools/check_health` guide explains the section.
     pub shallow_directories: Option<bool>,
 
     /// Show only the project health score (0–100) with letter grade (A/B/C/D/F).

@@ -40468,7 +40468,7 @@
           "items": {
             "$ref": "#/definitions/ShallowDirectoryItem"
           },
-          "description": "The shown items with the most outside users, at most 7. Sorted by\n`outside_files` (descending), then by `name`, then by `path`."
+          "description": "The shown items with the most outside users, at most 7 (the cap of the\nengine). Sorted by\n`outside_files` (descending), then by `name`, then by `path`."
         },
         "more_items": {
           "type": "integer",
@@ -40568,12 +40568,19 @@
           "type": "string",
           "description": "What the action does."
         },
-        "config": {
+        "config_key": {
           "type": [
             "string",
             "null"
           ],
-          "description": "The config entry for `ignore-directory`. Absent for other actions."
+          "description": "For `ignore-directory`: the config key that takes the pattern,\n`health.shallowDirectories.ignore`. Absent for other actions."
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For `ignore-directory`: the glob pattern to add to `config_key`. The\npattern escapes the glob characters of the directory path. Absent for\nother actions."
         }
       },
       "required": [
