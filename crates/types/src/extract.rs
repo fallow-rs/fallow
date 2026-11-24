@@ -1926,13 +1926,10 @@ pub struct MemberInfo {
     /// Member accesses on the call result credit the class (#346, #387).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_instance_returning_static: bool,
-    /// True when this is an instance class method whose call result is an
-    /// instance of the same class. Qualifies when the declared return type
-    /// matches the class name (`setX(): EventBuilder { ... }`) or when the
-    /// body's last statement is `return this`. The analyze layer walks fluent
-    /// chains (`Class.factory().setX().setY()`) only through methods carrying
-    /// this flag, so the chain stops at a non-self-returning method like
-    /// `.build()`. See issue #387.
+    /// True for an instance method whose call result is an instance of the
+    /// same class: the declared return type names the class, or the body ends
+    /// with `return this`. The analysis walks fluent chains
+    /// (`Class.factory().setX().setY()`) only through these methods (#387).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_self_returning: bool,
     /// Root identifier of the class `extends` expression, set only when the
@@ -1950,6 +1947,9 @@ pub struct MemberInfo {
     /// True for a `static` class member, which code with the class value reads.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_static: bool,
+    /// True for `dispose` when the class declares `[Symbol.dispose]` or `[Symbol.asyncDispose]`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pairs_with_symbol_dispose: bool,
 }
 
 /// The kind of member.
