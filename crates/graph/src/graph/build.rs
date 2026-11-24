@@ -263,7 +263,8 @@ fn collect_import_edge_with_kind(
 ///
 /// Every import uses the package. An import through an asset loader reads a
 /// file of the package at build time, and a macro import runs the package at
-/// build time, so both are also recorded as a build-time use. A static value import that runs the package is startup weight.
+/// build time, so both are also recorded as a build-time use.
+/// A static value import that runs the package is startup weight.
 fn record_package_import(
     acc: &mut EdgeAccumulator<'_>,
     package_name: &str,
