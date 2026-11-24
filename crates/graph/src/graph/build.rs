@@ -201,7 +201,9 @@ fn collect_import_edge(
     );
 }
 
-/// [`collect_import_edge`] for an edge whose target loads as `load_kind`.
+/// Collect one resolved import whose target loads as `load_kind`. Internal
+/// module imports create an `ImportedSymbol` entry grouped by target, and npm
+/// package imports are recorded in the package usage maps.
 fn collect_import_edge_with_kind(
     import: &ResolvedImport,
     file_id: FileId,
