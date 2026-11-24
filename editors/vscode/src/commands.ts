@@ -729,7 +729,7 @@ const showDryRunPreview = async (
   }
 
   if (warningNote) {
-    void vscode.window.showWarningMessage(`Fallow fix preview skipped files: ${warningNote}`);
+    void vscode.window.showWarningMessage(`Fallow: the fix run skipped some files. ${warningNote}`);
   }
 
   const quickPickItems: FixQuickPickItem[] = [];
@@ -759,9 +759,7 @@ const showDryRunPreview = async (
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
     title: `Fallow: ${fixCountLabel(available.length)} available${skipped}`,
-    placeHolder: warningNote
-      ? `${warningNote} — Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate`
-      : "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
+    placeHolder: "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
   if (!picked) {
@@ -1167,6 +1165,25 @@ export const runInspectActiveSymbol = async (
  * first. `afterRun` runs once the CLI was started, also when it failed, since
  * a failed apply run can have changed files before it stopped.
  */
+/**
+ * Show the preview for a dry run that exited with code 2 but still has
+ * eligible fixes. Return `null` when the report has no eligible fix, so the
+ * caller keeps the error message.
+ */
+const showPartialDryRunPreview = async (
+  root: string,
+  err: unknown,
+  message: string,
+): Promise<FallowFixResult | null> => {
+  const partial = parsePartialFixResult(err);
+  if (!partial || !partial.fixes.some((fix) => !fix.skipped)) {
+    return null;
+  }
+  const note = formatRecoverableSkipAdvice(partial) || message;
+  await showDryRunPreview(root, partial, note);
+  return partial;
+};
+
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
@@ -1212,13 +1229,9 @@ export const runFix = async (
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (dryRun) {
-      const partial = parsePartialFixResult(err);
-      if (partial && partial.fixes.some((fix) => !fix.skipped)) {
-        const note = formatRecoverableSkipAdvice(partial) || message;
-        await showDryRunPreview(root, partial, note);
-        return partial;
-      }
+    const partial = dryRun ? await showPartialDryRunPreview(root, err, message) : null;
+    if (partial) {
+      return partial;
     }
     void vscode.window.showErrorMessage(`Fallow fix failed: ${message}${partialFixSummary(err)}`);
     return null;

@@ -1257,6 +1257,9 @@ describe("applyFixes", () => {
     vi.clearAllMocks();
   });
 
+  const DEFAULT_FIX_PREVIEW_PLACEHOLDER =
+    "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate";
+
   const skipped = {
     type: "skipped",
     path: "src/member.ts",
@@ -1335,8 +1338,9 @@ describe("applyFixes", () => {
         const result = await runFix(workspaceContext, true);
         expect(result?.fixes).toHaveLength(3);
         expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
+        expect(mockWindow.showWarningMessage).toHaveBeenCalledOnce();
         expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
-          expect.stringContaining(`src/b.ts ${help}`),
+          `Fallow: the fix run skipped some files. src/b.ts ${help}`,
         );
         expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
           expect.arrayContaining([
@@ -1346,7 +1350,7 @@ describe("applyFixes", () => {
           ]),
           expect.objectContaining({
             title: "Fallow: 2 fixes available, skipped 1",
-            placeHolder: expect.stringContaining(`src/b.ts ${help}`),
+            placeHolder: DEFAULT_FIX_PREVIEW_PLACEHOLDER,
           }),
         );
       },
@@ -1370,7 +1374,9 @@ describe("applyFixes", () => {
         expect(result?.fixes).toHaveLength(2);
         expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
         expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
-          expect.stringContaining("fallow exited with code 2"),
+          expect.stringMatching(
+            /^Fallow: the fix run skipped some files\. .*fallow exited with code 2/,
+          ),
         );
         expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
           expect.arrayContaining([
@@ -1379,7 +1385,7 @@ describe("applyFixes", () => {
           ]),
           expect.objectContaining({
             title: "Fallow: 1 fix available, skipped 1",
-            placeHolder: expect.stringContaining("fallow exited with code 2"),
+            placeHolder: DEFAULT_FIX_PREVIEW_PLACEHOLDER,
           }),
         );
       },
