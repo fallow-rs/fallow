@@ -9170,7 +9170,7 @@
     ]
   },
   "plugins": {
-    "count": 158,
+    "count": 159,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -9302,6 +9302,7 @@
       "simple-git-hooks",
       "size-limit",
       "svgo",
+      "vite-pwa-assets-generator",
       "svgr",
       "graphql-codegen",
       "graphql-config",

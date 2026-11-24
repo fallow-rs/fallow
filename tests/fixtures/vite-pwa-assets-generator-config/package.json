@@ -1,0 +1,9 @@
+{
+  "name": "vite-pwa-assets-generator-config",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@vite-pwa/assets-generator": "^1.0.0"
+  }
+}

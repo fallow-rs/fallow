@@ -96,3 +96,17 @@ pub(super) fn resolve_local_module(config_dir: &Path, specifier: &str) -> PathBu
         );
     candidates.find(|path| path.is_file()).unwrap_or(base)
 }
+
+/// Whether an extensionless value names a file under `root`: the value itself,
+/// the value with a source extension, or the index file of the directory it
+/// names. This is the order in which a bundler resolves a path.
+pub(super) fn names_project_file(root: &Path, value: &str) -> bool {
+    let base = root.join(value);
+    base.is_file()
+        || crate::discover::SOURCE_EXTENSIONS.iter().any(|extension| {
+            let mut candidate = base.clone().into_os_string();
+            candidate.push(".");
+            candidate.push(extension);
+            Path::new(&candidate).is_file() || base.join(format!("index.{extension}")).is_file()
+        })
+}

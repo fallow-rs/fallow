@@ -900,6 +900,8 @@ mod typescript_content_mapper_plugin;
 mod vite_nested_config_entries;
 #[path = "integration_test/vite_plus_plugin.rs"]
 mod vite_plus_plugin;
+#[path = "integration_test/vite_pwa_assets_generator_config.rs"]
+mod vite_pwa_assets_generator_config;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
 #[path = "integration_test/vitest_include_scope.rs"]
