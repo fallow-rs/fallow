@@ -175,7 +175,7 @@ impl<'a> GraphConfidenceContext<'a> {
             if module.parse_error_count == 0 {
                 continue;
             }
-            let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
+            let Some(node) = graph.module(module.file_id) else {
                 continue;
             };
             if ignore_findings.is_ignored_path(root, &node.path) {

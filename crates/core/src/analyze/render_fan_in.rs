@@ -92,7 +92,7 @@ fn seed_component_population(
     // per-component path-annotation map has an entry for every component the
     // hotspot surface might query.
     let mut counts: FxHashMap<CompKey, FanInAccum> = FxHashMap::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }
@@ -130,7 +130,7 @@ fn credit_render_edges(
     // `(parent_file, parent_component)`; an edge with an empty parent (a
     // top-level render expression) still counts as a render site, keyed to the
     // module file with an empty parent name so it collapses correctly.
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }
@@ -164,7 +164,7 @@ fn build_render_fan_in_metric(
     counts: FxHashMap<CompKey, FanInAccum>,
 ) -> Option<RenderFanInMetric> {
     let path_by_id: FxHashMap<FileId, &Path> = graph
-        .modules
+        .modules()
         .iter()
         .map(|node| (node.file_id, node.path.as_path()))
         .collect();

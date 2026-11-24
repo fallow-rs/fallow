@@ -667,7 +667,7 @@ fn build_template_inherit_contexts(
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if let Some(context) =
             template_inherit_context_for_node(node, graph, test_coverage, module_by_id, file_paths)
         {
@@ -767,7 +767,7 @@ fn template_owner<'a>(
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<(&'a fallow_graph::graph::ModuleNode, &'a std::path::PathBuf)> {
-    let owner_node = graph.modules.get(importer_id.0 as usize)?;
+    let owner_node = graph.module(importer_id)?;
     let owner_path = *file_paths.get(&importer_id)?;
     if !is_template_owner_path(owner_path) || graph.test_entry_points.contains(&importer_id) {
         return None;
@@ -794,7 +794,7 @@ fn collect_direct_callers(
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>> {
     let mut callers_by_target = rustc_hash::FxHashMap::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         let Some(target_path) = file_paths.get(&node.file_id) else {
             continue;
         };
@@ -2735,9 +2735,9 @@ fn accumulate_file_scores(
         istanbul_files_total: ctx
             .istanbul_coverage
             .map_or(0, IstanbulCoverage::file_count),
-        ..FileScoreAccumulator::with_capacity(ctx.graph.modules.len())
+        ..FileScoreAccumulator::with_capacity(ctx.graph.module_count())
     };
-    for node in &ctx.graph.modules {
+    for node in ctx.graph.modules() {
         let Some(path) = ctx.file_paths.get(&node.file_id) else {
             continue;
         };
@@ -2883,7 +2883,7 @@ fn compute_file_score_metrics(
 }
 
 fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
-    let total_exports: usize = parts.graph.modules.iter().map(|m| m.exports.len()).sum();
+    let total_exports: usize = parts.graph.modules().iter().map(|m| m.exports.len()).sum();
     let unused_deps = parts.results.unused_dependencies.len()
         + parts.results.unused_dev_dependencies.len()
         + parts.results.unused_optional_dependencies.len();
@@ -3246,10 +3246,10 @@ fn build_analysis_counts_snapshot(
     unused_deps: usize,
 ) -> AnalysisCountsSnapshot {
     let mut module_export_counts = rustc_hash::FxHashMap::with_capacity_and_hasher(
-        graph.modules.len(),
+        graph.module_count(),
         rustc_hash::FxBuildHasher,
     );
-    for module in &graph.modules {
+    for module in graph.modules() {
         if let Some(path) = file_paths.get(&module.file_id) {
             module_export_counts.insert((*path).clone(), module.exports.len());
         }

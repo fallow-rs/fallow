@@ -332,7 +332,7 @@ fn is_package_listed_for_file_as(
     file_is_production: bool,
 ) -> bool {
     let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
-    graph.modules[0].path = file_path.to_path_buf();
+    graph.modules_mut()[0].path = file_path.to_path_buf();
     let roots: Vec<&Path> = ws_dep_map.iter().map(|ws| ws.root.as_path()).collect();
     let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
     super::super::manifest_chain_declares(
@@ -499,7 +499,7 @@ fn workspace_ownership_uses_most_specific_ancestor() {
         ("/project/packages/application/src/index.ts", None),
         ("/project/src/index.ts", None),
     ] {
-        graph.modules[0].path = PathBuf::from(path);
+        graph.modules_mut()[0].path = PathBuf::from(path);
         let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
         assert_eq!(ownership.workspace_index_for_file(FileId(0)), expected);
         assert_eq!(ownership.workspace_index_for_file(FileId(1)), None);
@@ -595,7 +595,7 @@ fn ancestor_root_for(
     manifests: &[super::super::WorkspaceManifest<'_>],
 ) -> Option<PathBuf> {
     let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
-    graph.modules[0].path = PathBuf::from(file);
+    graph.modules_mut()[0].path = PathBuf::from(file);
     let roots: Vec<&Path> = manifests.iter().map(|manifest| manifest.root).collect();
     let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
     let config = test_config(PathBuf::from("/project"));
@@ -677,7 +677,7 @@ fn chain_installs(
     manifests: &[super::super::WorkspaceManifest<'_>],
 ) -> bool {
     let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
-    graph.modules[0].path = PathBuf::from(file);
+    graph.modules_mut()[0].path = PathBuf::from(file);
     let roots: Vec<&Path> = manifests.iter().map(|manifest| manifest.root).collect();
     let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
     super::super::workspace_chain_installer(manifests, &ownership, package_name, FileId(0))

@@ -63,7 +63,7 @@ pub fn find_unused_component_props(
         modules.iter().map(|m| (m.file_id, m)).collect();
 
     let mut scan = SfcPropScan::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() {
             continue;
         }
@@ -218,7 +218,7 @@ pub fn find_unused_react_props(
         modules.iter().map(|m| (m.file_id, m)).collect();
 
     let mut scan = ReactPropScan::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() {
             continue;
         }

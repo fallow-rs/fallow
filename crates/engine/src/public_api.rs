@@ -79,7 +79,7 @@ pub fn public_api_entry_paths_for_graph(
         .filter_map(|file_id| {
             graph
                 .as_graph()
-                .modules
+                .modules()
                 .get(file_id.0 as usize)
                 .map(|module| module.path.clone())
         })
@@ -91,7 +91,7 @@ pub fn public_api_entry_paths_for_graph(
 
 fn graph_path_to_file_id(graph: &fallow_graph::graph::ModuleGraph) -> FxHashMap<PathBuf, FileId> {
     graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.path.clone(), module.file_id))
         .collect()
@@ -338,7 +338,7 @@ fn add_exportless_package_source_indexes(
         roots.push(canonical);
     }
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         if roots
             .iter()
             .any(|root| is_source_index_under_package(&module.path, root))

@@ -65,7 +65,7 @@ impl<'g> SourceCache<'g> {
         if !self.forwarded.contains_key(&file_id) {
             let path = self
                 .graph
-                .modules
+                .modules()
                 .get(file_id.0 as usize)
                 .map(|module| module.path.clone());
             let names = match (path, self.get(file_id)) {
@@ -84,7 +84,7 @@ impl<'g> SourceCache<'g> {
         self.sources
             .entry(file_id)
             .or_insert_with(|| {
-                let module = graph.modules.get(file_id.0 as usize)?;
+                let module = graph.module(file_id)?;
                 let text = std::fs::read_to_string(&module.path).ok()?;
                 let offsets = fallow_types::extract::compute_line_offsets(&text);
                 Some(Source { text, offsets })
@@ -294,7 +294,7 @@ impl SearchTarget {
         graph: &'g ModuleGraph,
         reference: &SymbolReference,
     ) -> Option<Binding<'g>> {
-        let module = graph.modules.get(reference.from_file.0 as usize)?;
+        let module = graph.module(reference.from_file)?;
         let forwards = |re_export: &&crate::graph::ReExportEdge| {
             self.exposures
                 .get(&re_export.source_file)
@@ -567,7 +567,7 @@ fn default_export_term(
     file_id: FileId,
 ) -> Option<String> {
     let export = graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)?
         .exports
         .iter()

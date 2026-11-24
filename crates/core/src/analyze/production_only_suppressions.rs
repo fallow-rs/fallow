@@ -81,7 +81,7 @@ fn is_member_needed_in_production(
     if kinds.peek().is_none() {
         return false;
     }
-    let Some(module) = graph.modules.get(file_id.0 as usize) else {
+    let Some(module) = graph.module(file_id) else {
         return false;
     };
     if is_production_excluded(config, module)
@@ -139,9 +139,9 @@ impl ProductionMemberView {
 /// than the production set but not smaller.
 fn production_reachable_modules(graph: &ModuleGraph, config: &ResolvedConfig) -> Vec<bool> {
     let kept = |module: &ModuleNode| !is_production_excluded(config, module);
-    let mut reachable = vec![false; graph.modules.len()];
+    let mut reachable = vec![false; graph.module_count()];
     let mut pending: Vec<FileId> = graph
-        .modules
+        .modules()
         .iter()
         .filter(|module| module.is_entry_point() && kept(module))
         .map(|module| module.file_id)
@@ -155,7 +155,7 @@ fn production_reachable_modules(graph: &ModuleGraph, config: &ResolvedConfig) ->
         }
         pending.extend(graph.edges_for(file_id).into_iter().filter(|target| {
             !reachable.get(target.0 as usize).copied().unwrap_or(true)
-                && graph.modules.get(target.0 as usize).is_some_and(kept)
+                && graph.module(*target).is_some_and(kept)
         }));
     }
     reachable
@@ -222,7 +222,7 @@ fn find_production_unused_members(input: &PostDetectionInput<'_, '_>) -> UnusedM
         .filter(|resolved| {
             input
                 .graph
-                .modules
+                .modules()
                 .get(resolved.file_id.0 as usize)
                 .is_some_and(|module| !is_production_excluded(input.config, module))
         })
@@ -256,7 +256,7 @@ fn has_production_reference(
 ) -> bool {
     export.references.iter().any(|reference| {
         graph
-            .modules
+            .modules()
             .get(reference.from_file.0 as usize)
             .is_some_and(|importer| !is_production_excluded(config, importer))
     })
@@ -276,7 +276,7 @@ fn is_needed_in_production(
     if config.production {
         return false;
     }
-    let Some(module) = graph.modules.get(file_id.0 as usize) else {
+    let Some(module) = graph.module(file_id) else {
         return false;
     };
     module.exports.iter().any(|export| {
@@ -302,7 +302,7 @@ fn is_referenced_only_by_production_excluded_files(
     !export.references.is_empty()
         && export.references.iter().all(|reference| {
             graph
-                .modules
+                .modules()
                 .get(reference.from_file.0 as usize)
                 .is_some_and(|importer| is_production_excluded(config, importer))
         })
@@ -329,7 +329,7 @@ fn is_re_exported_by_production_entry(
         if !seen.insert((source, name.clone())) {
             continue;
         }
-        for barrel in &graph.modules {
+        for barrel in graph.modules() {
             if is_production_excluded(config, barrel) {
                 continue;
             }

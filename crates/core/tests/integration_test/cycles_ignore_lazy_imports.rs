@@ -121,8 +121,8 @@ fn top_level_await_import_loads_eagerly() {
         .as_ref()
         .expect("analyze_with_trace retains the graph");
     let kinds = |from: &str, to: &str| -> Vec<ImportLoadKind> {
-        let source = module_named(&graph.modules, from).file_id;
-        let target = module_named(&graph.modules, to).file_id;
+        let source = module_named(graph.modules(), from).file_id;
+        let target = module_named(graph.modules(), to).file_id;
         graph
             .outgoing_symbol_edges(source)
             .filter(|(edge_target, _)| *edge_target == target)

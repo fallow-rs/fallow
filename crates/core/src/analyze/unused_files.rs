@@ -49,7 +49,7 @@ pub fn find_unused_file_scan(
     suppressions: &SuppressionContext<'_>,
 ) -> UnusedFileScan {
     let (suppressed, reported): (Vec<_>, Vec<_>) = graph
-        .modules
+        .modules()
         .iter()
         .filter(|m| !m.is_reachable() && !m.is_entry_point())
         .filter(|m| !is_config_file(&m.path))
@@ -78,17 +78,17 @@ fn has_reachable_importer(file_id: FileId, graph: &ModuleGraph) -> bool {
     }
     graph.reverse_deps[idx].iter().any(|&dep_id| {
         let dep_idx = dep_id.0 as usize;
-        dep_idx < graph.modules.len() && graph.modules[dep_idx].is_reachable()
+        dep_idx < graph.module_count() && graph.modules()[dep_idx].is_reachable()
     })
 }
 
 /// Check if any export on this file is referenced by a reachable module.
 fn has_reachable_export_reference(file_id: FileId, graph: &ModuleGraph) -> bool {
-    graph.modules.get(file_id.0 as usize).is_some_and(|module| {
+    graph.module(file_id).is_some_and(|module| {
         module.exports.iter().any(|export| {
             export.references.iter().any(|reference| {
                 graph
-                    .modules
+                    .modules()
                     .get(reference.from_file.0 as usize)
                     .is_some_and(|m| m.is_reachable())
             })

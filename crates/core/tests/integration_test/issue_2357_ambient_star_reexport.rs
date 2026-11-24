@@ -230,7 +230,7 @@ fn ambient_named_and_type_only_forms_keep_type_space_credit() {
         ("src/import-impl.ts", "ImportPair"),
         ("src/import-impl.ts", "JsdocPair"),
     ] {
-        let (type_slot, value_slot) = pair_slots(module_named(&graph.modules, path), name);
+        let (type_slot, value_slot) = pair_slots(module_named(graph.modules(), path), name);
         assert!(
             type_slot
                 .references_in(ExportNamespace::Type)
@@ -269,20 +269,20 @@ fn ambient_star_re_exports_leave_no_surface_on_the_declaring_file() {
         .as_ref()
         .expect("analyze_with_trace retains the graph");
 
-    let ambient = module_named(&graph.modules, "src/ambient.d.ts");
+    let ambient = module_named(graph.modules(), "src/ambient.d.ts");
     assert!(
         ambient.is_entry_point(),
         "the fixture must keep the declaring file an entry point (package.json `types`): \
          that is where the star surface used to launder target exports"
     );
-    let shim = module_named(&graph.modules, "src/shim.ts");
+    let shim = module_named(graph.modules(), "src/shim.ts");
     assert!(
         shim.is_reachable() && !shim.is_entry_point(),
         "the fixture must keep shim.ts a reachable non-entry module so the credit cannot \
          come from entry-point star propagation"
     );
     for path in ["src/ambient.d.ts", "src/ambient-ns.d.ts", "src/shim.ts"] {
-        let module = module_named(&graph.modules, path);
+        let module = module_named(graph.modules(), path);
         let re_exports: Vec<(&str, &str)> = module
             .re_exports
             .iter()
@@ -305,7 +305,7 @@ fn ambient_star_re_exports_leave_no_surface_on_the_declaring_file() {
         ("src/ns-impl.ts", &["helperC"][..]),
         ("src/shim-impl.ts", &["helperD"][..]),
     ] {
-        let module = module_named(&graph.modules, path);
+        let module = module_named(graph.modules(), path);
         for name in names {
             let kinds: Vec<ReferenceKind> = export_named(module, name)
                 .references
@@ -327,8 +327,8 @@ fn ambient_star_re_exports_leave_no_surface_on_the_declaring_file() {
 
     // The whole-module credit follows the target's own `export *` chain: the
     // graph propagates it from impl.ts (the barrel) to impl-deep.ts.
-    let impl_module = module_named(&graph.modules, "src/impl.ts");
-    let helper_e = export_named(module_named(&graph.modules, "src/impl-deep.ts"), "helperE");
+    let impl_module = module_named(graph.modules(), "src/impl.ts");
+    let helper_e = export_named(module_named(graph.modules(), "src/impl-deep.ts"), "helperE");
     assert!(
         helper_e
             .references
@@ -370,8 +370,8 @@ fn ambient_star_chain_covers_the_targets_namespace_re_exports() {
     // impl.ts `export * as sub from './sub'`: the ambient star reaches the
     // namespace object, so every export of sub.ts, `default` included, is
     // credited from impl.ts by the namespace re-export phase.
-    let impl_module = module_named(&graph.modules, "src/impl.ts");
-    let sub = module_named(&graph.modules, "src/sub.ts");
+    let impl_module = module_named(graph.modules(), "src/impl.ts");
+    let sub = module_named(graph.modules(), "src/sub.ts");
     for name in ["subOne", "nested", "default"] {
         credited_from(sub, name, impl_module);
     }
@@ -379,7 +379,7 @@ fn ambient_star_chain_covers_the_targets_namespace_re_exports() {
     // sub.ts's own `export *` source gets the star treatment (named exports,
     // never `default`) and its own `export * as nested` source the namespace
     // treatment, recursively.
-    let sub_deep = module_named(&graph.modules, "src/sub-deep.ts");
+    let sub_deep = module_named(graph.modules(), "src/sub-deep.ts");
     let sub_deep_one = export_named(sub_deep, "subDeepOne");
     assert!(
         sub_deep_one
@@ -393,15 +393,15 @@ fn ambient_star_chain_covers_the_targets_namespace_re_exports() {
         export_named(sub_deep, "default").references.is_empty(),
         "sub-deep.ts:default is not part of sub.ts's `export *` surface"
     );
-    let nested = module_named(&graph.modules, "src/sub-nested.ts");
+    let nested = module_named(graph.modules(), "src/sub-nested.ts");
     for name in ["nestedOne", "default"] {
         credited_from(nested, name, sub);
     }
 
     // The reachable non-entry shim follows the same rule for its target's
     // `export * as shimSub` namespace.
-    let shim_impl = module_named(&graph.modules, "src/shim-impl.ts");
-    let shim_sub = module_named(&graph.modules, "src/shim-sub.ts");
+    let shim_impl = module_named(graph.modules(), "src/shim-impl.ts");
+    let shim_sub = module_named(graph.modules(), "src/shim-sub.ts");
     for name in ["shimSubOne", "default"] {
         credited_from(shim_sub, name, shim_impl);
     }
@@ -428,7 +428,7 @@ fn ambient_star_forms_credit_both_declarations_of_a_type_value_pair() {
         ("src/sub.ts", "SubPair", ReferenceKind::NamespaceImport),
         ("src/impl-deep.ts", "DeepMerged", ReferenceKind::ReExport),
     ] {
-        let (type_slot, value_slot) = pair_slots(module_named(&graph.modules, path), name);
+        let (type_slot, value_slot) = pair_slots(module_named(graph.modules(), path), name);
         for (export, namespace) in [
             (type_slot, ExportNamespace::Type),
             (value_slot, ExportNamespace::Value),
@@ -444,7 +444,7 @@ fn ambient_star_forms_credit_both_declarations_of_a_type_value_pair() {
 
     // `export * as impl` forwards the namespace object, so `impl.default`
     // credits the target's default export; plain `export *` never does.
-    let ns_default = export_named(module_named(&graph.modules, "src/ns-impl.ts"), "default");
+    let ns_default = export_named(module_named(graph.modules(), "src/ns-impl.ts"), "default");
     assert!(
         ns_default
             .references
@@ -454,7 +454,7 @@ fn ambient_star_forms_credit_both_declarations_of_a_type_value_pair() {
          member, found {:?}",
         reference_shapes(ns_default)
     );
-    let star_default = export_named(module_named(&graph.modules, "src/impl.ts"), "default");
+    let star_default = export_named(module_named(graph.modules(), "src/impl.ts"), "default");
     assert!(
         star_default.references.is_empty(),
         "impl.ts:default is not part of the `export *` surface and must carry no \

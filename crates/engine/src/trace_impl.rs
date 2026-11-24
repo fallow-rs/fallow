@@ -42,7 +42,7 @@ pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str
     let mut exact = Vec::new();
     let mut suffix = Vec::new();
     let suffix_pattern = format!("/{normalized}");
-    for (index, module) in graph.modules.iter().enumerate() {
+    for (index, module) in graph.modules().iter().enumerate() {
         let module_path = forward_slash_path(&module.path);
         let is_exact = module_path == normalized || exact_targets.contains(&module.path);
         if is_exact {
@@ -85,7 +85,7 @@ impl<'g> ModulePathLookup<'g> {
     fn new(graph: &'g ModuleGraph, root: &'g Path) -> Self {
         let mut by_path: FxHashMap<String, Vec<usize>> = FxHashMap::default();
         let mut by_file_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
-        for (index, module) in graph.modules.iter().enumerate() {
+        for (index, module) in graph.modules().iter().enumerate() {
             by_path
                 .entry(path_key(&module.path))
                 .or_default()
@@ -135,7 +135,7 @@ impl<'g> ModulePathLookup<'g> {
             .flatten()
             .copied()
             .filter(|&index| {
-                forward_slash_path(&self.graph.modules[index].path).ends_with(&suffix_pattern)
+                forward_slash_path(&self.graph.modules()[index].path).ends_with(&suffix_pattern)
             })
             .collect()
     }
@@ -158,7 +158,7 @@ pub fn find_module<'a>(
 ) -> Option<&'a ModuleNode> {
     matching_module_indexes(graph, root, user_path)
         .first()
-        .map(|&index| &graph.modules[index])
+        .map(|&index| &graph.modules()[index])
 }
 
 /// Reconcile checker-backed reference evidence with the retained graph's
@@ -179,7 +179,7 @@ pub fn reconcile_semantic_trace_reachability(
             lookup
                 .matching(&reference.path.to_string_lossy())
                 .iter()
-                .any(|&index| graph.modules[index].is_reachable())
+                .any(|&index| graph.modules()[index].is_reachable())
         })
     };
     if has_reachable_reference {
@@ -202,7 +202,7 @@ pub(super) fn reference_to_export_reference(
     root: &Path,
     r: &crate::graph::SymbolReference,
 ) -> ExportReference {
-    let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
+    let from_path = graph.module(r.from_file).map_or_else(
         || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
         |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
     );
@@ -221,7 +221,7 @@ fn collect_re_export_chains(
         .effective_re_export_routes(target_file_id, export_name, namespace)
         .into_iter()
         .filter_map(|route| {
-            let module = graph.modules.get(route.barrel_file().0 as usize)?;
+            let module = graph.module(route.barrel_file())?;
             Some(ReExportChain {
                 barrel_file: relative_module_path(&module.path, root),
                 exported_as: route.exported_name().to_string(),
@@ -234,7 +234,7 @@ fn collect_re_export_chains(
                     .into_iter()
                     .filter(|reference| {
                         graph
-                            .modules
+                            .modules()
                             .get(reference.from_file.0 as usize)
                             .is_some_and(crate::graph::ModuleNode::is_reachable)
                     })
@@ -351,7 +351,7 @@ fn trace_star_export_ambiguity(
     let mut sources: Vec<_> = collisions
         .iter()
         .flat_map(|collision| collision.contributors.iter())
-        .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
+        .filter_map(|contributor| graph.module(*contributor))
         .map(|module| relative_module_path(&module.path, root))
         .collect();
     sources.sort();
@@ -399,7 +399,7 @@ pub fn semantic_symbol_for_export(
         (module, re_export.span, export_name, local_name)
     } else {
         let origin = surface.origin()?;
-        let origin_module = graph.modules.get(origin.file_id().0 as usize)?;
+        let origin_module = graph.module(origin.file_id())?;
         let origin_export = origin.export();
         let origin_name = match &origin_export.name {
             fallow_types::extract::ExportName::Named(name) => name.as_str(),
@@ -714,7 +714,7 @@ fn traced_imports_from(
         .iter()
         .filter_map(|target_id| {
             graph
-                .modules
+                .modules()
                 .get(target_id.0 as usize)
                 .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
         })
@@ -734,7 +734,7 @@ fn traced_imported_by(
             deps.iter()
                 .filter_map(|fid| {
                     graph
-                        .modules
+                        .modules()
                         .get(fid.0 as usize)
                         .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
                 })
@@ -753,7 +753,7 @@ fn traced_re_exports(
         .re_exports
         .iter()
         .map(|re| {
-            let source_path = graph.modules.get(re.source_file.0 as usize).map_or_else(
+            let source_path = graph.module(re.source_file).map_or_else(
                 || PathBuf::from(format!("<unknown:{}>", re.source_file.0)),
                 |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
             );
@@ -867,7 +867,7 @@ fn package_importers(
         let Some(total) = all.remove(&fid) else {
             continue;
         };
-        let Some(module) = graph.modules.get(fid.0 as usize) else {
+        let Some(module) = graph.module(fid) else {
             continue;
         };
         let path = relative_module_path(&module.path, root);
@@ -960,7 +960,7 @@ fn impact_closure_trace(
             consumer_search_checks(graph, module.file_id)
                 .into_iter()
                 .filter_map(|(file_id, check)| {
-                    let consumer = graph.modules.get(file_id.0 as usize)?;
+                    let consumer = graph.module(file_id)?;
                     let path = consumer
                         .path
                         .strip_prefix(root)
@@ -1004,7 +1004,7 @@ fn consumer_search_checks(
     seed: FileId,
 ) -> FxHashMap<FileId, (String, SearchCheck)> {
     let mut checks: FxHashMap<FileId, (String, SearchCheck)> = FxHashMap::default();
-    let Some(module) = graph.modules.get(seed.0 as usize) else {
+    let Some(module) = graph.module(seed) else {
         return checks;
     };
     let mut sources = SourceCache::new(graph);
@@ -1089,8 +1089,8 @@ fn resolve_import_path_hops(
     let mut line_offsets: FxHashMap<FileId, Option<Vec<u32>>> = FxHashMap::default();
     hops.iter()
         .filter_map(|hop| {
-            let from = graph.modules.get(hop.from.0 as usize)?;
-            let to = graph.modules.get(hop.to.0 as usize)?;
+            let from = graph.module(hop.from)?;
+            let to = graph.module(hop.to)?;
             let import_line = hop.import_span_start.and_then(|span_start| {
                 line_offsets
                     .entry(hop.from)
@@ -2551,7 +2551,7 @@ mod tests {
                 Err(expected),
             );
         }
-        graph.modules[0].exports[0].members[2].kind = MemberKind::ClassProperty;
+        graph.modules_mut()[0].exports[0].members[2].kind = MemberKind::ClassProperty;
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,
@@ -2562,8 +2562,8 @@ mod tests {
             ),
             Err(SemanticClassMethodResolutionError::UnsupportedSyntax),
         );
-        graph.modules[0].exports[0].members[2].kind = MemberKind::ClassMethod;
-        std::fs::remove_file(&graph.modules[0].path).expect("remove fixture source");
+        graph.modules_mut()[0].exports[0].members[2].kind = MemberKind::ClassMethod;
+        std::fs::remove_file(&graph.modules()[0].path).expect("remove fixture source");
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,
@@ -2575,11 +2575,11 @@ mod tests {
             Err(SemanticClassMethodResolutionError::SymbolNotFound),
         );
         let (_other_temp, mut other_graph) = exact_class_method_fixture();
-        let duplicate = other_graph.modules[0]
+        let duplicate = other_graph.modules_mut()[0]
             .exports
             .pop()
             .expect("fixture declares an owner");
-        graph.modules[0].exports.push(duplicate);
+        graph.modules_mut()[0].exports.push(duplicate);
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,

@@ -595,7 +595,7 @@ pub fn find_tainted_sinks(
     };
 
     let mut findings = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
@@ -708,7 +708,7 @@ impl<'m> ModuleSourceKinds<'m> {
                 return kinds;
             };
             for &importer in importers {
-                let Some(node) = run.graph.modules.get(importer.0 as usize) else {
+                let Some(node) = run.graph.module(importer) else {
                     continue;
                 };
                 let Some(module) = run.modules_by_id.get(&importer) else {

@@ -40,7 +40,7 @@ pub fn find_boundary_call_violations(
     let mut zone_file_counts = boundary_call_zone_file_counts(&patterns_by_zone);
 
     let mut violations = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         let Some((zone, patterns, module)) = boundary_call_scan_target(
             node,
             config,

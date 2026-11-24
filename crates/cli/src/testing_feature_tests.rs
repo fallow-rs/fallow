@@ -1,6 +1,7 @@
 //! The `testing` feature of `fallow-config`, `fallow-engine` and `fallow-api`
 //! makes the session constructors that take a config without a resolved run
-//! public. A release build must not have them, so only a dev-dependency may
+//! public. The `testing` feature of `fallow-graph` gives mutable access to a
+//! built graph. A release build must not have them, so only a dev-dependency may
 //! turn the feature on. This test reads each manifest of the workspace and
 //! fails when a normal dependency, a build dependency, a workspace
 //! dependency or another feature turns `testing` on.

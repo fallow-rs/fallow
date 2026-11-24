@@ -80,7 +80,7 @@ pub fn find_hardcoded_secret_candidates(
         root,
     };
 
-    for node in &graph.modules {
+    for node in graph.modules() {
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };

@@ -61,7 +61,7 @@ pub(super) fn collect_inline_loader_referenced_deps(
 /// The path of a project file by its id.
 fn module_path(graph: &ModuleGraph, file_id: FileId) -> Option<&Path> {
     graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)
         .map(|module| module.path.as_path())
 }

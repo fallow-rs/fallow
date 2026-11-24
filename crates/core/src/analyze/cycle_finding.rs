@@ -21,7 +21,7 @@ pub(super) fn circular_dependency_from_cycle(
             let (line, col) =
                 cycle_edge_line_col(graph, line_offsets_map, cycle, edge_index).unwrap_or((1, 0));
             CircularDependencyEdge {
-                path: graph.modules[from.0 as usize].path.clone(),
+                path: graph.modules()[from.0 as usize].path.clone(),
                 line,
                 col,
             }

@@ -153,7 +153,7 @@ pub fn find_unrendered_components(
         suppressions,
     };
     let mut findings = Vec::new();
-    for module in &graph.modules {
+    for module in graph.modules() {
         let Some(framework) = sfc_framework(&module.path, vue, svelte, astro) else {
             continue;
         };
@@ -196,7 +196,7 @@ fn build_rendered_sfc_used_set(
 /// `unused-file` / `unused-import` owns it.
 fn build_barrel_reexported_sfcs(graph: &ModuleGraph) -> FxHashMap<FileId, FileId> {
     let mut reexported: FxHashMap<FileId, FileId> = FxHashMap::default();
-    for barrel in &graph.modules {
+    for barrel in graph.modules() {
         if !barrel.is_reachable() {
             continue;
         }
@@ -267,7 +267,7 @@ fn evaluate_unrendered_sfc(
     // `path`), so JSON consumers never see a machine-specific absolute path.
     let reachable_via = scan
         .graph
-        .modules
+        .modules()
         .get(barrel_id.0 as usize)
         .map(|b| b.path.clone());
     Some(UnrenderedComponent {
@@ -379,7 +379,7 @@ fn sfc_default_origin(graph: &ModuleGraph, binding: EffectiveExportBinding) -> O
 
 fn graph_path(graph: &ModuleGraph, file_id: FileId) -> std::path::PathBuf {
     graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)
         .map(|m| m.path.clone())
         .unwrap_or_default()
@@ -545,7 +545,7 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
     let public_api = public_api_reexported_files(graph, public_api_entry_points);
 
     let mut findings = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || node.is_entry_point() {
             continue;
         }
@@ -667,7 +667,7 @@ fn collect_unrendered_angular_component_findings(
     // the selector-used / route / bootstrap / dynamic / public-API abstains
     // instead. A component not reachable at all is left to `unused-file`.
     let mut findings = Vec::new();
-    for node in &scan.graph.modules {
+    for node in scan.graph.modules() {
         let Some(module) = angular_component_scan_target(
             node,
             scan.modules_by_id,

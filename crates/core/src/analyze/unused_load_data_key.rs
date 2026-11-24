@@ -139,7 +139,7 @@ fn collect_unused_route_loader_data_key_findings(
     input: &LoadDataKeyScanInput<'_>,
 ) -> Vec<UnusedLoadDataKey> {
     let mut findings = Vec::new();
-    for node in &input.graph.modules {
+    for node in input.graph.modules() {
         let Some(candidate) =
             route_loader_candidate_for_node(node, input.module_indexes, input.root)
         else {
@@ -225,7 +225,7 @@ fn collect_unused_load_data_key_findings(
     input: &LoadDataKeyScanInput<'_>,
 ) -> Vec<UnusedLoadDataKey> {
     let mut findings = Vec::new();
-    for node in &input.graph.modules {
+    for node in input.graph.modules() {
         let Some(candidate) =
             producer_candidate_for_node(node, input.module_indexes, input.global_used, input.root)
         else {
@@ -318,7 +318,7 @@ fn build_module_indexes<'a>(
         .collect();
     ModuleIndexes {
         module_by_path: graph
-            .modules
+            .modules()
             .iter()
             .filter_map(|node| {
                 let module = module_by_id.get(&node.file_id).copied()?;
@@ -327,7 +327,7 @@ fn build_module_indexes<'a>(
             .collect(),
         module_by_id,
         path_by_id: graph
-            .modules
+            .modules()
             .iter()
             .map(|node| (node.file_id, node.path.as_path()))
             .collect(),

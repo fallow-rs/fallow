@@ -401,8 +401,8 @@ fn whole_module_credit_is_routed_through_the_chain() {
     // The `export *` source is credited through the barrel's star chain, the
     // `export * as sub` source through the namespace object the barrel
     // exposes, and so on down the chain.
-    let barrel = module_named(&graph.modules, "src/barrel.ts");
-    let deep_helper = export_named(module_named(&graph.modules, "src/deep.ts"), "deepHelper");
+    let barrel = module_named(graph.modules(), "src/barrel.ts");
+    let deep_helper = export_named(module_named(graph.modules(), "src/deep.ts"), "deepHelper");
     assert!(
         deep_helper
             .references
@@ -415,7 +415,7 @@ fn whole_module_credit_is_routed_through_the_chain() {
             .map(|r| (r.kind, r.namespace, r.from_file))
             .collect::<Vec<_>>()
     );
-    let sub = module_named(&graph.modules, "src/sub.ts");
+    let sub = module_named(graph.modules(), "src/sub.ts");
     for name in ["subOne", "default"] {
         let export = export_named(sub, name);
         assert!(
@@ -432,7 +432,7 @@ fn whole_module_credit_is_routed_through_the_chain() {
                 .collect::<Vec<_>>()
         );
     }
-    let sub2 = module_named(&graph.modules, "src/sub2.ts");
+    let sub2 = module_named(graph.modules(), "src/sub2.ts");
     let sub2_default = export_named(sub2, "default");
     assert!(
         sub2_default
@@ -447,7 +447,7 @@ fn whole_module_credit_is_routed_through_the_chain() {
             .collect::<Vec<_>>()
     );
     assert!(
-        export_named(module_named(&graph.modules, "src/sub2-deep.ts"), "default")
+        export_named(module_named(graph.modules(), "src/sub2-deep.ts"), "default")
             .references
             .is_empty(),
         "sub2-deep.ts:default is not part of sub2.ts's `export *` surface"

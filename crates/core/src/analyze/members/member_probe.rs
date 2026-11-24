@@ -27,7 +27,7 @@ pub(super) fn propagate_member_name_probe_accesses(
         return;
     }
     let credited_by_file = neighbor_probe_names(resolved_modules, &probes_by_file);
-    for module in &graph.modules {
+    for module in graph.modules() {
         let Some(names) = credited_by_file.get(&module.file_id) else {
             continue;
         };
@@ -57,7 +57,7 @@ fn collect_reachable_probes<'a>(
     let mut probes_by_file: FxHashMap<FileId, FxHashSet<&'a str>> = FxHashMap::default();
     for module in resolved_modules {
         let reachable = graph
-            .modules
+            .modules()
             .get(module.file_id.0 as usize)
             .is_some_and(crate::graph::ModuleNode::is_reachable);
         if !reachable {

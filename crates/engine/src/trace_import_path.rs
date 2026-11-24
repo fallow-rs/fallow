@@ -32,8 +32,8 @@ pub fn trace_import_path(
         ImportPathEndpoint::To,
         ImportPathEndpoint::AmbiguousTo,
     )?;
-    let from = &graph.modules[from_index];
-    let to = &graph.modules[to_index];
+    let from = &graph.modules()[from_index];
+    let to = &graph.modules()[to_index];
 
     let from_rel = relativize(&from.path, root);
     let to_rel = relativize(&to.path, root);

@@ -37,7 +37,7 @@ fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
     let mut file_hits = vec![false; config.compiled_ignore_exports.len()];
     let mut name_hits = vec![false; names.len()];
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         let relative = module
             .path
             .strip_prefix(&config.root)
@@ -63,7 +63,7 @@ fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
     let mut path_hits = config
         .path_glob_effect(
             &[&config.duplicates.ignore, &config.health.ignore],
-            graph.modules.iter().map(|module| module.path.as_path()),
+            graph.modules().iter().map(|module| module.path.as_path()),
         )
         .into_iter();
     let effect = &config.ignore_list_effect;

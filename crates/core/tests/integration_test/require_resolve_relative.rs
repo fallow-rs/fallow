@@ -112,7 +112,7 @@ fn require_resolve_target_is_outside_the_entry_load_closure() {
             .expect("analysis should succeed");
     let graph = output.graph.as_ref().expect("graph is retained");
     let entry = graph
-        .modules
+        .modules()
         .iter()
         .find(|m| {
             m.path
@@ -131,7 +131,7 @@ fn require_resolve_target_is_outside_the_entry_load_closure() {
     ] {
         let files: Vec<String> = ids
             .iter()
-            .map(|id| file_name(&graph.modules[id.0 as usize].path))
+            .map(|id| file_name(&graph.modules()[id.0 as usize].path))
             .collect();
         for target in ["worker.js", "loader.js", "template-target.js"] {
             assert!(

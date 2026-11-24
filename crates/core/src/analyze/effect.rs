@@ -160,13 +160,13 @@ impl<'a> Context<'a> {
     fn build(input: &'a EffectInput<'a>, facts: &'a [(FileId, &'a EffectFacts)]) -> Self {
         let paths = input
             .graph
-            .modules
+            .modules()
             .iter()
             .map(|module| (module.file_id, module.path.as_path()))
             .collect();
         let reachable = input
             .graph
-            .modules
+            .modules()
             .iter()
             .filter(|module| module.is_reachable())
             .map(|module| module.file_id)
@@ -370,7 +370,7 @@ impl EntryExports {
     fn build(graph: &ModuleGraph, public_api_entry_points: &FxHashSet<FileId>) -> Self {
         let mut exposed = Self::default();
         let mut queue: Vec<(FileId, Option<String>)> = graph
-            .modules
+            .modules()
             .iter()
             .filter(|module| module.is_entry_point())
             .map(|module| (module.file_id, None))
@@ -381,7 +381,7 @@ impl EntryExports {
             )
             .collect();
         let modules_by_id: FxHashMap<FileId, usize> = graph
-            .modules
+            .modules()
             .iter()
             .enumerate()
             .map(|(index, module)| (module.file_id, index))
@@ -403,7 +403,7 @@ impl EntryExports {
             let Some(&index) = modules_by_id.get(&file_id) else {
                 continue;
             };
-            for edge in &graph.modules[index].re_exports {
+            for edge in &graph.modules()[index].re_exports {
                 let star = edge.imported_name == "*";
                 match (&name, star) {
                     (None, true) => queue.push((edge.source_file, None)),

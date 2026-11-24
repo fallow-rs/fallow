@@ -115,7 +115,7 @@ pub fn find_invalid_client_exports(
 
 fn path_by_file_id(graph: &ModuleGraph) -> FxHashMap<FileId, &Path> {
     graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect()

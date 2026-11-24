@@ -71,7 +71,7 @@ impl<'a> CycleAllowList<'a> {
     fn accepts(&mut self, graph: &ModuleGraph, cycle: &[FileId]) -> bool {
         let files: Vec<String> = cycle
             .iter()
-            .map(|id| self.relative_path(&graph.modules[id.0 as usize].path))
+            .map(|id| self.relative_path(&graph.modules()[id.0 as usize].path))
             .collect();
         let mut accepted = false;
         for (entry, matched) in self.entries.iter().zip(&mut self.matched) {
@@ -92,7 +92,7 @@ impl<'a> CycleAllowList<'a> {
         let mut group_of: FxHashMap<String, usize> = FxHashMap::default();
         for (group, scc) in capped_sccs.iter().enumerate() {
             for id in scc {
-                let path = self.relative_path(&graph.modules[id.0 as usize].path);
+                let path = self.relative_path(&graph.modules()[id.0 as usize].path);
                 group_of.insert(path, group);
             }
         }

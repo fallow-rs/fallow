@@ -2347,7 +2347,7 @@ fn build_violations(
 fn build_edges(graph: &RetainedModuleGraph, index: &FileIndex<'_>) -> Vec<[u32; 3]> {
     let graph = graph.as_graph();
     let mut edges = Vec::with_capacity(graph.edge_count());
-    for node in &graph.modules {
+    for node in graph.modules() {
         let Some(source) = index.index_of_file_id(node.file_id.0) else {
             continue;
         };

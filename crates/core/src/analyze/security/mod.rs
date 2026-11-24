@@ -304,7 +304,7 @@ fn secret_source_hop(
         .first()
         .map_or((1, 0), |read| (read.line, read.col));
     TraceHop {
-        path: graph.modules[file_id.0 as usize].path.clone(),
+        path: graph.modules()[file_id.0 as usize].path.clone(),
         line,
         col,
         role: TraceHopRole::SecretSource,
@@ -523,7 +523,7 @@ fn find_client_server_leaks(
         empty_spans: &empty_spans,
     };
 
-    for node in &sources.graph.modules {
+    for node in sources.graph.modules() {
         scan_client_file_for_leaks(&scan, node, &mut findings, &mut stats);
     }
 
@@ -702,7 +702,7 @@ fn build_client_server_trace(
                 byte_offset_to_line_col(line_offsets_by_file, file_id, s)
             });
         trace.push(TraceHop {
-            path: graph.modules[file_id.0 as usize].path.clone(),
+            path: graph.modules()[file_id.0 as usize].path.clone(),
             line,
             col,
             role,
@@ -722,7 +722,7 @@ fn terminal_hop(scan: &LeakScanInput<'_>, sink_id: FileId, role: TraceHopRole) -
     }
     let (line, col) = server_only_location(scan, sink_id);
     TraceHop {
-        path: scan.graph.modules[sink_id.0 as usize].path.clone(),
+        path: scan.graph.modules()[sink_id.0 as usize].path.clone(),
         line,
         col,
         role,
@@ -913,7 +913,7 @@ fn build_direct_server_only_finding(
     client_id: FileId,
     kind: ClientRootKind,
 ) -> SecurityFinding {
-    let path = scan.graph.modules[client_id.0 as usize].path.clone();
+    let path = scan.graph.modules()[client_id.0 as usize].path.clone();
     let (line, col) = server_only_location(scan, client_id);
     let subject = kind.subject();
     let evidence = format!(

@@ -144,7 +144,7 @@ fn scan_runtime_files(
         exports: Vec::new(),
     };
 
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_runtime_reachable() {
             continue;
         }

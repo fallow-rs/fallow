@@ -174,7 +174,7 @@ fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
     for file in &mut store.manifest.files {
         file.file_id = FileId(file.file_id.0 + 10_000);
     }
-    store.graph.modules.clear();
+    store.graph.modules_mut().clear();
     store.graph.package_usage.clear();
     store.graph.type_only_package_usage.clear();
     store.graph.entry_points.clear();

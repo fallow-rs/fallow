@@ -164,9 +164,9 @@ impl StaticLinkIndex {
     #[must_use]
     pub(crate) fn from_graph(graph: &fallow_graph::graph::ModuleGraph) -> Self {
         let mut ids = FxHashMap::default();
-        let mut targets = Vec::with_capacity(graph.modules.len());
-        let mut re_export_sources = Vec::with_capacity(graph.modules.len());
-        for node in &graph.modules {
+        let mut targets = Vec::with_capacity(graph.module_count());
+        let mut re_export_sources = Vec::with_capacity(graph.module_count());
+        for node in graph.modules() {
             ids.insert(node.path.clone(), node.file_id.0);
             let mut node_targets: Vec<u32> = graph
                 .edges_for(node.file_id)
