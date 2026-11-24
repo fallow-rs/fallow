@@ -1100,19 +1100,6 @@ fn package_referenced_dependencies_by_path(
     by_path
 }
 
-fn plugin_referenced_set(
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-) -> FxHashSet<&str> {
-    plugin_result
-        .map(|pr| {
-            pr.referenced_dependencies
-                .iter()
-                .map(String::as_str)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn plugin_tooling_set(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> FxHashSet<&str> {
@@ -1298,7 +1285,7 @@ fn build_unused_dependency_scan<'a>(
         &root_peer_seeds,
     );
     UnusedDependencyScan {
-        plugin_referenced: plugin_referenced_set(plugin_result),
+        plugin_referenced: required::plugin_referenced_set(plugin_result),
         plugin_tooling: plugin_tooling_sets(plugin_result, root_declared),
         script_used: script_used_set(plugin_result),
         peer_extra_seeds,

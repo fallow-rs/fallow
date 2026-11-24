@@ -62,6 +62,29 @@ pub(super) fn extend(
     unlisted
 }
 
+/// The packages that plugins credit as used.
+///
+/// A required dependency counts as a use: the config needs the package, so a
+/// manifest that lists it uses it. Without this credit, a listed package is
+/// unused and an unlisted one is unlisted, and no project state is clean.
+pub(super) fn plugin_referenced_set(
+    plugin_result: Option<&AggregatedPluginResult>,
+) -> FxHashSet<&str> {
+    plugin_result
+        .map(|pr| {
+            pr.referenced_dependencies
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    pr.required_dependencies
+                        .iter()
+                        .map(|requirement| requirement.package_name.as_str()),
+                )
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Whether `ignorePatterns` covers the config file.
 fn config_path_is_ignored(config_path: &Path, config: &ResolvedConfig) -> bool {
     config_path

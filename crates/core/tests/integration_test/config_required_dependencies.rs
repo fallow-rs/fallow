@@ -360,3 +360,56 @@ fn tsconfig_plugin_in_an_ignored_path_is_not_unlisted() {
 
     assert!(unlisted_sites(&results, &root).is_empty());
 }
+
+fn unused_dependency_names(results: &AnalysisResults) -> Vec<&str> {
+    results
+        .unused_dependencies
+        .iter()
+        .map(|finding| finding.dep.package_name.as_str())
+        .collect()
+}
+
+fn expo_json_app(root: &Path, app_json: &str) {
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "c", "private": true, "main": "index.js", "dependencies": { "expo": "52.0.0", "expo-system-ui": "4.0.0" } }"#,
+    );
+    write(&root.join("index.js"), "import \"expo\";\n");
+    write(&root.join("app.json"), app_json);
+}
+
+#[test]
+fn listed_expo_system_ui_that_the_config_requires_is_used() {
+    let (_dir, root) = temp_root();
+    expo_json_app(
+        &root,
+        r#"{ "expo": { "name": "c", "userInterfaceStyle": "automatic" } }"#,
+    );
+
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis");
+
+    let unused = unused_dependency_names(&results);
+    assert!(!unused.contains(&"expo-system-ui"), "unused: {unused:?}");
+    assert!(unlisted_sites(&results, &root).is_empty());
+}
+
+#[test]
+fn listed_expo_system_ui_without_user_interface_style_is_unused() {
+    let (_dir, root) = temp_root();
+    expo_json_app(&root, r#"{ "expo": { "name": "c" } }"#);
+
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis");
+
+    assert!(unused_dependency_names(&results).contains(&"expo-system-ui"));
+}
+
+#[test]
+fn listed_tsconfig_plugin_is_used() {
+    let (_dir, root) = temp_root();
+    workspace_with_tsconfig(&root, "", r#""@acme/ts-plugin": "1.0.0""#, "packages/app");
+
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis");
+
+    let unused = unused_dependency_names(&results);
+    assert!(!unused.contains(&"@acme/ts-plugin"), "unused: {unused:?}");
+}
