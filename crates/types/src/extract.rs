@@ -1650,99 +1650,9 @@ pub enum ModuleLoadMechanism {
     CommonJsRequire = 1,
 }
 
-/// When the target of an import edge loads, relative to the importing module.
-///
-/// The startup weight report follows only `Static` edges to find the code that
-/// loads before the entry module runs. The other kinds load later, or outside
-/// the importing thread, except `PathReference` and `AssetReference`. These
-/// two edges keep their target in use but do not run it: see
-/// [`Self::loads_target`]. Only an asset reference also stops reachability:
-/// see [`Self::runs_target_code`].
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-#[repr(u8)]
-pub enum ImportLoadKind {
-    /// The target loads before the importer runs: `import`, `export ... from`,
-    /// `require()`, `require.context` and `import.meta.glob(..., { eager: true })`.
-    #[default]
-    Static = 0,
-    /// The target loads on demand through `import('./literal')`.
-    Dynamic = 1,
-    /// The target is one match of an on-demand pattern: a template `import()`
-    /// or a lazy `import.meta.glob`.
-    DynamicPattern = 2,
-    /// The target runs on another thread or in another process: a
-    /// `new URL(..., import.meta.url)` reference (for example a worker URL),
-    /// a webpack worker loader request (`worker-loader!./work.js`),
-    /// `child_process.fork`, a pino transport or a `module.register` hook.
-    OutOfThread = 3,
-    /// The importer gets only the path of the target and does not load it:
-    /// `require.resolve('./file')` or ``require.resolve(`./file`)``. The edge
-    /// keeps the target in use. The consumer of the path can run the target
-    /// later, so the imports of the target stay reachable.
-    PathReference = 4,
-    /// The importer reads the target as text, bytes or a URL through a
-    /// webpack asset loader, such as `raw-loader!./file.js`. The bundle never
-    /// runs the target as code, so the imports of the target are not
-    /// reachable through this edge. The graph sets this kind; extraction
-    /// never records it.
-    AssetReference = 5,
-}
-
-impl ImportLoadKind {
-    /// Whether the target loads before the importing module runs.
-    #[must_use]
-    pub const fn is_eager(self) -> bool {
-        matches!(self, Self::Static)
-    }
-
-    /// Whether the target loads on demand on the importing thread.
-    #[must_use]
-    pub const fn is_deferred(self) -> bool {
-        matches!(self, Self::Dynamic | Self::DynamicPattern)
-    }
-
-    /// Whether the edge runs its target. A path reference and an asset
-    /// reference keep the target in use but do not run it, so the edge does
-    /// not close a cycle, is not in the entry load closure, does not cross an
-    /// architecture boundary and does not carry server code into a client
-    /// bundle.
-    #[must_use]
-    pub const fn loads_target(self) -> bool {
-        !matches!(self, Self::PathReference | Self::AssetReference)
-    }
-
-    /// Whether the target can run as code at all, through this edge or
-    /// through the consumer of a path reference. Only an asset reference never
-    /// runs its target, so reachability does not continue through it.
-    #[must_use]
-    pub const fn runs_target_code(self) -> bool {
-        !matches!(self, Self::AssetReference)
-    }
-
-    /// Whether an import with this load kind puts a runtime value of the
-    /// target on the startup path: the target loads before the importer runs
-    /// and the import is not type-only.
-    #[must_use]
-    pub const fn is_eager_value(self, is_type_only: bool) -> bool {
-        self.is_eager() && !is_type_only
-    }
-}
+#[path = "extract_load_kind.rs"]
+mod load_kind;
+pub use load_kind::ImportLoadKind;
 
 /// Visibility tag from JSDoc/TSDoc comments that suppresses unused-export detection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1926,13 +1836,10 @@ pub struct MemberInfo {
     /// Member accesses on the call result credit the class (#346, #387).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_instance_returning_static: bool,
-    /// True when this is an instance class method whose call result is an
-    /// instance of the same class. Qualifies when the declared return type
-    /// matches the class name (`setX(): EventBuilder { ... }`) or when the
-    /// body's last statement is `return this`. The analyze layer walks fluent
-    /// chains (`Class.factory().setX().setY()`) only through methods carrying
-    /// this flag, so the chain stops at a non-self-returning method like
-    /// `.build()`. See issue #387.
+    /// True for an instance method whose call result is an instance of the
+    /// same class: the declared return type names the class, or the body ends
+    /// with `return this`. The analysis walks fluent chains
+    /// (`Class.factory().setX().setY()`) only through these methods (#387).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_self_returning: bool,
     /// Root identifier of the class `extends` expression, set only when the
@@ -1950,6 +1857,9 @@ pub struct MemberInfo {
     /// True for a `static` class member, which code with the class value reads.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_static: bool,
+    /// True for `dispose` when the class declares `[Symbol.dispose]` or `[Symbol.asyncDispose]`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pairs_with_symbol_dispose: bool,
 }
 
 /// The kind of member.

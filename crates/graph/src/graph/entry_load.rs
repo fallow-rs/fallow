@@ -65,14 +65,17 @@ impl ModuleGraph {
         }
         let eager = self.symbol_closure(&[entry], ImportedSymbol::is_eager_value);
         let eager_ids = set_members(&eager);
+        // A macro import runs its target only in the bundler, so no closure
+        // follows it.
         let same_thread = self.symbol_closure(&eager_ids, |symbol| {
             !symbol.is_type_only
                 && symbol.loads_target()
+                && symbol.load_kind().runs_at_runtime()
                 && symbol.load_kind() != ImportLoadKind::OutOfThread
         });
         let same_thread_ids = set_members(&same_thread);
         let everything = self.symbol_closure(&same_thread_ids, |symbol| {
-            !symbol.is_type_only && symbol.loads_target()
+            !symbol.is_type_only && symbol.loads_target() && symbol.load_kind().runs_at_runtime()
         });
 
         let mut deferred = same_thread.clone();

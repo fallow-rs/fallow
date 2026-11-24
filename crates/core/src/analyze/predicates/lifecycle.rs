@@ -52,9 +52,25 @@ pub(in crate::analyze) fn is_react_lifecycle_method(name: &str) -> bool {
     )
 }
 
+/// Methods that the JavaScript runtime calls by protocol on any object.
+///
+/// `JSON.stringify` calls `toJSON`, so the member is used even when no code
+/// reads it by name.
+pub(in crate::analyze) fn is_runtime_protocol_method(name: &str) -> bool {
+    name == "toJSON"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_protocol_methods() {
+        assert!(is_runtime_protocol_method("toJSON"));
+        assert!(!is_runtime_protocol_method("toJson"));
+        assert!(!is_runtime_protocol_method("dispose"));
+        assert!(!is_runtime_protocol_method("toString"));
+    }
 
     #[test]
     fn react_lifecycle_standard_methods() {

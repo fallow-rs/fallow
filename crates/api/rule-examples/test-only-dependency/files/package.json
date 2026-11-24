@@ -3,6 +3,6 @@
   "private": true,
   "main": "src/cart.ts",
   "dependencies": {
-    "vitest": "^3.0.0"
+    "vitest": "^5.1.1"
   }
 }

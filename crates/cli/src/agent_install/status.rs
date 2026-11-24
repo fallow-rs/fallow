@@ -54,6 +54,8 @@ struct SurfaceStatus {
     detail: Option<String>,
     #[serde(skip)]
     blocker: Option<GateBlocker>,
+    #[serde(skip)]
+    user_scope: bool,
 }
 
 /// Evidence available from inventorying a native gate and its launchers.
@@ -327,9 +329,12 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
         rows.push(skill_row(root, home, harness, name, &dir));
     }
     if let Some(home) = home {
+        let user_scope = home != root;
         for (harness, name, dir) in skill_dirs(home) {
             if skill::inspect(&dir) != skill::SkillState::Absent {
-                rows.push(skill_row(root, Some(home), harness, name, &dir));
+                let mut row = skill_row(root, Some(home), harness, name, &dir);
+                row.user_scope = user_scope;
+                rows.push(row);
             }
         }
     }
@@ -352,7 +357,9 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
             mcp::registered_command(&user_codex, Harness::Codex),
             Existing::Loaded(Some(_))
         ) {
-            rows.push(mcp_row(root, Some(home), Harness::Codex, &user_codex));
+            let mut row = mcp_row(root, Some(home), Harness::Codex, &user_codex);
+            row.user_scope = home != root;
+            rows.push(row);
         }
     }
     rows.push(mcp_row(
@@ -415,6 +422,7 @@ fn guide_row(
         path: display_path(root, home, path),
         detail,
         blocker: None,
+        user_scope: false,
     }
 }
 
@@ -438,6 +446,7 @@ fn claude_import_row(root: &Path, home: Option<&Path>, path: &Path) -> SurfaceSt
         path: display_path(root, home, path),
         detail,
         blocker: None,
+        user_scope: false,
     }
 }
 
@@ -479,6 +488,7 @@ fn skill_row(
         path: display_path(root, home, dir),
         detail,
         blocker: None,
+        user_scope: false,
     }
 }
 
@@ -511,6 +521,7 @@ fn mcp_row(root: &Path, home: Option<&Path>, harness: Harness, path: &Path) -> S
         path: display_path(root, home, path),
         detail,
         blocker: None,
+        user_scope: false,
     }
 }
 
@@ -577,24 +588,54 @@ fn hook_row(
         path: status.path.clone(),
         detail,
         blocker,
+        user_scope: false,
     }
 }
 
 fn status_next_actions(surfaces: &[SurfaceStatus], root_arg: Option<&str>) -> Vec<NextAction> {
     let scope = root_arg.unwrap_or_default();
     let mut next: Vec<NextAction> = Vec::new();
-    if surfaces
-        .iter()
-        .any(|row| matches!(row.state, SurfaceState::Absent | SurfaceState::Stale))
-    {
-        next.push(NextAction {
-            id: "agent-install",
-            command: format!("fallow agent install --dry-run{scope}"),
-            reason: "Shows what agent install would write for the absent or stale surfaces above; drop --dry-run to apply."
-                .to_string(),
-            mutating: false,
-        });
+    for (id, user_flag, scope_name, matches_scope) in [
+        ("agent-install", "", "project", false),
+        ("agent-install-user", " --user", "user-scope", true),
+    ] {
+        if surfaces.iter().any(|row| {
+            row.user_scope == matches_scope
+                && matches!(row.state, SurfaceState::Absent | SurfaceState::Stale)
+        }) {
+            next.push(NextAction {
+                id,
+                command: format!("fallow agent install{user_flag} --dry-run{scope}"),
+                reason: format!(
+                    "Shows what agent install{user_flag} would write for the absent or stale {scope_name} surfaces above; drop --dry-run to apply."
+                ),
+                mutating: false,
+            });
+        }
     }
+    push_gate_next_actions(surfaces, scope, &mut next);
+    for (id, user_flag, scope_name, matches_scope) in [
+        ("agent-install-force", "", "project", false),
+        ("agent-install-user-force", " --user", "user-scope", true),
+    ] {
+        if surfaces
+            .iter()
+            .any(|row| row.user_scope == matches_scope && row.state == SurfaceState::Foreign)
+        {
+            next.push(NextAction {
+                id,
+                command: format!("fallow agent install{user_flag} --force{scope}"),
+                reason: format!(
+                    "Foreign {scope_name} surfaces were not written by fallow; --force replaces them, otherwise they are left alone."
+                ),
+                mutating: true,
+            });
+        }
+    }
+    next
+}
+
+fn push_gate_next_actions(surfaces: &[SurfaceStatus], scope: &str, next: &mut Vec<NextAction>) {
     if surfaces
         .iter()
         .any(|row| row.blocker == Some(GateBlocker::JqMissing))
@@ -655,19 +696,6 @@ fn status_next_actions(surfaces: &[SurfaceStatus], root_arg: Option<&str>) -> Ve
             mutating: false,
         });
     }
-    if surfaces
-        .iter()
-        .any(|row| row.state == SurfaceState::Foreign)
-    {
-        next.push(NextAction {
-            id: "agent-install-force",
-            command: format!("fallow agent install --force{scope}"),
-            reason: "Foreign surfaces were not written by fallow; --force replaces them, otherwise they are left alone."
-                .to_string(),
-            mutating: true,
-        });
-    }
-    next
 }
 
 fn render_human(report: &StatusReport) -> String {
@@ -726,6 +754,7 @@ fn render_human(report: &StatusReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_install::MARKER_PREFIX;
     use crate::setup_hooks::HookSurfaceStatus;
 
     fn codex_gate_row(rows: &[SurfaceStatus]) -> &SurfaceStatus {
@@ -1062,5 +1091,75 @@ mod tests {
         assert_eq!(row.state, SurfaceState::Absent);
         let detail = row.detail.unwrap_or_default();
         assert!(detail.contains("does not parse"), "{detail}");
+    }
+
+    #[test]
+    fn stale_and_foreign_home_skills_emit_user_scoped_actions() {
+        let project = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+
+        let claude_skill = home.path().join(".claude/skills/fallow");
+        std::fs::create_dir_all(&claude_skill).unwrap();
+        std::fs::write(
+            claude_skill.join("SKILL.md"),
+            format!("<!-- {MARKER_PREFIX} v1 skill=embedded version=0.0.1-old -->\n# Stale\n"),
+        )
+        .unwrap();
+
+        let agents_skill = home.path().join(".agents/skills/fallow");
+        std::fs::create_dir_all(&agents_skill).unwrap();
+        std::fs::write(agents_skill.join("SKILL.md"), "# Foreign skill\n").unwrap();
+
+        let rows = surfaces(project.path(), Some(home.path()));
+        let actions = status_next_actions(&rows, None);
+
+        assert_eq!(
+            actions
+                .iter()
+                .find(|a| a.id == "agent-install-user")
+                .map(|a| a.command.as_str()),
+            Some("fallow agent install --user --dry-run")
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .find(|a| a.id == "agent-install-user-force")
+                .map(|a| a.command.as_str()),
+            Some("fallow agent install --user --force")
+        );
+        assert!(
+            !actions.iter().any(|a| a.id == "agent-install-force"),
+            "project has no foreign surfaces: {actions:?}"
+        );
+
+        let user_only_stale = vec![
+            SurfaceStatus {
+                harness: Some(Harness::Claude),
+                step: Step::Skill,
+                state: SurfaceState::Installed,
+                path: ".claude/skills/fallow".to_string(),
+                detail: None,
+                blocker: None,
+                user_scope: false,
+            },
+            SurfaceStatus {
+                harness: Some(Harness::Claude),
+                step: Step::Skill,
+                state: SurfaceState::Stale,
+                path: "~/.claude/skills/fallow".to_string(),
+                detail: None,
+                blocker: None,
+                user_scope: true,
+            },
+        ];
+        let user_only_actions = status_next_actions(&user_only_stale, Some(" --root /repo"));
+        assert!(!user_only_actions.iter().any(|a| a.id == "agent-install"));
+        assert_eq!(
+            user_only_actions
+                .iter()
+                .find(|a| a.id == "agent-install-user")
+                .map(|a| a.command.as_str()),
+            Some("fallow agent install --user --dry-run --root /repo")
+        );
     }
 }

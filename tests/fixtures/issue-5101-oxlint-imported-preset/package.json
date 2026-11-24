@@ -1,0 +1,13 @@
+{
+  "name": "issue-5101-oxlint-imported-preset",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": { "lint": "oxlint" },
+  "devDependencies": {
+    "eslint-plugin-base-rule": "1.0.0",
+    "eslint-plugin-unused-control": "1.0.0",
+    "lint-preset": "1.0.0",
+    "oxlint": "1.0.0",
+    "oxlint-plugin-react-doctor": "1.0.0"
+  }
+}

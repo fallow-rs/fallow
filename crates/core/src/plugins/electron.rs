@@ -7,11 +7,17 @@
 //! entries that electron-vite builds: the declared `build.rollupOptions.input`
 //! or `build.lib.entry`, else the electron-vite default `src/<section>/index`.
 //! A renderer section without an input gets the default `src/renderer/index.html`.
+//!
+//! In a Forge config, the plugin reads the `entry` and `config` paths that the
+//! Forge `VitePlugin` builds. See [`forge`].
 
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind};
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
+
+#[path = "electron_forge.rs"]
+mod forge;
 
 const ENABLERS: &[&str] = &[
     "electron",
@@ -33,7 +39,10 @@ const ALWAYS_USED: &[&str] = &[
     "electron.vite.config.{ts,js,mjs}",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["electron.vite.config.{ts,js,mjs}"];
+const CONFIG_PATTERNS: &[&str] = &[
+    "electron.vite.config.{ts,js,mjs}",
+    "forge.config.{ts,js,cjs}",
+];
 
 const CONFIG_FILE_EXPORTS: &[(&str, &[&str])] = &[
     ("forge.config.{ts,js,cjs}", &["default"]),
@@ -229,6 +238,43 @@ fn push_node_section_entries(
     push_config_entries(result, vec![fallback], config_path, root);
 }
 
+fn is_forge_config(config_path: &std::path::Path) -> bool {
+    config_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("forge.config."))
+}
+
+/// Mark the entries and Vite configs that the Forge `VitePlugin` builds as
+/// used. The plugin loads the default export of each Vite config, and it
+/// needs `vite` installed.
+fn resolve_forge_config(
+    config_path: &std::path::Path,
+    source: &str,
+    root: &std::path::Path,
+) -> PluginResult {
+    let mut result = PluginResult::default();
+    let forge = forge::read_forge_vite(source, config_path);
+    for entry in forge.entries {
+        if let Some(normalized) = config_parser::normalize_config_path(&entry, config_path, root) {
+            result.push_entry_pattern(globset::escape(&normalized));
+        }
+    }
+    for vite_config in forge.vite_configs {
+        if let Some(normalized) =
+            config_parser::normalize_config_path(&vite_config, config_path, root)
+        {
+            let pattern = globset::escape(&normalized);
+            result.push_entry_pattern(pattern.clone());
+            result.push_entry_export_credit(pattern, ["default"]);
+        }
+    }
+    if forge.names_plugin {
+        result.referenced_dependencies.push("vite".to_string());
+    }
+    result
+}
+
 define_plugin! {
     struct ElectronPlugin => "electron",
     enablers: ENABLERS,
@@ -238,6 +284,9 @@ define_plugin! {
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
     resolve_config(config_path, source, root) {
+        if is_forge_config(config_path) {
+            return resolve_forge_config(config_path, source, root);
+        }
         let mut result = PluginResult::default();
 
         // A config with a main or preload section names the Node entries that
@@ -597,6 +646,120 @@ mod tests {
         assert_eq!(
             entry_strings(&result),
             vec!["src/renderer/index.html".to_string()]
+        );
+    }
+
+    fn forge_config_path() -> std::path::PathBuf {
+        std::path::PathBuf::from("/project/forge.config.ts")
+    }
+
+    #[test]
+    fn forge_vite_plugin_names_entries_and_vite_configs() {
+        let source = r#"
+            import { VitePlugin } from "@electron-forge/plugin-vite";
+            export default {
+                plugins: [
+                    new VitePlugin({
+                        build: [{ entry: "src/main.ts", config: "vite.main.config.ts" }],
+                        renderer: [{ name: "main_window", config: "vite.renderer.config.ts" }],
+                    }),
+                ],
+            };
+        "#;
+        let result =
+            ElectronPlugin.resolve_config(&forge_config_path(), source, Path::new("/project"));
+        assert!(!result.replace_entry_patterns);
+        assert_eq!(
+            entry_strings(&result),
+            vec![
+                "src/main.ts".to_string(),
+                "vite.main.config.ts".to_string(),
+                "vite.renderer.config.ts".to_string(),
+            ]
+        );
+        let credits: Vec<(String, Vec<String>)> = result
+            .entry_export_credits
+            .iter()
+            .map(|rule| (rule.path.pattern.clone(), rule.exports.clone()))
+            .collect();
+        assert_eq!(
+            credits,
+            vec![
+                (
+                    "vite.main.config.ts".to_string(),
+                    vec!["default".to_string()]
+                ),
+                (
+                    "vite.renderer.config.ts".to_string(),
+                    vec!["default".to_string()]
+                ),
+            ]
+        );
+        assert_eq!(result.referenced_dependencies, vec!["vite".to_string()]);
+    }
+
+    #[test]
+    fn forge_vite_plugin_reads_require_namespace_and_object_forms() {
+        for source in [
+            r#"
+                const { VitePlugin: Vite } = require("@electron-forge/plugin-vite");
+                const config = { plugins: [new Vite({ build: [{ entry: "src/main.ts", config: "vite.main.config.ts" }] })] };
+                module.exports = config;
+            "#,
+            r#"
+                import * as forgeVite from "@electron-forge/plugin-vite";
+                export default { plugins: [new forgeVite.VitePlugin({ build: [{ entry: "src/main.ts", config: "vite.main.config.ts" }] })] };
+            "#,
+            r#"
+                module.exports = {
+                    plugins: [{
+                        name: "@electron-forge/plugin-vite",
+                        config: { build: [{ entry: "src/main.ts", config: "vite.main.config.ts" }] },
+                    }],
+                };
+            "#,
+        ] {
+            let result =
+                ElectronPlugin.resolve_config(&forge_config_path(), source, Path::new("/project"));
+            assert_eq!(
+                entry_strings(&result),
+                vec!["src/main.ts".to_string(), "vite.main.config.ts".to_string()],
+                "source: {source}"
+            );
+            assert_eq!(
+                result.referenced_dependencies,
+                vec!["vite".to_string()],
+                "source: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn forge_config_ignores_an_unrelated_vite_plugin_class() {
+        let source = r#"
+            class VitePlugin { constructor(options) { this.options = options; } }
+            export default { plugins: [new VitePlugin({ build: [{ entry: "src/main.ts", config: "vite.main.config.ts" }] })] };
+        "#;
+        let result =
+            ElectronPlugin.resolve_config(&forge_config_path(), source, Path::new("/project"));
+        assert!(result.entry_patterns.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn forge_vite_paths_keep_monorepo_prefix() {
+        let source = r#"
+            import { VitePlugin } from "@electron-forge/plugin-vite";
+            export default { plugins: [new VitePlugin({ renderer: [{ name: "w", config: "./vite.renderer.config.mts" }] })] };
+        "#;
+        let result = ElectronPlugin.resolve_config(
+            Path::new("/project/apps/desktop/forge.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            entry_strings(&result),
+            vec!["apps/desktop/vite.renderer.config.mts".to_string()]
         );
     }
 

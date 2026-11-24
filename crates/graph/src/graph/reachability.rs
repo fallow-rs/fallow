@@ -330,7 +330,7 @@ impl ModuleGraph {
     }
 
     /// BFS over the edges that `follows` accepts.
-    fn collect_reachable_along(
+    pub(super) fn collect_reachable_along(
         &self,
         entry_points: &FxHashSet<FileId>,
         total_capacity: usize,
@@ -427,11 +427,11 @@ impl ModuleGraph {
         test_reachability_plan: TestReachabilityPlan<'_>,
         total_capacity: usize,
     ) {
-        let runtime_same = runtime_entry_points == entry_points;
+        let runtime_same = runtime_entry_points == entry_points && !self.has_build_time_edge();
         let runtime_visited = if runtime_same {
             None
         } else {
-            Some(self.collect_reachable(runtime_entry_points, total_capacity))
+            Some(self.collect_runtime_reachable(runtime_entry_points, total_capacity))
         };
 
         let requires_reference_provenance = test_reachability_plan.requires_reference_provenance();

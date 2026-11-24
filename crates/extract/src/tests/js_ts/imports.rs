@@ -350,3 +350,44 @@ fn extracts_member_accesses_inside_exported_functions() {
         "Should capture Color.Red inside exported function body"
     );
 }
+
+/// The sources of the imports that extraction marks as build time, one per
+/// binding.
+fn build_time_import_sources(info: &fallow_types::extract::ModuleInfo) -> Vec<&str> {
+    let starts: Vec<u32> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            fallow_types::extract::SemanticFact::ImportLoadKindOverride(fact)
+                if fact.kind == fallow_types::extract::ImportLoadKind::BuildTime =>
+            {
+                Some(fact.span_start)
+            }
+            _ => None,
+        })
+        .collect();
+    info.imports
+        .iter()
+        .filter(|import| starts.contains(&import.span.start))
+        .map(|import| import.source.as_str())
+        .collect()
+}
+
+#[test]
+fn macro_import_attribute_marks_each_binding_build_time() {
+    let info = parse_source(
+        "import title, { a, b } from './title.macro.ts' with { type: 'macro' };\n\
+         import './side.ts' with { \"type\": \"macro\" };\n\
+         import data from './data.json' with { type: 'json' };\n\
+         import { run } from './run.ts';",
+    );
+    assert_eq!(
+        build_time_import_sources(&info),
+        vec![
+            "./title.macro.ts",
+            "./title.macro.ts",
+            "./title.macro.ts",
+            "./side.ts"
+        ],
+    );
+}

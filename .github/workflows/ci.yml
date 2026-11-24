@@ -607,7 +607,7 @@ jobs:
       - name: Install mutation runner dependencies
         run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest
 
@@ -821,7 +821,7 @@ jobs:
         with:
           components: clippy
           shared-key: windows-debug
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-nextest
       # One nextest run replaces ten `cargo test` calls. The calls had no
@@ -1015,7 +1015,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: crate-ci/typos@2611abd15acb0c2e317fb9e45855aabb8b35a414 # v1
+      - uses: crate-ci/typos@276087d9a4f06398b3e04825487805e2d7375888 # v1
       - name: Hidden unicode
         run: python3 scripts/scan-hidden-unicode.py --mode committed
       - name: Hidden-unicode scanner self-test
@@ -1682,7 +1682,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-audit
       - run: cargo audit
@@ -1697,7 +1697,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2
 
   # cargo-fallow checks the Rust workspace: unused dependencies and files,
   # visibility, crate boundaries, complexity and duplication. The

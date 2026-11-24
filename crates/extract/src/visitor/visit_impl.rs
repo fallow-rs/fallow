@@ -3699,7 +3699,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
         let source = decl.source.value.text().into_owned();
         let is_type_only = decl.import_kind.is_type();
-
         let source_span = decl.source.span;
 
         match &decl.specifiers {
@@ -3736,6 +3735,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
             None => self.push_side_effect_import(decl, source, false),
         }
+        self.mark_macro_import_bindings(decl);
     }
 
     fn visit_ts_export_assignment(&mut self, decl: &TSExportAssignment<'a>) {

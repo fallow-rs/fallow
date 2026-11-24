@@ -1,0 +1,6 @@
+{
+  "name": "vitest-reexported-config",
+  "private": true,
+  "workspaces": ["packages/*", "tooling/*"],
+  "devDependencies": { "vitest": "3.0.0" }
+}

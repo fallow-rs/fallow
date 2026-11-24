@@ -75,3 +75,23 @@ fn vitest_project_files_with_other_names_add_their_includes_and_setup_files() {
          are entries"
     );
 }
+
+#[test]
+fn root_vitest_include_keeps_the_default_test_patterns_of_a_workspace() {
+    assert_eq!(
+        unused_files("vitest-root-include-workspaces"),
+        vec!["packages/a/src/orphan.ts"],
+        "the include of the root config applies to the root; a workspace \
+         without its own config keeps the default test patterns"
+    );
+}
+
+#[test]
+fn vitest_config_that_reexports_its_default_gives_the_includes_of_that_module() {
+    assert_eq!(
+        unused_files("vitest-reexported-config"),
+        vec!["packages/b/src/orphan.ts"],
+        "`export {{ default }} from` a workspace package or a sibling file \
+         gives the includes of that module, below the workspace of the config"
+    );
+}
