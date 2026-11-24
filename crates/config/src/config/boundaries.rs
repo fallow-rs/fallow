@@ -621,7 +621,7 @@ impl BoundaryConfig {
     #[must_use]
     pub fn auto_discover_dirs(&self, project_root: &Path) -> Vec<PathBuf> {
         let mut expanded = self.clone();
-        super::resolution::expand_boundary_preset(&mut expanded, project_root);
+        expand_boundary_preset(&mut expanded, project_root);
         let mut dirs: Vec<PathBuf> = expanded
             .zones
             .iter()
@@ -692,6 +692,20 @@ impl BoundaryConfig {
 
         self.rules = expand_rules_for_groups(original_rules, &group_expansions);
         logical_groups
+    }
+}
+
+/// Expand the boundary preset in place, with the tsconfig `rootDir` as the
+/// source root. Does nothing without a preset.
+pub(super) fn expand_boundary_preset(boundaries: &mut BoundaryConfig, root: &Path) {
+    if boundaries.preset.is_some() {
+        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
+            .filter(|r| r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute())
+            .unwrap_or_else(|| "src".to_owned());
+        if source_root != "src" {
+            tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
+        }
+        boundaries.expand(&source_root);
     }
 }
 

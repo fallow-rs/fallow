@@ -728,28 +728,11 @@ fn resolve_boundaries(
     mut boundaries: super::boundaries::BoundaryConfig,
     root: &Path,
 ) -> ResolvedBoundaryConfig {
-    expand_boundary_preset(&mut boundaries, root);
+    super::boundaries::expand_boundary_preset(&mut boundaries, root);
     let logical_groups = boundaries.expand_auto_discover(root);
     let mut resolved = boundaries.resolve();
     resolved.logical_groups = logical_groups;
     resolved
-}
-
-/// Expand the boundary preset in place, with the tsconfig `rootDir` as the
-/// source root. Does nothing without a preset.
-pub(super) fn expand_boundary_preset(
-    boundaries: &mut super::boundaries::BoundaryConfig,
-    root: &Path,
-) {
-    if boundaries.preset.is_some() {
-        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
-            .filter(|r| r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute())
-            .unwrap_or_else(|| "src".to_owned());
-        if source_root != "src" {
-            tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
-        }
-        boundaries.expand(&source_root);
-    }
 }
 
 #[expect(
