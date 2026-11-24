@@ -149,7 +149,11 @@ impl Plugin for VitestPlugin {
         project_root: &Path,
     ) -> PluginResult {
         let run_dir = vitest_run_dir(config_path, root);
-        resolve_vitest_config(config_path, source, root, project_root, &run_dir)
+        let read = ConfigRead {
+            run_dir: &run_dir,
+            replaces: !is_ancestor_config(config_path, root),
+        };
+        resolve_followed_config(config_path, source, root, project_root, &read)
     }
 
     fn resolve_script_config(
@@ -159,19 +163,61 @@ impl Plugin for VitestPlugin {
         root: &Path,
         project_root: &Path,
     ) -> PluginResult {
-        resolve_vitest_config(config_path, source, root, project_root, root)
+        let read = ConfigRead {
+            run_dir: root,
+            replaces: true,
+        };
+        resolve_followed_config(config_path, source, root, project_root, &read)
     }
 }
 
-/// Read a Vitest config. `run_dir` is the directory that Vitest runs in,
-/// which is the base of `test.include` and of a reporter path.
+/// Whether `config_path` is in a directory above `root`. The workspace run
+/// reads the config of the project root too. The includes of that config add
+/// patterns, but they do not replace the default patterns of the workspace.
+fn is_ancestor_config(config_path: &Path, root: &Path) -> bool {
+    config_path
+        .parent()
+        .is_some_and(|dir| !dir.as_os_str().is_empty() && dir != root && root.starts_with(dir))
+}
+
+/// How Vitest uses one config file.
+struct ConfigRead<'a> {
+    /// The directory that Vitest runs in, which is the base of
+    /// `test.include` and of a reporter path.
+    run_dir: &'a Path,
+    /// Whether the `test.include` of the config can replace the default
+    /// test patterns.
+    replaces: bool,
+}
+
+/// Read a Vitest config, or the config that it re-exports as its default
+/// export. Vitest loads the re-exported config, so the includes of that
+/// config apply. The directory that Vitest runs in does not change.
+fn resolve_followed_config(
+    config_path: &Path,
+    source: &str,
+    root: &Path,
+    project_root: &Path,
+    read: &ConfigRead<'_>,
+) -> PluginResult {
+    if !is_shadowed_vite_config(config_path)
+        && let Some((target, target_source)) =
+            reexport::follow_default_reexport(config_path, source, project_root)
+    {
+        return resolve_vitest_config(&target, &target_source, root, project_root, read);
+    }
+    resolve_vitest_config(config_path, source, root, project_root, read)
+}
+
+/// Read a Vitest config.
 fn resolve_vitest_config(
     config_path: &Path,
     source: &str,
     root: &Path,
     project_root: &Path,
-    run_dir: &Path,
+    read: &ConfigRead<'_>,
 ) -> PluginResult {
+    let run_dir = read.run_dir;
     let mut result = PluginResult::default();
 
     let imports = config_parser::extract_imports(source, config_path);
@@ -194,7 +240,7 @@ fn resolve_vitest_config(
             inherit_by_default: !source.contains("projects")
                 || vitest_inherits_by_default(config_path, root),
         };
-        apply_vitest_includes(&mut result, source, config_path, root, run_dir, &dirs);
+        apply_vitest_includes(&mut result, source, config_path, root, read, &dirs);
         add_inline_project_includes(
             &mut result,
             source,
@@ -255,7 +301,7 @@ fn apply_vitest_includes(
     source: &str,
     config_path: &Path,
     root: &Path,
-    run_dir: &Path,
+    read: &ConfigRead<'_>,
     dirs: &VitestDirs,
 ) {
     // Every result accumulates, so a replacing config keeps the patterns of
@@ -264,7 +310,10 @@ fn apply_vitest_includes(
     let Some(includes) = push_config_includes(result, source, config_path, root, dirs) else {
         return;
     };
-    if !includes.is_empty() && dir_prefix(run_dir, root).is_some_and(|prefix| prefix.is_empty()) {
+    if read.replaces
+        && !includes.is_empty()
+        && dir_prefix(read.run_dir, root).is_some_and(|prefix| prefix.is_empty())
+    {
         result.replace_entry_patterns = true;
         if !includes.bench {
             push_vitest_include_entries(
@@ -1292,6 +1341,8 @@ fn add_vitest_browser_dependency(result: &mut PluginResult, source: &str, config
         result.referenced_dependencies.push(provider);
     }
 }
+
+mod reexport;
 
 #[cfg(test)]
 mod tests;
