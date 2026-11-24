@@ -11,7 +11,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use super::{
-    Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Reason, Scope, Step, StepReport, StepStatus,
+    Ctx, Harness, MARKER_PREFIX, MARKER_VERSION, Mode, Reason, Scope, Step, StepReport, StepStatus,
 };
 use crate::state_file::read_optional_text;
 
@@ -110,12 +110,19 @@ pub fn targets(ctx: &Ctx, harnesses: &[Harness]) -> Result<Vec<Target>, String> 
         .copied()
         .filter(|h| matches!(h, Harness::Codex | Harness::Cursor))
         .collect();
-    if harnesses.is_empty() || !neutral.is_empty() {
-        for skill in RELEASED_SKILLS {
+    let default_agents = harnesses.is_empty() || !neutral.is_empty();
+    for skill in RELEASED_SKILLS {
+        let dir = base.join(".agents").join("skills").join(skill.name);
+        // Refresh already-installed fallow skills under `.agents/skills/` even
+        // when only Claude is detected or selected, without creating new ones
+        // or failing on foreign skills the user did not ask to overwrite.
+        let refresh_existing =
+            ctx.mode == Mode::Install && matches!(inspect(&dir), SkillState::Managed { .. });
+        if default_agents || refresh_existing {
             targets.push(Target {
                 skill,
                 harness: None,
-                dir: base.join(".agents").join("skills").join(skill.name),
+                dir,
                 scope: ctx.scope(),
                 covers: neutral.clone(),
             });

@@ -1162,4 +1162,65 @@ mod tests {
             Some("fallow agent install --user --dry-run --root /repo")
         );
     }
+
+    #[test]
+    fn user_install_next_to_claude_clears_stale_agents_status_row() {
+        use super::super::{Ctx, Mode, select_harnesses};
+        if skill::EMBEDDED_SKILLS.is_empty() {
+            return;
+        }
+        let project = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+
+        let stale_agents = home.path().join(".agents/skills/fallow");
+        std::fs::create_dir_all(&stale_agents).unwrap();
+        std::fs::write(
+            stale_agents.join("SKILL.md"),
+            format!("<!-- {MARKER_PREFIX} v1 skill=embedded version=0.0.1-old -->\n# Stale\n"),
+        )
+        .unwrap();
+
+        let before = surfaces(project.path(), Some(home.path()));
+        assert_eq!(
+            before
+                .iter()
+                .find(|r| r.path == "~/.agents/skills/fallow")
+                .map(|r| r.state),
+            Some(SurfaceState::Stale)
+        );
+        assert!(
+            status_next_actions(&before, None)
+                .iter()
+                .any(|a| a.id == "agent-install-user")
+        );
+
+        let user_ctx = Ctx {
+            root: project.path().to_path_buf(),
+            home: Some(home.path().to_path_buf()),
+            user: true,
+            dry_run: false,
+            force: false,
+            approve: false,
+            gitignore_claude: false,
+            mode: Mode::Install,
+        };
+        let (detected, _, _) = select_harnesses(&[], project.path(), Some(home.path()));
+        let _ = skill::install(&user_ctx, &detected);
+
+        let after = surfaces(project.path(), Some(home.path()));
+        assert_eq!(
+            after
+                .iter()
+                .find(|r| r.path == "~/.agents/skills/fallow")
+                .map(|r| r.state),
+            Some(SurfaceState::Installed)
+        );
+        assert!(
+            !status_next_actions(&after, None)
+                .iter()
+                .any(|a| a.id == "agent-install-user"),
+            "stale ~/.agents row should be resolved after user install"
+        );
+    }
 }

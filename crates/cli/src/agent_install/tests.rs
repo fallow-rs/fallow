@@ -1019,3 +1019,89 @@ fn resolve_root_prefers_git_toplevel_unless_explicit() {
     assert_eq!(resolve_root(&nested, false), root);
     assert_eq!(resolve_root(&nested, true), nested);
 }
+
+#[test]
+fn claude_only_install_refreshes_existing_managed_agents_skill_without_creating_new_ones() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+
+    // Seed a stale fallow-managed skill under ~/.agents/skills/fallow alongside ~/.claude.
+    let stale_agents = home.path().join(".agents/skills/fallow");
+    std::fs::create_dir_all(&stale_agents).unwrap();
+    std::fs::write(
+        stale_agents.join("SKILL.md"),
+        format!(
+            "<!-- {MARKER_PREFIX} {MARKER_VERSION} skill=embedded version=0.0.1-old -->\n# Old\n"
+        ),
+    )
+    .unwrap();
+
+    // End-to-end check with select_harnesses (detects only Claude from ~/.claude).
+    let (detected, _, _) = select_harnesses(&[], dir.path(), Some(home.path()));
+    assert_eq!(detected, vec![Harness::Claude]);
+
+    let user_ctx = Ctx {
+        home: Some(home.path().to_path_buf()),
+        user: true,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let steps = skill::install(&user_ctx, &detected);
+    assert!(
+        steps
+            .iter()
+            .any(|s| s.path.as_deref() == Some("~/.agents/skills/fallow")
+                && s.status == StepStatus::Written),
+        "expected stale ~/.agents/skills/fallow to be refreshed: {steps:?}"
+    );
+    assert_eq!(
+        skill::inspect(&stale_agents),
+        skill::SkillState::Managed {
+            flavor: skill::Flavor::Embedded,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    );
+    assert!(
+        !home.path().join(".agents/skills/fallow-setup").exists(),
+        "must not create unrequested sibling under ~/.agents/skills/"
+    );
+
+    // Uninstall for Claude must leave the refreshed .agents skill untouched.
+    let claude_uninstall = Ctx {
+        mode: Mode::Uninstall,
+        ..user_ctx
+    };
+    let removed = skill::uninstall(&claude_uninstall, &[Harness::Claude]);
+    assert!(
+        removed
+            .iter()
+            .all(|s| s.path.as_deref() != Some("~/.agents/skills/fallow")),
+        "Claude uninstall should not remove .agents skills: {removed:?}"
+    );
+    assert!(stale_agents.join("SKILL.md").is_file());
+}
+
+#[test]
+fn claude_only_install_ignores_foreign_agents_skill_in_project_scope() {
+    if skill::EMBEDDED_SKILLS.is_empty() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let foreign_agents = dir.path().join(".agents/skills/fallow");
+    std::fs::create_dir_all(&foreign_agents).unwrap();
+    std::fs::write(foreign_agents.join("SKILL.md"), "# User authored\n").unwrap();
+
+    let install = ctx(dir.path(), Mode::Install);
+    let steps = skill::install(&install, &[Harness::Claude]);
+    assert!(
+        steps.iter().all(|s| s.status == StepStatus::Written),
+        "foreign .agents skill must not block Claude-only install: {steps:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(foreign_agents.join("SKILL.md")).unwrap(),
+        "# User authored\n"
+    );
+}
