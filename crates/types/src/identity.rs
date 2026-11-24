@@ -1671,6 +1671,8 @@ mod tests {
                 kind_known: true,
             },
             missing_reason: false,
+            next_line_kinds: Vec::new(),
+            next_line_blank: false,
             finding_id: None,
             actions: Vec::new(),
             effective_severity: None,

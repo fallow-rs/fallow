@@ -389,6 +389,8 @@ fn stale_expected_unused_suppression(
             reason: export.expected_unused_reason.clone(),
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     }
@@ -418,6 +420,8 @@ fn record_expected_unused_stale(
                 reason: None,
             },
             missing_reason: true,
+            next_line_kinds: Vec::new(),
+            next_line_blank: false,
             actions: StaleSuppression::actions_for(true),
             effective_severity: None,
         });
@@ -715,9 +719,11 @@ fn unused_export_for_module(
         .suppressions
         .is_suppressed(module.file_id, line, issue_kind)
         || (is_schema
-            && ctx
-                .suppressions
-                .is_suppressed(module.file_id, line, IssueKind::UnusedExport));
+            && ctx.suppressions.is_suppressed_by_compat_kind(
+                module.file_id,
+                line,
+                IssueKind::UnusedExport,
+            ));
     if suppressed {
         return None;
     }

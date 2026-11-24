@@ -132,7 +132,9 @@ pub struct DuplicatesConfig {
     #[schemars(range(min = 2))]
     pub min_occurrences: usize,
 
-    /// Maximum allowed duplication percentage (0 = no limit).
+    /// Maximum allowed duplication percentage. The default `0` turns the
+    /// percentage gate off: it is not zero tolerance. To fail when fallow
+    /// finds any clone group, use `--fail-on-issues`.
     #[serde(default)]
     pub threshold: f64,
 

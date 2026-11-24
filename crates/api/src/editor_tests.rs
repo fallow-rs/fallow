@@ -925,6 +925,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                 kind_known: true,
             },
             missing_reason: false,
+            next_line_kinds: Vec::new(),
+            next_line_blank: false,
             actions: super::editor_results::StaleSuppression::actions_for(false),
             effective_severity: None,
         }],

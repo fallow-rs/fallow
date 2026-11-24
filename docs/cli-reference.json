@@ -6456,7 +6456,7 @@
           "possible_values": [],
           "default": null,
           "env": null,
-          "help": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in the config file, or `0` if unset)",
+          "help": "Fail if duplication exceeds this percentage. `0` turns the gate off and is not zero tolerance: use `--fail-on-issues` to fail on any clone group (defaults to the value in the config file, or `0` if unset)",
           "long_help": null,
           "hidden": false,
           "hidden_in_short_help": false,

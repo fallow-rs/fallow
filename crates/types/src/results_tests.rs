@@ -1156,6 +1156,8 @@ fn protected_architecture_findings(path: &Path) -> AnalysisResults {
                 kind_known: true,
             },
             missing_reason: false,
+            next_line_kinds: Vec::new(),
+            next_line_blank: false,
             actions: StaleSuppression::actions_for(false),
             effective_severity: None,
         }],
@@ -1471,4 +1473,70 @@ fn entry_point_summary_not_counted_in_total_issues() {
     };
     assert_eq!(r.total_issues(), 0);
     assert!(!r.has_issues());
+}
+
+fn stale_next_line(kinds: &[&str], blank: bool) -> StaleSuppression {
+    StaleSuppression {
+        path: PathBuf::from("src/a.ts"),
+        line: 1,
+        col: 0,
+        origin: SuppressionOrigin::Comment {
+            issue_kind: Some("unused-export".to_string()),
+            reason: None,
+            is_file_level: false,
+            is_range: false,
+            kind_known: true,
+        },
+        missing_reason: false,
+        next_line_kinds: kinds.iter().map(ToString::to_string).collect(),
+        next_line_blank: blank,
+        finding_id: None,
+        actions: StaleSuppression::actions_for(false),
+        effective_severity: None,
+    }
+}
+
+#[test]
+fn stale_next_line_message_names_the_kind_on_the_line() {
+    let stale = stale_next_line(&["unused-type"], false);
+    let expected = "no unused-export issue found on the next line; the next line has an unused-type issue, use `fallow-ignore-next-line unused-type`";
+    assert_eq!(stale.explanation(), expected);
+    assert_eq!(
+        stale.display_message(),
+        format!("// fallow-ignore-next-line unused-export ({expected})")
+    );
+}
+
+#[test]
+fn stale_next_line_message_names_each_kind_on_the_line() {
+    let stale = stale_next_line(&["circular-dependency", "unused-type"], false);
+    assert_eq!(
+        stale.explanation(),
+        "no unused-export issue found on the next line; the next line has circular-dependency and unused-type issues, use `fallow-ignore-next-line circular-dependency, unused-type`"
+    );
+}
+
+#[test]
+fn stale_next_line_message_says_the_line_is_blank() {
+    let stale = stale_next_line(&[], true);
+    assert_eq!(
+        stale.explanation(),
+        "no unused-export issue found on the next line; the next line is blank, and a next-line marker applies only to the line directly after it"
+    );
+}
+
+#[test]
+fn stale_next_line_message_without_a_cause_keeps_the_wire_bytes() {
+    let stale = stale_next_line(&[], false);
+    assert_eq!(
+        stale.explanation(),
+        "no unused-export issue found on the next line"
+    );
+    assert_eq!(
+        stale.display_message(),
+        "// fallow-ignore-next-line unused-export"
+    );
+    let json = serde_json::to_value(&stale).expect("serialize");
+    assert!(json.get("next_line_kinds").is_none());
+    assert!(json.get("next_line_blank").is_none());
 }

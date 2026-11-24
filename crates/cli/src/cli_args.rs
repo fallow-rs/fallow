@@ -842,7 +842,7 @@ pub enum Command {
         #[arg(value_name = "FILE:LINE|dup:<fingerprint>")]
         trace: Option<String>,
 
-        /// Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in the config file, or `0` if unset).
+        /// Fail if duplication exceeds this percentage. `0` turns the gate off and is not zero tolerance: use `--fail-on-issues` to fail on any clone group (defaults to the value in the config file, or `0` if unset).
         #[arg(long, help_heading = "Gates")]
         threshold: Option<f64>,
 

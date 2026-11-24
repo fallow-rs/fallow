@@ -1453,3 +1453,72 @@ fn banned_effect_matches_fs_promises_on_a_module_import() {
         ["storage: fs.promises.rm"]
     );
 }
+
+/// Issue #5164: a stale policy-rule marker gets no `next_line_kinds` hint,
+/// because an issue-kind marker does not suppress a policy finding and the
+/// hint would give the wrong advice.
+#[test]
+fn stale_policy_marker_names_no_other_kind() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_call("no-console", &["console.*"])])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/line.ts"]);
+    let mut line_module = module(0, Vec::new(), Vec::new());
+    line_module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::policy_rule(
+            3,
+            2,
+            "team-policy",
+            "no-console",
+        ));
+    let modules = vec![line_module];
+    let suppressions = SuppressionContext::new(&modules);
+
+    assert!(!suppressions.is_suppressed(FileId(0), 3, crate::suppress::IssueKind::UnusedExport));
+
+    let stale = suppressions.find_stale(&graph, &config);
+    assert_eq!(stale.len(), 1, "the policy marker is stale: {stale:?}");
+    assert!(
+        stale[0].next_line_kinds.is_empty(),
+        "a policy marker must not name an issue kind: {:?}",
+        stale[0].next_line_kinds
+    );
+}
+
+/// Issue #5164: a kind whose rule is `off` gives no finding, so the stale
+/// marker must not name it.
+#[test]
+fn stale_marker_does_not_name_a_kind_that_is_off() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let mut config = make_config(root.clone(), Vec::new(), Severity::Warn);
+    config.rules.unused_types = Severity::Off;
+    let graph = build_graph(&root, &["src/line.ts"]);
+    let mut line_module = module(0, Vec::new(), Vec::new());
+    line_module
+        .suppressions
+        .push(fallow_types::suppress::Suppression::issue(
+            3,
+            2,
+            crate::suppress::IssueKind::UnusedExport,
+        ));
+    let modules = vec![line_module];
+    let suppressions = SuppressionContext::new(&modules);
+
+    assert!(!suppressions.is_suppressed(FileId(0), 3, crate::suppress::IssueKind::UnusedType));
+    assert!(!suppressions.is_suppressed(
+        FileId(0),
+        3,
+        crate::suppress::IssueKind::UnusedEnumMember
+    ));
+
+    let stale = suppressions.find_stale(&graph, &config);
+    assert_eq!(stale.len(), 1, "the marker is stale: {stale:?}");
+    assert_eq!(
+        stale[0].next_line_kinds,
+        vec!["unused-enum-member".to_string()]
+    );
+}

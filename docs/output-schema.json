@@ -5958,6 +5958,17 @@
           "type": "boolean",
           "description": "True when `rules.require-suppression-reason` reported a suppression\ncomment or tag that has no reason."
         },
+        "next_line_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Issue kinds that fallow found on the target line of a stale\n`fallow-ignore-next-line` marker. The marker names another kind, so it\ndoes not suppress these findings. Absent when the list is empty."
+        },
+        "next_line_blank": {
+          "type": "boolean",
+          "description": "True when the line after a stale `fallow-ignore-next-line` marker is\nblank. The marker applies only to the line directly after it."
+        },
         "finding_id": {
           "type": [
             "string",

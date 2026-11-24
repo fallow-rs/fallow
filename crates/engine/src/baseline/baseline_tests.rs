@@ -2530,11 +2530,15 @@ fn stale_suppression_baseline_keys_include_missing_reason_state() {
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: crate::results::StaleSuppression::actions_for(false),
         effective_severity: None,
     };
     let missing = crate::results::StaleSuppression {
         missing_reason: true,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: crate::results::StaleSuppression::actions_for(true),
         ..stale.clone()
     };
@@ -2682,6 +2686,8 @@ fn line_free_suppression(
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         finding_id: None,
         actions: Vec::new(),
         effective_severity: None,

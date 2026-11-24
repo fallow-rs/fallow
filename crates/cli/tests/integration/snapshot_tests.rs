@@ -930,6 +930,8 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: false,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
@@ -946,6 +948,8 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
