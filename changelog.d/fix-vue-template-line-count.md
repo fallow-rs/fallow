@@ -1,0 +1,3 @@
+### Fixed
+
+- **Vue SFC `<template>` complexity units now report the line count of the template block.** The synthetic `<template>` unit received the line count of the entire Vue file. This inflated `vital_signs.functions_over_60_loc_per_k`, and short templates in long single-file components showed in `large_functions`. The unit now spans the root `<template>` block, and only constructs inside that block count toward its complexity, so directives in custom blocks such as `<docs>` no longer add to it. A file with more than one root `<template>` keeps the line count of the whole file. The extraction cache version changes, so the first run after the update parses each file again. (Closes [#4992](https://github.com/fallow-rs/fallow/issues/4992))
