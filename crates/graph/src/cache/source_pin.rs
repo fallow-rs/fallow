@@ -125,7 +125,10 @@ fn normalize_keeps_production_changes() {
 }
 
 fn crate_source_hash() -> u64 {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR for tests"),
+    );
+    let root = root.as_path();
     let src = root.join("src");
     let mut files = Vec::new();
     collect_file_module(&src.join("lib.rs"), &src, &mut files);
