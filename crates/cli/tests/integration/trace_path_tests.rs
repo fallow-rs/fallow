@@ -52,6 +52,26 @@ fn write_project(root: &std::path::Path) {
 }
 
 #[test]
+fn a_re_export_hop_points_to_its_declaration() {
+    let root = crate::common::fixture_path("re-export-cycle-anchor-line");
+    let output = run_fallow_in_root(
+        "trace",
+        &root,
+        &[
+            "--path",
+            "src/barrel-a.ts",
+            "src/helper.ts",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(value["path"][0]["to"], "src/helper.ts");
+    assert_eq!(value["path"][0]["import_line"], 2);
+}
+
+#[test]
 fn exact_paths_win_over_suffix_matches_and_ambiguous_abbreviations_fail() {
     let dir = tempdir().unwrap();
     write_project(dir.path());

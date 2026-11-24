@@ -144,6 +144,8 @@ pub use fallow_engine::change_scope::{
     ChangeScope, ChangeScopeOwner, ChangeScopeRequest, first_package_baselines,
     package_baseline_statuses,
 };
+/// Source extensions a client watches to keep analysis current.
+pub use fallow_engine::discover::SOURCE_EXTENSIONS;
 /// Git commands for test fixtures. The LSP and MCP crates do not depend on
 /// the engine, so their tests take the commands from here.
 #[cfg(any(test, feature = "testing"))]

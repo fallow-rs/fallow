@@ -71,7 +71,7 @@ impl ResolveResult {
 
     /// Return whether this edge originated from CommonJS `require()`.
     #[must_use]
-    pub(crate) const fn is_commonjs_require(&self) -> bool {
+    pub const fn is_commonjs_require(&self) -> bool {
         matches!(
             self,
             Self::CommonJsInternalModule(_)

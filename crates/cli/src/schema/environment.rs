@@ -240,7 +240,7 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "FALLOW_IMPACT_STORE_MAX_AGE_DAYS",
         CACHE,
         None,
-        "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+        "Expiry threshold in days for per-project fallow impact stores; a recorded run drops the history of stores older than this and keeps an explicit enable, disable or declined opt-in (unset/0 keeps every store forever).",
     ),
     var(
         "FALLOW_CLOCK_EPOCH",

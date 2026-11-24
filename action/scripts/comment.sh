@@ -73,6 +73,7 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
     --pr "$PR_NUMBER"
     --repo "$GH_REPO"
     --body "$PR_COMMENT_FILE"
+    --api-url "${GITHUB_API_URL:-https://api.github.com}"
   )
   [ -f "$PR_COMMENT_ENVELOPE_FILE" ] && POST_COMMENT_ARGS+=(--envelope "$PR_COMMENT_ENVELOPE_FILE")
   # JSON format puts a failure on stdout as an error document with a code.

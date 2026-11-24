@@ -277,26 +277,6 @@ export const execFallow = (
   });
 
 /**
- * Resolved CLI versions keyed by binary path. A binary at a given path does not
- * change version within a session, so probe `--version` once instead of on
- * every sidebar analysis (config-change reanalysis can fire these frequently).
- * `undefined` = not yet probed; `null` = probed but version could not be read.
- */
-const cliVersionCache = new Map<string, Promise<string | null>>();
-
-const probeCliVersion = (binaryPath: string): Promise<string | null> => {
-  // Cache the in-flight PROMISE, not the resolved value, so concurrent callers
-  // share one `--version` spawn instead of each launching its own.
-  const cached = cliVersionCache.get(binaryPath);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const version = getBinaryVersion(binaryPath);
-  cliVersionCache.set(binaryPath, version);
-  return version;
-};
-
-/**
  * Resolve the fallow CLI to actually run, self-healing when the binary found on
  * PATH or in `node_modules` is older than the extension itself.
  *
@@ -310,9 +290,8 @@ const probeCliVersion = (binaryPath: string): Promise<string | null> => {
  * resolved CLI is always used as-is: this never downgrades, and with
  * auto-download off the stale binary is kept so the caller can degrade loudly.
  *
- * Returns the binary to spawn together with its probed version, so the caller
- * forwards exactly the version-gated flags this binary accepts (no probe/spawn
- * skew).
+ * Probe each selected binary directly. A download can replace the executable
+ * at the same path while another command is still reading its old version.
  */
 export const resolveCliForRun = async (
   context: vscode.ExtensionContext,
@@ -321,10 +300,10 @@ export const resolveCliForRun = async (
   const found = await findCliBinary(context);
   if (!found) {
     const downloaded = await resolveCliBinary(context, outputChannel);
-    return { binary: downloaded, version: downloaded ? await probeCliVersion(downloaded) : null };
+    return { binary: downloaded, version: downloaded ? await getBinaryVersion(downloaded) : null };
   }
 
-  const version = await probeCliVersion(found);
+  const version = await getBinaryVersion(found);
   const required = getExtensionVersion();
   const tooOld = required !== null && version !== null && compareVersions(version, required) < 0;
 
@@ -332,11 +311,12 @@ export const resolveCliForRun = async (
     const managed =
       (await getInstalledCliPath(context, outputChannel)) ??
       (await downloadCliBinary(context, outputChannel));
-    if (managed && managed !== found) {
-      const managedVersion = await probeCliVersion(managed);
-      outputChannel?.appendLine(
-        `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
-      );
+    if (managed) {
+      const managedVersion = await getBinaryVersion(managed);
+      if (managed !== found || managedVersion !== version)
+        outputChannel?.appendLine(
+          `Fallow: resolved CLI v${version} predates the extension (v${required}); switched to the managed CLI v${managedVersion ?? "unknown"} so your settings apply.`,
+        );
       return { binary: managed, version: managedVersion };
     }
   }
@@ -636,7 +616,7 @@ interface FixQuickPickItem extends vscode.QuickPickItem {
 
 const confirmApplyFixes = async (): Promise<boolean> => {
   const confirm = await vscode.window.showWarningMessage(
-    "Fallow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
+    "Fallow can remove export keywords, unused enums, individual enum and class members, dependencies, and catalog entries. It can also create or update Fallow config files. Apply these fixes?",
     "Yes",
     "No",
   );
@@ -676,14 +656,59 @@ const openFixLocation = async (root: string, fix: FixAction | undefined): Promis
   });
 };
 
+const fixCountLabel = (count: number): string => `${count} fix${count === 1 ? "" : "es"}`;
+
+const skippedFixLabel = (count: number): string => (count > 0 ? `, skipped ${count}` : "");
+
+const fixSummary = (result: FallowFixResult): string => {
+  const skipped = result.fixes.filter((fix) => fix.skipped).length;
+  const count = result.dry_run
+    ? `${fixCountLabel(result.fixes.length - skipped)} available`
+    : `applied ${fixCountLabel(result.total_fixed)}`;
+  return count + skippedFixLabel(skipped);
+};
+
+// Only these skips make the CLI exit with code 2. Intentional skips also carry help text.
+const RECOVERABLE_SKIP_REASONS: ReadonlySet<string> = new Set([
+  "content_changed",
+  "mixed_line_endings",
+]);
+
+const partialFixSummary = (error: unknown): string => {
+  if (!(error instanceof FallowExecError) || error.exitCode !== 2) return "";
+  try {
+    const result = JSON.parse(error.stdout) as FallowFixResult;
+    if (
+      typeof result.dry_run === "boolean" &&
+      Number.isInteger(result.total_fixed) &&
+      Array.isArray(result.fixes)
+    ) {
+      const recovery = result.fixes.find(
+        (fix) =>
+          fix.skipped &&
+          fix.help &&
+          fix.skip_reason !== undefined &&
+          RECOVERABLE_SKIP_REASONS.has(fix.skip_reason),
+      );
+      const advice = recovery?.help ? ` ${recovery.path ?? ""} ${recovery.help}`.trim() : "";
+      return ` (${fixSummary(result)})${advice ? `. ${advice}` : ""}`;
+    }
+  } catch {
+    // The CLI can fail before it emits a fix report.
+  }
+  return "";
+};
+
 const showDryRunPreview = async (root: string, result: FallowFixResult): Promise<void> => {
-  if (result.fixes.length === 0) {
-    void vscode.window.showInformationMessage("Fallow: no fixes available.");
+  const available = result.fixes.filter((fix) => !fix.skipped);
+  const skipped = skippedFixLabel(result.fixes.length - available.length);
+  if (available.length === 0) {
+    void vscode.window.showInformationMessage(`Fallow: no fixes available${skipped}.`);
     return;
   }
 
   const quickPickItems: FixQuickPickItem[] = [];
-  for (const item of createFixPreviewItems(result.fixes)) {
+  for (const item of createFixPreviewItems(available)) {
     if (item.action === "apply-all") {
       quickPickItems.push({
         label: "",
@@ -708,7 +733,7 @@ const showDryRunPreview = async (root: string, result: FallowFixResult): Promise
   }
 
   const picked = await vscode.window.showQuickPick(quickPickItems, {
-    title: `Fallow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
+    title: `Fallow: ${fixCountLabel(available.length)} available${skipped}`,
     placeHolder: "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate",
   });
 
@@ -1154,16 +1179,13 @@ export const runFix = async (
     if (dryRun) {
       await showDryRunPreview(root, result);
     } else {
-      const fixCount = result.fixes.length;
-      void vscode.window.showInformationMessage(
-        `Fallow: applied ${fixCount} fix${fixCount === 1 ? "" : "es"}.`,
-      );
+      void vscode.window.showInformationMessage(`Fallow: ${fixSummary(result)}.`);
     }
 
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`Fallow fix failed: ${message}`);
+    void vscode.window.showErrorMessage(`Fallow fix failed: ${message}${partialFixSummary(err)}`);
     return null;
   } finally {
     await afterRun?.();

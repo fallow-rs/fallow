@@ -2575,6 +2575,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     PR_NUMBER="123" \
     GH_REPO="owner/repo" \
     GITHUB_SHA="abc123" \
+    GITHUB_API_URL="https://ghe.example/api/v3" \
     PR_HEAD_SHA="head456" \
     FALLOW_COMMAND="check" \
     FALLOW_RENDER_PATH_PREFIX_SET="1" \
@@ -2588,6 +2589,7 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     GH_REPO="owner/repo" \
     FALLOW_COMMAND="check" \
     FALLOW_RENDER_PATH_PREFIX_SET="1" \
+    GITHUB_API_URL="https://ghe.example/api/v3" \
     FALLOW_RENDER_PATH_PREFIX="custom/base" \
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
@@ -2701,6 +2703,10 @@ assert_contains "$(cat "$ACTION_V3_POSTED" 2>/dev/null)" "fallow-fingerprint:v3:
   "review.sh keeps the v3 marker in the posted comment body"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-pr-comment --provider github" "comment.sh invokes GitHub PR comment post command"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-check-run --provider github" "comment.sh invokes GitHub Check Run post command"
+for operation in post-pr-comment post-review post-check-run; do
+  assert_contains "$(grep -F "fallow ci $operation " <<< "$ACTION_TYPED_OUT")" "--api-url https://ghe.example/api/v3" \
+    "$operation uses the GitHub runner API URL"
+done
 assert_contains "$ACTION_TYPED_OUT" "--head-sha head456" "comment.sh posts Check Run against the PR head SHA"
 assert_contains "$(cat "$ACTION_TYPED_WORK/comment-render-failure.out")" \
   'saved audit envelope is missing required field `version`' \

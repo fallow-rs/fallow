@@ -146,23 +146,33 @@ pub fn add_ignore_exports_rule_to_string(
     content: &str,
     entries: &[IgnoreExportRule],
 ) -> ConfigWriteResult<String> {
+    render_ignore_exports_edit(path, content, entries.to_vec()).map(|(content, _)| content)
+}
+
+/// Render the config and return the rules that were appended, in input order.
+pub fn render_ignore_exports_edit(
+    path: &Path,
+    content: &str,
+    mut entries: Vec<IgnoreExportRule>,
+) -> ConfigWriteResult<(String, Vec<IgnoreExportRule>)> {
     let had_bom = content.starts_with(BOM);
     let body = content.strip_prefix(BOM).unwrap_or(content);
     let config_dir = path.parent().unwrap_or_else(|| Path::new(""));
     let rendered = if is_json_config(path) {
-        append_json_ignore_exports(body, entries, config_dir)?
+        append_json_ignore_exports(body, &mut entries, config_dir)?
     } else {
-        append_toml_ignore_exports(body, entries, config_dir)?
+        append_toml_ignore_exports(body, &mut entries, config_dir)?
     };
     let with_endings = preserve_line_endings(&rendered, body);
-    Ok(if had_bom {
+    let content = if had_bom {
         let mut out = String::with_capacity(with_endings.len() + BOM.len_utf8());
         out.push(BOM);
         out.push_str(&with_endings);
         out
     } else {
         with_endings
-    })
+    };
+    Ok((content, entries))
 }
 
 #[expect(
@@ -180,7 +190,7 @@ fn is_json_config(path: &Path) -> bool {
 
 fn append_json_ignore_exports(
     content: &str,
-    entries: &[IgnoreExportRule],
+    entries: &mut Vec<IgnoreExportRule>,
     config_dir: &Path,
 ) -> ConfigWriteResult<String> {
     let root = CstRootNode::parse(content, &crate::jsonc::parse_options())
@@ -207,23 +217,22 @@ fn append_json_ignore_exports(
         }
     }
 
+    entries.retain(|entry| seen.insert(entry.file.clone()));
     for entry in entries {
-        if seen.insert(entry.file.clone()) {
-            array.append(CstInputValue::Object(vec![
-                ("file".to_owned(), CstInputValue::String(entry.file.clone())),
-                (
-                    "exports".to_owned(),
-                    CstInputValue::Array(
-                        entry
-                            .exports
-                            .iter()
-                            .cloned()
-                            .map(CstInputValue::String)
-                            .collect(),
-                    ),
+        array.append(CstInputValue::Object(vec![
+            ("file".to_owned(), CstInputValue::String(entry.file.clone())),
+            (
+                "exports".to_owned(),
+                CstInputValue::Array(
+                    entry
+                        .exports
+                        .iter()
+                        .cloned()
+                        .map(CstInputValue::String)
+                        .collect(),
                 ),
-            ]));
-        }
+            ),
+        ]));
     }
     if inherit_trailing_commas {
         array.set_trailing_commas(TrailingCommaMode::IfMultiline);
@@ -272,7 +281,7 @@ pub(crate) fn parse_toml_document(content: &str) -> ConfigWriteResult<DocumentMu
 
 fn append_toml_ignore_exports(
     content: &str,
-    entries: &[IgnoreExportRule],
+    entries: &mut Vec<IgnoreExportRule>,
     config_dir: &Path,
 ) -> ConfigWriteResult<String> {
     let mut doc = parse_toml_document(content)?;
@@ -340,13 +349,12 @@ fn files_from_array_of_tables(tables: &ArrayOfTables, config_dir: &Path) -> FxHa
 
 fn append_to_array_of_tables(
     tables: &mut ArrayOfTables,
-    entries: &[IgnoreExportRule],
+    entries: &mut Vec<IgnoreExportRule>,
     seen: &mut FxHashSet<String>,
 ) {
+    entries.retain(|entry| seen.insert(entry.file.clone()));
     for entry in entries {
-        if seen.insert(entry.file.clone()) {
-            tables.push(toml_ignore_export_table(entry));
-        }
+        tables.push(toml_ignore_export_table(entry));
     }
 }
 
@@ -394,13 +402,12 @@ fn record_existing_file(seen: &mut FxHashSet<String>, file: &str, config_dir: &P
 
 fn append_to_inline_array(
     array: &mut Array,
-    entries: &[IgnoreExportRule],
+    entries: &mut Vec<IgnoreExportRule>,
     seen: &mut FxHashSet<String>,
 ) {
+    entries.retain(|entry| seen.insert(entry.file.clone()));
     for entry in entries {
-        if seen.insert(entry.file.clone()) {
-            array.push(Value::InlineTable(toml_ignore_export_inline_table(entry)));
-        }
+        array.push(Value::InlineTable(toml_ignore_export_inline_table(entry)));
     }
 }
 

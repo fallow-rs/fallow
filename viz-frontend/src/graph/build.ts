@@ -99,8 +99,7 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
       if (bucket) bucket.push(index);
       else groups.set(key, [index]);
     }
-    // Nothing to gain: one child, or everything sits directly in `prefix`.
-    if (groups.size <= 1) {
+    if (groups.size === 1 && groups.has(prefix)) {
       emit(prefix, indices);
       return;
     }
@@ -110,7 +109,9 @@ const directoryCluster = (files: VizFile[]): Map<string, number[]> => {
     const residual: number[] = [];
     for (const [key, groupIndices] of groups) {
       if (key !== prefix && groupIndices.length >= MIN_CHILD) substantial.push([key, groupIndices]);
-      else residual.push(...groupIndices);
+      else {
+        for (const index of groupIndices) residual.push(index);
+      }
     }
     if (substantial.length === 0) {
       emit(prefix, indices);

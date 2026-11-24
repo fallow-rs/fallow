@@ -273,13 +273,13 @@ export const buildChrome = (
     setMoreOpen(true);
     moreMenu.querySelector<HTMLButtonElement>("button:not([hidden])")?.focus();
   });
+  moreWrap.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || moreMenu.hidden) return;
+    event.preventDefault();
+    setMoreOpen(false);
+    moreButton.focus();
+  });
   moreMenu.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setMoreOpen(false);
-      moreButton.focus();
-      return;
-    }
     if (
       event.key !== "ArrowDown" &&
       event.key !== "ArrowUp" &&

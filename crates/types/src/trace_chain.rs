@@ -86,7 +86,8 @@ pub struct ChainHop {
     /// The symbol name as imported across the edge (`default`, `*` for namespace,
     /// the imported name otherwise).
     pub imported_as: String,
-    /// The local binding name in the file at this hop.
+    /// The local import name, or the forwarded export name for a re-export
+    /// (`*` for an unaliased star re-export).
     pub local_name: String,
     /// Whether the import edge is type-only (`import type { ... }`).
     pub type_only: bool,
@@ -111,8 +112,8 @@ pub struct UnresolvedCallee {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum UnresolvedReason {
-    /// A bare identifier call with no matching import binding (a same-module
-    /// local function, a global, or a re-bound callee).
+    /// A call through a bare identifier with no matching import-symbol edge.
+    /// This includes local bindings imported from external packages.
     LocalOrGlobal,
     /// A computed / member-expression callee (`obj.method`, dynamic dispatch).
     MemberOrDynamic,

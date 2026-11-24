@@ -295,10 +295,11 @@ fn run_regression_gate(
         .as_ref()
         .map(|args| args.reasons.iter().map(|&reason| reason.into()).collect())
         .unwrap_or_default();
-    let regression = RegressionOpts {
+    let mut regression = RegressionOpts {
         scoped: !scope.is_whole_project(),
         ..opts.regression
     };
+    regression.args.retirement = opts.retirement.as_ref();
     report.regression = compare_flags_regression(&regression, &counts, &reasons)?;
     match regression.save_target {
         SaveRegressionTarget::None => Ok(()),
@@ -317,7 +318,7 @@ fn run_regression_gate(
             Ok(())
         }
         SaveRegressionTarget::File(path) => {
-            save_flags_regression_baseline(path, opts.root, &counts, opts.output)
+            save_flags_regression_baseline(path, opts.root, &counts, opts.output, regression.args)
         }
     }
 }
@@ -630,6 +631,7 @@ fn sort_and_limit_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>) {
             .cmp(&b.path)
             .then(a.line.cmp(&b.line))
             .then(a.flag_name.cmp(&b.flag_name))
+            .then(a.col.cmp(&b.col))
     });
 
     if let Some(top) = top {
@@ -1327,6 +1329,7 @@ fn print_flags_codeclimate(
     config: &ResolvedConfig,
     retirement: Option<&FlagRetirementReport>,
 ) {
+    let mut previous = None;
     let mut issues: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
@@ -1344,12 +1347,19 @@ fn print_flags_codeclimate(
                     f.guarded_dead_exports.len()
                 );
             }
-            let fingerprint = codeclimate_fingerprint_hash(&[
+            let line_fingerprint = codeclimate_fingerprint_hash(&[
                 "feature-flag",
                 &path,
                 &f.line.to_string(),
                 &f.flag_name,
             ]);
+            // The first read keeps the existing CodeClimate identity for this line.
+            let key = (&f.path, f.line, &f.flag_name);
+            let fingerprint = if previous.replace(key) == Some(key) {
+                codeclimate_fingerprint_hash(&[&line_fingerprint, &f.col.to_string()])
+            } else {
+                line_fingerprint
+            };
             serde_json::json!({
                 "type": "issue",
                 "check_name": "fallow/feature-flag",
@@ -1481,6 +1491,7 @@ mod tests {
             regression: RegressionOpts {
                 fail_on_regression: false,
                 tolerance: crate::regression::Tolerance::Absolute(0),
+                args: crate::regression::RegressionArgs::default(),
                 regression_baseline_file: None,
                 save_target: SaveRegressionTarget::None,
                 scoped: false,

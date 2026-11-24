@@ -450,14 +450,6 @@ pub(super) enum OnInvalid {
     Replace,
 }
 
-/// Give a store that never had a schema version the current one, so the
-/// next read knows its shape.
-pub(super) fn stamp_schema_version(store: &mut ImpactStore) {
-    if store.schema_version == 0 {
-        store.schema_version = STORE_SCHEMA_VERSION;
-    }
-}
-
 /// Write `store` to `path` with an atomic replace.
 pub(super) fn write_store(store: &ImpactStore, path: &Path) -> Result<(), StoreWriteError> {
     let io = |source| StoreWriteError::Io {
@@ -500,6 +492,7 @@ pub(super) fn transact<T>(
     };
     let value = match change(&mut store) {
         Change::Write(value) => {
+            store.schema_version = STORE_SCHEMA_VERSION;
             write_store(&store, &path)?;
             value
         }

@@ -3609,34 +3609,30 @@ fn grouped_duplication_json_directory_snapshot() {
 
 #[test]
 fn grouped_duplication_codeclimate_directory_snapshot() {
-    let root = PathBuf::from("/project");
-    let report = sample_grouped_duplication_report(&root);
+    let project = tempfile::tempdir().expect("project root");
+    let root = project.path();
+    let report = sample_grouped_duplication_report(root);
     let resolver = fallow_cli::report::OwnershipResolver::Directory;
-    let mut issues = build_duplication_codeclimate(&report, &root);
-    let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
-    for group in &report.clone_groups {
-        let owner = fallow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
-        for instance in &group.instances {
-            let rel = instance
-                .file
-                .strip_prefix(&root)
-                .unwrap_or(&instance.file)
-                .to_string_lossy()
-                .replace('\\', "/");
-            path_to_owner.insert(rel, owner.clone());
-        }
-    }
-    fallow_output::annotate_codeclimate_issues(
-        &mut issues,
-        fallow_output::CodeClimateAnnotationField::Group,
-        |path| {
-            path_to_owner
-                .get(path)
-                .cloned()
-                .unwrap_or_else(|| "(unowned)".to_string())
-        },
+    let grouping =
+        fallow_cli::report::dupes_grouping::build_duplication_grouping(&report, root, &resolver);
+    let saved =
+        api_grouped_duplication_json_document(&report, &grouping, root, Duration::ZERO, false)
+            .expect("serialize duplication report");
+    let path = root.join("dupes.json");
+    std::fs::write(&path, saved.to_string()).expect("save duplication report");
+    let rendered = crate::common::run_fallow_in_root(
+        "report",
+        root,
+        &[
+            "--from",
+            path.to_str().expect("path"),
+            "--group-by",
+            "directory",
+            "--format",
+            "codeclimate",
+        ],
     );
-    let value = codeclimate_issues_to_value(&issues);
+    let value = crate::common::parse_json(&rendered);
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("grouped_duplication_codeclimate_directory", json_str);
 }

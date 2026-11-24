@@ -1281,6 +1281,7 @@ fn test_config_with_ignore_exports(rules: Vec<fallow_config::IgnoreExportRule>) 
     fallow_config::FallowConfig {
         ignore_exports: rules,
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        keep_export_tags: fallow_config::KeepExportTags::default(),
         ..Default::default()
     }
     .resolve(

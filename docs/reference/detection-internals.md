@@ -217,6 +217,20 @@ error by suppressing a downstream detector.
   entry point reads only store members, so its enum, class and namespace
   members are not reported either, unless `includeEntryExports` covers the
   file (issue #4990).
+- A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
+  of Vitest, Jest and Playwright) seeds each matching file as a support entry
+  point, so the file is never an unused file. Discovery records the files that
+  only a fixture pattern seeds in `CategorizedEntryPoints::fixture_only`, and
+  drops a file when a directory between it and its outermost fixture
+  directory holds a `package.json`. The graph build (`graph_build::imported_fixture_entries`)
+  marks such a file consumer-checked, like an entry point that
+  `includeEntryExports` covers, when a module outside the fixture directories
+  imports a binding from it with a static ES import or re-exports it. A
+  fixture file that a checked fixture imports by name is checked too. A
+  side-effect import does not count. A file that a dynamic import, an import
+  pattern or `require()` loads stays unmarked, and so do the files that only
+  it imports (`graph::untracked_load_targets`). The default export of a checked fixture file stays used, because a
+  tool can also load the file by path (issue #5082).
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
 - A name supplied by two different `export *` sources is not exported by the
@@ -840,7 +854,7 @@ global list did not hide.
 `includeEntryExports` also changes the graph. A plain `export *` of an entry
 point credits every named export of its source, because the consumers of an
 entry point are not in the graph. `consumer_checked_entries`
-(`crates/core/src/graph_build.rs`) gives the graph build the entry points
+(`crates/core/src/graph_build/mod.rs`) gives the graph build the entry points
 that the option covers. `collect_open_star_barrels` leaves those out, so their
 `export *` lines credit only the names that an importer uses, like the
 `export *` of any other module, and the unused names are reported at their
@@ -1304,7 +1318,11 @@ each reason:
 - `parse-incomplete`: a module of the project has a parse error or a panic.
 - `open-contract`: the contract has an `incomplete` reason.
 - `public-api`: the value surface of a package entry point, or an export with
-  a visibility tag such as `@public`.
+  a visibility tag that `keepExportTags` keeps, such as `@public`. The rule
+  reads the extraction results, which hold each tag as written, so it applies
+  the key itself. The graph build clears the other tags before it runs
+  (`crates/core/src/graph_build/visibility_scope.rs`), so the unused-export
+  check, the re-export credit and the trace see only the kept tags.
 - `entry-export`: the value surface of an entry point (this covers
   `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
   or a side-effect registration.

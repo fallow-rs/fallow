@@ -143,12 +143,12 @@ vi.mock("../src/binary-utils.js", async (importOriginal) => ({
 vi.mock("../src/download.js", () => ({
   getInstalledCliPath: vi.fn(() => mockInstalledCli),
   downloadCliBinary: vi.fn(async () => mockDownloadedCli),
-  getBinaryVersion: (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null,
+  getBinaryVersion: vi.fn(async (binaryPath: string) => mockBinaryVersions[binaryPath] ?? null),
   getExtensionVersion: () => mockExtensionVersion,
 }));
 
 import { window as mockWindow, workspace as mockWorkspace } from "vscode";
-import { downloadCliBinary, getInstalledCliPath } from "../src/download.js";
+import { downloadCliBinary, getBinaryVersion, getInstalledCliPath } from "../src/download.js";
 import {
   execFallow,
   FallowExecError,
@@ -468,6 +468,53 @@ describe("resolveCliForRun", () => {
     mockBinaryVersions = {};
     mockComplexityBreakdownEnabled = false;
     vi.clearAllMocks();
+  });
+
+  it("uses new CLI capabilities after a release retry replaces the same path", async () => {
+    const path = "/storage/bin/release-retry/fallow";
+    mockInstalledCli = path;
+    mockBinaryVersions = { [path]: "2.86.0" };
+    expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.86.0" });
+
+    mockBinaryVersions = { [path]: "2.88.1" };
+    expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.88.1" });
+  });
+
+  it("returns the version installed by the current download at the original path", async () => {
+    const path = "/storage/bin/upgraded/fallow";
+    mockPathBinary = path;
+    mockBinaryVersions = { [path]: "2.86.0" };
+    vi.mocked(downloadCliBinary).mockImplementationOnce(async () => {
+      mockBinaryVersions = { [path]: "2.88.1" };
+      return path;
+    });
+    expect(await resolveCliForRun(context)).toEqual({ binary: path, version: "2.88.1" });
+  });
+
+  it("reads the downloaded CLI version while a probe of the old executable is pending", async () => {
+    const managed = "/storage/bin/fallow";
+    const local = "/workspace/node_modules/.bin/fallow";
+    mockPathBinary = managed;
+    let finishOldProbe!: (version: string) => void;
+    vi.mocked(getBinaryVersion).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldProbe = resolve;
+        }),
+    );
+    const sidebar = resolveCliForRun(context);
+    await vi.waitFor(() => expect(getBinaryVersion).toHaveBeenCalledWith(managed));
+
+    mockPathBinary = local;
+    mockBinaryVersions = { [local]: "2.86.0" };
+    vi.mocked(downloadCliBinary).mockImplementationOnce(async () => {
+      mockBinaryVersions = { [managed]: "2.88.1" };
+      setImmediate(() => finishOldProbe("2.86.0"));
+      return managed;
+    });
+    const result = await resolveCliForRun(context);
+    await sidebar;
+    expect(result).toEqual({ binary: managed, version: "2.88.1" });
   });
 
   it("uses a resolved CLI at the extension version as-is, without downloading", async () => {
@@ -1153,7 +1200,12 @@ describe("runAudit type-aware compatibility", () => {
 });
 
 describe("applyFixes", () => {
-  const writeFixScript = async (dir: string, logPath: string): Promise<string> => {
+  const writeFixScript = async (
+    dir: string,
+    logPath: string,
+    result: object,
+    exitCode: number,
+  ): Promise<string> => {
     const script = join(dir, "fallow-cli.js");
     await writeFile(
       script,
@@ -1161,7 +1213,8 @@ describe("applyFixes", () => {
         "#!/usr/bin/env node",
         'const fs = require("node:fs");',
         `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");`,
-        "process.stdout.write(JSON.stringify({ dry_run: false, fixes: [], total_fixed: 0 }));",
+        `process.stdout.write(${JSON.stringify(JSON.stringify(result))});`,
+        `process.exitCode = ${exitCode};`,
       ].join("\n"),
       "utf8",
     );
@@ -1169,11 +1222,15 @@ describe("applyFixes", () => {
     return script;
   };
 
-  const withFixWorkspace = async (body: (logPath: string) => Promise<void>): Promise<void> => {
+  const withFixWorkspace = async (
+    body: (logPath: string) => Promise<void>,
+    result: object = { dry_run: false, fixes: [], total_fixed: 0 },
+    exitCode = 0,
+  ): Promise<void> => {
     const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-apply-fix-"));
     const logPath = join(dir, "spawn.log");
     try {
-      const script = await writeFixScript(dir, logPath);
+      const script = await writeFixScript(dir, logPath, result, exitCode);
       mockPathBinary = script;
       mockBinaryVersions = { [script]: "3.9.2" };
       setWorkspaceRoot(dir);
@@ -1200,6 +1257,109 @@ describe("applyFixes", () => {
     vi.clearAllMocks();
   });
 
+  const skipped = {
+    type: "skipped",
+    path: "src/member.ts",
+    skipped: true,
+    skip_reason: "low_confidence_off_graph",
+  };
+
+  it("shows the CLI applied count and the skipped entries", async () => {
+    await withFixWorkspace(
+      async () => {
+        vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("Yes" as never);
+        await applyFixes(workspaceContext, async () => {});
+        expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
+          "Fallow: applied 1 fix, skipped 1.",
+        );
+      },
+      {
+        dry_run: false,
+        total_fixed: 1,
+        fixes: [{ type: "remove_export", name: "unused", applied: true }, skipped],
+      },
+    );
+  });
+
+  it("reports partial fixes when the CLI exits with a write error", async () => {
+    await withFixWorkspace(
+      async () => {
+        vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("Yes" as never);
+        await applyFixes(workspaceContext, async () => {});
+        expect(mockWindow.showErrorMessage).toHaveBeenCalledWith(
+          expect.stringMatching(/applied 1 fix, skipped 1/),
+        );
+      },
+      {
+        dry_run: false,
+        total_fixed: 1,
+        fixes: [
+          { type: "remove_export", name: "unused", applied: true },
+          { ...skipped, skip_reason: "content_changed" },
+        ],
+      },
+      2,
+    );
+  });
+
+  it("reports the recovery advice when a preview skips a file with mixed line endings", async () => {
+    const help = "Normalize this file to consistent LF or CRLF line endings.";
+    await withFixWorkspace(
+      async () => {
+        await runFix(workspaceContext, true);
+        expect(mockWindow.showErrorMessage).toHaveBeenCalledWith(
+          expect.stringContaining("skipped 2"),
+        );
+        expect(mockWindow.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining(help));
+        expect(mockWindow.showErrorMessage).not.toHaveBeenCalledWith(
+          expect.stringContaining("Intentional skip."),
+        );
+        expect(mockWindow.showQuickPick).not.toHaveBeenCalled();
+      },
+      {
+        dry_run: true,
+        total_fixed: 0,
+        fixes: [
+          { ...skipped, skip_reason: "low_confidence_off_graph", help: "Intentional skip." },
+          { ...skipped, skip_reason: "mixed_line_endings", help },
+        ],
+      },
+      2,
+    );
+  });
+
+  it("offers no apply action for a preview that contains only skips", async () => {
+    await withFixWorkspace(
+      async () => {
+        await runFix(workspaceContext, true);
+        expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
+          "Fallow: no fixes available, skipped 1.",
+        );
+        expect(mockWindow.showQuickPick).not.toHaveBeenCalled();
+      },
+      { dry_run: true, total_fixed: 0, fixes: [skipped] },
+    );
+  });
+
+  it("counts only available actions in a mixed preview", async () => {
+    await withFixWorkspace(
+      async () => {
+        await runFix(workspaceContext, true);
+        expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({ action: "apply-all", description: "1 fix" }),
+          ]),
+          expect.objectContaining({ title: "Fallow: 1 fix available, skipped 1" }),
+        );
+      },
+      {
+        dry_run: true,
+        total_fixed: 0,
+        fixes: [{ type: "remove_enum_member", name: "Unused", path: "src/member.ts" }, skipped],
+      },
+    );
+  });
+
   it("saves nothing and refreshes nothing when the user declines", async () => {
     await withFixWorkspace(async (logPath) => {
       vi.mocked(mockWindow.showWarningMessage).mockResolvedValueOnce("No" as never);
@@ -1207,6 +1367,17 @@ describe("applyFixes", () => {
 
       await applyFixes(workspaceContext, refresh);
 
+      const [message] = vi.mocked(mockWindow.showWarningMessage).mock.calls[0]!;
+      for (const change of [
+        "unused enums",
+        "class",
+        "config",
+        "catalog",
+        "export",
+        "dependencies",
+      ]) {
+        expect(message.toLowerCase()).toContain(change);
+      }
       expect(mockWorkspace.saveAll).not.toHaveBeenCalled();
       expect(await spawnCount(logPath)).toBe(0);
       expect(refresh).not.toHaveBeenCalled();

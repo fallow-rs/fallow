@@ -141,6 +141,7 @@ mod legacy_key_builders;
 use caller_review_keys::{absent_component_prop_baseline_keys, constant_parameter_baseline_keys};
 mod prune;
 mod saved_scope;
+mod stale_advice;
 #[cfg(test)]
 use legacy_key_builders::{
     baseline_catalog_keys, baseline_dependency_keys, baseline_file_export_keys,
@@ -401,23 +402,6 @@ pub enum BaselineKind {
 }
 
 impl BaselineKind {
-    /// The command that removes only the stale entries of the baseline at
-    /// `path`, in the mode that the file records. A prune in another mode
-    /// refuses the file.
-    #[must_use]
-    pub fn prune_command(self, path: &Path, mode: fallow_output::BaselineMode) -> String {
-        // The prune flags resolve a relative path against the project root,
-        // while `--baseline` resolves it against the working directory. An
-        // absolute path names the same file in both.
-        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        let quoted = crate::shell_quote::shell_quote(&absolute.display().to_string());
-        format!(
-            "fallow baselines prune{} --{}-baseline {quoted}",
-            mode.flags(),
-            self.as_str()
-        )
-    }
-
     /// The token this kind is written as, which is also the command to run.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -1963,7 +1947,6 @@ pub struct DuplicationBaselineData {
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     kind: Option<BaselineKind>,
     /// `production` when the saving run used production mode, absent otherwise.
-    /// Only `fallow baselines prune` reads it, through [`saved_scope_reasons`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     scope_reasons: Vec<String>,
     /// Legacy clone group keys: sorted list of `file:start-end` per group.
@@ -2161,7 +2144,6 @@ pub struct HealthBaselineData {
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub(crate) kind: Option<BaselineKind>,
     /// `production` when the saving run used production mode, absent otherwise.
-    /// Only `fallow baselines prune` reads it, through [`saved_scope_reasons`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) scope_reasons: Vec<String>,
     /// Legacy health baseline keys: `relative_path:function_name:line`.

@@ -360,6 +360,27 @@ fn retirement_groups_sites_into_one_row_per_flag() {
 }
 
 #[test]
+fn retirement_records_the_local_guard_of_an_unimported_vercel_flag() {
+    use std::io::Write as _;
+
+    let project = crate::common::copy_fixture("flags-retirement");
+    let mut flags = std::fs::OpenOptions::new()
+        .append(true)
+        .open(project.path().join("src/vercel.ts"))
+        .expect("open flag definitions");
+    writeln!(flags, "if (await showLegacy()) console.info('legacy');").expect("append guard");
+
+    let report = retirement_in(project.path(), &["--flag-age", "off"]);
+    let flag = retirement_row(&report, "legacy-banner");
+    assert_eq!(flag["sites"][0]["role"], "definition");
+    assert_eq!(flag["sites"][0]["line"], 4);
+    assert_eq!(flag["sites"][1]["role"], "read");
+    assert_eq!(flag["sites"][1]["line"], 5);
+    assert_eq!(flag["read_sites"], 1);
+    assert_eq!(reasons(flag), ["single-read-site"]);
+}
+
+#[test]
 fn retirement_leaves_the_rest_of_the_envelope_unchanged() {
     let plain = run_fallow(
         "flags",
@@ -1139,6 +1160,55 @@ fn gate_run(root: &std::path::Path, args: &[&str]) -> crate::common::CommandOutp
     let mut all = vec!["--no-cache", "--flag-age", "off"];
     all.extend_from_slice(args);
     run_fallow_in_root("flags", root, &all)
+}
+
+#[test]
+fn flags_recovery_keeps_the_vendor_counts_and_age_mode() {
+    check_flags_recovery(&["--regression-baseline", "missing.json"]);
+}
+
+#[test]
+fn flags_recovery_without_a_baseline_path_keeps_the_vendor_counts_and_age_mode() {
+    check_flags_recovery(&[]);
+}
+
+fn check_flags_recovery(baseline_option: &[&str]) {
+    use crate::common::{copy_fixture, parse_json, run_fallow_raw_in_dir};
+
+    let project = copy_fixture("flags-vendor");
+    let root = project.path();
+    let mut args = vec![
+        "flags",
+        "--retirement",
+        "--flag-state",
+        "flag-state.json",
+        "--flag-age",
+        "off",
+        "--fail-on-regression",
+        "--format",
+        "json",
+    ];
+    args.extend_from_slice(baseline_option);
+    let output = run_fallow_raw_in_dir(root, &args);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    let error = parse_json(&output);
+    let (_, command) = error["message"]
+        .as_str()
+        .unwrap()
+        .rsplit_once(": fallow ")
+        .expect("recovery command");
+    let command = command.replace("<PATH>", "missing.json");
+    let mut args: Vec<_> = command.split_whitespace().collect();
+    args.extend(["--format", "json"]);
+    let replay = run_fallow_raw_in_dir(root, &args);
+    assert_eq!(replay.code, 0, "{}", replay.stderr);
+    assert_eq!(parse_json(&replay)["retirement"]["age_mode"], "off");
+    let baseline: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("missing.json")).unwrap()).unwrap();
+    assert_eq!(
+        baseline["flags"]["by_reason"]["vendor-only"], 1,
+        "{baseline}"
+    );
 }
 
 #[test]

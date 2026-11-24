@@ -3,10 +3,11 @@
 use serde_json::Value;
 
 /// Capitalized words that are proper names, so sentence case keeps them.
+/// `Router` is the second word of the name `React Router`.
 /// Acronyms and words with an inner capital (`CSS`, `ReDoS`, `MySQL`) are
 /// kept without an entry here.
 pub(super) const PROPER_NAMES: &[&str] = &[
-    "Angular", "Buffer", "Effect", "Electron", "Next.js", "Svelte",
+    "Angular", "Buffer", "Effect", "Electron", "Next.js", "Router", "Svelte",
 ];
 
 /// The display label of an issue type row: the summary label of the human
@@ -67,5 +68,9 @@ mod tests {
             "Unsafe Electron BrowserWindow preferences"
         );
         assert_eq!(sentence_case("ReDoS regex sink"), "ReDoS regex sink");
+        assert_eq!(
+            sentence_case("React Router open redirect sink"),
+            "React Router open redirect sink"
+        );
     }
 }

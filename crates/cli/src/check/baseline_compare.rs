@@ -72,7 +72,12 @@ pub(super) fn load_and_compare_baseline(
             );
         }
         if !unrecognised_format {
-            baseline_notes::warn_on_staleness(staleness, baseline_path, comparison.saved_mode);
+            fallow_engine::baseline::BaselineKind::DeadCode.warn_on_staleness(
+                staleness,
+                baseline_path,
+                comparison.saved_mode,
+                &io.config.root,
+            );
         }
     }
     if unrecognised_format {

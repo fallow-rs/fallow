@@ -1,3 +1,4 @@
+import { isTextInput, isDashboardKey } from "./keyboard";
 import { applyHash, createState, runSearch, setDarkMode, storeTheme, syncHash } from "./state";
 import type { AppState } from "./state";
 import type { Lens, SecondaryAnalysis, TreeNode } from "./types";
@@ -76,12 +77,6 @@ const installSegmentSliders = (): void => {
   for (const group of document.querySelectorAll<HTMLElement>(".lens-tabs, .seg")) {
     installSlider(group);
   }
-};
-
-/** True when keyboard focus sits in a text field. */
-const isTextInput = (target: EventTarget | null): boolean => {
-  const tag = (target as HTMLElement | null)?.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA";
 };
 
 const init = (): void => {
@@ -597,6 +592,7 @@ const init = (): void => {
   };
 
   window.addEventListener("keydown", (event) => {
+    if (!isDashboardKey(event)) return;
     const inInput = isTextInput(event.target);
     if (event.key === "Escape") {
       handleEscape(inInput);

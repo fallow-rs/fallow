@@ -50,6 +50,8 @@ pub fn plugin_resolve_input<'a>(
 /// instead.
 ///
 /// `cache_config_hash` covers external plugin names and custom flag settings.
+/// `keepExportTags` keys the mode too: the graph build credits re-exports
+/// through the visibility tags that the key keeps.
 /// [`plugin_config_hash`] includes tsconfig-derived aliases through [`hash_path_aliases`].
 ///
 /// `production` and `ignore_patterns` intentionally stay out of this hash:
@@ -64,6 +66,7 @@ pub fn resolver_options_hash(
     let mut hasher = rustc_hash::FxHasher::default();
     config.cache_config_hash.hash(&mut hasher);
     config.resolve.conditions.hash(&mut hasher);
+    config.keep_export_tags.canonical().hash(&mut hasher);
     resolution_inputs::resolution_inputs_hash(&config.root, workspaces, files).hash(&mut hasher);
     hasher.finish()
 }
@@ -83,7 +86,9 @@ fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
 /// does not seed are reachability roots too: they depend on package.json,
 /// tsconfig and sibling files the manifest does not track.
 /// `consumer_checked` holds the entry points that `includeEntryExports`
-/// covers: their `export *` lines credit fewer names in the graph.
+/// covers: their `export *` lines credit fewer names in the graph. The
+/// fixture-only entry files are hashed too, because the graph build checks
+/// the exports of each one that a module imports.
 pub fn entry_points_hash(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
@@ -113,6 +118,11 @@ pub fn entry_points_hash(
     let excluded = entry_points.production_excluded();
     excluded.len().hash(&mut hasher);
     for path in excluded {
+        root_relative_key(root, path).hash(&mut hasher);
+    }
+    let fixtures = entry_points.fixture_only();
+    fixtures.len().hash(&mut hasher);
+    for path in fixtures {
         root_relative_key(root, path).hash(&mut hasher);
     }
     let mut unseeded: Vec<String> = files

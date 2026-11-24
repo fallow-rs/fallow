@@ -10,6 +10,7 @@ mod cycles;
 mod effective_exports;
 mod effective_re_exports;
 mod entry_load;
+mod entry_marks;
 mod fan_io;
 mod impact_closure;
 mod namespace_aliases;
@@ -52,6 +53,7 @@ pub use cycles::{CycleOptions, CycleSearch, MAX_CYCLE_LENGTH, MAX_CYCLES_PER_SCC
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use effective_re_exports::EffectiveReExportRoute;
 pub use entry_load::{DominatingImport, EntryLoadClosure};
+pub use entry_marks::untracked_load_targets;
 pub use fan_io::{FocusFileFacts, FocusFileFactsPaths};
 pub use impact_closure::{
     CoordinationGap, CoordinationGapPaths, ImpactClosure, ImpactClosurePaths,

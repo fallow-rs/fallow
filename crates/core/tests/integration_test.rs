@@ -14,6 +14,8 @@ mod bom_package_json;
 mod command_file_references;
 #[path = "integration_test/common.rs"]
 mod common;
+#[path = "integration_test/fixture_file_exports.rs"]
+mod fixture_file_exports;
 
 #[path = "integration_test/ag_ui_agent_hooks.rs"]
 mod ag_ui_agent_hooks;

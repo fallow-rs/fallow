@@ -62,6 +62,7 @@ pub fn benchmark_dead_code_json(
         regression_opts: RegressionOpts {
             fail_on_regression: false,
             tolerance: crate::regression::Tolerance::Absolute(0),
+            args: crate::regression::RegressionArgs::default(),
             regression_baseline_file: None,
             save_target: crate::regression::SaveRegressionTarget::None,
             scoped: false,

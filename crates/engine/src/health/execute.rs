@@ -48,6 +48,22 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
     scope_inputs: HealthScopeInputs<'a, R>,
     seams: &HealthSeams<'_>,
 ) -> Result<HealthResultGeneric<R>, HealthError> {
+    execute_health_inner_with_baseline(opts, input, scope_inputs, seams)
+        .map(|(analysis, _)| analysis)
+}
+
+/// Run health analysis and return the mode read from the loaded baseline.
+/// The mode is empty when the run had no baseline.
+///
+/// # Errors
+///
+/// Returns the same analysis errors as [`execute_health_inner`].
+pub fn execute_health_inner_with_baseline<'a, R: super::HealthGroupResolver>(
+    opts: &HealthOptions<'a>,
+    input: HealthPipelineInputs,
+    scope_inputs: HealthScopeInputs<'a, R>,
+    seams: &HealthSeams<'_>,
+) -> Result<(HealthResultGeneric<R>, fallow_output::BaselineMode), HealthError> {
     execute_health_inner_impl(opts, input.into(), scope_inputs, seams)
 }
 
@@ -61,7 +77,7 @@ where
     R: super::HealthGroupResolver,
     M: AsRef<[fallow_types::extract::ModuleInfo]>,
 {
-    execute_health_inner_impl(opts, input, scope_inputs, seams)
+    execute_health_inner_impl(opts, input, scope_inputs, seams).map(|(analysis, _)| analysis)
 }
 
 fn execute_health_inner_impl<'a, R, M>(
@@ -69,7 +85,7 @@ fn execute_health_inner_impl<'a, R, M>(
     input: HealthPipelineRunInputs<M>,
     scope_inputs: HealthScopeInputs<'a, R>,
     seams: &HealthSeams<'_>,
-) -> Result<HealthResultGeneric<R>, HealthError>
+) -> Result<(HealthResultGeneric<R>, fallow_output::BaselineMode), HealthError>
 where
     R: super::HealthGroupResolver,
     M: AsRef<[fallow_types::extract::ModuleInfo]>,
@@ -128,6 +144,10 @@ where
         seams,
     })?;
 
+    let saved_baseline_mode = findings_data.loaded_baseline.as_ref().map_or_else(
+        fallow_output::BaselineMode::default,
+        crate::baseline::HealthBaselineData::saved_mode,
+    );
     let HealthOutputContext { build, sections } =
         prepare_health_output_context(HealthOutputContextInput {
             config: &config,
@@ -147,7 +167,7 @@ where
 
     let output = build_health_output_parts(opts, &build, sections)?;
 
-    Ok(finalize_health_result(HealthFinalizeInput {
+    let analysis = finalize_health_result(HealthFinalizeInput {
         opts,
         config,
         files: &files,
@@ -159,7 +179,8 @@ where
         dead_code_results: dead_code_results.as_ref(),
         styling_artifacts: styling_artifacts.as_deref(),
         workspace_diagnostics,
-    }))
+    });
+    Ok((analysis, saved_baseline_mode))
 }
 
 #[cfg(test)]

@@ -242,6 +242,45 @@ fn post_review_rejects_scope_downgrade_and_cross_scope_before_provider_lookup() 
 }
 
 #[test]
+fn github_review_uses_the_graphql_endpoint_of_the_selected_runner() {
+    let envelope = write_envelope(&[]);
+    let (server_url, server) = serve(vec![github_comments("[]"), github_threads_empty()]);
+    let api = format!("{server_url}/api/v3");
+    let output = Command::new(fallow_bin())
+        .args([
+            "ci",
+            "post-review",
+            "--provider",
+            "github",
+            "--pr",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--dry-run",
+            "--api-url",
+            &api,
+            "--envelope",
+        ])
+        .arg(envelope.path().join("review.json"))
+        .env("GH_TOKEN", "test-token")
+        .env("GITHUB_API_URL", &api)
+        .env("GITHUB_GRAPHQL_URL", format!("{server_url}/runner/graphql"))
+        .output()
+        .expect("run post-review");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let requests = server.join().expect("server thread");
+    assert!(
+        requests[1].starts_with("POST /runner/graphql "),
+        "{}",
+        requests[1]
+    );
+}
+
+#[test]
 fn github_provider_state_isolates_identical_fingerprints_and_reports_scoped_stale() {
     let envelope = write_envelope_with_review_id(&["same"], Some("frontend"));
     let (api_url, server) = serve(vec![
@@ -398,6 +437,11 @@ fn run_reconcile_with_identity_and_retries(
         .env("RUST_LOG", "")
         .env("FALLOW_API_RETRIES", retries)
         .env("FALLOW_API_RETRY_DELAY", "0")
+        .env("GITHUB_API_URL", REFUSED_API)
+        .env(
+            "GITHUB_GRAPHQL_URL",
+            format!("{REFUSED_API}/runner/graphql"),
+        )
         .env("GH_TOKEN", "test-token")
         .env("GITHUB_SHA", sha)
         .env("GITLAB_TOKEN", "test-token")
@@ -933,13 +977,17 @@ fn github_existing_legacy_bare_marker_skips_reply_and_resolves_active_thread() {
 
     let output = run_reconcile(
         &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
-        &api_url,
+        &format!("{api_url}/api/v3/"),
         &envelope,
     );
     let json = parse_json(&output);
     assert_eq!(json["resolution_comments_posted"], 0);
     assert_eq!(json["threads_resolved"], 1);
-    assert_eq!(server.join().expect("server thread").len(), 4);
+    let requests = server.join().expect("server thread");
+    assert!(requests[0].starts_with("GET /api/v3/repos/"));
+    for request in &requests[1..] {
+        assert!(request.starts_with("POST /api/graphql "), "{request}");
+    }
 }
 
 #[test]

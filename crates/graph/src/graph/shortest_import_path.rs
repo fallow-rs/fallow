@@ -23,7 +23,7 @@ use fallow_types::discover::FileId;
 use fixedbitset::FixedBitSet;
 use rustc_hash::FxHashMap;
 
-use super::ModuleGraph;
+use super::{ImportedName, ModuleGraph, ModuleLoadMechanism};
 
 /// One import edge on a shortest import path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +102,7 @@ impl ModuleGraph {
                 visited.insert(idx);
                 predecessor.insert(hop.to, hop);
                 if hop.to == to {
-                    return Some(rebuild_path(&predecessor, from, to));
+                    return Some(rebuild_path(self, &predecessor, from, to));
                 }
                 queue.push_back(hop.to);
             }
@@ -133,11 +133,17 @@ impl ModuleGraph {
                         .find(|s| !s.is_type_only)
                         .or_else(|| symbols.first())
                 };
+                let import_span_start = anchor.and_then(|s| {
+                    let re_export = s.import_span.is_empty()
+                        && s.imported_name == ImportedName::SideEffect
+                        && s.mechanism == ModuleLoadMechanism::EsModule;
+                    (!re_export).then_some(s.import_span.start)
+                });
                 Some(ImportPathHop {
                     from: file_id,
                     to: target,
                     all_type_only,
-                    import_span_start: anchor.map(|s| s.import_span.start),
+                    import_span_start,
                     dynamic: !all_type_only && eager.is_none(),
                 })
             })
@@ -150,6 +156,7 @@ impl ModuleGraph {
 
 /// Walk the predecessor chain back from `to` and return it in import order.
 fn rebuild_path(
+    graph: &ModuleGraph,
     predecessor: &FxHashMap<FileId, ImportPathHop>,
     from: FileId,
     to: FileId,
@@ -157,9 +164,15 @@ fn rebuild_path(
     let mut reversed = Vec::new();
     let mut cursor = to;
     while cursor != from {
-        let Some(&hop) = predecessor.get(&cursor) else {
+        let Some(mut hop) = predecessor.get(&cursor).copied() else {
             break;
         };
+        // Only the returned route needs source positions. Looking up every
+        // outgoing hop of a barrel would scan its re-exports for each target.
+        if hop.import_span_start.is_none() {
+            hop.import_span_start =
+                graph.modules[hop.from.0 as usize].re_export_span_start(hop.to, hop.all_type_only);
+        }
         reversed.push(hop);
         cursor = hop.from;
     }

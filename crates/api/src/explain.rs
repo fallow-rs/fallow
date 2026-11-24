@@ -44,7 +44,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dead code",
         name: "Unused Exports",
         short: "Export is never imported",
-        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file.",
+        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`.",
         docs_path: "rules/unused-export",
     },
     RuleDef {
@@ -1178,6 +1178,26 @@ fn fallback_rule_guide() -> RuleGuide {
 pub fn explain_issue_type(
     issue_type: &str,
 ) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
+    explain_with_labels(issue_type, |rule| {
+        (rule_explain_name(rule), rule_explain_summary(rule))
+    })
+}
+
+/// Build an explanation with the name and short description used in terminal reports.
+///
+/// # Errors
+///
+/// Returns a structured error for an unknown issue token.
+pub fn explain_issue_type_for_display(
+    issue_type: &str,
+) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
+    explain_with_labels(issue_type, |rule| (rule.name, rule.short))
+}
+
+fn explain_with_labels(
+    issue_type: &str,
+    labels: impl FnOnce(&RuleDef) -> (&'static str, &'static str),
+) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
     if matches!(issue_type, "shared-state" | "fallow/shared-state") {
         return Ok(crate::shared_state_explain::explain());
     }
@@ -1186,10 +1206,11 @@ pub fn explain_issue_type(
     };
     let guide = rule_guide(rule);
     let (example_files, example_base_files) = crate::explain_examples::visible_example_files(rule);
+    let (name, summary) = labels(rule);
     Ok(fallow_output::ExplainOutput {
         id: rule.id.to_string(),
-        name: rule_explain_name(rule).to_string(),
-        summary: rule_explain_summary(rule).to_string(),
+        name: name.to_string(),
+        summary: summary.to_string(),
         rationale: rule_rationale(rule).to_string(),
         example: guide.example.to_string(),
         example_files,

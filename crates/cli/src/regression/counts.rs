@@ -9,7 +9,7 @@ use fallow_types::results::AnalysisResults;
 /// intentionally (see `CheckCounts` `#[serde(default)]`) so adding a new issue type
 /// stays backwards-compatible with existing baselines. Bumping `schema_version`
 /// signals "this baseline cannot be safely loaded by older fallow builds" and
-/// triggers a hard-fail with a regenerate hint in `load_regression_baseline`.
+/// causes the loader to reject the file and suggest a recovery command.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct RegressionBaseline {
     /// Schema version for forward compatibility.

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "fallow",
-  "version": "3.47.0",
+  "version": "3.48.0",
   "about": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "usage": "fallow [OPTIONS] [PATH] [COMMAND]",
   "root_command": {
@@ -17861,7 +17861,7 @@
           "aliases": [],
           "help_group": null,
           "about": "Activate a license JWT",
-          "long_about": "Activate a license JWT.\n\nJWT input precedence: positional arg > `--from-file` > stdin (`-`). All paths normalize whitespace before crypto verification.",
+          "long_about": "Activate a license JWT.\n\nPass a JWT as an argument, read it with `--from-file`, or pipe it to `fallow license activate --stdin`. All paths normalize whitespace before crypto verification.",
           "hidden": false,
           "usage": "fallow license activate [OPTIONS] [JWT]",
           "always_json": false,
@@ -18274,7 +18274,7 @@
     {
       "code": 13,
       "name": "coverage-upload-server-error",
-      "description": "Coverage inventory or static-findings upload failed after retries or returned another server error."
+      "description": "Coverage inventory or static-findings upload got a server error (5xx), a timeout (408), a rate limit (429), or a response that fallow cannot read."
     }
   ],
   "environment_variables": [
@@ -18462,7 +18462,7 @@
       "name": "FALLOW_IMPACT_STORE_MAX_AGE_DAYS",
       "group": "cache",
       "default": null,
-      "description": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever)."
+      "description": "Expiry threshold in days for per-project fallow impact stores; a recorded run drops the history of stores older than this and keeps an explicit enable, disable or declined opt-in (unset/0 keeps every store forever)."
     },
     {
       "name": "FALLOW_CLOCK_EPOCH",
@@ -25239,7 +25239,7 @@
         "how_to_fix": "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
         "docs": "https://fallow.tools/docs/rules/react-router-open-redirect/"
       },
-      "display_label": "React router open redirect sink"
+      "display_label": "React Router open redirect sink"
     },
     {
       "id": "dom-document-write",

@@ -9,6 +9,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::plugins::config_parser::lexical_normalize;
 use crate::scripts::{IgnoredCommandEntries, ScriptCatalog, WorkspacePackages};
 
+#[path = "entry_dedup.rs"]
+mod entry_dedup;
 #[path = "manual_entries.rs"]
 mod manual_entries;
 #[path = "plugin_entries.rs"]
@@ -18,6 +20,7 @@ mod wildcard_entries;
 use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
 #[cfg(test)]
 use plugin_entries::discover_plugin_entry_point_sets;
+pub use plugin_entries::is_below_fixture_dir;
 pub use plugin_entries::{discover_plugin_entry_point_sets_timed, discover_plugin_entry_points};
 use wildcard_entries::expand_wildcard_entries;
 
@@ -98,6 +101,8 @@ pub struct CategorizedEntryPoints {
     /// like a test file in production mode. `dedup` drops each path that a
     /// different entry source also seeds.
     pub(crate) production_excluded: Vec<PathBuf>,
+    /// Files that only a plugin fixture pattern seeds. See `entry_dedup`.
+    pub(crate) fixture_only: Vec<PathBuf>,
 }
 
 impl CategorizedEntryPoints {
@@ -134,22 +139,7 @@ impl CategorizedEntryPoints {
         self.test.extend(other.test);
         self.support.extend(other.support);
         self.production_excluded.extend(other.production_excluded);
-    }
-
-    #[must_use]
-    pub(crate) fn dedup(mut self) -> Self {
-        dedup_entry_paths(&mut self.all);
-        dedup_entry_paths(&mut self.runtime);
-        dedup_entry_paths(&mut self.test);
-        dedup_entry_paths(&mut self.support);
-        if !self.production_excluded.is_empty() {
-            let seeded: FxHashSet<&Path> = self.all.iter().map(|ep| ep.path.as_path()).collect();
-            self.production_excluded
-                .retain(|path| !seeded.contains(path.as_path()));
-            self.production_excluded.sort_unstable();
-            self.production_excluded.dedup();
-        }
-        self
+        self.fixture_only.extend(other.fixture_only);
     }
 
     /// Files that production mode leaves out of the analysis. See
