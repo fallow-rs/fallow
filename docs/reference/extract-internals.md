@@ -51,7 +51,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   - The same scan counts the `<` tokens that the TypeScript parser can try
     as nested type-argument lists: an open `<` with a later `<` behind a
     deeper `(` or `[`. Each such level makes the parser try the inner part
-    again, so the parse time grows exponentially with the level. A file past
+    again, so the parse time grows exponentially with the level. A grouping
+    `(` before `{`, `[` or `(` adds one more level, because the parser also
+    tries it as a parameter list, and a computed key or a default value in
+    that pattern holds the inner part. A file past
     `MAX_TYPE_ARGUMENT_NESTING` returns `None` in the same way as a file
     past `MAX_NESTING_DEPTH`.
   - It then runs the parse on a stack of

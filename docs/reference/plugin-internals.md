@@ -136,7 +136,11 @@ tool loads the package, so a `--production` run skips it.
 The current producers are:
 
 - the TypeScript plugin, for each bare `compilerOptions.plugins[].name`,
-  except the plugins that editor extensions ship (`EDITOR_BUNDLED_PLUGINS`);
+  except the plugins that editor extensions ship (`EDITOR_BUNDLED_PLUGINS`).
+  `PLUGIN_PROVIDERS` lists the other packages that provide a plugin name, for
+  example `@effect/tsgo` for `@effect/language-service`. A requirement keeps
+  these packages in `provided_by`: a listed provider satisfies it and counts
+  as used;
 - the Expo and Expo Router plugins, for `expo-system-ui` when the app config
   sets `userInterfaceStyle` at the top level or under `android`. iOS applies
   its own key without `expo-system-ui`.

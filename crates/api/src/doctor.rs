@@ -424,15 +424,16 @@ fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
 /// opt-in. The check reads the `package.json` of the installed package, the
 /// same file that the companion reads before it loads Vitest, so it runs no
 /// project code. The check is skipped when `mutation.runner` does not select
-/// Vitest, the root `package.json` declares no Vitest, and the root
-/// `node_modules` holds no Vitest. A workspace package can declare a Vitest
-/// that the package manager installs at the root, so the root install counts.
+/// Vitest, the root `package.json` declares no Vitest, and the companion
+/// finds no installed Vitest. A workspace package can declare a Vitest that
+/// the package manager installs at the root, and a toolchain such as Vite+
+/// can bring its own Vitest, so each install that the companion finds counts.
 /// The `node-test` and `bun-test` runners skip the check too: their range
 /// applies to the runtime that a run selects.
 fn mutation_runner_check(root: &Path, configured: fallow_config::MutationRunner) -> DoctorCheck {
     use crate::mutation::runner_select::{Runner, declares_vitest, select_runner};
     use crate::mutation::runner_version::{
-        check_runner_version, runner_range, runner_version_help, supported_range,
+        check_runner_version, installs_package, runner_range, runner_version_help, supported_range,
         unsupported_message,
     };
 
@@ -446,7 +447,7 @@ fn mutation_runner_check(root: &Path, configured: fallow_config::MutationRunner)
     }
     if configured == fallow_config::MutationRunner::Auto
         && !declares_vitest(root)
-        && !root.join("node_modules/vitest/package.json").is_file()
+        && !installs_package(root, runner.name())
     {
         return skipped(
             DoctorCheckId::MutationRunner,
@@ -990,6 +991,38 @@ mod tests {
             "Zero-config defaults resolved successfully."
         );
         assert_eq!(output.checks[4].status, DoctorCheckStatus::Skipped);
+    }
+
+    #[test]
+    fn mutation_runner_check_reads_the_vitest_of_a_listed_toolchain() {
+        let root = tempfile::tempdir().expect("temp root");
+        let toolchain = root.path().join("node_modules/toolchain");
+        let vitest = toolchain.join("node_modules/vitest");
+        std::fs::create_dir_all(&vitest).expect("create vitest dir");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"devDependencies":{"toolchain":"1.0.0"}}"#,
+        )
+        .expect("write root manifest");
+        std::fs::write(
+            toolchain.join("package.json"),
+            r#"{"name":"toolchain","dependencies":{"vitest":"5.1.1"}}"#,
+        )
+        .expect("write toolchain manifest");
+        std::fs::write(
+            vitest.join("package.json"),
+            r#"{"name":"vitest","version":"5.1.1"}"#,
+        )
+        .expect("write vitest manifest");
+
+        let check = mutation_runner_check(root.path(), fallow_config::MutationRunner::Auto);
+
+        assert_eq!(check.status, DoctorCheckStatus::Pass, "{}", check.message);
+        assert!(
+            check.message.starts_with("vitest 5.1.1 "),
+            "{}",
+            check.message
+        );
     }
 
     /// Issue: doctor reported `pass` on a tree that had never been installed,

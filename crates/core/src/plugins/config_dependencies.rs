@@ -35,6 +35,9 @@ pub struct RequiredDependency {
     /// True when only a development tool loads the package. A `--production`
     /// run does not report a development requirement.
     pub dev_only: bool,
+    /// Other packages that also provide the need. A manifest that lists one
+    /// of them satisfies the requirement, and that package counts as used.
+    pub provided_by: &'static [&'static str],
 }
 
 impl RequiredDependency {
@@ -57,6 +60,14 @@ impl RequiredDependency {
             line: u32::try_from(line).unwrap_or(u32::MAX),
             col: u32::try_from(offset - line_start).unwrap_or(u32::MAX),
             dev_only,
+            provided_by: &[],
         }
+    }
+
+    /// Set the other packages that also provide the need.
+    #[must_use]
+    pub(crate) const fn with_providers(mut self, provided_by: &'static [&'static str]) -> Self {
+        self.provided_by = provided_by;
+        self
     }
 }
