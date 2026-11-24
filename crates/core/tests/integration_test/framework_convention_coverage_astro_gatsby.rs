@@ -79,6 +79,42 @@ fn astro_current_convention_files_and_exports_are_covered() {
 }
 
 #[test]
+fn astro_component_props_type_is_framework_used() {
+    let root = fixture_path("astro-props");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_types: Vec<(String, String)> = results
+        .unused_types
+        .iter()
+        .map(|finding| {
+            let path = finding
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&finding.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (path, finding.export.export_name.clone())
+        })
+        .collect();
+    let has = |path: &str, name: &str| unused_types.iter().any(|(p, n)| p == path && n == name);
+
+    assert!(
+        !has("src/components/Card.astro", "Props"),
+        "Astro reads Props of a .astro file, found: {unused_types:?}"
+    );
+    assert!(
+        has("src/components/Card.astro", "UnusedCardType"),
+        "other unused types in a .astro file stay reported, found: {unused_types:?}"
+    );
+    assert!(
+        has("src/shapes.ts", "Props"),
+        "Props in a .ts file stays subject to the normal check, found: {unused_types:?}"
+    );
+}
+
+#[test]
 fn gatsby_pages_and_functions_keep_convention_exports_but_flag_dead_helpers() {
     let root = fixture_path("gatsby-conventions");
     let config = create_config(root.clone());
