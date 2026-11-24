@@ -1237,23 +1237,95 @@ test("release runs Zed verification on macOS and Windows without credentials", (
   assert.match(job, /cargo fmt --check --manifest-path editors\/zed\/Cargo.toml/);
 });
 
-test("release SBOMs list only the crates of the target build", () => {
+/** The binary names that the unix archive step of the release build packs. */
+const archivedBinaries = (build) => {
+  const step = workflowSteps(build).find((s) => s.startsWith("name: Package binaries (unix)"));
+  assert.ok(step, "missing step Package binaries (unix)");
+  const tar = step.match(/tar czf "[^"]+" (.+)$/mu);
+  assert.ok(tar, "the archive step runs no tar command");
+  const entry = matrixEntry(build, "x86_64-unknown-linux-gnu");
+  return tar[1].split(/\s+/u).map((word) => {
+    const variable = word.match(/^"\$(\w+)"$/u);
+    if (!variable) return word;
+    const key = step.match(new RegExp(`${variable[1]}: \\$\\{\\{ matrix\\.(\\w+) \\}\\}`, "u"));
+    assert.ok(key, `the archive step does not set ${variable[1]} from the matrix`);
+    const value = entry.match(new RegExp(`^\\s*${key[1]}: (\\S+)$`, "mu"));
+    assert.ok(value, `the build matrix has no ${key[1]}`);
+    return value[1];
+  });
+};
+
+/** The manifest directory and the package name of the Cargo package with bin `name`. */
+const packageOfBinary = (name) => {
+  const manifests = [
+    ...readdirSync("crates").map((dir) => `crates/${dir}`),
+    "tools/similar-code-sidecar",
+  ].filter((dir) => existsSync(`${dir}/Cargo.toml`));
+  for (const dir of manifests) {
+    const manifest = readFileSync(`${dir}/Cargo.toml`, "utf8");
+    if (!manifest.includes(`[[bin]]\nname = "${name}"\n`)) continue;
+    return { dir, name: manifest.match(/^\[package\]\nname = "([^"]+)"/mu)[1] };
+  }
+  assert.fail(`no Cargo package has the bin ${name}`);
+};
+
+test("release SBOMs cover every binary of the target archive and only its crates", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const sbom = indentedBlock(workflow, "sbom", 2);
+  const script = stepScript(sbom, "Generate SBOM");
 
   assert.match(sbom, /permissions:\n\s+contents: read/);
   assert.match(sbom, /actions\/setup-node@[0-9a-f]{40}/);
-  assert.match(
-    sbom,
-    /set -euo pipefail[\s\S]*cargo cyclonedx[\s\S]*cargo tree -p fallow-cli --target "\$FALLOW_TARGET" -e normal,build[\s\S]*--locked[\s\S]*node \.github\/scripts\/filter-sbom\.mjs[\s\S]*mkdir sbom/u,
+  assert.match(script, /^set -euo pipefail\n/u);
+
+  const shipped = archivedBinaries(indentedBlock(workflow, "build", 2));
+  assert.deepEqual(
+    shipped.toSorted(),
+    ["fallow", "fallow-lsp", "fallow-mcp", "fallow-similar-code"],
+    "the archive ships these binaries",
   );
-  // The filter must rewrite the same file that the job uploads.
-  const sbomFile = '"crates/cli/fallow-${FALLOW_TARGET}.cdx.json"';
-  assert.ok(
-    sbom.includes(`filter-sbom.mjs \\\n            ${sbomFile}`),
-    "the filter reads the SBOM",
-  );
-  assert.ok(sbom.includes(`cp ${sbomFile} sbom/`), "the job uploads the filtered SBOM");
+  const bins = Array.from(script.matchAll(/--bin (\S+)/gu), (match) => match[1]);
+  assert.deepEqual(bins.toSorted(), shipped.toSorted(), "the SBOM keeps the shipped bins only");
+
+  const trees = script.match(/cargo tree [^>]+/gu) ?? [];
+  for (const tree of trees) {
+    assert.match(tree, /--target "\$FALLOW_TARGET" -e normal,build/u);
+    assert.match(tree, /--locked/u);
+  }
+  const sidecar = script.match(/^sidecar=(\S+)$/mu)?.[1];
+  for (const binary of shipped) {
+    const pkg = packageOfBinary(binary);
+    assert.ok(
+      script.includes(`"${pkg.dir}/fallow-\${FALLOW_TARGET}.cdx.json"`),
+      `the merge reads the SBOM of ${pkg.name}`,
+    );
+    if (sidecar === `${pkg.dir}/Cargo.toml`) {
+      assert.ok(
+        trees.some((tree) => tree.includes('--manifest-path "$sidecar"')),
+        `a cargo tree covers ${pkg.name}`,
+      );
+      assert.match(
+        script,
+        /for manifest in [^\n]*"\$sidecar"; do\n\s+cargo cyclonedx --manifest-path "\$manifest"/u,
+      );
+    } else {
+      assert.ok(
+        trees.some((tree) => new RegExp(`-p ${pkg.name}(?![\\w-])`, "u").test(tree)),
+        `a cargo tree covers ${pkg.name}`,
+      );
+    }
+  }
+
+  // The merge writes the file that the job uploads, and every tree feeds it.
+  const out = '"sbom/fallow-${FALLOW_TARGET}.cdx.json"';
+  assert.match(script, /mkdir sbom\nnode \.github\/scripts\/filter-sbom\.mjs/u);
+  assert.ok(script.includes(`--out ${out}`), "the merge writes the uploaded SBOM");
+  assert.ok(sbom.includes("path: sbom/fallow-${{ matrix.target }}.cdx.json"));
+  const treeFiles = Array.from(script.matchAll(/> "(\$RUNNER_TEMP\/[^"]+)"/gu), (m) => m[1]);
+  assert.equal(treeFiles.length, trees.length);
+  for (const file of treeFiles) {
+    assert.ok(script.includes(`--tree "${file}"`), `the merge reads ${file}`);
+  }
 });
 
 test("release publication waits for the aggregate verification gate", () => {
