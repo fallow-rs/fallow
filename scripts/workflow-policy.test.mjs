@@ -2902,15 +2902,30 @@ test("bench.yml measures main nightly and a push only for the release commit", a
     );
   }
 
-  // The organization shares 600 free macro runner minutes per month, so the
-  // walltime jobs run only at night and on demand. The release build runs on
-  // a free GitHub runner with the Ubuntu release of the macro runner image.
+  // The walltime jobs run at night, on the release commit and on a dispatch
+  // with the walltime input. A plain dispatch, such as the one of
+  // scripts/verify-release-ci.mjs --dispatch-missing, must not wait on a macro
+  // runner. The release build runs on a free GitHub runner with the Ubuntu
+  // release of the macro runner image.
   for (const name of ["walltime-build-cli", "type-aware"]) {
-    assert.match(
-      indentedBlock(benchmark, name, 2),
-      /^    if: github\.event_name == 'schedule' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.walltime\)$/mu,
-      name,
-    );
+    const condition = indentedBlock(benchmark, name, 2)
+      .match(/^    if: >-\n((?: {6}.+\n)+)/mu)?.[1]
+      .replace(/\s+/gu, " ")
+      .trim()
+      .replaceAll("startsWith(", "__startsWith(");
+    assert.ok(condition, `${name} has a multi-line if`);
+    const runsWalltime = (event_name, { walltime = false, message = "" } = {}) =>
+      runInNewContext(condition, {
+        __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
+        github: { event_name, event: { head_commit: { message } } },
+        inputs: { walltime },
+      });
+    assert.equal(runsWalltime("schedule"), true, `${name} nightly`);
+    assert.equal(runsWalltime("workflow_dispatch", { walltime: true }), true, `${name} input`);
+    assert.equal(runsWalltime("workflow_dispatch"), false, `${name} plain dispatch`);
+    assert.equal(runsWalltime("push", { message: "chore: release v3.49.0" }), true, name);
+    assert.equal(runsWalltime("push", { message: "fix: something" }), false, name);
+    assert.equal(runsWalltime("pull_request"), false, `${name} pull request`);
   }
   assert.match(
     indentedBlock(benchmark, "walltime-build-cli", 2),

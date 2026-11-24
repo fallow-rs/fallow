@@ -17,7 +17,8 @@ the same workflow on one commit are fine.
   simulation shard, the CLI instruction counts and the walltime jobs.
 - A push to `main` measures only the release commit (`chore: release v`),
   because `scripts/verify-release-ci.mjs` reads that result before a release.
-  That run has the Rust shards only. The other pushes skip every job.
+  That run has the Rust shards and the walltime jobs. The other pushes skip
+  every job.
 - A pull request with the `ci:perf` label runs the affected simulation shards
   and the CLI instruction counts. CodSpeed compares it with the latest `main`
   commit that has a run, usually the last nightly run. The comparison then
@@ -45,7 +46,7 @@ CPU. Benchmarks outside `crates/benchmarks` include the same helper with a
 
 Simulation leaves syscall time out of the value. A benchmark that CodSpeed
 marks "dominated by syscalls" does not show file-system cost, so do not use it
-to judge an I/O change. The nightly walltime jobs (below) measure that cost.
+to judge an I/O change. The walltime jobs (below) measure that cost.
 
 Most fallow benchmarks get this warning even when they do no I/O. The analysis
 runs on a rayon pool, and the bench thread waits on a futex until a pool worker
@@ -87,12 +88,12 @@ the full fast matrix, and global benchmark or Cargo changes fall back to all
 fast shards. The shared fixtures under `crates/benchmarks/benches/support/`
 count as a global benchmark change.
 
-## Nightly walltime jobs
+## Walltime jobs
 
 The `walltime-cli` and `type-aware` jobs of `.github/workflows/bench.yml` run
 walltime benchmarks on a CodSpeed Macro Runner, a dedicated bare-metal ARM64
 (Graviton) machine.
-The hardware is the same each night, so the values are comparable between
+The hardware is the same for each run, so the values are comparable between
 runs. CodSpeed marks walltime from a shared GitHub-hosted runner as unreliable,
 so no other job uses walltime.
 
@@ -105,11 +106,14 @@ so no other job uses walltime.
   integration to track cold Program construction and warm persistent-session
   reuse as distinct benchmarks.
 
-The fallow-rs organization shares 600 free macro runner minutes per month, so
-these jobs run only in the nightly run and in a dispatch with
-`-f walltime=true`. The release build runs on
-a free `ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro
-runner image, and the macro runner job only measures.
+The CodSpeed Hobby plan of the fallow-rs organization gives about 1,560 macro
+runner minutes per month. One run of the two jobs uses about 4 of these
+minutes. These jobs run in the nightly run, on the release commit, and in a
+dispatch with `-f walltime=true`. The release build runs on a free
+`ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro runner
+image, and the macro runner job only measures. On the release commit, the
+walltime jobs usually end before the slowest simulation shard, so the release gate
+does not wait longer.
 
 ## Local walltime retain gates
 

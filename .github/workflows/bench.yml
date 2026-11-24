@@ -10,7 +10,9 @@ name: Benchmarks
 # compares it with the latest main commit that has a run, so the comparison
 # also holds the changes merged after that nightly run. A push to main runs
 # the jobs only for the release commit ("chore: release v"), because
-# scripts/verify-release-ci.mjs reads its result before a release.
+# scripts/verify-release-ci.mjs reads its result before a release. The
+# walltime jobs run at night, on the release commit, and on a dispatch with
+# the walltime input.
 # The "Perf label for cache formats" job runs on each pull request: it fails
 # when the branch changes a benchmarked cache format without the label.
 on:
@@ -280,8 +282,8 @@ jobs:
     name: CLI instruction counts
     # Whole-binary CPU simulation of the release CLI on pinned public projects.
     # benchmarks/cli-instructions.sh owns the corpus and the benchmark list.
-    # The release push skips it: the release gate must not wait on a release
-    # build and a clone of the public corpus.
+    # The release push skips it to save runner time: the walltime-cli job
+    # measures the release CLI on the same corpus for that commit.
     needs: benchmark-harness
     if: github.event_name != 'push'
     # CodSpeed simulation currently rejects Ubuntu 26.04.
@@ -330,16 +332,23 @@ jobs:
 
   # The walltime jobs run on a CodSpeed Macro Runner, a dedicated bare-metal
   # ARM64 (Graviton) machine. CodSpeed marks walltime from a shared
-  # GitHub-hosted runner as unreliable. The fallow-rs organization shares 600
-  # free macro runner minutes per month, so these jobs run only at night and
-  # on a dispatch with the walltime input, and the release build runs on a
-  # free GitHub ARM64 runner. A plain dispatch, such as the one of
+  # GitHub-hosted runner as unreliable. The CodSpeed Hobby plan of the
+  # fallow-rs organization gives about 1,560 macro runner minutes per month.
+  # A run uses about 4 of these minutes, so these jobs run at night, on the
+  # release commit and on a dispatch with the walltime input. The release
+  # build runs on a free GitHub ARM64 runner. On the release commit, the
+  # walltime jobs usually end before the slowest simulation shard, so the
+  # release gate does not wait longer. A plain dispatch, such as the one of
   # scripts/verify-release-ci.mjs --dispatch-missing, never waits on a macro
   # runner.
   walltime-build-cli:
     name: Build fallow for the macro runner
     needs: benchmark-harness
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.walltime)
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.walltime) ||
+      (github.event_name == 'push' &&
+      startsWith(github.event.head_commit.message, 'chore: release v'))
     # The macro runner image is Ubuntu 22.04. A build on the same release keeps
     # the binary inside the glibc version of the runner.
     runs-on: ubuntu-22.04-arm
@@ -357,7 +366,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: bench-walltime-cli
-          save-if: 'false'
+          # Only the release push saves, as for the other benchmark caches.
+          save-if: ${{ github.event_name == 'push' }}
 
       - name: Build fallow
         run: cargo build --release -p fallow-cli
@@ -409,7 +419,11 @@ jobs:
   type-aware:
     name: CodSpeed walltime (type-aware cold and warm)
     needs: benchmark-harness
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.walltime)
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.walltime) ||
+      (github.event_name == 'push' &&
+      startsWith(github.event.head_commit.message, 'chore: release v'))
     runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
     timeout-minutes: 15
     permissions:
