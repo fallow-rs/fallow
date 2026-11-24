@@ -360,6 +360,17 @@ fn a_hash_or_at_url_prefix_does_not_hide_nesting() {
     }
 }
 
+/// The parser reads each level of `r<({[` three times: as type arguments,
+/// as the parameters of an arrow function and as an expression. Seven levels
+/// stay under the bracket cap, but the parse time grows exponentially.
+#[test]
+fn nested_type_arguments_in_parenthesized_patterns_degrade() {
+    let source = format!("export const x = r{};\n", "<({[r".repeat(7));
+    let info = parse("src/index.ts", &source);
+    assert!(info.parse_nesting_too_deep);
+    assert_degraded(&info);
+}
+
 /// Depth of the nested destructure defaults. Work that doubles at each level
 /// does not end in the time limit at this depth.
 const DEFAULT_DEPTH: usize = 40;

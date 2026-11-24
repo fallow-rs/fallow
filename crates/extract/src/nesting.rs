@@ -38,9 +38,13 @@ use crate::visitor::ModuleInfoExtractor;
 /// so each `<` nested in such a list multiplies the work, and a few hundred
 /// bytes such as `t<{[t<{[t<{[...` keep the parser busy for minutes. The scan
 /// counts a `<` that is still open where the next one opens behind a deeper
-/// `(` or `[`. One level can cost up to four times the level inside it, so
-/// the cap keeps the worst case near a million steps. Real code, minified
-/// bundles and generated declaration files included, stays below this cap.
+/// `(` or `[`. A grouping `(` before `{`, `[` or `(` adds one more level:
+/// the parser also tries it as a parameter list, so each `<` of
+/// `t<({[t<({[...` costs about three times the level inside it. With that
+/// count, one level costs at most about two times the level inside it, and a
+/// source at the cap parses in less than a millisecond in a release build.
+/// Real code, minified bundles and generated declaration files included,
+/// stays below this cap.
 const MAX_TYPE_ARGUMENT_NESTING: u32 = 10;
 
 /// Bracket nesting depth past which a file is not parsed.
@@ -264,6 +268,9 @@ struct Scanner<'a> {
     /// Depth of each open `(` and `[`, innermost last. Only these brackets
     /// can hold an expression inside a type.
     expression_brackets: Vec<u32>,
+    /// Depth of each open `(` that the parser can also try as a parameter
+    /// list, innermost last, see [`Scanner::opens_parameter_list`].
+    parameter_lists: Vec<u32>,
     /// Whether this scanner reads the body of a guessed regex as code, see
     /// [`Scanner::count_regex_type_arguments`].
     regex_body: bool,
@@ -308,6 +315,7 @@ impl<'a> Scanner<'a> {
             type_arguments: Vec::new(),
             max_type_arguments: 0,
             expression_brackets: Vec::new(),
+            parameter_lists: Vec::new(),
             regex_body: false,
             colors: Vec::new(),
             max_colors: 0,
@@ -371,9 +379,13 @@ impl Scanner<'_> {
 
     /// Opens a bracket. A `(` or `[` can hold an expression inside a type.
     fn open_bracket(&mut self, byte: u8) {
+        let parameter_list = byte == b'(' && self.opens_parameter_list();
         self.open();
         if byte != b'{' {
             self.expression_brackets.push(self.depth);
+        }
+        if parameter_list {
+            self.parameter_lists.push(self.depth);
         }
         if self.dialect == Dialect::Style {
             self.style_closers.push(match byte {
@@ -393,6 +405,22 @@ impl Scanner<'_> {
         }
         self.style_closers.pop();
         true
+    }
+
+    /// Whether the `(` at `pos - 1` can open a parameter list that holds an
+    /// expression. A `(` that does not follow an operand groups an
+    /// expression, and the parser also tries it as the parameters of an
+    /// arrow function or a function type. A computed key or a default value
+    /// in such a pattern holds an expression, so a `{`, `[` or `(` after the
+    /// `(` makes the parser read the inner part once more. A `/` can start a
+    /// comment before such a pattern, so it counts too. A call such as
+    /// `f({` holds no parameters.
+    fn opens_parameter_list(&self) -> bool {
+        if self.dialect != Dialect::Script || !(self.regex_allowed || self.after_keyword()) {
+            return false;
+        }
+        let rest = self.bytes[self.pos..].trim_ascii_start();
+        matches!(rest.first(), Some(b'{' | b'[' | b'(' | b'/'))
     }
 
     /// Handles the script tokens that stylesheets do not have: a template
@@ -440,11 +468,14 @@ impl Scanner<'_> {
             .type_arguments
             .last()
             .map_or(1, |outer| {
-                let behind_expression = self
-                    .expression_brackets
-                    .last()
-                    .is_some_and(|&bracket| bracket > outer.depth);
-                outer.level + u32::from(behind_expression)
+                let behind = |brackets: &[u32]| {
+                    brackets
+                        .last()
+                        .is_some_and(|&bracket| bracket > outer.depth)
+                };
+                outer.level
+                    + u32::from(behind(&self.expression_brackets))
+                    + u32::from(behind(&self.parameter_lists))
             })
             .max(replaced);
         self.type_arguments.push(TypeArguments {
@@ -489,12 +520,10 @@ impl Scanner<'_> {
         {
             self.type_arguments.pop();
         }
-        while self
-            .expression_brackets
-            .last()
-            .is_some_and(|&bracket| bracket > self.depth)
-        {
-            self.expression_brackets.pop();
+        for brackets in [&mut self.expression_brackets, &mut self.parameter_lists] {
+            while brackets.last().is_some_and(|&bracket| bracket > self.depth) {
+                brackets.pop();
+            }
         }
     }
 
@@ -787,16 +816,18 @@ impl Scanner<'_> {
         for list in &scanner.type_arguments {
             self.carry_type_arguments(base + list.depth, open.saturating_add(list.level));
         }
-        for &bracket in &scanner.expression_brackets {
-            let depth = (base + bracket).min(self.depth);
-            if self
-                .expression_brackets
-                .last()
-                .is_none_or(|&last| last < depth)
-            {
-                self.expression_brackets.push(depth);
-            }
-        }
+        carry_brackets(
+            &mut self.expression_brackets,
+            &scanner.expression_brackets,
+            base,
+            self.depth,
+        );
+        carry_brackets(
+            &mut self.parameter_lists,
+            &scanner.parameter_lists,
+            base,
+            self.depth,
+        );
         self.max_type_arguments = self
             .max_type_arguments
             .max(open.saturating_add(scanner.max_type_arguments));
@@ -839,6 +870,18 @@ impl Scanner<'_> {
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Keeps the brackets that stay open at the end of a regex body open after
+/// it. A body bracket at `depth` from `base` is open at `base + depth`, at
+/// most the running `depth`. The entries of `open` stay in depth order.
+fn carry_brackets(open: &mut Vec<u32>, body: &[u32], base: u32, depth: u32) {
+    for &bracket in body {
+        let bracket = (base + bracket).min(depth);
+        if open.last().is_none_or(|&last| last < bracket) {
+            open.push(bracket);
         }
     }
 }
@@ -1113,7 +1156,6 @@ mod tests {
     #[test]
     fn type_argument_nesting_counts_open_lists_behind_expression_brackets() {
         assert_eq!(type_argument_nesting_of(&"t<{[".repeat(5)), 5);
-        assert_eq!(type_argument_nesting_of(&"t<({[".repeat(5)), 5);
         // A `<` at the same depth replaces the open one.
         assert_eq!(type_argument_nesting_of("f(a<b, c<d, e<(g<h))"), 2);
         // `&&`, `||`, `??` and `=` cannot appear in a type, so they end the
@@ -1150,6 +1192,22 @@ mod tests {
             scan_nesting(&"a>{[".repeat(40), Dialect::Style).type_arguments,
             0
         );
+    }
+
+    /// The parser also tries a grouping `(` before a pattern as a parameter
+    /// list, so it reads each level of `t<({[` three times.
+    #[test]
+    fn a_parenthesized_pattern_adds_a_type_argument_level() {
+        assert_eq!(type_argument_nesting_of(&"t<({[".repeat(5)), 9);
+        assert_eq!(type_argument_nesting_of(&"t<( /**/ [{[".repeat(5)), 9);
+        assert_eq!(type_argument_nesting_of(&"t<(({[".repeat(5)), 9);
+        assert!(exceeds_nesting_limit(&"t<({[".repeat(6)));
+        assert_eq!(type_argument_nesting_of("a < ({ [k]: b < c })"), 3);
+        assert_eq!(type_argument_nesting_of("a < (typeof ({ [k]: b < c }))"), 3);
+        // A call and a `(` before an operand hold no pattern of parameters.
+        assert_eq!(type_argument_nesting_of(&"t<f({[".repeat(5)), 5);
+        assert_eq!(type_argument_nesting_of(&"t<(a, {[".repeat(5)), 5);
+        assert_eq!(type_argument_nesting_of("a < (b) + f(c < d)"), 2);
     }
 
     #[test]
