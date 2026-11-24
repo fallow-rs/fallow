@@ -213,6 +213,7 @@ mod trace_error_tests;
 mod trace_federation_tests;
 mod trace_path_tests;
 mod trace_plugin_credit_tests;
+mod trace_sfc_default_tests;
 mod trace_tooling_credit_tests;
 mod type_aware_backend_tests;
 mod type_aware_constant_parameter_tests;

@@ -6,7 +6,25 @@ use fallow_types::trace::ReExportChain;
 
 use crate::graph::{ExportNamespace, ModuleNode};
 
-/// The kept tag and the reason text of the traced export `name`.
+/// The credit that the trace found for one export.
+#[derive(Clone, Copy)]
+pub(super) struct ExportCredit {
+    /// Distinct reachable files that reference the export.
+    pub(super) reference_count: usize,
+    /// Whether the export is the implicit default of a component file. The
+    /// unused-export analysis never reports this default: an unused
+    /// component is an unused file.
+    pub(super) implicit_component_default: bool,
+}
+
+/// The verdict of an export trace.
+pub(super) struct ExportVerdict {
+    pub(super) is_used: bool,
+    pub(super) kept_by_tag: Option<&'static str>,
+    pub(super) reason: String,
+}
+
+/// The verdict, the kept tag and the reason text of the traced export `name`.
 ///
 /// The analysis clears each tag that `keepExportTags` does not keep before
 /// the graph build, so a tag on a graph export is a kept tag. The tag is the
@@ -15,26 +33,35 @@ use crate::graph::{ExportNamespace, ModuleNode};
 pub(super) fn export_verdict(
     module: &ModuleNode,
     name: (&str, ExportNamespace),
-    reference_count: usize,
+    credit: ExportCredit,
     re_export_chains: &[ReExportChain],
     ambiguous: bool,
-) -> (Option<&'static str>, String) {
+) -> ExportVerdict {
+    let is_used =
+        module.is_reachable() && (credit.reference_count > 0 || credit.implicit_component_default);
     if ambiguous {
         let reason = "Star re-export collision prevents consumers from resolving this declaration";
-        return (None, reason.to_string());
+        return ExportVerdict {
+            is_used,
+            kept_by_tag: None,
+            reason: reason.to_string(),
+        };
     }
-    let is_used = module.is_reachable() && reference_count > 0;
     let kept_by_tag = (!is_used && module.is_reachable() && !module.is_entry_point())
         .then(|| kept_visibility_tag(module, name))
         .flatten();
     let reason = export_reason(
         module,
-        reference_count,
+        credit.reference_count,
         is_used,
         re_export_chains,
         kept_by_tag,
     );
-    (kept_by_tag, reason)
+    ExportVerdict {
+        is_used,
+        kept_by_tag,
+        reason,
+    }
 }
 
 /// The kept visibility tag of the export, preferring the export of the
@@ -70,6 +97,10 @@ fn export_reason(
 ) -> String {
     if !module.is_reachable() {
         "File is unreachable from any entry point".to_string()
+    } else if is_used && reference_count == 0 {
+        "No file imports the component by its default, but the component file is reachable, \
+         and dead-code reports an unused component as an unused file"
+            .to_string()
     } else if is_used {
         format!(
             "Used by {} file(s){}",
