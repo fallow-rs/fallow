@@ -341,6 +341,8 @@ mod tests {
                 kind_known: true,
             },
             missing_reason,
+            next_line_kinds: Vec::new(),
+            next_line_blank: false,
             actions: Vec::<IssueAction>::new(),
             effective_severity: None,
         }

@@ -6315,6 +6315,17 @@ origin: SuppressionOrigin
  */
 missing_reason?: boolean
 /**
+ * Issue kinds that fallow found on the target line of a stale
+ * `fallow-ignore-next-line` marker. The marker names another kind, so it
+ * does not suppress these findings. Absent when the list is empty.
+ */
+next_line_kinds?: string[]
+/**
+ * True when the line after a stale `fallow-ignore-next-line` marker is
+ * blank. The marker applies only to the line directly after it.
+ */
+next_line_blank?: boolean
+/**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
  * Line and column are not inputs, so the id survives line shifts,

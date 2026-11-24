@@ -279,6 +279,8 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             kind_known: false,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });

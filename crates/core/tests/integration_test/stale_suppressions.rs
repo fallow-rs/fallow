@@ -837,3 +837,40 @@ fn component_prop_suppressions_drop_the_finding_and_are_not_stale() {
         );
     }
 }
+
+/// Issue #5164: a stale next-line marker names the kind that fallow found on
+/// the next line, and says when the next line is blank.
+#[test]
+fn stale_next_line_marker_explains_the_next_line() {
+    let root = fixture_path("stale-suppression-hints");
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    let explanation = |line: u32| -> String {
+        results
+            .stale_suppressions
+            .iter()
+            .find(|s| s.path.ends_with("src/reexp.ts") && s.line == line)
+            .map_or_else(
+                || panic!("no stale suppression on line {line}"),
+                fallow_types::results::StaleSuppression::explanation,
+            )
+    };
+
+    let wrong_kind = explanation(1);
+    assert!(
+        wrong_kind.contains("unused-type")
+            && wrong_kind.contains("fallow-ignore-next-line unused-type"),
+        "the message must name the kind on the next line: {wrong_kind}"
+    );
+
+    let blank = explanation(5);
+    assert!(
+        blank.contains("the next line is blank"),
+        "the message must say that the next line is blank: {blank}"
+    );
+
+    assert_eq!(
+        explanation(9),
+        "no unused-type issue found on the next line",
+        "a marker with no other finding on the next line keeps the plain message"
+    );
+}

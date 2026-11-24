@@ -555,6 +555,8 @@ fn codeclimate_missing_suppression_reason_uses_reason_rule_severity() {
             kind_known: true,
         },
         missing_reason: true,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(true),
         effective_severity: None,
     });
@@ -588,6 +590,8 @@ fn codeclimate_stale_and_missing_suppression_have_distinct_identities() {
         col: 0,
         origin: origin.clone(),
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
@@ -598,6 +602,8 @@ fn codeclimate_stale_and_missing_suppression_have_distinct_identities() {
         col: 0,
         origin,
         missing_reason: true,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(true),
         effective_severity: None,
     });

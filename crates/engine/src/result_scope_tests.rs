@@ -412,6 +412,8 @@ fn push_route_and_policy_findings(results: &mut AnalysisResults, path: &Path) {
             reason: None,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         finding_id: None,
         actions: Vec::new(),
         effective_severity: None,

@@ -1252,6 +1252,8 @@ mod severity_gate {
                                 kind_known: true,
                             },
                             missing_reason: false,
+                            next_line_kinds: Vec::new(),
+                            next_line_blank: false,
                             actions: fallow_api::editor_results::StaleSuppression::actions_for(
                                 false,
                             ),

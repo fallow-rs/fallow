@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
@@ -72,6 +73,10 @@ pub struct SuppressionContext<'a> {
     /// Range markers with a problem. Listed by the suppression inventory
     /// only: clone detection reports them.
     range_problems: FxHashMap<FileId, &'a [RangeMarkerProblem]>,
+    /// The issue kinds that a detector asked about on the target line of a
+    /// next-line marker that names another kind, by file and marker index.
+    /// A stale marker names these kinds in its message (issue #5164).
+    other_kinds_on_line: Mutex<FxHashMap<(FileId, usize), Vec<IssueKind>>>,
 }
 
 impl<'a> SuppressionContext<'a> {
@@ -112,6 +117,7 @@ impl<'a> SuppressionContext<'a> {
             used,
             unknown_kinds,
             range_problems,
+            other_kinds_on_line: Mutex::default(),
         }
     }
 
@@ -134,6 +140,7 @@ impl<'a> SuppressionContext<'a> {
             used,
             unknown_kinds: FxHashMap::default(),
             range_problems: FxHashMap::default(),
+            other_kinds_on_line: Mutex::default(),
         }
     }
 
@@ -144,6 +151,7 @@ impl<'a> SuppressionContext<'a> {
             used: FxHashMap::default(),
             unknown_kinds: FxHashMap::default(),
             range_problems: FxHashMap::default(),
+            other_kinds_on_line: Mutex::default(),
         }
     }
 
@@ -151,19 +159,63 @@ impl<'a> SuppressionContext<'a> {
     /// and mark the matching suppression as consumed.
     #[must_use]
     pub(crate) fn is_suppressed(&self, file_id: FileId, line: u32, kind: IssueKind) -> bool {
+        self.check_line(file_id, line, kind, true)
+    }
+
+    /// Like [`Self::is_suppressed`], for a second kind that a detector also
+    /// accepts for compatibility. The stale-marker message does not name this
+    /// kind, because the detector reports the finding under its first kind.
+    #[must_use]
+    pub(crate) fn is_suppressed_by_compat_kind(
+        &self,
+        file_id: FileId,
+        line: u32,
+        kind: IssueKind,
+    ) -> bool {
+        self.check_line(file_id, line, kind, false)
+    }
+
+    fn check_line(&self, file_id: FileId, line: u32, kind: IssueKind, record: bool) -> bool {
         let Some(supps) = self.by_file.get(&file_id) else {
             return false;
         };
         let Some(used) = self.used.get(&file_id) else {
             return false;
         };
+        let mut other_kind_markers: Vec<usize> = Vec::new();
         for (i, s) in supps.iter().enumerate() {
             if s.matches_issue_kind(line, kind) {
                 used[i].store(true, Ordering::Relaxed);
                 return true;
             }
+            if record
+                && s.scope == SuppressionScope::Line
+                && s.issue_kind_target().is_some()
+                && s.applies_to_line(line)
+            {
+                other_kind_markers.push(i);
+            }
+        }
+        if !other_kind_markers.is_empty() {
+            self.record_other_kind(file_id, &other_kind_markers, kind);
         }
         false
+    }
+
+    /// Record that a detector asked about `kind` on the target line of each
+    /// next-line marker in `markers`.
+    fn record_other_kind(&self, file_id: FileId, markers: &[usize], kind: IssueKind) {
+        let mut other_kinds = self
+            .other_kinds_on_line
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for &i in markers {
+            let kinds = other_kinds.entry((file_id, i)).or_default();
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+        drop(other_kinds);
     }
 
     /// Check if the entire file is suppressed for the given kind,
@@ -256,23 +308,39 @@ impl<'a> SuppressionContext<'a> {
     ) -> Vec<StaleSuppression> {
         let mut stale = Vec::new();
         let mut warned_unknown_policy_targets: FxHashSet<(String, String)> = FxHashSet::default();
+        let other_kinds = self
+            .other_kinds_on_line
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
         for (&file_id, supps) in &self.by_file {
             let used = &self.used[&file_id];
             let path = &graph.modules[file_id.0 as usize].path;
             let file_rules = config.resolve_rules_for_path(path);
+            let source: std::cell::OnceCell<Option<String>> = std::cell::OnceCell::new();
 
             for (i, s) in supps.iter().enumerate() {
                 if used[i].load(Ordering::Relaxed) || is_needed(file_id, s) {
                     continue;
                 }
-                if let Some(entry) = stale_entry_for_suppression(
+                if let Some(mut entry) = stale_entry_for_suppression(
                     config,
                     &file_rules,
                     path,
                     s,
                     &mut warned_unknown_policy_targets,
                 ) {
+                    if s.scope == SuppressionScope::Line {
+                        let kinds: Vec<IssueKind> = other_kinds
+                            .get(&(file_id, i))
+                            .into_iter()
+                            .flatten()
+                            .copied()
+                            .filter(|&kind| file_rules.severity_for_kind(kind) != Severity::Off)
+                            .collect();
+                        add_next_line_hint(&mut entry, s, &kinds, &source);
+                    }
                     stale.push(entry);
                 }
             }
@@ -314,6 +382,8 @@ impl<'a> SuppressionContext<'a> {
                         kind_known: true,
                     },
                     missing_reason: true,
+                    next_line_kinds: Vec::new(),
+                    next_line_blank: false,
                     actions: StaleSuppression::actions_for(true),
                     effective_severity: None,
                 });
@@ -340,6 +410,8 @@ impl<'a> SuppressionContext<'a> {
                         kind_known: false,
                     },
                     missing_reason: true,
+                    next_line_kinds: Vec::new(),
+                    next_line_blank: false,
                     actions: StaleSuppression::actions_for(true),
                     effective_severity: None,
                 });
@@ -399,6 +471,41 @@ impl<'a> SuppressionContext<'a> {
         }
         active
     }
+}
+
+/// Add to a stale next-line marker what its target line shows: the kinds that
+/// fallow found there, or else that the line is blank.
+///
+/// `source` caches the text of the file across the markers of one file. The
+/// read runs only for a stale next-line marker with no other kind on its
+/// line, so most runs read no file here.
+fn add_next_line_hint(
+    entry: &mut StaleSuppression,
+    s: &Suppression,
+    kinds: &[IssueKind],
+    source: &std::cell::OnceCell<Option<String>>,
+) {
+    if !kinds.is_empty() {
+        let mut tokens: Vec<String> = kinds
+            .iter()
+            .map(|&kind| issue_kind_to_kebab(kind).to_string())
+            .collect();
+        tokens.sort_unstable();
+        entry.next_line_kinds = tokens;
+        return;
+    }
+    let text = source.get_or_init(|| std::fs::read_to_string(&entry.path).ok());
+    entry.next_line_blank = text
+        .as_deref()
+        .is_some_and(|text| line_is_blank(text, s.line));
+}
+
+/// Whether the 1-based `line` of `source` holds only whitespace.
+fn line_is_blank(source: &str, line: u32) -> bool {
+    source
+        .lines()
+        .nth(line.saturating_sub(1) as usize)
+        .is_some_and(|text| text.trim().is_empty())
 }
 
 /// The kind token that the inventory lists for a range marker with a
@@ -472,6 +579,8 @@ fn stale_entry_for_suppression(
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     })
@@ -501,6 +610,8 @@ fn unknown_kind_stale_entry(
             kind_known: false,
         },
         missing_reason,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(missing_reason),
         effective_severity: None,
     }
