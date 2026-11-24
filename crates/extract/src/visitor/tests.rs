@@ -544,6 +544,48 @@ fn pinia_credits_member_read_on_param_typed_return_type_of_type_only_store_impor
 }
 
 #[test]
+fn pinia_credits_member_read_on_property_typed_inline_return_type() {
+    let info = parse(
+        "import type { useCounterStore } from './store'\nexport const a = (deps: { store: ReturnType<typeof useCounterStore> }) => deps.store.viaProp\nexport const b = ({ store }: { store: ReturnType<typeof useCounterStore> }) => store.viaDestructure\nexport const c = (deps: { inner: { store: ReturnType<typeof useCounterStore> } }) => deps.inner.store.viaNested",
+    );
+    let accesses = store_member_accesses(&info);
+    for member in ["viaProp", "viaDestructure", "viaNested"] {
+        assert!(
+            accesses.contains(&("useCounterStore".to_string(), member.to_string())),
+            "a read through a property typed with an inline store ReturnType must credit {member}: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_credits_member_read_on_nullable_or_renamed_inline_return_type_property() {
+    let info = parse(
+        "import type { useCounterStore } from './store'\nexport const a = (deps: { store: ReturnType<typeof useCounterStore> | null }) => deps.store?.viaNullable\nexport const b = (deps: { store?: (ReturnType<typeof useCounterStore>) }) => deps.store?.viaOptional\nexport const c = ({ store: s }: { store: ReturnType<typeof useCounterStore> }) => s.viaRenamed",
+    );
+    let accesses = store_member_accesses(&info);
+    for member in ["viaNullable", "viaOptional", "viaRenamed"] {
+        assert!(
+            accesses.contains(&("useCounterStore".to_string(), member.to_string())),
+            "the read must credit {member}: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_inline_return_type_property_of_a_non_store_credits_no_store() {
+    let info = parse(
+        "import type { useCounter, makeStore } from './lib'\nexport const a = (deps: { counter: ReturnType<typeof useCounter> }) => deps.counter.one\nexport const b = (deps: { store: ReturnType<typeof makeStore> | number }) => deps.store.two",
+    );
+    let accesses = store_member_accesses(&info);
+    for factory in ["useCounter", "makeStore"] {
+        assert!(
+            !accesses.iter().any(|(object, _)| object == factory),
+            "{factory} is not a store factory: {accesses:?}"
+        );
+    }
+}
+
+#[test]
 fn pinia_credits_member_read_on_param_typed_store_alias() {
     let info = parse(
         "import type { useCounterStore } from './store'\ntype CounterStore = ReturnType<typeof useCounterStore>\nexport const readCount = (store: CounterStore) => store.count",

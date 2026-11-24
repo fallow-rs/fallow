@@ -228,6 +228,11 @@ error by suppressing a downstream detector.
   use of `this.$state` reads every key of `state`, but no getter or action. A
   whole write `this.$state = { ... }` reads no key. An alias of `this`, such as
   `const { $state } = this`, is not tracked (issue #5203).
+- A property of an object type typed `ReturnType<typeof useFooStore>` binds
+  to the store factory, also when it is nested or destructured:
+  `(deps: { store: ReturnType<typeof useFooStore> }) => deps.store.key` reads
+  `key`. The type name of such a property is `ReturnType`, so the lookup by
+  type name alone cannot find the store (issue #5207).
 - A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
   of Vitest, Jest and Playwright) seeds each matching file as a support entry
   point, so the file is never an unused file. Discovery records the files that
