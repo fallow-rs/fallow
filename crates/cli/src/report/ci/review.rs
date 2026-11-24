@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use fallow_output::CodeClimateIssue;
 
 use super::diff_filter::DiffIndex;
+use super::pr_comment::review_conclusion;
 use crate::exit_codes::exit_invalid_input;
 use crate::report::emit_json;
 use fallow_output::PrDecisionConclusion;
@@ -348,19 +349,6 @@ fn print_review_envelope_from_ci_issues(
         }
     };
     emit_json(&value, "review envelope")
-}
-
-/// Translate a gate conclusion into the review/check vocabulary. Shared with
-/// the sticky comment renderer so both surfaces phrase one gate outcome the
-/// same way.
-pub(crate) const fn review_conclusion(conclusion: PrDecisionConclusion) -> ReviewCheckConclusion {
-    match conclusion {
-        PrDecisionConclusion::Success => ReviewCheckConclusion::Success,
-        PrDecisionConclusion::Failure => ReviewCheckConclusion::Failure,
-        PrDecisionConclusion::Neutral | PrDecisionConclusion::Skipped => {
-            ReviewCheckConclusion::Neutral
-        }
-    }
 }
 
 fn review_id_from_env() -> Result<Option<ReviewId>, String> {

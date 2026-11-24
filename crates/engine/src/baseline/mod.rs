@@ -133,7 +133,7 @@ use health_categories::{
 mod health_match;
 #[cfg(test)]
 pub(crate) use health_match::filter_new_health_findings;
-use health_match::{HealthMatch, match_health_baseline, match_severity_slots};
+use health_match::{HealthMatch, match_health_baseline};
 mod identity_counts;
 
 #[cfg(test)]

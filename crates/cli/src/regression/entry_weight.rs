@@ -13,55 +13,12 @@ use fallow_config::OutputFormat;
 use fallow_output::{EntryWeightDelta, EntryWeightListing, EntryWeightRegression};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::counts::{REGRESSION_SCHEMA_VERSION, RegressionBaseline};
+use super::counts::{
+    EntryWeightBaselineEntry, EntryWeightCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline,
+};
 use super::recovery::{BaselineCommand, RegressionArgs};
 use super::tolerance::Tolerance;
 use crate::error::emit_input_error;
-
-/// Entry weights saved in a regression baseline file.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct EntryWeightCounts {
-    /// One row per runtime entry, sorted by path.
-    #[serde(default)]
-    pub entries: Vec<EntryWeightBaselineEntry>,
-}
-
-/// Saved weight of one runtime entry.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EntryWeightBaselineEntry {
-    /// Entry file, relative to the project root.
-    pub path: String,
-    /// Source bytes that load before the entry runs.
-    pub eager_bytes: u64,
-    /// Modules that load before the entry runs.
-    pub eager_modules: usize,
-    /// Names of the packages on the eager path.
-    #[serde(default)]
-    pub eager_packages: Vec<String>,
-}
-
-impl EntryWeightCounts {
-    /// Capture the weights of the current listing.
-    #[must_use]
-    pub fn from_listing(listing: &EntryWeightListing) -> Self {
-        let mut entries: Vec<EntryWeightBaselineEntry> = listing
-            .entries
-            .iter()
-            .map(|entry| EntryWeightBaselineEntry {
-                path: entry.path.clone(),
-                eager_bytes: entry.eager_bytes,
-                eager_modules: entry.eager_modules,
-                eager_packages: entry
-                    .eager_packages
-                    .iter()
-                    .map(|package| package.name.clone())
-                    .collect(),
-            })
-            .collect();
-        entries.sort_by(|a, b| a.path.cmp(&b.path));
-        Self { entries }
-    }
-}
 
 /// Where a `list --entry-weight` run reads and writes its regression baseline.
 pub struct EntryWeightGate<'a> {

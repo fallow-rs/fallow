@@ -5,8 +5,8 @@ use crate::module_graph::StaticTestCoverage;
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
 use super::coverage_input::{CoverageInput, read_coverage_input};
-use super::test_reach::build_test_referenced_exports;
 use super::threshold_overrides::ThresholdOverrideResolver;
+use super::{subset_filter::SubsetFilter, test_reach::build_test_referenced_exports};
 
 const MAX_FUNCTION_EVIDENCE: usize = 3;
 
@@ -143,7 +143,7 @@ impl AnalysisCountsSnapshot {
     /// available per-subset today (mirrors the project-wide behaviour).
     pub(crate) fn counts_for(
         &self,
-        subset: &crate::health::SubsetFilter<'_>,
+        subset: &SubsetFilter<'_>,
         defaults: &crate::vital_signs::AnalysisCounts,
     ) -> crate::vital_signs::AnalysisCounts {
         if subset.is_full() {
@@ -189,13 +189,13 @@ impl AnalysisCountsSnapshot {
 /// Return true when an unused dependency's `package.json` path belongs to
 /// the subset.
 ///
-/// For [`crate::health::SubsetFilter::Paths`] the dep's containing workspace
+/// For [`SubsetFilter::Paths`] the dep's containing workspace
 /// (its `package.json` parent directory) is considered in scope when at
 /// least one source file in the subset lives under that directory.
-fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path::Path) -> bool {
+fn dep_in_subset(subset: &SubsetFilter<'_>, dep_path: &std::path::Path) -> bool {
     match subset {
-        crate::health::SubsetFilter::Full => true,
-        crate::health::SubsetFilter::Paths(set) => {
+        SubsetFilter::Full => true,
+        SubsetFilter::Paths(set) => {
             let Some(workspace_root) = dep_path.parent() else {
                 return false;
             };

@@ -150,7 +150,7 @@ fn render_pr_comment_body(
             status_note,
             layout: pr_comment_layout_from_env(),
         },
-        conclusion.map(super::review::review_conclusion),
+        conclusion.map(review_conclusion),
     )
 }
 
@@ -447,7 +447,7 @@ fn build_issue_decision_surface(
     gates.extend(status.gates.iter().cloned());
     let verdict = fallow_output::pr_verdict_title(
         issues,
-        heading_conclusion(Some(conclusion), status.gates).map(super::review::review_conclusion),
+        heading_conclusion(Some(conclusion), status.gates).map(review_conclusion),
     );
     let summary_markdown = decision_summary_markdown(issues, &gates, status.message);
     PrDecisionSurface {
@@ -641,6 +641,21 @@ pub(crate) fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
     {
         Ok(()) => {}
         Err(e) => eprintln!("warning: failed to write PR details '{path}': {e}"),
+    }
+}
+
+/// Translate a gate conclusion into the review/check vocabulary. The review
+/// envelope and the sticky comment renderer both use it, so both surfaces
+/// phrase one gate outcome the same way.
+pub(crate) const fn review_conclusion(
+    conclusion: PrDecisionConclusion,
+) -> fallow_output::ReviewCheckConclusion {
+    match conclusion {
+        PrDecisionConclusion::Success => fallow_output::ReviewCheckConclusion::Success,
+        PrDecisionConclusion::Failure => fallow_output::ReviewCheckConclusion::Failure,
+        PrDecisionConclusion::Neutral | PrDecisionConclusion::Skipped => {
+            fallow_output::ReviewCheckConclusion::Neutral
+        }
     }
 }
 
