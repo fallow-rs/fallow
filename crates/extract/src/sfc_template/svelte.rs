@@ -815,6 +815,12 @@ fn merge_markup_attr_usage(
             element_locals.extend(extract_pattern_binding_names(local));
         }
         if let Some(expr) = shorthand_attribute_expression(&attr.name) {
+            if attr.value.is_none()
+                && expr == "data"
+                && !current.iter().any(|local| local == "data")
+            {
+                usage.has_load_data_whole_use = true;
+            }
             merge_expression_usage_allow_dollar_refs_with_bound_targets(
                 usage,
                 expr,
