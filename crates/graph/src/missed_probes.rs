@@ -32,6 +32,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use dashmap::DashSet;
 use rustc_hash::FxBuildHasher;
 
+use crate::installed_versions::PARALLEL_MIN;
+
 /// The number of open recorders. A zero count keeps [`note`] at one atomic
 /// load.
 static OPEN: AtomicUsize = AtomicUsize::new(0);
@@ -340,10 +342,6 @@ pub(crate) fn any_missing(root: &Path, found: &[String]) -> bool {
     use rayon::prelude::*;
     found.par_iter().any(check)
 }
-
-/// Below this number of entries, a check runs on the calling thread: the
-/// rayon pool costs more than a few `stat` calls.
-pub(crate) const PARALLEL_MIN: usize = 64;
 
 #[cfg(test)]
 mod tests {
