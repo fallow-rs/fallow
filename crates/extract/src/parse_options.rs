@@ -23,3 +23,16 @@ pub fn parse_options_for(source_type: SourceType) -> ParseOptions {
         ..ParseOptions::default()
     }
 }
+
+/// Parser options for the frontmatter script of an `.astro` file.
+///
+/// Astro compiles the frontmatter block into the body of the component render
+/// function, so a top-level `return` statement (for example
+/// `return Astro.rewrite('/privacy')` or `return Astro.redirect('/')`) is
+/// valid there even though imports and exports keep ES module semantics.
+pub fn astro_frontmatter_parse_options() -> ParseOptions {
+    ParseOptions {
+        allow_return_outside_function: true,
+        ..ParseOptions::default()
+    }
+}
