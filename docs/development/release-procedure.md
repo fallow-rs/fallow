@@ -430,6 +430,13 @@ invariants in this file.
     - A timeout: the runner queue was too long. Wait until the runs finish,
       then dispatch the release again. The runs of the release commit keep
       their state.
+    - A `Benchmarks` run that waits on a CodSpeed macro runner: the push run
+      of the release commit has walltime jobs, and these jobs wait when
+      CodSpeed has no free macro runner minutes or an outage. Start a plain
+      run with `gh workflow run bench.yml --ref main`. That run skips the
+      walltime jobs. The gate reads the newest run of each workflow, so the
+      new run replaces the waiting run. Then cancel the waiting run with
+      `gh run cancel <id>`.
 
     When you add a workflow that runs on push to `main`, or move a check from
     pull requests to `main`, update `REQUIRED_WORKFLOWS` in

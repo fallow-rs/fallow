@@ -366,7 +366,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: bench-walltime-cli
-          save-if: 'false'
+          # Only the release push saves, as for the other benchmark caches.
+          save-if: ${{ github.event_name == 'push' }}
 
       - name: Build fallow
         run: cargo build --release -p fallow-cli
