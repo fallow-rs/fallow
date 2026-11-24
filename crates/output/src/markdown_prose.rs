@@ -1,6 +1,44 @@
 //! Markdown escaping for finding descriptions in PR comments and reviews.
 
-use crate::ci_output::markdown_table_code_span;
+/// Render a complete CommonMark code span around an untrusted value. The
+/// fence grows past the longest backtick run inside the value, so the span
+/// cannot be closed early from within.
+#[must_use]
+pub fn markdown_code_span(value: &str) -> String {
+    let longest_run = value
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default();
+    let fence = "`".repeat(longest_run + 1);
+    let needs_padding = value.starts_with('`')
+        || value.ends_with('`')
+        || (value.starts_with(' ') && value.ends_with(' ') && !value.chars().all(|c| c == ' '));
+    if needs_padding {
+        format!("{fence} {value} {fence}")
+    } else {
+        format!("{fence}{value}{fence}")
+    }
+}
+
+/// [`markdown_code_span`] for a Markdown table cell: pipes are additionally
+/// escaped so the value cannot terminate the cell, and line endings collapse
+/// to spaces because any CommonMark line ending would split the table row.
+#[must_use]
+pub fn markdown_table_code_span(value: &str) -> String {
+    let collapsed = value.replace("\r\n", " ").replace(['\n', '\r'], " ");
+    markdown_code_span(&collapsed.replace('|', "\\|"))
+}
+
+/// Escape prose for a Markdown table cell while leaving intentional inline
+/// markup alone: pipes are escaped and line endings collapse to spaces.
+#[must_use]
+pub fn markdown_table_text(value: &str) -> String {
+    value
+        .replace("\r\n", " ")
+        .replace(['\n', '\r'], " ")
+        .replace('|', "\\|")
+}
 
 /// Escape a finding description for a Markdown table cell or paragraph.
 ///
@@ -137,7 +175,34 @@ fn prose_needs_escape(ch: char, written: &str, next: Option<char>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{markdown_table_prose, unwrap_code_spans};
+    use super::{
+        markdown_code_span, markdown_table_code_span, markdown_table_prose, markdown_table_text,
+        unwrap_code_spans,
+    };
+
+    #[test]
+    fn markdown_code_span_grows_fence_past_inner_backticks() {
+        assert_eq!(markdown_code_span("plain"), "`plain`");
+        assert_eq!(markdown_code_span("has`tick"), "``has`tick``");
+        assert_eq!(markdown_code_span("`leading"), "`` `leading ``");
+    }
+
+    #[test]
+    fn markdown_table_code_span_escapes_pipes() {
+        assert_eq!(markdown_table_code_span("a|b"), "`a\\|b`");
+        assert_eq!(markdown_table_code_span("x`|y"), "``x`\\|y``");
+    }
+
+    #[test]
+    fn markdown_table_code_span_collapses_line_endings() {
+        assert_eq!(markdown_table_code_span("a\r\nb\rc\nd"), "`a b c d`");
+    }
+
+    #[test]
+    fn markdown_table_text_neutralizes_pipes_and_line_endings() {
+        assert_eq!(markdown_table_text("a|b"), "a\\|b");
+        assert_eq!(markdown_table_text("a\r\nb\rc\nd"), "a b c d");
+    }
 
     #[test]
     fn unwrap_code_spans_keeps_the_code_and_drops_the_fences() {

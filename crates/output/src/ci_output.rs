@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use crate::json_paths::uri_to_path;
-use crate::markdown_prose::markdown_table_prose;
+use crate::markdown_prose::{markdown_code_span, markdown_table_code_span, markdown_table_prose};
 use crate::review_envelopes::{default_marker_regex, default_marker_regex_flags};
 use crate::{
     CodeClimateIssue, CodeClimateSeverity, DiffIndex, GitHubReviewComment, GitHubReviewSide,
@@ -683,46 +683,6 @@ const fn changes_tab(provider: CiProvider) -> &'static str {
         CiProvider::Github => "Files changed",
         CiProvider::Gitlab => "Changes",
     }
-}
-
-/// Render a complete CommonMark code span around an untrusted value. The
-/// fence grows past the longest backtick run inside the value, so the span
-/// cannot be closed early from within.
-#[must_use]
-pub fn markdown_code_span(value: &str) -> String {
-    let longest_run = value
-        .split(|c| c != '`')
-        .map(str::len)
-        .max()
-        .unwrap_or_default();
-    let fence = "`".repeat(longest_run + 1);
-    let needs_padding = value.starts_with('`')
-        || value.ends_with('`')
-        || (value.starts_with(' ') && value.ends_with(' ') && !value.chars().all(|c| c == ' '));
-    if needs_padding {
-        format!("{fence} {value} {fence}")
-    } else {
-        format!("{fence}{value}{fence}")
-    }
-}
-
-/// [`markdown_code_span`] for a Markdown table cell: pipes are additionally
-/// escaped so the value cannot terminate the cell, and line endings collapse
-/// to spaces because any CommonMark line ending would split the table row.
-#[must_use]
-pub fn markdown_table_code_span(value: &str) -> String {
-    let collapsed = value.replace("\r\n", " ").replace(['\n', '\r'], " ");
-    markdown_code_span(&collapsed.replace('|', "\\|"))
-}
-
-/// Escape prose for a Markdown table cell while leaving intentional inline
-/// markup alone: pipes are escaped and line endings collapse to spaces.
-#[must_use]
-pub fn markdown_table_text(value: &str) -> String {
-    value
-        .replace("\r\n", " ")
-        .replace(['\n', '\r'], " ")
-        .replace('|', "\\|")
 }
 
 /// Render a provider-specific review envelope from typed CI issues.
@@ -1837,30 +1797,6 @@ mod tests {
         );
         assert_eq!(summary_label("Health", 12, 50), "Health (12)");
         assert_eq!(summary_label("Dependencies", 50, 50), "Dependencies (50)");
-    }
-
-    #[test]
-    fn markdown_code_span_grows_fence_past_inner_backticks() {
-        assert_eq!(markdown_code_span("plain"), "`plain`");
-        assert_eq!(markdown_code_span("has`tick"), "``has`tick``");
-        assert_eq!(markdown_code_span("`leading"), "`` `leading ``");
-    }
-
-    #[test]
-    fn markdown_table_code_span_escapes_pipes() {
-        assert_eq!(markdown_table_code_span("a|b"), "`a\\|b`");
-        assert_eq!(markdown_table_code_span("x`|y"), "``x`\\|y``");
-    }
-
-    #[test]
-    fn markdown_table_code_span_collapses_line_endings() {
-        assert_eq!(markdown_table_code_span("a\r\nb\rc\nd"), "`a b c d`");
-    }
-
-    #[test]
-    fn markdown_table_text_neutralizes_pipes_and_line_endings() {
-        assert_eq!(markdown_table_text("a|b"), "a\\|b");
-        assert_eq!(markdown_table_text("a\r\nb\rc\nd"), "a b c d");
     }
 
     #[test]
