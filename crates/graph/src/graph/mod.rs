@@ -20,6 +20,7 @@ mod namespace_re_exports;
 mod narrowing;
 pub mod package_entry;
 mod partition_order;
+mod platform_family_credit;
 mod public_exports;
 mod re_exports;
 mod reachability;
@@ -891,6 +892,7 @@ impl ModuleGraph {
             consumer_checked,
             &mut reference_paths,
         );
+        graph.credit_platform_family_re_exports(&module_by_id);
         namespace_escapes::normalize(&mut graph.namespace_escapes);
         let finalized_paths = reference_paths.finalize(&mut graph.modules);
         graph.reference_paths = finalized_paths.paths;
