@@ -1,0 +1,8 @@
+{
+  "name": "react-native-platform-family-re-export",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "react-native": "0.76.0"
+  }
+}
