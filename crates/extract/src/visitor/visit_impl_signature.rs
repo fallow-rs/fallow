@@ -855,10 +855,15 @@ impl ModuleInfoExtractor {
         binding_name: &str,
         type_annotation: &TSTypeAnnotation<'_>,
     ) {
+        let store_properties = Self::store_return_type_properties(&type_annotation.type_annotation);
         for (property_path, type_name, origin) in
             super::super::helpers::extract_nested_type_bindings(type_annotation)
         {
-            if let Some(factory) = self.store_factory_for_type_name(&type_name) {
+            if let Some(factory) = store_properties
+                .get(&property_path)
+                .cloned()
+                .or_else(|| self.store_factory_for_type_name(&type_name))
+            {
                 self.insert_class_binding_target(
                     format!("{binding_name}.{property_path}"),
                     factory,
@@ -889,11 +894,17 @@ impl ModuleInfoExtractor {
         }
         if let TSType::TSTypeLiteral(type_lit) = &type_annotation.type_annotation {
             let properties = collect_object_type_property_types(&type_lit.members);
+            let store_properties =
+                Self::store_return_type_properties(&type_annotation.type_annotation);
             for (local, key) in bindings {
                 let Some(class_name) = properties.get(&key) else {
                     continue;
                 };
-                if let Some(factory) = self.store_factory_for_type_name(&class_name.name) {
+                if let Some(factory) = store_properties
+                    .get(&key)
+                    .cloned()
+                    .or_else(|| self.store_factory_for_type_name(&class_name.name))
+                {
                     self.insert_class_binding_target(local.clone(), factory);
                     self.store_instance_locals.insert(local);
                     continue;

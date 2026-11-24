@@ -291,3 +291,20 @@ fn credits_state_keys_read_through_this_state_in_an_option_store() {
         "only the never-read members must flag: {members:?}"
     );
 }
+
+#[test]
+fn credits_reads_through_a_property_typed_with_an_inline_store_return_type() {
+    // Each helper reads one key through a property, a destructured property or
+    // a nested property typed `ReturnType<typeof useCounterStore>`. Only the
+    // never-read `deadState` flags.
+    let root = fixture_path("pinia-inline-return-type-property");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let members = store_members(&results, &root);
+
+    assert_eq!(
+        members,
+        vec![("src/stores/counter.ts".to_string(), "deadState".to_string())],
+        "only the never-read counter state must flag: {members:?}"
+    );
+}

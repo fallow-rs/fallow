@@ -616,6 +616,84 @@ impl ModuleInfoExtractor {
         (factory.starts_with("use") && factory.ends_with("Store")).then_some(factory)
     }
 
+    /// The store factory of each object-type property typed with an inline
+    /// `ReturnType<typeof useFooStore>`, by dotted property path.
+    /// `{ deps: { store: ReturnType<typeof useFooStore> } }` maps `deps.store`
+    /// to `useFooStore`. The type name of such a property is `ReturnType`, so
+    /// a lookup by type name cannot find the store.
+    pub(super) fn store_return_type_properties(ty: &TSType<'_>) -> FxHashMap<String, String> {
+        let mut properties = FxHashMap::default();
+        Self::collect_store_return_type_properties(ty, None, &mut properties);
+        properties
+    }
+
+    fn collect_store_return_type_properties(
+        ty: &TSType<'_>,
+        prefix: Option<&str>,
+        properties: &mut FxHashMap<String, String>,
+    ) {
+        match ty {
+            TSType::TSTypeLiteral(type_lit) => {
+                for member in &type_lit.members {
+                    let TSSignature::TSPropertySignature(prop) = member else {
+                        continue;
+                    };
+                    let (Some(name), Some(annotation)) =
+                        (prop.key.static_name(), prop.type_annotation.as_deref())
+                    else {
+                        continue;
+                    };
+                    let path = match prefix {
+                        Some(prefix) => format!("{prefix}.{}", name.text()),
+                        None => name.text().into_owned(),
+                    };
+                    let property_type = &annotation.type_annotation;
+                    if let Some(factory) = Self::store_factory_of_property_type(property_type) {
+                        properties.insert(path, factory);
+                    } else {
+                        Self::collect_store_return_type_properties(
+                            property_type,
+                            Some(&path),
+                            properties,
+                        );
+                    }
+                }
+            }
+            TSType::TSParenthesizedType(paren) => {
+                Self::collect_store_return_type_properties(
+                    &paren.type_annotation,
+                    prefix,
+                    properties,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// The store factory of a property type `ReturnType<typeof useFooStore>`,
+    /// also in parentheses or in a union with `null` or `undefined`.
+    fn store_factory_of_property_type(ty: &TSType<'_>) -> Option<String> {
+        match ty {
+            TSType::TSParenthesizedType(paren) => {
+                Self::store_factory_of_property_type(&paren.type_annotation)
+            }
+            TSType::TSUnionType(union) => {
+                let mut present = union.types.iter().filter(|branch| {
+                    !matches!(
+                        branch,
+                        TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_)
+                    )
+                });
+                let only = present.next()?;
+                if present.next().is_some() {
+                    return None;
+                }
+                Self::store_factory_of_property_type(only)
+            }
+            _ => Self::store_factory_from_return_type(ty),
+        }
+    }
+
     /// Resolve a param type annotation to a store factory, accepting either the
     /// inline `ReturnType<typeof useFooStore>` form or a recorded alias of it.
     pub(super) fn store_factory_for_type(&self, ty: &TSType<'_>) -> Option<String> {
