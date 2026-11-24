@@ -9,15 +9,15 @@ use std::path::Path;
 
 use fallow_extract::JsText;
 use oxc_ast::ast::{
-    Argument, BindingPattern, Expression, ImportDeclarationSpecifier, NewExpression,
-    ObjectExpression, Program, Statement, StringLiteral,
+    Argument, BindingPattern, Expression, ImportDeclaration, ImportDeclarationSpecifier,
+    NewExpression, ObjectExpression, Program, Statement, StringLiteral, VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 
 use super::config_parser;
 
 /// The Forge plugin package that builds the app with Vite.
-pub(super) const VITE_PLUGIN_PACKAGE: &str = "@electron-forge/plugin-vite";
+const VITE_PLUGIN_PACKAGE: &str = "@electron-forge/plugin-vite";
 
 /// The class that `@electron-forge/plugin-vite` exports.
 const VITE_PLUGIN_EXPORT: &str = "VitePlugin";
@@ -60,54 +60,64 @@ fn vite_plugin_bindings(program: &Program<'_>) -> VitePluginBindings {
     for stmt in &program.body {
         match stmt {
             Statement::ImportDeclaration(decl) if decl.source.value == VITE_PLUGIN_PACKAGE => {
-                for specifier in decl.specifiers.iter().flatten() {
-                    match specifier {
-                        ImportDeclarationSpecifier::ImportSpecifier(specifier)
-                            if specifier.imported.name().as_ref() == VITE_PLUGIN_EXPORT =>
-                        {
-                            bindings.classes.push(specifier.local.name.to_string());
-                        }
-                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
-                            bindings.namespaces.push(specifier.local.name.to_string());
-                        }
-                        _ => {}
-                    }
-                }
+                add_import_bindings(decl, &mut bindings);
             }
             Statement::VariableDeclaration(decl) => {
                 for declarator in &decl.declarations {
-                    let is_plugin_require = declarator.init.as_ref().is_some_and(|init| {
-                        matches!(init, Expression::CallExpression(call)
-                            if config_parser::get_require_source(call).as_deref() == Some(VITE_PLUGIN_PACKAGE))
-                    });
-                    if !is_plugin_require {
-                        continue;
-                    }
-                    match &declarator.id {
-                        BindingPattern::BindingIdentifier(identifier) => {
-                            bindings.namespaces.push(identifier.name.to_string());
-                        }
-                        BindingPattern::ObjectPattern(object) => {
-                            for prop in &object.properties {
-                                if prop
-                                    .key
-                                    .static_name()
-                                    .is_some_and(|name| name.text() == VITE_PLUGIN_EXPORT)
-                                    && let BindingPattern::BindingIdentifier(identifier) =
-                                        &prop.value
-                                {
-                                    bindings.classes.push(identifier.name.to_string());
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                    add_require_bindings(declarator, &mut bindings);
                 }
             }
             _ => {}
         }
     }
     bindings
+}
+
+/// Record `import { VitePlugin }` and `import * as ns` of the plugin package.
+fn add_import_bindings(decl: &ImportDeclaration<'_>, bindings: &mut VitePluginBindings) {
+    for specifier in decl.specifiers.iter().flatten() {
+        match specifier {
+            ImportDeclarationSpecifier::ImportSpecifier(specifier)
+                if specifier.imported.name().as_ref() == VITE_PLUGIN_EXPORT =>
+            {
+                bindings.classes.push(specifier.local.name.to_string());
+            }
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(specifier) => {
+                bindings.namespaces.push(specifier.local.name.to_string());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Record `const ns = require(...)` and `const { VitePlugin } = require(...)`
+/// of the plugin package.
+fn add_require_bindings(declarator: &VariableDeclarator<'_>, bindings: &mut VitePluginBindings) {
+    let is_plugin_require = declarator.init.as_ref().is_some_and(|init| {
+        matches!(init, Expression::CallExpression(call)
+            if config_parser::get_require_source(call).as_deref() == Some(VITE_PLUGIN_PACKAGE))
+    });
+    if !is_plugin_require {
+        return;
+    }
+    match &declarator.id {
+        BindingPattern::BindingIdentifier(identifier) => {
+            bindings.namespaces.push(identifier.name.to_string());
+        }
+        BindingPattern::ObjectPattern(object) => {
+            for prop in &object.properties {
+                if prop
+                    .key
+                    .static_name()
+                    .is_some_and(|name| name.text() == VITE_PLUGIN_EXPORT)
+                    && let BindingPattern::BindingIdentifier(identifier) = &prop.value
+                {
+                    bindings.classes.push(identifier.name.to_string());
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 struct ForgeViteVisitor {
