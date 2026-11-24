@@ -16,6 +16,18 @@ use super::{
     extract_function_body_final_return_expr, static_member_object_name, unwrap_paren_expr,
 };
 
+/// The Pinia store property that holds the whole state object.
+const PINIA_STATE_PROPERTY: &str = "$state";
+
+/// The receiver of a Pinia store member read.
+enum StoreReceiver {
+    /// An inline factory call, `useFooStore()`: credit the factory import.
+    Factory(String),
+    /// A bound store instance local or member path: credit it through its
+    /// binding target.
+    Local(String),
+}
+
 /// Whether a call's callee is a bare `defineStore` identifier (Pinia). The
 /// harvest is loose here; the analyzer's `pinia` / `@pinia/nuxt` dependency
 /// gate is the activation boundary.
@@ -272,6 +284,20 @@ impl ModuleInfoExtractor {
         if obj_pat.rest.is_some() {
             return;
         }
+        if let Expression::StaticMemberExpression(state) = init
+            && obj_pat
+                .properties
+                .iter()
+                .all(|prop| prop.key.static_name().is_some())
+            && let Some(receiver) = self.pinia_state_receiver(state)
+        {
+            self.pinia_state_named_uses.insert(state.span.start);
+            let object = match receiver {
+                StoreReceiver::Factory(name) | StoreReceiver::Local(name) => name,
+            };
+            self.credit_store_pattern_members(obj_pat, &object);
+            return;
+        }
 
         self.record_pinia_object_pattern_store_members(obj_pat, init);
     }
@@ -316,6 +342,76 @@ impl ModuleInfoExtractor {
             }
             _ => {}
         }
+    }
+
+    /// The store receiver of a `<store>.$state` expression, or `None` when the
+    /// expression is not `$state` or its object is not a known store.
+    fn pinia_state_receiver(&self, state: &StaticMemberExpression<'_>) -> Option<StoreReceiver> {
+        if state.property.name != PINIA_STATE_PROPERTY {
+            return None;
+        }
+        if let Some(factory) = Self::inline_store_factory_receiver(&state.object) {
+            return Some(StoreReceiver::Factory(factory));
+        }
+        let path = static_member_object_name(&state.object)?;
+        let is_store = self.store_instance_locals.contains(&path)
+            || matches!(
+                self.binding_target_names.get(&path),
+                Some(BindingTarget::Class(factory))
+                    if factory.starts_with("use") && factory.ends_with("Store")
+            );
+        is_store.then_some(StoreReceiver::Local(path))
+    }
+
+    /// Credit `key` on the store when `object` is `<store>.$state`
+    /// (`store.$state.key`, `store.$state['key']`). Pinia exposes each state
+    /// key on the store itself, so the read is the same as `store.key`.
+    pub(super) fn record_pinia_state_key_read(&mut self, object: &Expression<'_>, key: &str) {
+        let Expression::StaticMemberExpression(state) = unwrap_paren_expr(object) else {
+            return;
+        };
+        let Some(receiver) = self.pinia_state_receiver(state) else {
+            return;
+        };
+        self.pinia_state_named_uses.insert(state.span.start);
+        match receiver {
+            StoreReceiver::Factory(factory) => self.member_accesses.push(MemberAccess {
+                object: factory,
+                member: key.to_string(),
+            }),
+            StoreReceiver::Local(path) => self.record_named_member_access(&path, key),
+        }
+    }
+
+    /// Mark a whole `store.$state = { ... }` write as consumed. Pinia applies
+    /// the write as a patch, and the write reads no key.
+    pub(super) fn record_pinia_state_write(&mut self, expr: &AssignmentExpression<'_>) {
+        if expr.operator == AssignmentOperator::Assign
+            && let AssignmentTarget::StaticMemberExpression(member) = &expr.left
+            && member.property.name == PINIA_STATE_PROPERTY
+        {
+            self.pinia_state_named_uses.insert(member.span.start);
+        }
+    }
+
+    /// Record a `<store>.$state.key` read on the store, and mark the whole store
+    /// as used for a store `$state` value that no key read, destructure or write
+    /// consumes (a call argument, a spread, an alias), as it can reach every key.
+    pub(super) fn record_pinia_state_access(&mut self, expr: &StaticMemberExpression<'_>) {
+        self.record_pinia_state_key_read(&expr.object, expr.property.name.as_str());
+        self.record_pinia_state_escape(expr);
+    }
+
+    fn record_pinia_state_escape(&mut self, state: &StaticMemberExpression<'_>) {
+        if self.pinia_state_named_uses.contains(&state.span.start) {
+            return;
+        }
+        let Some(receiver) = self.pinia_state_receiver(state) else {
+            return;
+        };
+        self.push_whole_object_use(match receiver {
+            StoreReceiver::Factory(name) | StoreReceiver::Local(name) => name,
+        });
     }
 
     /// Options-API map helpers reference store members as string-array or object

@@ -217,6 +217,12 @@ error by suppressing a downstream detector.
   entry point reads only store members, so its enum, class and namespace
   members are not reported either, unless `includeEntryExports` covers the
   file (issue #4990).
+- A Pinia state key read through the `$state` object of a known store is a
+  read of that store member: `store.$state.key`, `store.$state['key']` and
+  `const { key } = store.$state`. Any other use of a store `$state` value (a
+  call argument, a spread, an alias, a type assertion, a dynamic key, a rest
+  or dynamic-key destructure) marks the whole store as used. A whole write
+  `store.$state = { ... }` reads no key (issue #5168).
 - A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
   of Vitest, Jest and Playwright) seeds each matching file as a support entry
   point, so the file is never an unused file. Discovery records the files that

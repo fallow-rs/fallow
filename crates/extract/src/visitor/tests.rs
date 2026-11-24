@@ -401,6 +401,57 @@ fn pinia_setup_store_credits_returned_members_read_in_setup_body() {
 }
 
 #[test]
+fn pinia_state_key_reads_credit_the_key_and_writes_credit_nothing() {
+    // Issue #5168: Pinia exposes each state key on the store, so a key read
+    // through `$state` is a read of the store member.
+    let info = parse(
+        "import { useSStore } from './s'\nconst s = useSStore()\ns.$state?.optional\ns.$state?.['indexed']\ns.$state.counter += 1\nconst { picked } = s.$state\n;(s.$state).wrapped\nuseSStore().$state.inline\ns.$state = { replaced: 1 }\nconst plain = { $state: { other: 1 } }\nplain.$state.other\nsend(plain.$state)",
+    );
+    let accesses = store_member_accesses(&info);
+    for credited in [
+        "optional", "indexed", "counter", "picked", "wrapped", "inline",
+    ] {
+        assert!(
+            accesses.iter().any(|(_, member)| member == credited),
+            "{credited} is read through `$state` and must be credited: {accesses:?}"
+        );
+    }
+    assert!(
+        !accesses.iter().any(|(_, member)| member == "replaced"),
+        "a whole `$state` write reads no key: {accesses:?}"
+    );
+    assert!(
+        !info
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "s" || name == "useSStore"),
+        "named reads, a whole write and a non-store `$state` must not mark a whole store: {:?}",
+        info.whole_object_uses
+    );
+}
+
+#[test]
+fn pinia_state_value_that_escapes_marks_the_whole_store() {
+    let info = parse(
+        "import { useAStore, useBStore, useCStore, useDStore, useEStore, useFStore } from './s'\nconst a = useAStore()\nsend(a.$state)\nconst b = useBStore()\n;(b.$state as { k: number }).k\nconst c = useCStore()\nc.$state[key]\nconst d = useDStore()\nconst { x, ...rest } = d.$state\nconst e = useEStore()\nconst { [key]: v } = e.$state\nconst copy = { ...useFStore().$state }",
+    );
+    for store in [
+        "useAStore",
+        "useBStore",
+        "useCStore",
+        "useDStore",
+        "useEStore",
+        "useFStore",
+    ] {
+        assert!(
+            info.whole_object_uses.iter().any(|name| name == store),
+            "{store} has an escaped `$state` and must be a whole use: {:?}",
+            info.whole_object_uses
+        );
+    }
+}
+
+#[test]
 fn pinia_credits_member_read_on_param_typed_return_type_of_type_only_store_import() {
     // Issue #3348 case A: a helper in another file reads a store member through
     // a param typed `ReturnType<typeof useCounterStore>` with a type-only import.

@@ -4484,6 +4484,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        self.record_pinia_state_write(expr);
         // FP-1 (unused-load-data-key): a destructure-ASSIGNMENT from the `data`
         // prop (`({ guests } = data)` in a Svelte `$effect`, or `$: ({a} = data)`)
         // is NOT a `const/let` declaration, so Primitive A does not credit the
@@ -4692,6 +4693,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
         self.record_dotted_env_read(expr);
+        self.record_pinia_state_access(expr);
         self.capture_factory_property_access(&expr.object, expr.property.name.as_str());
         self.record_projected_member_access(&expr.object, expr.property.name.as_str());
         self.record_subclass_member_access(&expr.object, expr.property.name.as_str());
@@ -4734,11 +4736,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             ));
         }
         if let Some(store_factory) = Self::inline_store_factory_receiver(&expr.object) {
-            // `useFooStore().member` with no bound local: the generic receiver
-            // name would be the inert `useFooStore()` string. Credit the member on
-            // the factory import directly, mirroring the bound
-            // `const s = useFooStore(); s.member` path (see `record_pinia_store`,
-            // issue #1489 Case 1).
+            // `useFooStore().member` has no bound local: credit the factory import,
+            // as `record_pinia_store` does for `s.member` (issue #1489 Case 1).
             self.member_accesses.push(MemberAccess {
                 object: store_factory,
                 member: expr.property.name.to_string(),
@@ -4783,6 +4782,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         self.record_computed_env_read(expr);
         if let Some(member) = expr.static_property_name() {
+            self.record_pinia_state_key_read(&expr.object, &member.text());
             self.record_subclass_member_access(&expr.object, &member.text());
             self.record_awaited_dynamic_import_member(&expr.object, &member.text());
         }

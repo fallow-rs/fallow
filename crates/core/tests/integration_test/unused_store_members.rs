@@ -245,3 +245,26 @@ fn credits_store_members_read_through_imported_and_later_declared_aliases() {
         "only the never-read returned member must flag: {members:?}"
     );
 }
+
+#[test]
+fn credits_state_keys_read_through_the_state_object() {
+    // `system.$state.extra`, `system.$state['indexed']`, a destructure of
+    // `system.$state`, an inline `useSystemStore().$state.token` and a typed
+    // `props.store.$state.typedRead` each read one key. `prefs.$state` passed
+    // to a helper and a spread of `useSessionStore().$state` use the whole
+    // state. A whole `$state` write reads no key, so `deadState` and
+    // `deadGetter` still flag.
+    let root = fixture_path("pinia-state-object-reads");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let members = store_members(&results, &root);
+
+    assert_eq!(
+        members,
+        vec![
+            ("src/stores/system.ts".to_string(), "deadGetter".to_string()),
+            ("src/stores/system.ts".to_string(), "deadState".to_string()),
+        ],
+        "only the never-read system members must flag: {members:?}"
+    );
+}
