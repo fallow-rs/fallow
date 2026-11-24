@@ -1382,13 +1382,16 @@ selects one. The default `auto` reads the project in this order:
 
 1. `vitest` in the root `package.json` dependencies selects Vitest.
 2. Otherwise the test module that the most static test files import:
-   `vitest`, `bun:test` or `node:test`. A tie goes to Vitest, then
+   `vitest` or `vite-plus/test`, `bun:test` or `node:test`. A tie goes to
+   Vitest, then `bun test`.
+3. Otherwise `vite-plus` in the root `package.json` dependencies selects
+   Vitest. Vite+ runs Vitest through `vp test`, but a project can use Vite+
+   only to build, lint or format, so the test imports come first.
+4. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
    `bun test`.
-3. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
-   `bun test`.
-4. Otherwise a `node --test` or `borp` command in a `package.json` script
+5. Otherwise a `node --test` or `borp` command in a `package.json` script
    selects `node:test`.
-5. Otherwise Vitest.
+6. Otherwise Vitest.
 
 | Runner | Config value | Versions | Runtime of the companion |
 |---|---|---|---|
