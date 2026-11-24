@@ -1,0 +1,6 @@
+{
+  "name": "vitest-root-include-workspaces",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": { "vitest": "3.0.0" }
+}
