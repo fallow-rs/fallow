@@ -6,14 +6,14 @@ use fallow_config::{ExternalPluginDef, FallowConfig, PackageJson};
 use crate::exit_codes::exit_invalid_input;
 #[path = "init_git_hook_location.rs"]
 pub mod git_hook_location;
-use git_hook_location::{display_hook_path, git_pre_commit_target, write_hook};
+use git_hook_location::{git_pre_commit_target, write_hook};
 
 #[cfg(test)]
 #[path = "init_hook_script_tests.rs"]
 mod hook_script_tests;
 #[path = "init_project_files.rs"]
 mod project_files;
-use project_files::{ensure_gitignore, refuse_outside_link};
+use project_files::{display_hook_path, ensure_gitignore, refuse_outside_link};
 
 const AGENTS_GUIDE_FILENAME: &str = "AGENTS.md";
 /// Static template used as the ground truth for the empty-project case and

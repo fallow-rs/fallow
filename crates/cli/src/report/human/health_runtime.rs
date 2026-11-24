@@ -2,7 +2,7 @@ use std::path::Path;
 
 use colored::Colorize;
 
-use super::{MAX_FLAT_ITEMS, format_path, health::format_window, thousands};
+use super::{MAX_FLAT_ITEMS, format_path, thousands};
 use crate::health::optimization_target::MIN_COGNITIVE_COST;
 use crate::report::format_display_path;
 
@@ -225,11 +225,32 @@ fn render_upgrade_prompt(
     );
 }
 
+/// Format `seconds` as a human-readable window label like "12 min" or "6 h".
+///
+/// Used by both the terminal and markdown renderers so a multi-day window
+/// consistently reads as "N d" in both surfaces instead of diverging to
+/// "N h" in one of them.
+fn format_window(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds} s");
+    }
+    let minutes = seconds / 60;
+    if minutes < 120 {
+        return format!("{minutes} min");
+    }
+    let hours = minutes / 60;
+    if hours < 48 {
+        format!("{hours} h")
+    } else {
+        format!("{} d", hours / 24)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use fallow_output::{RuntimeCoverageCostBasis, RuntimeCoverageOptimizationTarget};
 
-    use super::{invocations_label, optimization_cost_suffix};
+    use super::{format_window, invocations_label, optimization_cost_suffix};
 
     fn target(
         cost_score: u64,
@@ -285,5 +306,14 @@ mod tests {
         assert_eq!(invocations_label(Some(0)), "0 invocations");
         assert_eq!(invocations_label(Some(1)), "1 invocation");
         assert_eq!(invocations_label(Some(2)), "2 invocations");
+    }
+
+    #[test]
+    fn format_window_labels() {
+        assert_eq!(format_window(30), "30 s");
+        assert_eq!(format_window(60), "1 min");
+        assert_eq!(format_window(720), "12 min");
+        assert_eq!(format_window(3600 * 3), "3 h");
+        assert_eq!(format_window(3600 * 24 * 3), "3 d");
     }
 }

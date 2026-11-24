@@ -11,10 +11,9 @@ pub use baseline::{
     save_baseline_to_config_with_identity, save_flags_regression_baseline,
     save_regression_baseline_with_identity,
 };
-pub use counts::{CheckCounts, FlagsCounts};
+pub use counts::{CheckCounts, EntryWeightCounts, FlagsCounts};
 pub use entry_weight::{
-    EntryWeightCounts, EntryWeightGate, compare_entry_weight, load_entry_weight_baseline,
-    save_entry_weight_baseline,
+    EntryWeightGate, compare_entry_weight, load_entry_weight_baseline, save_entry_weight_baseline,
 };
 pub use flags::{compare_flags_regression, print_flags_regression};
 pub use outcome::{RegressionOutcome, print_regression_outcome};
