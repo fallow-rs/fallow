@@ -11,6 +11,7 @@ use oxc_ast::ast::{
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::Span;
 use oxc_syntax::scope::ScopeFlags;
+use rustc_hash::FxHashSet;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
@@ -31,6 +32,9 @@ const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 const MODULE_EXTENSIONS: &[&str] = &["js", "mjs", "cjs", "ts", "mts", "cts"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["oxlint", "oxlint-tsgolint"];
+
+/// The number of imported preset levels that the plugin reads below a config.
+const MAX_IMPORTED_PRESET_DEPTH: usize = 4;
 
 const ULTRACITE_JS_PLUGINS_SOURCE: &str = "ultracite/oxlint/js-plugins";
 
@@ -75,16 +79,148 @@ pub(super) fn credit_oxlint_config(
     root: &Path,
     base: &[&str],
 ) {
-    let specifiers = config_parser::extract_from_source(source, config_path, |program| {
-        let mut config = config_parser::find_config_object(program)?;
-        for key in base {
-            config = config_parser::property_object(config, key)?;
-        }
-        Some(oxlint_config_specifiers(config))
-    })
-    .unwrap_or_default();
+    let (specifiers, presets) =
+        config_parser::extract_from_source(source, config_path, |program| {
+            let mut config = config_parser::find_config_object(program)?;
+            for key in base {
+                config = config_parser::property_object(config, key)?;
+            }
+            Some((
+                oxlint_config_specifiers(config),
+                imported_extends_sources(program, config),
+            ))
+        })
+        .unwrap_or_default();
     for specifier in specifiers {
         credit_config_specifier(result, config_path, root, &specifier);
+    }
+    let importer = absolute_config_path(config_path, root);
+    let mut visited = FxHashSet::default();
+    credit_imported_presets(
+        result,
+        &importer,
+        root,
+        &presets,
+        MAX_IMPORTED_PRESET_DEPTH,
+        &mut visited,
+    );
+}
+
+/// Credit the plugin specifiers of the presets that an `extends` array names
+/// as imported values (issue #5101). Each preset is the default export of the
+/// imported module. A preset that is not a static object gives no credit.
+fn credit_imported_presets(
+    result: &mut PluginResult,
+    importer: &Path,
+    root: &Path,
+    sources: &[String],
+    depth: usize,
+    visited: &mut FxHashSet<PathBuf>,
+) {
+    if depth == 0 {
+        return;
+    }
+    for source in sources {
+        let Some(file) = resolve_preset_file(importer, root, source) else {
+            continue;
+        };
+        if !visited.insert(file.clone()) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let Some((specifiers, nested)) =
+            config_parser::extract_from_source(&text, &file, |program| {
+                let config = config_parser::find_config_object(program)?;
+                Some((
+                    oxlint_config_specifiers(config),
+                    imported_extends_sources(program, config),
+                ))
+            })
+        else {
+            continue;
+        };
+        // A path inside a dependency is not a file of the project.
+        let in_dependency = super::project_glob::is_in_node_modules(&file, root);
+        for specifier in specifiers {
+            if !in_dependency || is_package_specifier(&specifier) {
+                credit_config_specifier(result, &file, root, &specifier);
+            }
+        }
+        credit_imported_presets(result, &file, root, &nested, depth - 1, visited);
+    }
+}
+
+/// The import sources of the `extends` entries that are default-imported
+/// bindings, such as `reactStrict` in `extends: [reactStrict]`.
+fn imported_extends_sources(program: &Program<'_>, config: &ObjectExpression<'_>) -> Vec<String> {
+    let Some(Expression::ArrayExpression(extends)) =
+        config_parser::property_expr(config, "extends")
+    else {
+        return Vec::new();
+    };
+    extends
+        .elements
+        .iter()
+        .filter_map(|element| match element.as_expression()? {
+            Expression::Identifier(binding) => {
+                default_import_source(program, binding.name.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn default_import_source(program: &Program<'_>, local: &str) -> Option<String> {
+    program.body.iter().find_map(|statement| {
+        let Statement::ImportDeclaration(declaration) = statement else {
+            return None;
+        };
+        if declaration.import_kind.is_type() {
+            return None;
+        }
+        let binds_local = declaration.specifiers.as_ref()?.iter().any(|specifier| {
+            matches!(
+                specifier,
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(default)
+                    if default.local.name == local
+            )
+        });
+        if !binds_local {
+            return None;
+        }
+        declaration.source.value.as_str().map(str::to_owned)
+    })
+}
+
+/// Resolve the module that an `import` in `importer` names. A package
+/// resolves through `node_modules` and the `exports` map of its manifest.
+fn resolve_preset_file(importer: &Path, root: &Path, source: &str) -> Option<PathBuf> {
+    if is_local_specifier(source) {
+        let file = resolve_local_module_file(resolve_config_relative_path(importer, root, source));
+        return file.is_file().then_some(file);
+    }
+    if !is_package_specifier(source) {
+        return None;
+    }
+    let package_name = crate::resolve::extract_package_name(source);
+    let package_dir = super::eslint::find_package_dir(importer.parent()?, &package_name)?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(package_dir.join("package.json")).ok()?)
+            .ok()?;
+    let subpath_key = format!(".{}", source.get(package_name.len()..).unwrap_or_default());
+    let entry = super::eslint::resolve_package_entry(&manifest, &subpath_key, &package_dir)?;
+    let file =
+        resolve_local_module_file(config_parser::lexical_normalize(&package_dir.join(entry)));
+    file.is_file().then_some(file)
+}
+
+fn absolute_config_path(config_path: &Path, root: &Path) -> PathBuf {
+    if config_path.is_absolute() {
+        config_path.to_path_buf()
+    } else {
+        root.join(config_path)
     }
 }
 
@@ -297,11 +433,7 @@ fn is_package_specifier(specifier: &str) -> bool {
 }
 
 fn resolve_config_relative_path(config_path: &Path, root: &Path, specifier: &str) -> PathBuf {
-    let config_abs = if config_path.is_absolute() {
-        config_path.to_path_buf()
-    } else {
-        root.join(config_path)
-    };
+    let config_abs = absolute_config_path(config_path, root);
     config_parser::lexical_normalize(&config_abs.parent().unwrap_or(root).join(specifier))
 }
 
@@ -804,6 +936,114 @@ mod tests {
             plugin.resolve_config(Path::new(".oxlintrc.json"), source, Path::new("/project"));
 
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    fn resolve_project_config(root: &Path, source: &str) -> PluginResult {
+        let config_path = root.join("oxlint.config.ts");
+        write_file(&config_path, source);
+        OxlintPlugin.resolve_config(&config_path, source, root)
+    }
+
+    #[test]
+    fn resolve_config_credits_js_plugins_of_an_imported_package_preset() {
+        // Issue #5101: the preset is an imported value under node_modules.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let preset = root.join("node_modules/lint-preset");
+        write_file(
+            &preset.join("package.json"),
+            r#"{"name":"lint-preset","type":"module","exports":{"./react-strict":"./react-strict.js"}}"#,
+        );
+        write_file(
+            &preset.join("react-strict.js"),
+            r#"export default { jsPlugins: ["oxlint-plugin-react-doctor"] }"#,
+        );
+
+        let result = resolve_project_config(
+            root,
+            r#"
+                import { defineConfig } from "oxlint";
+                import reactStrict from "lint-preset/react-strict";
+                export default defineConfig({ extends: [reactStrict] });
+            "#,
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"oxlint-plugin-react-doctor".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_follows_nested_imported_presets_up_to_the_depth_limit() {
+        // Each preset `level-N` extends `level-(N+1)` and names `plugin-N`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let levels = MAX_IMPORTED_PRESET_DEPTH + 2;
+        for level in 1..=levels {
+            let preset = root.join(format!("node_modules/level-{level}"));
+            write_file(
+                &preset.join("package.json"),
+                &format!(r#"{{"name":"level-{level}","main":"index.js"}}"#),
+            );
+            let next = level + 1;
+            let body = if level < levels {
+                format!(
+                    "import next from \"level-{next}\";\n\
+                     export default {{ extends: [next], jsPlugins: [\"plugin-{level}\"] }};\n"
+                )
+            } else {
+                format!("export default {{ jsPlugins: [\"plugin-{level}\"] }};\n")
+            };
+            write_file(&preset.join("index.js"), &body);
+        }
+
+        let result = resolve_project_config(
+            root,
+            r#"
+                import level from "level-1";
+                export default { extends: [level] };
+            "#,
+        );
+
+        let deps = &result.referenced_dependencies;
+        for level in 1..=MAX_IMPORTED_PRESET_DEPTH {
+            assert!(deps.contains(&format!("plugin-{level}")), "plugin-{level}");
+        }
+        for level in MAX_IMPORTED_PRESET_DEPTH + 1..=levels {
+            assert!(!deps.contains(&format!("plugin-{level}")), "plugin-{level}");
+        }
+    }
+
+    #[test]
+    fn resolve_config_ignores_imported_presets_that_are_not_static() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write_file(
+            &root.join("presets/dynamic.js"),
+            "export default makePreset([\"plugin-dynamic\"]);\n",
+        );
+        write_file(
+            &root.join("presets/cycle.js"),
+            "import self from \"./cycle.js\";\n\
+             export default { extends: [self], jsPlugins: [\"plugin-cycle\"] };\n",
+        );
+
+        let result = resolve_project_config(
+            root,
+            r#"
+                import dynamic from "./presets/dynamic.js";
+                import cycle from "./presets/cycle.js";
+                import missing from "missing-preset";
+                import type typed from "./presets/cycle.js";
+                export default { extends: [dynamic, cycle, missing, typed, unknown] };
+            "#,
+        );
+
+        let deps = &result.referenced_dependencies;
+        assert!(!deps.contains(&"plugin-dynamic".to_string()));
+        assert!(deps.contains(&"plugin-cycle".to_string()));
     }
 
     #[test]
