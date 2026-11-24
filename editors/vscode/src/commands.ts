@@ -1161,11 +1161,6 @@ export const runInspectActiveSymbol = async (
 };
 
 /**
- * Run `fallow fix`. An apply run asks for confirmation and saves all editors
- * first. `afterRun` runs once the CLI was started, also when it failed, since
- * a failed apply run can have changed files before it stopped.
- */
-/**
  * Show the preview for a dry run that exited with code 2 but still has
  * eligible fixes. Return `null` when the report has no eligible fix, so the
  * caller keeps the error message.
@@ -1184,6 +1179,11 @@ const showPartialDryRunPreview = async (
   return partial;
 };
 
+/**
+ * Run `fallow fix`. An apply run asks for confirmation and saves all editors
+ * first. `afterRun` runs once the CLI was started, also when it failed, since
+ * a failed apply run can have changed files before it stopped.
+ */
 export const runFix = async (
   context: vscode.ExtensionContext,
   dryRun: boolean,
