@@ -1237,6 +1237,25 @@ test("release runs Zed verification on macOS and Windows without credentials", (
   assert.match(job, /cargo fmt --check --manifest-path editors\/zed\/Cargo.toml/);
 });
 
+test("release SBOMs list only the crates of the target build", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const sbom = indentedBlock(workflow, "sbom", 2);
+
+  assert.match(sbom, /permissions:\n\s+contents: read/);
+  assert.match(sbom, /actions\/setup-node@[0-9a-f]{40}/);
+  assert.match(
+    sbom,
+    /set -euo pipefail[\s\S]*cargo cyclonedx[\s\S]*cargo tree -p fallow-cli --target "\$FALLOW_TARGET" -e normal,build[\s\S]*--locked[\s\S]*node \.github\/scripts\/filter-sbom\.mjs[\s\S]*mkdir sbom/u,
+  );
+  // The filter must rewrite the same file that the job uploads.
+  const sbomFile = '"crates/cli/fallow-${FALLOW_TARGET}.cdx.json"';
+  assert.ok(
+    sbom.includes(`filter-sbom.mjs \\\n            ${sbomFile}`),
+    "the filter reads the SBOM",
+  );
+  assert.ok(sbom.includes(`cp ${sbomFile} sbom/`), "the job uploads the filtered SBOM");
+});
+
 test("release publication waits for the aggregate verification gate", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const context = indentedBlock(workflow, "release-context", 2);

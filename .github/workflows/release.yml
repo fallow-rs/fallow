@@ -1510,10 +1510,12 @@ jobs:
           retention-days: 30
           include-hidden-files: false
 
-  # One CycloneDX SBOM per target. `cargo cyclonedx` reads Cargo.lock and
-  # resolves the dependency graph for that target, so each SBOM lists the
-  # crates that the matching release binary links. The `fallow-*` artifact
-  # name makes `release-assets` stage it with the binaries.
+  # One CycloneDX SBOM per target. `cargo cyclonedx` resolves features over the
+  # whole workspace, so its SBOM also lists crates that only other members
+  # enable. `filter-sbom.mjs` keeps only the crates that `cargo tree` gives for
+  # the fallow-cli build of that target, and it fails when a crate of that tree
+  # has no component (#5131). The `fallow-*` artifact name makes
+  # `release-assets` stage it with the binaries.
   sbom:
     name: SBOM (${{ matrix.target }})
     if: ${{ !inputs.auth_check }}
@@ -1539,6 +1541,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --version 0.5.9 --locked
 
@@ -1551,6 +1557,10 @@ jobs:
           cargo cyclonedx --manifest-path crates/cli/Cargo.toml \
             --format json --spec-version 1.5 --target "$FALLOW_TARGET" \
             --override-filename "fallow-${FALLOW_TARGET}.cdx"
+          cargo tree -p fallow-cli --target "$FALLOW_TARGET" -e normal,build \
+            --prefix none --format '{p}' --locked > "$RUNNER_TEMP/cargo-tree.txt"
+          node .github/scripts/filter-sbom.mjs \
+            "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" "$RUNNER_TEMP/cargo-tree.txt"
           mkdir sbom
           cp "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" sbom/
 
