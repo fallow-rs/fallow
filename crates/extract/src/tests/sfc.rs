@@ -2379,6 +2379,77 @@ fn route_component_template_data_spread_is_whole_use() {
 }
 
 #[test]
+fn route_component_template_data_shorthand_is_whole_use() {
+    // `<Child {data} />` is the shorthand of `data={data}`: it passes the whole
+    // `data` prop, so the load-data detector must abstain on this route.
+    let source = "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child {data} />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "{{data}} shorthand attribute is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_bind_data_shorthand_is_whole_use() {
+    // `bind:data` is `bind:data={data}`: the child can read and write any key.
+    let source = "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<Child bind:data />";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "bind:data shorthand is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_data_call_argument_is_whole_use() {
+    // `{format(data)}` gives the whole `data` object to a function, the same as
+    // `fn(data)` in the script.
+    let source =
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<p>{format(data)}</p>";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        info.has_load_data_whole_use,
+        "a template call argument is a whole-data use"
+    );
+}
+
+#[test]
+fn route_component_template_whole_data_forms_are_whole_use() {
+    // Each markup form passes the whole `data` prop, also inside a block and on
+    // a special element. `{#if data}` is a plain mention, so the detector
+    // abstains there too: an abstention only removes reports.
+    for markup in [
+        "<Child data=\"{data}\" />",
+        "<svelte:component this={Child} {...data} />",
+        "{#if ready}<Child {data} />{/if}",
+        "{#await load()}<p>wait</p>{:then}<Child {data} />{/await}",
+        "<Child bind:data={data} />",
+        "{#if data}<p>{data.title}</p>{/if}",
+    ] {
+        let source =
+            format!("<script lang=\"ts\">\n  let {{ data }} = $props();\n</script>\n{markup}");
+        let info = parse_sfc(&source, "+page.svelte");
+        assert!(
+            info.has_load_data_whole_use,
+            "{markup} must set the whole-data-use flag"
+        );
+    }
+}
+
+#[test]
+fn route_component_template_data_text_and_shadowed_shorthand_are_not_whole_use() {
+    // A `{data}` text node is not an attribute, and an `{#each}` local named
+    // `data` shadows the route prop.
+    let source = "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<p>{data.title}</p>\n{#each data.items as data}<Child {data} />{/each}";
+    let info = parse_sfc(source, "+page.svelte");
+    assert!(
+        !info.has_load_data_whole_use,
+        "a shadowed {{data}} shorthand must not set the whole-data-use flag"
+    );
+}
+
+#[test]
 fn route_component_template_member_access_is_not_whole_use() {
     // `{data.title}` is a credited member access, NOT a whole-data use.
     let source =
