@@ -223,6 +223,11 @@ error by suppressing a downstream detector.
   call argument, a spread, an alias, a type assertion, a dynamic key, a rest
   or dynamic-key destructure) marks the whole store as used. A whole write
   `store.$state = { ... }` reads no key (issue #5168).
+- In a getter or an action of an option store, `this.$state.key`,
+  `this.$state['key']` and `const { key } = this.$state` read `key`. Any other
+  use of `this.$state` reads every key of `state`, but no getter or action. A
+  whole write `this.$state = { ... }` reads no key. An alias of `this`, such as
+  `const { $state } = this`, is not tracked (issue #5203).
 - A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
   of Vitest, Jest and Playwright) seeds each matching file as a support entry
   point, so the file is never an unused file. Discovery records the files that

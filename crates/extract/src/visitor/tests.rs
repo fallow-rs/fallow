@@ -452,6 +452,84 @@ fn pinia_state_value_that_escapes_marks_the_whole_store() {
 }
 
 #[test]
+fn pinia_option_store_this_state_key_reads_credit_the_key() {
+    let info = parse(
+        "export const useAStore = defineStore('a', {\n  state: () => ({ dot: 1, bracket: 2, pattern: 3, written: 4, dead: 5 }),\n  actions: {\n    run() {\n      const { pattern } = this.$state\n      this.$state = { written: 0 }\n      return this.$state.dot + this.$state['bracket'] + pattern\n    },\n  },\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for key in ["dot", "bracket", "pattern"] {
+        assert!(
+            accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "`this.$state` read of {key} must credit it: {accesses:?}"
+        );
+    }
+    for key in ["written", "dead"] {
+        assert!(
+            !accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "{key} has no read and must stay uncredited: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_option_store_this_state_getter_and_optional_reads_credit_the_key() {
+    let info = parse(
+        "export const useAStore = defineStore('a', {\n  state: () => ({ inGetter: 1, optional: 2, dead: 3 }),\n  getters: { twice() { return this.$state.inGetter * 2 } },\n  actions: { read() { return this.$state?.optional } },\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for key in ["inGetter", "optional"] {
+        assert!(
+            accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "`this.$state` read of {key} must credit it: {accesses:?}"
+        );
+    }
+    assert!(
+        !accesses.contains(&("useAStore".to_string(), "dead".to_string())),
+        "dead has no read: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_option_store_this_state_dynamic_key_or_rest_credits_every_state_key() {
+    for body in [
+        "return this.$state[key]",
+        "const { one, ...rest } = this.$state; return rest",
+        "const { [key]: value } = this.$state; return value",
+    ] {
+        let info = parse(&format!(
+            "export const useAStore = defineStore('a', {{\n  state: () => ({{ one: 1, other: 2 }}),\n  actions: {{ read(key) {{ {body} }} }},\n}})"
+        ));
+        let accesses = store_member_accesses(&info);
+        for key in ["one", "other"] {
+            assert!(
+                accesses.contains(&("useAStore".to_string(), key.to_string())),
+                "`{body}` can read {key}: {accesses:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn pinia_option_store_this_state_escape_credits_every_state_key() {
+    let info = parse(
+        "export const useAStore = defineStore('a', {\n  state: () => ({ one: 1, other: 2 }),\n  getters: { two: (state) => state.one },\n  actions: {\n    save() { send(this.$state) },\n  },\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for key in ["one", "other"] {
+        assert!(
+            accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "an escaped `this.$state` must credit {key}: {accesses:?}"
+        );
+    }
+    for member in ["two", "save"] {
+        assert!(
+            !accesses.contains(&("useAStore".to_string(), member.to_string())),
+            "`$state` holds no getter or action, so {member} stays uncredited: {accesses:?}"
+        );
+    }
+}
+
+#[test]
 fn pinia_credits_member_read_on_param_typed_return_type_of_type_only_store_import() {
     // Issue #3348 case A: a helper in another file reads a store member through
     // a param typed `ReturnType<typeof useCounterStore>` with a type-only import.

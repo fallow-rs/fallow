@@ -268,3 +268,26 @@ fn credits_state_keys_read_through_the_state_object() {
         "only the never-read system members must flag: {members:?}"
     );
 }
+
+#[test]
+fn credits_state_keys_read_through_this_state_in_an_option_store() {
+    // The `counter` actions read `dot`, `bracket` and `pattern` through
+    // `this.$state`. A whole `this.$state` write reads no key, so `written`
+    // and `deadState` still flag. The `draft` action passes `this.$state` to a
+    // helper, which can read every state key, so `title` and `body` do not
+    // flag. `$state` holds no getter, so the unread `length` getter flags.
+    let root = fixture_path("pinia-this-state-reads");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let members = store_members(&results, &root);
+
+    assert_eq!(
+        members,
+        vec![
+            ("src/stores/counter.ts".to_string(), "deadState".to_string()),
+            ("src/stores/counter.ts".to_string(), "written".to_string()),
+            ("src/stores/draft.ts".to_string(), "length".to_string()),
+        ],
+        "only the never-read members must flag: {members:?}"
+    );
+}
