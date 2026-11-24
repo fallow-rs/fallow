@@ -1,0 +1,15 @@
+---
+import {
+  CSS,
+  JS,
+  STYLE_DATA,
+  SCRIPT_DATA,
+  STATIC_STR,
+  COMMENTED,
+  UNUSED,
+} from "../lib/css";
+---
+
+<style set:html={CSS} data-x={STYLE_DATA} title="{STATIC_STR}"></style>
+<script is:inline set:html={JS} data-x={SCRIPT_DATA}></script>
+<!-- <script set:html={COMMENTED}></script> -->

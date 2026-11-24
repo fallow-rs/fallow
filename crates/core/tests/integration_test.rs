@@ -850,6 +850,8 @@ mod issue_4986_entry_star_exports;
 mod issue_4990_entry_file_members;
 #[path = "integration_test/issue_5053_entry_namespace_reexport.rs"]
 mod issue_5053_entry_namespace_reexport;
+#[path = "integration_test/issue_5098_astro_tag_attrs.rs"]
+mod issue_5098_astro_tag_attrs;
 #[path = "integration_test/issue_5162_css_module_barrel.rs"]
 mod issue_5162_css_module_barrel;
 #[path = "integration_test/issue_609_velite.rs"]
