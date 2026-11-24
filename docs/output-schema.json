@@ -14195,6 +14195,88 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "ignore-exports-file-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The `file` glob of the rule, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "An `ignoreExports` rule whose `file` glob matched no file of the\ndead-code run (issue #5167). The usual cause is a file that was moved\nor deleted. Not for a `--production` run. `path` is the root. Not\ndegraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ignore-exports-name-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The entry as one line: the export name, `in`, and the glob."
+            },
+            "file": {
+              "type": "string",
+              "description": "The `file` glob of the rule, as written in the config."
+            },
+            "export": {
+              "type": "string",
+              "description": "The export name, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern",
+            "file",
+            "export"
+          ],
+          "description": "An export name of an `ignoreExports` rule that no file of its `file`\nglob declares or re-exports (issue #5167). The usual cause is an\nexport that was renamed or removed. A file with `export *` counts as\na file that can declare any name. Not for a `--production` run, nor\nfor the name `*`. `path` is the root. Not degraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "duplicates-ignore-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The glob, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "A `duplicates.ignore` glob that matched no file of the dead-code run\n(issue #5167). Not for a `--production` run. `path` is the root. Not\ndegraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "health-ignore-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The glob, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern"
+          ],
+          "description": "A `health.ignore` glob that matched no file of the dead-code run\n(issue #5167). Not for a `--production` run. `path` is the root. Not\ndegraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "circular-dependencies-allow-unmatched"
             },
             "pattern": {

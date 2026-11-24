@@ -8,6 +8,7 @@ mod flags;
 mod format;
 pub mod glob_validation;
 mod health;
+mod ignore_list_effect;
 mod ignore_patterns;
 mod keep_export_tags;
 mod legacy_glob;
@@ -49,6 +50,7 @@ pub use health::{
     ChangeCouplingConfig, CyclomaticPolicy, EmailMode, HealthConfig, HealthThresholdOverride,
     OwnershipConfig,
 };
+pub use ignore_list_effect::{IgnoreExportName, IgnoreListEffect};
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
 pub use keep_export_tags::{KeepExportTag, KeepExportTags};
 pub use legacy_glob::{

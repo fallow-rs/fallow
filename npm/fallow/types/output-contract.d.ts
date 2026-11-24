@@ -917,6 +917,38 @@ kind: "ignore-patterns-entry-redundant"
  */
 pattern: string
 } | {
+kind: "ignore-exports-file-unmatched"
+/**
+ * The `file` glob of the rule, as written in the config.
+ */
+pattern: string
+} | {
+kind: "ignore-exports-name-unmatched"
+/**
+ * The entry as one line: the export name, `in`, and the glob.
+ */
+pattern: string
+/**
+ * The `file` glob of the rule, as written in the config.
+ */
+file: string
+/**
+ * The export name, as written in the config.
+ */
+export: string
+} | {
+kind: "duplicates-ignore-unmatched"
+/**
+ * The glob, as written in the config.
+ */
+pattern: string
+} | {
+kind: "health-ignore-unmatched"
+/**
+ * The glob, as written in the config.
+ */
+pattern: string
+} | {
 kind: "circular-dependencies-allow-unmatched"
 /**
  * The entry as one line: the files joined by `, ` in brackets.

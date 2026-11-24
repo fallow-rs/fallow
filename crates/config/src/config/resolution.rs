@@ -211,6 +211,10 @@ pub struct ResolvedConfig {
     /// Which `circularDependencies.allow` entries matched a cycle in the
     /// latest cycle detection (issue #4623).
     pub circular_dependencies_allow_effect: EntryEffectRecord,
+    /// Which `ignoreExports`, `duplicates.ignore` and `health.ignore`
+    /// entries matched a file or an export in the latest dead-code pass
+    /// (issue #5167).
+    pub ignore_list_effect: super::IgnoreListEffect,
     /// Post-analysis finding-path matcher built from `ignoreFindings`; hides
     /// findings without removing files from the module graph.
     pub ignore_findings: FindingIgnoreMatcher,
@@ -1069,6 +1073,7 @@ impl FallowConfig {
             user_ignore_pattern_count: compiled_ignores.user_pattern_count,
             entry_pattern_effect: EntryEffectRecord::default(),
             circular_dependencies_allow_effect: EntryEffectRecord::default(),
+            ignore_list_effect: super::IgnoreListEffect::default(),
             ignore_findings: compiled_ignores.findings,
             output,
             cache_dir: cache.dir,

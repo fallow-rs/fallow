@@ -25,7 +25,8 @@ const IGNORE_DEPENDENCIES_RULES: [&str; 6] = [
 impl WorkspaceDiagnosticKind {
     /// The config setting and the entry of a config entry that had no effect
     /// in the run: an unmatched pattern (`ignoreDependencies`,
-    /// `ignoreFindings`, `circularDependencies.allow`) or a redundant entry (`entry`,
+    /// `ignoreFindings`, `circularDependencies.allow`, `ignoreExports`,
+    /// `duplicates.ignore`, `health.ignore`) or a redundant entry (`entry`,
     /// `ignoreDependencies`, `ignorePatterns`). `None` for every other kind.
     ///
     /// The human note, the SARIF configuration notifications, the Markdown
@@ -48,6 +49,14 @@ impl WorkspaceDiagnosticKind {
             Self::CircularDependenciesAllowUnmatched { pattern, .. } => {
                 Some(("circularDependencies.allow", pattern.as_str()))
             }
+            Self::IgnoreExportsFileUnmatched { pattern }
+            | Self::IgnoreExportsNameUnmatched { pattern, .. } => {
+                Some(("ignoreExports", pattern.as_str()))
+            }
+            Self::DuplicatesIgnoreUnmatched { pattern } => {
+                Some(("duplicates.ignore", pattern.as_str()))
+            }
+            Self::HealthIgnoreUnmatched { pattern } => Some(("health.ignore", pattern.as_str())),
             _ => None,
         }
     }
@@ -162,6 +171,26 @@ pub(super) fn config_entry_message(kind: &WorkspaceDiagnosticKind) -> String {
             "circularDependencies.allow entry {pattern} matched no cycle in this run, so it has \
              no effect. An entry lists the files of one cycle in import order, relative to the \
              project root. Fix the entry, or remove it from the config."
+        ),
+        WorkspaceDiagnosticKind::IgnoreExportsFileUnmatched { pattern } => format!(
+            "ignoreExports file glob '{pattern}' matched no file in this run, so the rule has \
+             no effect. A glob is relative to the project root. Fix the glob, or remove it from \
+             the config."
+        ),
+        WorkspaceDiagnosticKind::IgnoreExportsNameUnmatched { pattern, .. } => format!(
+            "ignoreExports entry '{pattern}' names no export of a file that the glob matches \
+             in this run, so it has no effect. Fix the name if the export was renamed, or \
+             remove it from the config."
+        ),
+        WorkspaceDiagnosticKind::DuplicatesIgnoreUnmatched { pattern } => format!(
+            "duplicates.ignore glob '{pattern}' matched no file in this run, so it has no \
+             effect. A glob is relative to the project root. Fix the glob, or remove it from \
+             the config."
+        ),
+        WorkspaceDiagnosticKind::HealthIgnoreUnmatched { pattern } => format!(
+            "health.ignore glob '{pattern}' matched no file in this run, so it has no effect. \
+             A glob is relative to the project root. Fix the glob, or remove it from the \
+             config."
         ),
         WorkspaceDiagnosticKind::OverrideRuleIneffective {
             rule,

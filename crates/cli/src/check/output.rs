@@ -612,6 +612,7 @@ mod tests {
             workspace_settings: fallow_config::ResolvedWorkspaceSettings::default(),
             entry_pattern_effect: fallow_config::EntryEffectRecord::default(),
             circular_dependencies_allow_effect: fallow_config::EntryEffectRecord::default(),
+            ignore_list_effect: fallow_config::IgnoreListEffect::default(),
             ignore_patterns: fallow_config::IgnorePatternSet::empty(),
             user_ignore_pattern_count: 0,
             ignore_findings: fallow_config::FindingIgnoreMatcher::default(),
