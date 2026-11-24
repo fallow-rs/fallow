@@ -643,6 +643,8 @@ mod issue_462_tooling_catalogue;
 mod issue_463_glob_validation;
 #[path = "integration_test/issue_4849_public_package_reachable_surface.rs"]
 mod issue_4849_public_package_reachable_surface;
+#[path = "integration_test/issue_5101_oxlint_imported_preset.rs"]
+mod issue_5101_oxlint_imported_preset;
 #[path = "integration_test/issue_515_re_export_cycles.rs"]
 mod issue_515_re_export_cycles;
 #[path = "integration_test/issue_601_vitest_test_alias.rs"]
