@@ -66,3 +66,32 @@ pub(super) fn run_duplication_analysis_with_session(
         session.find_duplicates_with_defaults(dupes_config, cache_dir)
     }
 }
+
+/// The diagnostics of a duplication walk, with each `duplicates.ignore` glob
+/// that matches no file. A run that reuses the discovery of the dead-code
+/// pass takes neither: the dead-code section states them.
+pub(super) fn session_workspace_diagnostics(
+    session: &fallow_engine::session::AnalysisSession,
+) -> Vec<fallow_config::WorkspaceDiagnostic> {
+    let mut diagnostics = session.workspace_diagnostics().to_vec();
+    diagnostics.extend(
+        fallow_engine::ignore_list_notes::duplicates_ignore_diagnostics(
+            session.config(),
+            session.files(),
+        ),
+    );
+    diagnostics
+}
+
+/// The stderr notes of a standalone run: the `--performance` panel and the
+/// `duplicates.ignore` globs that match no file.
+pub(super) fn print_run_notes(result: &DupesResult, opts: &DupesOptions<'_>) {
+    if opts.performance {
+        super::print_dupes_performance(result, opts.output);
+    }
+    crate::report::config_pattern_text::print_section_stderr_notes(
+        &result.workspace_diagnostics,
+        opts.output,
+        opts.quiet,
+    );
+}

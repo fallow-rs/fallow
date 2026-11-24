@@ -34,7 +34,7 @@ pub fn run_duplication(
     resolved.install(|| {
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::Duplication)?;
-        run_duplication_in_context(options, &resolved, &run)
+        run_duplication_inner(options, &resolved, &run, true)
     })
 }
 
@@ -45,19 +45,31 @@ pub(super) fn run_duplication_in_context(
     resolved: &ProgrammaticAnalysisContext,
     run: &ResolvedRun,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
-    resolved.install(|| run_duplication_inner(options, resolved, run))
+    resolved.install(|| run_duplication_inner(options, resolved, run, false))
 }
 
+/// With `standalone`, the output also states each `duplicates.ignore` glob
+/// that matches no file. In an audit run, the dead-code section states them.
 fn run_duplication_inner(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
     run: &ResolvedRun,
+    standalone: bool,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
     resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_duplication_session(options, resolved, run)?;
     super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
-    run_duplication_with_session(options, resolved, &session, None, start)
+    let mut result = run_duplication_with_session(options, resolved, &session, None, start)?;
+    if standalone {
+        result.output.workspace_diagnostics.extend(
+            fallow_engine::ignore_list_notes::duplicates_ignore_diagnostics(
+                session.config(),
+                session.files(),
+            ),
+        );
+    }
+    Ok(result)
 }
 
 pub(super) fn run_duplication_with_session(

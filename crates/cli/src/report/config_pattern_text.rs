@@ -14,6 +14,12 @@
 //!   have a Markdown section.
 //! - Every other format has a stderr note, so its stdout stays unchanged.
 //!
+//! The `fallow dupes` and `fallow health` runs state only their own
+//! `ignore` globs. JSON, the PR comment, the review summary body and the job
+//! summary carry them. Their SARIF and Markdown documents have no config
+//! section, so those formats get a stderr note, see
+//! [`print_section_stderr_notes`].
+//!
 //! A live run and `fallow report --from` use the same place for one format,
 //! so a re-render of a saved envelope states what the live run stated.
 //!
@@ -69,6 +75,32 @@ pub const fn document_carries(format: OutputFormat) -> bool {
 /// carries the entries in its document or `quiet` is set.
 pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFormat, quiet: bool) {
     if quiet || document_carries(format) {
+        return;
+    }
+    for note in stderr_notes(diagnostics) {
+        eprintln!("{note}");
+    }
+}
+
+/// Print the stderr notes of a duplication or health run, unless `format`
+/// carries the entries in its document or `quiet` is set. The SARIF and
+/// Markdown documents of these runs have no config section, so they get a
+/// note.
+pub fn print_section_stderr_notes(
+    diagnostics: &[WorkspaceDiagnostic],
+    format: OutputFormat,
+    quiet: bool,
+) {
+    let carries = matches!(
+        format,
+        OutputFormat::Json
+            | OutputFormat::GithubSummary
+            | OutputFormat::PrCommentGithub
+            | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
+    );
+    if quiet || carries {
         return;
     }
     for note in stderr_notes(diagnostics) {

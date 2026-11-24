@@ -3,7 +3,6 @@
 //! envelope reports each entry that matches nothing.
 
 use fallow_config::{IgnoreExportName, ResolvedConfig};
-use globset::GlobMatcher;
 use rustc_hash::FxHashSet;
 
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -31,17 +30,12 @@ pub(super) fn begin_pass(
 /// check never reports a name that a star re-export can supply.
 ///
 /// A `duplicates.ignore` or `health.ignore` glob has an effect when it matches
-/// a module or any other project file. The health pipeline also applies
-/// `health.ignore` to Markdown and template files outside the graph, so the
-/// graph alone does not prove that a glob matches nothing.
+/// a module or any other project file, see
+/// [`ResolvedConfig::path_glob_effect`].
 fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
     let names = config.ignore_export_names();
-    let duplicates = compile(&config.duplicates.ignore);
-    let health = compile(&config.health.ignore);
     let mut file_hits = vec![false; config.compiled_ignore_exports.len()];
     let mut name_hits = vec![false; names.len()];
-    let mut duplicates_hits = initial_hits(&duplicates);
-    let mut health_hits = initial_hits(&health);
 
     for module in &graph.modules {
         let relative = module
@@ -50,8 +44,6 @@ fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
             .unwrap_or(&module.path)
             .to_string_lossy()
             .replace('\\', "/");
-        mark_matches(&duplicates, &relative, &mut duplicates_hits);
-        mark_matches(&health, &relative, &mut health_hits);
         let matched_rules: Vec<usize> = config
             .compiled_ignore_exports
             .iter()
@@ -68,62 +60,21 @@ fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
         mark_declared_names(module, &names, &matched_rules, &mut name_hits);
     }
 
-    if duplicates_hits.contains(&false) || health_hits.contains(&false) {
-        mark_project_files(
-            config,
-            &duplicates,
-            &health,
-            &mut duplicates_hits,
-            &mut health_hits,
-        );
-    }
-
+    let mut path_hits = config
+        .path_glob_effect(
+            &[&config.duplicates.ignore, &config.health.ignore],
+            graph.modules.iter().map(|module| module.path.as_path()),
+        )
+        .into_iter();
     let effect = &config.ignore_list_effect;
     effect.ignore_export_files.record(file_hits);
     effect.ignore_export_names.record(name_hits);
-    effect.duplicates_ignore.record(duplicates_hits);
-    effect.health_ignore.record(health_hits);
-}
-
-/// Directory names that the project walk does not enter. No analysis reads
-/// files there, so a glob that matches only such files has no effect.
-const SKIPPED_DIRECTORIES: [&str; 2] = ["node_modules", ".git"];
-
-/// Credit the `duplicates.ignore` and `health.ignore` globs that match a
-/// project file outside the graph. The walk follows the ignore files of
-/// source discovery, and it ends once every glob has an effect. It runs only
-/// when a glob matched no module, so a config without stale entries pays
-/// nothing.
-fn mark_project_files(
-    config: &ResolvedConfig,
-    duplicates: &[Option<GlobMatcher>],
-    health: &[Option<GlobMatcher>],
-    duplicates_hits: &mut [bool],
-    health_hits: &mut [bool],
-) {
-    let mut builder = fallow_config::source_walk_builder(&config.root);
-    builder.filter_entry(|entry| {
-        entry
-            .file_name()
-            .to_str()
-            .is_none_or(|name| !SKIPPED_DIRECTORIES.contains(&name))
-    });
-    for entry in builder.build().flatten() {
-        if entry.file_type().is_none_or(|kind| kind.is_dir()) {
-            continue;
-        }
-        let relative = entry
-            .path()
-            .strip_prefix(&config.root)
-            .unwrap_or_else(|_| entry.path())
-            .to_string_lossy()
-            .replace('\\', "/");
-        mark_matches(duplicates, &relative, duplicates_hits);
-        mark_matches(health, &relative, health_hits);
-        if !duplicates_hits.contains(&false) && !health_hits.contains(&false) {
-            return;
-        }
-    }
+    effect
+        .duplicates_ignore
+        .record(path_hits.next().unwrap_or_default());
+    effect
+        .health_ignore
+        .record(path_hits.next().unwrap_or_default());
 }
 
 fn mark_declared_names(
@@ -152,31 +103,4 @@ fn mark_declared_names(
             *hit = true;
         }
     }
-}
-
-fn mark_matches(globs: &[Option<GlobMatcher>], relative: &str, hits: &mut [bool]) {
-    for (hit, glob) in hits.iter_mut().zip(globs) {
-        if glob.as_ref().is_some_and(|glob| glob.is_match(relative)) {
-            *hit = true;
-        }
-    }
-}
-
-/// Compile the globs of one config list. Config validation rejects a glob
-/// that does not compile, so `None` does not occur in a loaded config.
-fn compile(patterns: &[String]) -> Vec<Option<GlobMatcher>> {
-    patterns
-        .iter()
-        .map(|pattern| {
-            fallow_config::compile_path_glob(pattern)
-                .ok()
-                .map(|glob| glob.compile_matcher())
-        })
-        .collect()
-}
-
-/// One flag per glob. A glob without a matcher starts as matched, so the
-/// check reports nothing for it.
-fn initial_hits(globs: &[Option<GlobMatcher>]) -> Vec<bool> {
-    globs.iter().map(Option::is_none).collect()
 }

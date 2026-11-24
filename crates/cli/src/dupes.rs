@@ -517,7 +517,7 @@ fn execute_dupes_inner(
                 &dupes_config,
                 effective_changed_files,
             );
-            workspace_diagnostics = session.workspace_diagnostics().to_vec();
+            workspace_diagnostics = analysis::session_workspace_diagnostics(&session);
             (analysis, change_scope)
         }
     };
@@ -862,9 +862,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    if opts.performance {
-        print_dupes_performance(&result, opts.output);
-    }
+    analysis::print_run_notes(&result, opts);
     let resolver = match crate::build_ownership_resolver(
         opts.group_by,
         opts.root,
