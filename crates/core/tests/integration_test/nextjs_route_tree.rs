@@ -231,3 +231,65 @@ fn no_findings_when_next_is_absent() {
         results.dynamic_segment_name_conflicts.len()
     );
 }
+
+/// Each `(position, sorted conflicting segments, sorted flagged file dirs)`
+/// for the `nextjs-dynamic-segment-kinds` fixture.
+fn dynamic_conflicts_by_position(
+    results: &fallow_core::results::AnalysisResults,
+) -> Vec<(String, Vec<String>, Vec<String>)> {
+    let mut by_position: std::collections::BTreeMap<String, (Vec<String>, Vec<String>)> =
+        std::collections::BTreeMap::new();
+    for finding in &results.dynamic_segment_name_conflicts {
+        let entry = by_position
+            .entry(finding.conflict.position.clone())
+            .or_default();
+        entry.0.clone_from(&finding.conflict.conflicting_segments);
+        let path = norm(&finding.conflict.path);
+        let dir = path
+            .trim_end_matches("/page.tsx")
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        entry.1.push(dir);
+    }
+    by_position
+        .into_iter()
+        .map(|(position, (segments, mut dirs))| {
+            dirs.sort();
+            (position, segments, dirs)
+        })
+        .collect()
+}
+
+#[test]
+fn dynamic_segment_kinds_follow_next_router_slots() {
+    // Next.js keeps one slot per kind at each level: a single segment, a
+    // catch-all, and an optional catch-all. A conflict needs two names in one
+    // slot, or a catch-all next to an optional catch-all.
+    let config = fixture_config("nextjs-dynamic-segment-kinds");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let strings =
+        |items: &[&str]| -> Vec<String> { items.iter().map(|s| (*s).to_string()).collect() };
+    assert_eq!(
+        dynamic_conflicts_by_position(&results),
+        vec![
+            (
+                "/files".to_string(),
+                strings(&["[...a]", "[...b]"]),
+                strings(&["[...a]", "[...b]"]),
+            ),
+            (
+                "/news".to_string(),
+                strings(&["[id]", "[slug]"]),
+                strings(&["[id]", "[slug]"]),
+            ),
+            (
+                "/shop".to_string(),
+                strings(&["[...a]", "[[...b]]"]),
+                strings(&["[...a]", "[[...b]]"]),
+            ),
+        ],
+    );
+}
