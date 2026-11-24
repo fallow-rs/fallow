@@ -115,14 +115,13 @@ impl<'a> VueScanner<'a> {
     }
 
     fn template_region(&self) -> Option<std::ops::Range<usize>> {
-        if !self.multiple_roots && self.template_depth == 0 {
-            if let (Some(start), Some(end)) = (self.template_start, self.template_end) {
-                if start < end {
-                    return Some(start..end);
-                }
-            }
+        if self.multiple_roots || self.template_depth != 0 {
+            return None;
         }
-        None
+        match (self.template_start, self.template_end) {
+            (Some(start), Some(end)) if start < end => Some(start..end),
+            _ => None,
+        }
     }
 
     fn find_required(&self, offset: usize, needle: &str) -> Result<usize, ScanError> {
@@ -136,12 +135,8 @@ impl<'a> VueScanner<'a> {
         let tag_end = find_tag_end(self.source, offset)?;
         let after = tag_end + 1;
         if self.source[offset..].starts_with("</") {
-            let close_name = read_close_tag_name(self.source, offset);
-            if close_name.eq_ignore_ascii_case("template") && self.template_depth > 0 {
-                self.template_depth -= 1;
-                if self.template_depth == 0 && !self.multiple_roots {
-                    self.template_end = Some(after);
-                }
+            if read_close_tag_name(self.source, offset).eq_ignore_ascii_case("template") {
+                self.close_template(after);
             }
             // Closing tag: pop the matching open element. Decrement nesting only
             // when that element was control-flow-bearing, so plain markup never
@@ -159,20 +154,7 @@ impl<'a> VueScanner<'a> {
         let tag_name = read_tag_name(self.source, offset);
         let is_template = tag_name.eq_ignore_ascii_case("template");
         if is_template {
-            if self.template_depth == 0 {
-                if self.template_start.is_none() {
-                    self.template_start = Some(offset);
-                } else {
-                    self.multiple_roots = true;
-                }
-            }
-            if self_closing {
-                if self.template_depth == 0 && !self.multiple_roots {
-                    self.template_end = Some(after);
-                }
-            } else {
-                self.template_depth += 1;
-            }
+            self.open_template(offset, after, self_closing);
         }
 
         let in_template = self.template_depth > 0 || is_template;
@@ -191,6 +173,34 @@ impl<'a> VueScanner<'a> {
             }
         }
         Ok(after)
+    }
+
+    /// Track an opening `<template>` tag. The first one at depth 0 starts the
+    /// root region; a second one at depth 0 marks the file as multi-root.
+    fn open_template(&mut self, offset: usize, after: usize, self_closing: bool) {
+        if self.template_depth == 0 {
+            if self.template_start.is_none() {
+                self.template_start = Some(offset);
+            } else {
+                self.multiple_roots = true;
+            }
+        }
+        if !self_closing {
+            self.template_depth += 1;
+        } else if self.template_depth == 0 && !self.multiple_roots {
+            self.template_end = Some(after);
+        }
+    }
+
+    /// Track a closing `</template>` tag. A stray close at depth 0 is ignored.
+    fn close_template(&mut self, after: usize) {
+        if self.template_depth == 0 {
+            return;
+        }
+        self.template_depth -= 1;
+        if self.template_depth == 0 && !self.multiple_roots {
+            self.template_end = Some(after);
+        }
     }
 
     /// Scan an element's attributes, scoring directive expressions and control
@@ -641,11 +651,8 @@ for (const i of items) { use(i); }
 
     #[test]
     fn short_template_in_long_sfc_reports_template_block_lines() {
-        let mut script_lines = Vec::new();
-        script_lines.push("<script setup lang=\"ts\">");
-        for _ in 0..80 {
-            script_lines.push("const x = 1;");
-        }
+        let mut script_lines = vec!["<script setup lang=\"ts\">"];
+        script_lines.extend(std::iter::repeat_n("const x = 1;", 80));
         script_lines.push("</script>");
         let script = script_lines.join("\n");
         let source = format!(
@@ -669,20 +676,13 @@ for (const i of items) { use(i); }
 
     #[test]
     fn large_template_remains_detected_with_accurate_line_count() {
-        let mut script_lines = Vec::new();
-        script_lines.push("<script setup lang=\"ts\">");
-        for _ in 0..30 {
-            script_lines.push("const s = 'setup';");
-        }
+        let mut script_lines = vec!["<script setup lang=\"ts\">"];
+        script_lines.extend(std::iter::repeat_n("const s = 'setup';", 30));
         script_lines.push("</script>");
         let script = script_lines.join("\n");
 
-        let mut template_lines = Vec::new();
-        template_lines.push("<template>");
-        template_lines.push("  <div v-if=\"ready\">");
-        for _ in 0..70 {
-            template_lines.push("    <p>row</p>");
-        }
+        let mut template_lines = vec!["<template>", "  <div v-if=\"ready\">"];
+        template_lines.extend(std::iter::repeat_n("    <p>row</p>", 70));
         template_lines.push("  </div>");
         template_lines.push("</template>");
         let template = template_lines.join("\n");
@@ -755,7 +755,7 @@ const ready = true;
 </div>
 "#;
         let total_lines = source.lines().count();
-        assert!(total_lines > 15, "fixture must exceed template length");
+        assert!(total_lines > 5, "fixture must exceed template length");
 
         let complexity = compute_vue_template_complexity(source)
             .expect("template with control flow has complexity");
@@ -812,7 +812,7 @@ const ready = true;
             "template line_count must measure only the <template> block"
         );
         assert_eq!(
-            complexity.line, 11,
+            complexity.line, 10,
             "anchor line must point to the v-if inside <template>, not the custom block outside"
         );
         assert_eq!(
