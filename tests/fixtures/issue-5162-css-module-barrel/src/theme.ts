@@ -1,0 +1,1 @@
+export { outer } from './styles';
