@@ -5219,3 +5219,134 @@ fn status_line_names_deprecated_exports_in_use() {
         output.stderr
     );
 }
+
+/// The `(kind, pattern)` pairs of the unmatched ignore list entries in a
+/// dead-code envelope (issue #5167).
+fn unmatched_ignore_list_entries(json: &serde_json::Value) -> Vec<(String, String)> {
+    const KINDS: [&str; 4] = [
+        "ignore-exports-file-unmatched",
+        "ignore-exports-name-unmatched",
+        "duplicates-ignore-unmatched",
+        "health-ignore-unmatched",
+    ];
+    json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|diagnostic| {
+            let kind = diagnostic["kind"].as_str()?;
+            if !KINDS.contains(&kind) {
+                return None;
+            }
+            Some((kind.to_owned(), diagnostic["pattern"].as_str()?.to_owned()))
+        })
+        .collect()
+}
+
+/// The project of issue #5167: each ignore list has one entry that matches
+/// nothing next to one entry that matches a file or an export.
+fn stale_ignore_list_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/gen")).expect("create directory");
+    std::fs::create_dir_all(root.join("docs")).expect("create directory");
+    std::fs::write(root.join("docs/guide.md"), "# Guide\n").expect("write doc");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"repro","private":true,"type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { used } from \"./a\";\nimport { bar } from \"./barrel\";\nimport re from \"./re\";\nconsole.log(used, bar, re);\n",
+    )
+    .expect("write entry point");
+    std::fs::write(
+        root.join("src/a.ts"),
+        "export const used = 1;\nexport const kept = 2;\n",
+    )
+    .expect("write module");
+    std::fs::write(root.join("src/barrel.ts"), "export * from \"./gen/out\";\n")
+        .expect("write barrel");
+    std::fs::write(
+        root.join("src/re.ts"),
+        "export { kept as alias } from \"./a\";\nexport default 1;\n",
+    )
+    .expect("write re-export module");
+    std::fs::write(
+        root.join("src/gen/out.ts"),
+        "export const bar = 1;\nexport const baz = 2;\n",
+    )
+    .expect("write generated module");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+            "ignoreExports": [
+                { "file": "src/a.ts", "exports": ["kept", "gone"] },
+                { "file": "src/missing.ts", "exports": ["one", "two"] },
+                { "file": "src/barrel.ts", "exports": ["anything"] },
+                { "file": "src/re.ts", "exports": ["alias", "default"] }
+            ],
+            "duplicates": { "ignore": ["src/gen/**", "src/never/**"] },
+            "health": { "ignore": ["src/gen/**", "docs/**", "src/nothing/**"] }
+        }"#,
+    )
+    .expect("write config");
+    dir
+}
+
+#[test]
+fn stale_ignore_list_entries_are_reported_and_matching_entries_are_not() {
+    let dir = stale_ignore_list_project();
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        unmatched_ignore_list_entries(&json),
+        vec![
+            (
+                "ignore-exports-file-unmatched".to_owned(),
+                "src/missing.ts".to_owned()
+            ),
+            (
+                "ignore-exports-name-unmatched".to_owned(),
+                "gone in src/a.ts".to_owned()
+            ),
+            (
+                "duplicates-ignore-unmatched".to_owned(),
+                "src/never/**".to_owned()
+            ),
+            (
+                "health-ignore-unmatched".to_owned(),
+                "src/nothing/**".to_owned()
+            ),
+        ],
+        "kept is an export of src/a.ts, src/barrel.ts can forward any name through export *, \
+         src/re.ts re-exports alias and has a default export, src/gen/** matches a module, \
+         docs/** matches a Markdown file that the health pipeline reads, and the names of \
+         src/missing.ts repeat no note: {json}"
+    );
+
+    let human = run_fallow_in_root("dead-code", dir.path(), &[]);
+    for note in [
+        "Note: ignoreExports file glob matched no file this run: src/missing.ts",
+        "Note: ignoreExports name is not an export of its files this run: gone in src/a.ts",
+        "Note: duplicates.ignore glob matched no file this run: src/never/**",
+        "Note: health.ignore glob matched no file this run: src/nothing/**",
+    ] {
+        assert!(human.stderr.contains(note), "{note}\n{}", human.stderr);
+    }
+
+    let production = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet", "--production"],
+    ));
+    assert!(
+        unmatched_ignore_list_entries(&production).is_empty(),
+        "a production run analyzes fewer files, so it reports no unmatched entry: {production}"
+    );
+}

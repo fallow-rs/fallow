@@ -54,6 +54,10 @@ impl WorkspaceDiagnosticKind {
             Self::EntryPatternRedundant { .. } => "entry-pattern-redundant",
             Self::IgnoreDependenciesEntryRedundant { .. } => "ignore-dependencies-entry-redundant",
             Self::IgnorePatternsEntryRedundant { .. } => "ignore-patterns-entry-redundant",
+            Self::IgnoreExportsFileUnmatched { .. } => "ignore-exports-file-unmatched",
+            Self::IgnoreExportsNameUnmatched { .. } => "ignore-exports-name-unmatched",
+            Self::DuplicatesIgnoreUnmatched { .. } => "duplicates-ignore-unmatched",
+            Self::HealthIgnoreUnmatched { .. } => "health-ignore-unmatched",
             Self::CircularDependenciesAllowUnmatched { .. } => {
                 "circular-dependencies-allow-unmatched"
             }
@@ -116,6 +120,10 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -300,6 +308,10 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -376,6 +388,10 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -454,6 +470,10 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -533,6 +553,10 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }

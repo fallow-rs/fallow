@@ -694,6 +694,41 @@ pub enum WorkspaceDiagnosticKind {
         /// The `ignorePatterns` glob, as written in the config.
         pattern: String,
     },
+    /// An `ignoreExports` rule whose `file` glob matched no file of the
+    /// dead-code run (issue #5167). The usual cause is a file that was moved
+    /// or deleted. Not for a `--production` run. `path` is the root. Not
+    /// degraded.
+    IgnoreExportsFileUnmatched {
+        /// The `file` glob of the rule, as written in the config.
+        pattern: String,
+    },
+    /// An export name of an `ignoreExports` rule that no file of its `file`
+    /// glob declares or re-exports (issue #5167). The usual cause is an
+    /// export that was renamed or removed. A file with `export *` counts as
+    /// a file that can declare any name. Not for a `--production` run, nor
+    /// for the name `*`. `path` is the root. Not degraded.
+    IgnoreExportsNameUnmatched {
+        /// The entry as one line: the export name, `in`, and the glob.
+        pattern: String,
+        /// The `file` glob of the rule, as written in the config.
+        file: String,
+        /// The export name, as written in the config.
+        export: String,
+    },
+    /// A `duplicates.ignore` glob that matched no file of the dead-code run
+    /// (issue #5167). Not for a `--production` run. `path` is the root. Not
+    /// degraded.
+    DuplicatesIgnoreUnmatched {
+        /// The glob, as written in the config.
+        pattern: String,
+    },
+    /// A `health.ignore` glob that matched no file of the dead-code run
+    /// (issue #5167). Not for a `--production` run. `path` is the root. Not
+    /// degraded.
+    HealthIgnoreUnmatched {
+        /// The glob, as written in the config.
+        pattern: String,
+    },
     /// A `circularDependencies.allow` entry matched no cycle of the run
     /// (issue #4623): no cycle has exactly these files in this order, from
     /// any start file. The usual cause is a cycle that the code no longer
@@ -1362,6 +1397,10 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         | WorkspaceDiagnosticKind::EntryPatternRedundant { .. }
         | WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant { .. }
         | WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant { .. }
+        | WorkspaceDiagnosticKind::IgnoreExportsFileUnmatched { .. }
+        | WorkspaceDiagnosticKind::IgnoreExportsNameUnmatched { .. }
+        | WorkspaceDiagnosticKind::DuplicatesIgnoreUnmatched { .. }
+        | WorkspaceDiagnosticKind::HealthIgnoreUnmatched { .. }
         | WorkspaceDiagnosticKind::CircularDependenciesAllowUnmatched { .. }
         | WorkspaceDiagnosticKind::OverrideRuleIneffective { .. }
         | WorkspaceDiagnosticKind::RequestedRuleOff { .. } => {

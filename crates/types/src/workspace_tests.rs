@@ -1092,6 +1092,40 @@ fn unmatched_config_pattern_kinds_are_advisory_root_notes() {
             "ignorePatterns",
             "dist/**",
         ),
+        (
+            WorkspaceDiagnosticKind::IgnoreExportsFileUnmatched {
+                pattern: "src/missing.ts".to_owned(),
+            },
+            "ignore-exports-file-unmatched",
+            "ignoreExports",
+            "src/missing.ts",
+        ),
+        (
+            WorkspaceDiagnosticKind::IgnoreExportsNameUnmatched {
+                pattern: "gone in src/a.ts".to_owned(),
+                file: "src/a.ts".to_owned(),
+                export: "gone".to_owned(),
+            },
+            "ignore-exports-name-unmatched",
+            "ignoreExports",
+            "gone in src/a.ts",
+        ),
+        (
+            WorkspaceDiagnosticKind::DuplicatesIgnoreUnmatched {
+                pattern: "src/never/**".to_owned(),
+            },
+            "duplicates-ignore-unmatched",
+            "duplicates.ignore",
+            "src/never/**",
+        ),
+        (
+            WorkspaceDiagnosticKind::HealthIgnoreUnmatched {
+                pattern: "src/nothing/**".to_owned(),
+            },
+            "health-ignore-unmatched",
+            "health.ignore",
+            "src/nothing/**",
+        ),
     ] {
         let diag = WorkspaceDiagnostic::new(root, root.to_path_buf(), kind);
         assert_eq!(diag.kind.id(), id);

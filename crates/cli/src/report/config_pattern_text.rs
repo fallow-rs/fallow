@@ -1,6 +1,7 @@
 //! The text of the config entries that had no effect outside JSON and SARIF:
 //! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`,
-//! `circularDependencies.allow`), the
+//! `circularDependencies.allow`, `ignoreExports`, `duplicates.ignore`,
+//! `health.ignore`), the
 //! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
 //! `overrides` rules that cannot change a result, and the requested checks that
 //! did not run because their rule is off.
@@ -111,6 +112,30 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             ),
             "matched no cycle this run",
             "an entry lists the files of one cycle in import order; check the paths",
+        ),
+        (
+            "ignore-exports-file-unmatched",
+            ("ignoreExports file glob", "ignoreExports file globs"),
+            "matched no file this run",
+            "globs are project-root-relative; fix the glob or remove the rule",
+        ),
+        (
+            "ignore-exports-name-unmatched",
+            ("ignoreExports name", "ignoreExports names"),
+            "is not an export of its files this run",
+            "remove the name, or fix it if the export was renamed",
+        ),
+        (
+            "duplicates-ignore-unmatched",
+            ("duplicates.ignore glob", "duplicates.ignore globs"),
+            "matched no file this run",
+            "globs are project-root-relative; check for typos",
+        ),
+        (
+            "health-ignore-unmatched",
+            ("health.ignore glob", "health.ignore globs"),
+            "matched no file this run",
+            "globs are project-root-relative; check for typos",
         ),
         (
             "entry-pattern-redundant",
