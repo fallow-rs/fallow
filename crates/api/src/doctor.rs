@@ -424,10 +424,11 @@ fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
 /// opt-in. The check reads the `package.json` of the installed package, the
 /// same file that the companion reads before it loads Vitest, so it runs no
 /// project code. The check is skipped when `mutation.runner` does not select
-/// Vitest, the root `package.json` declares no Vitest, and the companion
-/// finds no installed Vitest. A workspace package can declare a Vitest that
-/// the package manager installs at the root, and a toolchain such as Vite+
-/// can bring its own Vitest, so each install that the companion finds counts.
+/// Vitest, the root `package.json` declares neither `vitest` nor `vite-plus`,
+/// and the companion finds no installed Vitest. A workspace package can
+/// declare a Vitest that the package manager installs at the root, and a
+/// toolchain such as Vite+ can bring its own Vitest, so each install that the
+/// companion finds counts.
 /// The `node-test` and `bun-test` runners skip the check too: their range
 /// applies to the runtime that a run selects.
 fn mutation_runner_check(root: &Path, configured: fallow_config::MutationRunner) -> DoctorCheck {

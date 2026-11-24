@@ -58,6 +58,21 @@ impl Runner {
 /// The most test files that the detection reads.
 const MAX_SCANNED_TEST_FILES: usize = 200;
 
+/// The Vitest package.
+const RUNNER_PACKAGE: &str = "vitest";
+
+/// The Vite+ toolchain package. It runs Vitest through `vp test`, but a
+/// project can also use it only to build, lint or format, so its dependency
+/// is a weaker signal than a `vitest` dependency.
+const VITE_PLUS_PACKAGE: &str = "vite-plus";
+
+/// The `package.json` fields of the root that declare a dependency.
+const DEPENDENCY_FIELDS: [&str; 3] = ["dependencies", "devDependencies", "optionalDependencies"];
+
+/// The test modules that Vitest tests import: Vitest itself, and the Vite+
+/// module that re-exports it.
+const VITEST_TEST_MODULES: &[&str] = &["vitest", "vite-plus/test"];
+
 /// The Bun files at the project root that mark a Bun project.
 const BUN_ROOT_FILES: &[&str] = &["bunfig.toml", "bun.lock", "bun.lockb"];
 
@@ -65,13 +80,14 @@ const BUN_ROOT_FILES: &[&str] = &["bunfig.toml", "bun.lock", "bun.lockb"];
 /// project at `root`, in this order:
 ///
 /// 1. `vitest` in the root `package.json` dependencies gives Vitest.
-/// 2. The import of `vitest`, `bun:test` or `node:test` that the most test
-///    files have. A tie goes to Vitest, then `bun test`.
-/// 3. A Bun file at the root (`bunfig.toml`, `bun.lock`, `bun.lockb`) gives
+/// 2. The import of `vitest` (or `vite-plus/test`), `bun:test` or `node:test`
+///    that the most test files have. A tie goes to Vitest, then `bun test`.
+/// 3. `vite-plus` in the root `package.json` dependencies gives Vitest.
+/// 4. A Bun file at the root (`bunfig.toml`, `bun.lock`, `bun.lockb`) gives
 ///    `bun test`.
-/// 4. A `node --test` or `borp` command in a `package.json` script gives
+/// 5. A `node --test` or `borp` command in a `package.json` script gives
 ///    `node:test`.
-/// 5. Otherwise Vitest.
+/// 6. Otherwise Vitest.
 pub fn select_runner(configured: MutationRunner, root: &Path, test_files: &[String]) -> Runner {
     match configured {
         MutationRunner::Vitest => Runner::Vitest,
@@ -83,11 +99,20 @@ pub fn select_runner(configured: MutationRunner, root: &Path, test_files: &[Stri
 
 fn detect_runner(root: &Path, test_files: &[String]) -> Runner {
     let manifest = read_manifest(root);
-    if manifest.as_ref().is_some_and(has_vitest_dependency) {
+    if manifest
+        .as_ref()
+        .is_some_and(|manifest| has_dependency(manifest, RUNNER_PACKAGE))
+    {
         return Runner::Vitest;
     }
     if let Some(runner) = runner_by_imports(root, test_files) {
         return runner;
+    }
+    if manifest
+        .as_ref()
+        .is_some_and(|manifest| has_dependency(manifest, VITE_PLUS_PACKAGE))
+    {
+        return Runner::Vitest;
     }
     if BUN_ROOT_FILES.iter().any(|file| root.join(file).is_file()) {
         return Runner::BunTest;
@@ -101,11 +126,12 @@ fn detect_runner(root: &Path, test_files: &[String]) -> Runner {
     Runner::Vitest
 }
 
-/// True when the root `package.json` declares `vitest` as a dependency.
+/// True when the root `package.json` declares `vitest` or `vite-plus` as a
+/// dependency.
 pub fn declares_vitest(root: &Path) -> bool {
-    read_manifest(root)
-        .as_ref()
-        .is_some_and(has_vitest_dependency)
+    read_manifest(root).as_ref().is_some_and(|manifest| {
+        has_dependency(manifest, RUNNER_PACKAGE) || has_dependency(manifest, VITE_PLUS_PACKAGE)
+    })
 }
 
 fn read_manifest(root: &Path) -> Option<serde_json::Value> {
@@ -113,15 +139,13 @@ fn read_manifest(root: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&text).ok()
 }
 
-fn has_vitest_dependency(manifest: &serde_json::Value) -> bool {
-    ["dependencies", "devDependencies", "optionalDependencies"]
-        .iter()
-        .any(|field| {
-            manifest
-                .get(field)
-                .and_then(|deps| deps.get("vitest"))
-                .is_some()
-        })
+fn has_dependency(manifest: &serde_json::Value, name: &str) -> bool {
+    DEPENDENCY_FIELDS.iter().any(|field| {
+        manifest
+            .get(field)
+            .and_then(|deps| deps.get(name))
+            .is_some()
+    })
 }
 
 fn has_node_test_script(manifest: &serde_json::Value) -> bool {
@@ -230,14 +254,20 @@ fn runner_by_imports(root: &Path, test_files: &[String]) -> Option<Runner> {
         .map(|(runner, _)| *runner)
 }
 
-/// True when the text imports the test module of the runner, as an import
-/// or a `require` call with a quoted specifier.
+/// True when the text imports a test module of the runner, as an import or a
+/// `require` call with a quoted specifier.
 fn imports_runner(text: &str, runner: Runner) -> bool {
-    let specifier = match runner {
-        Runner::Vitest => "vitest",
-        Runner::NodeTest => "node:test",
-        Runner::BunTest => "bun:test",
+    let specifiers: &[&str] = match runner {
+        Runner::Vitest => VITEST_TEST_MODULES,
+        Runner::NodeTest => &["node:test"],
+        Runner::BunTest => &["bun:test"],
     };
+    specifiers
+        .iter()
+        .any(|specifier| imports_specifier(text, specifier))
+}
+
+fn imports_specifier(text: &str, specifier: &str) -> bool {
     ['"', '\''].iter().any(|quote| {
         let quoted = format!("{quote}{specifier}{quote}");
         text.match_indices(&quoted).any(|(index, _)| {
@@ -318,6 +348,55 @@ mod tests {
             &["test/a.test.ts"],
         );
         assert_eq!(runner, Runner::Vitest);
+    }
+
+    #[test]
+    fn a_vite_plus_dependency_selects_vitest_in_a_bun_project() {
+        let runner = detect(
+            &[
+                (
+                    "package.json",
+                    r#"{"devDependencies":{"vite-plus":"1.8.0"}}"#,
+                ),
+                ("bun.lock", "{}"),
+                ("a.test.ts", "test('x', () => {});\n"),
+            ],
+            &["a.test.ts"],
+        );
+        assert_eq!(runner, Runner::Vitest);
+    }
+
+    #[test]
+    fn the_test_imports_win_over_a_vite_plus_dependency() {
+        let runner = detect(
+            &[
+                (
+                    "package.json",
+                    r#"{"devDependencies":{"vite-plus":"1.8.0"}}"#,
+                ),
+                ("a.test.ts", "import { test } from 'node:test';\n"),
+            ],
+            &["a.test.ts"],
+        );
+        assert_eq!(runner, Runner::NodeTest);
+    }
+
+    #[test]
+    fn a_vite_plus_test_import_counts_as_a_vitest_import() {
+        let runner = detect(
+            &[
+                ("bun.lock", "{}"),
+                ("a.test.ts", "import { test } from 'node:test';\n"),
+                ("b.test.ts", "import { test } from 'vite-plus/test';\n"),
+                ("c.test.ts", "import { test } from \"vite-plus/test\";\n"),
+            ],
+            &["a.test.ts", "b.test.ts", "c.test.ts"],
+        );
+        assert_eq!(runner, Runner::Vitest);
+        assert!(!imports_runner(
+            "import { defineConfig } from 'vite-plus';\n",
+            Runner::Vitest
+        ));
     }
 
     #[test]
