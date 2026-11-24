@@ -11,18 +11,13 @@ use std::path::{Path, PathBuf};
 use oxc_ast::ast::*;
 use rustc_hash::FxHashSet;
 
-use super::merge_config::find_merged_config_objects;
+use super::merge_config::{MAX_MULTI_CONFIGS, find_merged_config_objects};
 use super::{
     PathScope, collect_require_sources, collect_shallow_string_values, expression_to_path,
     extract_from_source, find_property, get_nested_expression, get_nested_string_or_array,
     is_module_exports_target, object_expression, path_from_config_string,
     resolve_alias_pairs_kinded,
 };
-
-/// The maximum number of configs read from one exported array, in source order.
-/// A build can export one config per locale or per target. The work for each
-/// config is linear in its size, and the inline budget bounds the copies.
-pub(super) const MAX_MULTI_CONFIGS: usize = 64;
 
 /// The config objects of a program: the objects that `find_merged_config_objects`
 /// finds, or else each object element of an exported config array. Elements
