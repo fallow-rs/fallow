@@ -648,13 +648,7 @@ fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSectio
         || options.score_gate
         || options.trend
         || matches!(options.output, OutputFormat::Badge);
-    let any_section = options.complexity
-        || options.file_scores
-        || options.coverage_gaps
-        || options.shallow_directories
-        || options.hotspots
-        || options.targets
-        || score;
+    let any_section = score || requests_a_section(options);
     let effective_score = if any_section { score } else { true } || options.snapshot_requested;
     let force_full = options.snapshot_requested || effective_score;
 
@@ -685,6 +679,16 @@ fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSectio
         force_full,
         score_only_output: is_health_score_only_output(options, score),
     }
+}
+
+/// Whether the request selects a section other than the score.
+fn requests_a_section(options: &HealthSectionOptions) -> bool {
+    options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || options.shallow_directories
+        || options.hotspots
+        || options.targets
 }
 
 /// Normalize health run inputs into the engine-owned run contract.

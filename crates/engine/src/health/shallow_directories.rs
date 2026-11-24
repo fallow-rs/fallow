@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::ShallowDirectoriesConfig;
-use fallow_graph::graph::{ExportNamespace, ModuleGraph, ModuleNode, ReferenceKind};
+use fallow_graph::graph::{ExportNamespace, ModuleGraph, ModuleNode, ReExportEdge, ReferenceKind};
 use fallow_output::{
     ShallowDirectoriesReport, ShallowDirectoryFinding, ShallowDirectoryItem,
     ShallowDirectoryItemKind,
@@ -155,54 +155,82 @@ fn published_exports(graph: &ModuleGraph) -> FxHashSet<(FileId, String)> {
         .iter()
         .map(|node| (node.file_id, node))
         .collect();
-    let mut published: FxHashSet<(FileId, String)> = FxHashSet::default();
-    let mut star_seen: FxHashSet<FileId> = FxHashSet::default();
-    let mut queue: Vec<(FileId, Option<String>)> = graph
-        .modules
-        .iter()
-        .filter(|node| node.is_entry_point())
-        .map(|node| (node.file_id, None))
-        .collect();
-    while let Some((file, name)) = queue.pop() {
+    let mut walk = PublishWalk {
+        nodes: &nodes,
+        published: FxHashSet::default(),
+        star_seen: FxHashSet::default(),
+        queue: graph
+            .modules
+            .iter()
+            .filter(|node| node.is_entry_point())
+            .map(|node| (node.file_id, None))
+            .collect(),
+    };
+    while let Some((file, name)) = walk.queue.pop() {
         let Some(node) = nodes.get(&file) else {
             continue;
         };
         for edge in &node.re_exports {
-            if edge.is_type_only {
-                continue;
-            }
-            let forwards = name
-                .as_deref()
-                .is_none_or(|name| edge.exported_name == name || edge.exported_name == STAR);
-            if !forwards {
-                continue;
-            }
-            if edge.imported_name == STAR {
-                // `export * from` and `export * as ns from` forward every
-                // export of the source module.
-                let wanted = match (name.as_deref(), edge.exported_name.as_str()) {
-                    (Some(name), STAR) => Some(name.to_string()),
-                    _ => None,
-                };
-                if wanted.is_none() {
-                    if !star_seen.insert(edge.source_file) {
-                        continue;
-                    }
-                    if let Some(source) = nodes.get(&edge.source_file) {
-                        for export in &source.exports {
-                            published.insert((edge.source_file, export.name.to_string()));
-                        }
-                    }
-                } else if let Some(wanted) = wanted.as_deref() {
-                    published.insert((edge.source_file, wanted.to_string()));
-                }
-                queue.push((edge.source_file, wanted));
-            } else if published.insert((edge.source_file, edge.imported_name.clone())) {
-                queue.push((edge.source_file, Some(edge.imported_name.clone())));
+            if !edge.is_type_only && forwards(edge, name.as_deref()) {
+                walk.follow(edge, name.as_deref());
             }
         }
     }
-    published
+    walk.published
+}
+
+/// Whether a re-export edge forwards `name`, or any export when `name` is
+/// `None`.
+fn forwards(edge: &ReExportEdge, name: Option<&str>) -> bool {
+    name.is_none_or(|name| edge.exported_name == name || edge.exported_name == STAR)
+}
+
+/// The state of the walk from the entry points along re-export edges.
+struct PublishWalk<'a> {
+    nodes: &'a FxHashMap<FileId, &'a ModuleNode>,
+    published: FxHashSet<(FileId, String)>,
+    /// Modules whose exports are all published already.
+    star_seen: FxHashSet<FileId>,
+    /// Modules to visit, with the one export name to follow, or `None` for
+    /// all exports.
+    queue: Vec<(FileId, Option<String>)>,
+}
+
+impl PublishWalk<'_> {
+    fn follow(&mut self, edge: &ReExportEdge, name: Option<&str>) {
+        if edge.imported_name != STAR {
+            if self
+                .published
+                .insert((edge.source_file, edge.imported_name.clone()))
+            {
+                self.queue
+                    .push((edge.source_file, Some(edge.imported_name.clone())));
+            }
+            return;
+        }
+        // `export * from` forwards the one name that the walk follows.
+        // `export * as ns from` and a walk of all exports forward every export
+        // of the source module.
+        match name.filter(|_| edge.exported_name == STAR) {
+            Some(name) => {
+                self.published.insert((edge.source_file, name.to_string()));
+                self.queue.push((edge.source_file, Some(name.to_string())));
+            }
+            None => self.publish_all(edge.source_file),
+        }
+    }
+
+    fn publish_all(&mut self, file: FileId) {
+        if !self.star_seen.insert(file) {
+            return;
+        }
+        if let Some(source) = self.nodes.get(&file) {
+            for export in &source.exports {
+                self.published.insert((file, export.name.to_string()));
+            }
+        }
+        self.queue.push((file, None));
+    }
 }
 
 /// The name that a star re-export edge carries.
