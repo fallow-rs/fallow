@@ -4,7 +4,7 @@
 use std::fmt::Write;
 use std::path::Path;
 
-use fallow_output::{markdown_table_code_span, normalize_uri};
+use fallow_output::{markdown_table_code_span, markdown_table_text, normalize_uri};
 
 use super::{plural, relative_path};
 
@@ -90,10 +90,10 @@ pub(super) fn write_shallow_directories_section(
         let mut items: Vec<String> = dir
             .items
             .iter()
-            .map(|item| format!("`{}`", item.name))
+            .map(|item| markdown_table_code_span(&item.name))
             .collect();
         if dir.more_items > 0 {
-            items.push(format!("+{} more", dir.more_items));
+            items.push(markdown_table_text(&format!("+{} more", dir.more_items)));
         }
         let _ = writeln!(
             out,

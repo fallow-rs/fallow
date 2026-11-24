@@ -299,24 +299,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
         }
     }
 
-    if let Some(ref gaps) = report.coverage_gaps {
-        for item in &gaps.files {
-            issues.push(ctx.untested_file_issue(item));
-        }
-
-        for item in &gaps.exports {
-            issues.push(ctx.untested_export_issue(item));
-        }
-    }
-
-    if let Some(ref section) = report.shallow_directories {
-        issues.extend(
-            section
-                .directories
-                .iter()
-                .map(HealthCodeClimateContext::shallow_directory_issue),
-        );
-    }
+    push_section_issues(&ctx, report, &mut issues);
 
     issues
 }
@@ -421,6 +404,30 @@ const fn coverage_intelligence_severity(
         CoverageIntelligenceVerdict::ReviewRequired
         | CoverageIntelligenceVerdict::RefactorCarefully => Some(CodeClimateSeverity::Minor),
         CoverageIntelligenceVerdict::Clean | CoverageIntelligenceVerdict::Unknown => None,
+    }
+}
+
+/// The issues of the coverage gaps and shallow directories sections.
+fn push_section_issues(
+    ctx: &HealthCodeClimateContext<'_>,
+    report: &HealthReport,
+    issues: &mut Vec<CodeClimateIssue>,
+) {
+    if let Some(ref gaps) = report.coverage_gaps {
+        issues.extend(gaps.files.iter().map(|item| ctx.untested_file_issue(item)));
+        issues.extend(
+            gaps.exports
+                .iter()
+                .map(|item| ctx.untested_export_issue(item)),
+        );
+    }
+    if let Some(ref section) = report.shallow_directories {
+        issues.extend(
+            section
+                .directories
+                .iter()
+                .map(HealthCodeClimateContext::shallow_directory_issue),
+        );
     }
 }
 
