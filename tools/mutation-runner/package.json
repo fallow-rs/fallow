@@ -13,7 +13,7 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "vite": "8.3.7",
+    "vite": "8.3.8",
     "vitest": "5.1.0",
     "vitest4": "npm:vitest@4.1.12"
   }
