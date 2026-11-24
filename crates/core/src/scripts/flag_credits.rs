@@ -93,14 +93,29 @@ struct FlagRule {
 #[derive(Debug)]
 struct Catalogue {
     rules: Vec<FlagRule>,
-    /// `(binary, flag)` -> index into `rules`.
-    index: FxHashMap<(String, String), usize>,
+    /// binary -> flag -> index into `rules`.
+    index: FxHashMap<String, FxHashMap<String, usize>>,
 }
 
 impl Catalogue {
-    fn rule(&self, binary: &str, flag: &str) -> Option<&FlagRule> {
-        let key = (binary.to_string(), flag.to_string());
-        self.index.get(&key).map(|&idx| &self.rules[idx])
+    /// The rules of `binary`, or `None` when the catalogue does not list it.
+    fn binary_rules(&self, binary: &str) -> Option<BinaryRules<'_>> {
+        self.index.get(binary).map(|flags| BinaryRules {
+            rules: &self.rules,
+            flags,
+        })
+    }
+}
+
+/// The flag rules of one binary.
+struct BinaryRules<'a> {
+    rules: &'a [FlagRule],
+    flags: &'a FxHashMap<String, usize>,
+}
+
+impl BinaryRules<'_> {
+    fn rule(&self, flag: &str) -> Option<&FlagRule> {
+        self.flags.get(flag).map(|&idx| &self.rules[idx])
     }
 }
 
@@ -164,12 +179,13 @@ fn parse(source: &str) -> Result<Catalogue, String> {
             builtins: entry.builtins,
         });
         for binary in &entry.binaries {
+            let flags: &mut FxHashMap<String, usize> = index.entry(binary.clone()).or_default();
             for flag in &entry.flags {
-                let key = (binary.clone(), flag.clone());
-                if index.contains_key(&key) {
-                    return Err(format!("duplicate flag-credit entry: {key:?}"));
+                if flags.insert(flag.clone(), rule_idx).is_some() {
+                    return Err(format!(
+                        "duplicate flag-credit entry: ({binary:?}, {flag:?})"
+                    ));
                 }
-                index.insert(key, rule_idx);
             }
         }
     }
@@ -200,8 +216,10 @@ fn catalogue() -> &'static Catalogue {
 /// `args` are the tokens after the binary itself; scanning stops at `--`
 /// because everything past it belongs to another program.
 pub fn flag_referenced_packages(binary: &str, args: &[&str]) -> Vec<String> {
-    let catalogue = catalogue();
     let mut packages = inline_code::inline_code_packages(binary, args);
+    let Some(catalogue) = catalogue().binary_rules(binary) else {
+        return packages;
+    };
     let mut idx = 0;
     while idx < args.len() {
         let token = args[idx];
@@ -211,11 +229,11 @@ pub fn flag_referenced_packages(binary: &str, args: &[&str]) -> Vec<String> {
 
         let inline = token
             .split_once('=')
-            .and_then(|(flag, value)| catalogue.rule(binary, flag).map(|rule| (rule, value)));
+            .and_then(|(flag, value)| catalogue.rule(flag).map(|rule| (rule, value)));
         let (rule, value) = if let Some(found) = inline {
             idx += 1;
             found
-        } else if let Some(rule) = catalogue.rule(binary, token) {
+        } else if let Some(rule) = catalogue.rule(token) {
             idx += 2;
             let Some(value) = args.get(idx - 1) else {
                 break;
@@ -546,6 +564,21 @@ mod tests {
         assert!(credits("prettier", "--format gha").is_empty());
         assert!(credits("stylelint", "--formatter pretty").is_empty());
         assert!(credits("nyc", "--reporter lcov").is_empty());
+    }
+
+    /// OSS-Fuzz test case 4735951052800000: a 300 KB binary name with 23,000
+    /// arguments timed out, because each argument copied and hashed the name.
+    #[test]
+    fn long_binary_name_with_many_args_is_fast() {
+        let binary = "x".repeat(100_000);
+        let args = vec!["-f"; 20_000];
+        let start = std::time::Instant::now();
+        assert!(flag_referenced_packages(&binary, &args).is_empty());
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "the flag scan took {elapsed:?}"
+        );
     }
 
     #[test]
