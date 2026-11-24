@@ -1498,6 +1498,44 @@ fn react_lifecycle_method_not_flagged() {
 }
 
 #[test]
+fn react_component_static_properties_not_flagged() {
+    let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/component.tsx", false)]);
+    graph.set_reachable(1);
+    set_exports(
+        &mut graph,
+        1,
+        &[make_export_with_members(
+            "Greeting",
+            vec![
+                make_member("defaultProps", MemberKind::ClassProperty),
+                make_member("displayName", MemberKind::ClassProperty),
+                make_member("propTypes", MemberKind::ClassProperty),
+                make_member("contextTypes", MemberKind::ClassProperty),
+                make_member("childContextTypes", MemberKind::ClassProperty),
+                make_member("contextType", MemberKind::ClassProperty),
+                make_member("getDerivedStateFromProps", MemberKind::ClassMethod),
+                make_member("getDerivedStateFromError", MemberKind::ClassMethod),
+                make_member("render", MemberKind::ClassMethod),
+                make_member("unusedStatic", MemberKind::ClassProperty),
+            ],
+            Some(0),
+        )],
+    );
+
+    let (_, class_members) = find_unused_members(
+        &graph,
+        &[],
+        &[],
+        &SuppressionContext::empty(),
+        &FxHashMap::default(),
+        &[],
+        &[],
+    );
+    assert_eq!(class_members.len(), 1);
+    assert_eq!(class_members[0].member_name, "unusedStatic");
+}
+
+#[test]
 fn angular_lifecycle_method_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/component.ts", false)]);
     graph.set_reachable(1);

@@ -49,6 +49,11 @@ pub(in crate::analyze) fn is_react_lifecycle_method(name: &str) -> bool {
             | "UNSAFE_componentWillUpdate"
             | "getChildContext"
             | "contextType"
+            | "defaultProps"
+            | "displayName"
+            | "propTypes"
+            | "contextTypes"
+            | "childContextTypes"
     )
 }
 
@@ -109,6 +114,15 @@ mod tests {
     fn react_lifecycle_context_methods() {
         assert!(is_react_lifecycle_method("getChildContext"));
         assert!(is_react_lifecycle_method("contextType"));
+    }
+
+    #[test]
+    fn react_component_static_properties() {
+        assert!(is_react_lifecycle_method("defaultProps"));
+        assert!(is_react_lifecycle_method("displayName"));
+        assert!(is_react_lifecycle_method("propTypes"));
+        assert!(is_react_lifecycle_method("contextTypes"));
+        assert!(is_react_lifecycle_method("childContextTypes"));
     }
 
     #[test]
@@ -273,6 +287,11 @@ mod tests {
             "UNSAFE_componentWillUpdate",
             "getChildContext",
             "contextType",
+            "defaultProps",
+            "displayName",
+            "propTypes",
+            "contextTypes",
+            "childContextTypes",
         ];
         for method in &all_methods {
             assert!(

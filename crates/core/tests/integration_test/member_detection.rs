@@ -1468,3 +1468,55 @@ fn map_iteration_credits_values_without_crediting_keys_or_other_receivers() {
         "Map iteration must bind the value position within its lexical scope"
     );
 }
+
+#[test]
+fn react_class_static_properties_not_flagged_as_unused_members() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "react-class-statics", "private": true, "main": "src/index.tsx", "dependencies": { "react": "^18.0.0", "react-dom": "^18.0.0" } }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/components.tsx"),
+        r"import React from 'react';
+
+export class Greeting extends React.Component {
+  static defaultProps = { name: 'world' };
+  static displayName = 'Greeting';
+  static propTypes = {};
+  static contextTypes = {};
+  static childContextTypes = {};
+  static contextType = {};
+  static unusedStatic = 'ignored';
+  static getDerivedStateFromProps() {
+    return null;
+  }
+  static getDerivedStateFromError() {
+    return null;
+  }
+  render() {
+    return null;
+  }
+}
+",
+    )
+    .expect("write component");
+    std::fs::write(
+        root.join("src/index.tsx"),
+        "import { createRoot } from 'react-dom/client';\nimport { Greeting } from './components';\ncreateRoot(document.body).render(<Greeting />);\n",
+    )
+    .expect("write entry");
+
+    let mut config = create_config(root);
+    config.cache_dir = temp.path().join("cache");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    assert_eq!(unused, vec!["Greeting.unusedStatic".to_string()]);
+}
