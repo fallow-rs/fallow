@@ -794,7 +794,9 @@ fn analyze_astro_frontmatter(
     };
     let source_type = SourceType::ts();
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+    let parser_return = Parser::new(&allocator, &script.body, source_type)
+        .with_options(crate::parse_options::astro_frontmatter_parse_options())
+        .parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_top_level_is_component_body(true);
     extractor.set_template_reads_root(true);
