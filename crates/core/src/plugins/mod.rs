@@ -218,46 +218,6 @@ pub struct PluginResult {
     tsconfig_jsx_dirs: Vec<registry::TsconfigJsxDir>,
 }
 
-/// What a Module Federation config declares, and where, for the trace output.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FederationSource {
-    /// What the config names.
-    pub target: FederationSourceTarget,
-    /// The absolute path of the config file.
-    pub config_path: PathBuf,
-    /// The plugin that read the config, as it labels itself.
-    pub plugin: String,
-    /// The config key that names the target.
-    pub key: &'static str,
-}
-
-/// The thing a [`FederationSource`] names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FederationSourceTarget {
-    /// An `exposes` target, as the entry-point rule it became.
-    Exposed(PathRule),
-    /// A `remotes` alias.
-    Remote(String),
-}
-
-impl FederationSource {
-    #[must_use]
-    fn prefixed(&self, ws_prefix: &str) -> Self {
-        let target = match &self.target {
-            FederationSourceTarget::Exposed(rule) => {
-                FederationSourceTarget::Exposed(rule.prefixed(ws_prefix))
-            }
-            FederationSourceTarget::Remote(alias) => FederationSourceTarget::Remote(alias.clone()),
-        };
-        Self {
-            target,
-            config_path: self.config_path.clone(),
-            plugin: self.plugin.clone(),
-            key: self.key,
-        }
-    }
-}
-
 /// Match the Module Federation sources of one analysis against the discovered
 /// files, for the trace output.
 ///
@@ -1401,6 +1361,20 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// The package that provides this framework's virtual and generated
+    /// modules, credited as used when a source file imports one.
+    ///
+    /// A framework can serve imports that name no npm package (SvelteKit's
+    /// `$app/state`, `./$types`). The package behind those specifiers would
+    /// look unused in a project where the plugin found no tooling evidence
+    /// (its own config file, or a script, CI workflow or git hook calling its
+    /// tool). Return the providing package name: an import matching
+    /// [`Self::virtual_module_prefixes`] or [`Self::generated_import_patterns`]
+    /// in the package where this plugin is active then credits it.
+    fn virtual_module_package(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Path alias mappings provided by this framework at build time.
     ///
     /// Returns a list of `(prefix, replacement_dir)` tuples. When an import starting
@@ -1804,6 +1778,7 @@ macro_rules! define_plugin {
 mod config_dependencies;
 pub mod config_parser;
 mod config_value_credits;
+mod federation_source;
 use config_value_credits::{
     canonical_test_environment, credit_config_value, credit_environment_optional_peers,
 };
@@ -1828,10 +1803,11 @@ mod used_export_rule;
 
 pub use config_dependencies::RequiredDependency;
 use config_dependencies::add_import_referenced_dependencies;
+pub use federation_source::{FederationSource, FederationSourceTarget};
 pub(crate) use module_federation::runtime_remotes;
 pub use registry::{
     AggregatedPluginResult, CheckedAliasPrefix, PluginRegistry, PluginToolingDependencies,
-    PluginToolingEvidence,
+    PluginToolingEvidence, VirtualModuleMatch, VirtualModuleProviderRule,
 };
 pub use tooling::types_package_target;
 pub(crate) use tooling::{

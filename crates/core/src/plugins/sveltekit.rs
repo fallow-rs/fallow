@@ -145,6 +145,13 @@ impl Plugin for SvelteKitPlugin {
         GENERATED_IMPORT_PATTERNS
     }
 
+    /// `$app/*`, `$env/*`, `$service-worker` and `./$types` resolve inside the
+    /// `SvelteKit` build, so an import of one credits `@sveltejs/kit` also in a
+    /// project with no `svelte.config.js`.
+    fn virtual_module_package(&self) -> Option<&'static str> {
+        Some("@sveltejs/kit")
+    }
+
     fn path_aliases(&self, _root: &Path) -> Vec<(&'static str, String)> {
         vec![
             ("$lib/", "src/lib".to_string()),

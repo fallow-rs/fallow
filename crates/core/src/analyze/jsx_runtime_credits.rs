@@ -1,4 +1,5 @@
-//! Dependency credit for the package of the automatic JSX runtime.
+//! Dependency credit for packages used through framework-controlled module
+//! generation.
 //!
 //! The automatic JSX transform imports `<source>/jsx-runtime` (or
 //! `jsx-dev-runtime`) into each file with JSX. No import statement shows
@@ -16,10 +17,16 @@
 //!
 //! A tsconfig `jsxImportSource` credits its package in the TypeScript plugin.
 //!
+//! A framework can also serve imports that name no npm package: SvelteKit
+//! generates `$app/state`, `$env/static/public` and the `./$types` of each
+//! route directory inside its build. Those specifiers credit the provider
+//! package a plugin declares through `Plugin::virtual_module_package`.
+//!
 //! The credit goes to one manifest only, as for an import: the nearest
 //! manifest in the chain of the file (its workspace, the ancestor workspaces,
-//! then the root) that declares the package. Thus a JSX file in one
-//! workspace does not hide an unused `react` in a different workspace.
+//! then the root) that declares the package. Thus a JSX file or virtual-module
+//! import in one workspace does not hide an unused package in a different
+//! workspace.
 
 use std::path::{Path, PathBuf};
 
@@ -27,9 +34,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{PackageJson, WorkspaceInfo};
 
+use super::unused_deps::matches_virtual_prefix;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
-use crate::plugins::AggregatedPluginResult;
+use crate::plugins::{AggregatedPluginResult, VirtualModuleMatch, VirtualModuleProviderRule};
 
 /// Extensions of the files that Vite transforms with the tsconfig JSX
 /// settings.
@@ -46,8 +54,8 @@ const DEFAULT_JSX_IMPORT_SOURCE: &str = "react";
 const AUTOMATIC_JSX_FRAMEWORK_PLUGINS: &[&str] = &["nextjs"];
 
 /// The `(package.json path, package)` credits of the automatic JSX runtime
-/// for the modules with `jsx_runtime_from_config` set. The result is sorted.
-pub(super) fn collect_jsx_runtime_package_credits<'a>(
+/// and the plugin virtual/generated module providers. The result is sorted.
+pub(super) fn collect_implicit_package_credits<'a>(
     plugin_result: Option<&AggregatedPluginResult>,
     modules: impl IntoIterator<Item = &'a ModuleInfo>,
     graph: &ModuleGraph,
@@ -58,9 +66,11 @@ pub(super) fn collect_jsx_runtime_package_credits<'a>(
         return Vec::new();
     };
     let framework_dirs = automatic_jsx_framework_dirs(plugin_result, root);
+    let has_virtual_module_providers = !plugin_result.virtual_module_providers.is_empty();
     if plugin_result.jsx_package_credits.is_empty()
         && plugin_result.tsconfig_jsx_dirs.is_empty()
         && framework_dirs.is_empty()
+        && !has_virtual_module_providers
     {
         return Vec::new();
     }
@@ -69,25 +79,40 @@ pub(super) fn collect_jsx_runtime_package_credits<'a>(
     let mut credited: FxHashSet<(PathBuf, String)> = FxHashSet::default();
     for module in modules
         .into_iter()
-        .filter(|module| module.jsx_runtime_from_config)
+        .filter(|module| module.jsx_runtime_from_config || has_virtual_module_providers)
     {
         let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
             continue;
         };
         let path = node.path.as_path();
-        let mut packages: Vec<&str> = Vec::new();
-        if uses_default_runtime(plugin_result, &framework_dirs, path) {
-            packages.push(DEFAULT_JSX_IMPORT_SOURCE);
+        let mut packages: FxHashSet<&str> = FxHashSet::default();
+        if module.jsx_runtime_from_config {
+            if uses_default_runtime(plugin_result, &framework_dirs, path) {
+                packages.insert(DEFAULT_JSX_IMPORT_SOURCE);
+            }
+            // A tsconfig JSX setting replaces the default runtime of a bundler
+            // config for the TypeScript files below that tsconfig.
+            if !(is_typescript(path)
+                && nearest_tsconfig_depth(plugin_result, path, false).is_some())
+            {
+                packages.extend(
+                    rules
+                        .iter()
+                        .filter(|rule| rule.matches(path))
+                        .map(|rule| rule.rule().source.as_str()),
+                );
+            }
         }
-        // A tsconfig JSX setting replaces the default runtime of a bundler
-        // config for the TypeScript files below that tsconfig.
-        if !(is_typescript(path) && nearest_tsconfig_depth(plugin_result, path, false).is_some()) {
-            packages.extend(
-                rules
-                    .iter()
-                    .filter(|rule| rule.matches(path))
-                    .map(|rule| rule.rule().source.as_str()),
-            );
+        if has_virtual_module_providers {
+            for specifier in module_specifiers(module) {
+                packages.extend(
+                    plugin_result
+                        .virtual_module_providers
+                        .iter()
+                        .filter(|rule| virtual_module_rule_matches(rule, root, path, specifier))
+                        .map(|rule| rule.package.as_str()),
+                );
+            }
         }
         for package in packages {
             let manifest = manifests.credited_manifest(path, package);
@@ -97,6 +122,55 @@ pub(super) fn collect_jsx_runtime_package_credits<'a>(
     let mut credits: Vec<(PathBuf, String)> = credited.into_iter().collect();
     credits.sort_unstable();
     credits
+}
+
+/// Every literal specifier of the module: static imports, re-exports,
+/// literal dynamic imports and `require()` calls. Resolved or not, each is
+/// evidence that the file uses the framework module it names.
+fn module_specifiers(module: &ModuleInfo) -> impl Iterator<Item = &str> {
+    module
+        .imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .chain(
+            module
+                .re_exports
+                .iter()
+                .map(|re_export| re_export.source.as_str()),
+        )
+        .chain(
+            module
+                .dynamic_imports
+                .iter()
+                .map(|import| import.source.as_str()),
+        )
+        .chain(module.require_calls.iter().map(|call| call.source.as_str()))
+}
+
+/// Whether `rule` covers `specifier` written in the file at `path`.
+///
+/// A rule applies only to the files under the package root where its plugin
+/// is active, so a virtual-module import in another workspace credits no
+/// package.
+fn virtual_module_rule_matches(
+    rule: &VirtualModuleProviderRule,
+    root: &Path,
+    path: &Path,
+    specifier: &str,
+) -> bool {
+    if !rule.scope.is_empty() && !path.starts_with(root.join(&rule.scope)) {
+        return false;
+    }
+    match &rule.matcher {
+        VirtualModuleMatch::Prefix(prefix) => matches_virtual_prefix(prefix, specifier),
+        VirtualModuleMatch::Generated(pattern) => {
+            let bare = specifier
+                .strip_suffix(".js")
+                .or_else(|| specifier.strip_suffix(".ts"))
+                .unwrap_or(specifier);
+            (bare.starts_with("./") || bare.starts_with("../")) && bare.ends_with(pattern.as_str())
+        }
+    }
 }
 
 /// The absolute roots of the packages where a framework with the automatic

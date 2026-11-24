@@ -772,7 +772,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     let iconify_referenced = iconify::collect_iconify_referenced_deps(input);
     let loader_referenced =
         inline_loaders::collect_inline_loader_referenced_deps(input.resolved_modules, input.graph);
-    let jsx_runtime_referenced = jsx_runtime_credits::collect_jsx_runtime_package_credits(
+    let implicit_referenced = jsx_runtime_credits::collect_implicit_package_credits(
         input.plugin_result,
         credit_modules(),
         input.graph,
@@ -783,7 +783,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     let augmented_plugin_result;
     let plugin_result = if iconify_referenced.is_empty()
         && loader_referenced.is_empty()
-        && jsx_runtime_referenced.is_empty()
+        && implicit_referenced.is_empty()
         && runtime_remotes.is_empty()
     {
         input.plugin_result
@@ -793,7 +793,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         owned.referenced_dependencies.extend(loader_referenced);
         owned
             .package_referenced_dependencies
-            .extend(jsx_runtime_referenced);
+            .extend(implicit_referenced);
         owned.provided_dependencies.extend(runtime_remotes);
         augmented_plugin_result = owned;
         Some(&augmented_plugin_result)

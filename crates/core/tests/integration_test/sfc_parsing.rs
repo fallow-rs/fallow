@@ -428,6 +428,50 @@ fn sveltekit_generated_types_not_unresolved() {
 }
 
 #[test]
+fn sveltekit_virtual_modules_credit_kit_package() {
+    let root = fixture_path("sveltekit-project");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_deps: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_dev_deps.contains(&"@sveltejs/kit"),
+        "$app/*, $env/* and ./$types imports should credit @sveltejs/kit without a svelte.config.js: {unused_dev_deps:?}"
+    );
+    assert!(
+        unused_dev_deps.contains(&"@sveltejs/adapter-auto"),
+        "adapter-auto is only referenced from config files and stays reported: {unused_dev_deps:?}"
+    );
+    assert!(
+        unused_dev_deps.contains(&"@sveltejs/vite-plugin-svelte"),
+        "vite-plugin-svelte is only referenced from config files and stays reported: {unused_dev_deps:?}"
+    );
+}
+
+#[test]
+fn sveltekit_bare_types_import_does_not_credit_kit() {
+    let root = fixture_path("sveltekit-bare-types-no-kit-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_deps: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        unused_dev_deps.contains(&"@sveltejs/kit"),
+        "a package import ending in /$types is not a generated relative ./$types import and must not credit @sveltejs/kit: {unused_dev_deps:?}"
+    );
+}
+
+#[test]
 fn sveltekit_head_script_src_not_unresolved() {
     let root = fixture_path("issue-835-svelte-script-src");
     let config = create_config(root);
