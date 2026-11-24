@@ -420,6 +420,24 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
     decisions
 }
 
+/// The stable delta key for one dependency entry: `<manifest>::<name>` for an
+/// added entry, `<manifest>::<name>@<from>-><to>` for a bump. The decision
+/// candidate key joins these with `|`, so the brief's `deltas` and the
+/// decision's `signal_key` name the same change.
+#[must_use]
+pub fn dependency_delta_key(
+    manifest: &str,
+    kind: DependencyChangeKind,
+    entry: &DependencyEntry,
+) -> String {
+    match (kind, &entry.from) {
+        (DependencyChangeKind::MajorBump, Some(from)) => {
+            format!("{manifest}::{}@{from}->{}", entry.name, entry.to)
+        }
+        _ => format!("{manifest}::{}", entry.name),
+    }
+}
+
 /// The candidate key for a dependency anchor: the manifest-scoped entry keys,
 /// name-sorted and `|`-joined, so one manifest yields one stable id per kind.
 /// Built from the same per-entry key the brief's `deltas` carry.
@@ -427,9 +445,7 @@ fn dependency_candidate_key(anchor: &DependencyAnchor) -> String {
     let keys: Vec<String> = anchor
         .entries
         .iter()
-        .map(|entry| {
-            crate::dependency_deltas::dependency_delta_key(&anchor.manifest, anchor.kind, entry)
-        })
+        .map(|entry| dependency_delta_key(&anchor.manifest, anchor.kind, entry))
         .collect();
     keys.join("|")
 }

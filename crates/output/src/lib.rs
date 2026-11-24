@@ -174,8 +174,7 @@ pub use ci_output::{
     ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
     ReviewGitlabDiffRefs, apply_path_prefix, command_title, github_check_conclusion,
     group_review_issues_by_path_line, is_file_scoped_rule, is_project_level_rule,
-    issues_from_codeclimate, issues_from_codeclimate_issues, markdown_code_span,
-    markdown_table_code_span, markdown_table_text, pr_verdict_title, render_pr_comment,
+    issues_from_codeclimate, issues_from_codeclimate_issues, pr_verdict_title, render_pr_comment,
     render_pr_comment_with_verdict, render_review_comment_for_group, render_review_envelope,
     render_review_envelope_with_conclusion, render_scoped_review_envelope,
     render_scoped_review_envelope_with_conclusion, summary_label,
@@ -348,7 +347,10 @@ pub use list_envelopes::{
     ListBoundariesOutput, ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspaceInfo,
     WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
 };
-pub use markdown_prose::{markdown_table_prose, unwrap_code_spans};
+pub use markdown_prose::{
+    markdown_code_span, markdown_table_code_span, markdown_table_prose, markdown_table_text,
+    unwrap_code_spans,
+};
 pub use mutation::{
     DUPLICATE_TEST_IDS_CODE, MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION,
     MUTATION_SCHEMA_VERSION, MUTATION_TASKS_SCHEMA_VERSION, MutantAttempt, MutantChange,

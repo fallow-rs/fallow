@@ -65,7 +65,7 @@ pub fn store_witnesses(
     cache_dir: &Path,
     witnesses: BTreeMap<String, StoredWitness>,
 ) -> std::io::Result<()> {
-    crate::mutation::last_report::ignore_cache_dir(cache_dir)?;
+    crate::mutation::ignore_cache_dir(cache_dir)?;
     let path = witness_path(cache_dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

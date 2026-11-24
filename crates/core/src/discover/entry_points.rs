@@ -1076,7 +1076,7 @@ pub fn discover_root_entry_points(
         discovery.entries = apply_default_fallback(files, &config.root, None);
     }
 
-    discovery.non_manual_runtime_paths = super::entry_report::non_manual_paths(&discovery.entries);
+    discovery.non_manual_runtime_paths = super::non_manual_paths(&discovery.entries);
     dedup_entry_paths(&mut discovery.entries);
     dedup_entry_paths(&mut discovery.support_entries);
 

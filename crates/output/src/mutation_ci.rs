@@ -11,8 +11,8 @@
 //! block that uses four backticks, and each run of three backticks in a message
 //! becomes three single quotes, so no message can close the fence.
 
-use crate::ci_output::markdown_code_span;
 use crate::gate_outcomes::{GateOutcome, GateStatus};
+use crate::markdown_prose::markdown_code_span;
 use crate::mutation::{
     MutantChange, MutationCompletion, MutationCompletionStatus, MutationIncompleteReason,
     MutationScopeKind, MutationStatusCounts,

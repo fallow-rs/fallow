@@ -586,8 +586,8 @@ fn hostile_list_item_stays_in_code_spans() {
     let flat = "a|b`c``` <details>-->  x ```suggestion ```` </details> y";
     let expected = format!(
         "- {}, function {}",
-        crate::ci_output::markdown_code_span(&format!("{flat}:7")),
-        crate::ci_output::markdown_code_span(flat),
+        crate::markdown_prose::markdown_code_span(&format!("{flat}:7")),
+        crate::markdown_prose::markdown_code_span(flat),
     );
     assert!(out.lines().any(|line| line == expected), "{out}");
 }

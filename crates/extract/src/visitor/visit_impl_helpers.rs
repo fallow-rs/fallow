@@ -10,8 +10,8 @@ use crate::function_body::BodyRef;
 use crate::js_text::JsText;
 
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
-use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::visit_computed_keys::{ComputedKeyPart, computed_key_parts};
+use super::visit_source_paths::MAX_RECORDED_CHAIN_LINKS;
 use super::{
     ITERABLE_ELEMENT_CALLBACK_METHODS, assignment_target_identifier_name,
     static_member_object_name, unwrap_parens, unwrap_static_expr,
