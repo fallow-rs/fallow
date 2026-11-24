@@ -21,7 +21,9 @@ use fallow_types::extract::{
     ordinary_whole_object_uses,
 };
 
-use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
+use super::predicates::{
+    is_angular_lifecycle_method, is_react_lifecycle_method, is_runtime_protocol_method,
+};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 mod cloudflare_runtime;
@@ -1723,6 +1725,8 @@ fn class_member_runtime_credit_applies(member: &MemberInfo, ctx: &MemberSkipCont
         && (((is_react_lifecycle_method(&member.name)
             || is_angular_lifecycle_method(&member.name))
             && !semantic_framework_candidate)
+            || is_runtime_protocol_method(&member.name)
+            || member.pairs_with_symbol_dispose
             || is_native_custom_element_lifecycle_method(&member.name, ctx.super_class)
             || is_error_subclass_runtime_member(
                 &member.name,
