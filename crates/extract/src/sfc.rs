@@ -1,6 +1,7 @@
 //! Vue/Svelte Single File Component (SFC) script and style extraction.
 //!
-//! Extracts `<script>` block content from `.vue` and `.svelte` files using regex,
+//! Extracts `<script>` block content from `.vue` and `.svelte` files with the
+//! linear block scan of `sfc_blocks`,
 //! handling `lang`, `src` metadata, and `generic` attributes, and filtering
 //! HTML comments. Vue external script references are emitted as graph edges;
 //! Svelte markup-level script `src` references are treated as runtime HTML.
@@ -20,6 +21,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::asset_url::normalize_asset_url;
 use crate::parse::compute_import_binding_usage;
+use crate::sfc_blocks::{script_blocks, style_blocks};
 use crate::sfc_template::{SfcKind, collect_template_usage_with_bound_targets};
 use crate::source_map::ExtractionResult;
 use crate::visitor::ModuleInfoExtractor;
@@ -27,14 +29,6 @@ use crate::{ImportInfo, ImportedName, ModuleInfo};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{FunctionComplexity, byte_offset_to_line_col, compute_line_offsets};
 use oxc_span::Span;
-
-/// Regex to extract `<script>` block content from Vue/Svelte SFCs.
-/// The attrs pattern skips `>` in quoted values and in brace expressions up to 3 levels deep (#4828).
-static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<script\b(?P<attrs>(?:[^>"'{]|"[^"]*"|'[^']*'|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{[^{}]*\})*\})*\}|\{)*)>(?P<body>[\s\S]*?)</script>"#,
-    )
-});
 
 /// Regex to extract the `lang` attribute value from a script tag.
 static LANG_ATTR_RE: LazyLock<regex::Regex> =
@@ -94,15 +88,6 @@ static PROPS_ATTRS_SPREAD_RE: LazyLock<regex::Regex> =
 static SVELTE_TEMPLATE_DATA_WHOLE_USE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?:=\s*\{\s*data\s*\}|\{\s*\.\.\.\s*data\s*\})"));
 
-/// Regex to extract `<style>` block content from Vue/Svelte SFCs.
-/// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
-/// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
-static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
-    )
-});
-
 /// Static asset references in SFC markup: `<img src="./logo.png">`,
 /// `<source src="...">`, `<video poster="...">`, etc.
 ///
@@ -128,14 +113,30 @@ static TEMPLATE_ASSET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 /// offsets still map 1:1 into the original source for line/col reporting.
 fn mask_non_markup_regions(source: &str) -> String {
     let mut masked = source.to_string();
-    for re in [&*SCRIPT_BLOCK_RE, &*STYLE_BLOCK_RE, &*HTML_COMMENT_RE] {
-        masked = re
-            .replace_all(&masked, |caps: &regex::Captures<'_>| {
-                " ".repeat(caps[0].len())
-            })
-            .into_owned();
-    }
+    let spans: Vec<_> = script_blocks(&masked).into_iter().map(|b| b.span).collect();
+    mask_spans(&mut masked, spans);
+    let spans: Vec<_> = style_blocks(&masked).into_iter().map(|b| b.span).collect();
+    mask_spans(&mut masked, spans);
+    let spans: Vec<_> = HTML_COMMENT_RE
+        .find_iter(&masked)
+        .map(|m| m.range())
+        .collect();
+    mask_spans(&mut masked, spans);
     masked
+}
+
+/// Replace each of `spans` with spaces of the same byte length.
+fn mask_spans(text: &mut String, spans: Vec<std::ops::Range<usize>>) {
+    for span in spans {
+        let len = span.len();
+        text.replace_range(span, &" ".repeat(len));
+    }
+}
+
+/// Whether `pos` is inside one of the sorted, disjoint `ranges`.
+fn in_ranges(ranges: &[(usize, usize)], pos: usize) -> bool {
+    let index = ranges.partition_point(|&(_, end)| end <= pos);
+    ranges.get(index).is_some_and(|&(start, _)| start <= pos)
 }
 
 /// Collect static relative asset references from SFC markup as
@@ -190,19 +191,13 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
         .map(|m| (m.start(), m.end()))
         .collect();
 
-    SCRIPT_BLOCK_RE
-        .captures_iter(source)
-        .filter(|cap| {
-            let start = cap.get(0).map_or(0, |m| m.start());
-            !comment_ranges
-                .iter()
-                .any(|&(cs, ce)| start >= cs && start < ce)
-        })
-        .map(|cap| {
-            let attrs = cap.name("attrs").map_or("", |m| m.as_str());
-            let body_match = cap.name("body");
-            let byte_offset = body_match.map_or(0, |m| m.start());
-            let body = body_match.map_or("", |m| m.as_str()).to_string();
+    script_blocks(source)
+        .into_iter()
+        .filter(|block| !in_ranges(&comment_ranges, block.span.start))
+        .map(|block| {
+            let attrs = &source[block.attrs.clone()];
+            let byte_offset = block.body.start;
+            let body = source[block.body].to_string();
             let lang = LANG_ATTR_RE
                 .captures(attrs)
                 .and_then(|c| c.get(1))
@@ -213,7 +208,7 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 .captures(attrs)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
-            let attrs_start = cap.name("attrs").map_or(0, |m| m.start());
+            let attrs_start = block.attrs.start;
             let src_span = SRC_ATTR_RE.captures(attrs).and_then(|c| c.get(1)).map(|m| {
                 Span::new(
                     (attrs_start + m.start()) as u32,
@@ -279,11 +274,12 @@ pub struct SourceRegion {
 /// comments as template text. Offsets always point into the original SFC source.
 #[must_use]
 pub fn extract_sfc_template_regions(source: &str) -> Vec<SourceRegion> {
-    let mut ranges: Vec<(usize, usize)> = SCRIPT_BLOCK_RE
-        .find_iter(source)
-        .chain(STYLE_BLOCK_RE.find_iter(source))
-        .chain(HTML_COMMENT_RE.find_iter(source))
-        .map(|m| (m.start(), m.end()))
+    let mut ranges: Vec<(usize, usize)> = script_blocks(source)
+        .into_iter()
+        .chain(style_blocks(source))
+        .map(|block| block.span)
+        .chain(HTML_COMMENT_RE.find_iter(source).map(|m| m.range()))
+        .map(|span| (span.start, span.end))
         .collect();
     ranges.sort_unstable_by_key(|(start, _)| *start);
     ranges_to_gaps(source, &ranges)
@@ -301,18 +297,13 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
         .map(|m| (m.start(), m.end()))
         .collect();
 
-    STYLE_BLOCK_RE
-        .captures_iter(source)
-        .filter(|cap| {
-            let start = cap.get(0).map_or(0, |m| m.start());
-            !comment_ranges
-                .iter()
-                .any(|&(cs, ce)| start >= cs && start < ce)
-        })
-        .map(|cap| {
-            let attrs = cap.name("attrs").map_or("", |m| m.as_str());
-            let body = cap.name("body").map_or("", |m| m.as_str()).to_string();
-            let byte_offset = cap.name("body").map_or(0, |m| m.start());
+    style_blocks(source)
+        .into_iter()
+        .filter(|block| !in_ranges(&comment_ranges, block.span.start))
+        .map(|block| {
+            let attrs = &source[block.attrs.clone()];
+            let byte_offset = block.body.start;
+            let body = source[block.body].to_string();
             let lang = LANG_ATTR_RE
                 .captures(attrs)
                 .and_then(|c| c.get(1))
@@ -321,7 +312,7 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
                 .captures(attrs)
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
-            let attrs_start = cap.name("attrs").map_or(0, |m| m.start());
+            let attrs_start = block.attrs.start;
             let src_span = SRC_ATTR_RE.captures(attrs).and_then(|c| c.get(1)).map(|m| {
                 Span::new(
                     (attrs_start + m.start()) as u32,

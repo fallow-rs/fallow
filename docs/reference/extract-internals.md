@@ -17,6 +17,12 @@ and parse-cache changes.
   for Angular, Vue, Svelte, and Astro, over a shared JS-expression engine.
 - `crates/extract/src/sfc.rs`, `astro/mod.rs`, `glimmer.rs`, `mdx.rs`, and
   `graphql.rs`: component and embedded-language extraction.
+- `crates/extract/src/sfc_blocks.rs`: the `<script>` and `<style>` block scan
+  of Vue and Svelte files. It gives the same blocks as the leftmost-first
+  regexes in its module docs, in linear time. A regex search costs quadratic
+  time on a file with many unclosed attribute quotes. The tests in
+  `crates/extract/src/tests/sfc_blocks.rs` compare the scan with those
+  regexes on generated input.
 - `crates/extract/src/sfc_template/`: template-visible usage for supported
   component formats.
 - `crates/extract/src/css.rs`, `css_metrics.rs`, `css_classes.rs`,

@@ -68,6 +68,7 @@ mod parse;
 mod parse_degradation;
 mod parse_options;
 pub mod sfc;
+mod sfc_blocks;
 pub mod sfc_css;
 mod sfc_props;
 mod sfc_template;
