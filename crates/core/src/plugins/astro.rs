@@ -64,6 +64,9 @@ const ENDPOINT_EXPORTS: &[&str] = &[
 const MIDDLEWARE_EXPORTS: &[&str] = &["onRequest"];
 const CONTENT_EXPORTS: &[&str] = &["collections"];
 const ACTION_EXPORTS: &[&str] = &["server"];
+/// Astro reads the exported `Props` type of a component to type
+/// `Astro.props`, so no other file needs to import it.
+const COMPONENT_EXPORTS: &[&str] = &["Props"];
 
 define_plugin! {
     struct AstroPlugin => "astro",
@@ -88,6 +91,7 @@ define_plugin! {
             CONTENT_EXPORTS
         ),
         ("src/actions/index.{js,ts,mjs,mts,cjs,cts}", ACTION_EXPORTS),
+        ("**/*.astro", COMPONENT_EXPORTS),
     ],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
@@ -321,5 +325,10 @@ mod tests {
         assert!(exports.iter().any(|(pattern, names)| {
             pattern.contains("src/pages") && names.contains(&"getStaticPaths")
         }));
+        assert!(
+            exports
+                .iter()
+                .any(|(pattern, names)| *pattern == "**/*.astro" && names.contains(&"Props"))
+        );
     }
 }
