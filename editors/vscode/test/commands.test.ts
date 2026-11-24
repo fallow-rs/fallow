@@ -1257,6 +1257,9 @@ describe("applyFixes", () => {
     vi.clearAllMocks();
   });
 
+  const DEFAULT_FIX_PREVIEW_PLACEHOLDER =
+    "Review fixes. Select 'Apply all fixes' to apply, or click a fix to navigate";
+
   const skipped = {
     type: "skipped",
     path: "src/member.ts",
@@ -1322,6 +1325,76 @@ describe("applyFixes", () => {
         fixes: [
           { ...skipped, skip_reason: "low_confidence_off_graph", help: "Intentional skip." },
           { ...skipped, skip_reason: "mixed_line_endings", help },
+        ],
+      },
+      2,
+    );
+  });
+
+  it("shows available fixes in the preview with recovery advice when dry run exits with code 2", async () => {
+    const help = "Normalize this file to consistent LF or CRLF line endings.";
+    await withFixWorkspace(
+      async () => {
+        const result = await runFix(workspaceContext, true);
+        expect(result?.fixes).toHaveLength(3);
+        expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
+        expect(mockWindow.showWarningMessage).toHaveBeenCalledOnce();
+        expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+          `Fallow: the fix run skipped some files. src/b.ts ${help}`,
+        );
+        expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({ detail: "src/a.ts:1" }),
+            expect.objectContaining({ detail: "src/a.ts:4" }),
+            expect.objectContaining({ action: "apply-all", description: "2 fixes" }),
+          ]),
+          expect.objectContaining({
+            title: "Fallow: 2 fixes available, skipped 1",
+            placeHolder: DEFAULT_FIX_PREVIEW_PLACEHOLDER,
+          }),
+        );
+      },
+      {
+        dry_run: true,
+        total_fixed: 0,
+        fixes: [
+          { type: "remove_export", name: "unusedA", path: "src/a.ts", line: 1 },
+          { type: "remove_export", name: "unusedB", path: "src/a.ts", line: 4 },
+          { ...skipped, path: "src/b.ts", skip_reason: "mixed_line_endings", help },
+        ],
+      },
+      2,
+    );
+  });
+
+  it("falls back to the CLI error text as the preview note when exit code 2 report lacks recovery help", async () => {
+    await withFixWorkspace(
+      async () => {
+        const result = await runFix(workspaceContext, true);
+        expect(result?.fixes).toHaveLength(2);
+        expect(mockWindow.showErrorMessage).not.toHaveBeenCalled();
+        expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+          expect.stringMatching(
+            /^Fallow: the fix run skipped some files\. .*fallow exited with code 2/,
+          ),
+        );
+        expect(mockWindow.showQuickPick).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({ detail: "src/a.ts:1" }),
+            expect.objectContaining({ action: "apply-all", description: "1 fix" }),
+          ]),
+          expect.objectContaining({
+            title: "Fallow: 1 fix available, skipped 1",
+            placeHolder: DEFAULT_FIX_PREVIEW_PLACEHOLDER,
+          }),
+        );
+      },
+      {
+        dry_run: true,
+        total_fixed: 0,
+        fixes: [
+          { type: "remove_export", name: "unusedA", path: "src/a.ts", line: 1 },
+          { ...skipped, path: "src/b.ts", skip_reason: "content_changed" },
         ],
       },
       2,
