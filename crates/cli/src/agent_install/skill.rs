@@ -135,8 +135,35 @@ pub fn targets(ctx: &Ctx, harnesses: &[Harness]) -> Result<Vec<Target>, String> 
     Ok(targets)
 }
 
+/// The install targets: every target of `targets`, plus each `.agents` skill
+/// that already carries the fallow marker. A harness that reads only
+/// `.claude/skills/` does not select the `.agents` root, but `agent status`
+/// still reports a stale fallow copy there. The install keeps that copy
+/// current. It does not create an absent `.agents` skill, and it does not
+/// touch one without the marker.
+fn install_targets(ctx: &Ctx, harnesses: &[Harness]) -> Result<Vec<Target>, String> {
+    let mut targets = targets(ctx, harnesses)?;
+    let base = ctx.scope_base()?;
+    for skill in RELEASED_SKILLS {
+        let dir = base.join(".agents").join("skills").join(skill.name);
+        if targets.iter().any(|target| target.dir == dir) {
+            continue;
+        }
+        if matches!(inspect(&dir), SkillState::Managed { .. }) {
+            targets.push(Target {
+                skill,
+                harness: None,
+                dir,
+                scope: ctx.scope(),
+                covers: Vec::new(),
+            });
+        }
+    }
+    Ok(targets)
+}
+
 pub fn install(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
-    let targets = match targets(ctx, harnesses) {
+    let targets = match install_targets(ctx, harnesses) {
         Ok(targets) => targets,
         Err(message) => {
             return vec![StepReport::failed(None, Step::Skill, Scope::Local, message)];
