@@ -352,6 +352,8 @@ mod production_mode;
 mod prop_drilling;
 #[path = "integration_test/re_export_chains.rs"]
 mod re_export_chains;
+#[path = "integration_test/react_class_statics.rs"]
+mod react_class_statics;
 #[path = "integration_test/react_component_intel.rs"]
 mod react_component_intel;
 #[path = "integration_test/react_native_platform_family_re_export.rs"]

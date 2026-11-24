@@ -52,6 +52,17 @@ pub(in crate::analyze) fn is_react_lifecycle_method(name: &str) -> bool {
     )
 }
 
+/// Static properties that React reads from a class component.
+///
+/// The names are common instance fields in other code, so only a `static`
+/// member gets this credit.
+pub(in crate::analyze) fn is_react_class_static_property(name: &str) -> bool {
+    matches!(
+        name,
+        "defaultProps" | "displayName" | "propTypes" | "contextTypes" | "childContextTypes"
+    )
+}
+
 /// Methods that the JavaScript runtime calls by protocol on any object.
 ///
 /// `JSON.stringify` calls `toJSON`, so the member is used even when no code
@@ -109,6 +120,18 @@ mod tests {
     fn react_lifecycle_context_methods() {
         assert!(is_react_lifecycle_method("getChildContext"));
         assert!(is_react_lifecycle_method("contextType"));
+    }
+
+    #[test]
+    fn react_class_static_properties() {
+        assert!(is_react_class_static_property("defaultProps"));
+        assert!(is_react_class_static_property("displayName"));
+        assert!(is_react_class_static_property("propTypes"));
+        assert!(is_react_class_static_property("contextTypes"));
+        assert!(is_react_class_static_property("childContextTypes"));
+        assert!(!is_react_class_static_property("contextType"));
+        assert!(!is_react_class_static_property("defaultProp"));
+        assert!(!is_react_class_static_property("name"));
     }
 
     #[test]
