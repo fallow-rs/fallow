@@ -212,6 +212,10 @@ jobs:
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
+          # Charge each instruction the same cost. The cycle estimate uses the
+          # cache model of the physical CPU, and the hosted runners change CPU
+          # between runs, so the estimate moves on the same code.
+          cycle-estimation: 'false'
 
   benchmark-full:
     name: CodSpeed full simulation (${{ matrix.label }})
@@ -277,6 +281,10 @@ jobs:
         with:
           mode: simulation
           run: cargo codspeed run -p ${{ matrix.package }} --bench ${{ matrix.bench }}
+          # Charge each instruction the same cost. The cycle estimate uses the
+          # cache model of the physical CPU, and the hosted runners change CPU
+          # between runs, so the estimate moves on the same code.
+          cycle-estimation: 'false'
 
   cli-instructions:
     name: CLI instruction counts

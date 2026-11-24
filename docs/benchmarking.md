@@ -54,9 +54,20 @@ finishes. CodSpeed counts that wait as syscall time. For example,
 `workspace_file_bucketing` is pure in-memory work, but CodSpeed reports 10
 syscalls that take more time than the work itself. The simulated value still
 counts the instructions of the worker, so the warning alone is no reason to
-distrust a result. A change in the result between runs of the same code
-usually comes from the CPU model of the hosted runner. Compare complete runs of
-the same commit before you act on a flagged change.
+distrust a result.
+
+Every simulation job sets `cycle-estimation: false`, so each instruction has
+the same cost and the value follows the instruction count. The cycle estimate
+of CodSpeed adds a cost for cache misses from a cache model of the physical
+CPU. The hosted runners change between Intel and AMD CPUs from run to run, so
+that estimate moves on the same code. The instruction count does not depend on
+the CPU. Cache and memory cost shows in the walltime jobs.
+`scripts/check-benchmark-harness.py` rejects a simulation job without the
+setting.
+
+When this setting changed, each value of the Rust shards dropped once,
+because the value no longer holds the cache-miss cost. Do not compare a run
+from before that change with a run after it.
 
 `cargo codspeed build` and `cargo bench` use `[profile.bench]` in the root
 `Cargo.toml`. It inherits `release` but uses thin LTO, because fat LTO of the
