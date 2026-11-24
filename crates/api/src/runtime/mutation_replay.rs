@@ -19,7 +19,7 @@ use super::mutation::{
 };
 use crate::mutation::companion::{COMPANION_FILES, install};
 use crate::mutation::discovery::discover_runtime;
-use crate::mutation::last_report::ignore_cache_dir;
+use crate::mutation::ignore_cache_dir;
 use crate::mutation::manifest::manifest;
 use crate::mutation::protocol::{
     InitRequest, LinkFault, ReplayRequest, ReplayResult, Request, Response,
