@@ -712,6 +712,9 @@ mod ember_classic;
 #[path = "integration_test/issue_620_error_subclass_name.rs"]
 mod issue_620_error_subclass_name;
 
+#[path = "integration_test/issue_5099_tojson_dispose.rs"]
+mod issue_5099_tojson_dispose;
+
 #[path = "integration_test/issue_1638_openlayers_dispatch.rs"]
 mod issue_1638_openlayers_dispatch;
 

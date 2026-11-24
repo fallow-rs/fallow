@@ -225,6 +225,7 @@ fn collect_store_member_keys(obj: &ObjectExpression<'_>, members: &mut Vec<Membe
             override_base: None,
             is_protected: false,
             is_static: false,
+            pairs_with_symbol_dispose: false,
         });
     }
 }

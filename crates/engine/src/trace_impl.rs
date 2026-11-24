@@ -2123,10 +2123,9 @@ mod tests {
     }
 
     fn class_method(name: &str, start: u32, end: u32) -> fallow_types::extract::MemberInfo {
-        use fallow_types::extract::{MemberInfo, MemberKind};
-        MemberInfo {
+        fallow_types::extract::MemberInfo {
             name: name.to_string(),
-            kind: MemberKind::ClassMethod,
+            kind: fallow_types::extract::MemberKind::ClassMethod,
             span: oxc_span::Span::new(start, end),
             has_decorator: false,
             decorator_names: vec![],
@@ -2135,6 +2134,7 @@ mod tests {
             override_base: None,
             is_protected: false,
             is_static: false,
+            pairs_with_symbol_dispose: false,
         }
     }
 

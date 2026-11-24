@@ -258,6 +258,7 @@ impl ModuleInfoExtractor {
                     override_base: None,
                     is_protected: false,
                     is_static: false,
+                    pairs_with_symbol_dispose: false,
                 })
             })
             .collect();
@@ -439,6 +440,7 @@ impl ModuleInfoExtractor {
             override_base: None,
             is_protected: false,
             is_static: false,
+            pairs_with_symbol_dispose: false,
         });
     }
 
