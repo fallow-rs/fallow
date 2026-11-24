@@ -30,10 +30,10 @@ pub fn session_reuse_allowed(value: Option<&str>) -> bool {
     })
 }
 
-/// The fixed file names, other than [`fallow_config::CONFIG_FILE_NAMES`],
-/// that can change the resolved config or the workspace set of a session.
-/// The server asks the client to watch each of them. The `fallow.*` names
-/// are legacy spellings that `initializationOptions.configPath` can name.
+/// The fixed file names, other than the config file names of
+/// [`fallow_config::config_file_name`], that can change the resolved config
+/// or the workspace set of a session. The server asks the client to watch
+/// each of them.
 pub const SESSION_INPUT_FILE_NAMES: &[&str] = &[
     "package.json",
     "package-lock.json",
@@ -44,10 +44,6 @@ pub const SESSION_INPUT_FILE_NAMES: &[&str] = &[
     "bun.lockb",
     "deno.json",
     "deno.jsonc",
-    "fallow.json",
-    "fallow.jsonc",
-    "fallow.yaml",
-    "fallow.yml",
 ];
 
 /// Whether a change to `path` can change the resolved config or the
@@ -64,7 +60,7 @@ pub fn session_input_file(path: &Path) -> bool {
     name.starts_with("tsconfig")
         || name.starts_with("jsconfig")
         || SESSION_INPUT_FILE_NAMES.contains(&name)
-        || fallow_config::CONFIG_FILE_NAMES.contains(&name)
+        || fallow_config::config_file_name(name)
         || fallow_config::is_default_external_plugin_file(path)
 }
 

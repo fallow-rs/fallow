@@ -55,13 +55,8 @@ fn type_aware_resolution_file(path: &Path) -> bool {
                 | "yarn.lock"
                 | "bun.lock"
                 | "bun.lockb"
-                | "fallow.json"
-                | "fallow.jsonc"
-                | "fallow.yaml"
-                | "fallow.yml"
-                | "fallow.toml"
         )
-        || fallow_config::CONFIG_FILE_NAMES.contains(&name)
+        || fallow_config::config_file_name(name)
         || name.ends_with(".d.ts")
 }
 
@@ -246,6 +241,7 @@ fn watched_file_globs() -> Vec<String> {
             session_store::SESSION_INPUT_FILE_NAMES
                 .iter()
                 .chain(fallow_config::CONFIG_FILE_NAMES)
+                .chain(fallow_config::UNRECOGNIZED_CONFIG_FILE_NAMES)
                 .map(|name| format!("**/{name}")),
         )
         .collect()

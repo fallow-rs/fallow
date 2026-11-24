@@ -63,6 +63,7 @@ impl WorkspaceDiagnosticKind {
             Self::InertFlag { .. } => "inert-flag",
             Self::ConfigLoadFellBack { .. } => "config-load-fell-back",
             Self::ConfigFileShadowed { .. } => "config-file-shadowed",
+            Self::ConfigFileNameUnrecognized { .. } => "config-file-name-unrecognized",
             Self::UnknownSecurityCategory { .. } => "unknown-security-category",
             Self::EnvValueIgnored { .. } => "env-value-ignored",
         }
@@ -156,6 +157,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BaselineInstallStateMismatch { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::EnvValueIgnored { .. } => true,
         }
     }
@@ -305,6 +307,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -380,6 +383,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -457,6 +461,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -535,6 +540,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -552,6 +558,7 @@ impl WorkspaceDiagnosticKind {
             Self::InertFlag { .. }
                 | Self::ConfigLoadFellBack { .. }
                 | Self::ConfigFileShadowed { .. }
+                | Self::ConfigFileNameUnrecognized { .. }
                 | Self::UnknownSecurityCategory { .. }
                 | Self::EnvValueIgnored { .. }
         )

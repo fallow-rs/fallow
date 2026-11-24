@@ -488,6 +488,12 @@ fn type_aware_file_classification_covers_source_and_resolution_inputs() {
             "{name} is a config file the loader reads, so it must invalidate the semantic session"
         );
     }
+    for name in fallow_config::UNRECOGNIZED_CONFIG_FILE_NAMES {
+        assert!(
+            type_aware_resolution_file(Path::new(name)),
+            "{name} is a near-miss config name, and configPath can name the JSON ones, so it must invalidate the semantic session"
+        );
+    }
     for path in ["src/index.ts", "src/view.tsx", "src/runtime.js"] {
         assert!(type_aware_source_file(Path::new(path)));
         assert!(!type_aware_resolution_file(Path::new(path)));

@@ -14374,6 +14374,24 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "config-file-name-unrecognized"
+            },
+            "name": {
+              "type": "string",
+              "description": "The file name that the run did not read."
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "The project root has a file whose name looks like a fallow config,\nsuch as `fallow.jsonc`, but no config file name that discovery reads\n(issue #5166). The run does not load that file, so its settings do not\napply. One entry per such file. Not for a run with an explicit config\nfile. `path` is the file."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "unknown-security-category"
             },
             "id": {

@@ -781,6 +781,15 @@ pub enum WorkspaceDiagnosticKind {
         /// The file name that the run ignored.
         ignored: String,
     },
+    /// The project root has a file whose name looks like a fallow config,
+    /// such as `fallow.jsonc`, but no config file name that discovery reads
+    /// (issue #5166). The run does not load that file, so its settings do not
+    /// apply. One entry per such file. Not for a run with an explicit config
+    /// file. `path` is the file.
+    ConfigFileNameUnrecognized {
+        /// The file name that the run did not read.
+        name: String,
+    },
     /// The `security.categories` config names a category that fallow does not
     /// know, so the run ignores that entry. `path` is the root.
     UnknownSecurityCategory {
@@ -1314,6 +1323,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::InertFlag { .. }
         | WorkspaceDiagnosticKind::ConfigLoadFellBack { .. }
         | WorkspaceDiagnosticKind::ConfigFileShadowed { .. }
+        | WorkspaceDiagnosticKind::ConfigFileNameUnrecognized { .. }
         | WorkspaceDiagnosticKind::UnknownSecurityCategory { .. }
         | WorkspaceDiagnosticKind::EnvValueIgnored { .. } => {
             run_notices::run_notice_message(&display, kind)
