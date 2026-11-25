@@ -119,7 +119,13 @@ fn native_gate_probe(
     if !text.contains("# Native JSON protocol: fallow-gate-json-v1") {
         return None;
     }
-    let trusted = crate::setup_hooks::rendered_gate_script();
+    // A user-scope gate records the path of its fallow, which the template
+    // comparison ignores.
+    let trusted = if crate::setup_hooks::is_user_scope_gate_script(&text) {
+        crate::setup_hooks::render_gate_script(true, None)
+    } else {
+        crate::setup_hooks::rendered_gate_script()
+    };
     if !gate_matches_template(&text, &trusted) {
         return Some((status.path.clone(), NativeGateState::Modified));
     }
@@ -133,6 +139,9 @@ const INSTALLER_VERSION_LINE: &str = "# Installer version: ";
 /// installer version comment changes with each fallow release, so it does not
 /// make a gate modified. Every other byte must match. CRLF line endings count
 /// as an edit, because bash cannot run a script with them.
+/// The line of a user-scope gate that records the path of its fallow.
+const GATE_BIN_LINE: &str = "GATE_FALLOW_BIN=";
+
 fn gate_matches_template(installed: &str, trusted: &str) -> bool {
     normalized_gate_lines(installed).eq(normalized_gate_lines(trusted))
 }
@@ -141,6 +150,8 @@ fn normalized_gate_lines(text: &str) -> impl Iterator<Item = &str> {
     text.split('\n').map(|line| {
         if line.starts_with(INSTALLER_VERSION_LINE) {
             INSTALLER_VERSION_LINE
+        } else if line.starts_with(GATE_BIN_LINE) {
+            GATE_BIN_LINE
         } else {
             line
         }
@@ -1071,6 +1082,14 @@ mod tests {
         );
         assert_ne!(older, crate::setup_hooks::rendered_gate_script());
         assert_ne!(probe_installed_gate(&older), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn user_scope_native_gate_matches_the_user_scope_template() {
+        let user = crate::setup_hooks::render_gate_script(true, Some("/opt/tools/bin/fallow"));
+        assert_ne!(probe_installed_gate(&user), NativeGateState::Modified);
+        let edited = user.replacen("exit 2", "exit 0", 1);
+        assert_eq!(probe_installed_gate(&edited), NativeGateState::Modified);
     }
 
     #[test]
