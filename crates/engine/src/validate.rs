@@ -16,7 +16,7 @@ pub fn validate_git_ref(s: &str) -> Result<&str, String> {
 /// The root must not pass through a link that moves it out of its checkout.
 /// Without this check, a committed link could point the root at a directory
 /// outside the repository, and the analysis would then use that directory
-/// as the project. See [`check_root_links`] for the rules.
+/// as the project. The private `check_root_links` holds the rules.
 ///
 /// A relative `root` starts at the current directory of the process. See
 /// [`validate_root_in`] for the check of its `PWD` spelling.
