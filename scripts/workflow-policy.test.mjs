@@ -2931,65 +2931,96 @@ test("bench.yml measures main nightly and a push only for the release commit", a
   );
   assert.deepEqual(triggers, ["pull_request", "push", "schedule", "workflow_dispatch"]);
 
-  const gate = indentedBlock(benchmark, "benchmark-harness", 2)
-    .match(/^    if: >-\n((?: {6}.+\n)+)/mu)[1]
-    .replace(/\s+/gu, " ")
-    .trim();
-  const expression = gate
-    .replaceAll("github.event.pull_request.labels.*.name", "__labels")
-    .replaceAll("startsWith(", "__startsWith(")
-    .replaceAll("contains(", "__contains(");
-  const runs = (event_name, { labels = [], ...event } = {}) =>
-    runInNewContext(expression, {
-      __labels: labels,
-      __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
-      __contains: (list, value) => list.includes(value),
-      github: { event_name, event: { head_commit: {}, label: {}, ...event } },
-    });
+  // Evaluate a GitHub expression of bench.yml for one event. A job condition
+  // without a label of its own reads `github.event.label` as an empty object.
+  const evaluate = (
+    source,
+    event_name,
+    { labels = [], walltime = false, fork = false, message = "", ...event } = {},
+  ) =>
+    runInNewContext(
+      source
+        .replace(/\s+/gu, " ")
+        .trim()
+        .replaceAll("github.event.pull_request.labels.*.name", "__labels")
+        .replaceAll("startsWith(", "__startsWith(")
+        .replaceAll("contains(", "__contains("),
+      {
+        __labels: labels,
+        __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
+        __contains: (list, value) => list.includes(value),
+        github: {
+          event_name,
+          ref: "refs/pull/1/merge",
+          repository: "fallow-rs/fallow",
+          run_id: 42,
+          event: {
+            head_commit: { message },
+            label: {},
+            pull_request: {
+              head: { repo: { full_name: fork ? "contributor/fallow" : "fallow-rs/fallow" } },
+            },
+            ...event,
+          },
+        },
+        inputs: { walltime },
+      },
+    );
+  const jobIf = (name) => {
+    const job = indentedBlock(benchmark, name, 2);
+    const condition =
+      job.match(/^    if: >-\n((?: {6}.+\n)+)/mu)?.[1] ?? job.match(/^    if: (.+)$/mu)?.[1];
+    assert.ok(condition, `${name} has an if`);
+    return condition;
+  };
+  const labeled = (name, options = {}) => ({ action: "labeled", label: { name }, ...options });
+  const release = { message: "chore: release v3.49.0" };
+
+  const runs = (...args) => evaluate(jobIf("benchmark-harness"), ...args);
   assert.equal(runs("schedule"), true);
   assert.equal(runs("workflow_dispatch"), true);
-  assert.equal(runs("push", { head_commit: { message: "chore: release v3.44.0" } }), true);
-  assert.equal(runs("push", { head_commit: { message: "fix: something" } }), false);
+  assert.equal(runs("push", release), true);
+  assert.equal(runs("push", { message: "fix: something" }), false);
   assert.equal(runs("pull_request", { action: "synchronize" }), false);
   assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:perf"] }), true);
   // A label event for another label must not start a second ci:perf run.
+  assert.equal(runs("pull_request", labeled("other", { labels: ["ci:perf"] })), false);
+  assert.equal(runs("pull_request", labeled("ci:perf", { labels: ["ci:perf"] })), true);
+  // The "ci:walltime" label starts one run, with or without "ci:perf", but
+  // not for a fork and not again on a later push.
+  for (const labels of [["ci:walltime"], ["ci:perf", "ci:walltime"]]) {
+    assert.equal(runs("pull_request", labeled("ci:walltime", { labels })), true, String(labels));
+  }
   assert.equal(
-    runs("pull_request", { action: "labeled", label: { name: "other" }, labels: ["ci:perf"] }),
+    runs("pull_request", labeled("ci:walltime", { labels: ["ci:walltime"], fork: true })),
     false,
   );
-  assert.equal(
-    runs("pull_request", { action: "labeled", label: { name: "ci:perf" }, labels: ["ci:perf"] }),
-    true,
-  );
-  // The "ci:walltime" label starts one run, with or without "ci:perf".
-  for (const labels of [["ci:walltime"], ["ci:perf", "ci:walltime"]]) {
-    assert.equal(
-      runs("pull_request", { action: "labeled", label: { name: "ci:walltime" }, labels }),
-      true,
-      labels.join(","),
-    );
-  }
   assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:walltime"] }), false);
 
-  // The run of the "ci:walltime" label skips the simulation jobs. The release
-  // push must not wait on a release build of the CLI corpus.
-  const notWalltimeLabel = "github.event.label.name != 'ci:walltime'";
-  assert.match(
-    indentedBlock(benchmark, "determine-matrix", 2),
-    new RegExp(`^    if: ${notWalltimeLabel.replaceAll(".", "\\.")}$`, "mu"),
-  );
+  // The run of the "ci:walltime" label skips the simulation jobs. The fast
+  // shards need determine-matrix. The release push must not wait on a release
+  // build of the CLI corpus.
   assert.match(indentedBlock(benchmark, "benchmark", 2), /^      - determine-matrix$/mu);
-  assert.match(
-    indentedBlock(benchmark, "cli-instructions", 2),
-    new RegExp(
-      `^    if: github\\.event_name != 'push' && ${notWalltimeLabel.replaceAll(".", "\\.")}$`,
-      "mu",
-    ),
-  );
-  assert.match(
-    indentedBlock(benchmark, "benchmark-full", 2),
-    /^    if: github\.event_name != 'pull_request'$/mu,
-  );
+  const simulation = {
+    "determine-matrix": { release: true, perf: true, walltime: false },
+    "cli-instructions": { release: false, perf: true, walltime: false },
+    "benchmark-full": { release: true, perf: false, walltime: false },
+  };
+  for (const [name, expected] of Object.entries(simulation)) {
+    const condition = jobIf(name);
+    assert.equal(evaluate(condition, "schedule"), true, `${name} nightly`);
+    assert.equal(evaluate(condition, "push", release), expected.release, `${name} release`);
+    assert.equal(
+      evaluate(condition, "pull_request", labeled("ci:perf", { labels: ["ci:perf"] })),
+      expected.perf,
+      `${name} ci:perf`,
+    );
+    assert.equal(
+      evaluate(condition, "pull_request", labeled("ci:walltime", { labels: ["ci:perf"] })),
+      expected.walltime,
+      `${name} ci:walltime`,
+    );
+  }
   for (const trigger of ["pull_request", "push"]) {
     assert.match(
       indentedBlock(indentedBlock(benchmark, "on", 0), trigger, 2),
@@ -2997,40 +3028,47 @@ test("bench.yml measures main nightly and a push only for the release commit", a
       trigger,
     );
   }
+  // The label must start a run for a change of the type-aware companion alone.
+  assert.match(
+    indentedBlock(indentedBlock(benchmark, "on", 0), "pull_request", 2),
+    /- 'tools\/type-aware-sidecar\/\*\*'/u,
+  );
+
+  // A ci:walltime run gets a group of its own: it does not cancel a ci:perf
+  // run, and a later push does not cancel it.
+  const group = indentedBlock(benchmark, "concurrency", 0).match(
+    /^ {2}group: "bench-\$\{\{ (.+) \}\}"$/mu,
+  )?.[1];
+  assert.ok(group, "bench.yml has a concurrency group");
+  const refGroup = "refs/pull/1/merge";
+  assert.equal(evaluate(group, "pull_request", { action: "synchronize" }), refGroup);
+  assert.equal(evaluate(group, "pull_request", labeled("ci:perf")), refGroup);
+  assert.equal(evaluate(group, "pull_request", labeled("ci:walltime")), 42);
+  assert.equal(evaluate(group, "push", release), 42);
 
   // The walltime jobs run at night, on the release commit, on a dispatch with
-  // the walltime input and on the "labeled" event of "ci:walltime". A plain
-  // dispatch, such as the one of scripts/verify-release-ci.mjs
-  // --dispatch-missing, must not wait on a macro runner. A push to a pull
-  // request must not run them again. The release build runs on a free GitHub runner with the Ubuntu
-  // release of the macro runner image.
+  // the walltime input and on the "labeled" event of "ci:walltime" for a
+  // branch of this repository. A plain dispatch, such as the one of
+  // scripts/verify-release-ci.mjs --dispatch-missing, must not wait on a macro
+  // runner. A push to a pull request must not run them again. The release
+  // build runs on a free GitHub runner with the Ubuntu release of the macro
+  // runner image.
   for (const name of ["walltime-build-cli", "type-aware"]) {
-    const condition = indentedBlock(benchmark, name, 2)
-      .match(/^    if: >-\n((?: {6}.+\n)+)/mu)?.[1]
-      .replace(/\s+/gu, " ")
-      .trim()
-      .replaceAll("startsWith(", "__startsWith(");
-    assert.ok(condition, `${name} has a multi-line if`);
-    const runsWalltime = (
-      event_name,
-      { walltime = false, message = "", action, label = null } = {},
-    ) =>
-      runInNewContext(condition, {
-        __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
-        github: { event_name, event: { head_commit: { message }, action, label } },
-        inputs: { walltime },
-      });
+    const runsWalltime = (...args) => evaluate(jobIf(name), ...args);
     assert.equal(runsWalltime("schedule"), true, `${name} nightly`);
     assert.equal(runsWalltime("workflow_dispatch", { walltime: true }), true, `${name} input`);
     assert.equal(runsWalltime("workflow_dispatch"), false, `${name} plain dispatch`);
-    assert.equal(runsWalltime("push", { message: "chore: release v3.49.0" }), true, name);
+    assert.equal(runsWalltime("push", release), true, `${name} release`);
     assert.equal(runsWalltime("push", { message: "fix: something" }), false, name);
-    assert.equal(runsWalltime("pull_request"), false, `${name} pull request`);
-    const labeled = (labelName) => ({ action: "labeled", label: { name: labelName } });
     assert.equal(runsWalltime("pull_request", labeled("ci:walltime")), true, `${name} label`);
+    assert.equal(
+      runsWalltime("pull_request", labeled("ci:walltime", { fork: true })),
+      false,
+      `${name} fork`,
+    );
     assert.equal(runsWalltime("pull_request", labeled("ci:perf")), false, `${name} ci:perf`);
     assert.equal(
-      runsWalltime("pull_request", { action: "synchronize" }),
+      runsWalltime("pull_request", { action: "synchronize", labels: ["ci:walltime"] }),
       false,
       `${name} push to a labeled pull request`,
     );
