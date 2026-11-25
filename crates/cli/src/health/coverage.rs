@@ -2241,7 +2241,7 @@ mod tests {
 
         assert!(looks_like_istanbul(&coverage));
 
-        let prepared = prepare_coverage_sources(&coverage, &coverage)
+        let prepared = prepare_coverage_sources(&root, &coverage)
             .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
         assert!(matches!(
             &*prepared.sources,
@@ -2263,7 +2263,7 @@ mod tests {
 
         assert!(!looks_like_istanbul(&coverage));
 
-        let prepared = prepare_coverage_sources(&coverage, &coverage)
+        let prepared = prepare_coverage_sources(&root, &coverage)
             .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
         assert!(matches!(
             &*prepared.sources,

@@ -31,9 +31,15 @@ pub(super) fn check_input(root: &Path, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// True when `path` exists, is below `root`, and resolves outside it.
+/// True when `path` exists, is below `root`, and resolves outside it. A
+/// relative `path` is taken relative to the working directory, as the read
+/// takes it. When the working directory cannot be read, the path counts as
+/// outside.
 pub(super) fn is_outside_link(root: &Path, path: &Path) -> bool {
-    path.symlink_metadata().is_ok() && lies_below(root, path) && !is_inside_root(root, path)
+    let Ok(path) = std::path::absolute(path) else {
+        return true;
+    };
+    path.symlink_metadata().is_ok() && lies_below(root, &path) && !is_inside_root(root, &path)
 }
 
 /// The `.json` regular files of the coverage directory `dir`, sorted, and
@@ -116,6 +122,20 @@ mod tests {
         assert!(
             check_input(&root, &outside).is_ok(),
             "a user path outside stays allowed"
+        );
+
+        // The same link, named by a path relative to the working directory.
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut relative = PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            relative.push("..");
+        }
+        let link = root.join("coverage");
+        relative.push(link.strip_prefix("/").expect("absolute link"));
+        assert!(
+            check_input(&root, &relative).is_err(),
+            "{}",
+            relative.display()
         );
         assert_eq!(
             coverage_json_files(&root, &root.join("own")).expect("list"),
