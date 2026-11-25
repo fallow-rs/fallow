@@ -256,7 +256,7 @@ fn parse_store_text(content: &str, path: &Path) -> Result<Result<ImpactStore, Ne
 
 /// Read one store file. `Ok(None)` means that the file does not exist. This
 /// function never writes and never logs.
-pub(super) fn read_store_file(path: &Path) -> Result<Option<ImpactStore>, StoreReadError> {
+fn read_store_file(path: &Path) -> Result<Option<ImpactStore>, StoreReadError> {
     match load_existing(path, |content| parse_store_text(content, path)) {
         Existing::Absent => Ok(None),
         Existing::Loaded(Ok(store)) => Ok(Some(store)),

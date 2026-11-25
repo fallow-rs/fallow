@@ -242,7 +242,7 @@ pub(super) fn read_source_snapshot(
 
 /// The byte offset of the start of each element of
 /// `content.split(line_ending)`.
-pub(super) fn split_line_starts(content: &str, line_ending: &str) -> Vec<usize> {
+fn split_line_starts(content: &str, line_ending: &str) -> Vec<usize> {
     std::iter::once(0)
         .chain(
             content

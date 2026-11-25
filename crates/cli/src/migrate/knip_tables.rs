@@ -332,7 +332,7 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
 /// that covers the same tool. Every other entry of `KNIP_PLUGIN_KEYS` has to
 /// match a registered plugin name exactly, so a new spelling difference fails
 /// `plugin_keys_resolve_to_builtin_plugins` until it is declared here.
-pub(super) const KNIP_PLUGIN_KEY_ALIASES: &[(&str, &str)] = &[
+const KNIP_PLUGIN_KEY_ALIASES: &[(&str, &str)] = &[
     ("electron-vite", "electron"),
     ("nest", "nestjs"),
     ("next", "nextjs"),

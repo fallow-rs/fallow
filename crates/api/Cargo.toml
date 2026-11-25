@@ -23,6 +23,7 @@ fallow-process = { workspace = true }
 fallow-types = { workspace = true }
 dunce = { workspace = true }
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
+flate2 = { workspace = true }
 globset = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
@@ -48,6 +49,7 @@ jsonschema = { workspace = true }
 tempfile = { workspace = true }
 
 [build-dependencies]
+flate2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

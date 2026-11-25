@@ -7,7 +7,6 @@
 //! skill resolves its source on its own, so an older npm package without a
 //! newer skill still gets the embedded copy of that skill.
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use super::{
@@ -15,7 +14,7 @@ use super::{
 };
 use crate::state_file::read_optional_text;
 
-include!(concat!(env!("OUT_DIR"), "/embedded_skill.rs"));
+pub use fallow_api::released_skills::{EMBEDDED_SKILLS, EmbeddedSkill};
 
 const NODE_MODULES_PACKAGE: &str = "node_modules/fallow";
 const NODE_MODULES_SKILLS: &str = "node_modules/fallow/skills";
@@ -33,7 +32,8 @@ pub struct ReleasedSkill {
     task_map: bool,
 }
 
-/// Every released skill, in install order. `build.rs` embeds the same set.
+/// Every released skill, in install order. The build script of `fallow-api`
+/// embeds the same set.
 pub const RELEASED_SKILLS: &[ReleasedSkill] = &[
     ReleasedSkill {
         name: "fallow",
@@ -287,9 +287,7 @@ impl Source {
                 .files
                 .iter()
                 .map(|file| {
-                    let mut decoder = flate2::read::GzDecoder::new(file.gzip);
-                    let mut bytes = Vec::with_capacity(file.raw_len);
-                    decoder.read_to_end(&mut bytes).map_err(|e| {
+                    let mut bytes = file.bytes().map_err(|e| {
                         format!("decompress embedded skill file {}: {e}", file.path)
                     })?;
                     if file.path == "SKILL.md" {

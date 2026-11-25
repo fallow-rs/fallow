@@ -1191,7 +1191,7 @@ fn cloud_finding(
     }
 }
 
-pub(super) fn rank_importance(
+fn rank_importance(
     entries: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
 ) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
     let max_log = entries

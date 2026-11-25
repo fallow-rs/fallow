@@ -5,6 +5,9 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+#[path = "build/embed_skills.rs"]
+mod embed_skills;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProtocolManifest {
@@ -292,6 +295,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     fs::write(output.join("type_aware_protocol.rs"), generated)?;
     generate_similar_code_protocol(&output)?;
+    embed_skills::generate(&output)?;
     Ok(())
 }
 

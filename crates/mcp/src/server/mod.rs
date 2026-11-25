@@ -1,9 +1,10 @@
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetSkillRequestParams,
+    GetSkillResult, Implementation, ListResourceTemplatesResult, ListResourcesResult,
+    ListSkillsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
@@ -559,27 +560,45 @@ impl FallowMcp {
     }
 }
 
-#[rmcp::tool_handler]
-impl ServerHandler for FallowMcp {
-    fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .build(),
-        )
-            .with_server_info(
-                Implementation::new("fallow-mcp", env!("CARGO_PKG_VERSION"))
-                    .with_description("Codebase analysis for TypeScript/JavaScript projects"),
-            )
-            .with_instructions(
-                "Fallow MCP server: deterministic codebase analysis for TypeScript and JavaScript projects. \
+/// Routing text for the `instructions` field. Claude Code cuts this text
+/// at 4,096 characters, and the budget test in `tests/tool_descriptions.rs`
+/// pins its size.
+const INSTRUCTIONS: &str = "Fallow MCP server: deterministic codebase analysis for TypeScript and JavaScript projects. \
                  Every tool description states what it returns and when to use it; read tools/list rather than guessing from names. \
                  On a root with Cargo.toml and no package.json (a Rust root), analyze, find_dupes, check_health, check_architecture, mutation_plan and mutation_inspect run cargo fallow and return language: \"rust\" reports; project_info, mutation_tasks and code_execute refuse it with FALLOW_RUST_UNSUPPORTED_TOOL. \
                  Two routing rules: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want dead-in-production verdicts, and check_health for complexity, hotspot, and CRAP analysis without one; read a fallow:// resource instead of calling fallow_explain when you only need reference material. \
                  Resources are read-only, run no analysis, and are safe to cache per server version: fallow://tools, fallow://issue-types, fallow://explain and fallow://explain/{issue_type}, fallow://task-matrix, and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack, fallow://schema/similar-code-snapshot (JSON Schemas). \
-                 Every analysis result is JSON in a single text block: parse it. The root warnings array restates this run's verdicts with their remedy: gate_outcomes entries, baseline staleness, and a degraded analysis. An absent gate_outcomes is not proof of a pass, because audit and the combined analyses publish none on the in-process route.",
+                 Every analysis result is JSON in a single text block: parse it. The root warnings array restates this run's verdicts with their remedy: gate_outcomes entries, baseline staleness, and a degraded analysis. An absent gate_outcomes is not proof of a pass, because audit and the combined analyses publish none on the in-process route.";
+
+/// Added to [`INSTRUCTIONS`] when the build serves skills, so a host that
+/// loads skills by URI finds them.
+const SKILLS_INSTRUCTION: &str = " For a workflow playbook, load the skills skill://fallow/SKILL.md (analysis, cleanup, review) and skill://fallow-setup/SKILL.md (tooling setup).";
+
+fn server_instructions() -> String {
+    if crate::skills::available() {
+        format!("{INSTRUCTIONS}{SKILLS_INSTRUCTION}")
+    } else {
+        INSTRUCTIONS.to_string()
+    }
+}
+
+#[rmcp::tool_handler]
+impl ServerHandler for FallowMcp {
+    fn get_info(&self) -> ServerConfig {
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources();
+        let capabilities = if crate::skills::available() {
+            capabilities.enable_skills()
+        } else {
+            capabilities
+        };
+        ServerConfig::new(capabilities.build())
+            .with_server_info(
+                Implementation::new("fallow-mcp", env!("CARGO_PKG_VERSION"))
+                    .with_description("Codebase analysis for TypeScript/JavaScript projects"),
             )
+            .with_instructions(server_instructions())
     }
 
     /// Dispatch one tool call inside the cancellation scope of its request.
@@ -624,5 +643,21 @@ impl ServerHandler for FallowMcp {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
         crate::resources::read_resource(&request.uri).map(ReadResourceResponse::from)
+    }
+
+    async fn list_skills(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListSkillsResult, McpError> {
+        Ok(crate::skills::list_skills())
+    }
+
+    async fn get_skill(
+        &self,
+        request: GetSkillRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetSkillResult, McpError> {
+        crate::skills::get_skill(&request.uri)
     }
 }

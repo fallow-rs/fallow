@@ -473,7 +473,12 @@ pub fn run_agent_install(
         None
     } else {
         let command = mcp::resolve_command(&root);
-        steps.extend(mcp::install(&ctx, &harnesses, command.as_ref()));
+        steps.extend(mcp::install(
+            &ctx,
+            &harnesses,
+            command.as_ref(),
+            !skip(Step::Skill),
+        ));
         command
     };
     if !skip(Step::Hooks) {

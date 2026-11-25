@@ -26,6 +26,7 @@ mod nearest;
 mod params;
 mod resources;
 mod server;
+mod skills;
 mod tool_guides;
 mod tools;
 mod warm_session;

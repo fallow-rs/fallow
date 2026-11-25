@@ -165,7 +165,7 @@ fn push_direct_references(lines: &mut Vec<String>, refs: &[ExportReference]) {
 
 /// A short suffix that tells the reader a name search does not find the
 /// consumer, or finds it only under another name. Empty for `found`.
-pub(in crate::report) fn search_hint(
+fn search_hint(
     visibility: Option<fallow_types::trace::SearchVisibility>,
     search_as: Option<&str>,
 ) -> String {

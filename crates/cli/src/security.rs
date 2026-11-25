@@ -1710,7 +1710,7 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 /// JSON: the `SecurityOutput` envelope, pretty-printed.
 #[must_use]
 #[cfg(test)]
-pub fn render_json(output: &SecurityOutput) -> String {
+fn render_json(output: &SecurityOutput) -> String {
     render_json_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }
@@ -1730,7 +1730,7 @@ fn render_json_with_style(
 /// JSON summary: compact aggregate payload without per-finding arrays.
 #[must_use]
 #[cfg(test)]
-pub fn render_json_summary(output: &SecurityOutput) -> String {
+fn render_json_summary(output: &SecurityOutput) -> String {
     render_json_summary_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }
@@ -1757,7 +1757,7 @@ fn render_survivors_output(
 
 #[must_use]
 #[cfg(test)]
-pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
+fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
     render_survivors_json_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }
@@ -1963,7 +1963,7 @@ fn render_blind_spots_output(
 
 #[must_use]
 #[cfg(test)]
-pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
+fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
     render_blind_spots_json_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }

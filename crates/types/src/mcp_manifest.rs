@@ -789,6 +789,15 @@ impl McpResourceInfo {
 /// `fallow://tools` resource, so the two never drift.
 pub const MCP_TOOLS_KEY_PARAMS_NOTE: &str = "key_params is a curated subset; the live MCP input schemas (tools/list) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection";
 
+/// Environment variable of the MCP server: `0`, `false`, `off` or `no` stops
+/// the server from serving the released skills through the skills extension.
+pub const MCP_SKILLS_ENV: &str = "FALLOW_MCP_SKILLS";
+
+/// The value of [`MCP_SKILLS_ENV`] that `fallow agent install` writes into
+/// the MCP entry when it also installs the skills on disk, so a client does
+/// not show each skill twice.
+pub const MCP_SKILLS_OFF: &str = "off";
+
 /// URI scheme every fallow resource lives under. The authority (`tools`,
 /// `explain`, ...) carries the resource family, matching what shipping MCP
 /// servers do; `fallow:///tools` (empty authority) is NOT the same URI.

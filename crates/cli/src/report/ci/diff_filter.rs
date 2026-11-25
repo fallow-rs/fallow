@@ -6,7 +6,7 @@ pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES};
 use fallow_output::CiIssue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DiffFilterMode {
+enum DiffFilterMode {
     Added,
     DiffContext,
     File,

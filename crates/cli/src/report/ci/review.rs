@@ -58,7 +58,7 @@ impl AuditGatePolicy {
     /// Read the policy from the `attribution` object of a saved audit
     /// envelope. `None` when the envelope has no gate mode.
     #[must_use]
-    pub fn from_audit_envelope(envelope: &serde_json::Value) -> Option<Self> {
+    pub(crate) fn from_audit_envelope(envelope: &serde_json::Value) -> Option<Self> {
         let attribution = envelope.get("attribution")?;
         let gate: fallow_config::AuditGate =
             serde_json::from_value(attribution.get("gate")?.clone()).ok()?;

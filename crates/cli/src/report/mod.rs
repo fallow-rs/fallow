@@ -23,7 +23,7 @@ pub(crate) mod sink;
 mod status;
 pub(crate) mod suggestions;
 #[cfg(test)]
-pub(crate) mod test_helpers;
+mod test_helpers;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -187,7 +187,7 @@ pub(crate) enum ArchitectureLayout {
 }
 
 /// The subcommand name of `fallow architecture`.
-pub(crate) const ARCHITECTURE_COMMAND: &str = "architecture";
+const ARCHITECTURE_COMMAND: &str = "architecture";
 
 impl ArchitectureLayout {
     /// The subcommand that a JSON report in this layout names in its
@@ -251,7 +251,7 @@ pub(crate) fn format_display_path(path: &Path, root: &Path) -> String {
 /// Split a path string into (directory, filename) for display.
 /// Directory includes the trailing `/`. If no directory, returns `("", filename)`.
 #[must_use]
-pub(crate) fn split_dir_filename(path: &str) -> (&str, &str) {
+fn split_dir_filename(path: &str) -> (&str, &str) {
     path.rfind('/')
         .map_or(("", path), |pos| (&path[..=pos], &path[pos + 1..]))
 }
@@ -362,7 +362,7 @@ pub(crate) fn render_check_json(
 ///
 /// Example: `elide_common_prefix("a/b/c/foo.ts", "a/b/d/bar.ts")` → `"d/bar.ts"`
 #[must_use]
-pub(crate) fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
+fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
     let mut last_sep = 0;
     for (i, (a, b)) in base.bytes().zip(target.bytes()).enumerate() {
         if a != b {
@@ -396,14 +396,14 @@ pub(crate) fn normalize_uri(path_str: &str) -> String {
 
 /// Severity level for human-readable output.
 #[derive(Clone, Copy, Debug)]
-pub enum Level {
+pub(crate) enum Level {
     Warn,
     Info,
     Error,
 }
 
 #[must_use]
-pub(crate) const fn severity_to_level(s: Severity) -> Level {
+const fn severity_to_level(s: Severity) -> Level {
     match s {
         Severity::Error => Level::Error,
         Severity::Warn => Level::Warn,
