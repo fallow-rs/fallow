@@ -45,7 +45,7 @@ const PROBE_OUTPUT_LIMIT: u64 = 4096;
 const NO_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher found. Install fallow through npm (npm i -D fallow), or put fallow-mcp on PATH. cargo install fallow-mcp and the GitHub release archive both supply fallow-mcp";
 /// A user-level entry starts in every project, so it needs a launcher outside
 /// each project: a global install.
-const NO_USER_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher outside the project found. A user-level entry needs a global install: npm install -g fallow, or cargo install fallow-cli";
+const NO_USER_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher outside the project found. A user-level entry needs a global install: npm install -g fallow, or cargo install fallow-mcp";
 
 /// How the MCP server should be started.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
