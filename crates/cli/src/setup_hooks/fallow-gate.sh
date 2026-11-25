@@ -218,12 +218,20 @@ export PATH
 # in GATE_TARGET_EXCLUDED. GATE_TARGETS keeps each such directory for the
 # block message of gate_check_targets.
 GATE_TARGETS=()
+# A tree that is already excluded is not added again, so GATE_TARGET_COUNT
+# grows only for a new tree.
+GATE_TARGET_COUNT=0
 gate_exclude_target() {
-  local n="${#GATE_EXCLUDED[@]}" i
+  local n="${#GATE_EXCLUDED[@]}" i known tree
   GATE_TARGETS+=("$1")
   gate_exclude_tree "$1" "" "" target
   for ((i = n; i < ${#GATE_EXCLUDED[@]}; i++)); do
-    GATE_TARGET_EXCLUDED+=("${GATE_EXCLUDED[$i]}")
+    tree="${GATE_EXCLUDED[$i]}"
+    for known in ${GATE_EXCLUDED[@]+"${GATE_EXCLUDED[@]:0:n}"} ${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"}; do
+      [ "$known" != "$tree" ] || continue 2
+    done
+    GATE_TARGET_EXCLUDED+=("$tree")
+    GATE_TARGET_COUNT=$((GATE_TARGET_COUNT + 1))
   done
   if [ "$n" -eq 0 ]; then
     GATE_EXCLUDED=()
@@ -981,6 +989,7 @@ fi
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then
   gate_check_targets jq
 fi
+GATE_CHECKED_COUNT="$GATE_TARGET_COUNT"
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ] && ! command -v jq >/dev/null 2>&1; then
   echo "fallow-gate: no native JSON reader or jq found, skipping audit. Upgrade fallow on PATH or install it in the project." >&2
   exit 0
@@ -1389,9 +1398,13 @@ else
     done
   fi
 fi
-GATE_CHECK_TOOLS=(fallow git)
-[ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || GATE_CHECK_TOOLS+=(jq)
-gate_check_targets "${GATE_CHECK_TOOLS[@]}"
+# The early check above already covers the target trees known then. This
+# check runs only when a later target or audit root added a new tree.
+if [ "$GATE_TARGET_COUNT" -gt "$GATE_CHECKED_COUNT" ]; then
+  GATE_CHECK_TOOLS=(fallow git)
+  [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || GATE_CHECK_TOOLS+=(jq)
+  gate_check_targets "${GATE_CHECK_TOOLS[@]}"
+fi
 GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 
 # Lists the findings that caused a fail verdict, one line each, from the
