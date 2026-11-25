@@ -152,7 +152,26 @@ impl From<ConfigLoadError> for EngineError {
 /// config file, or that writes to the config file, calls this function.
 #[must_use]
 pub fn find_config_file(root: &Path) -> Option<PathBuf> {
+    register_tracked_link_probe();
     FallowConfig::find_config_path(root)
+}
+
+/// Give config discovery the git probe for a config file link out of the
+/// project: discovery allows such a link when git does not track it.
+fn register_tracked_link_probe() {
+    fallow_config::set_tracked_link_probe(git_tracks_entry);
+}
+
+/// Whether git tracks the entry at `path`. See
+/// [`fallow_config::TrackedLinkProbe`].
+fn git_tracks_entry(path: &Path) -> Option<bool> {
+    let output = crate::git_env::git_command(path.parent()?)
+        .args(["--literal-pathspecs", "ls-files", "-z", "--"])
+        .arg(path.file_name()?)
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(!output.stdout.is_empty())
 }
 
 /// Load the config file of a project: the file at `config_path`, else the
@@ -170,6 +189,7 @@ pub fn load_config_file(
 ) -> Result<ConfigFile, ConfigLoadError> {
     #[cfg(any(test, feature = "testing"))]
     load_count::record(root);
+    register_tracked_link_probe();
     let load_options = ConfigLoadOptions::new(options.allow_remote_extends)
         .with_extends_timeout(options.extends_timeout);
     let file = load_config_file_unchecked(root, config_path, load_options)?;
@@ -281,6 +301,38 @@ mod tests {
             load_config_file(dir.path(), None, ConfigFileOptions::default()).expect("loads");
         }
         assert_eq!(load_count::config_loads(dir.path()), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_untracked_config_link_out_of_the_checkout_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outer = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = outer.join("project");
+        std::fs::create_dir(&root).expect("project");
+        let git = |args: &[&str]| {
+            let status = crate::git_fixture::fixture_git_command(&root)
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(outer.join("dotfiles.json"), r#"{ "entry": ["src/a.ts"] }"#)
+            .expect("config");
+        std::os::unix::fs::symlink(outer.join("dotfiles.json"), root.join(".fallowrc.json"))
+            .expect("link");
+
+        let file = load_config_file(&root, None, ConfigFileOptions::default()).expect("loads");
+        assert_eq!(file.config.entry, vec!["src/a.ts".to_owned()]);
+        assert!(find_config_file(&root).is_some());
+
+        git(&["add", ".fallowrc.json"]);
+        assert!(load_config_file(&root, None, ConfigFileOptions::default()).is_err());
+        assert!(find_config_file(&root).is_none());
     }
 
     /// No server listens on port 1, so the fetch fails at once and offline.

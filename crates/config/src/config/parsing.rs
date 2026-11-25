@@ -177,14 +177,19 @@ fn discovery_base(dir: &Path) -> &Path {
 }
 
 /// Refuse a discovered config file that is a link which does not resolve
-/// inside its [`discovery_base`]. The message names only the link, and it is
-/// the same for a dangling link and a link to a file that exists.
+/// inside its [`discovery_base`], when git tracks the link or no git
+/// checkout holds it. A local link that git does not track, such as a link
+/// to a dotfiles config, stays allowed. The message names only the link,
+/// and it is the same for a dangling link and a link to a file that exists.
 fn check_discovered_config(dir: &Path, candidate: &Path) -> Result<(), String> {
     let is_link = candidate
         .symlink_metadata()
         .is_ok_and(|meta| meta.file_type().is_symlink());
     let base = discovery_base(dir);
-    if !is_link || fallow_types::read_guard::is_inside_root(base, candidate) {
+    if !is_link
+        || fallow_types::read_guard::is_inside_root(base, candidate)
+        || super::outside_root::git_tracks(candidate) == Some(false)
+    {
         return Ok(());
     }
     Err(format!(

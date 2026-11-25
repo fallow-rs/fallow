@@ -15,6 +15,7 @@ mod legacy_glob;
 mod markup_extensions;
 mod mutation;
 mod outside_root;
+pub use outside_root::{TrackedLinkProbe, set_tracked_link_probe};
 mod override_effect;
 mod parsing;
 mod resolution;

@@ -6,6 +6,9 @@
 //! but its error text names the file and a position only. A field name, a
 //! value, or the message of a fallow deserializer from that file is not
 //! shown. The files inside the project keep the full error text.
+//!
+//! A discovered config file that is a link out of the project is allowed
+//! only when git does not track it, see [`git_tracks`].
 
 use std::path::{Path, PathBuf};
 
@@ -62,4 +65,26 @@ pub(super) fn merged_error(path: &Path, values: &[LocalValue]) -> miette::Report
         path.display(),
         outside.join(", ")
     )
+}
+
+/// A function that tells whether git tracks the entry at a path:
+/// `Some(true)` for a tracked entry, `Some(false)` for an entry of a git
+/// checkout that git does not track, and `None` when no git checkout holds
+/// the entry or git cannot tell.
+pub type TrackedLinkProbe = fn(&Path) -> Option<bool>;
+
+static TRACKED_LINK_PROBE: std::sync::OnceLock<TrackedLinkProbe> = std::sync::OnceLock::new();
+
+/// Set the probe that config discovery asks about a config file link out of
+/// the project. The config crate starts no process, so the host that owns
+/// the git process wrapper sets it once. The first call wins. Without a
+/// probe, every such link is refused.
+pub fn set_tracked_link_probe(probe: TrackedLinkProbe) {
+    let _ = TRACKED_LINK_PROBE.set(probe);
+}
+
+/// What the probe of [`set_tracked_link_probe`] tells about `path`, or
+/// `None` when no probe is set.
+pub(super) fn git_tracks(path: &Path) -> Option<bool> {
+    TRACKED_LINK_PROBE.get().and_then(|probe| probe(path))
 }
