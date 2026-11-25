@@ -3,6 +3,17 @@
 //! Detects Nx projects and marks workspace config files as always used.
 //! Parses `project.json` to extract executor references as tooling dependencies
 //! and `options.main` as entry points.
+//!
+//! Nx loads the files of a workspace-local plugin at runtime, so no source file
+//! imports them. The plugin makes these files entry points:
+//!
+//! - the `implementation`, `batchImplementation`, `factory` and `hasher` files
+//!   of each entry in an `executors.json` or `generators.json` collection;
+//! - a local plugin path in the `plugins` array of `nx.json`, and the `main`
+//!   file of its `package.json`;
+//! - the collections that the `package.json` of a local plugin or a local
+//!   executor path (`./tools/plugin:build`) names in its `executors`,
+//!   `builders`, `generators` or `schematics` field.
 
 use std::path::Path;
 
@@ -12,7 +23,12 @@ use super::{Plugin, PluginResult};
 define_plugin!(
     struct NxPlugin => "nx",
     enablers: &["nx"],
-    config_patterns: &["nx.json", "**/project.json"],
+    config_patterns: &[
+        "nx.json",
+        "**/project.json",
+        "**/executors.json",
+        "**/generators.json",
+    ],
     always_used: &["nx.json", "**/project.json"],
     tooling_dependencies: &[
         "nx",
@@ -37,8 +53,15 @@ define_plugin!(
         "@nx/nest",
     ],
     resolve_config(config_path, source, _root) {
-        if config_path.file_name().is_some_and(|name| name == "nx.json") {
-            return resolve_nx_json(config_path, source);
+        let file_name = config_path.file_name().and_then(|name| name.to_str());
+        match file_name {
+            Some("nx.json") => return resolve_nx_json(config_path, source, _root),
+            Some("executors.json" | "generators.json") => {
+                let mut result = PluginResult::default();
+                resolve_collection(config_path, source, _root, &mut result);
+                return result;
+            }
+            _ => {}
         }
 
         let mut result = PluginResult::default();
@@ -49,13 +72,7 @@ define_plugin!(
             &["targets"],
             &["executor"],
         );
-        for executor in &executor_strings {
-            if let Some(pkg) = executor.split(':').next()
-                && !pkg.is_empty()
-            {
-                result.referenced_dependencies.push(pkg.to_string());
-            }
-        }
+        credit_executors(&executor_strings, _root, &mut result);
 
         let project_root_rel = config_path
             .parent()
@@ -125,7 +142,7 @@ define_plugin!(
 ///
 /// Nx cannot run a target whose plugin, executor, or task runner is missing, so
 /// every package named here is load-bearing.
-fn resolve_nx_json(config_path: &Path, source: &str) -> PluginResult {
+fn resolve_nx_json(config_path: &Path, source: &str, root: &Path) -> PluginResult {
     let mut result = PluginResult::default();
 
     let plugins = config_parser::extract_config_shallow_strings_or_object_property(
@@ -157,18 +174,158 @@ fn resolve_nx_json(config_path: &Path, source: &str) -> PluginResult {
         &["runner"],
     );
 
-    for reference in plugins
-        .iter()
-        .chain(&executors)
-        .chain(&executor_keys)
-        .chain(&runners)
-    {
-        if let Some(package) = nx_reference_package(reference) {
-            result.referenced_dependencies.push(package);
+    for plugin in &plugins {
+        match local_reference_path(plugin) {
+            Some(path) => resolve_local_plugin(path, root, &mut result),
+            None => credit_package(plugin, &mut result),
         }
+    }
+    credit_executors(executors.iter().chain(&executor_keys), root, &mut result);
+    for runner in &runners {
+        credit_package(runner, &mut result);
     }
 
     result
+}
+
+/// The keys of an executor or generator collection. Nx reads `builders` and
+/// `schematics` as the Angular names of `executors` and `generators`.
+const COLLECTION_KEYS: &[&str] = &["executors", "builders", "generators", "schematics"];
+
+/// The fields of a collection entry that name a module that Nx loads.
+const COLLECTION_MODULE_FIELDS: &[&str] =
+    &["implementation", "batchImplementation", "factory", "hasher"];
+
+/// Make the files of each entry in an `executors.json` or `generators.json`
+/// collection entry points. The paths are relative to the collection file.
+fn resolve_collection(config_path: &Path, source: &str, root: &Path, result: &mut PluginResult) {
+    for key in COLLECTION_KEYS {
+        for field in COLLECTION_MODULE_FIELDS {
+            let modules = config_parser::extract_config_object_nested_strings(
+                source,
+                config_path,
+                &[key],
+                &[field],
+            );
+            for module in &modules {
+                // `./src/executor#buildExecutor` names an export of the module.
+                let module = module.split('#').next().unwrap_or_default();
+                if let Some(path) = config_parser::normalize_config_path(module, config_path, root)
+                {
+                    push_module_path(path, result);
+                }
+            }
+        }
+        let schemas = config_parser::extract_config_object_nested_strings(
+            source,
+            config_path,
+            &[key],
+            &["schema"],
+        );
+        for schema in &schemas {
+            if let Some(path) = config_parser::normalize_config_path(schema, config_path, root) {
+                result.always_used_files.push(path);
+            }
+        }
+    }
+}
+
+/// Credit each executor reference: a package for `<package>:<name>`, and the
+/// collections of the local plugin for `./<path>:<name>`.
+fn credit_executors<'a>(
+    executors: impl IntoIterator<Item = &'a String>,
+    root: &Path,
+    result: &mut PluginResult,
+) {
+    for executor in executors {
+        match local_reference_path(executor) {
+            Some(path) => {
+                let plugin_dir = path.split(':').next().unwrap_or_default();
+                resolve_local_manifest(plugin_dir, root, false, result);
+            }
+            None => credit_package(executor, result),
+        }
+    }
+}
+
+fn credit_package(reference: &str, result: &mut PluginResult) {
+    if let Some(package) = nx_reference_package(reference) {
+        result.referenced_dependencies.push(package);
+    }
+}
+
+/// Make a local `nx.json` plugin an entry point. The path names a module file,
+/// or a directory with an index file or a `package.json`.
+fn resolve_local_plugin(path: &str, root: &Path, result: &mut PluginResult) {
+    let Some(relative) = workspace_relative(path, root) else {
+        return;
+    };
+    push_module_path(relative.clone(), result);
+    resolve_local_manifest(&relative, root, true, result);
+}
+
+/// Read the `package.json` in the local plugin directory `path` and credit the
+/// collections that it names. With `include_main`, its `main` file is an entry
+/// point too.
+fn resolve_local_manifest(path: &str, root: &Path, include_main: bool, result: &mut PluginResult) {
+    let Some(relative) = workspace_relative(path, root) else {
+        return;
+    };
+    let manifest_path = root.join(&relative).join("package.json");
+    if !config_parser::is_inside_root(&manifest_path, root) {
+        return;
+    }
+    let Some(manifest) = std::fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
+    else {
+        return;
+    };
+
+    if include_main
+        && let Some(main) = manifest.get("main").and_then(serde_json::Value::as_str)
+        && let Some(main) = config_parser::normalize_config_path(main, &manifest_path, root)
+    {
+        push_module_path(main, result);
+    }
+
+    for key in COLLECTION_KEYS {
+        let Some(collection) = manifest.get(*key).and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(collection) =
+            config_parser::normalize_config_path_buf(collection, &manifest_path, root)
+        else {
+            continue;
+        };
+        let collection_path = root.join(collection);
+        if !config_parser::is_inside_root(&collection_path, root) {
+            continue;
+        }
+        if let Ok(source) = std::fs::read_to_string(&collection_path) {
+            resolve_collection(&collection_path, &source, root, result);
+        }
+    }
+}
+
+/// Register a module path that Nx loads with `require`. Nx does not expand
+/// globs, so a value with glob syntax names no file and must not become a
+/// pattern that makes many files entry points.
+fn push_module_path(path: String, result: &mut PluginResult) {
+    if !super::module_request::has_glob_syntax(&path) {
+        result.push_entry_path(path);
+    }
+}
+
+/// Nx resolves a local plugin or executor path from the workspace root.
+fn workspace_relative(path: &str, root: &Path) -> Option<String> {
+    config_parser::normalize_filesystem_config_path(path, &root.join("nx.json"), root)
+}
+
+/// The path of a workspace-local plugin or executor reference, which Nx marks
+/// with a leading `./` or `/`.
+fn local_reference_path(reference: &str) -> Option<&str> {
+    (reference.starts_with("./") || reference.starts_with('/')).then_some(reference)
 }
 
 /// Resolve an Nx plugin, executor, or task-runner reference to its npm package.
@@ -638,5 +795,166 @@ mod tests {
             "nx.json-only keys must not be read from project.json: {deps:?}"
         );
         assert!(!deps.contains(&"nx-cloud".to_string()), "{deps:?}");
+    }
+
+    fn write(root: &Path, path: &str, contents: &str) {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn project_json_local_executor_reads_plugin_collections() {
+        let tmp = tempfile::tempdir().expect("create temp dir");
+        let root = tmp.path();
+        write(
+            root,
+            "tools/local-executors/package.json",
+            r#"{"builders":"./custom-builders.json"}"#,
+        );
+        write(
+            root,
+            "tools/local-executors/custom-builders.json",
+            r#"{"builders":{"e2e":{"implementation":"./impl/e2e.ts#runE2e","schema":"./impl/schema.json"}}}"#,
+        );
+        let source = r#"{"targets":{"e2e":{"executor":"./tools/local-executors:e2e"}}}"#;
+        let result = NxPlugin.resolve_config(&root.join("apps/web/project.json"), source, root);
+        assert!(
+            has_entry_pattern(&result, "tools/local-executors/impl/e2e.ts"),
+            "{:?}",
+            result.entry_patterns
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"tools/local-executors/impl/schema.json".to_string()),
+            "{:?}",
+            result.always_used_files
+        );
+        assert!(
+            result.referenced_dependencies.is_empty(),
+            "a local executor path is not a package: {:?}",
+            result.referenced_dependencies
+        );
+    }
+
+    #[test]
+    fn collection_credits_modules_and_schemas_relative_to_the_file() {
+        let source = r#"{
+            "executors": {
+                "build": {
+                    "implementation": "./src/executors/build/executor#buildExecutor",
+                    "batchImplementation": "./src/executors/build/batch",
+                    "schema": "./src/executors/build/schema.json"
+                },
+                "alias": "@nx/js:tsc"
+            },
+            "generators": {
+                "lib": { "factory": "./src/generators/lib/generator", "schema": "./src/generators/lib/schema.json" },
+                "app": { "implementation": "./src/generators/app/generator.ts", "schema": "./schema.json" }
+            },
+            "schematics": {
+                "old": { "factory": "./src/schematics/old/index", "schema": "./old.json" }
+            }
+        }"#;
+        let result = NxPlugin.resolve_config(
+            Path::new("/repo/tools/plugin/generators.json"),
+            source,
+            Path::new("/repo"),
+        );
+        for pattern in [
+            "tools/plugin/src/executors/build/executor",
+            "tools/plugin/src/executors/build/batch",
+            "tools/plugin/src/generators/lib/generator",
+            "tools/plugin/src/generators/app/generator.ts",
+            "tools/plugin/src/schematics/old/index",
+        ] {
+            assert!(
+                has_entry_pattern(&result, pattern),
+                "{pattern}: {:?}",
+                result.entry_patterns
+            );
+        }
+        assert!(
+            result
+                .always_used_files
+                .contains(&"tools/plugin/src/executors/build/schema.json".to_string()),
+            "{:?}",
+            result.always_used_files
+        );
+    }
+
+    #[test]
+    fn collection_drops_paths_outside_the_root() {
+        let source = r#"{"executors":{"x":{"implementation":"../../../outside/impl","schema":"../../../outside/schema.json"}}}"#;
+        let result = NxPlugin.resolve_config(
+            Path::new("/repo/tools/plugin/executors.json"),
+            source,
+            Path::new("/repo"),
+        );
+        assert!(
+            result.entry_patterns.is_empty(),
+            "{:?}",
+            result.entry_patterns
+        );
+        assert!(
+            result.always_used_files.is_empty(),
+            "{:?}",
+            result.always_used_files
+        );
+    }
+
+    #[test]
+    fn nx_json_local_plugin_paths_are_entry_points() {
+        let source = r#"{
+            "plugins": [
+                "./tools/file-plugin.ts",
+                { "plugin": "./tools/dir-plugin", "options": {} },
+                "@nx/vite/plugin"
+            ]
+        }"#;
+        let result =
+            NxPlugin.resolve_config(Path::new("/repo/nx.json"), source, Path::new("/repo"));
+        assert!(
+            has_entry_pattern(&result, "tools/file-plugin.ts"),
+            "{:?}",
+            result.entry_patterns
+        );
+        assert!(
+            has_entry_pattern(
+                &result,
+                "tools/dir-plugin/index.{ts,tsx,mts,cts,gts,js,jsx,mjs,cjs,gjs,vue,svelte,astro,mdx}"
+            ),
+            "{:?}",
+            result.entry_patterns
+        );
+        assert_eq!(result.referenced_dependencies, vec!["@nx/vite".to_string()]);
+    }
+
+    #[test]
+    fn collection_skips_glob_values_and_empty_export_names() {
+        let source = r#"{"executors":{
+            "all": {"implementation": "./**"},
+            "dynamic": {"implementation": "./src/[id]/executor"},
+            "empty": {"implementation": "./src/empty/executor#"}
+        }}"#;
+        let result = NxPlugin.resolve_config(
+            Path::new("/repo/tools/plugin/executors.json"),
+            source,
+            Path::new("/repo"),
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .all(|rule| !rule.pattern.contains("**") && !rule.pattern.contains("[id]")),
+            "a glob value names no module: {:?}",
+            result.entry_patterns
+        );
+        assert!(
+            has_entry_pattern(&result, "tools/plugin/src/empty/executor"),
+            "{:?}",
+            result.entry_patterns
+        );
     }
 }
