@@ -1,6 +1,6 @@
 //! Confine the files that `--save-baseline`, `--save-regression-baseline`,
-//! `--save-snapshot`, `--output-file` and `--sarif-file` write to the project,
-//! and keep the default cache directory inside it.
+//! `--save-snapshot`, `--output-file`, `--sarif-file` and `viz --out` write to
+//! the project, and keep the default cache directory inside it.
 //!
 //! A relative path resolves against the working directory, as it always did,
 //! so the matching read path (`--baseline`, `--regression-baseline`) still
@@ -211,9 +211,10 @@ fn same_existing_file(left: &Path, right: &Path) -> bool {
 }
 
 /// When the default cache directory `<root>/.fallow` resolves outside the
-/// project, for example through a committed symlink, return a note and do not
-/// use it for the cache. `FALLOW_CACHE_DIR` and `--no-cache` skip the check,
-/// because the default directory is then not used for the cache.
+/// project, or through a symlink into a `.git` or `node_modules` directory,
+/// return a note that names the reason, and do not use it for the cache.
+/// `FALLOW_CACHE_DIR` and `--no-cache` skip the check, because the default
+/// directory is then not used for the cache.
 pub fn default_cache_dir_note(
     cli: &Cli,
     root: &Path,
@@ -226,15 +227,15 @@ pub fn default_cache_dir_note(
     cache_dir.symlink_metadata().ok()?;
     let cwd = std::env::current_dir().ok()?;
     let resolved = write_guard::resolve(&cache_dir);
-    let inside = WriteScope::new(root, &cwd, write_guard::shared_dirs())
-        .is_ok_and(|scope| scope.contains(&resolved));
-    (!inside).then(|| {
-        format!(
-            "note: {} resolves to {}, which is outside the project, so it is not used for the cache in this run. Remove the link, or set FALLOW_CACHE_DIR or cache.dir to relocate the cache.",
-            cache_dir.display(),
-            resolved.display()
-        )
-    })
+    let reason = match WriteScope::new(root, &cwd, write_guard::shared_dirs()) {
+        Ok(scope) => scope.refusal_reason(&cwd.join(&cache_dir))?,
+        Err(_) => "outside the project",
+    };
+    Some(format!(
+        "note: {} resolves {reason} ({}), so it is not used for the cache in this run. Remove the link, or set FALLOW_CACHE_DIR or cache.dir to relocate the cache.",
+        cache_dir.display(),
+        resolved.display()
+    ))
 }
 
 /// Every file on the command line that a save or report flag writes, with
@@ -277,6 +278,13 @@ fn write_targets(cli: &Cli, root: &Path) -> Vec<(&'static str, PathBuf, WriteTar
         if let Some(path) = path.filter(|path| !path.as_os_str().is_empty()) {
             targets.push((flag, path.to_path_buf(), WriteTarget::Path));
         }
+    }
+    if let Some(Command::Viz {
+        output: Some(path), ..
+    }) = cli.command.as_ref()
+        && !path.as_os_str().is_empty()
+    {
+        targets.push(("--out", path.clone(), WriteTarget::Path));
     }
     targets
 }
