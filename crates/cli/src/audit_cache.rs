@@ -584,8 +584,12 @@ pub fn sweep_base_snapshot_cache(
         .collect()
 }
 
+/// Save the base snapshot into the cache directory of the audit. The writes
+/// are checked from `host_root`, the checkout that the user runs in, which
+/// is not `opts.root` for `--staged`.
 pub(super) fn save_cached_base_snapshot(
     opts: &AuditOptions<'_>,
+    host_root: &Path,
     key: &AuditBaseSnapshotCacheKey,
     snapshot: &AuditKeySnapshot,
 ) {
@@ -594,7 +598,7 @@ pub(super) fn save_cached_base_snapshot(
     };
     let dir = audit_base_snapshot_cache_dir(opts.cache_dir);
     let target = audit_base_snapshot_cache_file(opts.cache_dir, key);
-    let cache = CacheTarget::new(opts.root, opts.cache_dir);
+    let cache = CacheTarget::new(host_root, opts.cache_dir);
     for path in [&dir.join(".gitignore"), &target] {
         if let Err(error) = cache.check(path) {
             tracing::warn!("Skipped the audit base snapshot cache save: {error}");
@@ -625,7 +629,7 @@ pub(super) fn save_cached_base_snapshot(
         opts.config_path.as_ref(),
         opts.allow_remote_extends,
     );
-    let target = CacheTarget::new(opts.root, opts.cache_dir);
+    let target = CacheTarget::new(host_root, opts.cache_dir);
     sweep_base_snapshot_cache(target, max_age, SweepMode::Apply, SystemTime::now());
 }
 

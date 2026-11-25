@@ -201,13 +201,17 @@ pub fn cache_write_base(root: &Path, cache_dir: &Path) -> PathBuf {
 /// A work tree counts when its `.git` entry (a directory or a file) has the
 /// same common Git directory as the work tree of the root. This covers the
 /// main checkout, a linked worktree, a submodule and a worktree of a bare
-/// repository. When more than one ancestor counts, the highest one is the
-/// top, so a link in a nested work tree is checked from the outer one. An
-/// ancestor that is a symlink never counts. The links below the top are
-/// checked later, from the top.
+/// repository. An ancestor that is a symlink never counts.
+///
+/// When more than one ancestor counts, the lowest one is the top, so a link
+/// in a worktree inside the main checkout is checked from that worktree and
+/// cannot lead up into the main checkout. An ancestor that is below a
+/// symlink, seen from the highest ancestor that counts, is skipped, so the
+/// base is never reached through a link. The links below the top are checked
+/// later, from the top.
 fn same_repository_top(root: &Path, cache_dir: &Path) -> Option<PathBuf> {
     let root_common = common_dir_of_work_tree(work_tree_top(root)?)?;
-    cache_dir
+    let tops: Vec<&Path> = cache_dir
         .ancestors()
         .skip(1)
         .filter(|ancestor| {
@@ -217,8 +221,26 @@ fn same_repository_top(root: &Path, cache_dir: &Path) -> Option<PathBuf> {
                 && ancestor.join(GIT_ENTRY).symlink_metadata().is_ok()
                 && common_dir_of_work_tree(ancestor).as_ref() == Some(&root_common)
         })
-        .last()
+        .collect();
+    let highest = *tops.last()?;
+    tops.into_iter()
+        .find(|top| !has_link_between(highest, top))
         .map(Path::to_path_buf)
+}
+
+/// Whether an entry below `upper`, down to and including `lower`, is a
+/// symlink or cannot be read. `lower` must be below `upper`.
+fn has_link_between(upper: &Path, lower: &Path) -> bool {
+    let Ok(relative) = lower.strip_prefix(upper) else {
+        return true;
+    };
+    let mut current = upper.to_path_buf();
+    relative.components().any(|component| {
+        current.push(component);
+        !current
+            .symlink_metadata()
+            .is_ok_and(|meta| !meta.file_type().is_symlink())
+    })
 }
 
 /// The canonical common Git directory of the work tree at `top`.
@@ -717,6 +739,85 @@ mod tests {
                 .is_err()
         );
         assert_eq!(std::fs::read_dir(&f.outside).expect("outside").count(), 0);
+    }
+
+    /// Write a `.git` file at `top` that names the linked Git directory
+    /// `name` below the common Git directory `common`, with its `commondir`.
+    fn linked_work_tree(common: &Path, top: &Path, name: &str) {
+        let git_dir = common.join("worktrees").join(name);
+        std::fs::create_dir_all(&git_dir).expect("linked git dir");
+        std::fs::write(git_dir.join("commondir"), "../..\n").expect("common");
+        std::fs::create_dir_all(top).expect("work tree");
+        std::fs::write(top.join(".git"), format!("gitdir: {}\n", git_dir.display()))
+            .expect("git file");
+    }
+
+    /// A linked worktree can live inside the main checkout. A link in it
+    /// that leads up into the main checkout must not take the cache writes
+    /// of a staged audit there.
+    #[test]
+    fn a_link_from_a_worktree_inside_the_main_checkout_up_into_it_is_refused() {
+        let f = fixture();
+        let repo = f.root.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).expect("main git");
+        let host = repo.join(".worktrees/feature");
+        linked_work_tree(&repo.join(".git"), &host, "feature");
+        let staged = f.root.join("staged");
+        linked_work_tree(&repo.join(".git"), &staged, "staged");
+        symlink("../..", host.join("build")).expect("link");
+        let dir = host.join("build/cache");
+        for root in [&staged, &host] {
+            let target = CacheTarget::new(root, &dir);
+            assert!(target.write_gitignore().is_err());
+            assert!(target.write_file("cache.bin", b"data").is_err());
+        }
+        assert!(!repo.join("cache").exists());
+    }
+
+    /// The same for two worktrees of a bare repository, one inside the
+    /// other. The bare repository has no work tree of its own.
+    #[test]
+    fn a_link_from_a_nested_worktree_of_a_bare_repository_is_refused() {
+        let f = fixture();
+        let bare = f.root.join("repo.git");
+        let outer = f.root.join("trees/main");
+        linked_work_tree(&bare, &outer, "main");
+        let host = outer.join(".worktrees/feature");
+        linked_work_tree(&bare, &host, "feature");
+        let staged = f.root.join("staged");
+        linked_work_tree(&bare, &staged, "staged");
+        symlink("../..", host.join("build")).expect("link");
+        let dir = host.join("build/cache");
+        assert!(
+            CacheTarget::new(&staged, &dir)
+                .write_file("cache.bin", b"data")
+                .is_err()
+        );
+        assert!(!outer.join("cache").exists());
+    }
+
+    /// A work tree that is reached through a link is never the base, so the
+    /// link is checked from the work tree above it.
+    #[test]
+    fn a_work_tree_behind_a_link_is_not_the_base() {
+        let f = fixture();
+        let repo = f.root.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).expect("main git");
+        let host = f.root.join("host");
+        linked_work_tree(&repo.join(".git"), &host, "host");
+        let other = f.outside.join("other");
+        linked_work_tree(&repo.join(".git"), &other, "other");
+        linked_work_tree(&repo.join(".git"), &other.join("nested"), "nested");
+        let staged = f.root.join("staged");
+        linked_work_tree(&repo.join(".git"), &staged, "staged");
+        symlink(&other, host.join("shared")).expect("link");
+        let dir = host.join("shared/nested/cache");
+        assert!(
+            CacheTarget::new(&staged, &dir)
+                .write_file("cache.bin", b"data")
+                .is_err()
+        );
+        assert!(!other.join("nested/cache").exists());
     }
 
     #[test]

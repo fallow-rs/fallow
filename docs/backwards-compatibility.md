@@ -805,8 +805,11 @@ These are documented for the rare CI script that depended on the old behavior. N
   tree. A work tree counts when its `.git` entry has the same common Git
   directory as the root: the main checkout, a linked worktree, a submodule,
   or a worktree of a bare repository. When more than one counts, the
-  highest one is the top. This covers the cache of the checkout when
-  `audit --staged` runs in a temporary worktree. A configured `cache.dir`
+  lowest one that is not reached through a symlink is the top, so a link
+  in a worktree inside the main checkout cannot lead up into the main
+  checkout. This covers the cache of the checkout when `audit --staged`
+  runs in a temporary worktree. The base snapshot cache of `audit --staged`
+  is checked from the checkout that the run starts in. A configured `cache.dir`
   is also ignored when a part of it names `.git` in any case, with trailing
   dots or spaces, with a `:` (an NTFS stream), or as `git~<digits>` (an 8.3
   short name). A
