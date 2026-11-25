@@ -194,6 +194,10 @@
         "section": "implementation-reference"
       },
       {
+        "path": "docs/rule-precision.md",
+        "section": "verification"
+      },
+      {
         "path": "docs/security-agent-verification.md",
         "section": "verification"
       },

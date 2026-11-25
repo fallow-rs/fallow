@@ -1,0 +1,901 @@
+{
+  "schema_version": 1,
+  "corpus": {
+    "documenso": {
+      "repo": "documenso/documenso",
+      "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+      "kind": "app monorepo"
+    },
+    "plane": {
+      "repo": "makeplane/plane",
+      "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+      "kind": "app monorepo"
+    },
+    "immich": {
+      "repo": "immich-app/immich",
+      "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+      "kind": "app monorepo"
+    },
+    "react-hook-form": {
+      "repo": "react-hook-form/react-hook-form",
+      "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+      "kind": "library"
+    }
+  },
+  "rows": [
+    {
+      "rule": "circular-dependency",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 27,
+          "sampled": 27,
+          "real": 27,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 98,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 56,
+          "sampled": 30,
+          "real": 16,
+          "noise": 14,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "implicit type-only import",
+          "count": 14
+        },
+        {
+          "class": "elided unused import",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "duplicate-export",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 8,
+          "sampled": 8,
+          "real": 8,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 4,
+          "sampled": 4,
+          "real": 4,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 8,
+          "sampled": 8,
+          "real": 5,
+          "noise": 3,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "Svelte component instance method",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "rule": "duplicate-export-alias",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 49,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 12,
+          "sampled": 12,
+          "real": 12,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 7,
+          "sampled": 7,
+          "real": 7,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "package-cycle",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 20,
+          "sampled": 20,
+          "real": 18,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "Playwright fixture import",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "test-only-dependency",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 2,
+          "sampled": 2,
+          "real": 2,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "unlisted-binary",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 0,
+      "projects": [
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "Mise-managed binary",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unlisted-dependency",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 83,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 78,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 15,
+          "sampled": 15,
+          "real": 0,
+          "noise": 15,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "documentation example",
+          "count": 8
+        },
+        {
+          "class": "Deno import map",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "rule": "unresolved-import",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 3,
+      "agreement_percent": 43,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 3,
+          "sampled": 3,
+          "real": 0,
+          "noise": 3,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 8,
+          "sampled": 8,
+          "real": 0,
+          "noise": 8,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "documentation example",
+          "count": 8
+        },
+        {
+          "class": "build output import",
+          "count": 3
+        },
+        {
+          "class": "generated type import",
+          "count": 2
+        },
+        {
+          "class": "server route URL",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unused-catalog-entry",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 16,
+          "sampled": 16,
+          "real": 16,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "unused-class-member",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 10,
+          "sampled": 10,
+          "real": 4,
+          "noise": 6,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 266,
+          "sampled": 30,
+          "real": 21,
+          "noise": 9,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 82,
+          "sampled": 30,
+          "real": 5,
+          "noise": 25,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "test use",
+          "count": 13
+        },
+        {
+          "class": "library contract",
+          "count": 11
+        },
+        {
+          "class": "indirect receiver",
+          "count": 6
+        },
+        {
+          "class": "release script",
+          "count": 3
+        },
+        {
+          "class": "store hook",
+          "count": 3
+        },
+        {
+          "class": "MobX annotation",
+          "count": 2
+        },
+        {
+          "class": "required interface",
+          "count": 1
+        },
+        {
+          "class": "Svelte template",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unused-component-prop",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 18,
+          "sampled": 18,
+          "real": 18,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "unused-dependency",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 19,
+          "sampled": 19,
+          "real": 19,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 7,
+          "sampled": 7,
+          "real": 7,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 4,
+          "sampled": 4,
+          "real": 3,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 2,
+          "sampled": 2,
+          "real": 0,
+          "noise": 2,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "required styling peer dependency",
+          "count": 2
+        },
+        {
+          "class": "imported by an extensionless CLI entry",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unused-dependency-override",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 7,
+          "sampled": 7,
+          "real": 7,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "unused-dev-dependency",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 12,
+          "sampled": 12,
+          "real": 10,
+          "noise": 2,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 3,
+          "sampled": 3,
+          "real": 1,
+          "noise": 2,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 3,
+          "sampled": 3,
+          "real": 2,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "loaded by tool configuration",
+          "count": 4
+        },
+        {
+          "class": "invoked through a package binary",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unused-enum-member",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 158,
+          "sampled": 30,
+          "real": 29,
+          "noise": 1,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 227,
+          "sampled": 30,
+          "real": 0,
+          "noise": 30,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "published SDK enum contract",
+          "count": 29
+        },
+        {
+          "class": "serialized value in live type",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "unused-export",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 398,
+          "sampled": 30,
+          "real": 28,
+          "noise": 2,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 187,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 84,
+          "sampled": 30,
+          "real": 26,
+          "noise": 4,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "used in a Svelte component",
+          "count": 4
+        },
+        {
+          "class": "tooling configuration export",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "rule": "unused-file",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 39,
+          "sampled": 30,
+          "real": 12,
+          "noise": 18,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 123,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 124,
+          "sampled": 30,
+          "real": 2,
+          "noise": 28,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 95,
+          "sampled": 30,
+          "real": 22,
+          "noise": 8,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "dynamic database migration",
+          "count": 25
+        },
+        {
+          "class": "React Router preview entry",
+          "count": 11
+        },
+        {
+          "class": "documented Deno command",
+          "count": 4
+        },
+        {
+          "class": "standalone test fixture generator",
+          "count": 4
+        },
+        {
+          "class": "TypeScript test discovery",
+          "count": 4
+        },
+        {
+          "class": "configured task command",
+          "count": 2
+        },
+        {
+          "class": "shell script invocation",
+          "count": 2
+        },
+        {
+          "class": "computed worker entry",
+          "count": 1
+        },
+        {
+          "class": "tool-discovered configuration",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule": "unused-load-data-key",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 1,
+      "agreement_percent": null,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 4,
+          "sampled": 4,
+          "real": 1,
+          "noise": 3,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "HTTP resource response",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "rule": "unused-tagged-error",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 1,
+          "sampled": 1,
+          "real": 1,
+          "noise": 0,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": []
+    },
+    {
+      "rule": "unused-type",
+      "command": "dead-code",
+      "fallow_version": "3.48.0",
+      "reviewed_on": "2026-11-25",
+      "sample_size": 30,
+      "reviews": 2,
+      "agreement_percent": 100,
+      "projects": [
+        {
+          "project": "documenso",
+          "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
+          "findings": 464,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "plane",
+          "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
+          "findings": 72,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "immich",
+          "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
+          "findings": 42,
+          "sampled": 30,
+          "real": 30,
+          "noise": 0,
+          "unsure": 0
+        },
+        {
+          "project": "react-hook-form",
+          "commit": "f3fd1bf4a3cb1265171adfc778f279a3c7e06fc5",
+          "findings": 1,
+          "sampled": 1,
+          "real": 0,
+          "noise": 1,
+          "unsure": 0
+        }
+      ],
+      "noise_classes": [
+        {
+          "class": "imported by type tests",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}
