@@ -394,7 +394,7 @@ fn read_trace_manifests(
         )
         .filter_map(|package_root| {
             let path = package_root.join("package.json");
-            let content = std::fs::read_to_string(&path).ok()?;
+            let content = crate::discover::project_read::read_project_file(root, &path)?;
             serde_json::from_str(&content)
                 .ok()
                 .map(|value| (path, value))

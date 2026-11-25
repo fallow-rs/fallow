@@ -1365,7 +1365,9 @@ fn load_workspace_filesystem_configs(input: &mut WorkspaceFsConfigInput<'_>) {
         input.candidate_index,
     );
     for (abs_path, plugin) in &ws_json_configs {
-        let Ok(source) = std::fs::read_to_string(abs_path) else {
+        let Some(source) =
+            crate::discover::project_read::read_project_file(input.project_root, abs_path)
+        else {
             continue;
         };
         let plugin_result =
@@ -1455,7 +1457,9 @@ fn resolve_plugin_matching_files(input: &mut PluginMatchingFilesInput<'_, '_, '_
         })
         .collect();
     for abs_path in plugin_hits {
-        let Ok(source) = std::fs::read_to_string(abs_path) else {
+        let Some(source) =
+            crate::discover::project_read::read_project_file(input.project_root, abs_path)
+        else {
             continue;
         };
         let plugin_result = input.plugin.resolve_config_in_project(
@@ -1487,7 +1491,7 @@ fn resolve_plugin_filesystem_config(
     result: &mut AggregatedPluginResult,
     regex_errors: &mut Vec<PluginRegexValidationError>,
 ) {
-    let Ok(source) = std::fs::read_to_string(abs_path) else {
+    let Some(source) = crate::discover::project_read::read_project_file(root, abs_path) else {
         return;
     };
     let plugin_result = plugin.resolve_config(abs_path, &source, root);

@@ -379,7 +379,9 @@ fn follow_chained_config(
     walk: &mut ExtendsWalk<'_>,
     depth: usize,
 ) -> bool {
-    let Ok(chained_source) = std::fs::read_to_string(path) else {
+    let Some(chained_source) =
+        crate::discover::project_read::read_project_file(walk.project_root(), path)
+    else {
         return false;
     };
     push_setup_file_once(result, path.to_path_buf());
@@ -452,7 +454,8 @@ fn read_package_entry_for_specifier(
     pkg_name: &str,
 ) -> Option<(String, PathBuf)> {
     let pkg_dir = find_package_dir(workspace_dir, pkg_name)?;
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json_str =
+        crate::discover::project_read::read_file_in_its_scope(&pkg_dir.join("package.json"))?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
 
     let subpath_key = if specifier.len() > pkg_name.len() {
@@ -464,7 +467,7 @@ fn read_package_entry_for_specifier(
 
     let entry_rel = resolve_package_entry(&pkg_json, &subpath_key, &pkg_dir)?;
     let entry_path = pkg_dir.join(entry_rel);
-    let source = std::fs::read_to_string(&entry_path).ok()?;
+    let source = crate::discover::project_read::read_file_in_its_scope(&entry_path)?;
     Some((source, entry_path))
 }
 
@@ -499,7 +502,8 @@ fn is_eslint_ecosystem_dependency(name: &str) -> bool {
 /// directory tree to find it (handles hoisted deps in monorepos).
 fn read_package_json(workspace_dir: &Path, pkg_name: &str) -> Option<serde_json::Value> {
     let pkg_dir = find_package_dir(workspace_dir, pkg_name)?;
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json_str =
+        crate::discover::project_read::read_file_in_its_scope(&pkg_dir.join("package.json"))?;
     serde_json::from_str(&pkg_json_str).ok()
 }
 

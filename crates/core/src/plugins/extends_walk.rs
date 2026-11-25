@@ -144,7 +144,8 @@ pub(in crate::plugins) fn workspace_package_file(
     subpath: &str,
     root: &Path,
 ) -> Option<PathBuf> {
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json_str =
+        crate::discover::project_read::read_file_in_its_scope(&pkg_dir.join("package.json"))?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
     let subpath_key = format!(".{subpath}");
     let entry_rel = required_main_entry(&pkg_json, &subpath_key)

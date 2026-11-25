@@ -289,7 +289,9 @@ fn extract_jest_string_projects(input: JestStringProjectsInput<'_, '_>) {
     for entry in &project_entries {
         let configs = expand_project_entry(entry, &root_dir, config_path, root, walk.project_root);
         for child_config in configs {
-            let Ok(child_source) = std::fs::read_to_string(&child_config) else {
+            let Some(child_source) =
+                crate::discover::project_read::read_project_file(walk.project_root, &child_config)
+            else {
                 continue;
             };
             let child_root = child_config
@@ -575,7 +577,7 @@ fn probe_directory_for_jest_config(dir: &Path, project_root: &Path) -> Option<Pa
 /// Reading + parsing the file is cheap relative to the cost of recursing
 /// into a synthesised config that turns out to be empty.
 fn package_json_has_jest_key(path: &Path) -> bool {
-    let Ok(raw) = std::fs::read_to_string(path) else {
+    let Some(raw) = crate::discover::project_read::read_file_in_its_scope(path) else {
         return false;
     };
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
@@ -1950,5 +1952,15 @@ mod tests {
             "got: {:?}",
             result.referenced_dependencies,
         );
+    }
+
+    /// A `package.json` that links to a device has no `jest` key.
+    #[test]
+    #[cfg(unix)]
+    fn a_package_json_that_links_to_a_device_has_no_jest_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manifest = dir.path().join("package.json");
+        std::os::unix::fs::symlink("/dev/zero", &manifest).expect("link");
+        assert!(!package_json_has_jest_key(&manifest));
     }
 }

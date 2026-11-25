@@ -100,7 +100,9 @@ pub fn resolution_inputs_hash(
     let mut inputs: Vec<(String, Vec<u8>)> = collect_input_files(root, workspaces, files)
         .into_iter()
         .filter_map(|path| {
-            let content = std::fs::read(&path).ok()?;
+            // A lockfile can sit above the root, so each input is a bounded
+            // read in the scope of its own directory.
+            let content = crate::discover::project_read::read_project_bytes(path.parent()?, &path)?;
             Some((portable_key(root, &path), content))
         })
         .collect();
@@ -255,7 +257,9 @@ fn package_entry_target_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec
     let mut states = Vec::new();
     let package_dirs = std::iter::once(root).chain(workspaces.iter().map(|ws| ws.root.as_path()));
     for dir in package_dirs {
-        let Ok(content) = std::fs::read(dir.join("package.json")) else {
+        let Some(content) =
+            crate::discover::project_read::read_project_bytes(root, &dir.join("package.json"))
+        else {
             continue;
         };
         let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&content) else {
@@ -584,5 +588,24 @@ mod tests {
         assert!(is_tsconfig_name(Path::new("tsconfig.app.jsonc")));
         assert!(!is_tsconfig_name(Path::new("package.json")));
         assert!(!is_tsconfig_name(Path::new("tsconfig.ts")));
+    }
+
+    /// A `package.json` that links out of the root does not key the mode.
+    #[test]
+    #[cfg(unix)]
+    fn a_manifest_that_links_out_of_the_root_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(
+            outside.join("package.json"),
+            r#"{"main":"./dist/index.js"}"#,
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("package.json"), root.join("package.json"))
+            .expect("link");
+        assert!(package_entry_target_states(&root, &[]).is_empty());
     }
 }

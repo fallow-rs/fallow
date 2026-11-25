@@ -270,7 +270,7 @@ fn declared_packages(config_dir: &Path, root: &Path) -> FxHashSet<String> {
     let Some(manifest) = manifest else {
         return declared;
     };
-    let Ok(content) = std::fs::read_to_string(&manifest) else {
+    let Some(content) = crate::discover::project_read::read_project_file(root, &manifest) else {
         return declared;
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {

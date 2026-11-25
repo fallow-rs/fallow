@@ -494,7 +494,8 @@ fn add_next_line_hint(
         entry.next_line_kinds = tokens;
         return;
     }
-    let text = source.get_or_init(|| std::fs::read_to_string(&entry.path).ok());
+    let text =
+        source.get_or_init(|| crate::discover::project_read::read_file_in_its_scope(&entry.path));
     entry.next_line_blank = text
         .as_deref()
         .is_some_and(|text| line_is_blank(text, s.line));

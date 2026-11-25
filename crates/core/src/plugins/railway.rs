@@ -338,7 +338,9 @@ fn local_repositories(project_dir: &Path, root: &Path) -> Vec<String> {
         dirs.push(root);
     }
     for dir in &dirs {
-        let Ok(content) = std::fs::read_to_string(dir.join("package.json")) else {
+        let Some(content) =
+            crate::discover::project_read::read_project_file(root, &dir.join("package.json"))
+        else {
             continue;
         };
         let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&content) else {
@@ -352,7 +354,9 @@ fn local_repositories(project_dir: &Path, root: &Path) -> Vec<String> {
             repositories.push(name);
         }
     }
-    if let Ok(git_config) = std::fs::read_to_string(root.join(".git").join("config")) {
+    if let Some(git_config) =
+        crate::discover::project_read::read_project_file(root, &root.join(".git").join("config"))
+    {
         repositories.extend(git_remote_urls(&git_config).filter_map(github_repository));
     }
     repositories.sort_unstable();
@@ -505,5 +509,32 @@ svc('cache', { source: { image: 'redis' }, start: 'node x.ts' });
         assert!(packages.contains("storefront-tool"), "{packages:?}");
         assert!(files.contains(&cwd.join("scripts/deploy.ts")), "{files:?}");
         assert!(files.contains(&cwd.join("src/serve.ts")), "{files:?}");
+    }
+
+    /// A manifest or Git config that links out of the root gives no
+    /// repository.
+    #[test]
+    #[cfg(unix)]
+    fn manifests_that_link_out_of_the_root_give_no_repository() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(root.join(".git")).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(
+            outside.join("package.json"),
+            r#"{"repository":"https://github.com/acme/app"}"#,
+        )
+        .expect("write");
+        std::fs::write(
+            outside.join("config"),
+            "[remote \"origin\"]\n\turl = https://github.com/acme/app\n",
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("package.json"), root.join("package.json"))
+            .expect("link");
+        std::os::unix::fs::symlink(outside.join("config"), root.join(".git/config")).expect("link");
+
+        assert!(local_repositories(&root, &root).is_empty());
     }
 }
