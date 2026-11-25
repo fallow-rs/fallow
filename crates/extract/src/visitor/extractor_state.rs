@@ -1,5 +1,6 @@
-//! The constructor, the setters, the accessors, and the candidate sets that the
-//! semantic pass reads.
+//! The constructor, the setters, the accessors, the candidate sets that the
+//! semantic pass reads, and the resolution of the facts that it admits. Also
+//! the Open Graph image template calls.
 
 use super::*;
 

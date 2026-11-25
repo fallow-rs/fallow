@@ -1,6 +1,6 @@
 //! Typed destructures, bound object names, local subclass accesses, typed
-//! property chains, structural calls, object binding candidates, and
-//! namespace object aliases.
+//! property chains, structural calls, object binding candidates, namespace
+//! object aliases, and type-only exports.
 
 use super::*;
 

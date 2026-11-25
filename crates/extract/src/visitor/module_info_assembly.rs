@@ -1,5 +1,6 @@
-//! The resolution phase after the walk, and the assembly of a `ModuleInfo` from
-//! the extractor, also the merge of another extractor into it.
+//! The resolution phase after the walk, the load kinds of imports, and the
+//! assembly of a `ModuleInfo` from the extractor, also the merge of another
+//! extractor into it.
 
 use super::*;
 
