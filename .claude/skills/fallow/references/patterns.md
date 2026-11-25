@@ -810,7 +810,7 @@ Codex reads the same PreToolUse shape and runs the same gate script from `.codex
         "hooks": [
           {
             "type": "command",
-            "command": "c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" || c=; t=\"$(cd -P \"./$c\" 2>/dev/null && pwd -P)\" || exit 0; o=\"$(cd -P \"$t/..\" 2>/dev/null && c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" && cd -P \"./$c\" 2>/dev/null && pwd -P)\" && [ \"$o\" != \"$(cd -P \"$HOME\" 2>/dev/null && pwd -P)\" ] && ! git -c safe.bareRepository=explicit -C \"$o\" worktree list --porcelain 2>/dev/null | { w=; while IFS= read -r l; do case \"$l\" in \"worktree \"*) [ \"$(cd -P \"${l#worktree }\" 2>/dev/null && pwd -P)\" = \"$t\" ] && w=1;; esac; done; [ -n \"$w\" ]; } && exit 0; r=\"$(cd -P \"$t\"/'.' 2>/dev/null && pwd -P)\" || exit 0; [ -f \"$r/.codex/hooks/fallow-gate.sh\" ] || exit 0; d=\"$(pwd -P)\"; until [ \"$d\" = \"$r\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; [ \"$d\" = \"$r\" ] || exit 0; cd -P \"$r\" && exec \"$r/.codex/hooks/fallow-gate.sh\""
+            "command": "<the handler command that fallow agent install writes>"
           }
         ]
       }
