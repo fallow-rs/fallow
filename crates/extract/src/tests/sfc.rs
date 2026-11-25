@@ -2768,3 +2768,32 @@ fn a_vue_generic_attribute_with_braces_and_gt_keeps_the_script_body() {
             .any(|import| import.source == "./helper")
     );
 }
+
+/// Issue #5064: the semantic shadow check also runs for an SFC script block,
+/// whose spans the extractor remaps after the check.
+#[test]
+fn sfc_catch_parameter_does_not_use_namespace_import_as_whole() {
+    for (filename, source) in [
+        (
+            "Comp.vue",
+            "<script setup lang=\"ts\">\nimport * as e from './errors';\ntry { e.a(); } catch (e) { String(e); }\n</script>\n",
+        ),
+        (
+            "Comp.svelte",
+            "<script lang=\"ts\">\nimport * as e from './errors';\ntry { e.a(); } catch (e) { String(e); }\n</script>\n",
+        ),
+    ] {
+        let info = parse_sfc(source, filename);
+        assert!(
+            !info.whole_object_uses.contains(&"e".to_string()),
+            "{filename}: a catch parameter must not use the import as a whole, found: {:?}",
+            info.whole_object_uses
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "e" && access.member == "a"),
+            "{filename}: the dotted read of the import must stay recorded"
+        );
+    }
+}

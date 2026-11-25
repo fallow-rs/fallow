@@ -1264,7 +1264,7 @@ impl ModuleInfoExtractor {
                 .iter()
                 .any(|local| local == name)
         {
-            self.record_whole_object_identifier_use(name);
+            self.record_namespace_whole_object_use(ident.span, name);
             return;
         }
         self.record_object_literal_namespace_pass(name);
@@ -1290,7 +1290,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn record_whole_object_identifier_use(&mut self, name: &str) {
+    pub(super) fn record_whole_object_identifier_use(&mut self, name: &str) {
         if name == "loaderData" || self.route_loader_data_bindings.contains(name) {
             self.push_whole_object_use(ROUTE_LOADER_DATA_OBJECT.to_string());
         }

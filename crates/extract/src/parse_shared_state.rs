@@ -7,7 +7,10 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
     template_used: &rustc_hash::FxHashSet<String>,
     mode: fallow_types::shared_state::ExtractionMode,
 ) -> SemanticUsage {
-    let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
+    // Both candidate sets ask which spans resolve to a root-scope binding,
+    // and each resolver below reads only its own spans.
+    let mut module_binding_candidates = extractor.computed_enum_key_reference_spans();
+    module_binding_candidates.extend(extractor.namespace_whole_object_use_candidates());
     let subclass_candidates = extractor.subclass_reference_candidates();
     let callback_candidates = extractor.callback_capture_reference_candidates();
     let imported_call_candidates = extractor.imported_call_reference_candidates();
@@ -21,7 +24,7 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
         template_used,
         SemanticReferenceCandidates {
             mode,
-            module_bindings: &computed_enum_key_spans,
+            module_bindings: &module_binding_candidates,
             subclass_bindings: &subclass_candidates,
             callback_captures: &callback_candidates,
             imported_calls: &imported_call_candidates,
@@ -30,6 +33,7 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
         },
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
+    extractor.resolve_namespace_whole_object_uses(&semantic_usage.module_binding_reference_spans);
     extractor.set_subclass_binding_provenance(
         std::mem::take(&mut semantic_usage.subclass_binding_reference_spans),
         std::mem::take(&mut semantic_usage.subclass_namespace_reference_spans),
