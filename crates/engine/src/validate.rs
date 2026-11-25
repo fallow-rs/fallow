@@ -164,7 +164,13 @@ fn check_root_spellings(
     arg: RootArg,
     pwd: Option<&Path>,
 ) -> Result<(), String> {
-    check_root_links(root, probe)?;
+    // The current directory of the caller can hold a link, so a relative
+    // root is walked from the full spelling of that directory.
+    if root.is_relative() && probe.cwd.is_absolute() {
+        check_root_links(&probe.cwd.join(root), probe)?;
+    } else {
+        check_root_links(root, probe)?;
+    }
     let Some(pwd) = pwd.filter(|pwd| pwd.is_absolute()) else {
         return Ok(());
     };
@@ -924,6 +930,22 @@ mod tests {
             .check(Path::new("packages/app/../app"), &repo)
             .unwrap_err();
         assert!(err.contains("outside the checkout"), "got: {err}");
+    }
+
+    /// A caller can give a current directory that is not resolved, such as
+    /// the folder of an editor. A relative root starts at that spelling, so
+    /// a link in the current directory is checked too.
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_relative_root_below_a_current_directory_spelled_through_a_link() {
+        let fixture = Fixture::new();
+        let (repo, _outside) = committed_outside_link(&fixture);
+        let cwd = repo.join("packages");
+
+        for root in ["app", "."] {
+            let err = fixture.check(Path::new(root), &cwd).unwrap_err();
+            assert!(err.contains("outside the checkout"), "{root}: {err}");
+        }
     }
 
     #[cfg(unix)]
