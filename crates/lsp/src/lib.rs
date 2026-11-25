@@ -293,6 +293,15 @@ struct CompletedRun<'a> {
     attempted_type_aware_changes: &'a fallow_api::TypeAwareFileChanges,
 }
 
+/// Why an analysis skips the workspace root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RootProblem {
+    message: String,
+    /// Whether the client shows the problem to the user, and does not only
+    /// log it.
+    show: bool,
+}
+
 #[derive(Clone)]
 struct FallowLspServer {
     client: Client,
@@ -301,6 +310,12 @@ struct FallowLspServer {
     /// The first analysis after the folder appears validates and resolves
     /// it. See `analysis_root`.
     pending_root: Arc<RwLock<Option<PathBuf>>>,
+    /// Why the root validation refused a folder that appeared after
+    /// initialize. Each later analysis skips the run with this reason.
+    refused_root: Arc<RwLock<Option<RootProblem>>>,
+    /// The last root problem that the server reported, so that each problem
+    /// is reported once per change and not on each save.
+    reported_root_problem: Arc<std::sync::Mutex<Option<RootProblem>>>,
     analysis: Arc<RwLock<Option<LspAnalysisSnapshot>>>,
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
@@ -780,6 +795,8 @@ impl FallowLspServer {
             client,
             root: Arc::new(RwLock::new(None)),
             pending_root: Arc::new(RwLock::new(None)),
+            refused_root: Arc::new(RwLock::new(None)),
+            reported_root_problem: Arc::new(std::sync::Mutex::new(None)),
             analysis: Arc::new(RwLock::new(None)),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
@@ -878,8 +895,13 @@ impl FallowLspServer {
     /// sessions are kept and the workspace root has a `package.json`.
     async fn spawn_prewarm(&self) {
         let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
-        let Ok(Some(root)) = self.analysis_root().await else {
-            return;
+        let root = match self.analysis_root().await {
+            Ok(Some(root)) => root,
+            Ok(None) => return,
+            Err(problem) => {
+                self.report_root_problem(problem).await;
+                return;
+            }
         };
         if !self.lock_sessions().is_enabled() || !root.join("package.json").is_file() {
             return;
@@ -1017,7 +1039,11 @@ impl FallowLspServer {
     /// once it exists, as at initialize. While it does not exist, there is
     /// no root and the analysis does not run. A resolved root must still
     /// resolve to the same path (see `path_utils::moved_root_reason`).
-    async fn analysis_root(&self) -> std::result::Result<Option<PathBuf>, String> {
+    async fn analysis_root(&self) -> std::result::Result<Option<PathBuf>, RootProblem> {
+        let refused = self.refused_root.read().await.clone();
+        if let Some(problem) = refused {
+            return Err(problem);
+        }
         let pending = self.pending_root.read().await.clone();
         if let Some(spelled) = pending {
             match path_utils::resolve_folder(&spelled) {
@@ -1025,19 +1051,66 @@ impl FallowLspServer {
                 path_utils::FolderRoot::Valid(root) => {
                     *self.root.write().await = Some(root.clone());
                     *self.pending_root.write().await = None;
+                    self.clear_root_problem();
                     return Ok(Some(root));
                 }
                 path_utils::FolderRoot::Refused(message) => {
+                    let problem = RootProblem {
+                        message: format!("fallow does not analyze this workspace: {message}"),
+                        show: true,
+                    };
                     *self.root.write().await = None;
                     *self.pending_root.write().await = None;
-                    return Err(format!("fallow does not analyze this workspace: {message}"));
+                    *self.refused_root.write().await = Some(problem.clone());
+                    return Err(problem);
                 }
             }
         }
         let Some(root) = self.root.read().await.clone() else {
             return Ok(None);
         };
-        path_utils::moved_root_reason(&root).map_or(Ok(Some(root)), Err)
+        match path_utils::moved_root_reason(&root) {
+            None => {
+                self.clear_root_problem();
+                Ok(Some(root))
+            }
+            Some(message) => Err(RootProblem {
+                message,
+                show: false,
+            }),
+        }
+    }
+
+    /// Report `problem` to the client, unless it is the last problem that
+    /// the server reported.
+    async fn report_root_problem(&self, problem: RootProblem) {
+        {
+            let mut reported = self
+                .reported_root_problem
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if reported.as_ref() == Some(&problem) {
+                return;
+            }
+            *reported = Some(problem.clone());
+        }
+        if problem.show {
+            self.client
+                .show_message(MessageType::ERROR, problem.message.clone())
+                .await;
+        }
+        self.client
+            .log_message(MessageType::ERROR, problem.message)
+            .await;
+    }
+
+    /// Forget the last reported root problem, so that the next problem is
+    /// reported again.
+    fn clear_root_problem(&self) {
+        *self
+            .reported_root_problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     async fn run_analysis(&self) {
@@ -1053,9 +1126,9 @@ impl FallowLspServer {
         let root = match self.analysis_root().await {
             Ok(Some(root)) => root,
             Ok(None) => return,
-            Err(reason) => {
+            Err(problem) => {
                 self.lock_scheduler().clear_pending();
-                self.client.log_message(MessageType::ERROR, reason).await;
+                self.report_root_problem(problem).await;
                 return;
             }
         };

@@ -6268,3 +6268,140 @@ async fn analysis_root_resolves_a_folder_that_appears_after_initialize() {
     assert_eq!(backend.analysis_root().await, Ok(Some(resolved.clone())));
     assert_eq!(*backend.root.read().await, Some(resolved));
 }
+
+/// The methods and texts of the messages that the server sends, read from
+/// the client socket of `service`.
+#[cfg(unix)]
+fn record_messages(
+    socket: tower_lsp_server::ClientSocket,
+) -> std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> {
+    use futures::StreamExt;
+
+    let messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = std::sync::Arc::clone(&messages);
+    let mut socket = socket;
+    tokio::spawn(async move {
+        while let Some(message) = socket.next().await {
+            let params = message
+                .params()
+                .map_or_else(String::new, ToString::to_string);
+            sink.lock()
+                .unwrap()
+                .push((message.method().to_string(), params));
+        }
+    });
+    messages
+}
+
+#[cfg(unix)]
+async fn initialize_with_folder(
+    service: &mut LspService<FallowLspServer>,
+    folder: &std::path::Path,
+) {
+    let uri = Uri::from_file_path(folder).expect("file uri");
+    let request = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{ "uri": uri.as_str(), "name": "project" }],
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("ready")
+        .call(request)
+        .await
+        .expect("initialize handled")
+        .expect("response");
+}
+
+/// How many recorded messages have `method` and a text with `needle`.
+#[cfg(unix)]
+async fn count_messages(
+    messages: &std::sync::Mutex<Vec<(String, String)>>,
+    method: &str,
+    needle: &str,
+) -> usize {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    messages
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(name, params)| name == method && params.contains(needle))
+        .count()
+}
+
+/// A folder that appears after initialize below a committed link that
+/// leaves the checkout stays refused. The user sees the refusal once, also
+/// when the prewarm resolves the folder first.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_late_folder_refusal_is_shown_once_and_kept() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo dir");
+    fallow_api::git_fixture::fixture_git(&repo, &["init", "-q", "-b", "main"]);
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(&outside).expect("outside dir");
+    std::os::unix::fs::symlink(&outside, repo.join("packages")).expect("link");
+    fallow_api::git_fixture::fixture_git(&repo, &["add", "packages"]);
+    fallow_api::git_fixture::fixture_git(&repo, &["commit", "-q", "-m", "link"]);
+    let folder = repo.join("packages").join("app");
+
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let messages = record_messages(socket);
+    initialize_with_folder(&mut service, &folder).await;
+    let backend = service.inner();
+    assert_eq!(backend.analysis_root().await, Ok(None));
+
+    std::fs::create_dir(outside.join("app")).expect("create folder");
+    backend.spawn_prewarm().await;
+    let refused = backend.analysis_root().await;
+    assert!(
+        matches!(&refused, Err(problem) if problem.message.contains("outside the checkout")),
+        "got: {refused:?}"
+    );
+    backend.run_analysis().await;
+    backend.run_analysis().await;
+
+    let shown = count_messages(&messages, "window/showMessage", "outside the checkout").await;
+    assert_eq!(shown, 1);
+}
+
+/// A root that a link replaces is logged once per change, not on each run.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_moved_root_is_logged_once_per_change() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let base = dunce::canonicalize(temp.path()).unwrap();
+    let root = base.join("project");
+    std::fs::create_dir(&root).expect("root");
+    let elsewhere = base.join("elsewhere");
+    std::fs::create_dir(&elsewhere).expect("other dir");
+
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let messages = record_messages(socket);
+    initialize_with_folder(&mut service, &root).await;
+    let backend = service.inner();
+
+    std::fs::remove_dir(&root).expect("remove root");
+    std::os::unix::fs::symlink(&elsewhere, &root).expect("link root");
+    backend.run_analysis().await;
+    backend.run_analysis().await;
+    assert_eq!(
+        count_messages(&messages, "window/logMessage", "now resolves to").await,
+        1
+    );
+
+    std::fs::remove_file(&root).expect("remove link");
+    std::fs::create_dir(&root).expect("root again");
+    assert_eq!(backend.analysis_root().await, Ok(Some(root.clone())));
+    std::fs::remove_dir(&root).expect("remove root");
+    std::os::unix::fs::symlink(&elsewhere, &root).expect("link root again");
+    backend.run_analysis().await;
+    assert_eq!(
+        count_messages(&messages, "window/logMessage", "now resolves to").await,
+        2
+    );
+}
