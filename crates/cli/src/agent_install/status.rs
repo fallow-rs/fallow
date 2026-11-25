@@ -342,7 +342,10 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
         &root.join(mcp::codex_file()),
     ));
     if let Some(home) = home {
+        // `~/.claude.json` holds the user-level Claude servers. Status only
+        // reads it; fallow never edits it.
         for (harness, file) in [
+            (Harness::Claude, ".claude.json"),
             (Harness::Codex, mcp::codex_file()),
             (Harness::Cursor, mcp::cursor_file()),
         ] {
@@ -358,9 +361,14 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
                     && row.state == SurfaceState::Installed
                     && command.command == "npx"
                 {
+                    let fix = if harness == Harness::Claude {
+                        "run the claude mcp add command that agent install --user prints"
+                    } else {
+                        "agent install --user writes an absolute launcher"
+                    };
                     row.state = SurfaceState::Stale;
                     row.detail = Some(format!(
-                        "{}: a user-level entry runs the fallow-mcp of each project it opens; agent install --user writes an absolute launcher",
+                        "{}: a user-level entry runs the fallow-mcp of each project it opens; {fix}",
                         command.shell_words()
                     ));
                 }

@@ -364,6 +364,11 @@ fn status_reports_old_user_level_gates_and_npx_entries_as_stale() {
         "[mcp_servers.fallow]\ncommand = \"npx\"\nargs = [\"--no\", \"fallow-mcp\"]\n",
     )
     .unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{"fallow":{"command":"npx","args":["--no","fallow-mcp"]}}}"#,
+    )
+    .unwrap();
 
     let json = status_json(&dir, &home);
 
@@ -377,6 +382,7 @@ fn status_reports_old_user_level_gates_and_npx_entries_as_stale() {
         "stale",
         "{json}"
     );
+    assert_eq!(surface(&json, "~/.claude.json")["state"], "stale", "{json}");
     assert!(next_action_command(&json, "agent-install-user").contains("--user"));
     let _ = fs::remove_dir_all(&dir);
 }
