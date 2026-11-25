@@ -19,7 +19,7 @@ paths:
 - Every suppression needs a `reason`.
 
 ## Size assertions
-Compile-time size assertions (`const _: () = assert!(...)` in `crates/types/src/extract.rs`) pin the graph structs so a field addition cannot silently bloat them. Read the assertions for the current sizes before changing those structs.
+Compile-time size assertions (`const _: () = assert!(...)` in `crates/types/src/extract.rs` and its `extract_*.rs` child modules) pin the graph structs so a field addition cannot silently bloat them. Read the assertions for the current sizes before changing those structs.
 
 ## Formatting
 `.rustfmt.toml` with `style_edition = "2024"`.
