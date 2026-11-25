@@ -1,0 +1,10 @@
+{
+  "name": "test-only-exports",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@storybook/react": "^8.0.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "test-only-exports": "error"
+  }
+}
