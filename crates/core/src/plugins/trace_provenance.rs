@@ -7,7 +7,7 @@ use fallow_types::extract::ExportName;
 use fallow_types::trace::{PluginExportCredit, TraceProvenance};
 
 use super::{
-    AggregatedPluginResult, CONFIG_ONLY_EXPORT_NAMES, CompiledPathRule, PluginUsedExportRule,
+    AggregatedPluginResult, CONFIG_ONLY_EXPORT_NAMES, PathRuleIndex, PluginUsedExportRule,
     federation_trace_provenance, push_tooling_trace_credits,
 };
 use crate::discover::DiscoveredFile;
@@ -89,18 +89,14 @@ fn push_plugin_export_credits(
     } else {
         &[]
     };
-    let rules: Vec<(CompiledPathRule, &PluginUsedExportRule)> = plugin_result
-        .used_exports
-        .iter()
-        .chain(config_credits)
-        .filter_map(|rule| {
-            let compiled = CompiledPathRule::for_used_export_rule(
-                &rule.rule.path,
-                "plugin export credit pattern",
-            )?;
-            Some((compiled, rule))
-        })
-        .collect();
+    let rules: PathRuleIndex<&PluginUsedExportRule> = PathRuleIndex::build(
+        plugin_result
+            .used_exports
+            .iter()
+            .chain(config_credits)
+            .map(|rule| (&rule.rule.path, rule)),
+        "plugin export credit pattern",
+    );
     if rules.is_empty() {
         return;
     }
@@ -111,10 +107,7 @@ fn push_plugin_export_credits(
         let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
         let relative_str = relative.to_string_lossy().replace('\\', "/");
         let mut credits = Vec::new();
-        for (compiled, rule) in &rules {
-            if !compiled.matches(&relative_str) {
-                continue;
-            }
+        for rule in rules.matching(&relative_str) {
             for name in export_names(module) {
                 if rule.rule.exports.iter().any(|e| e == "*" || e == name) {
                     credits.push((
@@ -159,10 +152,8 @@ fn push_config_export_provenance(
     modules: &[ModuleInfo],
     plugin_result: &AggregatedPluginResult,
 ) {
-    let rules: Vec<(CompiledPathRule, Vec<&str>)> = plugin_result
-        .used_exports
-        .iter()
-        .filter_map(|rule| {
+    let rules: PathRuleIndex<Vec<&str>> = PathRuleIndex::build(
+        plugin_result.used_exports.iter().filter_map(|rule| {
             let names: Vec<&str> = rule
                 .rule
                 .exports
@@ -170,14 +161,10 @@ fn push_config_export_provenance(
                 .map(String::as_str)
                 .filter(|name| CONFIG_ONLY_EXPORT_NAMES.contains(name))
                 .collect();
-            if names.is_empty() {
-                return None;
-            }
-            let compiled =
-                CompiledPathRule::for_used_export_rule(&rule.rule.path, "used_exports pattern")?;
-            Some((compiled, names))
-        })
-        .collect();
+            (!names.is_empty()).then_some((&rule.rule.path, names))
+        }),
+        "used_exports pattern",
+    );
     if rules.is_empty() {
         return;
     }
@@ -203,11 +190,9 @@ fn push_config_export_provenance(
         };
         let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
         let relative_str = relative.to_string_lossy().replace('\\', "/");
+        let matching = rules.matching(&relative_str);
         for name in config_names {
-            if rules
-                .iter()
-                .any(|(rule, names)| names.contains(&name.as_str()) && rule.matches(&relative_str))
-            {
+            if matching.iter().any(|names| names.contains(&name.as_str())) {
                 provenance.push_config_export(relative.to_path_buf(), name);
             }
         }

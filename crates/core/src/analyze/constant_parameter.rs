@@ -1557,7 +1557,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
             .filter(|node| {
                 let relative = node.path.strip_prefix(&config.root).unwrap_or(&node.path);
                 let relative = relative.to_string_lossy().replace('\\', "/");
-                matchers.iter().any(|rule| rule.matches(&relative))
+                matchers.any_match(&relative)
             })
             .map(|node| node.file_id)
             .collect()

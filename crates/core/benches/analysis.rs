@@ -1668,9 +1668,71 @@ fn cache_round_trip(c: &mut Criterion) {
     });
 }
 
+/// Workspaces of the plugin-rule monorepo fixture.
+const PLUGIN_RULE_WORKSPACES: usize = 96;
+/// Modules of each workspace in the plugin-rule monorepo fixture.
+const PLUGIN_RULE_MODULES: usize = 16;
+
+/// A monorepo whose workspaces each depend on Next.js. Each workspace gets its
+/// own copy of the Next.js `used_exports` rules, with the workspace path as
+/// prefix. The used-export lookup of a module must not grow with the number
+/// of workspaces (issue #5196).
+fn create_plugin_rule_monorepo_input() -> ConfigInput {
+    use std::fmt::Write as _;
+    let temp_dir = tempfile::Builder::new()
+        .prefix("fallow-bench-plugin-rules-")
+        .tempdir()
+        .unwrap();
+    let root = temp_dir.path().to_path_buf();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"bench-root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    for workspace in 0..PLUGIN_RULE_WORKSPACES {
+        let dir = root.join(format!("packages/pkg{workspace:02}"));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            format!(
+                r#"{{"name":"@bench/pkg{workspace:02}","main":"src/index.ts","devDependencies":{{"next":"^15.0.0"}}}}"#
+            ),
+        )
+        .unwrap();
+        let mut index = String::new();
+        for module in 0..PLUGIN_RULE_MODULES {
+            std::fs::write(
+                dir.join(format!("src/m{module}.ts")),
+                format!(
+                    "export const a{module} = {module};\nexport function b{module}() {{ return {module}; }}\n"
+                ),
+            )
+            .unwrap();
+            writeln!(index, "import './m{module}';").unwrap();
+        }
+        std::fs::write(dir.join("src/index.ts"), index).unwrap();
+    }
+    let config = helpers::create_test_config(root);
+    ConfigInput {
+        _temp_dir: temp_dir,
+        config,
+    }
+}
+
+fn full_pipeline_workspace_plugin_rules(c: &mut Criterion) {
+    c.bench_function("full_pipeline_workspace_plugin_rules", |bencher| {
+        bencher.iter_batched_ref(
+            create_plugin_rule_monorepo_input,
+            |input| fallow_core::analyze(&input.config),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 criterion_group!(
     benches,
     star_barrel_monorepo,
+    full_pipeline_workspace_plugin_rules,
     parse_single_file,
     full_pipeline_10_files,
     full_pipeline_100_files,
