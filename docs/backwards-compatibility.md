@@ -801,7 +801,10 @@ These are documented for the rare CI script that depended on the old behavior. N
     `..` is resolved too. A component that cannot be read for a reason
     other than "not found" fails the write.
   - `viz --out` is checked with the save and report flags, before the
-    analysis runs.
+    analysis runs. A `viz --out` path outside the root, its Git work tree
+    and the temp directories is refused.
+  - A link into the Git directory of a worktree inside a bare repository is
+    refused. The files of the worktree itself stay writable.
 
   A cache directory that is not below the root, but is below a work tree of
   the same repository as the root, is checked from the top of that work
@@ -812,15 +815,20 @@ These are documented for the rare CI script that depended on the old behavior. N
   in a worktree inside the main checkout cannot lead up into the main
   checkout. This covers the cache of the checkout when `audit --staged`
   runs in a temporary worktree. The base snapshot cache of `audit --staged`
-  is checked from the checkout that the run starts in. A configured `cache.dir`
-  is also ignored when a part of it names `.git` in any case, with trailing
-  dots or spaces, with a `:` (an NTFS stream), or as `git~<digits>` (an 8.3
-  short name). A
-  `rule-pack init --config` with an absolute path inside the root or its Git
-  work tree gets the same link check as a relative path. A refusal of a save
-  or report flag or of `viz --out` exits 2. A cache write is skipped with a
-  warning, and `fallow fix` reports the file as failed. No envelope field
-  changes, and no `schema_version` moves.
+  is checked from the checkout that the run starts in.
+
+  A `..` in a cache path is resolved on disk, so
+  `FALLOW_CACHE_DIR=../shared` from a subdirectory root writes into the
+  work tree, and a link before the `..` is still checked. A configured
+  `cache.dir` is ignored when a part of it names `.git` in any case, with
+  trailing dots or spaces, with a `:` (an NTFS stream), or as
+  `git~<digits>` (an 8.3 short name).
+
+  A `rule-pack init --config` with an absolute path inside the root or its
+  Git work tree gets the same link check as a relative path. A refusal of a
+  save or report flag or of `viz --out` exits 2. A cache write is skipped
+  with a warning that names the reason, and `fallow fix` reports the file
+  as failed. No envelope field changes, and no `schema_version` moves.
 
   These link setups worked before and are now refused:
   - A `.fallow` link to a folder in `/tmp` or another temp directory. The
