@@ -93,17 +93,21 @@ fn lsp_server_subcommand_completes_initialize_handshake() {
 /// `mcp-server`, also when no other launcher exists.
 #[test]
 fn agent_install_resolves_the_multicall_binary_as_mcp_launcher() {
-    let root = std::env::temp_dir().join(format!(
+    let scratch = std::env::temp_dir().join(format!(
         "fallow-multicall-agent-install-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("home")).expect("create scratch project");
+    let _ = std::fs::remove_dir_all(&scratch);
+    let root = scratch.join("project");
+    std::fs::create_dir_all(&root).expect("create scratch project");
+    std::fs::create_dir_all(scratch.join("home")).expect("create scratch home");
     std::fs::write(root.join("package.json"), r#"{"name": "scratch"}"#)
         .expect("write package.json");
     // A copy in its own directory keeps a `fallow-mcp` of the same build
-    // directory off `PATH`; that launcher would be chosen first.
-    let bin_dir = root.join("bin");
+    // directory off `PATH`; that launcher would be chosen first. The
+    // directory is outside the project, because a user-level launcher must
+    // not be a file of the project.
+    let bin_dir = scratch.join("bin");
     std::fs::create_dir_all(&bin_dir).expect("create binary directory");
     let source = std::path::Path::new(MULTICALL);
     let multicall = bin_dir.join(source.file_name().expect("multicall file name"));
@@ -113,14 +117,14 @@ fn agent_install_resolves_the_multicall_binary_as_mcp_launcher() {
         .arg("--root")
         .arg(&root)
         .args(["--format", "json"])
-        .env("HOME", root.join("home"))
+        .env("HOME", scratch.join("home"))
         .env("PATH", &bin_dir)
         .env("CLAUDECODE", "")
         .env("CODEX_THREAD_ID", "")
         .env("CURSOR_AGENT", "")
         .output()
         .expect("run agent install");
-    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&scratch);
     let stdout = String::from_utf8(out.stdout).expect("utf8 stdout");
     assert!(out.status.success(), "agent install failed: {stdout}");
     assert!(
