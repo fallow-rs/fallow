@@ -429,6 +429,13 @@ Rstest plugin does not, so its boundary is the `root` argument. In a workspace
 run, Rstest therefore does not follow a sibling package. This is stricter than
 the project root.
 
+The Nx plugin also keeps the `root` argument as its boundary. It reads the
+`package.json` of a local plugin or executor path, and the executor and
+generator collections that the manifest names. Nx resolves these paths from
+the workspace root. The root run reads each `project.json` of the workspace
+with the project root as `root`, so a local executor in a workspace package
+still resolves.
+
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto
