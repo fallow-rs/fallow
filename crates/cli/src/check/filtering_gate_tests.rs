@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 
 use fallow_types::results::*;
 
-use super::tests::{build_diff, sample_security_finding, unresolved_callee_diagnostic};
+use crate::report::ci::diff_filter::DiffIndex;
+
+use super::tests::{sample_security_finding, unresolved_callee_diagnostic};
 use super::{filter_results_by_diff, retain_gate_new};
 
 #[test]
 fn gate_keeps_new_sink_anchor_on_added_line() {
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/render.ts b/src/render.ts\n\
          --- a/src/render.ts\n\
          +++ b/src/render.ts\n\
@@ -36,7 +38,7 @@ fn gate_keeps_new_sink_anchor_on_added_line() {
 
 #[test]
 fn gate_new_scopes_unresolved_callee_diagnostics_to_added_lines() {
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/a.ts b/src/a.ts\n\
          --- a/src/a.ts\n\
          +++ b/src/a.ts\n\
@@ -97,7 +99,7 @@ fn secret_leak_with_reads(reads: &[(&str, u32)]) -> SecurityFinding {
 
 #[test]
 fn gate_keeps_secret_read_added_to_existing_module() {
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/shared.ts b/src/shared.ts\n\
          --- a/src/shared.ts\n\
          +++ b/src/shared.ts\n\
@@ -118,7 +120,7 @@ fn gate_keeps_secret_read_added_to_existing_module() {
 
 #[test]
 fn gate_keeps_second_secret_read_added_below_an_old_read() {
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/shared.ts b/src/shared.ts\n\
          --- a/src/shared.ts\n\
          +++ b/src/shared.ts\n\
@@ -139,7 +141,7 @@ fn gate_keeps_second_secret_read_added_below_an_old_read() {
 
 #[test]
 fn gate_drops_old_secret_read_when_another_line_changes() {
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/shared.ts b/src/shared.ts\n\
          --- a/src/shared.ts\n\
          +++ b/src/shared.ts\n\
@@ -164,7 +166,7 @@ fn gate_drops_secret_source_file_touched_when_anchor_unchanged() {
     // editing a file that merely reads a secret is not a new sink, and the
     // forbidden "a sink in a changed file fails the gate" false positive.
     // The secret read stays on line 1; the change adds another line.
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/server.ts b/src/server.ts\n\
          --- a/src/server.ts\n\
          +++ b/src/server.ts\n\
@@ -211,7 +213,7 @@ fn gate_drops_secret_source_file_touched_when_anchor_unchanged() {
 fn gate_keeps_untrusted_source_hop_on_added_line() {
     // A pre-existing sink whose anchor is NOT added, but the PR wires a new
     // UntrustedSource into it on an added line: genuine new exposure, kept.
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/route.ts b/src/route.ts\n\
          --- a/src/route.ts\n\
          +++ b/src/route.ts\n\
@@ -254,7 +256,7 @@ fn gate_drops_intermediate_hop_pass_through() {
     // Only an Intermediate (pass-through) hop sits on an added line; the sink
     // anchor and any UntrustedSource/Sink hop are unchanged. Editing a transit
     // module is not new exposure, so the gate drops it.
-    let diff = build_diff(
+    let diff = DiffIndex::from_unified_diff(
         "diff --git a/src/transit.ts b/src/transit.ts\n\
          --- a/src/transit.ts\n\
          +++ b/src/transit.ts\n\
@@ -312,7 +314,7 @@ fn transitive_leak(category: &str, terminal: TraceHop) -> SecurityFinding {
 }
 
 fn banner_diff(hunk: &str) -> crate::report::ci::diff_filter::DiffIndex {
-    build_diff(&format!(
+    DiffIndex::from_unified_diff(&format!(
         "diff --git a/app/components/banner.tsx b/app/components/banner.tsx\n\
          --- a/app/components/banner.tsx\n\
          +++ b/app/components/banner.tsx\n\

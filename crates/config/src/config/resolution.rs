@@ -690,10 +690,6 @@ fn per_root_cache_subdir(root: &Path) -> String {
     }
 }
 
-pub(super) fn normalize_user_glob_pattern(pattern: &str) -> &str {
-    super::glob_validation::normalize_path_pattern(pattern)
-}
-
 /// Built-in discovery ignore patterns, unioned into
 /// [`ResolvedConfig::ignore_patterns`] after the user's own `ignorePatterns`.
 ///
@@ -733,7 +729,7 @@ fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<GlobMatcher> {
     patterns
         .iter()
         .map(|pattern| {
-            let normalized = normalize_user_glob_pattern(pattern);
+            let normalized = super::glob_validation::normalize_path_pattern(pattern);
             Glob::new(normalized)
                 .expect("ignoreUnresolvedImports entry was validated at config load time")
                 .compile_matcher()

@@ -38,7 +38,7 @@ use crate::mutation::recorded_args::RecordPass;
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, kebab,
     mutant_results, plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue,
-    summary, tool_version, unmatched_paths,
+    tool_version, unmatched_paths,
 };
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
@@ -1357,7 +1357,7 @@ fn guard_typecheck_companion(enabled: bool, root: &Path) -> ProgrammaticResult<(
     if !enabled {
         return Ok(());
     }
-    crate::type_aware::check_typecheck_companion(root).map_err(|message| {
+    crate::type_aware::discover_companion(root).map_err(|message| {
         mutation_error("FALLOW_MUTATION_TYPECHECK_UNAVAILABLE", message)
             .with_help("install the fallow-type-aware companion, or run without --typecheck")
             .with_context("mutation.typecheck")
@@ -1488,7 +1488,7 @@ pub fn run_mutation_with_progress(
         runner: execution.runner,
         cache: execution.cache,
         resume: execution.resume,
-        summary: summary(&results),
+        summary: fallow_output::MutationSummary::from_results(&results),
         functions: function_results(plan, &results),
         mutants: results,
         no_test_files: plan.no_test_files,

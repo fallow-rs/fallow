@@ -91,15 +91,6 @@ struct Response {
 /// The diagnostic codes that the report keeps for one mutant.
 const MAX_CODES: usize = 8;
 
-/// Finds the companion, without starting it.
-///
-/// # Errors
-///
-/// Returns the remediation text when no trusted companion exists.
-pub fn check_typecheck_companion(root: &Path) -> Result<(), String> {
-    super::discover_companion(root)
-}
-
 /// Type-checks `files` through the companion. The result has one entry for
 /// each requested mutant, in request order.
 ///

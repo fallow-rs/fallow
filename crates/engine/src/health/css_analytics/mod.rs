@@ -28,6 +28,23 @@ use preprocessor::*;
 use theme_tokens::*;
 use token_consumers::*;
 
+/// Scan markup source for Tailwind arbitrary-value utilities, without the
+/// values that match `tailwind_ignore_patterns` of the config.
+fn scan_tailwind_arbitrary_values(
+    source: &str,
+    config: &ResolvedConfig,
+) -> Vec<fallow_extract::tailwind::TailwindArbitraryUse> {
+    fallow_extract::tailwind::scan_tailwind_arbitrary_values(source)
+        .into_iter()
+        .filter(|usage| {
+            !config
+                .tailwind_ignore_patterns
+                .iter()
+                .any(|pattern| pattern.is_match(&usage.value))
+        })
+        .collect()
+}
+
 const MAX_REPORTED_RAW_STYLE_VALUES: usize = 200;
 
 /// The per-run scan filters shared by every CSS and markup health scanner:
@@ -406,7 +423,7 @@ impl CssTokenSets {
     /// source once, and only when it has a `@theme`, `@apply`, `var(` or
     /// `@plugin`, so this is near-free for non-Tailwind stylesheets.
     fn record_theme(&mut self, source: &str, rel: &str) {
-        let tokens = crate::css::scan_stylesheet_tokens(source);
+        let tokens = fallow_extract::css::scan_stylesheet_tokens(source);
         let scan = tokens.theme;
         for token in scan.tokens {
             self.theme_token_definers
@@ -844,7 +861,7 @@ fn scan_markup_tailwind_arbitrary_values(
         };
         let reported = output_changed_files
             .is_none_or(|changed| css_output_path_in_changed_scope(&rel, config, changed));
-        for arb in crate::css::scan_tailwind_arbitrary_values(&source, config) {
+        for arb in scan_tailwind_arbitrary_values(&source, config) {
             total_uses = total_uses.saturating_add(1);
             let entry = agg.entry(arb.value).or_insert_with(|| ArbitraryValueUses {
                 count: 0,
@@ -1081,12 +1098,13 @@ fn record_css_scan_item(
     scoring: &mut CssGradeScoring,
 ) -> bool {
     let ScanFile { rel, reported } = file;
-    let Some(mut analytics) = crate::css::compute_css_analytics(&item.source) else {
+    let Some(mut analytics) = fallow_extract::css_metrics::compute_css_analytics(&item.source)
+    else {
         return false;
     };
     tokens.record_theme(item.source.as_ref(), rel);
     for layer in &item.layers {
-        if let Some(layer_analytics) = crate::css::compute_css_analytics(layer) {
+        if let Some(layer_analytics) = fallow_extract::css_metrics::compute_css_analytics(layer) {
             merge_css_analytics(&mut analytics, layer_analytics);
         }
         tokens.record_theme(layer, rel);

@@ -24,9 +24,7 @@ pub use client::{
     refine_dead_code_results, refine_dead_code_results_in_session, symbol_impact, trace_symbol,
     type_coupling,
 };
-pub use mutant_typecheck::{
-    TypecheckFile, TypecheckMutant, TypecheckOutcome, check_typecheck_companion, typecheck_mutants,
-};
+pub use mutant_typecheck::{TypecheckFile, TypecheckMutant, TypecheckOutcome, typecheck_mutants};
 pub use transport::{
     TypeAwareError, TypeAwareFileChanges, TypeAwareOutcome, TypeAwareSession, TypeAwareStatus,
     discover_companion, shutdown_type_aware_sidecars, status, terminate_active_type_aware_sidecars,

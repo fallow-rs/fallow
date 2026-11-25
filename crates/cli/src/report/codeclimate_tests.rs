@@ -444,7 +444,7 @@ fn stored_codeclimate_preserves_native_unused_file_contract() {
         unused_files: Severity::Warn,
         ..RulesConfig::default()
     };
-    let direct = api_codeclimate_issues(&results, root.path(), &rules);
+    let direct = fallow_api::build_codeclimate(&results, root.path(), &rules);
     let mut envelope = serde_json::to_value(&results).expect("serialize results");
     envelope["kind"] = serde_json::json!("dead-code");
     envelope["unused_files"][0]["path"] = serde_json::json!("src/dead.ts");
@@ -479,7 +479,7 @@ fn stored_grouped_dead_code_preserves_native_owner_contract() {
             deprecated_reason: None,
         }));
     let rules = RulesConfig::default();
-    let mut direct = api_codeclimate_issues(&results, root.path(), &rules);
+    let mut direct = fallow_api::build_codeclimate(&results, root.path(), &rules);
     annotate_codeclimate_issues(&mut direct, CodeClimateAnnotationField::Owner, |path| {
         grouping::resolve_owner(Path::new(path), Path::new(""), &resolver)
     });
@@ -524,7 +524,7 @@ fn stored_dead_code_codeclimate_covers_native_findings() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let rules = RulesConfig::default();
-    let direct = api_codeclimate_issues(&results, &root, &rules);
+    let direct = fallow_api::build_codeclimate(&results, &root, &rules);
     let mut envelope = serde_json::to_value(&results).expect("serialize results");
     envelope["kind"] = serde_json::json!("dead-code");
     fallow_output::strip_root_prefix(&mut envelope, "/project/");
@@ -566,7 +566,8 @@ fn codeclimate_missing_suppression_reason_uses_reason_rule_severity() {
         ..Default::default()
     };
 
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
 
     assert_eq!(output[0]["check_name"], "fallow/missing-suppression-reason");
     assert_eq!(output[0]["severity"], "major");
@@ -613,7 +614,8 @@ fn codeclimate_stale_and_missing_suppression_have_distinct_identities() {
         ..Default::default()
     };
 
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
 
     assert_eq!(output[0]["check_name"], "fallow/stale-suppression");
     assert_eq!(output[1]["check_name"], "fallow/missing-suppression-reason");
@@ -631,14 +633,16 @@ fn codeclimate_unused_file_severity_follows_rules() {
         }));
 
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["severity"], "major");
 
     let rules = RulesConfig {
         unused_files: Severity::Warn,
         ..RulesConfig::default()
     };
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["severity"], "minor");
 }
 
@@ -660,7 +664,8 @@ fn codeclimate_unused_export_has_line_number() {
             deprecated_reason: None,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let issue = &output[0];
     assert_eq!(issue["location"]["lines"]["begin"], 10);
 }
@@ -675,7 +680,8 @@ fn codeclimate_paths_are_relative() {
             path: root.join("src/deep/nested/file.ts"),
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let path = output[0]["location"]["path"].as_str().unwrap();
     assert_eq!(path, "src/deep/nested/file.ts");
     assert!(!path.starts_with("/project"));
@@ -699,7 +705,8 @@ fn codeclimate_re_export_label_in_description() {
             deprecated_reason: None,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("Re-export"));
 }
@@ -728,7 +735,8 @@ fn codeclimate_unlisted_dep_one_issue_per_import_site() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let arr = output.as_array().unwrap();
     assert_eq!(arr.len(), 2);
     assert_eq!(arr[0]["check_name"], "fallow/unlisted-dependency");
@@ -762,7 +770,8 @@ fn codeclimate_duplicate_export_one_issue_per_location() {
             ],
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let arr = output.as_array().unwrap();
     assert_eq!(arr.len(), 3);
 }
@@ -784,7 +793,8 @@ fn codeclimate_circular_dep_emits_chain_in_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("Circular dependency"));
     assert!(desc.contains("src/a.ts"));
@@ -796,7 +806,8 @@ fn codeclimate_fingerprints_are_unique() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
 
     let mut fps: Vec<&str> = output
         .as_array()
@@ -824,7 +835,8 @@ fn codeclimate_type_only_dep_has_correct_check_name() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("zod"));
@@ -846,7 +858,8 @@ fn codeclimate_dep_with_zero_line_omits_line_number() {
             declared_and_imported_in: Vec::new(),
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["location"]["lines"]["begin"], 1);
 }
 
@@ -854,7 +867,7 @@ fn codeclimate_dep_with_zero_line_omits_line_number() {
 /// The CodeClimate helpers must check that slice before they map its severity.
 /// `Severity::Off` has no CodeClimate equivalent.
 #[test]
-fn api_codeclimate_issues_with_off_severity_and_empty_findings_does_not_panic() {
+fn build_codeclimate_with_off_severity_and_empty_findings_does_not_panic() {
     let root = PathBuf::from("/project");
     let results = AnalysisResults::default();
     let rules = RulesConfig {
@@ -867,7 +880,7 @@ fn api_codeclimate_issues_with_off_severity_and_empty_findings_does_not_panic() 
         unused_class_members: Severity::Off,
         ..RulesConfig::default()
     };
-    let issues = api_codeclimate_issues(&results, &root, &rules);
+    let issues = fallow_api::build_codeclimate(&results, &root, &rules);
     assert!(issues.is_empty());
 }
 
@@ -910,7 +923,7 @@ fn health_codeclimate_includes_coverage_gaps() {
         ..Default::default()
     };
 
-    let output = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let output = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = output.as_array().unwrap();
     assert_eq!(issues.len(), 2);
     assert_eq!(issues[0]["check_name"], "fallow/untested-file");
@@ -975,7 +988,7 @@ fn health_codeclimate_includes_coverage_intelligence_issue() {
         ..Default::default()
     };
 
-    let output = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let output = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = output.as_array().unwrap();
     assert_eq!(issues.len(), 1);
     assert_eq!(
@@ -1013,7 +1026,7 @@ fn health_codeclimate_skips_summary_only_coverage_intelligence() {
         ..Default::default()
     };
 
-    let issues = api_health_codeclimate_issues(&report, &root);
+    let issues = fallow_api::build_health_codeclimate(&report, &root);
     assert!(issues.is_empty());
 }
 
@@ -1053,7 +1066,7 @@ fn health_codeclimate_crap_only_uses_crap_check_name() {
         },
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
     assert_eq!(issues[0]["severity"], "major");
@@ -1102,7 +1115,7 @@ fn complexity_description_both_threshold_exceeded() {
         ],
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues[0]["check_name"], "fallow/high-complexity");
     let desc = issues[0]["description"].as_str().unwrap();
@@ -1146,7 +1159,7 @@ fn complexity_description_cyclomatic_only() {
         ],
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues[0]["check_name"], "fallow/high-cyclomatic-complexity");
     let desc = issues[0]["description"].as_str().unwrap();
@@ -1193,7 +1206,7 @@ fn complexity_description_cognitive_only() {
         ],
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues[0]["check_name"], "fallow/high-cognitive-complexity");
     let desc = issues[0]["description"].as_str().unwrap();
@@ -1237,7 +1250,7 @@ fn complexity_description_all_threshold_crap_no_coverage() {
         ],
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
     let desc = issues[0]["description"].as_str().unwrap();
@@ -1293,7 +1306,7 @@ fn coverage_intelligence_issue_none_identity_uses_code_label() {
         }),
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues.len(), 1);
     assert_eq!(
@@ -1352,7 +1365,7 @@ fn coverage_intelligence_clean_verdict_emits_no_issue() {
         }),
         ..Default::default()
     };
-    let issues = api_health_codeclimate_issues(&report, &root);
+    let issues = fallow_api::build_health_codeclimate(&report, &root);
     assert!(
         issues.is_empty(),
         "Clean verdict should not produce an issue"
@@ -1387,7 +1400,7 @@ fn untested_file_singular_export_count() {
         }),
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues.len(), 1);
     let desc = issues[0]["description"].as_str().unwrap();
@@ -1422,7 +1435,7 @@ fn untested_file_plural_export_count() {
         }),
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     let desc = issues[0]["description"].as_str().unwrap();
     assert!(desc.contains("3 value exports)"), "plural: {desc}");
@@ -1447,7 +1460,8 @@ fn unused_dep_with_workspace_context_includes_workspace_in_description() {
             declared_and_imported_in: Vec::new(),
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let desc = output[0]["description"].as_str().unwrap();
     assert!(
         desc.contains("imported in other workspaces"),
@@ -1482,7 +1496,8 @@ fn private_type_leak_emits_correct_check_name_and_description() {
         private_type_leaks: Severity::Error,
         ..RulesConfig::default()
     };
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let arr = output.as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["check_name"], "fallow/private-type-leak");
@@ -1510,7 +1525,8 @@ fn type_only_dep_zero_line_defaults_to_1() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["location"]["lines"]["begin"], 1);
 }
 
@@ -1528,7 +1544,8 @@ fn test_only_dep_zero_line_defaults_to_1() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/test-only-dependency");
     assert_eq!(output[0]["location"]["lines"]["begin"], 1);
 }
@@ -1551,7 +1568,8 @@ fn re_export_cycle_self_loop_description_contains_self_loop_tag() {
             col: 0,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/re-export-cycle");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("(self-loop)"), "desc: {desc}");
@@ -1571,7 +1589,8 @@ fn re_export_cycle_multi_node_description_has_no_kind_tag() {
             col: 0,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.starts_with("Re-export cycle: "), "desc: {desc}");
     assert!(!desc.contains("(self-loop)"), "desc: {desc}");
@@ -1598,7 +1617,8 @@ fn boundary_coverage_violation_emits_correct_check_name() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/boundary-coverage");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("no configured zone"), "desc: {desc}");
@@ -1622,7 +1642,8 @@ fn boundary_call_violation_emits_pattern_in_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/boundary-call-violation");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("fs.readFile"), "desc: {desc}");
@@ -1653,7 +1674,8 @@ fn policy_violation_error_severity_maps_to_major() {
             message: None,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/policy-violation");
     assert_eq!(output[0]["severity"], "major");
     let desc = output[0]["description"].as_str().unwrap();
@@ -1680,7 +1702,8 @@ fn policy_violation_warn_severity_maps_to_minor() {
             message: Some("Use the project logger instead".to_string()),
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["severity"], "minor");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(
@@ -1710,7 +1733,8 @@ fn invalid_client_export_emits_correct_check_name_and_directive() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/invalid-client-export");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("metadata"), "desc: {desc}");
@@ -1734,7 +1758,8 @@ fn mixed_client_server_barrel_emits_correct_check_name_and_origins() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/mixed-client-server-barrel");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("./client-comp"), "desc: {desc}");
@@ -1761,7 +1786,8 @@ fn misplaced_directive_emits_correct_check_name_and_guidance() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/misplaced-directive");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("use client"), "desc: {desc}");
@@ -1790,7 +1816,8 @@ fn unrendered_component_emits_correct_check_name_and_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unrendered-component");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`Dead`"), "desc: {desc}");
@@ -1818,7 +1845,8 @@ fn unused_component_prop_emits_correct_check_name_and_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-component-prop");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`color`"), "desc: {desc}");
@@ -1846,7 +1874,8 @@ fn unused_component_emit_emits_correct_check_name_and_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-component-emit");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`close`"), "desc: {desc}");
@@ -1872,7 +1901,8 @@ fn unused_svelte_event_emits_correct_check_name_and_description() {
             col: 0,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-svelte-event");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`submit`"), "desc: {desc}");
@@ -1900,7 +1930,8 @@ fn unused_component_input_emits_correct_check_name_and_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-component-input");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`label`"), "desc: {desc}");
@@ -1924,7 +1955,8 @@ fn unused_component_output_emits_correct_check_name_and_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-component-output");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`changed`"), "desc: {desc}");
@@ -1951,7 +1983,8 @@ fn unused_server_action_emits_correct_check_name_and_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-server-action");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`deleteUser`"), "desc: {desc}");
@@ -1977,7 +2010,8 @@ fn unused_load_data_key_emits_correct_check_name_and_description() {
             route_dir: None,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-load-data-key");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`postCount`"), "desc: {desc}");
@@ -2003,7 +2037,8 @@ fn route_collision_emits_correct_check_name_and_url_in_description() {
             col: 0,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/route-collision");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("`/about`"), "desc: {desc}");
@@ -2028,7 +2063,8 @@ fn dynamic_segment_name_conflict_emits_correct_check_name_and_position() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(
         output[0]["check_name"],
         "fallow/dynamic-segment-name-conflict"
@@ -2060,7 +2096,8 @@ fn unresolved_catalog_reference_default_catalog_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(
         output[0]["check_name"],
         "fallow/unresolved-catalog-reference"
@@ -2088,7 +2125,8 @@ fn unresolved_catalog_reference_named_catalog_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("catalog 'react17'"), "desc: {desc}");
     assert!(desc.contains("available in"), "desc: {desc}");
@@ -2120,7 +2158,8 @@ fn unused_dependency_override_with_hint_includes_hint_in_description() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-dependency-override");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("react"), "desc: {desc}");
@@ -2128,7 +2167,7 @@ fn unused_dependency_override_with_hint_includes_hint_in_description() {
 }
 
 // ---------------------------------------------------------------------------
-// api_health_codeclimate_issues: runtime coverage findings
+// fallow_api::build_health_codeclimate: runtime coverage findings
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -2184,7 +2223,7 @@ fn health_codeclimate_runtime_safe_to_delete_maps_to_critical_severity() {
         }),
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0]["check_name"], "fallow/runtime-safe-to-delete");
@@ -2250,14 +2289,14 @@ fn health_codeclimate_runtime_finding_with_none_invocations_shows_untracked() {
         }),
         ..Default::default()
     };
-    let json = codeclimate_issues_to_value(&api_health_codeclimate_issues(&report, &root));
+    let json = codeclimate_issues_to_value(&fallow_api::build_health_codeclimate(&report, &root));
     let issues = json.as_array().unwrap();
     let desc = issues[0]["description"].as_str().unwrap();
     assert!(desc.contains("untracked"), "desc: {desc}");
 }
 
 // ---------------------------------------------------------------------------
-// api_duplication_codeclimate_issues
+// fallow_api::build_duplication_codeclimate
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -2297,7 +2336,8 @@ fn duplication_codeclimate_one_issue_per_instance() {
         range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
-    let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_duplication_codeclimate(&report, &root));
     let issues = output.as_array().unwrap();
     assert_eq!(issues.len(), 2, "one issue per clone instance");
     assert_eq!(issues[0]["check_name"], "fallow/code-duplication");
@@ -2357,7 +2397,8 @@ fn duplication_codeclimate_description_uses_stable_clone_handle_not_ordinal() {
         range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
-    let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_duplication_codeclimate(&report, &root));
     let issues = output.as_array().unwrap();
     assert_eq!(issues.len(), 2);
     let desc0 = issues[0]["description"].as_str().unwrap();
@@ -2374,8 +2415,9 @@ fn duplication_codeclimate_description_uses_stable_clone_handle_not_ordinal() {
 
     let mut reordered = report;
     reordered.clone_groups.reverse();
-    let reordered_output =
-        codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&reordered, &root));
+    let reordered_output = codeclimate_issues_to_value(&fallow_api::build_duplication_codeclimate(
+        &reordered, &root,
+    ));
     let descriptions_by_path = |issues: &serde_json::Value| {
         issues
             .as_array()
@@ -2413,7 +2455,8 @@ fn duplication_codeclimate_empty_report_produces_empty_array() {
         range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
-    let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_duplication_codeclimate(&report, &root));
     assert!(output.as_array().unwrap().is_empty());
 }
 
@@ -2454,7 +2497,8 @@ fn duplication_codeclimate_fingerprints_are_unique_across_instances() {
         range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
-    let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_duplication_codeclimate(&report, &root));
     let issues = output.as_array().unwrap();
     let fp0 = issues[0]["fingerprint"].as_str().unwrap();
     let fp1 = issues[1]["fingerprint"].as_str().unwrap();
@@ -2489,7 +2533,8 @@ fn circular_dep_cross_package_description_contains_label() {
             },
         ));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("(cross-package)"), "desc: {desc}");
 }
@@ -2517,7 +2562,8 @@ fn unused_type_re_export_uses_type_re_export_label() {
             deprecated_reason: None,
         }));
     let rules = RulesConfig::default();
-    let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
+    let output =
+        codeclimate_issues_to_value(&fallow_api::build_codeclimate(&results, &root, &rules));
     assert_eq!(output[0]["check_name"], "fallow/unused-type");
     let desc = output[0]["description"].as_str().unwrap();
     assert!(desc.contains("Type re-export"), "desc: {desc}");

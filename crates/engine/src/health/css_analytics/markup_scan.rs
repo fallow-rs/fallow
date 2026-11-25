@@ -224,7 +224,7 @@ pub(super) fn record_scoped_unused_classes(
     summary: &mut fallow_output::CssAnalyticsSummary,
     scoped_unused: &mut Vec<fallow_output::ScopedUnusedClasses>,
 ) {
-    let Some(found) = crate::css::scoped_unused_classes_at(source) else {
+    let Some(found) = fallow_extract::sfc_css::scoped_unused_classes_at(source) else {
         return;
     };
     let classes = found.classes;
@@ -296,9 +296,8 @@ pub(super) fn preprocessor_source_of(
 ) -> Option<std::borrow::Cow<'_, str>> {
     match kind {
         CssScanKind::Preprocessor => Some(std::borrow::Cow::Borrowed(source)),
-        CssScanKind::Sfc => {
-            crate::css::sfc_preprocessor_virtual_stylesheet(source).map(std::borrow::Cow::Owned)
-        }
+        CssScanKind::Sfc => fallow_extract::sfc_css::sfc_preprocessor_virtual_stylesheet(source)
+            .map(std::borrow::Cow::Owned),
         CssScanKind::Css | CssScanKind::CssInJs => None,
     }
 }
@@ -316,14 +315,15 @@ fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
     use std::borrow::Cow;
 
     let mut items = Vec::new();
-    if let Some(virtual_css) = crate::css::sfc_virtual_stylesheet(source) {
+    if let Some(virtual_css) = fallow_extract::sfc_css::sfc_virtual_stylesheet(source) {
         items.push(CssScanItem::new(
             Cow::Owned(virtual_css),
             GradePolicy::Structural,
             true,
         ));
     }
-    if let Some(preprocessor_source) = crate::css::sfc_preprocessor_virtual_stylesheet(source)
+    if let Some(preprocessor_source) =
+        fallow_extract::sfc_css::sfc_preprocessor_virtual_stylesheet(source)
         && let Some(item) = preprocessor_scan_item(&preprocessor_source)
     {
         items.push(item);
@@ -338,14 +338,14 @@ fn css_in_js_scan_items<'a>(source: &'a str, path: &std::path::Path) -> Vec<CssS
         return Vec::new();
     }
     let mut items = Vec::new();
-    if let Some(virtual_css) = crate::css::css_in_js_virtual_stylesheet(source) {
+    if let Some(virtual_css) = fallow_extract::css_in_js_virtual_stylesheet(source) {
         items.push(CssScanItem::new(
             Cow::Owned(virtual_css),
             GradePolicy::Structural,
             true,
         ));
     }
-    let sheets = crate::css::css_in_js_object_sheets(source, path);
+    let sheets = fallow_extract::css_in_js_object_sheets(source, path);
     if let Some(structural) = sheets.structural {
         items.push(CssScanItem::new(
             Cow::Owned(structural),

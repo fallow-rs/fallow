@@ -404,11 +404,11 @@ use store::{Change, OnInvalid, finish_record, load_all, load_global_default};
 #[cfg(test)]
 use store::{
     ImpactStoreLock, StoreReadError, legacy_store_path, lock_path_for, migration_marker_path,
-    store_path, write_store,
+    write_store,
 };
 pub use store::{
     StatuslineLoadError, StoreWriteError, load, load_statusline, reset, reset_all,
-    resolved_store_path, set_global_default, store_dir,
+    set_global_default, store_dir, store_path,
 };
 
 /// Resolve the store-GC window from [`STORE_MAX_AGE_ENV`]. `None` (no sweep)

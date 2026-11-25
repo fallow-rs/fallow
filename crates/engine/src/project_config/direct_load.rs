@@ -211,23 +211,13 @@ pub fn config_for_project_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())
+    config_for_project_analysis_with_env(root, config_path, options, &EnvSnapshot::capture())
 }
 
 /// [`config_for_project_analysis`] with the environment variables of `env`
 /// in place of the process environment.
 #[cfg(test)]
 pub fn config_for_project_analysis_with_env(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ProjectConfigOptions,
-    env: &EnvSnapshot,
-) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options, env)
-}
-
-#[cfg(test)]
-fn resolve_project_config_analysis(
     root: &Path,
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
