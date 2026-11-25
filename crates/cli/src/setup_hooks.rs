@@ -144,19 +144,19 @@ const FALLOW_GATE_POSIX_SUFFIX: &str = "/.claude/hooks/fallow-gate.sh";
 const FALLOW_GATE_WINDOWS_SUFFIX: &str = "\\.claude\\hooks\\fallow-gate.sh";
 const CLAUDE_HOOK_MATCHER: &str = "Bash";
 
-/// Codex runs hook commands from the session cwd and sets no project-dir
-/// variable. The project handler finds the install root at run time: the git
-/// top level of the cwd, from `git rev-parse --show-cdup` (git does not use a
-/// bare repository that it finds on its own), plus the path of the install
-/// root below it, which the install writes. Outside a git work tree the top level is the cwd. The handler runs
-/// only the gate script of that root, from that root, because the gate script
-/// and `fallow audit` resolve paths from the cwd. It exits 0 without a gate
-/// when the top level is inside another git work tree (a nested repository or
-/// worktree; a work tree at `$HOME` does not count), when no script is there,
-/// or when the walk from the cwd finds a `.git` entry before the install root.
+/// Codex runs hook commands from the session cwd and sets no project-dir variable. The
+/// project handler finds the install root at run time: the git top level of the cwd, from
+/// `git rev-parse --show-cdup` (git does not use a bare repository that it finds on its
+/// own), plus the path of the install root below it, which the install writes. Outside a
+/// git work tree the top level is the cwd. The handler runs only the gate script of that
+/// root, from that root, because the gate script and `fallow audit` resolve paths from the
+/// cwd. It exits 0 without a gate when the top level is inside the work tree of another
+/// repository (not of `$HOME`; a linked worktree with the same common git directory keeps
+/// its gate), when no script is there, or when the walk from the cwd finds a `.git` entry
+/// before the install root.
 fn codex_project_handler_command(install_rel: &Path) -> String {
     format!(
-        "c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" || c=; t=\"$(cd -P \"./$c\" 2>/dev/null && pwd -P)\" || exit 0; o=\"$(cd -P \"$t/..\" 2>/dev/null && c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" && cd -P \"./$c\" 2>/dev/null && pwd -P)\" && [ \"$o\" != \"$(cd -P \"$HOME\" 2>/dev/null && pwd -P)\" ] && exit 0; r=\"$(cd -P \"$t\"/{} 2>/dev/null && pwd -P)\" || exit 0; [ -f \"$r/.codex/hooks/fallow-gate.sh\" ] || exit 0; d=\"$(pwd -P)\"; until [ \"$d\" = \"$r\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; [ \"$d\" = \"$r\" ] || exit 0; cd -P \"$r\" && exec \"$r/.codex/hooks/fallow-gate.sh\"",
+        "c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" || c=; t=\"$(cd -P \"./$c\" 2>/dev/null && pwd -P)\" || exit 0; o=\"$(cd -P \"$t/..\" 2>/dev/null && c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" && cd -P \"./$c\" 2>/dev/null && pwd -P)\" && [ \"$o\" != \"$(cd -P \"$HOME\" 2>/dev/null && pwd -P)\" ] && {{ g=\"$(cd -P \"$t\" 2>/dev/null && x=\"$(git -c safe.bareRepository=explicit rev-parse --git-common-dir 2>/dev/null)\" && cd -P \"$x\" 2>/dev/null && pwd -P)\"; [ -z \"$g\" ] || [ \"$g\" != \"$(cd -P \"$o\" 2>/dev/null && x=\"$(git -c safe.bareRepository=explicit rev-parse --git-common-dir 2>/dev/null)\" && cd -P \"$x\" 2>/dev/null && pwd -P)\" ]; }} && exit 0; r=\"$(cd -P \"$t\"/{} 2>/dev/null && pwd -P)\" || exit 0; [ -f \"$r/.codex/hooks/fallow-gate.sh\" ] || exit 0; d=\"$(pwd -P)\"; until [ \"$d\" = \"$r\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; [ \"$d\" = \"$r\" ] || exit 0; cd -P \"$r\" && exec \"$r/.codex/hooks/fallow-gate.sh\"",
         posix_single_quote(&install_rel.to_string_lossy().replace('\\', "/"))
     )
 }

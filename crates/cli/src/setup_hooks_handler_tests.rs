@@ -221,6 +221,43 @@ fn project_handlers_stop_at_a_nested_worktree() {
     );
 }
 
+/// A linked worktree of the same repository inside the main checkout is its
+/// own checkout, not a nested repository. The Codex handler runs the gate
+/// script of that worktree.
+#[test]
+fn codex_handler_runs_the_gate_of_a_linked_worktree_inside_the_main_checkout() {
+    let tmp = tempdir().unwrap();
+    let repo = tmp.path().canonicalize().unwrap();
+    git(&repo, &["init", "-q"]);
+    commit_all(&repo);
+    let worktree = repo.join(".worktrees/feat");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            worktree.to_str().unwrap(),
+        ],
+    );
+
+    let out = run_handler_stub(
+        &codex("."),
+        ".codex",
+        &worktree,
+        &worktree.join("src"),
+        &worktree,
+    );
+
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        worktree.to_string_lossy(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// A nested repository, submodule or vendored package below the project
 /// can commit its own `.claude/hooks/fallow-gate.sh`. The handler of the
 /// project must run only the script of the install root.
