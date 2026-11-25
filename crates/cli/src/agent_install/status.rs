@@ -119,14 +119,15 @@ fn native_gate_probe(
     if !text.contains("# Native JSON protocol: fallow-gate-json-v1") {
         return None;
     }
-    // A user-scope gate records the path of its fallow, which the template
-    // comparison ignores.
-    let trusted = if crate::setup_hooks::is_user_scope_gate_script(&text) {
+    // A user-scope gate records the path of its fallow. The comparison
+    // accepts any recorded path in the exact line that the install writes.
+    let user = crate::setup_hooks::is_user_scope_gate_script(&text);
+    let trusted = if user {
         crate::setup_hooks::render_gate_script(true, None)
     } else {
         crate::setup_hooks::rendered_gate_script()
     };
-    if !gate_matches_template(&text, &trusted) {
+    if !gate_matches_template(&text, &trusted, user) {
         return Some((status.path.clone(), NativeGateState::Modified));
     }
     Some((status.path.clone(), native_reader_inventory(root)))
@@ -139,18 +140,35 @@ const INSTALLER_VERSION_LINE: &str = "# Installer version: ";
 /// installer version comment changes with each fallow release, so it does not
 /// make a gate modified. Every other byte must match. CRLF line endings count
 /// as an edit, because bash cannot run a script with them.
-/// The line of a user-scope gate that records the path of its fallow.
+/// The start of the line of a user-scope gate that records its fallow.
 const GATE_BIN_LINE: &str = "GATE_FALLOW_BIN=";
 
-fn gate_matches_template(installed: &str, trusted: &str) -> bool {
-    normalized_gate_lines(installed).eq(normalized_gate_lines(trusted))
+fn gate_matches_template(installed: &str, trusted: &str, user: bool) -> bool {
+    normalized_gate_lines(installed, user).eq(normalized_gate_lines(trusted, user))
 }
 
-fn normalized_gate_lines(text: &str) -> impl Iterator<Item = &str> {
-    text.split('\n').map(|line| {
+/// True for the exact line that the install writes for a user-scope gate:
+/// `GATE_FALLOW_BIN='<path>'`, with an empty or absolute path (`/...` or
+/// `X:/...`) and no quote or line end in it.
+fn is_recorded_bin_line(line: &str) -> bool {
+    let Some(value) = line
+        .strip_prefix("GATE_FALLOW_BIN='")
+        .and_then(|rest| rest.strip_suffix('\''))
+    else {
+        return false;
+    };
+    let bytes = value.as_bytes();
+    let absolute = value.is_empty()
+        || value.starts_with('/')
+        || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && &bytes[1..3] == b":/");
+    absolute && !value.contains(['\'', '\n', '\r'])
+}
+
+fn normalized_gate_lines(text: &str, user: bool) -> impl Iterator<Item = &str> {
+    text.split('\n').map(move |line| {
         if line.starts_with(INSTALLER_VERSION_LINE) {
             INSTALLER_VERSION_LINE
-        } else if line.starts_with(GATE_BIN_LINE) {
+        } else if user && is_recorded_bin_line(line) {
             GATE_BIN_LINE
         } else {
             line
@@ -1090,6 +1108,26 @@ mod tests {
         assert_ne!(probe_installed_gate(&user), NativeGateState::Modified);
         let edited = user.replacen("exit 2", "exit 0", 1);
         assert_eq!(probe_installed_gate(&edited), NativeGateState::Modified);
+        for line in [
+            "GATE_FALLOW_BIN='/opt/tools/bin/fallow'; touch /tmp/x",
+            "GATE_FALLOW_BIN='relative/fallow'",
+            "GATE_FALLOW_BIN=\"/opt/fallow\"",
+        ] {
+            let extra = user.replacen("GATE_FALLOW_BIN='/opt/tools/bin/fallow'", line, 1);
+            assert_eq!(
+                probe_installed_gate(&extra),
+                NativeGateState::Modified,
+                "{line}"
+            );
+        }
+        let windows = user.replacen("/opt/tools/bin/fallow", "C:/tools/fallow.exe", 1);
+        assert_ne!(probe_installed_gate(&windows), NativeGateState::Modified);
+        let project = crate::setup_hooks::rendered_gate_script().replacen(
+            "GATE_FALLOW_BIN=''",
+            "GATE_FALLOW_BIN='/opt/fallow'",
+            1,
+        );
+        assert_eq!(probe_installed_gate(&project), NativeGateState::Modified);
     }
 
     #[test]
