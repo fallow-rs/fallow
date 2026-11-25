@@ -1809,6 +1809,7 @@ use module_request::{has_glob_syntax, has_source_extension, module_request, name
 pub mod manifest_entries;
 mod mise;
 mod osls;
+mod path_rule_index;
 mod project_glob;
 mod railway;
 pub mod registry;
@@ -1823,6 +1824,7 @@ mod used_export_rule;
 pub use config_dependencies::RequiredDependency;
 use config_dependencies::add_import_referenced_dependencies;
 pub(crate) use module_federation::runtime_remotes;
+pub(crate) use path_rule_index::PathRuleIndex;
 pub use registry::{
     AggregatedPluginResult, CheckedAliasPrefix, PluginRegistry, PluginToolingDependencies,
     PluginToolingEvidence,

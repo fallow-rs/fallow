@@ -49,8 +49,9 @@ mod types;
 use types::drop_types_paired_with_schemas;
 pub use types::suppress_signature_backing_types;
 
-/// Pre-compiled glob matchers for plugin/framework used_exports rules.
-pub(super) type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
+/// Pre-compiled glob matchers for plugin/framework used_exports rules, with
+/// the export names of each rule.
+pub(super) type PluginMatchers<'a> = crate::plugins::PathRuleIndex<Vec<&'a str>>;
 
 const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
@@ -85,12 +86,9 @@ pub(super) fn compile_plugin_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
-        return Vec::new();
+        return PluginMatchers::default();
     };
-    pr.used_exports
-        .iter()
-        .filter_map(compile_used_export_rule)
-        .collect()
+    compile_used_export_rules(pr.used_exports.iter())
 }
 
 /// Compile TanStack route contract export rules for duplicate-export filtering.
@@ -98,13 +96,13 @@ fn compile_tanstack_duplicate_export_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
-        return Vec::new();
+        return PluginMatchers::default();
     };
-    pr.used_exports
-        .iter()
-        .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME)
-        .filter_map(compile_used_export_rule)
-        .collect()
+    compile_used_export_rules(
+        pr.used_exports
+            .iter()
+            .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME),
+    )
 }
 
 fn is_tanstack_router_active(
@@ -124,27 +122,18 @@ fn is_react_native_active(plugin_result: Option<&crate::plugins::AggregatedPlugi
     plugin_result.is_some_and(|pr| has_react_native_plugin(&pr.active_plugins))
 }
 
-pub(super) struct CompiledUsedExportRule<'a> {
-    path: crate::plugins::CompiledPathRule,
-    exports: Vec<&'a str>,
-}
-
-impl CompiledUsedExportRule<'_> {
-    pub(super) fn matches(&self, path: &str) -> bool {
-        self.path.matches(path)
-    }
-}
-
-fn compile_used_export_rule(
-    rule: &crate::plugins::PluginUsedExportRule,
-) -> Option<CompiledUsedExportRule<'_>> {
-    Some(CompiledUsedExportRule {
-        path: crate::plugins::CompiledPathRule::for_used_export_rule(
-            &rule.rule.path,
-            "used_exports pattern",
-        )?,
-        exports: rule.rule.exports.iter().map(String::as_str).collect(),
-    })
+fn compile_used_export_rules<'a>(
+    rules: impl Iterator<Item = &'a crate::plugins::PluginUsedExportRule>,
+) -> PluginMatchers<'a> {
+    PluginMatchers::build(
+        rules.map(|rule| {
+            (
+                &rule.rule.path,
+                rule.rule.exports.iter().map(String::as_str).collect(),
+            )
+        }),
+        "used_exports pattern",
+    )
 }
 
 /// Whether the only export of `module` is the default that an `export = x`
@@ -202,9 +191,9 @@ fn matchers_for_module<'a>(
         .map(|rule| rule.exports.as_slice())
         .collect();
     let mp: Vec<&[&str]> = plugin_matchers
-        .iter()
-        .filter(|rule| rule.matches(file_str.as_ref()))
-        .map(|rule| rule.exports.as_slice())
+        .matching(file_str.as_ref())
+        .into_iter()
+        .map(Vec::as_slice)
         .collect();
     (mi, mp)
 }

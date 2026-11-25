@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{AggregatedPluginResult, CompiledPathRule};
+use super::{AggregatedPluginResult, PathRuleIndex};
 
 /// The plugin used-export rules of one plugin run, compiled for path lookups.
 ///
@@ -11,7 +11,7 @@ use super::{AggregatedPluginResult, CompiledPathRule};
 /// reads the same rules with the same path matcher.
 #[derive(Debug, Clone)]
 pub struct UsedExportNames {
-    rules: Vec<(CompiledPathRule, Vec<String>)>,
+    rules: PathRuleIndex<Vec<String>>,
 }
 
 impl UsedExportNames {
@@ -21,9 +21,9 @@ impl UsedExportNames {
     #[must_use]
     pub fn names_for(&self, rel_path: &str) -> BTreeSet<&str> {
         self.rules
-            .iter()
-            .filter(|(path, _)| path.matches(rel_path))
-            .flat_map(|(_, exports)| exports.iter().map(String::as_str))
+            .matching(rel_path)
+            .into_iter()
+            .flat_map(|exports| exports.iter().map(String::as_str))
             .collect()
     }
 }
@@ -34,17 +34,12 @@ impl AggregatedPluginResult {
     #[must_use]
     pub fn used_export_names(&self) -> UsedExportNames {
         UsedExportNames {
-            rules: self
-                .used_exports
-                .iter()
-                .filter_map(|rule| {
-                    let path = CompiledPathRule::for_used_export_rule(
-                        &rule.rule.path,
-                        "used_exports pattern",
-                    )?;
-                    Some((path, rule.rule.exports.clone()))
-                })
-                .collect(),
+            rules: PathRuleIndex::build(
+                self.used_exports
+                    .iter()
+                    .map(|rule| (&rule.rule.path, rule.rule.exports.clone())),
+                "used_exports pattern",
+            ),
         }
     }
 }
