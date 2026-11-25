@@ -86,6 +86,8 @@ for contributors and maintainers of the open-source codebase.
   research.
 - [Security agent verification](security-agent-verification.md): verification
   of syntactic security candidates.
+- [Rule precision](rule-precision.md): the measured precision of each rule,
+  its pinned corpus, and the sampling and review method.
 - [Security corpus](security-corpus.md): precision and advisory recall of
   `fallow security` on public projects.
 - [Fallow compliance](fallow-compliance.md): compliance workflow.

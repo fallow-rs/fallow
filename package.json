@@ -35,6 +35,7 @@
     "test:semantic-clone-conformance": "node --test scripts/semantic-clone-conformance.test.mjs",
     "type-aware:corpus": "node scripts/type-aware-corpus.mjs",
     "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",
+    "rule-precision": "node scripts/rule-precision.mjs",
     "security:corpus": "node scripts/security-corpus.mjs",
     "test:security-corpus": "node --test scripts/security-corpus.test.mjs",
     "smoke:styling-corpus": "node scripts/styling-corpus-smoke.mjs",
