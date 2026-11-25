@@ -396,15 +396,21 @@ impl<'a> FileDigests<'a> {
     }
 
     /// True when the file under the root has the digest of the report. A file
-    /// that is missing, or that the report has no digest for, is not fresh.
+    /// that is missing, that the report has no digest for, or that the bounded
+    /// read refuses (outside the root, not a regular file, too large) is not
+    /// fresh.
     fn is_fresh(&mut self, file: &'a str) -> bool {
         let (report, root) = (self.report, self.root);
         *self.fresh.entry(file).or_insert_with(|| {
             let Some(expected) = report.saved_file(file).map(|saved| &saved.source_sha256) else {
                 return false;
             };
-            std::fs::read(root.join(file))
-                .is_ok_and(|bytes| sha256_hex(&bytes) == expected.as_str())
+            fallow_types::read_guard::read_bytes_inside(
+                root,
+                Path::new(file),
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            )
+            .is_ok_and(|bytes| sha256_hex(&bytes) == expected.as_str())
         })
     }
 }
@@ -806,6 +812,31 @@ mod tests {
             .collect();
         assert_eq!(ids, ["m3"]);
         assert_eq!(evidence.view.stale_hidden, 4);
+    }
+
+    /// A survivor in a file that links out of the root is stale, also when
+    /// the target has the digest of the report.
+    #[test]
+    #[cfg(unix)]
+    fn a_survivor_in_a_file_that_links_out_of_the_root_is_stale() {
+        let dir = project();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("linked.ts"), SOURCE).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("linked.ts"),
+            dir.path().join("src/linked.ts"),
+        )
+        .unwrap();
+        let mut value = report(&[mutant("m1", "src/linked.ts", 1, 30, "survived")]);
+        value["files"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "path": "src/linked.ts", "source_sha256": sha(SOURCE) }));
+
+        let evidence = parse(&value, dir.path()).unwrap();
+
+        assert!(evidence.survivors.is_empty());
+        assert_eq!(evidence.view.stale_hidden, 1);
     }
 
     #[test]
