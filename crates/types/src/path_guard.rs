@@ -126,34 +126,55 @@ fn find_refusal(base: &Path, path: &Path, steps: ParentSteps) -> Option<Refused>
             _ => return refuse(path, Refusal::NotBelowBase),
         };
         current.push(name);
-        let candidate = resolved.join(name);
-        match candidate.symlink_metadata() {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                let Ok(target) = std::fs::canonicalize(&candidate) else {
-                    return refuse(&current, Refusal::LinkOutside);
-                };
-                if !target.starts_with(&canonical_base) {
-                    return refuse(&current, Refusal::LinkOutside);
-                }
-                if let Some(reason) = protected_kind(&canonical_base, &target) {
-                    return refuse(&current, reason);
-                }
-                resolved = target;
-            }
-            Ok(_) => resolved = candidate,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if steps == ParentSteps::Refuse {
-                    return None;
-                }
-                resolved = candidate;
-            }
-            Err(_) => return refuse(&current, Refusal::Unreadable),
+        match step_into(&canonical_base, &resolved, name, steps) {
+            Ok(Some(next)) => resolved = next,
+            Ok(None) => return None,
+            Err(reason) => return refuse(&current, reason),
         }
     }
-    match std::fs::metadata(&resolved) {
-        Ok(meta) if !meta.is_file() && !meta.is_dir() => refuse(path, Refusal::NotRegular),
-        _ => None,
+    is_special_file(&resolved).then(|| Refused {
+        entry: path.to_path_buf(),
+        reason: Refusal::NotRegular,
+    })
+}
+
+/// The resolved path after the entry `name` below the resolved `parent`.
+/// `None` ends the walk at a missing entry with [`ParentSteps::Refuse`].
+fn step_into(
+    canonical_base: &Path,
+    parent: &Path,
+    name: &std::ffi::OsStr,
+    steps: ParentSteps,
+) -> Result<Option<PathBuf>, Refusal> {
+    let candidate = parent.join(name);
+    match candidate.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            link_target_in(canonical_base, &candidate).map(Some)
+        }
+        Ok(_) => Ok(Some(candidate)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok((steps == ParentSteps::Resolve).then_some(candidate))
+        }
+        Err(_) => Err(Refusal::Unreadable),
     }
+}
+
+/// The canonical target of the symlink `link`, when it is inside the
+/// canonical base and not protected.
+fn link_target_in(canonical_base: &Path, link: &Path) -> Result<PathBuf, Refusal> {
+    let target = std::fs::canonicalize(link).map_err(|_| Refusal::LinkOutside)?;
+    if !target.starts_with(canonical_base) {
+        return Err(Refusal::LinkOutside);
+    }
+    match protected_kind(canonical_base, &target) {
+        Some(reason) => Err(reason),
+        None => Ok(target),
+    }
+}
+
+/// Whether `path` exists and is not a regular file or a directory.
+fn is_special_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| !meta.is_file() && !meta.is_dir())
 }
 
 /// Why `base` is refused when it is a symlink whose target is a protected
