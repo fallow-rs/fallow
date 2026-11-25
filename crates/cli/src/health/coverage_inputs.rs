@@ -9,8 +9,11 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use fallow_cov_protocol::CoverageSource;
+use fallow_engine::health::coverage_v8::source_map_cache::file_url_to_path;
 use fallow_engine::saved_file::{json_error_position, lies_below};
-use fallow_types::read_guard::{is_inside_root, read_to_string_bounded};
+use fallow_types::read_guard::{is_inside_root, read_to_string_bounded, read_to_string_inside};
+use fallow_v8_coverage::ScriptCoverage;
 
 /// The size limit for one coverage file. V8 dumps of large test suites reach
 /// hundreds of MiB, so this limit is above the default limit for project
@@ -33,19 +36,41 @@ pub(super) fn is_outside_link(root: &Path, path: &Path) -> bool {
     path.symlink_metadata().is_ok() && lies_below(root, path) && !is_inside_root(root, path)
 }
 
-/// The `.json` regular files of the coverage directory `dir`, sorted. An
-/// entry below `root` that resolves outside it is skipped.
-pub(super) fn coverage_json_files(root: &Path, dir: &Path) -> Result<Vec<PathBuf>, String> {
+/// The `.json` regular files of the coverage directory `dir`, sorted, and
+/// whether an entry was skipped because it is below `root` and resolves
+/// outside it.
+pub(super) fn coverage_json_files(root: &Path, dir: &Path) -> Result<(Vec<PathBuf>, bool), String> {
     let entries = std::fs::read_dir(dir)
         .map_err(|err| format!("failed to read coverage directory {}: {err}", dir.display()))?;
-    let mut files: Vec<PathBuf> = entries
+    let (refused, kept): (Vec<PathBuf>, Vec<PathBuf>) = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|entry| entry.extension() == Some(OsStr::new("json")))
-        .filter(|entry| !is_outside_link(root, entry) && entry.is_file())
+        .partition(|entry| is_outside_link(root, entry));
+    let mut files: Vec<PathBuf> = kept
+        .into_iter()
+        .filter(|entry| entry.extension() == Some(OsStr::new("json")) && entry.is_file())
         .collect();
     files.sort();
-    Ok(files)
+    Ok((files, !refused.is_empty()))
+}
+
+/// The sources of a coverage directory without `.json` files. The companion
+/// reads such a directory itself, so a directory with a refused entry gives
+/// no source.
+pub(super) fn dir_fallback(dir: &Path, refused: bool) -> Vec<CoverageSource> {
+    if refused {
+        return Vec::new();
+    }
+    vec![CoverageSource::V8Dir {
+        path: dir.to_string_lossy().into_owned(),
+    }]
+}
+
+/// The text of the generated script of a V8 entry, when its `file://` URL
+/// names a regular file inside `root`.
+pub(super) fn generated_source(root: &Path, script: &ScriptCoverage) -> Option<String> {
+    let path = file_url_to_path(&script.url)?;
+    read_to_string_inside(root, &path, MAX_COVERAGE_FILE_BYTES).ok()
 }
 
 /// Read one coverage file that [`check_input`] or [`coverage_json_files`]
@@ -89,8 +114,30 @@ mod tests {
         );
         assert_eq!(
             coverage_json_files(&root, &root.join("own")).expect("list"),
-            vec![root.join("own/b.json")]
+            (vec![root.join("own/b.json")], true)
         );
+    }
+
+    /// A coverage directory whose only entries link out of the project gives
+    /// no source, so the companion never reads that directory.
+    #[test]
+    #[cfg(unix)]
+    fn a_directory_with_only_refused_entries_gives_no_source() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(root.join("coverage")).expect("mkdir");
+        std::fs::create_dir_all(root.join("plain")).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("dump.json"), r#"{"result":[]}"#).expect("write");
+        std::os::unix::fs::symlink(outside.join("dump.json"), root.join("coverage/dump.json"))
+            .expect("link");
+
+        let (files, refused) = coverage_json_files(&root, &root.join("coverage")).expect("list");
+        assert!(files.is_empty());
+        assert!(dir_fallback(&root.join("coverage"), refused).is_empty());
+        let (_, refused) = coverage_json_files(&root, &root.join("plain")).expect("list");
+        assert_eq!(dir_fallback(&root.join("plain"), refused).len(), 1);
     }
 
     #[test]

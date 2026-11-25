@@ -817,6 +817,7 @@ fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverage
     if !path.is_dir() {
         let mut sources = Vec::new();
         prepare_single_coverage_source(
+            root,
             path,
             &mut sources,
             &mut temp_dir,
@@ -830,13 +831,11 @@ fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverage
         });
     }
 
-    let json_files = coverage_inputs::coverage_json_files(root, path)?;
+    let (json_files, refused) = coverage_inputs::coverage_json_files(root, path)?;
 
     if json_files.is_empty() {
         return Ok(PreparedCoverageSources {
-            sources: vec![CoverageSource::V8Dir {
-                path: path.to_string_lossy().into_owned(),
-            }],
+            sources: coverage_inputs::dir_fallback(path, refused),
             inner_iterations,
             _temp_dir: None,
         });
@@ -845,6 +844,7 @@ fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverage
     let mut sources = Vec::with_capacity(json_files.len());
     for (index, file) in json_files.iter().enumerate() {
         prepare_single_coverage_source(
+            root,
             file,
             &mut sources,
             &mut temp_dir,
@@ -861,6 +861,7 @@ fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverage
 }
 
 fn prepare_single_coverage_source(
+    root: &Path,
     path: &Path,
     sources: &mut Vec<CoverageSource>,
     temp_dir: &mut Option<TempDir>,
@@ -875,7 +876,7 @@ fn prepare_single_coverage_source(
     }
 
     let Some((remapped_path, residual_path)) =
-        preprocess_v8_coverage_file(path, temp_dir, inner_iterations, index)?
+        preprocess_v8_coverage_file(root, path, temp_dir, inner_iterations, index)?
     else {
         sources.push(CoverageSource::V8 {
             path: path.to_string_lossy().into_owned(),
@@ -896,6 +897,7 @@ fn prepare_single_coverage_source(
 }
 
 fn preprocess_v8_coverage_file(
+    root: &Path,
     path: &Path,
     temp_dir: &mut Option<TempDir>,
     inner_iterations: &mut InnerIterationIndex,
@@ -911,7 +913,7 @@ fn preprocess_v8_coverage_file(
         .unwrap_or_default();
 
     let (remapped_files, residual_scripts) =
-        remap_dump_scripts(dump.result, &cache, inner_iterations);
+        remap_dump_scripts(root, dump.result, &cache, inner_iterations);
     record_raw_scripts(inner_iterations, &residual_scripts);
 
     if remapped_files.is_empty() {
@@ -930,6 +932,7 @@ fn preprocess_v8_coverage_file(
 /// Split V8 scripts into source-map-remapped Istanbul functions and the
 /// residual scripts that had no usable source map.
 fn remap_dump_scripts(
+    root: &Path,
     scripts: Vec<fallow_v8_coverage::ScriptCoverage>,
     cache: &FxHashMap<String, SourceMapCacheEntry>,
     inner_iterations: &mut InnerIterationIndex,
@@ -946,7 +949,7 @@ fn remap_dump_scripts(
             residual_scripts.push(script);
             continue;
         };
-        let Some(mapped) = remap_script_with_source_map(&script, entry) else {
+        let Some(mapped) = remap_script_with_source_map(root, &script, entry) else {
             residual_scripts.push(script);
             continue;
         };
@@ -1035,11 +1038,12 @@ fn ensure_temp_dir(temp_dir: &mut Option<TempDir>) -> Result<&Path, String> {
 }
 
 fn remap_script_with_source_map(
+    root: &Path,
     script: &fallow_v8_coverage::ScriptCoverage,
     entry: &SourceMapCacheEntry,
 ) -> Option<RemappedScript> {
     let sourcemap = SourceMap::from_json(&entry.data.to_string()).ok()?;
-    let generated_source = generated_source_for_script(script);
+    let generated_source = coverage_inputs::generated_source(root, script);
     let positions = match generated_source.as_deref() {
         Some(source) => GeneratedPositionLookup::SourceText {
             offsets: Utf16OffsetIndex::new(source),
@@ -1074,15 +1078,6 @@ fn remap_script_with_source_map(
         functions: remapped,
         residual_script,
     })
-}
-
-fn generated_source_for_script(script: &fallow_v8_coverage::ScriptCoverage) -> Option<String> {
-    if let Some(path) = file_url_to_path(&script.url)
-        && let Ok(source) = fs::read_to_string(path)
-    {
-        return Some(source);
-    }
-    None
 }
 
 /// Maps V8 UTF-16 source offsets to UTF-8 byte offsets for one script.
@@ -2620,18 +2615,20 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", source.display()));
         let source_url = file_url(&source);
         let script = script_coverage_with_url(&source_url);
+        let source_of = super::coverage_inputs::generated_source;
 
         assert_eq!(
-            super::generated_source_for_script(&script),
+            source_of(&root, &script),
             Some("function alpha() {}\n".to_owned())
         );
+        assert_eq!(source_of(&root.join("missing-root"), &script), None);
 
         let remote = script_coverage_with_url("https://cdn.example.com/bundle.js");
-        assert_eq!(super::generated_source_for_script(&remote), None);
+        assert_eq!(source_of(&root, &remote), None);
 
         let missing_url = file_url(&root.join("missing.js"));
         let missing = script_coverage_with_url(&missing_url);
-        assert_eq!(super::generated_source_for_script(&missing), None);
+        assert_eq!(source_of(&root, &missing), None);
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
@@ -3270,7 +3267,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
         assert_eq!(prepared.sources.len(), 1);
@@ -3351,7 +3348,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
         assert_eq!(prepared.sources.len(), 1);
@@ -3427,7 +3424,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
         assert_eq!(prepared.sources.len(), 2);
@@ -3514,7 +3511,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
         let canonical = dunce::canonicalize(&original)
             .unwrap_or_else(|err| panic!("failed to canonicalize {}: {err}", original.display()));
@@ -3573,7 +3570,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
         assert_eq!(prepared.sources.len(), 1);
@@ -3632,7 +3629,7 @@ mod tests {
         });
         let v8_file = root.join("coverage-v8.json");
         std::fs::write(&v8_file, v8_json.to_string()).expect("write dump");
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file).expect("preprocess coverage");
+        let prepared = prepare_coverage_sources(&root, &v8_file).expect("preprocess coverage");
         let Some(CoverageSource::Istanbul { path }) = prepared.sources.first() else {
             panic!("expected remapped istanbul coverage source");
         };
@@ -3703,7 +3700,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
         assert_eq!(prepared.sources.len(), 1);
@@ -3762,7 +3759,7 @@ mod tests {
         std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
 
-        let prepared = prepare_coverage_sources(&v8_file, &v8_file)
+        let prepared = prepare_coverage_sources(&root, &v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
         assert_eq!(prepared.sources.len(), 1);
@@ -4125,7 +4122,7 @@ mod tests {
         .unwrap_or_else(|err| panic!("failed to build source map entry: {err}"));
 
         super::UTF16_CHARS_WALKED.with(|walked| walked.set(0));
-        let remapped = super::remap_script_with_source_map(&script, &entry)
+        let remapped = super::remap_script_with_source_map(Path::new("/"), &script, &entry)
             .map_or(0, |mapped| mapped.functions.len());
         let walked = super::UTF16_CHARS_WALKED.with(std::cell::Cell::get);
         (remapped, walked, generated.chars().count())
