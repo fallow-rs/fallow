@@ -11,7 +11,7 @@
 //! runs the `fallow-mcp` of the project that the harness opens. It uses the
 //! absolute path of the `fallow-mcp` on `PATH`, as found, or of the running
 //! binary when that binary serves MCP. A launcher of the current project
-//! never counts, see [`crate::user_launcher`].
+//! never counts, see [`crate::setup_hooks::user_launcher`].
 //!
 //! JSON cannot carry a marker comment, so ownership of the `fallow` entry is
 //! recognized by shape: an entry whose command and args match one of the
