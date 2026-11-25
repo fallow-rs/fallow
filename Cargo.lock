@@ -1240,6 +1240,7 @@ dependencies = [
  "fallow-config",
  "fallow-extract",
  "fallow-graph",
+ "fallow-process",
  "fallow-security",
  "fallow-types",
  "fixedbitset",

@@ -333,10 +333,14 @@ fn entry_path_exists(root: &Path, entry: &str) -> bool {
             return false;
         }
         if pattern.contains(['*', '?', '[']) {
-            fallow_config::glob_validation::expand_disk_glob(root, pattern)
-                .is_some_and(|mut paths| paths.next().is_some())
+            // A match through a link that leaves the root does not count.
+            fallow_config::glob_validation::expand_disk_glob(root, pattern).is_some_and(|paths| {
+                paths
+                    .filter_map(Result::ok)
+                    .any(|path| fallow_types::read_guard::is_inside_root(root, &path))
+            })
         } else {
-            root.join(pattern).exists()
+            fallow_types::read_guard::is_inside_root(root, &root.join(pattern))
         }
     })
 }
@@ -569,6 +573,23 @@ mod tests {
     fn test_run(root: &Path) -> fallow_engine::resolved_run::ResolvedRun {
         crate::cli_production::benchmark_run(root, fallow_config::CommandKind::PluginCheck, 1)
             .expect("fixture run")
+    }
+
+    /// A seeded entry through a directory link out of the root does not
+    /// exist for the check.
+    #[test]
+    #[cfg(unix)]
+    fn entry_path_exists_skips_a_link_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("index.ts"), "").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("linked")).expect("link");
+
+        assert!(!entry_path_exists(&root, "linked/*.ts"));
+        assert!(!entry_path_exists(&root, "linked/index.ts"));
     }
 
     #[test]

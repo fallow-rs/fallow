@@ -26,7 +26,7 @@ const T3_PROJECT_FILE: &str = "t3.json";
 pub(super) fn read_command_files(root: &Path) -> Vec<(String, Vec<String>)> {
     let mut files = Vec::new();
     for path in devcontainer_files(root) {
-        let Some(config) = read_jsonc(&path) else {
+        let Some(config) = read_jsonc(root, &path) else {
             continue;
         };
         let mut commands = Vec::new();
@@ -38,7 +38,7 @@ pub(super) fn read_command_files(root: &Path) -> Vec<(String, Vec<String>)> {
         push_file_commands(root, &path, commands, &mut files);
     }
     let project_file = root.join(T3_PROJECT_FILE);
-    if let Some(project) = read_jsonc(&project_file) {
+    if let Some(project) = read_jsonc(root, &project_file) {
         let mut commands = Vec::new();
         push_t3_script_commands(&project, &mut commands);
         push_file_commands(root, &project_file, commands, &mut files);
@@ -68,12 +68,12 @@ fn devcontainer_files(root: &Path) -> Vec<PathBuf> {
         root.join(".devcontainer.json"),
         dir.join("devcontainer.json"),
     ];
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+    if let Some(entries) = crate::discover::project_read::read_project_dir(root, &dir) {
         let mut nested: Vec<PathBuf> = entries
             .flatten()
             .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
             .map(|entry| entry.path().join("devcontainer.json"))
-            .filter(|path| path.is_file())
+            .filter(|path| crate::discover::project_read::is_project_file(root, path))
             .collect();
         nested.sort();
         files.extend(nested);
@@ -81,8 +81,8 @@ fn devcontainer_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn read_jsonc(path: &Path) -> Option<Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+fn read_jsonc(root: &Path, path: &Path) -> Option<Value> {
+    let content = crate::discover::project_read::read_project_file(root, path)?;
     fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
 }
 
@@ -150,6 +150,35 @@ mod tests {
         let mut commands = Vec::new();
         push_lifecycle_commands(value, &mut commands);
         commands
+    }
+
+    /// A development container file or a `t3.json` that links out of the
+    /// project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn command_files_that_link_out_of_the_project_are_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(outside.join("nested")).expect("mkdir");
+        let config = r#"{"postCreateCommand": "node outside.mjs", "scripts": [{"command": "node outside.mjs"}]}"#;
+        std::fs::write(outside.join("devcontainer.json"), config).expect("write");
+        std::fs::write(outside.join("nested/devcontainer.json"), config).expect("write");
+        std::os::unix::fs::symlink(
+            outside.join("devcontainer.json"),
+            root.join(".devcontainer.json"),
+        )
+        .expect("link");
+        std::os::unix::fs::symlink(outside.join("devcontainer.json"), root.join("t3.json"))
+            .expect("link");
+        std::os::unix::fs::symlink(&outside, root.join(".devcontainer")).expect("link");
+
+        assert!(
+            read_command_files(&root)
+                .iter()
+                .all(|(_, commands)| commands.is_empty())
+        );
     }
 
     #[test]

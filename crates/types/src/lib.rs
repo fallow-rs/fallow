@@ -107,6 +107,8 @@ pub mod pipeline_spans;
 /// Bounded reads of project files: no link out of the root, regular files
 /// only, and a size limit.
 pub mod read_guard;
+/// The directory that the reads of a project may reach.
+pub mod read_scope;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
 /// The `Next:` step of a `client-server-leak` candidate, shared by the CLI

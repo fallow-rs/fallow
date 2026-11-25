@@ -282,7 +282,7 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
     let found_knip_file = !sources.is_empty();
     let mut found_jscpd_file = false;
     let jscpd_path = root.join(".jscpd.json");
-    if jscpd_path.exists() {
+    if jscpd_path.exists() && detected_file_readable(root, &jscpd_path, "jscpd", &mut warnings) {
         let jscpd_value = load_json_or_jsonc(Some(root), &jscpd_path)?;
         migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
         sources.push(".jscpd.json".to_string());
@@ -336,7 +336,7 @@ fn migrate_first_knip_file(
 
     for name in &knip_files {
         let path = root.join(name);
-        if path.exists() {
+        if path.exists() && detected_file_readable(root, &path, "knip", warnings) {
             if name.ends_with(".ts") {
                 warnings.push(MigrationWarning {
                     source: "knip",
@@ -376,7 +376,7 @@ fn migrate_first_stylelint_file(
 
     for name in &stylelint_files {
         let path = root.join(name);
-        if path.exists() {
+        if path.exists() && detected_file_readable(root, &path, "stylelint", warnings) {
             let stylelint_value = load_stylelint_config(Some(root), &path)?;
             migrate_stylelint(&stylelint_value, config, warnings);
             sources.push(name.to_string());
@@ -409,7 +409,7 @@ fn migrate_package_json_keys(
     sources: &mut Vec<String>,
 ) -> Result<(), String> {
     let pkg_path = root.join("package.json");
-    if !pkg_path.exists() {
+    if !pkg_path.exists() || !detected_file_readable(root, &pkg_path, "package.json", warnings) {
         return Ok(());
     }
     let pkg_content = read_config_text(Some(root), &pkg_path)?;
@@ -554,13 +554,49 @@ fn migrate_unnamed_config_file(
     Ok(())
 }
 
+/// The read scope base of the project at `root`.
+fn read_scope_base(root: &Path) -> std::path::PathBuf {
+    let home = fallow_process::HostPaths::from_env().home;
+    fallow_types::read_scope::read_scope_base(root, home.as_deref())
+}
+
+/// Whether migrate can read the detected config file `path` under `root`. A
+/// file that resolves outside the read scope of the project (see
+/// [`fallow_types::read_scope`]), or that is not a regular file, is skipped
+/// with a warning, and the run goes on with the other files.
+fn detected_file_readable(
+    root: &Path,
+    path: &Path,
+    source: &'static str,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    let base = read_scope_base(root);
+    if path.is_file() && fallow_types::read_guard::is_inside_root(&base, path) {
+        return true;
+    }
+    let name = path.strip_prefix(root).unwrap_or(path);
+    warnings.push(MigrationWarning {
+        source,
+        field: name.display().to_string(),
+        message: format!(
+            "skipped {}: it is not a regular file inside the project",
+            name.display()
+        ),
+        suggestion: None,
+    });
+    false
+}
+
 /// Read a config file. A file that migrate detects under `root` must resolve
-/// inside it. A file that the user names has no root. Each file must be a
+/// inside the read scope of the project. A file that the user names has no root. Each file must be a
 /// regular file of a bounded size.
 fn read_config_text(root: Option<&Path>, path: &Path) -> Result<String, String> {
     let max = fallow_types::read_guard::DEFAULT_MAX_READ_BYTES;
     match root {
-        Some(root) => fallow_types::read_guard::read_to_string_inside(root, path, max),
+        Some(root) => {
+            let base = read_scope_base(root);
+            fallow_types::read_guard::read_to_string_inside(&base, path, max)
+        }
         None => fallow_types::read_guard::read_to_string_bounded(path, max),
     }
     .map_err(|e| format!("failed to read {}: {e}", path.display()))

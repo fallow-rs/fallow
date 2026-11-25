@@ -75,8 +75,35 @@ fn migrate_does_not_read_a_detected_config_that_links_out_of_the_project() {
         let result = migrate_auto_detect(root.path());
 
         let text = format!("{result:?}");
-        assert!(result.is_err(), "{name}: {text}");
+        assert!(
+            result.as_ref().is_ok_and(|done| !done.warnings.is_empty()),
+            "{name}: a refused file is skipped with a warning: {text}"
+        );
         assert!(!text.contains("outside-entry"), "{name}: {text}");
         assert!(!text.contains("77"), "{name}: {text}");
     }
+}
+
+/// A detected config that links to a shared file of the Git work tree above
+/// the project root is read.
+#[test]
+fn migrate_reads_a_detected_config_that_links_inside_the_work_tree() {
+    let top = tempfile::tempdir().unwrap();
+    std::fs::create_dir(top.path().join(".git")).unwrap();
+    let root = top.path().join("packages/app");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        top.path().join("knip.base.json"),
+        r#"{"entry": ["src/shared-entry.ts"]}"#,
+    )
+    .unwrap();
+    symlink("../../knip.base.json", root.join("knip.json")).unwrap();
+
+    let result = migrate_auto_detect(&root).unwrap();
+
+    assert!(
+        result.config.to_string().contains("shared-entry"),
+        "{}",
+        result.config
+    );
 }
