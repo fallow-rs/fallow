@@ -16,6 +16,39 @@ pub enum ProjectEntry {
     Inside,
 }
 
+/// The directory that project files of the analysis root `root` may
+/// resolve in: the git top level of the root, found as the nearest
+/// directory at or above the root with a `.git` entry. A top level at the
+/// home directory belongs to a dotfiles checkout, not to the project, so a
+/// root below the home directory then uses the root itself. Without a git
+/// checkout the base is the root. A root that does not resolve is its own
+/// base.
+#[must_use]
+pub fn project_scope_base(root: &Path) -> PathBuf {
+    let Ok(root) = dunce::canonicalize(root) else {
+        return root.to_path_buf();
+    };
+    let Some(top) = root
+        .ancestors()
+        .find(|dir| dir.join(".git").symlink_metadata().is_ok())
+    else {
+        return root;
+    };
+    if top != root && is_home_dir(top) {
+        return root;
+    }
+    top.to_path_buf()
+}
+
+fn is_home_dir(dir: &Path) -> bool {
+    ["HOME", "USERPROFILE"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .filter(|home| !home.is_empty())
+        .filter_map(|home| dunce::canonicalize(home).ok())
+        .any(|home| home == dir)
+}
+
 /// The state of `path` below the canonical project root `canonical_root`.
 /// A relative `path` is taken relative to the root.
 pub fn project_entry(canonical_root: &Path, path: &Path) -> ProjectEntry {
@@ -188,5 +221,18 @@ mod tests {
             project_entry_within(&root, &root, Path::new("../elsewhere/a.json")),
             ProjectEntry::Outside
         );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn the_scope_base_is_the_git_top_level_or_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let top = dunce::canonicalize(dir.path()).unwrap();
+        let package = top.join("packages/a");
+        std::fs::create_dir_all(&package).unwrap();
+        assert_eq!(project_scope_base(&package), package);
+        std::fs::create_dir(top.join(".git")).unwrap();
+        assert_eq!(project_scope_base(&package), top);
+        assert_eq!(project_scope_base(&top), top);
     }
 }

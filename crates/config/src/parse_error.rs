@@ -152,6 +152,34 @@ pub fn describe_json(err: &serde_json::Error) -> String {
     }
 }
 
+/// The text of a parse error of a file outside the project: the position
+/// only, with no message. A message can name a field or a value of the
+/// file, and an own deserializer message can quote a value.
+pub fn position_only(position: Option<(usize, usize)>) -> String {
+    match position {
+        Some((line, column)) => format!("invalid content at line {line}, column {column}"),
+        None => "invalid content".to_owned(),
+    }
+}
+
+/// The one-based line and column of a TOML parse error, when it has one.
+pub fn toml_position(
+    err: &crate::toml_input::TomlInputError,
+    source: &str,
+) -> Option<(usize, usize)> {
+    match err {
+        crate::toml_input::TomlInputError::TooDeep(_) => None,
+        crate::toml_input::TomlInputError::Parse(inner) => {
+            inner.span().map(|span| line_and_column(source, span.start))
+        }
+    }
+}
+
+/// The one-based line and column of a JSONC parse error.
+pub fn jsonc_position(err: &jsonc_parser::errors::ParseError) -> (usize, usize) {
+    (err.line_display(), err.column_display())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +252,16 @@ mod tests {
         let text = describe_json(&err);
         assert!(!text.contains("marker-7531"), "{text}");
         assert!(text.contains("line 2"), "{text}");
+    }
+
+    #[test]
+    fn position_only_text_has_no_message() {
+        let err = crate::jsonc::parse_to_value::<serde_json::Value>("{\n  \"a\": marker-7531\n}")
+            .unwrap_err();
+        let text = position_only(Some(jsonc_position(&err)));
+        assert!(!text.contains("marker-7531"), "{text}");
+        assert!(text.contains("line 2"), "{text}");
+        assert_eq!(position_only(None), "invalid content");
     }
 
     #[test]

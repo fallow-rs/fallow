@@ -103,6 +103,16 @@ fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
 }
 
 pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, miette::Report> {
+    parse_config_to_value_in(path, true)
+}
+
+/// [`parse_config_to_value`] for a file that is `inside` the project or
+/// not. A parse error of a file outside the project names the position
+/// only.
+fn parse_config_to_value_in(
+    path: &Path,
+    inside: bool,
+) -> Result<serde_json::Value, miette::Report> {
     // An `extends` target can be outside the project by design, so the read
     // has no root check. It still refuses devices and very large files, and
     // the parse errors below name a position but never quote the file.
@@ -116,11 +126,14 @@ pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, mi
     match ConfigFormat::from_path(path) {
         ConfigFormat::Toml => {
             let toml_value: toml::Value = crate::toml_input::from_str(content).map_err(|e| {
-                miette::miette!(
-                    "Failed to parse config file {}: {}",
-                    path.display(),
+                let reason = if inside {
                     crate::parse_error::describe_toml(&e, content)
-                )
+                } else {
+                    crate::parse_error::position_only(crate::parse_error::toml_position(
+                        &e, content,
+                    ))
+                };
+                miette::miette!("Failed to parse config file {}: {reason}", path.display())
             })?;
             serde_json::to_value(toml_value).map_err(|e| {
                 miette::miette!(
@@ -131,11 +144,12 @@ pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, mi
             })
         }
         ConfigFormat::Json => crate::jsonc::parse_to_value(content).map_err(|e| {
-            miette::miette!(
-                "Failed to parse config file {}: {}",
-                path.display(),
+            let reason = if inside {
                 crate::parse_error::describe_jsonc(&e)
-            )
+            } else {
+                crate::parse_error::position_only(Some(crate::parse_error::jsonc_position(&e)))
+            };
+            miette::miette!("Failed to parse config file {}: {reason}", path.display())
         }),
     }
 }
@@ -591,6 +605,12 @@ struct ExtendsResolver<'a, Fetcher> {
     /// records it.
     merge_order: MergeOrder,
     record_merge_order: bool,
+    /// The directory that the files of the walk count as inside, set from
+    /// the first local file. See [`crate::project_scope_base`].
+    scope: Option<PathBuf>,
+    /// Each local file of the walk with its own value, and whether it is
+    /// inside `scope`.
+    local_values: Vec<super::outside_root::LocalValue>,
     fetcher: &'a mut Fetcher,
 }
 
@@ -647,6 +667,8 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             order_frames: Vec::new(),
             merge_order: MergeOrder::default(),
             record_merge_order: false,
+            scope: None,
+            local_values: Vec::new(),
             fetcher,
         }
     }
@@ -705,6 +727,10 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             )
         })?;
         let identity = ConfigResourceId::Local(canonical.clone());
+        let scope = self.scope.get_or_insert_with(|| {
+            crate::project_scope_base(canonical.parent().unwrap_or(&canonical))
+        });
+        let inside = canonical.starts_with(scope);
         if let Some(value) = self.reuse_resolved(&identity) {
             return Ok(value);
         }
@@ -717,7 +743,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
 
         self.local_files.push(canonical.clone());
         self.open_order_frame();
-        let result = self.resolve_local_uncached(&canonical, depth);
+        let result = self.resolve_local_uncached(&canonical, depth, inside);
         self.active.remove(&identity);
         let order = self.close_order_frame(&identity, result.is_ok());
         if let Ok(value) = &result {
@@ -758,9 +784,12 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         &mut self,
         path: &Path,
         depth: usize,
+        inside: bool,
     ) -> Result<serde_json::Value, miette::Report> {
-        let mut value = parse_config_to_value(path)?;
+        let mut value = parse_config_to_value_in(path, inside)?;
         let extends = extract_extends(&mut value, &path.display().to_string())?;
+        self.local_values
+            .push(super::outside_root::LocalValue::new(path, inside, &value));
         if extends.is_empty() {
             return Ok(value);
         }
@@ -1354,8 +1383,9 @@ fn load_with_fetcher<Fetcher: RemoteConfigFetcher>(
     options: ConfigLoadOptions,
     fetcher: &mut Fetcher,
 ) -> Result<FallowConfig, miette::Report> {
-    let merged = ExtendsResolver::new(options, fetcher).resolve_local(path, 0)?;
-    FallowConfig::from_merged(path, merged)
+    let mut resolver = ExtendsResolver::new(options, fetcher);
+    let merged = resolver.resolve_local(path, 0)?;
+    FallowConfig::from_merged(path, merged, &resolver.local_values)
 }
 
 impl FallowConfig {
@@ -1441,9 +1471,20 @@ impl FallowConfig {
         Some(sources.collect())
     }
 
-    fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
+    fn from_merged(
+        path: &Path,
+        merged: serde_json::Value,
+        local_values: &[super::outside_root::LocalValue],
+    ) -> Result<Self, miette::Report> {
         assert_binary_meets_minimum_version(path, &merged)?;
-        warn_on_unknown_rule_keys(path, &merged);
+        let outside = super::outside_root::has_outside(local_values);
+        if outside {
+            for value in local_values.iter().filter(|value| value.inside) {
+                warn_on_unknown_rule_keys(path, &value.value);
+            }
+        } else {
+            warn_on_unknown_rule_keys(path, &merged);
+        }
 
         let private_type_leaks_configured = merged
             .get("rules")
@@ -1452,6 +1493,9 @@ impl FallowConfig {
                 rules.contains_key("private-type-leaks") || rules.contains_key("private-type-leak")
             });
         let mut config: Self = serde_json::from_value(merged).map_err(|e| {
+            if outside {
+                return super::outside_root::merged_error(path, local_values);
+            }
             let reason = crate::parse_error::describe_json(&e);
             // Unknown fields on overrides/ignoreExports entries are usually
             // inline annotations; point at JSONC comments as the fix.

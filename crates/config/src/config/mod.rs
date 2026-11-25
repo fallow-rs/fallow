@@ -14,6 +14,7 @@ mod keep_export_tags;
 mod legacy_glob;
 mod markup_extensions;
 mod mutation;
+mod outside_root;
 mod override_effect;
 mod parsing;
 mod resolution;

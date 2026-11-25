@@ -36,7 +36,43 @@ fn type_error_of_an_extended_file_omits_the_value() {
 
     let message = FallowConfig::load(&config).unwrap_err().to_string();
     assert!(!message.contains(MARKER), "{message}");
-    assert!(message.contains("invalid type"), "{message}");
+    assert!(message.contains("outside.json"), "{message}");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn an_extended_file_outside_the_project_shows_no_field_name_or_own_message() {
+    for content in [
+        format!(r#"{{"{MARKER}": true}}"#),
+        format!(r#"{{"keepExportTags": ["{MARKER}"]}}"#),
+        format!("{{\n  \"{MARKER}\": ,\n}}"),
+    ] {
+        let dir = project_with_outside_file("outside.json", &content);
+        let config = dir.path().join("project/.fallowrc.json");
+        std::fs::write(&config, r#"{"extends": ["../outside.json"]}"#).unwrap();
+
+        let message = FallowConfig::load(&config).unwrap_err().to_string();
+        assert!(!message.contains(MARKER), "{message}");
+        assert!(message.contains("outside.json"), "{message}");
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_file_inside_the_project_keeps_the_full_error_text() {
+    let dir = project_with_outside_file("outside.json", r#"{"entry": ["src/a.ts"]}"#);
+    let project = dir.path().join("project");
+    std::fs::write(project.join("base.json"), r#"{"unknownInside": true}"#).unwrap();
+    let config = project.join(".fallowrc.json");
+    std::fs::write(
+        &config,
+        r#"{"extends": ["../outside.json", "./base.json"]}"#,
+    )
+    .unwrap();
+
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(message.contains("unknownInside"), "{message}");
+    assert!(message.contains("base.json"), "{message}");
 }
 
 #[test]
