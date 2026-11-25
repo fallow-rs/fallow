@@ -28,24 +28,25 @@ const lstatOrNull = (file) => {
 
 /**
  * Resolve paths with one `realpath` call per directory. A file is resolved
- * on its own only when `lstat` shows that it is a link.
+ * on its own only when `lstat` shows that it is a link. A missing directory
+ * is not cached, because it can appear later, also as a link. `reset` drops
+ * the cache, so that each snapshot sees the current links.
  */
 const createResolver = () => {
   const directories = new Map();
   const realDirectory = (dir) => {
     const cached = directories.get(dir);
     if (cached !== undefined) return cached;
-    let real;
     try {
-      real = realpathSync(dir);
+      const real = realpathSync(dir);
+      directories.set(dir, real);
+      return real;
     } catch {
       const parent = path.dirname(dir);
-      real = parent === dir ? dir : path.join(realDirectory(parent), path.basename(dir));
+      return parent === dir ? dir : path.join(realDirectory(parent), path.basename(dir));
     }
-    directories.set(dir, real);
-    return real;
   };
-  return (file) => {
+  const resolve = (file) => {
     const absolute = path.resolve(file);
     const parent = path.dirname(absolute);
     if (parent === absolute) return { real: absolute, stats: lstatOrNull(absolute) };
@@ -60,6 +61,8 @@ const createResolver = () => {
       return { located, real: located, stats: null };
     }
   };
+  resolve.reset = () => directories.clear();
+  return resolve;
 };
 
 const realOrResolved = (file) => {
@@ -99,18 +102,17 @@ const readScopeBase = (root, scopeRoot = process.env[SCOPE_ROOT_ENV]) => {
   return isWithin(base, realRoot) ? base : realRoot;
 };
 
-const hasNodeModulesSegment = (file) => file.split(path.sep).includes("node_modules");
-
 /**
  * A test of whether the checker may touch a path for the project at `root`.
  *
  * A path is in scope when its resolved path is inside the read scope base
  * (see {@link readScopeBase}), inside a real `node_modules` directory at or
- * above the root, or inside one of `compilerDirs`. A link below an allowed
- * `node_modules` directory is also in scope when its target is inside the
- * base or has a `node_modules` segment, such as a workspace link or the
- * pnpm virtual store. A path that is not absolute, such as a bundled library
- * file of the compiler, is left to the compiler.
+ * above the root, or inside one of `compilerDirs`. So a workspace link or a
+ * pnpm virtual store link below an allowed `node_modules` directory is in
+ * scope when its target is inside the base or inside such a `node_modules`
+ * directory, and a link to a store outside them is not. A path that is not
+ * absolute, such as a bundled library file of the compiler, is left to the
+ * compiler.
  *
  * The result names whether the path is in scope and, for a file that may be
  * read, whether it is a regular file of at most
@@ -119,7 +121,7 @@ const hasNodeModulesSegment = (file) => file.split(path.sep).includes("node_modu
  * @param {string} root
  * @param {string[]} [compilerDirs] directories of the compiler and its library files
  * @param {string} [scopeRoot]
- * @returns {{ inScope: (fileName: string) => boolean, readable: (fileName: string) => boolean }}
+ * @returns {{ inScope: (fileName: string) => boolean, readable: (fileName: string) => boolean, reset: () => void }}
  */
 export const createReadScope = (root, compilerDirs = [], scopeRoot = undefined) => {
   const base = readScopeBase(root, scopeRoot);
@@ -128,16 +130,11 @@ export const createReadScope = (root, compilerDirs = [], scopeRoot = undefined) 
   const resolve = createResolver();
   const check = (fileName) => {
     if (!path.isAbsolute(fileName)) return { inScope: true, stats: undefined };
-    const { located, real, stats } = resolve(fileName);
-    if (allowed.some((dir) => isWithin(dir, real))) return { inScope: true, stats };
-    const linkedFromNodeModules =
-      located !== undefined &&
-      located !== real &&
-      nodeModules.some((dir) => isWithin(dir, located)) &&
-      (isWithin(base, real) || hasNodeModulesSegment(real));
-    return { inScope: linkedFromNodeModules, stats };
+    const { real, stats } = resolve(fileName);
+    return { inScope: allowed.some((dir) => isWithin(dir, real)), stats };
   };
   return {
+    reset: resolve.reset,
     inScope: (fileName) => check(fileName).inScope,
     readable: (fileName) => {
       const { inScope, stats } = check(fileName);

@@ -148,3 +148,41 @@ test("a subpackage reads the shared tsconfig and a workspace package of its work
     }
   });
 });
+
+test("a link to an outside directory named node_modules stays out of scope", () => {
+  withLayout(({ root, outside }) => {
+    const store = path.join(outside, "store", "node_modules", "pkg");
+    mkdirSync(store, { recursive: true });
+    writeFileSync(path.join(store, "index.d.ts"), OUTSIDE_TEXT);
+    mkdirSync(path.join(root, "node_modules"), { recursive: true });
+    symlinkSync(store, path.join(root, "node_modules", "pkg"));
+    symlinkSync(path.join(store, "index.d.ts"), path.join(root, "node_modules", "pkg.d.ts"));
+    const scope = createReadScope(root, [], "");
+    assert.equal(scope.readable(path.join(root, "node_modules", "pkg", "index.d.ts")), false);
+    assert.equal(scope.readable(path.join(root, "node_modules", "pkg.d.ts")), false);
+  });
+});
+
+test("a directory that appears after a first miss is resolved again", () => {
+  withLayout(({ root, outside }) => {
+    const scope = createReadScope(root, [], "");
+    const later = path.join(root, "later");
+    assert.equal(scope.readable(path.join(later, "other.ts")), true, "a missing file");
+    symlinkSync(outside, later);
+    assert.equal(scope.readable(path.join(later, "other.ts")), false);
+  });
+});
+
+test("a reset drops the resolved directories of an earlier snapshot", () => {
+  withLayout(({ root, outside }) => {
+    const scope = createReadScope(root, [], "");
+    const swapped = path.join(root, "swapped");
+    mkdirSync(swapped);
+    writeFileSync(path.join(swapped, "other.ts"), OUTSIDE_TEXT);
+    assert.equal(scope.readable(path.join(swapped, "other.ts")), true);
+    rmSync(swapped, { recursive: true, force: true });
+    symlinkSync(outside, swapped);
+    scope.reset();
+    assert.equal(scope.readable(path.join(swapped, "other.ts")), false);
+  });
+});

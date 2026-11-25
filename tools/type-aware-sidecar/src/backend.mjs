@@ -169,8 +169,7 @@ const REFUSED = {
  * (see {@link createReadScope}). A refused file reads as missing. A path in
  * scope goes to the callback of the caller, or to the file system.
  */
-const withReadScope = (root, scopeRoot, fs = {}) => {
-  const scope = createReadScope(root, COMPILER_DIRS, scopeRoot);
+const withReadScope = (scope, fs = {}) => {
   const scoped = { ...fs };
   const readFile = fs.readFile ?? (() => READ_FROM_DISK);
   scoped.readFile = (fileName) => (scope.readable(fileName) ? readFile(fileName) : null);
@@ -181,6 +180,21 @@ const withReadScope = (root, scopeRoot, fs = {}) => {
   return scoped;
 };
 
+/** Drop the path cache of `scope` before each snapshot update of `api`. */
+const resettingScope = (api, scope) =>
+  new Proxy(api, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property === "updateSnapshot") {
+        return (...args) => {
+          scope.reset();
+          return value.apply(target, args);
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
 /**
  * Create a backend API with the TypeScript 7.0 snapshot contract. With a
  * `cwd`, the checker touches only the paths in the read scope of that root.
@@ -190,10 +204,12 @@ const withReadScope = (root, scopeRoot, fs = {}) => {
  */
 export const createApi = (options = {}) => {
   const { scopeRoot, ...apiOptions } = options;
-  const scoped = options.cwd ? withReadScope(options.cwd, scopeRoot, options.fs) : options.fs;
+  const scope = options.cwd ? createReadScope(options.cwd, COMPILER_DIRS, scopeRoot) : null;
+  const scoped = scope ? withReadScope(scope, options.fs) : options.fs;
   const fs = scoped ? { ...FS_CALLBACK_DEFAULTS, ...scoped } : undefined;
   const api = new sync.API({ ...apiOptions, ...(fs ? { fs } : {}) });
-  return typeof api.createSnapshot === "function" ? withLinearSnapshots(api) : api;
+  const linear = typeof api.createSnapshot === "function" ? withLinearSnapshots(api) : api;
+  return scope ? resettingScope(linear, scope) : linear;
 };
 
 const INFERRED_PROJECT_ID = "/dev/null/inferred";
