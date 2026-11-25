@@ -1752,17 +1752,17 @@ const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;
 /// so the upload nudge can name the dir the user most likely needs.
 const SOURCE_MAP_BUILD_DIRS: &[&str] = &["dist", ".next", "out", "build"];
 
-/// Max recursion depth for the build-dir source-map scan: deep enough to reach
-/// `.next/static/chunks` / `dist/assets` without walking an entire tree.
+/// Max depth of the build-dir scan: it reaches `.next/static/chunks` and `dist/assets`.
 const SOURCE_MAP_SCAN_MAX_DEPTH: usize = 6;
 
-/// First build directory under `root` that contains at least one `.map` file, or
-/// `None`. A bounded, early-returning scan used only to name `--dir` in the
-/// upload nudge, never an exhaustive walk.
+/// First build directory under `root` that resolves inside it and holds a `.map` file, or
+/// `None`. A bounded scan that only names `--dir` in the upload nudge.
 fn find_local_source_map_dir(root: &Path) -> Option<&'static str> {
     SOURCE_MAP_BUILD_DIRS.iter().copied().find(|dir| {
         let candidate = root.join(dir);
-        candidate.is_dir() && dir_contains_source_map(&candidate, SOURCE_MAP_SCAN_MAX_DEPTH)
+        fallow_types::read_guard::is_inside_root(root, &candidate)
+            && candidate.is_dir()
+            && dir_contains_source_map(&candidate, SOURCE_MAP_SCAN_MAX_DEPTH)
     })
 }
 

@@ -70,3 +70,22 @@ pub(super) fn local_health(
     options.production = *dead_code.production().value();
     crate::health::execute_health_in(&options, Some(dead_code))
 }
+
+#[cfg(test)]
+mod tests {
+    /// A build directory that links out of the project is not scanned for
+    /// source maps.
+    #[test]
+    #[cfg(unix)]
+    fn source_map_dir_scan_skips_a_build_dir_link_out_of_the_project() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("app.js.map"), "{}").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("dist")).expect("link");
+
+        assert_eq!(super::super::find_local_source_map_dir(&root), None);
+    }
+}
