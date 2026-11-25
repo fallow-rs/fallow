@@ -4597,6 +4597,29 @@ effective_severity?: (EffectiveSeverity | null)
  * withhold the removal of a caveated export as low confidence.
  */
 reachability_caveats?: ReachabilityCaveat[]
+/**
+ * Production mode only: the test-side files that import this export. A
+ * file is test-side when an entry point reaches it and a production
+ * exclude pattern or a `production.ignore` glob matches it (test, story,
+ * fixture and bench files), or when no runtime entry point reaches it (a
+ * file that only a support entry seeds). When present,
+ * the `remove-export` action is not auto-fixable, because the removal
+ * breaks these imports. Absent when no such file imports the export.
+ */
+test_importers?: (TestImporters | null)
+}
+/**
+ * The reachable files outside the production scope that import an export.
+ */
+export interface TestImporters {
+/**
+ * The importing files, sorted by path, at most 5.
+ */
+files: string[]
+/**
+ * The number of importing files that `files` does not list.
+ */
+remaining: number
 }
 /**
  * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
@@ -4681,6 +4704,12 @@ effective_severity?: (EffectiveSeverity | null)
  * with the same confidence. Sorted, deduplicated, omitted when empty.
  */
 reachability_caveats?: ReachabilityCaveat[]
+/**
+ * Production mode only: the test-side files that import this type. The
+ * same rule as [`UnusedExportFinding::test_importers`] applies, and the
+ * `remove-export` action is not auto-fixable when the field is present.
+ */
+test_importers?: (TestImporters | null)
 }
 /**
  * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors

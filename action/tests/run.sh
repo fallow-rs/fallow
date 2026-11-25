@@ -1721,6 +1721,13 @@ assert_not_contains "$OUT_SHARED_DECLARATION" "No fixable issues found" "export 
 assert_contains "$OUT_SHARED_DECLARATION" "kept 1 unused export(s) whose \`export\` keyword also exports a name that is in use" "export held back by its shared declaration reaches the headline"
 assert_not_contains "$OUT_SHARED_DECLARATION" "Export removals | 1" "export held back by its shared declaration is not counted as removed"
 
+OUT_TEST_IMPORTERS=$(printf '%s' "$FIX_DEP_WITHHELD" \
+  | jq '.skipped_low_confidence_dependencies = 0 | .skipped_test_importers = 1 | .fixes = [{"type": "remove_export", "path": "src/a.ts", "line": 2, "name": "onlyTest", "applied": false, "skipped": true, "skip_reason": "test_importers"}]' \
+  | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_TEST_IMPORTERS" "No fixable issues found" "export that a test imports is not reported as clean"
+assert_contains "$OUT_TEST_IMPORTERS" "kept 1 unused export(s) that a file outside the production scope imports" "export that a test imports reaches the headline"
+assert_not_contains "$OUT_TEST_IMPORTERS" "Export removals | 1" "export that a test imports is not counted as removed"
+
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"

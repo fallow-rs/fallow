@@ -107,6 +107,7 @@ pub mod source;
 pub mod source_edits;
 mod suppress;
 pub mod test_paths;
+pub mod test_side_imports;
 pub mod thread_pool;
 pub mod trace;
 pub mod trace_chain;

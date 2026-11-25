@@ -224,88 +224,6 @@ impl ReachabilityCaveat {
     }
 }
 
-/// The compact labels of `caveats`, joined for a one-line renderer, or `None`
-/// when there is nothing to say.
-#[must_use]
-pub fn caveat_labels(caveats: &[ReachabilityCaveat]) -> Option<String> {
-    if caveats.is_empty() {
-        return None;
-    }
-    let labels: Vec<&str> = caveats
-        .iter()
-        .map(|caveat| ReachabilityCaveat::short_label(*caveat))
-        .collect();
-    Some(labels.join(", "))
-}
-
-/// The compact parenthetical a one-line human renderer appends to a finding
-/// carrying `caveats`, or `None` when there is nothing to say. Shared by every
-/// dead-code section so the suffix reads the same everywhere.
-#[must_use]
-pub fn caveat_suffix(caveats: &[ReachabilityCaveat]) -> Option<String> {
-    caveat_labels(caveats).map(|labels| format!("{CAVEAT_SUFFIX_MARKER}{labels})"))
-}
-
-/// The opening of the parenthetical [`caveat_suffix`] renders. Public because
-/// one consumer can only see the rendered description: the CI review formats
-/// build their comments from CodeClimate issues, whose `description` is the
-/// only place the caveat survives (the CodeClimate wire is a published
-/// contract with no field for it). Recognising the marker is what lets those
-/// formats withhold a one-click mutation.
-pub const CAVEAT_SUFFIX_MARKER: &str = " (caveat: ";
-
-/// Whether a rendered finding description already carries a caveat
-/// parenthetical, for a surface holding the string rather than the typed
-/// finding.
-///
-/// Lives here, next to the renderer, so the producer and the recogniser cannot
-/// drift; `a_rendered_suffix_is_recognised_by_the_marker` pins the pair.
-#[must_use]
-pub fn description_carries_caveat(description: &str) -> bool {
-    description.contains(CAVEAT_SUFFIX_MARKER)
-}
-
-/// The compact label for one wire token, for a renderer that reads
-/// `reachability_caveats[]` back off a serialized envelope instead of holding
-/// the typed findings.
-///
-/// The value set is OPEN, exactly as the wire documentation says: a token this
-/// build does not recognise is still a caveat, so it is rendered as itself with
-/// its separators relaxed into spaces rather than dropped. Dropping it would
-/// turn a finding whose evidence is incomplete back into a confident one,
-/// which is the failure this whole mechanism exists to prevent.
-#[must_use]
-pub fn caveat_label_for_token(token: &str) -> String {
-    match token {
-        "incomplete-file-analysis" => {
-            ReachabilityCaveat::short_label(ReachabilityCaveat::IncompleteFileAnalysis).to_owned()
-        }
-        "incomplete-import-graph" => {
-            ReachabilityCaveat::short_label(ReachabilityCaveat::IncompleteImportGraph).to_owned()
-        }
-        other => other.replace('-', " "),
-    }
-}
-
-/// The joined compact labels for wire tokens, or `None` when there are none.
-/// The token-side twin of [`caveat_labels`], for renderers driven by a
-/// serialized envelope rather than by typed findings.
-#[must_use]
-pub fn caveat_labels_for_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Option<String> {
-    let labels: Vec<String> = tokens.into_iter().map(caveat_label_for_token).collect();
-    if labels.is_empty() {
-        return None;
-    }
-    Some(labels.join(", "))
-}
-
-/// The token-side twin of [`caveat_suffix`], so an envelope-driven renderer
-/// appends the same parenthetical as a findings-driven one.
-#[must_use]
-pub fn caveat_suffix_for_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Option<String> {
-    caveat_labels_for_tokens(tokens).map(|labels| format!("{CAVEAT_SUFFIX_MARKER}{labels})"))
-}
-
 /// The note every mutating action carries once [`MutationEvidence`] withholds
 /// it. One string, so the CLI action array, the LSP diagnostic, and the MCP
 /// tool contract all say the same thing about the same finding.
@@ -1204,6 +1122,15 @@ pub struct UnusedExportFinding {
     /// withhold the removal of a caveated export as low confidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reachability_caveats: Vec<ReachabilityCaveat>,
+    /// Production mode only: the test-side files that import this export. A
+    /// file is test-side when an entry point reaches it and a production
+    /// exclude pattern or a `production.ignore` glob matches it (test, story,
+    /// fixture and bench files), or when no runtime entry point reaches it (a
+    /// file that only a support entry seeds). When present,
+    /// the `remove-export` action is not auto-fixable, because the removal
+    /// breaks these imports. Absent when no such file imports the export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_importers: Option<TestImporters>,
 }
 
 impl UnusedExportFinding {
@@ -1245,6 +1172,7 @@ impl UnusedExportFinding {
             introduced: None,
             effective_severity: None,
             reachability_caveats: Vec::new(),
+            test_importers: None,
         }
     }
 
@@ -1300,6 +1228,11 @@ pub struct UnusedTypeFinding {
     /// with the same confidence. Sorted, deduplicated, omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reachability_caveats: Vec<ReachabilityCaveat>,
+    /// Production mode only: the test-side files that import this type. The
+    /// same rule as [`UnusedExportFinding::test_importers`] applies, and the
+    /// `remove-export` action is not auto-fixable when the field is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_importers: Option<TestImporters>,
 }
 
 impl UnusedTypeFinding {
@@ -1342,6 +1275,7 @@ impl UnusedTypeFinding {
             introduced: None,
             effective_severity: None,
             reachability_caveats: Vec::new(),
+            test_importers: None,
         }
     }
 
@@ -4422,6 +4356,17 @@ impl_gated_finding!(
 #[path = "output_dead_code_re_export_cycle.rs"]
 mod output_dead_code_re_export_cycle;
 pub use output_dead_code_re_export_cycle::ReExportCycleFinding;
+
+#[path = "output_dead_code_caveat_labels.rs"]
+mod output_dead_code_caveat_labels;
+pub use output_dead_code_caveat_labels::{
+    CAVEAT_SUFFIX_MARKER, caveat_label_for_token, caveat_labels, caveat_labels_for_tokens,
+    caveat_suffix, caveat_suffix_for_tokens, description_carries_caveat,
+};
+
+#[path = "output_dead_code_test_importers.rs"]
+mod output_dead_code_test_importers;
+pub use output_dead_code_test_importers::{TEST_IMPORTERS_CAP, TEST_IMPORTERS_NOTE, TestImporters};
 
 #[path = "output_dead_code_namespace_escape.rs"]
 mod output_dead_code_namespace_escape;

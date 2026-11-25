@@ -4,7 +4,7 @@ use super::*;
 
 /// The withholding counters of the fix envelope, with the clause each one
 /// adds to the headline: `, {before}{count}{after}`.
-const SKIP_CLAUSES: [(&str, &str, &str); 7] = [
+const SKIP_CLAUSES: [(&str, &str, &str); 8] = [
     (
         "skipped_content_changed",
         "skipped ",
@@ -39,6 +39,11 @@ const SKIP_CLAUSES: [(&str, &str, &str); 7] = [
         "skipped_shared_declarations",
         "kept ",
         " unused export(s) whose `export` keyword also exports a name that is in use",
+    ),
+    (
+        "skipped_test_importers",
+        "kept ",
+        " unused export(s) that a file outside the production scope imports",
     ),
 ];
 

@@ -77,9 +77,13 @@ export interface FixAction {
    *   `skipped_shared_declarations`).
    * - `generated_source` (#4912: the file is generated code, and its
    *   generator writes it again, so the export removal is withheld).
+   * - `test_importers` (#5251: a `remove_export` entry of a production run
+   *   whose removal is withheld because a reachable test, story, fixture or
+   *   other file outside the production scope imports the export. Counted by
+   *   `skipped_test_importers`).
    *
    * The three `low_confidence_*` reasons, `kept_re_export`,
-   * `shared_declaration_in_use` and `generated_source` are
+   * `shared_declaration_in_use`, `generated_source` and `test_importers` are
    * INTENTIONAL skips: they do NOT cause a non-zero exit code (unlike
    * `content_changed` / `mixed_line_endings`).
    */
@@ -165,4 +169,12 @@ export interface FallowFixResult {
    * defaults to 0. Does NOT change the exit code.
    */
   readonly skipped_shared_declarations?: number;
+  /**
+   * Count of `remove_export` entries withheld with
+   * `skip_reason: "test_importers"`: in production mode, a reachable test,
+   * story, fixture or other file outside the production scope imports the
+   * export, so the removal would break that import. Counts exports, not
+   * files. Always present; defaults to 0. Does NOT change the exit code.
+   */
+  readonly skipped_test_importers?: number;
 }

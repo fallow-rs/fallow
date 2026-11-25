@@ -1422,6 +1422,44 @@ fn fix_summary_does_not_report_an_export_behind_a_shared_declaration_as_removed(
     );
 }
 
+/// An export removal that a test-side import holds back is stated in the
+/// summary and not listed as removed.
+#[test]
+fn fix_summary_does_not_report_a_test_imported_export_as_removed() {
+    let env = json!({
+        "dry_run": true,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_test_importers": 1,
+        "fixes": [
+            {
+                "type": "remove_export",
+                "path": "src/a.ts",
+                "line": 2,
+                "name": "onlyTest",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "test_importers"
+            }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("No fixable issues found"),
+        "a withheld export is not a clean run: {rendered}"
+    );
+    assert!(
+        rendered
+            .contains("kept 1 unused export(s) that a file outside the production scope imports"),
+        "the withholding has to be stated: {rendered}"
+    );
+    assert!(
+        !rendered.contains("src/a.ts:2"),
+        "a withheld export must not be listed as removed: {rendered}"
+    );
+}
+
 /// The bundled action no-ops annotations for the fix command, so the native
 /// `EnvelopeKind::Fix` annotation renderer must emit nothing.
 #[test]

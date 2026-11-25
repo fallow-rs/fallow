@@ -558,6 +558,50 @@ fn push_withheld_export_entry(
     }));
 }
 
+/// Where the entries of withheld export removals go.
+pub(super) struct WithheldEntrySink<'a> {
+    pub(super) root: &'a Path,
+    pub(super) plan: &'a mut FixPlan,
+    pub(super) output: OutputFormat,
+    pub(super) dry_run: bool,
+    pub(super) fixes: &'a mut Vec<serde_json::Value>,
+}
+
+/// Emit a withheld entry for each unused export that a file outside the
+/// production scope imports (issue #5251). Production mode excludes test,
+/// story and fixture files before the graph is built, so the export reads as
+/// unused, but the removal of its `export` keyword breaks the import in such
+/// a file. The caller does not plan these exports, so a shared declaration
+/// or a re-export that names one of them stays too.
+pub(super) fn withhold_test_imported_exports(
+    sink: &mut WithheldEntrySink<'_>,
+    findings: &[&fallow_types::output_dead_code::UnusedExportFinding],
+) {
+    let reason = SkipReason::TestImporters;
+    for finding in findings {
+        let export = &finding.export;
+        let relative = export.path.strip_prefix(sink.root).unwrap_or(&export.path);
+        let relative_display = relative.to_string_lossy().replace('\\', "/");
+        if sink.dry_run && !matches!(sink.output, OutputFormat::Json) {
+            let text = format!(
+                "Would keep export in {relative_display}:{} `{}`: a file that production mode excludes imports it",
+                export.line, export.export_name,
+            );
+            sink.plan.note(&export.path, export.line as usize, text);
+        }
+        sink.fixes.push(serde_json::json!({
+            "type": "remove_export",
+            "path": relative_display,
+            "line": export.line,
+            "name": export.export_name,
+            "applied": false,
+            "skipped": true,
+            "skip_reason": reason.as_wire_str(),
+            "help": reason.help(),
+        }));
+    }
+}
+
 fn collect_export_line_fixes(
     lines: &[&str],
     file_exports: &[&fallow_types::results::UnusedExport],

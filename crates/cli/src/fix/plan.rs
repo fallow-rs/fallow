@@ -61,6 +61,11 @@ pub(super) enum SkipReason {
     /// The file is generated code. Its generator writes the file again on its
     /// next run, so an edit of the file does not last.
     GeneratedSource,
+    /// An export removal withheld in production mode because a reachable
+    /// file outside the production scope (a test, story, fixture or support
+    /// file) imports the export. The removal would break that import.
+    /// Recorded per export entry, never on the per-file skip list.
+    TestImporters,
 }
 
 impl SkipReason {
@@ -74,6 +79,7 @@ impl SkipReason {
             Self::KeptReExport => "kept_re_export",
             Self::SharedDeclarationInUse => "shared_declaration_in_use",
             Self::GeneratedSource => "generated_source",
+            Self::TestImporters => "test_importers",
         }
     }
 
@@ -104,6 +110,9 @@ impl SkipReason {
             Self::GeneratedSource => {
                 "Preserved because this file is generated code, and its generator writes it again. Change the input of the generator, or add the file to `ignoreExports` in the fallow config."
             }
+            Self::TestImporters => {
+                "Preserved because a test, story, fixture or other file that production mode excludes imports this export. Change or remove that import first, then run `fallow fix --production --dry-run` and review the new preview."
+            }
         }
     }
 
@@ -117,6 +126,7 @@ impl SkipReason {
                 | Self::KeptReExport
                 | Self::SharedDeclarationInUse
                 | Self::GeneratedSource
+                | Self::TestImporters
         )
     }
 
@@ -146,6 +156,9 @@ impl SkipReason {
             ),
             Self::GeneratedSource => format!(
                 "Kept {display} as it is: the file is generated code, and its generator writes it again.",
+            ),
+            Self::TestImporters => format!(
+                "Kept unused export(s) in {display}: a file that production mode excludes imports them.",
             ),
         }
     }
