@@ -40,6 +40,14 @@ const { serverFS } = await importApi("fs");
  */
 export const READ_FROM_DISK = serverFS?.useOS;
 
+/**
+ * The value a `readFile` callback returns for a file that the checker must
+ * treat as missing. An API with `serverFS` (TypeScript 7.1 and tsrs) reads
+ * `undefined` as a missing file and refuses `null`. TypeScript 7.0 reads
+ * `undefined` from disk, so it gets `null`.
+ */
+const MISSING_FILE = serverFS ? undefined : null;
+
 const FS_CALLBACK_DEFAULTS = serverFS
   ? {
       readFile: serverFS.useOS,
@@ -174,7 +182,7 @@ const REFUSED = {
 export const withReadScope = (scope, fs = {}) => {
   const scoped = { ...fs };
   const readFile = fs.readFile ?? (() => READ_FROM_DISK);
-  scoped.readFile = (fileName) => (scope.readable(fileName) ? readFile(fileName) : null);
+  scoped.readFile = (fileName) => (scope.readable(fileName) ? readFile(fileName) : MISSING_FILE);
   for (const [name, refused] of Object.entries(REFUSED)) {
     const inner = fs[name] ?? (() => FS_CALLBACK_DEFAULTS[name]);
     scoped[name] = (fileName) => (scope.inScope(fileName) ? inner(fileName) : refused(fileName));
