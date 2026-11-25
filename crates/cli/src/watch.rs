@@ -586,10 +586,22 @@ struct WatchLoopState {
     detached: bool,
     next_root_check: Instant,
     last_reattach_error: Option<Instant>,
+    /// The real path of the root at the start of the watch.
+    canonical_root: PathBuf,
 }
 
 impl WatchLoopState {
     fn new(opts: &WatchOptions<'_>, config: WatchConfig) -> Result<Self, ExitCode> {
+        let canonical_root = match dunce::canonicalize(opts.root) {
+            Ok(root) => root,
+            Err(e) => {
+                eprintln!(
+                    "Failed to resolve watch root '{}': {e}",
+                    opts.root.display()
+                );
+                return Err(exit_invalid_input());
+            }
+        };
         let (tx, rx) = mpsc::channel();
         let initial = config.event_filter();
         let dirs = initial.external_config_dirs();
@@ -612,6 +624,7 @@ impl WatchLoopState {
             detached: false,
             next_root_check: Instant::now() + ROOT_POLL_INTERVAL,
             last_reattach_error: None,
+            canonical_root,
         })
     }
 }
@@ -626,7 +639,7 @@ fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCo
         let now = Instant::now();
         if now >= state.next_root_check {
             state.next_root_check = now + ROOT_POLL_INTERVAL;
-            handle_root_lifecycle(
+            if let Err(code) = handle_root_lifecycle(
                 opts,
                 RootLifecycleState {
                     config: &mut state.config,
@@ -636,8 +649,11 @@ fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCo
                     debouncer: &mut state.debouncer,
                     detached: &mut state.detached,
                     last_reattach_error: &mut state.last_reattach_error,
+                    canonical_root: &state.canonical_root,
                 },
-            );
+            ) {
+                return code;
+            }
         }
 
         match receive_watch_event(&state.rx, &mut state.debouncer, state.detached) {
@@ -649,8 +665,10 @@ fn run_watch_loop(opts: &WatchOptions<'_>, state: &mut WatchLoopState) -> ExitCo
             WatchPoll::Idle => {}
         }
 
-        if !state.detached {
-            run_ready_reanalysis(state, opts);
+        if !state.detached
+            && let Err(code) = run_ready_reanalysis(state, opts)
+        {
+            return code;
         }
     }
 }
@@ -724,13 +742,27 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
 /// Drain the debouncer. When a non-empty batch is ready, reload the config,
 /// rebuild the event filter from it, and re-run the analysis. No-op when no
 /// batch is ready or all paths dedupe away.
-fn run_ready_reanalysis(state: &mut WatchLoopState, opts: &WatchOptions<'_>) {
+///
+/// # Errors
+///
+/// Returns the exit code of the watch when the root moved (see
+/// [`require_unmoved_root`]).
+fn run_ready_reanalysis(
+    state: &mut WatchLoopState,
+    opts: &WatchOptions<'_>,
+) -> Result<(), ExitCode> {
     let Some(paths) = state.debouncer.drain_ready(Instant::now(), DEBOUNCE_WINDOW) else {
-        return;
+        return Ok(());
     };
     let changed = display_changed_paths(paths, opts.root);
     if changed.is_empty() {
-        return;
+        return Ok(());
+    }
+    if matches!(
+        require_unmoved_root(opts.root, &state.canonical_root)?,
+        RootPresence::Absent
+    ) {
+        return Ok(());
     }
 
     if opts.clear_screen && std::io::stderr().is_terminal() {
@@ -758,6 +790,48 @@ fn run_ready_reanalysis(state: &mut WatchLoopState, opts: &WatchOptions<'_>) {
         eprintln!("Watch analysis failed; continuing to watch for changes");
     }
     print_waiting(opts);
+    Ok(())
+}
+
+/// Whether the watch root exists.
+#[derive(Debug, PartialEq, Eq)]
+enum RootPresence {
+    Present,
+    Absent,
+}
+
+/// Check that the root still resolves to its real path at the start of the
+/// watch. A branch switch can replace the root, or a directory above it,
+/// with a link. The watch would then analyze the link target and write its
+/// cache there, so the watch stops instead.
+///
+/// # Errors
+///
+/// Prints the reason and returns the exit code for invalid input when the
+/// root resolves to another path.
+fn require_unmoved_root(root: &Path, canonical_root: &Path) -> Result<RootPresence, ExitCode> {
+    if root.metadata().is_err() {
+        return Ok(RootPresence::Absent);
+    }
+    match dunce::canonicalize(root) {
+        Ok(resolved) if resolved == canonical_root => Ok(RootPresence::Present),
+        Ok(resolved) => {
+            eprintln!(
+                "Watch root '{}' now resolves to '{}' instead of '{}'; stopping the watch",
+                root.display(),
+                resolved.display(),
+                canonical_root.display()
+            );
+            Err(exit_invalid_input())
+        }
+        Err(e) => {
+            eprintln!(
+                "Failed to resolve watch root '{}': {e}; stopping the watch",
+                root.display()
+            );
+            Err(exit_invalid_input())
+        }
+    }
 }
 
 type WatchEvent = Result<Vec<PathBuf>, notify::Error>;
@@ -830,9 +904,20 @@ struct RootLifecycleState<'a> {
     debouncer: &'a mut PathDebouncer,
     detached: &'a mut bool,
     last_reattach_error: &'a mut Option<Instant>,
+    canonical_root: &'a Path,
 }
 
-fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>) {
+/// Detach the watcher when the root disappears, and re-attach it when the
+/// root comes back.
+///
+/// # Errors
+///
+/// Returns the exit code of the watch when the root moved (see
+/// [`require_unmoved_root`]).
+fn handle_root_lifecycle(
+    opts: &WatchOptions<'_>,
+    state: RootLifecycleState<'_>,
+) -> Result<(), ExitCode> {
     let RootLifecycleState {
         config,
         filter,
@@ -841,10 +926,17 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
         debouncer,
         detached,
         last_reattach_error,
+        canonical_root,
     } = state;
 
-    let root_exists = opts.root.metadata().is_ok();
-    if !root_exists {
+    let presence = match require_unmoved_root(opts.root, canonical_root) {
+        Ok(presence) => presence,
+        Err(code) => {
+            watcher.take();
+            return Err(code);
+        }
+    };
+    if presence == RootPresence::Absent {
         if !*detached {
             watcher.take();
             debouncer.clear();
@@ -854,11 +946,11 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
                 eprintln!("Watch root disappeared; waiting for it to reappear...");
             }
         }
-        return;
+        return Ok(());
     }
 
     if !*detached {
-        return;
+        return Ok(());
     }
 
     reload_config_or_keep_previous(config, opts);
@@ -888,6 +980,7 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1247,6 +1340,7 @@ mod tests {
         let mut debouncer = PathDebouncer::default();
         let mut detached = false;
         let mut last_reattach_error = None;
+        let canonical_root = dunce::canonicalize(&root).expect("canonical root");
 
         std::fs::remove_dir(&root).expect("remove root");
         handle_root_lifecycle(
@@ -1259,8 +1353,10 @@ mod tests {
                 debouncer: &mut debouncer,
                 detached: &mut detached,
                 last_reattach_error: &mut last_reattach_error,
+                canonical_root: &canonical_root,
             },
-        );
+        )
+        .expect("the root did not move");
         assert!(detached);
         assert!(watcher.is_none());
 
@@ -1275,10 +1371,90 @@ mod tests {
                 debouncer: &mut debouncer,
                 detached: &mut detached,
                 last_reattach_error: &mut last_reattach_error,
+                canonical_root: &canonical_root,
             },
-        );
+        )
+        .expect("the root did not move");
         assert!(!detached);
         assert!(watcher.is_some());
+    }
+
+    /// A branch switch can remove the watch root and then put a link to
+    /// another directory in its place. The watch must stop, and must not
+    /// load the config of the link target or attach to it again.
+    #[cfg(unix)]
+    #[test]
+    fn root_lifecycle_stops_when_the_root_becomes_a_link_to_another_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("project");
+        std::fs::create_dir(&root).expect("create root");
+        let elsewhere = temp.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).expect("create other dir");
+        let resolve = resolver(&root, &[], &[]);
+        let opts = make_watch_options(&root, &resolve);
+        let mut config = load_watch_config(&opts).expect("config");
+        let filter = Arc::new(Mutex::new(config.event_filter()));
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut watcher = None;
+        let mut debouncer = PathDebouncer::default();
+        let mut detached = false;
+        let mut last_reattach_error = None;
+        let canonical_root = dunce::canonicalize(&root).expect("canonical root");
+        let mut lifecycle = |config: &mut WatchConfig,
+                             watcher: &mut Option<ProjectWatcher>,
+                             detached: &mut bool| {
+            handle_root_lifecycle(
+                &opts,
+                RootLifecycleState {
+                    config,
+                    filter: &filter,
+                    watcher,
+                    tx: &tx,
+                    debouncer: &mut debouncer,
+                    detached,
+                    last_reattach_error: &mut last_reattach_error,
+                    canonical_root: &canonical_root,
+                },
+            )
+        };
+
+        std::fs::remove_dir(&root).expect("remove root");
+        lifecycle(&mut config, &mut watcher, &mut detached).expect("the root is absent");
+        assert!(detached);
+        std::os::unix::fs::symlink(&elsewhere, &root).expect("link root");
+        let outcome = lifecycle(&mut config, &mut watcher, &mut detached);
+
+        assert_eq!(outcome, Err(exit_invalid_input()), "the watch stops");
+        assert!(watcher.is_none(), "the watch does not attach to the target");
+        assert_eq!(
+            config.config.root, canonical_root,
+            "the watch does not load the config of the link target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn require_unmoved_root_refuses_a_root_below_a_replaced_parent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("repo").join("packages").join("app");
+        std::fs::create_dir_all(&root).expect("create root");
+        let canonical_root = dunce::canonicalize(&root).expect("canonical root");
+        let elsewhere = temp.path().join("elsewhere");
+        std::fs::create_dir_all(elsewhere.join("app")).expect("create other dir");
+
+        assert_eq!(
+            require_unmoved_root(&root, &canonical_root),
+            Ok(RootPresence::Present)
+        );
+        std::fs::remove_dir_all(temp.path().join("repo").join("packages")).expect("remove");
+        std::os::unix::fs::symlink(&elsewhere, temp.path().join("repo").join("packages"))
+            .expect("link parent");
+        assert!(require_unmoved_root(&root, &canonical_root).is_err());
+        std::fs::remove_file(temp.path().join("repo").join("packages")).expect("unlink");
+        assert_eq!(
+            require_unmoved_root(&root, &canonical_root),
+            Ok(RootPresence::Absent)
+        );
     }
 
     fn make_config(
@@ -1514,7 +1690,7 @@ mod tests {
             vec![selected],
             Instant::now().checked_sub(DEBOUNCE_WINDOW).unwrap(),
         );
-        run_ready_reanalysis(&mut state, &opts);
+        run_ready_reanalysis(&mut state, &opts).expect("the root did not move");
         assert!(state.config.config.production);
 
         let replacement = second.with_extension("tmp");
@@ -1637,7 +1813,7 @@ mod tests {
             .checked_sub(DEBOUNCE_WINDOW)
             .expect("monotonic clock is past the debounce window");
         state.debouncer.push_paths(vec![config_path], changed_at);
-        run_ready_reanalysis(&mut state, &opts);
+        run_ready_reanalysis(&mut state, &opts).expect("the root did not move");
 
         assert!(
             !state.filter.lock().expect("filter").allows(&generated),

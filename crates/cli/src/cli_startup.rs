@@ -240,6 +240,7 @@ fn resolve_validated_root(
     output: fallow_config::OutputFormat,
     json_style: crate::json_style::JsonStyle,
 ) -> Result<PathBuf, ExitCode> {
+    let given = cli.root.is_some();
     let raw_root = if let Some(root) = cli.root.clone() {
         root
     } else {
@@ -253,7 +254,12 @@ fn resolve_validated_root(
             )
         })?
     };
-    validate::validate_root(&raw_root).map_err(|e| {
+    let validated = if given {
+        validate::validate_root(&raw_root)
+    } else {
+        validate::validate_current_dir_root(&raw_root)
+    };
+    validated.map_err(|e| {
         telemetry::note_failure_reason(telemetry::FailureReason::Config);
         crate::error::emit_programmatic_error(
             &fallow_api::ProgrammaticError::new(e, 2)

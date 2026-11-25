@@ -163,6 +163,9 @@ pub use fallow_engine::source_edits;
 /// [`ProgrammaticAnalysisContext::install`], such as the LSP server, gives its
 /// own threads this stack size and registers it at thread start.
 pub use fallow_engine::thread_pool::{WORKER_STACK_SIZE, register_thread_stack};
+/// Project-root validation that the CLI uses for `--root`, for a surface that
+/// takes its root from a client, such as the language server.
+pub use fallow_engine::validate::validate_root;
 /// Parsed modules that a long-lived process keeps across analysis calls.
 ///
 /// A process that runs many calls on the same project, such as the MCP

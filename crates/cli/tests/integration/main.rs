@@ -16,6 +16,8 @@
 mod common;
 #[path = "../common/http_stub.rs"]
 mod http_stub;
+#[cfg(unix)]
+mod linked_cwd_root_tests;
 #[path = "../common/sign.rs"]
 mod sign;
 
@@ -50,6 +52,8 @@ mod audit_worsened_tests;
 mod banned_call_new_tests;
 mod banned_import_allow_names_tests;
 mod bare_run_resolve_tests;
+#[cfg(unix)]
+mod base_root_link_tests;
 mod baseline_cache_dir_tests;
 mod baseline_growth_tests;
 mod baseline_install_state_tests;
