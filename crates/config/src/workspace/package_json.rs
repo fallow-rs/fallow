@@ -1095,14 +1095,29 @@ mod tests {
         std::fs::create_dir_all(root.join("node_modules/x")).unwrap();
         std::fs::write(root.join("node_modules/x/package.json"), r#"{"name": "x"}"#).unwrap();
         let cwd = dunce::canonicalize(std::env::current_dir().unwrap()).unwrap();
-        let mut relative = std::path::PathBuf::new();
-        for _ in cwd.components().skip(1) {
-            relative.push("..");
+        let prefix = |path: &std::path::Path| {
+            path.components()
+                .find(|part| matches!(part, std::path::Component::Prefix(_)))
+                .map(|part| part.as_os_str().to_owned())
+        };
+        // A relative path cannot change the drive, so the check needs the
+        // temp dir on the drive of the crate.
+        if prefix(&cwd) == prefix(&root) {
+            let mut relative = std::path::PathBuf::new();
+            for part in cwd.components() {
+                if matches!(part, std::path::Component::Normal(_)) {
+                    relative.push("..");
+                }
+            }
+            for part in root.components() {
+                if let std::path::Component::Normal(name) = part {
+                    relative.push(name);
+                }
+            }
+            relative.push("node_modules/x/package.json");
+            let pkg = PackageJson::load(&relative).unwrap();
+            assert_eq!(pkg.name.as_deref(), Some("x"));
         }
-        relative.push(root.strip_prefix("/").unwrap());
-        relative.push("node_modules/x/package.json");
-        let pkg = PackageJson::load(&relative).unwrap();
-        assert_eq!(pkg.name.as_deref(), Some("x"));
     }
 
     /// A workspace without a `.git` entry, with the member `packages/a` and
