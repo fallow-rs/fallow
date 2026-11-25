@@ -209,6 +209,16 @@ fn root_relative_rule(mut rule: Value, package: &str) -> Value {
 
 /// Build the JSON for one external plugin.
 fn plugin_value(ext: &ExternalPluginDef, packages: &[PluginPackage]) -> Value {
+    // The globs of a plugin that fails validation can reach outside the
+    // project, so its detection is not evaluated.
+    if let Err(errors) = ext.validate_user_globs() {
+        let messages: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        return json!({
+            "name": ext.name,
+            "active": false,
+            "activation_requirement": format!("fix the invalid globs: {}", messages.join("; ")),
+        });
+    }
     let active: Vec<&PluginPackage> = packages
         .iter()
         .filter(|package| is_external_plugin_active(ext, &package.dependencies, &package.dir, &[]))

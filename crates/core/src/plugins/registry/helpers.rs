@@ -983,8 +983,10 @@ pub fn check_plugin_detection(
                     }
                 }
             }
-            fallow_config::glob_validation::expand_disk_glob(root, pattern)
-                .is_some_and(|mut paths| paths.next().is_some())
+            // A pattern that can lead above the root never matches.
+            !fallow_config::glob_validation::escapes_project_root(pattern)
+                && fallow_config::glob_validation::expand_disk_glob(root, pattern)
+                    .is_some_and(|mut paths| paths.next().is_some())
         }
         PluginDetection::All { conditions } => conditions
             .iter()
@@ -1022,6 +1024,18 @@ mod tests {
             .flat_map(|pattern| discover_pattern_matches(&root, pattern))
             .collect();
         assert!(hits.is_empty(), "{hits:?}");
+    }
+
+    #[test]
+    fn file_exists_detection_never_matches_above_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::write(dir.path().join("found.txt"), "").expect("write");
+        let detection = PluginDetection::FileExists {
+            pattern: "../f*".to_owned(),
+        };
+        assert!(!check_plugin_detection(&detection, &[], &root, &[]));
     }
 
     #[test]

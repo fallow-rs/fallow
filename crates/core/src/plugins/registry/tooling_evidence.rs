@@ -375,6 +375,10 @@ fn first_file_match(root: &Path, pattern: &str) -> Option<PathBuf> {
     expand_brace_pattern(pattern)
         .into_iter()
         .find_map(|expanded| {
+            // A pattern that can lead above the root never matches.
+            if fallow_config::glob_validation::escapes_project_root(&expanded) {
+                return None;
+            }
             if !has_glob_syntax(&expanded) {
                 let path = root.join(&expanded);
                 return path.is_file().then_some(path);

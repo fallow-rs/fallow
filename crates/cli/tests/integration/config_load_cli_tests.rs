@@ -582,6 +582,49 @@ fn plugin_check_reports_a_plugin_with_an_invalid_glob() {
     assert_eq!(names, ["escape"]);
 }
 
+/// A coverage upload validates the globs of the external plugins, because
+/// those globs reach the disk.
+#[test]
+fn coverage_upload_refuses_a_plugin_with_an_invalid_glob() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::create_dir_all(root.join(".fallow/plugins")).unwrap();
+    std::fs::write(
+        root.join(".fallow/plugins/escape.json"),
+        r#"{"name":"escape","detection":{"type":"fileExists","pattern":"../outside/f*"}}"#,
+    )
+    .unwrap();
+    let output = run(&root, UPLOAD_DRY_RUN, &[]);
+    assert_ne!(output.code, 0, "{}{}", output.stdout, output.stderr);
+    assert!(
+        output.stderr.contains("invalid external plugin definition"),
+        "{}",
+        output.stderr
+    );
+}
+
+/// `plugin-check` does not evaluate the detection of a plugin that fails
+/// validation, so a pattern above the root does not probe the disk there.
+#[test]
+fn plugin_check_does_not_evaluate_an_invalid_detection() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    let outside = root.parent().unwrap().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("found.txt"), "").unwrap();
+    std::fs::create_dir_all(root.join(".fallow/plugins")).unwrap();
+    std::fs::write(
+        root.join(".fallow/plugins/escape.json"),
+        r#"{"name":"escape","detection":{"type":"fileExists","pattern":"../outside/f*"}}"#,
+    )
+    .unwrap();
+    let output = run(&root, &["plugin-check", "--format", "json"], &[]);
+    assert_eq!(output.code, 0, "{}{}", output.stdout, output.stderr);
+    let plugins = parse_json(&output)["plugins"].clone();
+    assert_eq!(plugins[0]["name"], "escape", "{plugins}");
+    assert_eq!(plugins[0]["active"], false, "{plugins}");
+}
+
 /// `fallow security` rejects an unsupported `--format` before it loads the
 /// config, so the format error shows also when the config is invalid.
 #[test]
