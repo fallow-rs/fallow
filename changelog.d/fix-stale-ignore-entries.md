@@ -1,4 +1,0 @@
-### Fixed
-
-- **Stale `ignoreExports`, `duplicates.ignore` and `health.ignore` entries now give a "has no effect" note.** A dead-code run reports an `ignoreExports` file glob that matches no file, an `ignoreExports` name that no file of its glob declares or re-exports, and a `duplicates.ignore` or `health.ignore` glob that matches no file. The new `workspace_diagnostics` kinds are `ignore-exports-file-unmatched`, `ignore-exports-name-unmatched`, `duplicates-ignore-unmatched` and `health-ignore-unmatched`. The human output prints one note per setting, SARIF has a configuration notification, and Markdown lists them under "Unmatched config patterns". A file with `export *` counts as a file that can declare any name. A `--production` run reports none of these.
-  (Closes [#5167](https://github.com/fallow-rs/fallow/issues/5167))
