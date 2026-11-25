@@ -306,27 +306,42 @@ impl Source {
 
 /// The canonical `node_modules/fallow` of `root`, when it is an installed
 /// fallow package: a directory named `fallow` in a `node_modules` directory,
-/// with a `package.json` whose name is `fallow`. Inside the project, only a
-/// package below the `node_modules` of the project counts (for example the
-/// pnpm store), not a directory elsewhere in the project. Git must not track
-/// the `node_modules/fallow` entry or the package files: a package manager
-/// writes them, a commit does not.
+/// with a `package.json` whose name is `fallow`. Inside the project or its
+/// git work tree, only a package below the `node_modules` of the project or
+/// of the work tree top counts (for example the pnpm store), not a directory
+/// elsewhere. Git must not track the `node_modules/fallow` entry or the
+/// package files: a package manager writes them, a commit does not. When git
+/// cannot answer, the package does not count.
 fn installed_package(root: &Path) -> Option<PathBuf> {
     let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
     let project = dunce::canonicalize(root).ok()?;
+    let top = match super::mcp::git_top(&project) {
+        super::mcp::GitTop::Outside => None,
+        super::mcp::GitTop::Top(top) => Some(top),
+        super::mcp::GitTop::Unknown => return None,
+    };
+    let trees: Vec<&Path> = std::iter::once(project.as_path())
+        .chain(top.as_deref())
+        .collect();
+    let inside_tree = trees.iter().any(|tree| package.starts_with(tree));
+    let in_node_modules = trees
+        .iter()
+        .any(|tree| package.starts_with(tree.join("node_modules")));
     if project.starts_with(&package)
         || package.file_name()? != "fallow"
         || package.parent()?.file_name()? != "node_modules"
-        || (package.starts_with(&project) && !package.starts_with(project.join("node_modules")))
+        || (inside_tree && !in_node_modules)
     {
         return None;
     }
-    let mut tracked = vec![PathBuf::from(NODE_MODULES_PACKAGE)];
-    if let Ok(inside) = package.strip_prefix(&project) {
-        tracked.push(inside.to_path_buf());
-    }
-    if super::mcp::git_tracks_any(&project, &tracked)? {
-        return None;
+    if let Some(top) = &top {
+        let mut tracked = vec![project.strip_prefix(top).ok()?.join(NODE_MODULES_PACKAGE)];
+        if let Ok(inside) = package.strip_prefix(top) {
+            tracked.push(inside.to_path_buf());
+        }
+        if super::mcp::git_tracks_any(top, &tracked)? {
+            return None;
+        }
     }
     let PackageFile::Text(manifest) = read_package_file(&package, &package.join("package.json"))
     else {

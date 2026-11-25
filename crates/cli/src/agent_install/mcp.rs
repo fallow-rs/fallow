@@ -1099,16 +1099,51 @@ pub fn merge_codex(
     Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup))
 }
 
+/// Where `root` sits relative to git.
+pub(super) enum GitTop {
+    /// No directory at or above `root` holds a `.git` entry.
+    Outside,
+    /// The canonical work tree top level.
+    Top(PathBuf),
+    /// Git fails there (for example a `safe.directory` refusal) or prints a
+    /// path that is not UTF-8.
+    Unknown,
+}
+
+pub(super) fn git_top(root: &Path) -> GitTop {
+    if !root
+        .ancestors()
+        .any(|dir| dir.join(".git").symlink_metadata().is_ok())
+    {
+        return GitTop::Outside;
+    }
+    let Ok(output) = fallow_engine::changed_files::git_command_in(root)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+    else {
+        return GitTop::Unknown;
+    };
+    if !output.status.success() {
+        return GitTop::Unknown;
+    }
+    match fallow_engine::changed_files::git_path_line(&output.stdout) {
+        Some(line) if !line.is_empty() => {
+            dunce::canonicalize(line).map_or(GitTop::Unknown, GitTop::Top)
+        }
+        _ => GitTop::Unknown,
+    }
+}
+
 /// `Some(true)` when git tracks one of `paths` (relative to `root`) or a file
-/// below it, `Some(false)` when it tracks none or `root` is not in a git work
-/// tree, `None` when git cannot run.
+/// below it, `Some(false)` when it tracks none, `None` when git cannot run or
+/// exits with an error. A caller treats `None` as "tracked".
 pub(super) fn git_tracks_any(root: &Path, paths: &[PathBuf]) -> Option<bool> {
     let output = fallow_engine::changed_files::git_command_in(root)
         .args(["ls-files", "-z", "--"])
         .args(paths)
         .output()
         .ok()?;
-    Some(output.status.success() && !output.stdout.is_empty())
+    output.status.success().then_some(!output.stdout.is_empty())
 }
 
 fn is_git_tracked(root: &Path, relative: &str) -> bool {

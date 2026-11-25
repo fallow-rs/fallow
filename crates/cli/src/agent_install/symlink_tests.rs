@@ -385,6 +385,73 @@ fn skill_install_ignores_a_committed_package_link_or_vendor_directory() {
     assert!(text.contains("skill=embedded"), "tracked link: {text}");
 }
 
+/// With `--root packages/app`, a committed `packages/app/node_modules` link
+/// can lead to a committed package elsewhere in the repository. Git does not
+/// look past the link, so the check asks git about the resolved package path.
+#[test]
+fn skill_install_ignores_a_committed_package_that_a_link_of_a_subproject_reaches() {
+    for (store, link) in [
+        ("vendor", "../../vendor/node_modules"),
+        ("", "../../node_modules"),
+    ] {
+        let top = tempfile::tempdir().unwrap();
+        let top = top.path();
+        ship_skill(&top.join(store));
+        let app = top.join("packages/app");
+        std::fs::create_dir_all(&app).unwrap();
+        symlink(link, app.join("node_modules")).unwrap();
+        git_in(top, &["init", "-q"]);
+        git_in(top, &["add", "-f", "."]);
+
+        let text = installed_flavor(&app);
+
+        assert!(text.contains("skill=embedded"), "{link}: {text}");
+    }
+}
+
+/// The pnpm workspace layout: the package of a subproject links into the
+/// store below the `node_modules` of the work tree top, and git tracks none
+/// of it.
+#[test]
+fn skill_install_reads_a_subproject_package_from_the_store_of_the_work_tree() {
+    let top = tempfile::tempdir().unwrap();
+    let top = top.path();
+    let store = top.join("node_modules/.pnpm/fallow@1.0.0");
+    ship_skill(&store);
+    let app = top.join("packages/app");
+    std::fs::create_dir_all(app.join("node_modules")).unwrap();
+    symlink(
+        store.join("node_modules/fallow"),
+        app.join("node_modules/fallow"),
+    )
+    .unwrap();
+    git_in(top, &["init", "-q"]);
+
+    assert!(installed_flavor(&app).contains("skill=stub"));
+}
+
+/// When git cannot answer, the package counts as committed.
+#[test]
+fn skill_install_ignores_the_package_when_git_cannot_list_the_files() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let store = tempfile::tempdir().unwrap();
+    ship_skill(store.path());
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    symlink(
+        store.path().join("node_modules/fallow"),
+        root.join("node_modules/fallow"),
+    )
+    .unwrap();
+    git_in(root, &["init", "-q"]);
+    assert!(installed_flavor(root).contains("skill=stub"));
+    std::fs::write(root.join(".git/index"), "not an index").unwrap();
+
+    let text = installed_flavor(root);
+
+    assert!(text.contains("skill=embedded"), "{text}");
+}
+
 #[test]
 fn guide_install_writes_through_a_link_that_stays_in_the_project() {
     let root = tempfile::tempdir().unwrap();
