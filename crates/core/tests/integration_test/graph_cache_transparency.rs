@@ -216,6 +216,39 @@ fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
     );
 }
 
+/// A cached graph whose module paths differ from the discovered files must not
+/// be reused. The manifest still matches, so only a check of the graph itself
+/// keeps the foreign path out of the findings.
+#[test]
+fn exact_cache_hit_rebuilds_when_a_module_path_is_outside_the_root() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
+    let cache_dir = temp.path().join("cache");
+    let outside = temp.path().join("elsewhere").join("other.ts");
+
+    let config = create_config_with_cache(root, cache_dir.clone());
+    let cold = fallow_core::analyze(&config).expect("cold analysis");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    for module in &mut store.graph.modules {
+        module.path.clone_from(&outside);
+    }
+    store.save(fallow_types::path_guard::CacheTarget::inside(&cache_dir));
+
+    let warm = fallow_core::analyze(&config).expect("warm analysis");
+    let warm_json = serde_json::to_string(&warm).expect("serialize warm results");
+    assert!(
+        !warm_json.contains("elsewhere"),
+        "a cached module path outside the root must not reach the findings"
+    );
+    assert_eq!(
+        serde_json::to_value(&cold).expect("serialize cold results"),
+        serde_json::to_value(&warm).expect("serialize warm results"),
+        "a rejected graph cache must rebuild to the cold results"
+    );
+}
+
 #[test]
 fn resolver_cache_hit_rebuilds_graph_when_file_ids_shift() {
     assert_resolver_cache_hit_matches_cold("barrel-exports");

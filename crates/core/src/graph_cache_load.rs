@@ -33,7 +33,7 @@ pub fn try_load_analysis_graph_cache(
         unseeded_declaration_files: &unseeded_declaration_files,
     });
     let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir).map_err(Some)?;
-    if store.manifest.matches_inputs(&current) {
+    if store.manifest.matches_inputs(&current) && store.graph.describes_files(input.files) {
         let mut project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
         tracing::debug!("Graph cache hit: skipping import resolution and graph build");
         let excluded = production_scope::excluded_file_ids(
