@@ -141,6 +141,19 @@ pub const UNOWNED_LABEL: &str = "(unowned)";
 /// isn't inside any `[Section]` block.
 pub const NO_SECTION_LABEL: &str = "(no section)";
 
+/// The text of the CODEOWNERS file at `path` below `root`, read with the
+/// bounded read helper.
+fn read_project_file(
+    root: &Path,
+    path: &Path,
+) -> Result<String, fallow_types::read_guard::ReadRefusal> {
+    fallow_types::read_guard::read_to_string_inside(
+        root,
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+}
+
 impl CodeOwners {
     /// Load and parse a CODEOWNERS file from the given path.
     pub fn from_file(path: &Path) -> Result<Self, String> {
@@ -152,15 +165,35 @@ impl CodeOwners {
     /// Auto-probe standard CODEOWNERS locations relative to the project root.
     ///
     /// Tries `CODEOWNERS`, `.github/CODEOWNERS`, `.gitlab/CODEOWNERS`, `docs/CODEOWNERS`.
-    /// A probe that is a link must resolve to a file inside `root`.
+    /// A probe that is a link must resolve to a file inside `root`. A probe
+    /// link that does not resolve there gets a warning, and the search goes
+    /// on with the next location. A dangling link and a link to a file
+    /// outside `root` get the same warning.
     pub fn discover(root: &Path) -> Result<Self, String> {
         for probe in PROBE_PATHS {
             let present = root
                 .join(probe)
                 .symlink_metadata()
                 .is_ok_and(|meta| meta.is_file() || meta.file_type().is_symlink());
-            if present {
-                return Self::from_project_file(root, Path::new(probe));
+            let parent_is_link = Path::new(probe).parent().is_some_and(|parent| {
+                !parent.as_os_str().is_empty()
+                    && root
+                        .join(parent)
+                        .symlink_metadata()
+                        .is_ok_and(|meta| meta.file_type().is_symlink())
+            });
+            if !present && !parent_is_link {
+                continue;
+            }
+            match read_project_file(root, Path::new(probe)) {
+                Ok(content) => return Self::parse(&content),
+                Err(fallow_types::read_guard::ReadRefusal::OutsideRoot { .. }) => {
+                    tracing::warn!(
+                        "skipping {probe}: it is a link that does not resolve to a file inside the project root"
+                    );
+                }
+                Err(refusal) if refusal.is_not_found() => {}
+                Err(refusal) => return Err(refusal.to_string()),
             }
         }
         Err(format!(
@@ -184,12 +217,7 @@ impl CodeOwners {
     /// refuses a path that resolves outside `root`, a file that is not a
     /// regular file, and a very large file.
     fn from_project_file(root: &Path, path: &Path) -> Result<Self, String> {
-        let content = fallow_types::read_guard::read_to_string_inside(
-            root,
-            path,
-            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
-        )
-        .map_err(|e| e.to_string())?;
+        let content = read_project_file(root, path).map_err(|e| e.to_string())?;
         Self::parse(&content)
     }
 
@@ -925,9 +953,26 @@ mod tests {
         std::os::unix::fs::symlink(dir.path().join("OWNERS"), root.join("CODEOWNERS")).unwrap();
 
         let err = CodeOwners::discover(&root).unwrap_err();
-        assert!(err.contains("outside"), "{err}");
+        assert!(err.contains("no CODEOWNERS file found"), "{err}");
         let err = CodeOwners::load(&root, Some("CODEOWNERS")).unwrap_err();
         assert!(err.contains("outside"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_dangling_root_codeowners_link_falls_back_to_the_github_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::os::unix::fs::symlink("missing-owners", root.join("CODEOWNERS")).unwrap();
+        std::fs::create_dir(root.join(".github")).unwrap();
+        std::fs::write(root.join(".github/CODEOWNERS"), "* @github-owner\n").unwrap();
+
+        let owners = CodeOwners::discover(root).unwrap();
+        assert_eq!(
+            owners.owner_of(Path::new("src/a.ts")),
+            Some("@github-owner")
+        );
     }
 
     #[test]

@@ -66,7 +66,9 @@ impl ReadRefusal {
         }
     }
 
-    /// True when the file does not exist. A dangling symlink also counts.
+    /// True when the file does not exist. A link on the path that does not
+    /// resolve gives [`ReadRefusal::OutsideRoot`], not this state, so a
+    /// dangling link and a link to a file outside the root look the same.
     #[must_use]
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
@@ -135,16 +137,61 @@ pub fn read_bytes_inside(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec
         path: path.to_path_buf(),
         source,
     };
-    joined.symlink_metadata().map_err(io)?;
+    let outside = || ReadRefusal::OutsideRoot {
+        path: path.to_path_buf(),
+        root: root.to_path_buf(),
+    };
     let canonical_root = std::fs::canonicalize(root).map_err(io)?;
-    let resolved = std::fs::canonicalize(&joined).map_err(io)?;
+    let resolved = match std::fs::canonicalize(&joined) {
+        Ok(resolved) => resolved,
+        Err(_) if passes_a_link(root, &canonical_root, &joined) => return Err(outside()),
+        Err(source) => return Err(io(source)),
+    };
     if !resolved.starts_with(&canonical_root) {
-        return Err(ReadRefusal::OutsideRoot {
-            path: path.to_path_buf(),
-            root: root.to_path_buf(),
-        });
+        return Err(outside());
     }
     read_resolved(path, &resolved, max_bytes)
+}
+
+/// True when the walk from `root` to `joined` passes a link, or when
+/// `joined` is not below `root` by text. The read helpers use it for a path
+/// that does not resolve: such a path gets the same refusal as a path that
+/// resolves outside the root, so a caller cannot tell a dangling link from a
+/// link to a file outside the root.
+fn passes_a_link(root: &Path, canonical_root: &Path, joined: &Path) -> bool {
+    use std::path::Component;
+    let (base, relative) = match joined.strip_prefix(root) {
+        Ok(relative) => (root, relative),
+        Err(_) => match joined.strip_prefix(canonical_root) {
+            Ok(relative) => (canonical_root, relative),
+            Err(_) => return true,
+        },
+    };
+    let mut current = base.to_path_buf();
+    let mut depth = 0_usize;
+    for component in relative.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
+                current.pop();
+            }
+            Component::Normal(name) => {
+                current.push(name);
+                depth += 1;
+                match current.symlink_metadata() {
+                    Ok(meta) if meta.file_type().is_symlink() => return true,
+                    Ok(_) => {}
+                    Err(_) => return false,
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return true,
+        }
+    }
+    false
 }
 
 /// [`read_bytes_inside`] that also requires valid UTF-8.
@@ -304,12 +351,30 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
-    fn refuses_a_dangling_link_as_not_found() {
+    fn refuses_a_dangling_link_as_outside_the_root() {
         let dir = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink("/nonexistent/fallow/target", dir.path().join("a.json"))
             .unwrap();
         let err = read_to_string_inside(dir.path(), Path::new("a.json"), 16).unwrap_err();
-        assert!(err.is_not_found());
+        assert!(matches!(err, ReadRefusal::OutsideRoot { .. }), "{err:?}");
+        assert!(!err.is_not_found());
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::os::unix::fs::symlink("missing-dir", dir.path().join("sub/link")).unwrap();
+        let err = read_to_string_inside(dir.path(), Path::new("sub/link/a.json"), 16).unwrap_err();
+        assert!(matches!(err, ReadRefusal::OutsideRoot { .. }), "{err:?}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_missing_file_inside_the_root_stays_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        for path in ["sub/none.json", "sub/../none.json", "none/a.json"] {
+            let err = read_to_string_inside(dir.path(), Path::new(path), 16).unwrap_err();
+            assert!(err.is_not_found(), "{path}: {err:?}");
+        }
+        let err = read_to_string_inside(dir.path(), Path::new("../none.json"), 16).unwrap_err();
+        assert!(matches!(err, ReadRefusal::OutsideRoot { .. }), "{err:?}");
     }
 
     #[cfg(unix)]
