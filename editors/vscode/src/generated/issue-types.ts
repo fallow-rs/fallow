@@ -22,6 +22,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-class-members": true,
   "unused-protected-class-members": true,
   "namespace-escapes": true,
+  "test-only-exports": true,
   "unused-namespace-members": true,
   "unused-store-members": true,
   "unresolved-imports": true,
@@ -104,6 +105,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "route-collisions": "route-collision",
   "stale-suppression": "stale-suppressions",
   "test-only-dependency": "test-only-dependencies",
+  "test-only-export": "test-only-exports",
   "thin-wrappers": "thin-wrapper",
   "type-only-dependency": "type-only-dependencies",
   "unlisted-binary": "unlisted-binaries",
@@ -195,6 +197,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "namespace-escape",
     "label": "Namespace Escapes"
+  },
+  {
+    "code": "test-only-export",
+    "label": "Test-Only Exports"
   },
   {
     "code": "unused-namespace-member",

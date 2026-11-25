@@ -175,6 +175,10 @@ fn section_dead_code_footer_text(title: &str) -> Option<(&'static str, &'static 
             "Namespace imports used as a whole value, so fallow does not check the exports of the target",
             "https://fallow.tools/docs/rules/namespace-escape/",
         )),
+        "Test-only exports" => Some((
+            "Exported values that only test, story, fixture or other test-side files use",
+            "https://fallow.tools/docs/rules/test-only-export/",
+        )),
         "Unused store members" => Some((
             "Store state or actions never accessed by any consumer",
             "https://fallow.tools/docs/rules/unused-store-member/",
@@ -364,6 +368,7 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
         "Unused namespace members" => IssueKind::UnusedNamespaceMember,
         "Unused protected class members" => IssueKind::UnusedProtectedClassMember,
         "Namespace escapes" => IssueKind::NamespaceEscape,
+        "Test-only exports" => IssueKind::TestOnlyExport,
         "Unused store members" => IssueKind::UnusedStoreMember,
         "Unresolved imports" => IssueKind::UnresolvedImport,
         "Unlisted dependencies" => IssueKind::UnlistedDependency,

@@ -41,6 +41,9 @@ use entry_star::{EntryStarCredit, EntryStarCreditInput};
 #[path = "unused_exports_namespace_escapes.rs"]
 mod namespace_escapes;
 pub(super) use namespace_escapes::find_namespace_escape_candidates;
+#[path = "unused_exports_test_only.rs"]
+mod test_only;
+pub(super) use test_only::find_test_only_export_candidates;
 #[path = "unused_exports_manual_mocks.rs"]
 mod manual_mocks;
 use manual_mocks::drop_manual_mocks_of_group_modules;
@@ -75,10 +78,27 @@ struct UnusedExportModuleContext<'a> {
     /// sibling use (`lib.d.mts` next to `lib.mjs`).
     declaration_sibling_credit: &'a DeclarationSiblingCredit,
     entry_star_credit: &'a EntryStarCredit<'a>,
-    /// Treat every export as having no import reference. The namespace
-    /// escape pass sets it to ask which escape-credited exports would be
-    /// findings without the escape credit.
-    assume_unreferenced: bool,
+    /// The import references that count as a use.
+    references: ReferenceView<'a>,
+    /// The test-side files of a default-scope run, or `None` in a production
+    /// run. An `@expected-unused` export that only these files use is still
+    /// unused, so its tag is not stale.
+    test_side: Option<&'a FxHashSet<FileId>>,
+}
+
+/// The import references that the unused-export pass counts as a use.
+#[derive(Clone, Copy)]
+enum ReferenceView<'a> {
+    /// Every reference counts.
+    All,
+    /// No import reference counts. The namespace escape pass uses it to ask
+    /// which escape-credited exports would be findings without the escape
+    /// credit.
+    None,
+    /// A reference from one of these files does not count. The test-only
+    /// export pass uses it to ask which exports would be findings without
+    /// their test-side references.
+    Without(&'a FxHashSet<FileId>),
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
@@ -346,18 +366,26 @@ fn export_has_reachable_reference(
     graph: &ModuleGraph,
     module: &ModuleNode,
     export: &ExportSymbol,
+    references: ReferenceView<'_>,
 ) -> bool {
+    let skipped = match references {
+        ReferenceView::All => None,
+        ReferenceView::None => return false,
+        ReferenceView::Without(files) => Some(files),
+    };
+    let counts = |file: FileId| skipped.is_none_or(|files| !files.contains(&file));
     if module.is_reachable() {
-        return !export.references.is_empty();
+        return export.references.iter().any(|r| counts(r.from_file));
     }
     export.references.iter().any(|r| {
-        graph.module(r.from_file).is_some_and(|m| {
-            debug_assert_eq!(
-                m.file_id, r.from_file,
-                "ModuleGraph::modules FileId-as-index invariant broken"
-            );
-            m.is_reachable()
-        })
+        counts(r.from_file)
+            && graph.module(r.from_file).is_some_and(|m| {
+                debug_assert_eq!(
+                    m.file_id, r.from_file,
+                    "ModuleGraph::modules FileId-as-index invariant broken"
+                );
+                m.is_reachable()
+            })
     })
 }
 
@@ -452,29 +480,47 @@ pub fn find_unused_exports(
         suppressions,
         line_offsets_by_file,
     };
-    with_unused_export_context(input, false, |module_context| {
-        let module_results: Vec<UnusedExportModuleResult> = graph
-            .modules()
-            .par_iter()
-            .map(|module| find_unused_exports_for_module(module, module_context, None))
-            .collect();
+    // Only an `@expected-unused` export reads the test-side set, so a run
+    // without one skips the reach walk.
+    let has_expected_unused = graph.modules().iter().any(|module| {
+        module.exports.iter().any(|export| {
+            matches!(
+                export.visibility,
+                fallow_types::extract::VisibilityTag::ExpectedUnused
+            )
+        })
+    });
+    let test_side = (!config.production && has_expected_unused)
+        .then(|| crate::test_side::test_side_files(graph, config));
+    with_unused_export_context(
+        input,
+        ReferenceView::All,
+        test_side.as_ref(),
+        |module_context| {
+            let module_results: Vec<UnusedExportModuleResult> = graph
+                .modules()
+                .par_iter()
+                .map(|module| find_unused_exports_for_module(module, module_context, None))
+                .collect();
 
-        let mut unused_exports = Vec::new();
-        let mut unused_types = Vec::new();
-        let mut stale_expected_unused = Vec::new();
-        for (exports, types, stale_expected) in module_results {
-            unused_exports.extend(exports);
-            unused_types.extend(types);
-            stale_expected_unused.extend(stale_expected);
-        }
-        (unused_exports, unused_types, stale_expected_unused)
-    })
+            let mut unused_exports = Vec::new();
+            let mut unused_types = Vec::new();
+            let mut stale_expected_unused = Vec::new();
+            for (exports, types, stale_expected) in module_results {
+                unused_exports.extend(exports);
+                unused_types.extend(types);
+                stale_expected_unused.extend(stale_expected);
+            }
+            (unused_exports, unused_types, stale_expected_unused)
+        },
+    )
 }
 
 /// Build the shared state of the unused-export pass and run `run` with it.
-fn with_unused_export_context<R>(
-    input: UnusedExportInput<'_>,
-    assume_unreferenced: bool,
+fn with_unused_export_context<'a, R>(
+    input: UnusedExportInput<'a>,
+    references: ReferenceView<'a>,
+    test_side: Option<&'a FxHashSet<FileId>>,
     run: impl FnOnce(&UnusedExportModuleContext<'_>) -> R,
 ) -> R {
     let UnusedExportInput {
@@ -523,7 +569,8 @@ fn with_unused_export_context<R>(
         schema_exports: schema_exports.as_ref(),
         declaration_sibling_credit: &declaration_sibling_credit,
         entry_star_credit: &entry_star_credit,
-        assume_unreferenced,
+        references,
+        test_side,
     };
     run(&module_context)
 }
@@ -735,22 +782,36 @@ fn unused_export_candidate_is_skipped(
     export_str: &str,
     match_ctx: &mut UnusedExportMatchContext<'_>,
 ) -> bool {
-    let has_cross_file_ref = (!ctx.assume_unreferenced
-        && export_has_reachable_reference(ctx.graph, module, export))
-        || ctx
-            .declaration_sibling_credit
-            .get(&module.file_id)
-            .is_some_and(|names| names.contains(export_str));
-    let is_referenced = has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
+    let sibling_credit = ctx
+        .declaration_sibling_credit
+        .get(&module.file_id)
+        .is_some_and(|names| names.contains(export_str));
+    let side_effect_use = module.is_reachable() && export.is_side_effect_used;
+    let is_referenced = sibling_credit
+        || side_effect_use
+        || export_has_reachable_reference(ctx.graph, module, export, ctx.references);
     if matches!(
         export.visibility,
         fallow_types::extract::VisibilityTag::ExpectedUnused
     ) {
+        let used_outside_tests = match ctx.test_side {
+            Some(test_side) => {
+                sibling_credit
+                    || side_effect_use
+                    || export_has_reachable_reference(
+                        ctx.graph,
+                        module,
+                        export,
+                        ReferenceView::Without(test_side),
+                    )
+            }
+            None => is_referenced,
+        };
         record_expected_unused_stale(
             module,
             export,
             ctx,
-            is_referenced,
+            used_outside_tests,
             match_ctx.stale_expected_unused,
         );
         return true;

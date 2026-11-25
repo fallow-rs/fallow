@@ -38,7 +38,7 @@ use fallow_types::output_dead_code::{
     MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, NamespaceEscapeFinding, PackageCycleFinding,
     PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, TestOnlyExportFinding, ThinWrapperFinding,
     TypeOnlyDependencyFinding, UnlistedBinaryFinding, UnlistedDependencyFinding,
     UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
     UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
@@ -186,6 +186,7 @@ file_scoped! {
     UnusedNamespaceMemberFinding => member.path, unused_namespace_members;
     UnusedProtectedClassMemberFinding => member.path, unused_protected_class_members;
     NamespaceEscapeFinding => escape.path, namespace_escapes;
+    TestOnlyExportFinding => export.path, test_only_exports;
     UnusedStoreMemberFinding => member.path, unused_store_members;
     UnprovidedInjectFinding => inject.path, unprovided_injects;
     UnresolvedImportFinding => import.path, unresolved_imports;
@@ -525,6 +526,7 @@ fn for_each_gated_finding(
         unused_namespace_members,
         unused_protected_class_members,
         namespace_escapes,
+        test_only_exports,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -606,6 +608,7 @@ fn for_each_gated_finding(
     visit(unused_namespace_members, f);
     visit(unused_protected_class_members, f);
     visit(namespace_escapes, f);
+    visit(test_only_exports, f);
     visit(unused_store_members, f);
     visit(unresolved_imports, f);
     visit(unlisted_dependencies, f);
@@ -673,6 +676,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         unused_namespace_members,
         unused_protected_class_members,
         namespace_escapes,
+        test_only_exports,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -750,6 +754,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unused_namespace_members)
         || tally.add(unused_protected_class_members)
         || tally.add(namespace_escapes)
+        || tally.add(test_only_exports)
         || tally.add(unused_store_members)
         || tally.add(unresolved_imports)
         || tally.add(unlisted_dependencies)
@@ -821,6 +826,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unused_namespace_members,
         &mut rules.unused_protected_class_members,
         &mut rules.namespace_escapes,
+        &mut rules.test_only_exports,
         &mut rules.unused_store_members,
         &mut rules.unprovided_injects,
         &mut rules.unrendered_components,

@@ -155,6 +155,10 @@ pub struct CheckSummary {
     /// zero, because the rule is `off` by default.
     #[serde(default, skip_serializing_if = "zero_count")]
     pub namespace_escapes: usize,
+    /// Exported values that only test-side files use. Omitted when zero,
+    /// because the rule is `off` by default.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub test_only_exports: usize,
     /// Unused store members.
     #[serde(default)]
     pub unused_store_members: usize,

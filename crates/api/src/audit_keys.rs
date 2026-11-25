@@ -653,6 +653,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_namespace_members,
             unused_protected_class_members,
             namespace_escapes,
+            test_only_exports,
             unused_store_members,
             unresolved_imports,
             unlisted_dependencies,
@@ -764,6 +765,7 @@ impl DeadCodeKeyCollector<'_> {
             unused_store_members,
         );
         self.add_items(AuditCollection::NamespaceEscapes, namespace_escapes);
+        self.add_items(AuditCollection::TestOnlyExports, test_only_exports);
         self.add_component_contract_findings(&ComponentContractFindingSlices {
             unused_component_props,
             absent_component_props,
@@ -1481,6 +1483,7 @@ pub fn retain_introduced_dead_code(
         unused_namespace_members,
         unused_protected_class_members,
         namespace_escapes,
+        test_only_exports,
         unused_store_members,
         unresolved_imports,
         unused_dependencies,
@@ -1611,6 +1614,7 @@ pub fn annotate_dead_code_json(
         unused_namespace_members,
         unused_protected_class_members,
         namespace_escapes,
+        test_only_exports,
         unused_store_members,
         unresolved_imports,
         duplicate_exports,

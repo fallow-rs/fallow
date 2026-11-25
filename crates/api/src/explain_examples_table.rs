@@ -968,6 +968,19 @@ pub(super) const RULE_EXAMPLES: &[RuleExample] = &[
         ],
     },
     RuleExample {
+        rule: "test-only-export",
+        args: &[],
+        anchor: ExampleAnchor::Line,
+        base: &[],
+        files: &[
+            file!("test-only-export", "files", ".fallowrc.json", false),
+            file!("test-only-export", "files", "package.json", true),
+            file!("test-only-export", "files", "src/index.ts", false),
+            file!("test-only-export", "files", "src/price.test.ts", false),
+            file!("test-only-export", "files", "src/price.ts", false),
+        ],
+    },
+    RuleExample {
         rule: "thin-wrapper",
         args: &[],
         anchor: ExampleAnchor::Line,

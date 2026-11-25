@@ -697,6 +697,7 @@ describe("runAnalysis retry backoff", () => {
       ["unused-namespace-members", ["unused_namespace_members"]],
       ["unused-protected-class-members", ["unused_protected_class_members"]],
       ["namespace-escapes", ["namespace_escapes"]],
+      ["test-only-exports", ["test_only_exports"]],
       ["unused-store-members", ["unused_store_members"]],
       ["unused-server-actions", ["unused_server_actions"]],
       ["unused-load-data-keys", ["unused_load_data_keys"]],

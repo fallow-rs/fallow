@@ -30,6 +30,13 @@ pub(super) fn build_production_excludes(config: &ResolvedConfig) -> Option<globs
     if !config.production {
         return None;
     }
+    production_exclude_globs(config)
+}
+
+/// The built-in production exclude patterns plus the `production.ignore`
+/// globs, in any mode. The set matches root-relative paths. A pattern that
+/// does not compile is left out.
+pub fn production_exclude_globs(config: &ResolvedConfig) -> Option<globset::GlobSet> {
     let mut builder = globset::GlobSetBuilder::new();
     let user_patterns = config.production_ignore.iter().map(String::as_str);
     for pattern in PRODUCTION_EXCLUDE_PATTERNS

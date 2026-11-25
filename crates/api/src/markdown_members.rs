@@ -57,6 +57,20 @@ pub(super) fn push_markdown_member_sections(
         |e| e.escape.path.as_path(),
         |e: &NamespaceEscapeFinding| format_namespace_escape(&e.escape, root),
     );
+    markdown_grouped_section(
+        out,
+        &results.test_only_exports,
+        "Test-only exports",
+        root,
+        |t| t.export.path.as_path(),
+        |t: &TestOnlyExportFinding| {
+            format!(
+                ":{} {}",
+                t.export.line,
+                escape_markdown_inline(&t.export.message())
+            )
+        },
+    );
 }
 
 fn format_namespace_escape(escape: &NamespaceEscape, root: &Path) -> String {

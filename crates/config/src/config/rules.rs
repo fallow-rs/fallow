@@ -151,6 +151,15 @@ pub struct RulesConfig {
         alias = "namespace-escape"
     )]
     pub namespace_escapes: Severity,
+    /// An exported value that only test-side files use: test, story,
+    /// fixture and bench files, `production.ignore` files, and test helpers.
+    /// Reported in default-scope runs only. Defaults to `off`, so the
+    /// default output and the `--ci` gate do not change.
+    #[serde(
+        default = "RulesConfig::default_test_only_exports",
+        alias = "test-only-export"
+    )]
+    pub test_only_exports: Severity,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Defaults to `warn`, not `error` like the closed-set
@@ -564,6 +573,7 @@ impl Default for RulesConfig {
             unused_namespace_members: Severity::Warn,
             unused_protected_class_members: Severity::Off,
             namespace_escapes: Self::NAMESPACE_ESCAPES_DEFAULT,
+            test_only_exports: Self::TEST_ONLY_EXPORTS_DEFAULT,
             unused_store_members: Severity::Warn,
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
@@ -648,6 +658,13 @@ impl RulesConfig {
         Self::NAMESPACE_ESCAPES_DEFAULT
     }
 
+    /// Default severity of the `test-only-exports` rule.
+    pub const TEST_ONLY_EXPORTS_DEFAULT: Severity = Severity::Off;
+
+    const fn default_test_only_exports() -> Severity {
+        Self::TEST_ONLY_EXPORTS_DEFAULT
+    }
+
     /// Map an [`IssueKind`] to its configured [`Severity`] in this config.
     ///
     /// Single source of truth for the kind-to-severity mapping, shared by core
@@ -675,6 +692,7 @@ impl RulesConfig {
             IssueKind::UnusedNamespaceMember => self.unused_namespace_members,
             IssueKind::UnusedProtectedClassMember => self.unused_protected_class_members,
             IssueKind::NamespaceEscape => self.namespace_escapes,
+            IssueKind::TestOnlyExport => self.test_only_exports,
             IssueKind::UnusedStoreMember => self.unused_store_members,
             IssueKind::UnprovidedInject => self.unprovided_injects,
             IssueKind::UnresolvedImport => self.unresolved_imports,
@@ -783,6 +801,7 @@ impl RulesConfig {
                 unused_namespace_members,
                 unused_protected_class_members,
                 namespace_escapes,
+                test_only_exports,
                 unused_store_members,
                 unprovided_injects,
                 unrendered_components,
@@ -1051,6 +1070,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub namespace_escapes: Option<Severity>,
+    /// Severity of the `test-only-exports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
+    #[serde(
+        default,
+        alias = "test-only-export",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub test_only_exports: Option<Severity>,
     /// Severity of the `unused-store-members` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.
     #[serde(
         default,
@@ -1489,6 +1515,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-namespace-members",
     "unused-protected-class-members",
     "namespace-escapes",
+    "test-only-exports",
     "unused-store-members",
     "unprovided-injects",
     "unrendered-components",
@@ -1560,6 +1587,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-namespace-member",
     "unused-protected-class-member",
     "namespace-escape",
+    "test-only-export",
     "unused-store-member",
     "unprovided-inject",
     "unrendered-component",

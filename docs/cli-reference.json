@@ -4804,6 +4804,31 @@
           "negated_by": null
         },
         {
+          "id": "test_only_exports",
+          "long": "--test-only-exports",
+          "short": null,
+          "aliases": [],
+          "value_name": null,
+          "value_names": [],
+          "value_optional": false,
+          "action": "set-true",
+          "takes_value": false,
+          "multiple": false,
+          "possible_values": [],
+          "default": null,
+          "env": null,
+          "help": "Only report exported values that only test-side files use (enables this rule)",
+          "long_help": null,
+          "hidden": false,
+          "hidden_in_short_help": false,
+          "global": false,
+          "help_heading": "Issue types",
+          "required": false,
+          "conflicts_with": [],
+          "negates": null,
+          "negated_by": null
+        },
+        {
           "id": "unprovided_injects",
           "long": "--unprovided-injects",
           "short": null,
@@ -19256,7 +19281,7 @@
       "description": "Production dependency only used via type-only imports",
       "label": "Type-Only Dependencies",
       "config_key": "type-only-dependencies",
-      "registry_index": 20,
+      "registry_index": 21,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unused-deps",
@@ -19319,7 +19344,7 @@
       "description": "Production dependency only imported by test files",
       "label": "Test-Only Dependencies",
       "config_key": "test-only-dependencies",
-      "registry_index": 21,
+      "registry_index": 22,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unused-deps",
@@ -19378,7 +19403,7 @@
       "description": "devDependency imported by production code with a runtime import",
       "label": "Dev Dependencies Used in Production",
       "config_key": "dev-dependencies-in-production",
-      "registry_index": 22,
+      "registry_index": 23,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unused-deps",
@@ -19555,7 +19580,7 @@
       "description": "Store member is never accessed by any consumer",
       "label": "Unused Store Members",
       "config_key": "unused-store-members",
-      "registry_index": 14,
+      "registry_index": 15,
       "aliases": [
         "unused-store-members"
       ],
@@ -19743,6 +19768,75 @@
       "display_label": "Namespace escapes"
     },
     {
+      "id": "test-only-export",
+      "rule_id": "fallow/test-only-export",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Export is used only by test-side files",
+      "label": "Test-Only Exports",
+      "config_key": "test-only-exports",
+      "registry_index": 13,
+      "aliases": [
+        "test-only-exports"
+      ],
+      "lsp": true,
+      "filter_flag": "--test-only-exports",
+      "deprecated_filter_flag": null,
+      "result_key": "test_only_exports",
+      "summary_label": "Test-only exports",
+      "summary_docs_anchor": "test-only-exports",
+      "sarif_rule_ids": [
+        "fallow/test-only-export"
+      ],
+      "codeclimate_check_names": [
+        "fallow/test-only-export"
+      ],
+      "ts_alias": {
+        "name": "TestOnlyExport",
+        "parent": "TestOnlyExportFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line test-only-export",
+      "default_severity": "off",
+      "opt_in": true,
+      "frameworks": [],
+      "note": "Opt-in check for default-scope runs; the rule defaults to off. No automatic fix, because a removal breaks the test-side importers.",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/test-only-export/",
+      "explanation": {
+        "id": "fallow/test-only-export",
+        "name": "Test-Only Exports",
+        "summary": "Export is used only by test-side files",
+        "rationale": "An exported value that production code does not use, while a test-side file does. Test-side files are the files that `--production` leaves out: test, story, fixture and bench files and the `production.ignore` globs, plus the files that only tests reach, such as a test helper. A file that a runtime or support entry reaches, such as a source file that a bundler config names, is production code. In the default mode the tests keep such an export alive, so `unused-export` does not report it. In `--production` mode the same export is an `unused-export` finding, and this rule does not run. One export is never in both kinds in one run. Only values are checked in this version, not types. Entry exports, `keepExportTags`, `ignoreExports` and plugin rules keep an export, as for `unused-export`. The `colocated_only` field is true when each test-side importer is next to the module, which can mean a deliberate internal seam. A test-only use does not make an `@expected-unused` tag stale. Defaults to off.",
+        "example": "src/price.ts exports legacyFormat. Only src/price.test.ts imports it, and no production file calls it.",
+        "example_files": [
+          {
+            "path": ".fallowrc.json",
+            "code": "{\n  \"rules\": {\n    \"test-only-exports\": \"warn\"\n  }\n}\n"
+          },
+          {
+            "path": "src/index.ts",
+            "code": "import { formatPrice } from \"./price\";\n\nexport const label = (cents: number): string => `Total: ${formatPrice(cents)}`;\n"
+          },
+          {
+            "path": "src/price.test.ts",
+            "code": "import { expect, it } from \"vitest\";\nimport { formatPrice, legacyFormat } from \"./price\";\n\nit(\"formats\", () => {\n  expect(formatPrice(150)).toBe(\"1.5 EUR\");\n  expect(legacyFormat(150)).toBe(\"EUR 1.5\");\n});\n"
+          },
+          {
+            "path": "src/price.ts",
+            "code": "export const formatPrice = (cents: number): string => `${roundCents(cents) / 100} EUR`;\n\nexport const roundCents = (cents: number): number => Math.round(cents);\n\nexport const legacyFormat = (cents: number): string => `EUR ${cents / 100}`;\n"
+          }
+        ],
+        "example_base_files": [],
+        "how_to_fix": "When the export is dead code that its tests keep alive, remove the export and those tests. When it is a seam for tests only, test the behavior through the public functions of the module and make the item internal. When the export is deliberate, add // fallow-ignore-next-line test-only-export above it. See also unused-export.",
+        "docs": "https://fallow.tools/docs/rules/test-only-export/"
+      },
+      "display_label": "Test-only exports"
+    },
+    {
       "id": "unused-namespace-member",
       "rule_id": "fallow/unused-namespace-member",
       "command": "dead-code",
@@ -19750,7 +19844,7 @@
       "description": "Namespace member is never referenced",
       "label": "Unused Namespace Members",
       "config_key": "unused-namespace-members",
-      "registry_index": 13,
+      "registry_index": 14,
       "aliases": [
         "unused-namespace-members"
       ],
@@ -19811,7 +19905,7 @@
       "description": "Import could not be resolved",
       "label": "Unresolved Imports",
       "config_key": "unresolved-imports",
-      "registry_index": 15,
+      "registry_index": 16,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unresolved-imports",
@@ -19870,7 +19964,7 @@
       "description": "Dependency used but not in package.json",
       "label": "Unlisted Dependencies",
       "config_key": "unlisted-dependencies",
-      "registry_index": 16,
+      "registry_index": 17,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unlisted-deps",
@@ -19929,7 +20023,7 @@
       "description": "Binary used but provided by no installed package",
       "label": "Unlisted Binaries",
       "config_key": "unlisted-binaries",
-      "registry_index": 17,
+      "registry_index": 18,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--unlisted-binaries",
@@ -19979,7 +20073,7 @@
       "description": "Export name appears in multiple modules",
       "label": "Duplicate Exports",
       "config_key": "duplicate-exports",
-      "registry_index": 18,
+      "registry_index": 19,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--duplicate-exports",
@@ -20042,7 +20136,7 @@
       "description": "One module exports one binding under two or more names",
       "label": "Duplicate Export Aliases",
       "config_key": "duplicate-export-aliases",
-      "registry_index": 19,
+      "registry_index": 20,
       "aliases": [
         "duplicate-export-aliases"
       ],
@@ -20103,7 +20197,7 @@
       "description": "Circular dependency chain detected",
       "label": "Circular Dependencies",
       "config_key": "circular-dependencies",
-      "registry_index": 23,
+      "registry_index": 24,
       "aliases": [
         "circular-dependencies"
       ],
@@ -20164,7 +20258,7 @@
       "description": "Two or more barrel files re-export from each other in a loop",
       "label": "Re-Export Cycles",
       "config_key": "re-export-cycle",
-      "registry_index": 24,
+      "registry_index": 25,
       "aliases": [
         "re-export-cycles",
         "reexport-cycle",
@@ -20227,7 +20321,7 @@
       "description": "Two or more workspace packages import each other in a loop",
       "label": "Package Cycles",
       "config_key": "package-cycle",
-      "registry_index": 25,
+      "registry_index": 26,
       "aliases": [
         "package-cycles"
       ],
@@ -20296,7 +20390,7 @@
       "description": "Import crosses a configured architecture boundary",
       "label": "Boundary Violations",
       "config_key": "boundary-violation",
-      "registry_index": 26,
+      "registry_index": 27,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--boundaries",
@@ -20359,7 +20453,7 @@
       "description": "Source file matches no configured architecture boundary zone",
       "label": "Boundary Coverage",
       "config_key": "boundary-violation",
-      "registry_index": 27,
+      "registry_index": 28,
       "aliases": [
         "boundary-coverage-violations"
       ],
@@ -20421,7 +20515,7 @@
       "description": "Zoned file calls a callee its zone forbids",
       "label": "Boundary Call Violations",
       "config_key": "boundary-violation",
-      "registry_index": 28,
+      "registry_index": 29,
       "aliases": [
         "boundary-calls",
         "boundary-call-violations"
@@ -20480,7 +20574,7 @@
       "description": "Usage violates a configured rule-pack policy",
       "label": "Policy Violations",
       "config_key": "policy-violation",
-      "registry_index": 29,
+      "registry_index": 30,
       "aliases": [
         "policy-violations"
       ],
@@ -20542,7 +20636,7 @@
       "description": "Suppression comment or tag no longer matches any issue",
       "label": "Stale Suppressions",
       "config_key": "stale-suppressions",
-      "registry_index": 49,
+      "registry_index": 50,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--stale-suppressions",
@@ -20600,7 +20694,7 @@
       "description": "Suppression comment omits a required reason",
       "label": "Missing Suppression Reasons",
       "config_key": "require-suppression-reason",
-      "registry_index": 50,
+      "registry_index": 51,
       "aliases": [
         "missing-suppression-reasons"
       ],
@@ -20658,7 +20752,7 @@
       "description": "Catalog entry not referenced by any workspace package",
       "label": "Unused Catalog Entries",
       "config_key": "unused-catalog-entries",
-      "registry_index": 51,
+      "registry_index": 52,
       "aliases": [
         "catalog",
         "unused-catalog-entries"
@@ -20720,7 +20814,7 @@
       "description": "Named catalog group has no entries",
       "label": "Empty Catalog Groups",
       "config_key": "empty-catalog-groups",
-      "registry_index": 52,
+      "registry_index": 53,
       "aliases": [
         "empty-catalog",
         "empty-catalog-groups"
@@ -20778,7 +20872,7 @@
       "description": "package.json references a catalog that does not declare the package",
       "label": "Unresolved Catalog References",
       "config_key": "unresolved-catalog-references",
-      "registry_index": 53,
+      "registry_index": 54,
       "aliases": [
         "unresolved-catalog",
         "unresolved-catalog-references"
@@ -20840,7 +20934,7 @@
       "description": "Package-manager override target is not declared or resolved",
       "label": "Unused Dependency Overrides",
       "config_key": "unused-dependency-overrides",
-      "registry_index": 54,
+      "registry_index": 55,
       "aliases": [
         "unused-dependency-overrides",
         "unused-override",
@@ -20899,7 +20993,7 @@
       "description": "Package-manager override has an unparsable key or value",
       "label": "Misconfigured Dependency Overrides",
       "config_key": "misconfigured-dependency-overrides",
-      "registry_index": 55,
+      "registry_index": 56,
       "aliases": [
         "misconfigured-dependency-overrides",
         "misconfigured-override",
@@ -20958,7 +21052,7 @@
       "description": "\"use client\" file exports a server-only / route-config name",
       "label": "Invalid Client Exports",
       "config_key": "invalid-client-export",
-      "registry_index": 30,
+      "registry_index": 31,
       "aliases": [
         "invalid-client-exports"
       ],
@@ -21014,7 +21108,7 @@
       "description": "Barrel re-exports both a \"use client\" module and a server-only module",
       "label": "Mixed Client/Server Barrels",
       "config_key": "mixed-client-server-barrel",
-      "registry_index": 31,
+      "registry_index": 32,
       "aliases": [
         "mixed-client-server-barrels"
       ],
@@ -21076,7 +21170,7 @@
       "description": "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
       "label": "Misplaced Directives",
       "config_key": "misplaced-directive",
-      "registry_index": 32,
+      "registry_index": 33,
       "aliases": [
         "misplaced-directives"
       ],
@@ -21130,7 +21224,7 @@
       "description": "inject() / getContext() reads a key that no provide() / setContext() supplies",
       "label": "Unprovided Injects",
       "config_key": "unprovided-injects",
-      "registry_index": 33,
+      "registry_index": 34,
       "aliases": [
         "unprovided-injects"
       ],
@@ -21188,7 +21282,7 @@
       "description": "A component is reachable through a barrel but rendered nowhere",
       "label": "Unrendered Components",
       "config_key": "unrendered-components",
-      "registry_index": 34,
+      "registry_index": 35,
       "aliases": [
         "unrendered-components"
       ],
@@ -21250,7 +21344,7 @@
       "description": "Known reachable callers omit an optional prop consumed inside its component",
       "label": "Absent Optional Component Props",
       "config_key": "absent-component-props",
-      "registry_index": 36,
+      "registry_index": 37,
       "aliases": [
         "absent-component-props"
       ],
@@ -21312,7 +21406,7 @@
       "description": "Each visible call passes a function parameter in the same way",
       "label": "Constant Parameters",
       "config_key": "constant-parameters",
-      "registry_index": 37,
+      "registry_index": 38,
       "aliases": [
         "constant-parameters"
       ],
@@ -21374,7 +21468,7 @@
       "description": "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
       "label": "Unused Component Props",
       "config_key": "unused-component-props",
-      "registry_index": 35,
+      "registry_index": 36,
       "aliases": [
         "unused-component-props"
       ],
@@ -21432,7 +21526,7 @@
       "description": "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
       "label": "Unused Component Emits",
       "config_key": "unused-component-emits",
-      "registry_index": 38,
+      "registry_index": 39,
       "aliases": [
         "unused-component-emits"
       ],
@@ -21490,7 +21584,7 @@
       "description": "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
       "label": "Unused Component Inputs",
       "config_key": "unused-component-inputs",
-      "registry_index": 39,
+      "registry_index": 40,
       "aliases": [
         "unused-component-inputs"
       ],
@@ -21548,7 +21642,7 @@
       "description": "An Angular @Output() / signal output() output is emitted nowhere in its own component",
       "label": "Unused Component Outputs",
       "config_key": "unused-component-outputs",
-      "registry_index": 40,
+      "registry_index": 41,
       "aliases": [
         "unused-component-outputs"
       ],
@@ -21606,7 +21700,7 @@
       "description": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
       "label": "Unused Svelte Events",
       "config_key": "unused-svelte-events",
-      "registry_index": 41,
+      "registry_index": 42,
       "aliases": [
         "unused-svelte-events"
       ],
@@ -21664,7 +21758,7 @@
       "description": "An Effect layer is composed only into layers that nothing uses",
       "label": "Unused Effect Layers",
       "config_key": "unused-effect-layers",
-      "registry_index": 44,
+      "registry_index": 45,
       "aliases": [
         "unused-effect-layers"
       ],
@@ -21722,7 +21816,7 @@
       "description": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it",
       "label": "Unused Tagged Errors",
       "config_key": "unused-tagged-errors",
-      "registry_index": 45,
+      "registry_index": 46,
       "aliases": [
         "unused-tagged-errors"
       ],
@@ -21780,7 +21874,7 @@
       "description": "A catchTag handler names a project error tag that no code produces",
       "label": "Unproduced Catch Tags",
       "config_key": "unproduced-catch-tags",
-      "registry_index": 46,
+      "registry_index": 47,
       "aliases": [
         "unproduced-catch-tags"
       ],
@@ -21838,7 +21932,7 @@
       "description": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
       "label": "Unused Server Actions",
       "config_key": "unused-server-actions",
-      "registry_index": 42,
+      "registry_index": 43,
       "aliases": [
         "unused-server-actions"
       ],
@@ -21896,7 +21990,7 @@
       "description": "A SvelteKit load() return-object key is read by no consumer",
       "label": "Unused Load Data Keys",
       "config_key": "unused-load-data-keys",
-      "registry_index": 43,
+      "registry_index": 44,
       "aliases": [
         "unused-load-data-keys"
       ],
@@ -21954,7 +22048,7 @@
       "description": "A React/Preact prop is forwarded unchanged through 2 or more components to a distant consumer",
       "label": "Prop Drilling",
       "config_key": "prop-drilling",
-      "registry_index": 61,
+      "registry_index": 62,
       "aliases": [],
       "lsp": true,
       "filter_flag": null,
@@ -22022,7 +22116,7 @@
       "description": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
       "label": "Thin Wrappers",
       "config_key": "thin-wrapper",
-      "registry_index": 62,
+      "registry_index": 63,
       "aliases": [
         "thin-wrappers"
       ],
@@ -22084,7 +22178,7 @@
       "description": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
       "label": "Duplicate Prop Shapes",
       "config_key": "duplicate-prop-shape",
-      "registry_index": 63,
+      "registry_index": 64,
       "aliases": [
         "duplicate-prop-shapes"
       ],
@@ -22150,7 +22244,7 @@
       "description": "Two or more Next.js App Router route files resolve to the same URL",
       "label": "Route Collisions",
       "config_key": "route-collision",
-      "registry_index": 47,
+      "registry_index": 48,
       "aliases": [
         "route-collisions"
       ],
@@ -22210,7 +22304,7 @@
       "description": "Sibling Next.js dynamic route segments use different slug names at the same position",
       "label": "Dynamic Segment Conflicts",
       "config_key": "dynamic-segment-name-conflict",
-      "registry_index": 48,
+      "registry_index": 49,
       "aliases": [
         "dynamic-segment-name-conflicts"
       ],
@@ -22654,7 +22748,7 @@
       "description": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system",
       "label": "CSS Token Drift",
       "config_key": "css-token-drift",
-      "registry_index": 64,
+      "registry_index": 65,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -22706,7 +22800,7 @@
       "description": "CSS or CSS-in-JS declaration block is duplicated across rules",
       "label": "CSS Duplicate Block",
       "config_key": "css-duplicate-block",
-      "registry_index": 65,
+      "registry_index": 66,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -22758,7 +22852,7 @@
       "description": "CSS selector, nesting, or important usage is structurally complex",
       "label": "CSS Selector Complexity",
       "config_key": "css-selector-complexity",
-      "registry_index": 66,
+      "registry_index": 67,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -22806,7 +22900,7 @@
       "description": "CSS or CSS-in-JS surface appears unused",
       "label": "CSS Dead Surface",
       "config_key": "css-dead-surface",
-      "registry_index": 67,
+      "registry_index": 68,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -22854,7 +22948,7 @@
       "description": "CSS or CSS-in-JS reference resolves to no stylesheet definition",
       "label": "CSS Broken Reference",
       "config_key": "css-broken-reference",
-      "registry_index": 68,
+      "registry_index": 69,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -23465,7 +23559,7 @@
       "description": "Detected feature flag pattern",
       "label": "Feature Flags",
       "config_key": "feature-flags",
-      "registry_index": 59,
+      "registry_index": 60,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -25920,7 +26014,7 @@
       "description": "The change weakens tests or a coverage threshold",
       "label": "Weakened Tests",
       "config_key": "weakened-tests",
-      "registry_index": 69,
+      "registry_index": 70,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -25973,7 +26067,7 @@
       "description": "The change adds a suppression comment",
       "label": "Added Suppressions",
       "config_key": "added-suppression",
-      "registry_index": 70,
+      "registry_index": 71,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -26026,7 +26120,7 @@
       "description": "The change adds a test-environment branch to source code",
       "label": "Test-Only Branches",
       "config_key": "test-only-branch",
-      "registry_index": 71,
+      "registry_index": 72,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -26079,7 +26173,7 @@
       "description": "The change edits one copy of duplicated code but not its siblings",
       "label": "Diverged Clone Siblings",
       "config_key": "diverged-clone-sibling",
-      "registry_index": 72,
+      "registry_index": 73,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -26148,7 +26242,7 @@
       "description": "The change adds a dependency",
       "label": "Added Dependencies",
       "config_key": "added-dependency",
-      "registry_index": 73,
+      "registry_index": 74,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,

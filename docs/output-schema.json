@@ -731,6 +731,13 @@
           },
           "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
+        "test_only_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TestOnlyExportFinding"
+          },
+          "description": "Exported values that only test-side files use. Default-scope runs\nonly: a production run reports such an export as an unused export.\nThe rule is `off` by default, so this array is empty unless a config\nturns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -1439,6 +1446,13 @@
             "$ref": "#/definitions/NamespaceEscapeFinding"
           },
           "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
+        },
+        "test_only_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TestOnlyExportFinding"
+          },
+          "description": "Exported values that only test-side files use. Default-scope runs\nonly: a production run reports such an export as an unused export.\nThe rule is `off` by default, so this array is empty unless a config\nturns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -6577,6 +6591,10 @@
           "type": "integer",
           "description": "Namespace bindings that the code uses as a whole value. Omitted when\nzero, because the rule is `off` by default."
         },
+        "test_only_exports": {
+          "type": "integer",
+          "description": "Exported values that only test-side files use. Omitted when zero,\nbecause the rule is `off` by default."
+        },
         "unused_store_members": {
           "type": "integer",
           "description": "Unused store members."
@@ -7449,6 +7467,13 @@
             "$ref": "#/definitions/NamespaceEscapeFinding"
           },
           "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
+        },
+        "test_only_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TestOnlyExportFinding"
+          },
+          "description": "Exported values that only test-side files use. Default-scope runs\nonly: a production run reports such an export as an unused export.\nThe rule is `off` by default, so this array is empty unless a config\nturns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -8343,6 +8368,16 @@
           "type": "string",
           "const": "resolve-dynamic-segment-name-conflict",
           "description": "Resolve a Next.js dynamic-segment name conflict by renaming the dynamic\nsegments at the conflicting position to a single consistent slug name\n(manual)."
+        },
+        {
+          "type": "string",
+          "const": "remove-export-and-tests",
+          "description": "Remove an export that only test-side files use, together with the\ntests that use it (manual; used by test-only-export findings)."
+        },
+        {
+          "type": "string",
+          "const": "test-through-interface",
+          "description": "Test the behavior through the public interface of the module instead\nof through the export, then make the export internal (manual; used by\ntest-only-export findings)."
         },
         {
           "type": "string",
@@ -32119,6 +32154,13 @@
           },
           "description": "Namespace bindings that the code uses as a whole value, so every\nexport of the target module gets credit and stays unchecked. The rule\nis `off` by default, so this array is empty unless a config turns it on."
         },
+        "test_only_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TestOnlyExportFinding"
+          },
+          "description": "Exported values that only test-side files use. Default-scope runs\nonly: a production run reports such an export as an unused export.\nThe rule is `off` by default, so this array is empty unless a config\nturns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -40686,6 +40728,81 @@
         "remaining"
       ],
       "description": "The reachable files outside the production scope that import an export."
+    },
+    "TestOnlyExportFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that declares the export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "Name of the export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the export."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "test_importers": {
+          "description": "The test-side files that use the export.",
+          "$ref": "#/definitions/TestImporters"
+        },
+        "colocated_only": {
+          "type": "boolean",
+          "description": "True when each test-side importer is in the directory of the\ndeclaring file or in a `__tests__` directory directly below it. A\ncolocated test can use the export on purpose as an internal seam of\nthe module."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "export_name",
+        "line",
+        "col",
+        "test_importers",
+        "colocated_only",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`TestOnlyExport`] finding under the\n`test_only_exports` key.\n\nBoth fix actions are manual. A removal of the export also breaks the\ntest-side files that import it, so `fallow fix` never applies one."
     }
   }
 }

@@ -256,6 +256,7 @@ fn ts_alias_policy_is_explicit() {
             ("PackageCycle", "PackageCycleFinding"),
             ("ReExportCycle", "ReExportCycleFinding"),
             ("TestOnlyDependency", "TestOnlyDependencyFinding"),
+            ("TestOnlyExport", "TestOnlyExportFinding"),
             ("TypeOnlyDependency", "TypeOnlyDependencyFinding"),
             (
                 "UnresolvedCatalogReference",

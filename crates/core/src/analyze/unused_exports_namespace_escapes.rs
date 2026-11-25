@@ -28,7 +28,9 @@ use fallow_types::extract::ImportedName;
 use crate::graph::{ExportSymbol, ModuleGraph, ModuleNode, NamespaceEscape, NamespaceEscapeReason};
 use rayon::prelude::*;
 
-use super::{UnusedExportInput, find_unused_exports_for_module, with_unused_export_context};
+use super::{
+    ReferenceView, UnusedExportInput, find_unused_exports_for_module, with_unused_export_context,
+};
 
 /// A namespace binding that hides at least one export.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,8 +134,8 @@ fn hidden_exports(
     let graph = input.graph;
     let mut files: Vec<(&FileId, &FxHashSet<usize>)> = credited.iter().collect();
     files.sort_unstable_by_key(|(file_id, _)| file_id.0);
-    let reported = |assume_unreferenced: bool| -> FxHashSet<(FileId, usize)> {
-        with_unused_export_context(input, assume_unreferenced, |ctx| {
+    let reported = |references: ReferenceView<'_>| -> FxHashSet<(FileId, usize)> {
+        with_unused_export_context(input, references, None, |ctx| {
             files
                 .par_iter()
                 .filter_map(|&(&file_id, only)| {
@@ -162,13 +164,13 @@ fn hidden_exports(
                 .collect()
         })
     };
-    let with_references = reported(false);
-    let mut hidden = reported(true);
+    let with_references = reported(ReferenceView::All);
+    let mut hidden = reported(ReferenceView::None);
     hidden.retain(|key| !with_references.contains(key));
     hidden
 }
 
-fn export_index(
+pub(super) fn export_index(
     module: &ModuleNode,
     name: &str,
     is_type_only: bool,

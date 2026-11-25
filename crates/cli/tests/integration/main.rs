@@ -216,6 +216,7 @@ mod stdout_pipe_tests;
 mod summary_mark_tests;
 mod suppressions_tests;
 mod telemetry_tests;
+mod test_only_export_tests;
 mod trace_chain_tests;
 mod trace_dependency_tests;
 mod trace_dependency_usage_tests;

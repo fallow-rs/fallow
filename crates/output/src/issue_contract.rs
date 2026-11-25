@@ -484,6 +484,7 @@ mod tests {
                 ("UnusedExport", "UnusedExportFinding"),
                 ("UnusedFile", "UnusedFileFinding"),
                 ("NamespaceEscape", "NamespaceEscapeFinding"),
+                ("TestOnlyExport", "TestOnlyExportFinding"),
                 ("UnusedMember", "UnusedClassMemberFinding"),
                 ("UnusedMember", "UnusedEnumMemberFinding"),
                 ("UnusedMember", "UnusedNamespaceMemberFinding"),

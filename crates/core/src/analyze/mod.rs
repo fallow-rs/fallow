@@ -32,6 +32,7 @@ mod namespace_escape_detector;
 mod package_cycles;
 mod package_json_utils;
 mod package_manager;
+mod parallel_detector_results;
 mod plugin_slices;
 mod policy;
 mod predicates;
@@ -48,6 +49,8 @@ mod route_tree;
 mod security;
 mod semantic_scope;
 mod server_only;
+mod test_only_export_detector;
+use parallel_detector_results::collect_parallel_dead_code_detector_results;
 mod thin_wrapper;
 mod unconfigured_check;
 mod unlisted_binaries;
@@ -824,6 +827,8 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
     let mut results = run_parallel_dead_code_detectors(detector_input);
     results.namespace_escapes =
         namespace_escape_detector::run_namespace_escape_detector(detector_input);
+    results.test_only_exports =
+        test_only_export_detector::run_test_only_export_detector(detector_input);
     semantic_scope::attach(&mut results, input.graph, input.config, plugin_result);
     results
 }
@@ -1651,66 +1656,6 @@ impl ParallelDeadCodeDetectorResults {
 
 fn run_parallel_dead_code_detectors(input: DeadCodeDetectorInput<'_>) -> AnalysisResults {
     collect_parallel_dead_code_detector_results(input).into_analysis_results()
-}
-
-fn collect_parallel_dead_code_detector_results(
-    input: DeadCodeDetectorInput<'_>,
-) -> ParallelDeadCodeDetectorResults {
-    let (
-        ((unused_files, suppressed_unused_files), export_results),
-        (
-            (member_results, dependency_results),
-            (
-                (unresolved_imports, (duplicate_exports, duplicate_export_aliases)),
-                (
-                    (
-                        boundary_violations,
-                        (
-                            boundary_coverage_violations,
-                            (boundary_call_violations, policy_violations),
-                        ),
-                    ),
-                    (circular_dependencies, ((re_export_cycles, package_cycles), export_usages)),
-                ),
-            ),
-        ),
-    ) = rayon::join(
-        || run_file_and_export_detectors(input),
-        || {
-            rayon::join(
-                || run_member_and_dependency_detectors(input),
-                || {
-                    rayon::join(
-                        || {
-                            import_and_duplicate_detectors::run_import_and_duplicate_detectors(
-                                input,
-                            )
-                        },
-                        || run_boundary_cycle_and_usage_detectors(input),
-                    )
-                },
-            )
-        },
-    );
-
-    ParallelDeadCodeDetectorResults {
-        unused_files,
-        suppressed_unused_files,
-        export_results,
-        member_results,
-        dependency_results,
-        unresolved_imports,
-        duplicate_exports,
-        duplicate_export_aliases,
-        boundary_violations,
-        boundary_coverage_violations,
-        boundary_call_violations,
-        policy_violations,
-        circular_dependencies,
-        re_export_cycles,
-        package_cycles,
-        export_usages,
-    }
 }
 
 fn run_file_and_export_detectors(

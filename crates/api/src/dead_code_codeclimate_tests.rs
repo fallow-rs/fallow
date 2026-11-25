@@ -16,6 +16,7 @@ fn codeclimate_check_name_literals() -> BTreeSet<String> {
         include_str!("dead_code_codeclimate_boundary.rs"),
         include_str!("dead_code_codeclimate_cycles.rs"),
         include_str!("dead_code_codeclimate_namespace_escape.rs"),
+        include_str!("dead_code_codeclimate_test_only_export.rs"),
     ]
     .concat();
     let mut literals = BTreeSet::new();

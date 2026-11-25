@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 
 use toml::{Table, Value};
 
+#[path = "architecture_boundaries_audit_routes.rs"]
+mod audit_routes;
+
 #[test]
 fn repo_architecture_north_star_stays_documented() {
     let migration_doc =
@@ -946,86 +949,6 @@ fn routing_self_identity_probe_routes_through_engine() {
     }
 }
 
-#[test]
-fn audit_repo_ref_orchestration_routes_through_engine() {
-    let source_path = "crates/api/src/runtime/audit.rs";
-    let source = read_source_without_line_comments(source_path).expect("read audit source");
-    let production_source = source
-        .split("\n#[cfg(test)]")
-        .next()
-        .expect("audit source before tests");
-    assert!(
-        production_source.contains("repo_refs::{self, ResolvedAuditBase, TemporaryBaseWorktree}"),
-        "audit runtime must use engine-owned repo-ref and base-worktree helpers"
-    );
-    for forbidden in [
-        "Command::new(\"git\")",
-        "std::process::Command::new(\"git\")",
-        "clear_ambient_git_env",
-        "fn git_stdout",
-        "fn git_ref_exists",
-        "fn git_upstream_ref",
-        "fn git_merge_base",
-        "fn detect_remote_default_ref",
-        "fn get_head_sha",
-        "struct BaseWorktree",
-    ] {
-        assert!(
-            !production_source.contains(forbidden),
-            "{source_path} must not own audit git orchestration helper `{forbidden}`"
-        );
-    }
-
-    // The copy that drifted and caused #2699 lived on the CLI side, so the
-    // same rule holds for the CLI entry point into the detection. Both routes
-    // resolve the base through the one audit resolver in fallow-api.
-    let resolver_path = "crates/api/src/audit_run/base_ref.rs";
-    let resolver = read_source_without_line_comments(resolver_path).expect("read base resolver");
-    assert!(
-        resolver.contains("repo_refs::auto_detect_audit_base_ref")
-            && !resolver.contains("Command::new(\"git\")"),
-        "{resolver_path} must resolve the auto-detected base through the engine"
-    );
-    assert!(
-        read_source_without_line_comments("crates/api/src/runtime/audit_base_ref.rs")
-            .is_ok_and(|typed| typed.contains("crate::audit_run::resolve_audit_base")),
-        "the typed audit must resolve the base through the shared audit resolver"
-    );
-    let cli_path = "crates/cli/src/audit_base_ref.rs";
-    let cli_source = read_source_without_line_comments(cli_path).expect("read cli base-ref source");
-    assert!(
-        cli_source.contains("fallow_api::audit_run::resolve_audit_base"),
-        "{cli_path} must resolve the base through the shared audit resolver"
-    );
-    for forbidden in [
-        "fn git_stdout",
-        "fn git_ref_exists",
-        "fn git_upstream_ref",
-        "fn git_merge_base",
-        "fn detect_remote_default_ref",
-        "fn get_head_sha",
-        "Command::new(\"git\")",
-    ] {
-        assert!(
-            !cli_source.contains(forbidden),
-            "{cli_path} must not own audit git orchestration helper `{forbidden}`"
-        );
-    }
-
-    let decision_surface_path = "crates/api/src/runtime/decision_surface.rs";
-    let decision_surface =
-        read_source_without_line_comments(decision_surface_path).expect("read decision surface");
-    assert!(
-        decision_surface.contains("fallow_engine::repo_refs::{self, TemporaryBaseWorktree}"),
-        "decision surface must use engine-owned base-worktree helpers"
-    );
-    assert!(
-        !decision_surface.contains("super::audit::BaseWorktree")
-            && !decision_surface.contains("super::audit::base_analysis_root"),
-        "{decision_surface_path} must not depend on audit-internal base-worktree helpers"
-    );
-}
-
 /// Each CLI file that spawns git, and the git fact it owns. The engine owns ref
 /// and root detection, so a CLI spawn is for work `repo_refs` does not model.
 const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
@@ -1255,8 +1178,11 @@ fn sarif_rule_descriptions_live_in_issue_result_registry() {
 fn typescript_alias_policy_routes_through_issue_registry() {
     let source = read_source_without_line_comments("crates/types/src/issue_meta.rs")
         .expect("read issue metadata source");
+    let alias_table = read_source_without_line_comments("crates/types/src/issue_meta_ts_alias.rs")
+        .expect("read issue alias table source");
     assert!(
-        source.contains("pub const ISSUE_TS_ALIAS_META"),
+        alias_table.contains("pub const ISSUE_TS_ALIAS_META")
+            && source.contains("pub use ts_alias::ISSUE_TS_ALIAS_META;"),
         "TypeScript alias policy must live in registry data"
     );
     assert!(
@@ -1537,6 +1463,10 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::discover::ALLOWED_HIDDEN_DIRS",
         "fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS",
         "fallow_core::discover::SOURCE_EXTENSIONS",
+        // The test-side file rule has one definition, in fallow-core, so the
+        // test importers of a production finding and the test-only-export
+        // rule agree on it.
+        "fallow_core::test_side::TestSideMatcher",
         // The built-in module list has one source, in fallow-core, so the
         // entry weight report and the dependency detectors agree on it.
         "fallow_core::analyze::is_builtin_module",

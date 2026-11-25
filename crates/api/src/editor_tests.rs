@@ -453,6 +453,7 @@ fn merge_results_covers_all_fields() {
     assert_eq!(target.unused_namespace_members.len(), 1);
     assert_eq!(target.unused_protected_class_members.len(), 1);
     assert_eq!(target.namespace_escapes.len(), 1);
+    assert_eq!(target.test_only_exports.len(), 1);
     assert_eq!(target.unused_store_members.len(), 1);
     assert_eq!(target.unresolved_imports.len(), 1);
     assert_eq!(target.unlisted_dependencies.len(), 1);
@@ -725,6 +726,19 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                 module: "/g.ts".into(),
                 hidden_exports: 1,
                 reason: super::editor_results::NamespaceEscapeReason::WholeObjectUse,
+            },
+        )],
+        test_only_exports: vec![super::editor_results::TestOnlyExportFinding::with_actions(
+            super::editor_results::TestOnlyExport {
+                path: "/f.ts".into(),
+                export_name: "seam".to_string(),
+                line: 8,
+                col: 0,
+                test_importers: fallow_types::output_dead_code::TestImporters::from_files(vec![
+                    "/f.test.ts".into(),
+                ])
+                .expect("one importer"),
+                colocated_only: true,
             },
         )],
         unresolved_imports: vec![

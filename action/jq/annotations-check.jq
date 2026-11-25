@@ -67,6 +67,9 @@ def dependency_action(pkg):
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused protected class member::Protected class member '\(.parent_name | san).\(.member_name | san)' is never referenced by its class or a subclass.\(nl)\(nl)Consider removing it or marking it as private."),
   (.namespace_escapes[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Namespace escape::namespace \(.local_name | san) \(if .reason == "re-exported-binding" then "is re-exported as a whole object" elif .reason == "no-member-read" then "has no member read by name" else "is used as a whole value" end); \(.hidden_exports | n(0)) \(if (.hidden_exports | n(0)) == 1 then "export" else "exports" end) of \(.module | san) \(if (.hidden_exports | n(0)) == 1 then "is" else "are" end) not checked.\(nl)\(nl)Read the members by name, or suppress the import with // fallow-ignore-next-line namespace-escape."),
+  (.test_only_exports[]? |
+    ((.test_importers.files // [] | length) + (.test_importers.remaining | n(0))) as $count |
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Test-only export::export \(.export_name | san) is used only by \($count) test-side \(if $count == 1 then "file" else "files" end).\(nl)\(nl)Remove the export and its tests, or test through the public interface of the module. To keep it, suppress the line with // fallow-ignore-next-line test-only-export."),
   (.unused_store_members[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused store member::Store member '\(.parent_name | san).\(.member_name | san)' is never accessed by any consumer.\(nl)\(nl)Consider removing the unused store state, getter, or action."),
   (.unresolved_imports[]? |

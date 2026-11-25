@@ -20,6 +20,7 @@ pub(super) fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> 
         "unused-namespace-member" => rules.unused_namespace_members,
         "unused-protected-class-member" => rules.unused_protected_class_members,
         "namespace-escape" => rules.namespace_escapes,
+        "test-only-export" => rules.test_only_exports,
         "unused-store-member" => rules.unused_store_members,
         "unresolved-import" => rules.unresolved_imports,
         "unlisted-dependency" => rules.unlisted_dependencies,

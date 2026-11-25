@@ -92,6 +92,36 @@ pub(super) fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
             )
         },
     );
+    collect_test_only_exports(env, out);
+}
+
+fn collect_test_only_exports(env: &Value, out: &mut Vec<Annotation>) {
+    push_each(
+        out,
+        env,
+        "test_only_exports",
+        "Test-only export",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "{}.\n\nRemove the export and its tests, or test through the public interface of the module. To keep it, suppress the line with // fallow-ignore-next-line test-only-export.",
+                test_only_export_message(it)
+            )
+        },
+    );
+}
+
+/// The text of `TestOnlyExport::message` for a JSON finding. The jq filter
+/// `annotations-check.jq` builds the same text.
+fn test_only_export_message(it: &Value) -> String {
+    let importers = &it["test_importers"];
+    let count = importers["files"].as_array().map_or(0, Vec::len)
+        + usize::try_from(u(importers, "remaining")).unwrap_or(0);
+    let noun = if count == 1 { "file" } else { "files" };
+    format!(
+        "export {} is used only by {count} test-side {noun}",
+        s(it, "export_name")
+    )
 }
 
 /// The text of `NamespaceEscape::message` for a JSON finding. The jq filter

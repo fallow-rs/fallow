@@ -762,6 +762,7 @@ mod tests {
             "fallow/unused-namespace-member",
             "fallow/unused-protected-class-member",
             "fallow/namespace-escape",
+            "fallow/test-only-export",
             "fallow/unused-store-member",
             "fallow/unresolved-import",
             "fallow/unlisted-dependency",

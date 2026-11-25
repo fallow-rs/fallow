@@ -500,6 +500,7 @@ const ISSUE_TYPE_FILTERS: ReadonlyArray<readonly [CheckFindingKey, keyof IssueTy
   ["unused_namespace_members", "unused-namespace-members"],
   ["unused_protected_class_members", "unused-protected-class-members"],
   ["namespace_escapes", "namespace-escapes"],
+  ["test_only_exports", "test-only-exports"],
   ["unused_store_members", "unused-store-members"],
   ["unused_server_actions", "unused-server-actions"],
   ["unused_load_data_keys", "unused-load-data-keys"],

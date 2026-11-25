@@ -50,6 +50,8 @@ fn action_type(action: &IssueAction) -> &'static str {
             FixActionType::ResolveDynamicSegmentNameConflict => {
                 "resolve-dynamic-segment-name-conflict"
             }
+            FixActionType::RemoveExportAndTests => "remove-export-and-tests",
+            FixActionType::TestThroughInterface => "test-through-interface",
             FixActionType::AddSuppressionReason => "add-suppression-reason",
             FixActionType::RemoveStaleSuppression => "remove-stale-suppression",
         },

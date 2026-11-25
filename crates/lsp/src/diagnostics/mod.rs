@@ -5,6 +5,7 @@ pub mod namespace_escapes;
 mod quality;
 pub mod security;
 mod structural;
+pub mod test_only_exports;
 mod unused;
 
 use rustc_hash::FxHashMap;
@@ -116,6 +117,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref(), root);
     unused::push_member_diagnostics(&mut map, results, &mut mapper);
     namespace_escapes::push_namespace_escape_diagnostics(&mut map, results, root, &mut mapper);
+    test_only_exports::push_test_only_export_diagnostics(&mut map, results, &mut mapper);
     absent_props::push_absent_prop_diagnostics(&mut map, results, &mut mapper);
     constant_parameters::push_constant_parameter_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
@@ -539,6 +541,7 @@ mod severity_gate {
             unused_namespace_members: _,
             unused_protected_class_members: _,
             namespace_escapes: _,
+            test_only_exports: _,
             unresolved_imports: _,
             unlisted_dependencies: _,
             unlisted_binaries: _,

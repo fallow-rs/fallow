@@ -516,6 +516,8 @@ pub struct DeadCodeFilters {
     /// Namespace bindings that the code uses as a whole value, so their
     /// exports are not checked.
     pub namespace_escapes: bool,
+    /// Exported values that only test-side files use.
+    pub test_only_exports: bool,
     /// Store members (for example Pinia) never used outside the store.
     pub unused_store_members: bool,
     /// `inject` calls with no matching `provide`.
@@ -601,6 +603,7 @@ impl DeadCodeFilters {
             || self.unused_namespace_members
             || self.unused_protected_class_members
             || self.namespace_escapes
+            || self.test_only_exports
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -672,6 +675,7 @@ impl DeadCodeFilters {
             "--unused-namespace-members" => self.unused_namespace_members = true,
             "--unused-protected-class-members" => self.unused_protected_class_members = true,
             "--namespace-escapes" => self.namespace_escapes = true,
+            "--test-only-exports" => self.test_only_exports = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,

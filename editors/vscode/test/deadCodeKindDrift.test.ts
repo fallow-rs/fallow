@@ -196,6 +196,17 @@ const DEAD_CODE_WIRING = {
       actions: [],
     },
   },
+  "test-only-export": {
+    field: "test_only_exports",
+    category: "test-only-export",
+    finding: {
+      ...loc,
+      export_name: "seam",
+      test_importers: { files: ["src/a.test.ts"], remaining: 0 },
+      colocated_only: true,
+      actions: [],
+    },
+  },
   "unused-server-action": {
     field: "unused_server_actions",
     category: "unused-server-action",

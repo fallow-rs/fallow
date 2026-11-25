@@ -253,6 +253,9 @@ pub enum IssueKind {
     /// A namespace binding that the code uses as a whole value, so every
     /// export of its target module gets credit and stays unchecked.
     NamespaceEscape,
+    /// An exported value that only test-side files use: test, story, fixture
+    /// and bench files, `production.ignore` files, and test helpers.
+    TestOnlyExport,
 }
 
 impl IssueKind {
@@ -329,6 +332,7 @@ impl IssueKind {
         Self::ConstantParameter,
         Self::UnusedProtectedClassMember,
         Self::NamespaceEscape,
+        Self::TestOnlyExport,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -412,6 +416,7 @@ impl IssueKind {
             Self::ConstantParameter => 69,
             Self::UnusedProtectedClassMember => 70,
             Self::NamespaceEscape => 71,
+            Self::TestOnlyExport => 72,
         }
     }
 
@@ -490,6 +495,7 @@ impl IssueKind {
             69 => Some(Self::ConstantParameter),
             70 => Some(Self::UnusedProtectedClassMember),
             71 => Some(Self::NamespaceEscape),
+            72 => Some(Self::TestOnlyExport),
             _ => None,
         }
     }
@@ -1092,6 +1098,7 @@ mod tests {
             (69, IssueKind::ConstantParameter),
             (70, IssueKind::UnusedProtectedClassMember),
             (71, IssueKind::NamespaceEscape),
+            (72, IssueKind::TestOnlyExport),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

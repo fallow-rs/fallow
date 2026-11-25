@@ -35,6 +35,7 @@ def filter_check:
   (if .unused_namespace_members then .unused_namespace_members |= map(select(.path | in_changed))      else . end) |
   (if .unused_protected_class_members then .unused_protected_class_members |= map(select(.path | in_changed))      else . end) |
   (if .namespace_escapes then .namespace_escapes |= map(select(.path | in_changed))      else . end) |
+  (if .test_only_exports then .test_only_exports |= map(select(.path | in_changed))      else . end) |
   (if .unused_store_members then .unused_store_members |= map(select(.path | in_changed))      else . end) |
   (if .unresolved_imports   then .unresolved_imports   |= map(select(.path | in_changed))      else . end) |
   (if .unlisted_dependencies then
@@ -158,6 +159,7 @@ def filter_check:
       (.unused_namespace_members // [] | length) +
       (.unused_protected_class_members // [] | length) +
       (.namespace_escapes // [] | length) +
+      (.test_only_exports // [] | length) +
       (.unused_store_members // [] | length) +
       (.unresolved_imports // [] | length) +
       (.unlisted_dependencies // [] | length) +

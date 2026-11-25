@@ -105,4 +105,29 @@ pub(super) fn push_member_sarif_results(
             properties: None,
         }
     });
+    push_test_only_export_sarif_results(sarif_results, ctx, snippets);
+}
+
+fn push_test_only_export_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    ctx: &SarifCtx<'_>,
+    snippets: &mut SourceSnippetCache,
+) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+    push_sarif_results(sarif_results, &results.test_only_exports, snippets, |t| {
+        let export = &t.export;
+        SarifFields {
+            rule_id: "fallow/test-only-export",
+            level: finding_level(t, rules.test_only_exports),
+            message: export.message(),
+            uri: relative_uri(&export.path, root),
+            region: Some((export.line, export.col + 1)),
+            source_path: Some(export.path.clone()),
+            properties: None,
+        }
+    });
 }

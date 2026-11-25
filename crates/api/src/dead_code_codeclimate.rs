@@ -25,6 +25,8 @@ mod catalog_issues;
 mod component_io;
 #[path = "dead_code_codeclimate_namespace_escape.rs"]
 mod namespace_escape;
+#[path = "dead_code_codeclimate_test_only_export.rs"]
+mod test_only_export;
 use caller_review::{push_absent_component_prop_issues, push_constant_parameter_issues};
 use catalog_issues::{
     push_empty_catalog_group_issues, push_misconfigured_dependency_override_issues,
@@ -1712,6 +1714,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.namespace_escapes,
             self.root,
             self.rules.namespace_escapes,
+        );
+        test_only_export::push_test_only_export_issues(
+            &mut self.issues,
+            &self.results.test_only_exports,
+            self.root,
+            self.rules.test_only_exports,
         );
     }
 
