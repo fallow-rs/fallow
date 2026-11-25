@@ -58,6 +58,7 @@ impl WorkspaceDiagnosticKind {
             Self::IgnoreExportsNameUnmatched { .. } => "ignore-exports-name-unmatched",
             Self::DuplicatesIgnoreUnmatched { .. } => "duplicates-ignore-unmatched",
             Self::HealthIgnoreUnmatched { .. } => "health-ignore-unmatched",
+            Self::OverrideFilesUnmatched { .. } => "override-files-unmatched",
             Self::CircularDependenciesAllowUnmatched { .. } => {
                 "circular-dependencies-allow-unmatched"
             }
@@ -124,6 +125,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreExportsNameUnmatched { .. }
             | Self::DuplicatesIgnoreUnmatched { .. }
             | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -312,6 +314,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreExportsNameUnmatched { .. }
             | Self::DuplicatesIgnoreUnmatched { .. }
             | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -392,6 +395,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreExportsNameUnmatched { .. }
             | Self::DuplicatesIgnoreUnmatched { .. }
             | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -474,6 +478,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreExportsNameUnmatched { .. }
             | Self::DuplicatesIgnoreUnmatched { .. }
             | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -557,6 +562,7 @@ impl WorkspaceDiagnosticKind {
             | Self::IgnoreExportsNameUnmatched { .. }
             | Self::DuplicatesIgnoreUnmatched { .. }
             | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }

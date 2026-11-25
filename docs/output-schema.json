@@ -14299,6 +14299,45 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "override-files-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The glob, as written in the config."
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The `files` globs of the override, as written in the config."
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The canonical names of the rules of the override that apply per\nfile."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why the glob matched no file, as a kebab-case token."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern",
+            "files",
+            "rules",
+            "reason"
+          ],
+          "description": "A glob of an `overrides[].files` list that matched no project file\n(issue #5227), so the override has no effect for it. The check reads\nthe analyzed files and the other project files, so the answer does not\ndepend on `--changed-since`, `--workspace` or `--production`. An\noverride whose every rule has a `project-level`\n`override-rule-ineffective` entry gets no entry of this kind. `reason`\nis `glob-unmatched`, `directory`, `path-not-found` or `not-a-path`.\nThe token set is open. `path` is the root. Not degraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "circular-dependencies-allow-unmatched"
             },
             "pattern": {

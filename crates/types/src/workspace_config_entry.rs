@@ -197,6 +197,12 @@ pub(super) fn config_entry_message(kind: &WorkspaceDiagnosticKind) -> String {
             files,
             reason,
         } => ineffective_override_message(rule, files, reason),
+        WorkspaceDiagnosticKind::OverrideFilesUnmatched {
+            pattern,
+            files,
+            rules,
+            reason,
+        } => super::override_glob_text::override_glob_message(pattern, files, rules, reason),
         WorkspaceDiagnosticKind::RequestedRuleOff { rule, flag } => format!(
             "{rule} is off in config, so {flag} did not check it. Set the rule to \"error\" or \
              \"warn\" to run this check."

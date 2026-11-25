@@ -1,6 +1,7 @@
-//! Which entries of `ignoreExports`, `duplicates.ignore` and `health.ignore`
-//! match a file or an export of the module graph (issue #5167). The dead-code
-//! envelope reports each entry that matches nothing.
+//! Which entries of `ignoreExports`, `duplicates.ignore`, `health.ignore`
+//! and `overrides[].files` match a file or an export of the module graph
+//! (issues #5167 and #5227). The dead-code envelope reports each entry that
+//! matches nothing.
 
 use fallow_config::{IgnoreExportName, ResolvedConfig};
 use rustc_hash::FxHashSet;
@@ -29,9 +30,12 @@ pub(super) fn begin_pass(
 /// can forward any name, so it gives every name of its rules an effect: the
 /// check never reports a name that a star re-export can supply.
 ///
-/// A `duplicates.ignore` or `health.ignore` glob has an effect when it matches
-/// a module or any other project file, see
-/// [`ResolvedConfig::path_glob_effect`].
+/// A `duplicates.ignore`, `health.ignore` or `overrides[].files` glob has an
+/// effect when it matches a module or any other project file, see
+/// [`ResolvedConfig::path_glob_effect`]. Other analyses (for example security
+/// and styling) also apply the overrides, so a project file outside the graph
+/// counts too. The answer does not depend on the scope of the run, so
+/// `--changed-since`, `--workspace` and `--production` give the same answer.
 fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
     let names = config.ignore_export_names();
     let mut file_hits = vec![false; config.compiled_ignore_exports.len()];
@@ -60,9 +64,18 @@ fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
         mark_declared_names(module, &names, &matched_rules, &mut name_hits);
     }
 
+    let override_globs: Vec<String> = config
+        .override_globs()
+        .iter()
+        .map(|glob| glob.pattern.to_owned())
+        .collect();
     let mut path_hits = config
         .path_glob_effect(
-            &[&config.duplicates.ignore, &config.health.ignore],
+            &[
+                &config.duplicates.ignore,
+                &config.health.ignore,
+                &override_globs,
+            ],
             graph.modules().iter().map(|module| module.path.as_path()),
         )
         .into_iter();
@@ -74,6 +87,9 @@ fn record_ignore_list_effect(graph: &ModuleGraph, config: &ResolvedConfig) {
         .record(path_hits.next().unwrap_or_default());
     effect
         .health_ignore
+        .record(path_hits.next().unwrap_or_default());
+    effect
+        .override_files
         .record(path_hits.next().unwrap_or_default());
 }
 

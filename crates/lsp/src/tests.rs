@@ -1512,6 +1512,36 @@ fn an_ineffective_override_rule_is_a_diagnostic_on_the_written_key() {
     );
 }
 
+#[test]
+fn an_unmatched_override_glob_is_a_diagnostic_on_the_glob() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let config = "{\n  \"overrides\": [\n    { \"files\": [\"src/**\", \"./vendor/missing.css\"], \"rules\": { \"unresolved-import\": \"off\" } }\n  ]\n}\n";
+    write_unmatched_pattern_project(root, (".fallowrc.json", config));
+
+    let (_, map) = unmatched_patterns_of(root);
+
+    let config_path = dunce::canonicalize(root.join(".fallowrc.json")).expect("canonical");
+    let uri = Uri::from_file_path(&config_path).expect("config uri");
+    let diagnostics = map.get(&uri).expect("diagnostics on the config file");
+    let found: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code
+                == Some(NumberOrString::String(
+                    "override-files-unmatched".to_string(),
+                ))
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "{diagnostics:?}");
+    assert_eq!(text_at(config, found[0].range), "\"./vendor/missing.css\"");
+    assert!(
+        found[0].message.contains("`ignoreUnresolvedImports`"),
+        "{}",
+        found[0].message
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn unlocated_config_patterns_are_logged_once_per_changed_set() {
     let (service, _) = LspService::build(FallowLspServer::new).finish();
