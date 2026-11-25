@@ -94,6 +94,28 @@ Contract rules:
   the manifest and the live catalogue agree on names, URIs, MIME types, and
   template placement.
 
+## Skills
+
+The server serves the released skills (`npm/fallow/skills/<name>/`) through
+the skills extension (`io.modelcontextprotocol/skills`, SEP-2640). A client
+gets the skill of the same version as the tools, with no separate install.
+
+- `crates/api/build/embed_skills.rs` embeds the skill files at build time.
+  `fallow agent install` writes the same table to disk.
+- `crates/mcp/src/skills.rs` answers `skills/list` and `skills/get`, and
+  serves each file through `resources/read` at `skill://<name>/<path>`. Each
+  manifest entry carries the SHA-256 digest and the byte size of the served
+  bytes. The frontmatter keeps every field of `SKILL.md`.
+- The server declares the extension only when the build embeds at least one
+  skill. A crates.io source build has no skill trees, so it declares none.
+- The manifest lists every file, so the server does not declare
+  `directoryRead`.
+- Skill files are not in the `fallow://` catalogue and not in
+  `resources/list`.
+- `crates/mcp/tests/integration/resources.rs` compares each served file with
+  the released file, byte for byte. To check a build by hand, run
+  `npx @modelcontextprotocol/inspector --cli target/debug/fallow-mcp --method skills/list --verify --require-digests`.
+
 ## Contract rules
 
 - Prefer typed API execution. Use CLI subprocess fallback only where the policy

@@ -1,9 +1,10 @@
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetSkillRequestParams,
+    GetSkillResult, Implementation, ListResourceTemplatesResult, ListResourcesResult,
+    ListSkillsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
@@ -562,12 +563,15 @@ impl FallowMcp {
 #[rmcp::tool_handler]
 impl ServerHandler for FallowMcp {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .build(),
-        )
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources();
+        let capabilities = if crate::skills::available() {
+            capabilities.enable_skills()
+        } else {
+            capabilities
+        };
+        ServerConfig::new(capabilities.build())
             .with_server_info(
                 Implementation::new("fallow-mcp", env!("CARGO_PKG_VERSION"))
                     .with_description("Codebase analysis for TypeScript/JavaScript projects"),
@@ -624,5 +628,21 @@ impl ServerHandler for FallowMcp {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
         crate::resources::read_resource(&request.uri).map(ReadResourceResponse::from)
+    }
+
+    async fn list_skills(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListSkillsResult, McpError> {
+        Ok(crate::skills::list_skills())
+    }
+
+    async fn get_skill(
+        &self,
+        request: GetSkillRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetSkillResult, McpError> {
+        crate::skills::get_skill(&request.uri)
     }
 }

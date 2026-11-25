@@ -247,6 +247,9 @@ pub fn read_resource(uri: &str) -> Result<ReadResourceResult, McpError> {
         let tool = percent_decode(raw_tool);
         return read_tool_guide(uri, &tool);
     }
+    if let Some(result) = crate::skills::read_skill_file(uri) {
+        return Ok(result);
+    }
     Err(unknown_uri_error(uri))
 }
 

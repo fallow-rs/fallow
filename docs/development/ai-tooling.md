@@ -64,7 +64,7 @@ such as `agents/openai.yaml` stay in the released tree.
   uncommitted edit that its released file does not have. It names the released
   file that should take the edit.
 - A new released skill also needs an entry in `SKILLS` in
-  `crates/cli/build.rs` and in `RELEASED_SKILLS` in
+  `crates/api/build/embed_skills.rs` and in `RELEASED_SKILLS` in
   `crates/cli/src/agent_install/skill.rs`. `scripts/repository-policy.test.mjs`
   fails when the three lists differ.
 - `npm run generate:contracts` writes the generated tables into the released

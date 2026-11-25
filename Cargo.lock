@@ -1100,6 +1100,7 @@ dependencies = [
  "fallow-output",
  "fallow-process",
  "fallow-types",
+ "flate2",
  "globset",
  "jsonschema",
  "libc",
