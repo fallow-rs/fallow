@@ -281,8 +281,9 @@ gate_block_target() {
 }
 
 # Blocks the command when the trees of the targets hold the fallow that the
-# install recorded, or the git that the gate finds on PATH without them, or,
-# with no recorded fallow, the fallow on PATH. The audit cannot then run with
+# install recorded, or a program in the arguments (fallow, git or jq) that the
+# gate finds on PATH without them. With a recorded fallow, the fallow on PATH
+# does not count. The audit cannot then run with
 # a program that the gate trusts.
 gate_check_targets() {
   local tool before after
@@ -290,7 +291,7 @@ gate_check_targets() {
   if [ -n "$GATE_LOCAL_FALLOW" ] && gate_runner_excluded "$GATE_LOCAL_FALLOW"; then
     gate_block_target fallow "$GATE_LOCAL_FALLOW"
   fi
-  for tool in fallow git; do
+  for tool in "$@"; do
     # The recorded fallow runs before the fallow on PATH.
     [ "$tool" != fallow ] || [ -z "$GATE_LOCAL_FALLOW" ] || continue
     GATE_TARGET_EXCLUDED=()
@@ -964,7 +965,7 @@ for GATE_CANDIDATE in ${GIT_WRITE_CANDIDATES[@]+"${GIT_WRITE_CANDIDATES[@]}"}; d
 done
 # A JSON reader that the gate found before the targets were known can lie in
 # a target tree. The check runs before the next reader probe.
-gate_check_targets
+gate_check_targets fallow git
 GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 if [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] && gate_runner_excluded "${GATE_JSON_RUNNER[0]}"; then
   GATE_JSON_RUNNER=()
@@ -974,6 +975,11 @@ fi
 # The block message reads the audit report with the same reader.
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then
   gate_find_json_runner || true
+fi
+# Without a fallow reader, jq reads the report, so a target tree that holds
+# the jq on PATH blocks.
+if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then
+  gate_check_targets jq
 fi
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ] && ! command -v jq >/dev/null 2>&1; then
   echo "fallow-gate: no native JSON reader or jq found, skipping audit. Upgrade fallow on PATH or install it in the project." >&2
@@ -1383,7 +1389,9 @@ else
     done
   fi
 fi
-gate_check_targets
+GATE_CHECK_TOOLS=(fallow git)
+[ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || GATE_CHECK_TOOLS+=(jq)
+gate_check_targets "${GATE_CHECK_TOOLS[@]}"
 GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 
 # Lists the findings that caused a fail verdict, one line each, from the

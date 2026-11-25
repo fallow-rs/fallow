@@ -771,7 +771,8 @@ fn gate_blocks_a_write_to_the_tree_of_the_only_trusted_fallow() {
 }
 
 /// A git write with two targets audits both trees. A helper below the tree of
-/// one target never runs, also not in the audit of the other target.
+/// one target never runs, also not in the audit of the other target. A jq
+/// there blocks the command instead (`gate_blocks_when_a_target_holds_the_only_jq`).
 #[test]
 fn gate_runs_no_helper_from_the_tree_of_another_audit_root() {
     let tmp = tempdir().unwrap();
@@ -783,7 +784,7 @@ fn gate_runs_no_helper_from_the_tree_of_another_audit_root() {
     for dir in [&session, &first, &second] {
         std::fs::create_dir_all(dir).unwrap();
     }
-    for helper in ["jq", "cat", "sed", "tr", "mktemp", "head", "sort", "grep"] {
+    for helper in ["cat", "sed", "tr", "mktemp", "head", "sort", "grep"] {
         logging_stub(
             &second.join("bin").join(helper),
             &format!("stub-{helper}"),
@@ -1323,4 +1324,45 @@ fn gate_skips_a_link_chain_through_a_shim() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!calls.contains("hop") && !calls.contains("mise"), "{calls}");
+}
+
+/// With no fallow JSON reader, jq reads the audit report. When a target tree
+/// holds that jq, the gate blocks instead of skipping the audit.
+#[test]
+fn gate_blocks_when_a_target_holds_the_only_jq() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(target.join("bin")).unwrap();
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    logging_stub(&target.join("bin/jq"), "stub-jq", &log);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", target.display()) },
+    });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!(
+            "{}:{}:{}",
+            target.join("bin").display(),
+            base.join("bin").display(),
+            sys.display()
+        ),
+        input.to_string().as_bytes(),
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains(&target.display().to_string()), "{stderr}");
+    assert!(!calls(&log).contains("stub-jq"), "{}", calls(&log));
 }
