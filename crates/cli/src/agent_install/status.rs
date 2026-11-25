@@ -393,7 +393,7 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
                 row.user_scope = home != root;
                 if row.user_scope
                     && row.state == SurfaceState::Installed
-                    && command.command == "npx"
+                    && runs_a_package_runner(&command)
                 {
                     let fix = if harness == Harness::Claude {
                         "run the claude mcp add command that agent install --user prints"
@@ -427,6 +427,27 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex_gate, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
     rows
+}
+
+/// True when an MCP entry starts a package runner that resolves `fallow-mcp`
+/// from the current project: `npx`, `bunx` or `pnpm dlx`, also as a `.cmd`
+/// or `.exe` file and by path.
+fn runs_a_package_runner(command: &mcp::McpCommand) -> bool {
+    let name = command
+        .command
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = name
+        .strip_suffix(".cmd")
+        .or_else(|| name.strip_suffix(".exe"))
+        .unwrap_or(&name);
+    match name {
+        "npx" | "bunx" => true,
+        "pnpm" => command.args.first().is_some_and(|arg| arg == "dlx"),
+        _ => false,
+    }
 }
 
 /// Rows for the user-level gate scripts that fallow wrote in `home`. A script
@@ -1100,6 +1121,33 @@ mod tests {
         );
         assert_ne!(older, crate::setup_hooks::rendered_gate_script());
         assert_ne!(probe_installed_gate(&older), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn a_package_runner_entry_counts_for_each_runner_form() {
+        let entry = |command: &str, args: &[&str]| mcp::McpCommand {
+            command: command.to_string(),
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            source: mcp::McpSource::Registered,
+        };
+        for (command, args) in [
+            ("npx", &["--no", "fallow-mcp"][..]),
+            ("npx.cmd", &["fallow-mcp"][..]),
+            ("C:/nodejs/NPX.CMD", &["fallow-mcp"][..]),
+            ("bunx", &["fallow-mcp"][..]),
+            ("pnpm", &["dlx", "fallow-mcp"][..]),
+            ("pnpm.cmd", &["dlx", "fallow-mcp"][..]),
+        ] {
+            assert!(runs_a_package_runner(&entry(command, args)), "{command}");
+        }
+        assert!(!runs_a_package_runner(&entry(
+            "/usr/local/bin/fallow-mcp",
+            &[]
+        )));
+        assert!(!runs_a_package_runner(&entry(
+            "pnpm",
+            &["exec", "fallow-mcp"]
+        )));
     }
 
     #[test]
