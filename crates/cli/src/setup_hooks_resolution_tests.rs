@@ -573,7 +573,13 @@ fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
     std::fs::create_dir_all(base.join("bin")).unwrap();
     let log = base.join("calls.log");
     let recorded = base.join("tools/fallow");
-    reader_stub(&recorded, "recorded", &log, "git commit -m x", &project);
+    // The reader returns a long command with control operators and quotes,
+    // so the command scans of the gate run on a long text too.
+    let long_command = format!(
+        "cd . && git commit -m 'a{}' ; echo \\\"done\\\"",
+        "bcdefg".repeat(20_000)
+    );
+    reader_stub(&recorded, "recorded", &log, &long_command, &project);
     let script = render_gate_script(true, recorded.to_str());
     let run = |input: &str| {
         let started = std::time::Instant::now();
@@ -606,7 +612,7 @@ fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
     let (elapsed, output) = run(&input);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    let limit = std::cmp::max(baseline * 5, std::time::Duration::from_secs(1));
+    let limit = std::cmp::max(baseline * 5, std::time::Duration::from_secs(3));
     assert!(
         elapsed <= limit,
         "{elapsed:?} for a baseline of {baseline:?}"
@@ -1092,9 +1098,8 @@ fn gate_reads_a_large_input_with_the_recorded_fallow_before_jq() {
 }
 
 /// A fallow reader in the session tree never reads the hook input: the gate
-/// drops the session tree from PATH before the reader runs. When the gate
-/// cannot read `cwd` before the reader runs, it blocks once the reader turns
-/// out to lie in the session tree.
+/// drops the session tree from PATH before the reader runs, also when the
+/// `cwd` value holds escapes.
 #[test]
 fn gate_never_trusts_a_hook_input_reader_of_the_session_tree() {
     for escaped_cwd in [false, true] {
@@ -1133,13 +1138,10 @@ fn gate_never_trusts_a_hook_input_reader_of_the_session_tree() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let calls = calls(&log);
 
-        if escaped_cwd {
-            assert_eq!(output.status.code(), Some(2), "{stderr}\n{calls}");
-            assert!(!calls.contains("session --version"), "{calls}");
-            assert!(!calls.contains("session audit"), "{calls}");
-        } else {
-            assert!(!calls.contains("session"), "{calls}\n{stderr}");
-        }
+        assert!(
+            !calls.contains("session"),
+            "{escaped_cwd}: {calls}\n{stderr}"
+        );
     }
 }
 
@@ -1387,4 +1389,48 @@ fn gate_blocks_when_a_target_holds_the_only_jq() {
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(stderr.contains(&target.display().to_string()), "{stderr}");
     assert!(!calls(&log).contains("stub-jq"), "{}", calls(&log));
+}
+
+/// Bash below version 4 needs time that grows with the square of the length
+/// for the shell reader, so there the shell reader takes a hook input of at
+/// most 1024 characters. A longer input goes to the reader of the install.
+#[test]
+fn gate_uses_the_shell_reader_up_to_the_limit_of_the_bash_version() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    let log = base.join("calls.log");
+    let recorded = base.join("tools/fallow");
+    reader_stub(&recorded, "recorded", &log, "git commit -m x", &session);
+    let major = std::process::Command::new("bash")
+        .env("PATH", "/usr/bin:/bin")
+        .args(["-c", "echo ${BASH_VERSINFO[0]}"])
+        .output()
+        .unwrap();
+    let major: u32 = String::from_utf8_lossy(&major.stdout)
+        .trim()
+        .parse()
+        .unwrap();
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git commit -m '{}'", "a\"b".repeat(1000)) },
+    });
+
+    let output = probe_gate(
+        &render_gate_script(true, recorded.to_str()),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+    );
+    let read_by_fallow = calls(&log).contains("recorded hooks gate-runtime input");
+
+    assert_eq!(
+        read_by_fallow,
+        major < 4,
+        "bash {major}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

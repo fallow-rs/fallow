@@ -40,7 +40,30 @@ set -euo pipefail
 # reader of fallow, because the time of those shell scans grows faster than
 # the length.
 GATE_SMALL_INPUT_LIMIT=8192
+# Bash below version 4 copies a string for each step of these scans, so
+# there the limit is lower.
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || GATE_SMALL_INPUT_LIMIT=1024
 GATE_NL=$'\n'
+
+# Sets GATE_OUT to $1 with each match of the pattern $2 replaced by $3. Bash
+# 3.2 needs time that grows with the square of the length for one
+# `${var//pattern/text}` on a long text, so the function works on chunks of
+# 128 bytes. A chunk that ends in a backslash takes one more byte, so a
+# pattern of a backslash and the next character stays in one chunk.
+gate_replace() {
+  local LC_ALL=C s="$1" out="" chunk i=0 n len
+  n="${#1}"
+  while [ "$i" -lt "$n" ]; do
+    len=128
+    while [ $((i + len)) -lt "$n" ] && [ "${s:i+len-1:1}" = \\ ]; do
+      len=$((len + 1))
+    done
+    chunk="${s:i:len}"
+    out+="${chunk//$2/$3}"
+    i=$((i + len))
+  done
+  GATE_OUT="$out"
+}
 
 gate_skip_not_git_write() {
   if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
@@ -65,7 +88,8 @@ if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ]; then
   case "$INPUT" in
     *'\u'*) ;;
     *)
-      case "${INPUT//[\'\"\\]/}" in
+      gate_replace "$INPUT" "[\\'\"\\\\]" ""
+      case "$GATE_OUT" in
         *git*commit* | *git*push* | *git*'$'*) ;;
         *) gate_skip_not_git_write ;;
       esac
@@ -821,7 +845,7 @@ is_git_write_command() {
       done
       [ "$#" -gt 0 ] && shift
     done
-  done <<<"${cmd//[$separators]/$GATE_NL}"
+  done < <(gate_replace "$cmd" "[$separators]" "$GATE_NL" && printf '%s\n' "$GATE_OUT")
   return "$found"
 }
 
@@ -833,15 +857,16 @@ is_git_write_command() {
 # stays one command. It can count a command that does not write: that only adds
 # an audit.
 gate_loose_write() {
-  local text="$1" segment word seen_git line_join=$'\\\n'
+  local text="$1" segment word seen_git
   case "$text" in
     *[\'\"\\\$\`]*) ;;
     *) return 1 ;;
   esac
-  text="${text//"$line_join"/ }"
-  text="${text//[\'\"\\]/}"
-  text="${text//[;|&\`]/$GATE_NL}"
-  text="${text//[()]/ }"
+  gate_replace "$text" "\\\\$GATE_NL" " "
+  gate_replace "$GATE_OUT" "[\\'\"\\\\]" ""
+  gate_replace "$GATE_OUT" "[;|&\\\`]" "$GATE_NL"
+  gate_replace "$GATE_OUT" "[()]" " "
+  text="$GATE_OUT"
   while IFS= read -r segment; do
     seen_git=0
     # Intentional word splitting; globbing is disabled below.
@@ -873,19 +898,25 @@ SESSION_CWD=""
 # the trusted fallow of the install, then jq, then the fallow on PATH, each
 # by its absolute path. yarn and npx never read the hook input. Before that
 # reader runs, the gate removes the tree of each `cwd` value of the input
-# from PATH. A plain `"cwd"` key after `{` or `,` cannot be text inside a
-# JSON string, where each quote is escaped. A nested key can match too, and
-# its tree only adds an exclusion.
+# from PATH, after it decodes the escapes of the value. A plain `"cwd"` key
+# after `{` or `,` cannot be text inside a JSON string, where each quote is
+# escaped. A nested key can match too, and its tree only adds an exclusion.
 GATE_INPUT_READER=""
-GATE_CWD_RE='[{,][[:space:]]*"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
+
+# A `"cwd"` key with its string value. The value part matches a JSON string
+# with escapes in linear time.
+GATE_CWD_RE='[{,][[:space:]]*"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*(\\.[^"\\]*)*)"'
 GATE_SMALL_READ=0
 if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ] && gate_read_input; then
   GATE_SMALL_READ=1
 else
   GATE_REST="$INPUT"
   while [[ "$GATE_REST" =~ $GATE_CWD_RE ]]; do
-    [ ! -d "${BASH_REMATCH[1]}" ] || gate_exclude_tree "${BASH_REMATCH[1]}" "" self
-    GATE_REST="${GATE_REST#*"${BASH_REMATCH[0]}"}"
+    GATE_MATCH="${BASH_REMATCH[0]}"
+    if gate_json_unescape "${BASH_REMATCH[1]}" && [ -d "$GATE_STR" ]; then
+      gate_exclude_tree "$GATE_STR" "" self
+    fi
+    GATE_REST="${GATE_REST#*"$GATE_MATCH"}"
   done
   GATE_PATH_FALLOW="$(gate_find_fallow || true)"
   if [ -n "$GATE_LOCAL_FALLOW" ] && gate_try_json_runner "$PWD" "$GATE_LOCAL_FALLOW"; then
@@ -899,7 +930,8 @@ else
     case "$INPUT" in
       *'\u'*) GATE_MAYBE_WRITE=1 ;;
       *)
-        case "${INPUT//[\'\"\\]/}" in
+        gate_replace "$INPUT" "[\\'\"\\\\]" ""
+        case "$GATE_OUT" in
           *git*commit* | *git*push* | *git*'$'*) GATE_MAYBE_WRITE=1 ;;
           *) GATE_MAYBE_WRITE=0 ;;
         esac
