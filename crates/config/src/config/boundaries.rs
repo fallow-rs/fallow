@@ -634,6 +634,9 @@ impl BoundaryConfig {
                 zone.auto_discover.iter().filter_map(move |raw_dir| {
                     let dir = normalize_auto_discover_dir(raw_dir)?;
                     let relative = join_relative_path(&zone_root, &dir);
+                    if relative.starts_with('/') {
+                        return None;
+                    }
                     Some(if relative.is_empty() {
                         project_root.to_path_buf()
                     } else {
@@ -1388,7 +1391,17 @@ fn discover_child_zones_in_dir(
     } else {
         project_root.join(&fs_relative)
     };
-    let Ok(entries) = std::fs::read_dir(&absolute_dir) else {
+    // A zone root such as `.//home` normalizes to an absolute path, and a
+    // linked directory can resolve outside the root. Both get the same
+    // warning as a directory that does not exist.
+    let inside = !fs_relative.starts_with('/')
+        && fallow_types::read_guard::is_inside_root(project_root, &absolute_dir);
+    let entries = if inside {
+        std::fs::read_dir(&absolute_dir).ok()
+    } else {
+        None
+    };
+    let Some(entries) = entries else {
         tracing::warn!(
             "boundary zone '{}' autoDiscover path '{}' did not resolve to a readable directory",
             zone.name,
@@ -1627,3 +1640,7 @@ impl ResolvedBoundaryConfig {
 #[cfg(test)]
 #[path = "boundaries_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "boundaries_read_tests.rs"]
+mod read_tests;
