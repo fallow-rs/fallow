@@ -165,3 +165,28 @@ async fn a_deleted_and_created_file_starts_a_run_each_time() {
     send_watched(backend, &uri, FileChangeType::CREATED).await;
     assert_eq!(epoch(backend), before + 2);
 }
+
+// A client can report one event for a deleted directory and none for its
+// files. A file created again with its old content must still start a run.
+#[tokio::test(flavor = "current_thread")]
+async fn a_created_file_with_known_content_starts_a_run() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir(dir.path().join("src")).expect("src dir");
+    let (service, _socket) = quiet_backend();
+    let backend = service.inner();
+    let uri = write_source(&dir.path().join("src"), "a.ts", "export const a = 1;\n");
+    send_watched(backend, &uri, FileChangeType::CHANGED).await;
+
+    let before = epoch(backend);
+    send_watched(backend, &uri, FileChangeType::CREATED).await;
+    assert_eq!(epoch(backend), before + 1);
+
+    let src = Uri::from_file_path(dir.path().join("src")).expect("dir uri");
+    send_watched(backend, &src, FileChangeType::DELETED).await;
+    send_watched(backend, &uri, FileChangeType::CHANGED).await;
+    assert_eq!(
+        epoch(backend),
+        before + 3,
+        "the directory delete forgets the record of its files",
+    );
+}

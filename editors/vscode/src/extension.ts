@@ -85,7 +85,7 @@ import { STATUS_MENU_COMMAND } from "./statusBar-model.js";
 import { auditScopeSummary, gatingCount } from "./audit-utils.js";
 import { OPEN_FILE_COMMAND, openFileCommandHandler } from "./openFileCommand.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
-import { applyIssueTypeFilter } from "./statusBar-utils.js";
+import { alignWithSidebarCount } from "./statusBar-utils.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
 import {
   applyWorkspaceVisibility,
@@ -229,12 +229,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       return;
     }
     void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
-    // The LSP analyzes the whole project. With a workspace scope, the sidebar
-    // and the status bar count come from the scoped CLI run instead (#5278).
-    if (resolveActiveWorkspaceScope(context) !== "") {
+    // The LSP analyzes the whole project. After a scoped CLI run, the status
+    // bar keeps the scoped count of the sidebar (#5278).
+    if (lastCheckResult !== null && resolveActiveWorkspaceScope(context) !== "") {
       return;
     }
-    updateStatusBarFromLsp(applyIssueTypeFilter(params, getIssueTypes()));
+    updateStatusBarFromLsp(alignWithSidebarCount(params, getIssueTypes()));
   };
 
   const syncFindingsVisibility = (): void => {

@@ -345,7 +345,7 @@ const isCoreFindingKey = (key: CheckFindingKey): key is CoreFindingKey =>
  * `prop_drilling_chains`, `thin_wrappers` and `duplicate_prop_shapes` are not
  * in this list.
  */
-const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
+export const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
   "unused_files",
   "unused_exports",
   "unused_types",

@@ -10,12 +10,13 @@ use tracing_subscriber::filter::{LevelFilter, Targets};
 
 /// Build the stderr filter from the value of `RUST_LOG`.
 ///
-/// Without `RUST_LOG`, the filter keeps WARN and ERROR. A `RUST_LOG` value
+/// Without `RUST_LOG`, the filter keeps WARN and ERROR of the `fallow*`
+/// targets, so dependency crates add no lines. A `RUST_LOG` value
 /// replaces the default. The filter skips a directive that it cannot read,
 /// such as a span or field filter, and keeps the others.
 pub fn stderr_log_filter(rust_log: Option<&str>) -> Targets {
     let Some(value) = rust_log.map(str::trim) else {
-        return Targets::new().with_default(LevelFilter::WARN);
+        return Targets::new().with_target("fallow", LevelFilter::WARN);
     };
     let readable: Vec<&str> = value
         .split(',')
@@ -48,6 +49,12 @@ mod tests {
         let filter = stderr_log_filter(None);
         assert!(filter.would_enable(PLUGIN_TARGET, &Level::WARN));
         assert!(filter.would_enable("fallow_config", &Level::ERROR));
+    }
+
+    #[test]
+    fn default_filter_drops_dependency_lines() {
+        let filter = stderr_log_filter(None);
+        assert!(!filter.would_enable("tower_lsp_server::service", &Level::WARN));
     }
 
     #[test]

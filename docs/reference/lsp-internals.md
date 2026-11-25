@@ -34,10 +34,12 @@ lifecycle behavior.
   content that a save or an event reported. An event for the same content
   starts no run, also the event of a save that `didSave` reported before. A
   file watcher reports timestamp and attribute changes too, and a steady
-  stream of them otherwise starts a run each `MAX_WAIT` (#5278). A deleted
-  file, an unreadable file, a file over 8 MiB, and a batch of more than
-  `MAX_COMPARED_EVENTS` events always count. The server logs the files of
-  each counted batch and the number of skipped events.
+  stream of them otherwise starts a run each `MAX_WAIT` (#5278). A created
+  or deleted file, an unreadable file, a file over 8 MiB, and a batch of more
+  than `MAX_COMPARED_EVENTS` events always count. A deleted path also forgets
+  the records below it, because a client can report one event for a deleted
+  directory. The server logs the files of each counted batch, and the number
+  of skipped events at most once per 10 seconds.
 - The server writes only WARN and ERROR tracing lines to stderr, because
   editors show stderr as error output. `RUST_LOG` selects more detail.
 - Convert paths through the LSP path helpers. Never construct document URIs by

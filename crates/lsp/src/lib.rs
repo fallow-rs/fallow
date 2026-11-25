@@ -374,6 +374,8 @@ struct FallowLspServer {
     /// The last known content of saved and watched files. See
     /// `disk_fingerprints.rs`.
     disk_fingerprints: Arc<StdMutex<disk_fingerprints::DiskFingerprints>>,
+    /// The skipped watched-file events since the last log line about them.
+    skipped_event_log: Arc<StdMutex<disk_fingerprints::SkippedEventLog>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -830,6 +832,7 @@ impl FallowLspServer {
                 fallow_api::TypeAwareFileChanges::default(),
             )),
             disk_fingerprints: Arc::default(),
+            skipped_event_log: Arc::default(),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(DiagnosticCache::default())),
             client_pulls: Arc::new(AtomicBool::new(false)),
@@ -1345,71 +1348,71 @@ impl FallowLspServer {
     /// Record the current content of `paths`. Returns for each path whether
     /// the content differs from the last record.
     async fn record_disk_contents(&self, paths: Vec<PathBuf>) -> Vec<bool> {
-        let store = Arc::clone(&self.disk_fingerprints);
         let count = paths.len();
-        tokio::task::spawn_blocking(move || {
-            let mut store = store.lock().unwrap_or_else(|error| error.into_inner());
-            paths.iter().map(|path| store.record(path)).collect()
+        // The reads run without the store lock, so an event handler that
+        // takes the lock never waits for disk reads.
+        let Ok(read) = tokio::task::spawn_blocking(move || {
+            paths
+                .into_iter()
+                .map(|path| {
+                    let fingerprint = disk_fingerprints::read_fingerprint(&path);
+                    (path, fingerprint)
+                })
+                .collect::<Vec<_>>()
         })
         .await
-        .unwrap_or_else(|_| vec![true; count])
+        else {
+            return vec![true; count];
+        };
+        let mut store = self
+            .disk_fingerprints
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        read.into_iter()
+            .map(|(path, fingerprint)| store.update(&path, fingerprint))
+            .collect()
     }
 
-    /// Keep the watched-file events that change the content of a file. A
-    /// deleted file and a file that the server cannot read always count.
+    /// Keep the watched-file events that change a file. A changed event for
+    /// the same content as the last record starts no run. A created or
+    /// deleted file, and a file that the server cannot read, always count.
     async fn changed_content_events(&self, events: Vec<FileEvent>) -> Vec<FileEvent> {
-        if events.len() > disk_fingerprints::MAX_COMPARED_EVENTS {
-            {
-                let mut store = self
-                    .disk_fingerprints
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                for path in events.iter().filter_map(|event| event.uri.to_file_path()) {
-                    store.forget(&path);
-                }
-            }
-            self.log_watched_events(&events, 0).await;
-            return events;
-        }
-        let paths: Vec<Option<PathBuf>> = events
-            .iter()
-            .map(|event| {
-                (event.typ != FileChangeType::DELETED)
-                    .then(|| event.uri.to_file_path().map(std::borrow::Cow::into_owned))
-                    .flatten()
-            })
-            .collect();
+        let compare = events.len() <= disk_fingerprints::MAX_COMPARED_EVENTS;
+        let mut compared = Vec::new();
         {
             let mut store = self
                 .disk_fingerprints
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            for event in events
-                .iter()
-                .filter(|event| event.typ == FileChangeType::DELETED)
-            {
-                if let Some(path) = event.uri.to_file_path() {
+            for (index, event) in events.iter().enumerate() {
+                let Some(path) = event.uri.to_file_path() else {
+                    continue;
+                };
+                if compare && event.typ == FileChangeType::CHANGED {
+                    compared.push((index, path.into_owned()));
+                } else {
                     store.forget(&path);
                 }
             }
         }
-        let readable: Vec<PathBuf> = paths.iter().flatten().cloned().collect();
-        let mut changed = self.record_disk_contents(readable).await.into_iter();
-        let mut kept = Vec::with_capacity(events.len());
-        let mut unchanged = 0;
-        for (event, path) in events.into_iter().zip(paths) {
-            if path.is_none() || changed.next().unwrap_or(true) {
-                kept.push(event);
-            } else {
-                unchanged += 1;
-            }
-        }
+        let (indexes, paths): (Vec<usize>, Vec<PathBuf>) = compared.into_iter().unzip();
+        let unchanged_indexes: FxHashSet<usize> = indexes
+            .into_iter()
+            .zip(self.record_disk_contents(paths).await)
+            .filter_map(|(index, changed)| (!changed).then_some(index))
+            .collect();
+        let unchanged = unchanged_indexes.len();
+        let kept: Vec<FileEvent> = events
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, event)| (!unchanged_indexes.contains(&index)).then_some(event))
+            .collect();
         self.log_watched_events(&kept, unchanged).await;
         kept
     }
 
     /// Name the files whose events start a run, so a trace shows the source
-    /// of a run.
+    /// of a run, and count the skipped events.
     async fn log_watched_events(&self, changed: &[FileEvent], unchanged: usize) {
         const NAMED_FILES: usize = 3;
         let root = self.root.read().await.clone();
@@ -1439,9 +1442,14 @@ impl FallowLspServer {
                 names.join(", ")
             ));
         }
-        if unchanged > 0 {
+        let skipped = self
+            .skipped_event_log
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .note(unchanged, std::time::Instant::now());
+        if let Some(skipped) = skipped {
             parts.push(format!(
-                "Skipped {unchanged} watched-file event(s) without a content change"
+                "Skipped {skipped} watched-file event(s) without a content change"
             ));
         }
         let message = parts.join(". ");
