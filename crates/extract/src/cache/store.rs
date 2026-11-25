@@ -1,6 +1,7 @@
 //! Cache store: load, save, and query cached module data.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -21,6 +22,70 @@ use super::types::{
 thread_local! {
     static FULL_STORE_ENCODE_COUNT: Cell<usize> = const { Cell::new(0) };
     static LAST_WORKING_SET_EVICTED_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+/// What one eviction did to the working set of the latest run.
+///
+/// The working set is the entries that the latest run saw. An evicted
+/// working-set entry is a file that the next run of the same scope parses
+/// again, also on an unchanged tree.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct WorkingSetEviction {
+    /// Entries that the latest run saw.
+    pub(super) entries: usize,
+    /// Working-set entries that eviction removed to stay under the cap.
+    pub(super) evicted: usize,
+    /// Encoded size of the working set before eviction, estimated as its
+    /// share of the encoded store.
+    pub(super) encoded_bytes: usize,
+}
+
+static WORKING_SET_EVICTION_WARNED: AtomicBool = AtomicBool::new(false);
+
+const BYTES_PER_MIB: usize = 1024 * 1024;
+
+/// Headroom, in basis points of the working set, in the suggested cap. The
+/// save evicts above 80 percent of the cap, so a cap of 125 percent of the
+/// working set keeps the next save out of eviction.
+const SUGGESTED_CAP_BPS: usize = 12_500;
+
+/// Warn once for each process when the cap forced out working-set entries.
+///
+/// The warning uses the analysis diagnostic target, so a quiet run does not
+/// print it. A long-lived process, such as the language server, saves after
+/// each analysis, and one line is enough for it.
+fn warn_working_set_evicted(eviction: &WorkingSetEviction, max_size_bytes: usize) {
+    let Some(message) = working_set_eviction_message(eviction, max_size_bytes) else {
+        return;
+    };
+    if WORKING_SET_EVICTION_WARNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    tracing::warn!(target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET, "{message}");
+}
+
+/// The warning text for an eviction that removed working-set entries, or
+/// `None` when the whole working set stayed in the cache.
+pub(super) fn working_set_eviction_message(
+    eviction: &WorkingSetEviction,
+    max_size_bytes: usize,
+) -> Option<String> {
+    if eviction.evicted == 0 || eviction.entries == 0 {
+        return None;
+    }
+    let percent = (eviction.evicted.saturating_mul(100) / eviction.entries).max(1);
+    let cap_mib = max_size_bytes.div_ceil(BYTES_PER_MIB);
+    let suggested_mib = (eviction.encoded_bytes / 10_000)
+        .saturating_mul(SUGGESTED_CAP_BPS)
+        .div_ceil(BYTES_PER_MIB)
+        .max(cap_mib.saturating_add(1));
+    Some(format!(
+        "Parse cache is full: {evicted} of {total} files of this run ({percent}%) do not fit in \
+         the {cap_mib} MiB cap, so the next run parses them again. Set `cache.maxSizeMb` in the \
+         config or FALLOW_CACHE_MAX_SIZE to {suggested_mib} or more.",
+        evicted = eviction.evicted,
+        total = eviction.entries,
+    ))
 }
 
 /// Cached module information stored on disk.
@@ -205,28 +270,16 @@ impl CacheStore {
                 .saturating_sub(CACHE_HEADER_LEN);
             // The working set of the latest run may fill the whole cap.
             let working_set = max_size_bytes.saturating_sub(CACHE_HEADER_LEN);
-            let (new_encoded, working_set_evicted) =
-                self.evict_lru_to_target(target, working_set, encoded);
+            let (new_encoded, eviction) = self.evict_lru_to_target(target, working_set, encoded);
             encoded = new_encoded;
 
             #[cfg(test)]
-            LAST_WORKING_SET_EVICTED_COUNT.with(|count| count.set(working_set_evicted));
+            LAST_WORKING_SET_EVICTED_COUNT.with(|count| count.set(eviction.evicted));
 
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
-            if working_set_evicted > 0 {
-                let cap_desc = if max_size_bytes >= 1024 * 1024 {
-                    format!("{} MiB", max_size_bytes / (1024 * 1024))
-                } else {
-                    format!("{} KiB", max_size_bytes / 1024)
-                };
-                tracing::warn!(
-                    working_set_evicted,
-                    remaining_entries = self.entries.len(),
-                    "Repository working set exceeds cache cap ({cap_desc}); {working_set_evicted} files \
-                     were evicted and may need to be re-parsed on subsequent runs. Increase FALLOW_CACHE_MAX_SIZE or \
-                     cache.maxSizeMb to cache the full repository"
-                );
+            if eviction.evicted > 0 {
+                warn_working_set_evicted(&eviction, max_size_bytes);
             } else {
                 let significant_evicted =
                     initial_entries.saturating_mul(EVICTION_SIGNIFICANT_BPS) / 10_000;
@@ -272,7 +325,7 @@ impl CacheStore {
         target_bytes: usize,
         working_set_bytes: usize,
         encoded: Vec<u8>,
-    ) -> (Vec<u8>, usize) {
+    ) -> (Vec<u8>, WorkingSetEviction) {
         let mut order: Vec<(u64, String, usize)> = self
             .entries
             .iter()
@@ -291,12 +344,26 @@ impl CacheStore {
         let newest = order.last().map_or(0, |(seen, _, _)| *seen);
         let working_set_from = order.partition_point(|(seen, _, _)| *seen < newest);
 
+        let estimated_total: usize = order
+            .iter()
+            .map(|(_, _, estimated_bytes)| estimated_bytes)
+            .sum();
+        let estimated_working_set: usize = order[working_set_from..]
+            .iter()
+            .map(|(_, _, estimated_bytes)| estimated_bytes)
+            .sum();
+        // The per-entry estimates overshoot the real encoding, so the share of
+        // the real size gives the working-set size that a cap must hold.
+        let working_set_encoded_bytes = u128::try_from(encoded.len())
+            .unwrap_or(u128::MAX)
+            .saturating_mul(estimated_working_set as u128)
+            .checked_div(estimated_total as u128)
+            .map_or(encoded.len(), |bytes| {
+                usize::try_from(bytes).unwrap_or(usize::MAX)
+            });
         let mut cursor = EvictionCursor {
             idx: 0,
-            estimated_remaining: order
-                .iter()
-                .map(|(_, _, estimated_bytes)| estimated_bytes)
-                .sum(),
+            estimated_remaining: estimated_total,
         };
         let mut encoded = encoded;
         if working_set_from > 0 {
@@ -331,7 +398,12 @@ impl CacheStore {
                 "Single cache entry exceeds configured max; cache will overshoot the cap"
             );
         }
-        (encoded, working_set_evicted)
+        let eviction = WorkingSetEviction {
+            entries: order.len() - working_set_from,
+            evicted: working_set_evicted,
+            encoded_bytes: working_set_encoded_bytes,
+        };
+        (encoded, eviction)
     }
 
     /// Remove entries in `order` from `cursor.idx` up to (not including)

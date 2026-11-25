@@ -2925,34 +2925,52 @@ fn working_set_within_cap_does_not_evict_or_warn() {
     assert_eq!(loaded.len(), 10, "all 10 entries preserved");
 }
 
+/// The warning names the evicted share of the run, the cap, both settings,
+/// and a cap that holds the working set with headroom.
 #[test]
-fn working_set_eviction_emits_warn_log() {
-    let dir = test_cache_dir("working_set_warn_log");
-    let mut store = CacheStore::new(Path::new(""));
-    let latest_seen = 1_000_000;
-    for i in 0..50u64 {
-        store.insert(
-            Path::new(&format!("live{i:02}.ts")),
-            synthetic_module(i, latest_seen, 1),
-        );
-    }
-    let cap = 32 * 1024;
-
-    let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let subscriber = WarnLogCollector(Arc::clone(&logs));
-    tracing::subscriber::with_default(subscriber, || {
-        store.save(at(&dir), 1, cap).expect("save succeeds");
-    });
-
-    let messages = logs.lock().expect("lock logs").clone();
+fn working_set_eviction_message_names_the_share_and_a_larger_cap() {
+    let eviction = super::store::WorkingSetEviction {
+        entries: 40_100,
+        evicted: 7_801,
+        encoded_bytes: 6 * 1024 * 1024,
+    };
+    let message = super::store::working_set_eviction_message(&eviction, 4 * 1024 * 1024)
+        .expect("an evicted working set gives a warning");
     assert!(
-        messages.iter().any(|msg| {
-            msg.contains("Repository working set exceeds cache cap")
-                && msg.contains("Increase FALLOW_CACHE_MAX_SIZE")
-                && msg.contains("cache.maxSizeMb")
-        }),
-        "warning log must be emitted when working-set entries are evicted: {messages:?}"
+        message.contains("7801 of 40100 files of this run (19%)"),
+        "{message}"
     );
+    assert!(message.contains("the 4 MiB cap"), "{message}");
+    assert!(message.contains("`cache.maxSizeMb`"), "{message}");
+    assert!(
+        message.contains("config or FALLOW_CACHE_MAX_SIZE to 8 or more"),
+        "{message}"
+    );
+}
+
+/// A suggestion at or below the current cap gives no help, so the message
+/// asks for at least 1 MiB more.
+#[test]
+fn working_set_eviction_message_suggests_more_than_the_current_cap() {
+    let eviction = super::store::WorkingSetEviction {
+        entries: 10,
+        evicted: 1,
+        encoded_bytes: 1024,
+    };
+    let message =
+        super::store::working_set_eviction_message(&eviction, 4 * 1024 * 1024).expect("warning");
+    assert!(message.contains("(10%)"), "{message}");
+    assert!(message.contains("to 5 or more"), "{message}");
+}
+
+#[test]
+fn working_set_eviction_message_is_none_when_nothing_of_the_run_was_evicted() {
+    let eviction = super::store::WorkingSetEviction {
+        entries: 10,
+        evicted: 0,
+        encoded_bytes: 1024,
+    };
+    assert!(super::store::working_set_eviction_message(&eviction, 1024 * 1024).is_none());
 }
 
 #[test]
@@ -2984,7 +3002,7 @@ fn stale_eviction_alone_does_not_emit_warn_log() {
     assert!(
         !messages
             .iter()
-            .any(|msg| msg.contains("Repository working set exceeds cache cap")),
+            .any(|msg| msg.contains("Parse cache is full")),
         "stale-only eviction must not emit the working-set warning: {messages:?}"
     );
 }
