@@ -5,7 +5,7 @@
 //! through that link reaches a file outside the project. A link that resolves
 //! inside the base directory is safe and stays allowed, unless it leads into
 //! Git metadata or into an installed package (see
-//! [`is_protected_link_target`]).
+//! [`is_protected_link_target`](crate::path_guard::is_protected_link_target)).
 
 use std::path::{Component, Path, PathBuf};
 
