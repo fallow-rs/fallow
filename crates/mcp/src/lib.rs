@@ -27,6 +27,7 @@ mod params;
 mod resources;
 mod server;
 mod skills;
+mod tasks;
 mod tool_guides;
 mod tools;
 mod warm_session;
@@ -135,7 +136,10 @@ async fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
 
     warm_session::install_from_env();
     let server = server::FallowMcp::new();
+    let tasks = server.task_store();
     let service = server.serve(stdio()).await?;
-    service.waiting().await?;
+    let waited = service.waiting().await;
+    tasks.shutdown().await;
+    waited?;
     Ok(())
 }

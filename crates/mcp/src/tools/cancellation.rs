@@ -10,7 +10,9 @@
 //! The token travels as a task-local value instead of a parameter of every
 //! tool function. Each direct tool runs inline in the `call_tool` future, so
 //! one scope there reaches every route, and a new tool gets the same behavior
-//! without a change to its signature. Code Mode is the exception: it runs its
+//! without a change to its signature. A call that runs as an MCP task runs in
+//! a spawned future with a scope of its own, whose token `tasks/cancel` sets
+//! (see `crate::tasks`). Code Mode is the exception: it runs its
 //! snippet on a blocking thread outside the scope, so `code_execute` reads the
 //! token first and passes it to the snippet as an argument.
 

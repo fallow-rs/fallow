@@ -127,12 +127,18 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     Ok(args)
 }
 
-fn requires_cli_fallback(params: &AnalyzeParams) -> bool {
+/// Whether the call asks for type-aware analysis through its parameters.
+pub fn analyze_requests_type_aware(params: &AnalyzeParams) -> bool {
     type_aware_requested(
         params.type_aware,
         params.type_aware_projects.as_deref(),
         params.type_aware_require.as_ref(),
-    ) || baseline_requested(params.baseline.as_deref(), params.save_baseline.as_deref())
+    )
+}
+
+fn requires_cli_fallback(params: &AnalyzeParams) -> bool {
+    analyze_requests_type_aware(params)
+        || baseline_requested(params.baseline.as_deref(), params.save_baseline.as_deref())
         || regression_requested(
             params.fail_on_regression,
             params.tolerance.as_deref(),

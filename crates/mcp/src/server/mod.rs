@@ -1,10 +1,11 @@
 use rmcp::handler::server::tool::{InputResponses, RequestState, ToolCallContext, ToolRouter};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetSkillRequestParams,
-    GetSkillResult, Implementation, ListResourceTemplatesResult, ListResourcesResult,
-    ListSkillsResult, MetaObject, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResponse, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ContentBlock,
+    CreateTaskResult, GetSkillRequestParams, GetSkillResult, GetTaskParams, GetTaskResult,
+    Implementation, ListResourceTemplatesResult, ListResourcesResult, ListSkillsResult, MetaObject,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
+    ServerConfig, UpdateTaskParams,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
@@ -76,6 +77,8 @@ pub struct FallowMcp {
     tool_router: ToolRouter<Self>,
     /// How long `fix_apply` waits for an answer to its confirmation form.
     confirm_timeout: std::time::Duration,
+    /// The MCP tasks of this server. All clones share one store.
+    tasks: crate::tasks::TaskStore,
 }
 
 impl FallowMcp {
@@ -86,7 +89,34 @@ impl FallowMcp {
             cargo_fallow: resolve_cargo_fallow(),
             tool_router: Self::tool_router(),
             confirm_timeout: crate::tools::CONFIRM_TIMEOUT,
+            tasks: crate::tasks::TaskStore::new(),
         }
+    }
+
+    /// The task store, which the stdio loop shuts down when the client leaves.
+    pub fn task_store(&self) -> crate::tasks::TaskStore {
+        self.tasks.clone()
+    }
+
+    /// Start `request` as an MCP task and return its handle.
+    fn start_task(
+        &self,
+        pace: crate::tasks::TaskPace,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> CallToolResponse {
+        let tool = request.name.to_string();
+        let options = crate::tasks::task_options(&tool, pace);
+        let server = self.clone();
+        let task = self.tasks.spawn(options, move |task, cancellation| {
+            Box::pin(async move {
+                let call = ToolCallContext::new(&server, request, context);
+                let work =
+                    with_request_cancellation(cancellation.clone(), server.tool_router.call(call));
+                crate::tasks::drive_task(task, &tool, cancellation, work).await
+            })
+        });
+        CallToolResponse::Task(CreateTaskResult::new(task))
     }
 }
 
@@ -664,7 +694,8 @@ impl ServerHandler for FallowMcp {
     fn get_info(&self) -> ServerConfig {
         let capabilities = ServerCapabilities::builder()
             .enable_tools()
-            .enable_resources();
+            .enable_resources()
+            .enable_tasks();
         let capabilities = if crate::skills::available() {
             capabilities.enable_skills()
         } else {
@@ -680,6 +711,10 @@ impl ServerHandler for FallowMcp {
 
     /// Dispatch one tool call inside the cancellation scope of its request.
     ///
+    /// A long call runs as an MCP task when the request declares the tasks
+    /// extension: the response is the task handle, and the work gets its own
+    /// token, which `tasks/cancel` sets.
+    ///
     /// rmcp answers `notifications/cancelled` by cancelling `context.ct` only;
     /// it keeps polling this future. The scope makes the token visible to the
     /// work of the call, so the subprocess route kills its process tree and
@@ -689,6 +724,11 @@ impl ServerHandler for FallowMcp {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        if crate::tasks::request_declares_tasks(&context)
+            && let Some(pace) = crate::tasks::task_pace(&request)
+        {
+            return Ok(self.start_task(pace, request, context));
+        }
         let cancellation = context.ct.clone();
         let call = ToolCallContext::new(self, request, context);
         with_request_cancellation(cancellation, self.tool_router.call(call)).await
@@ -720,6 +760,35 @@ impl ServerHandler for FallowMcp {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
         crate::resources::read_resource(&request.uri).map(ReadResourceResponse::from)
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, McpError> {
+        self.tasks
+            .manager()
+            .get_task(&request.task_id)
+            .map(GetTaskResult::new)
+    }
+
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        self.tasks
+            .manager()
+            .update_task(&request.task_id, request.input_responses)
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        self.tasks.manager().cancel_task(&request.task_id)
     }
 
     async fn list_skills(

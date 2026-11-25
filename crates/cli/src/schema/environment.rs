@@ -378,7 +378,7 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "FALLOW_TIMEOUT_SECS",
         MCP,
         Some("120"),
-        "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120). Raise for long runs like production coverage on large dumps.",
+        "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120, or 1800 for a call that runs as an MCP task). Raise for long runs like production coverage on large dumps.",
     ),
     var(
         "FALLOW_MCP_MAX_OUTPUT_BYTES",

@@ -37,6 +37,7 @@ impl Client {
             cargo_fallow: "cargo-fallow".to_string(),
             tool_router: FallowMcp::tool_router(),
             confirm_timeout,
+            tasks: crate::tasks::TaskStore::new(),
         };
         let (client, server_io) = tokio::io::duplex(1024 * 1024);
         let (server_read, server_write) = tokio::io::split(server_io);

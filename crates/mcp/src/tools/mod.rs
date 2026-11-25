@@ -39,7 +39,7 @@ mod similar_code;
 mod suppressions;
 mod trace;
 
-pub use analyze::{build_analyze_args, run_analyze};
+pub use analyze::{analyze_requests_type_aware, build_analyze_args, run_analyze};
 pub use architecture::{build_architecture_args, run_architecture};
 pub use audit::{build_audit_args, run_audit};
 pub use cancellation::request_cancellation;
@@ -328,10 +328,33 @@ fn timeout_duration_from(value: Option<&str>, default_secs: u64) -> Duration {
 }
 
 /// Read the subprocess timeout from `FALLOW_TIMEOUT_SECS` or use the supplied
-/// tool-specific default.
+/// tool-specific default. A call that runs as an MCP task has
+/// [`crate::tasks::TASK_DEFAULT_TIMEOUT_SECS`] as its default, the same
+/// deadline that sets the `ttlMs` of the task.
 fn timeout_duration_with_default(default_secs: u64) -> Duration {
     let configured = std::env::var("FALLOW_TIMEOUT_SECS").ok();
-    timeout_duration_from(configured.as_deref(), default_secs)
+    let in_task = crate::tasks::current_task().is_some();
+    timeout_duration_from(
+        configured.as_deref(),
+        call_default_secs(default_secs, in_task),
+    )
+}
+
+const fn call_default_secs(default_secs: u64, in_task: bool) -> u64 {
+    if in_task {
+        crate::tasks::TASK_DEFAULT_TIMEOUT_SECS
+    } else {
+        default_secs
+    }
+}
+
+/// The deadline of a tool call that runs as an MCP task.
+pub fn task_timeout() -> Duration {
+    let configured = std::env::var("FALLOW_TIMEOUT_SECS").ok();
+    timeout_duration_from(
+        configured.as_deref(),
+        crate::tasks::TASK_DEFAULT_TIMEOUT_SECS,
+    )
 }
 
 fn timeout_duration() -> Duration {
@@ -1339,6 +1362,17 @@ mod completeness_tests {
             .map(ToString::to_string)
             .collect();
         assert!(!type_aware_complete_required(&args));
+    }
+
+    #[test]
+    fn a_task_call_gets_the_task_default() {
+        let task_default = crate::tasks::TASK_DEFAULT_TIMEOUT_SECS;
+        assert_eq!(
+            call_default_secs(DEFAULT_TIMEOUT_SECS, false),
+            DEFAULT_TIMEOUT_SECS
+        );
+        assert_eq!(call_default_secs(DEFAULT_TIMEOUT_SECS, true), task_default);
+        assert_eq!(call_default_secs(15 * 60, true), task_default);
     }
 
     #[test]

@@ -7968,7 +7968,7 @@
     "FALLOW_AGENT_SOURCE": "Normalized agent vendor for telemetry classification (e.g. claude_code, codex, cursor). Only read when telemetry is on.",
     "DO_NOT_TRACK": "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention).",
     "FALLOW_BIN": "Path to the fallow binary that the fallow-mcp server runs. When it is unset, the server runs the `fallow` file next to its own executable, else `fallow` on PATH.",
-    "FALLOW_TIMEOUT_SECS": "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120). Raise for long runs like production coverage on large dumps.",
+    "FALLOW_TIMEOUT_SECS": "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120, or 1800 for a call that runs as an MCP task). Raise for long runs like production coverage on large dumps.",
     "FALLOW_MCP_MAX_OUTPUT_BYTES": "MCP server: response cap in bytes for each tool call (default 1000000, highest 16777216). A larger response is refused with FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT and a narrow list of parameters. The max_output_bytes parameter of a call can only lower this cap.",
     "FALLOW_DIFF_FILE": "MCP server: path to a unified diff that scopes all findings by changed line.",
     "FALLOW_CHANGED_SINCE": "MCP server: git ref that scopes file discovery for analysis tools.",
