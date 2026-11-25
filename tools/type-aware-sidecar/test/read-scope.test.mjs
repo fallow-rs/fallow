@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createApi } from "../src/backend.mjs";
+import { createApi, withReadScope } from "../src/backend.mjs";
 import { createReadScope, resolvesInside } from "../src/read-scope.mjs";
 
 const OUTSIDE_TEXT = 'export const value = "text-of-the-other-file";\n';
@@ -93,7 +93,14 @@ test("a node_modules link does not open its target", () => {
   });
 });
 
-test("the existence callbacks stay inside the read scope", () => {
+test("only the content callbacks of the checker go through the read scope", () => {
+  withLayout(({ root }) => {
+    const scoped = withReadScope(createReadScope(root, [], ""));
+    assert.deepEqual(Object.keys(scoped).toSorted(), ["getAccessibleEntries", "readFile"]);
+  });
+});
+
+test("the scope check follows links", () => {
   withLayout(({ root, outside }) => {
     const scope = createReadScope(root, [], "");
     assert.equal(scope.inScope(outside), false);

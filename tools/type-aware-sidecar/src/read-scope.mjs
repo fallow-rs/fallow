@@ -128,13 +128,24 @@ export const createReadScope = (root, compilerDirs = [], scopeRoot = undefined) 
   const nodeModules = nodeModulesAbove(realOrResolved(root));
   const allowed = [base, ...nodeModules, ...compilerDirs.map(realOrResolved)];
   const resolve = createResolver();
+  // The checker asks for one file several times (`realpath`, then
+  // `readFile`). A result for an existing path is kept until the next reset.
+  // A missing path is checked again, because it can appear later as a link.
+  const results = new Map();
   const check = (fileName) => {
     if (!path.isAbsolute(fileName)) return { inScope: true, stats: undefined };
+    const cached = results.get(fileName);
+    if (cached) return cached;
     const { real, stats } = resolve(fileName);
-    return { inScope: allowed.some((dir) => isWithin(dir, real)), stats };
+    const result = { inScope: allowed.some((dir) => isWithin(dir, real)), stats };
+    if (stats) results.set(fileName, result);
+    return result;
   };
   return {
-    reset: resolve.reset,
+    reset: () => {
+      results.clear();
+      resolve.reset();
+    },
     inScope: (fileName) => check(fileName).inScope,
     readable: (fileName) => {
       const { inScope, stats } = check(fileName);

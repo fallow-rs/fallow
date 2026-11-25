@@ -153,15 +153,17 @@ const COMPILER_DIRS = (() => {
 })();
 
 /**
- * The answer of each file system callback for a path outside the read scope:
- * the path does not exist, and a link resolves to itself.
+ * The answer of each scoped file system callback, besides `readFile`, for a
+ * path outside the read scope: a directory lists no entries.
+ *
+ * Each scoped callback costs one round trip from the checker for each call.
+ * So the callbacks that give no file content (`fileExists`,
+ * `directoryExists`, `stat` and `realpath`) go to the checker host. A link
+ * that `realpath` resolves to a path outside the scope stays unreadable,
+ * because `readFile` checks the resolved path of each file itself.
  */
 const REFUSED = {
-  fileExists: () => false,
-  directoryExists: () => false,
   getAccessibleEntries: () => ({ files: [], directories: [] }),
-  realpath: (fileName) => fileName,
-  stat: () => undefined,
 };
 
 /**
@@ -169,7 +171,7 @@ const REFUSED = {
  * (see {@link createReadScope}). A refused file reads as missing. A path in
  * scope goes to the callback of the caller, or to the file system.
  */
-const withReadScope = (scope, fs = {}) => {
+export const withReadScope = (scope, fs = {}) => {
   const scoped = { ...fs };
   const readFile = fs.readFile ?? (() => READ_FROM_DISK);
   scoped.readFile = (fileName) => (scope.readable(fileName) ? readFile(fileName) : null);
