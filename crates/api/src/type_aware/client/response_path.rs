@@ -1,66 +1,262 @@
 //! Check the file paths that the type-aware companion returns.
 //!
-//! The companion reports each path relative to the analysis root, which is
-//! the base of its read scope. A path may use `..` segments, but with those
-//! segments applied it must stay inside the root.
+//! The companion reports each path relative to the analysis root. The
+//! companion can read files above the root: the files of the read scope base
+//! (the Git work tree of the root) and the files in a real `node_modules`
+//! directory at or above the root, for example a hoisted
+//! `../../node_modules/@angular/core/index.d.ts`. A returned path, with its
+//! `..` segments applied to the root, must stay inside one of those
+//! directories. The caller drops each entry with a path that does not.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
-use super::TypeAwareError;
+const NODE_MODULES: &str = "node_modules";
 
-/// Fail when `path` is absolute or leads above the analysis root.
-pub(super) fn validate_semantic_response_path(
-    path: &Path,
-    query_id: usize,
-) -> Result<(), TypeAwareError> {
-    if stays_inside_root(path) {
-        return Ok(());
-    }
-    Err(TypeAwareError::from(format!(
-        "type-aware query {query_id} returned a path outside the project root"
-    )))
+/// The directories that a returned path may name for one analysis root.
+pub(super) struct ResponseScope {
+    root: PathBuf,
+    allowed: Vec<PathBuf>,
 }
 
-/// True when the root-relative `path`, with each `..` and `.` applied by
-/// text, stays at or below the root.
-fn stays_inside_root(path: &Path) -> bool {
-    let mut depth: usize = 0;
-    for component in path.components() {
-        match component {
-            Component::Normal(_) => depth += 1,
-            Component::CurDir => {}
-            Component::ParentDir => match depth.checked_sub(1) {
-                Some(up) => depth = up,
-                None => return false,
-            },
-            Component::RootDir | Component::Prefix(_) => return false,
-        }
+impl ResponseScope {
+    /// The scope of `root`: its read scope base and each real `node_modules`
+    /// directory at or above it. A `node_modules` link does not count.
+    pub(super) fn new(root: &Path) -> Self {
+        let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let home = fallow_process::HostPaths::from_env().home;
+        let mut allowed = vec![fallow_types::read_scope::read_scope_base(
+            &root,
+            home.as_deref(),
+        )];
+        allowed.extend(
+            root.ancestors()
+                .map(|dir| dir.join(NODE_MODULES))
+                .filter(|dir| {
+                    dir.symlink_metadata()
+                        .is_ok_and(|metadata| metadata.file_type().is_dir())
+                }),
+        );
+        Self { root, allowed }
     }
-    true
+
+    /// True when the root-relative `path`, with each `..` and `.` applied to
+    /// the root by text, stays inside an allowed directory. An absolute path
+    /// is never allowed, because the protocol names root-relative paths.
+    pub(super) fn allows(&self, path: &Path) -> bool {
+        let mut joined = self.root.clone();
+        for component in path.components() {
+            match component {
+                Component::Normal(part) => joined.push(part),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !joined.pop() {
+                        return false;
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => return false,
+            }
+        }
+        self.allowed.iter().any(|dir| joined.starts_with(dir))
+    }
+}
+
+/// True when each contract declaration of `data` stays inside `scope`.
+pub(super) fn contract_paths_in_scope(data: &super::SymbolUseData, scope: &ResponseScope) -> bool {
+    data.contract_relations
+        .iter()
+        .map(|contract| &contract.declaration.path)
+        .chain(
+            data.framework_contract_relations
+                .iter()
+                .map(|contract| &contract.declaration.path),
+        )
+        .all(|path| scope.allows(path))
+}
+
+/// True when the path and each alias hop of `evidence` stay inside `scope`.
+pub(super) fn reference_paths_in_scope(
+    evidence: &super::SemanticReferenceData,
+    scope: &ResponseScope,
+) -> bool {
+    scope.allows(&evidence.path) && evidence.via.iter().all(|hop| scope.allows(&hop.path))
+}
+
+/// The impact paths whose path and provenance stay inside `scope`. The
+/// other paths are dropped.
+pub(super) fn impact_paths(
+    paths: Vec<super::ImpactPathData>,
+    relation: &str,
+    scope: &ResponseScope,
+) -> Vec<super::SemanticImpactPath> {
+    paths
+        .into_iter()
+        .filter(|path| {
+            scope.allows(&path.path) && path.provenance.iter().all(|hop| scope.allows(hop))
+        })
+        .map(|path| super::SemanticImpactPath {
+            distance: path.provenance.len().max(1),
+            via: path.provenance,
+            path: path.path,
+            relation: relation.to_string(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::tests::symbol;
+    use super::super::*;
     use super::*;
+    use serde_json::json;
 
     #[test]
-    fn response_paths_may_use_parent_segments_that_stay_inside_the_root() {
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_package_root_accepts_paths_into_the_work_tree_and_hoisted_node_modules() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outer = dunce::canonicalize(dir.path()).expect("canonical");
+        let top = outer.join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::create_dir_all(top.join("node_modules/@angular/core")).expect("mkdir");
+        let scope = ResponseScope::new(&root);
+
         for path in [
             "src/a.ts",
             "./src/a.ts",
             "src/../lib/a.ts",
-            "packages/app/../lib/a.ts",
+            "../lib/src/a.ts",
+            "../../node_modules/@angular/core/index.d.ts",
         ] {
-            assert!(
-                validate_semantic_response_path(Path::new(path), 0).is_ok(),
-                "{path}"
-            );
+            assert!(scope.allows(Path::new(path)), "{path}");
         }
-        for path in ["../shared/consumer.ts", "src/../../a.ts", "/abs/a.ts"] {
-            assert!(
-                validate_semantic_response_path(Path::new(path), 0).is_err(),
-                "{path}"
-            );
+        for path in ["../../../outside.ts", "src/../../../../a.ts", "/abs/a.ts"] {
+            assert!(!scope.allows(Path::new(path)), "{path}");
         }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_root_without_a_work_tree_accepts_only_its_own_paths_and_real_node_modules() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outer = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = outer.join("app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(outer.join("node_modules/pkg")).expect("mkdir");
+        let scope = ResponseScope::new(&root);
+
+        assert!(scope.allows(Path::new("src/a.ts")));
+        assert!(scope.allows(Path::new("../node_modules/pkg/index.d.ts")));
+        assert!(!scope.allows(Path::new("../shared/consumer.ts")));
+    }
+
+    /// A package root below a work tree with hoisted `node_modules` gets
+    /// framework contract and reference paths above the root. The decode
+    /// keeps such a path, and drops only the entry with a path outside the
+    /// work tree.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn hoisted_node_modules_paths_decode_for_a_package_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dunce::canonicalize(dir.path())
+            .expect("canonical")
+            .join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::create_dir_all(top.join("node_modules/@angular/core")).expect("mkdir");
+        let requested = SemanticFrameworkContract {
+            framework: "angular".to_string(),
+            package: "@angular/core".to_string(),
+            heritage_symbol: "OnInit".to_string(),
+            heritage_names: vec!["OnInit".to_string()],
+            relation: SemanticFrameworkRelation::Implements,
+            members: vec!["ngOnInit".to_string()],
+        };
+        let query = SemanticQuery::SymbolUse {
+            id: 0,
+            symbol: symbol(),
+            framework_contracts: vec![requested],
+        };
+        let mut declaration = symbol();
+        declaration.path = PathBuf::from("../../node_modules/@angular/core/index.d.ts");
+        declaration.exported_name = "OnInit".to_string();
+        declaration.local_name = "OnInit".to_string();
+        let reference = |path: &str| {
+            json!({
+                "path": path,
+                "line": 1,
+                "col": 0,
+                "role": "import",
+                "source": "checker",
+                "namespace": "value",
+                "via": []
+            })
+        };
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::SymbolUse,
+            assertion: "confirmed-used".to_string(),
+            status: SemanticCompleteness::Complete,
+            reason_code: None,
+            actions: Vec::new(),
+            evidence: vec![
+                reference("../../node_modules/@angular/core/use.d.ts"),
+                reference("../../../outside.ts"),
+            ],
+            total_evidence_count: 2,
+            truncated: false,
+            omissions: Vec::new(),
+            data: json!({
+                "symbol": symbol(),
+                "selected_project": "tsconfig.json",
+                "owning_projects": ["tsconfig.json"],
+                "total_reference_count": 2,
+                "contract_relations": [],
+                "framework_contract_relations": [{
+                    "framework": "angular",
+                    "package": "@angular/core",
+                    "relation": "implements",
+                    "declaration": declaration
+                }],
+                "closed_world_eligible": false,
+                "edit_guard": { "start": 0, "end": 1, "declaration_sha256": "unused" }
+            }),
+        };
+        let scope = ResponseScope::new(&root);
+
+        let decision = decode_candidate_decision(
+            &root,
+            &scope,
+            &query,
+            &result,
+            false,
+            &mut FxHashMap::default(),
+        )
+        .expect("hoisted paths decode");
+
+        assert!(decision.framework_contract.is_some());
+        assert_eq!(decision.evidence.len(), 1);
+        assert_eq!(
+            decision.evidence[0].path,
+            PathBuf::from("../../node_modules/@angular/core/use.d.ts")
+        );
+
+        let mut outside = result;
+        outside.data["framework_contract_relations"][0]["declaration"]["path"] =
+            json!("../../../node_modules/@angular/core/index.d.ts");
+        let decision = decode_candidate_decision(
+            &root,
+            &scope,
+            &query,
+            &outside,
+            false,
+            &mut FxHashMap::default(),
+        )
+        .expect("an outside contract path keeps the decode");
+        assert_eq!(
+            decision.decision,
+            SemanticCandidateDecisionKind::RetainedUnresolved
+        );
     }
 }
