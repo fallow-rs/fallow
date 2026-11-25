@@ -1201,6 +1201,34 @@ fn a_configured_cache_dir_outside_the_project_is_ignored() {
 }
 
 #[test]
+fn a_configured_cache_dir_in_git_metadata_is_ignored_in_any_spelling() {
+    for dir in [
+        ".GIT/hooks",
+        ".Git",
+        "sub/.git./x",
+        "sub/.git /x",
+        ".git. ./x",
+        ".git::$INDEX_ALLOCATION/x",
+        "cache:stream",
+        "GIT~1/hooks",
+        "sub/git~12",
+    ] {
+        assert_eq!(
+            config_cache_dir(Path::new("/my/project"), Some(PathBuf::from(dir))),
+            PathBuf::from("/my/project/.fallow"),
+            "{dir}"
+        );
+    }
+    assert_eq!(
+        config_cache_dir(
+            Path::new("/my/project"),
+            Some(PathBuf::from(".github/cache"))
+        ),
+        PathBuf::from("/my/project/.github/cache")
+    );
+}
+
+#[test]
 fn a_relative_root_does_not_accept_an_outside_cache_dir() {
     let dir = config_cache_dir(Path::new("."), Some(PathBuf::from("/home/user")));
     assert!(dir.ends_with(".fallow"), "{}", dir.display());
