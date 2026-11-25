@@ -960,7 +960,7 @@ pattern: string
 files: string[]
 /**
  * The canonical names of the rules of the override that apply per
- * file.
+ * file, also when the config uses an alias.
  */
 rules: string[]
 /**

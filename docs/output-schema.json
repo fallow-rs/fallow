@@ -14317,7 +14317,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "The canonical names of the rules of the override that apply per\nfile."
+              "description": "The canonical names of the rules of the override that apply per\nfile, also when the config uses an alias."
             },
             "reason": {
               "type": "string",
