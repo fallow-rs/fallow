@@ -736,7 +736,13 @@ pub fn trace_symbol(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware trace response omitted its query result".to_string())
     })?;
-    decode_symbol_trace(&response, &request, result, symbol)
+    decode_symbol_trace(
+        &response,
+        &request,
+        result,
+        symbol,
+        &ResponseScope::new(root),
+    )
 }
 
 fn decode_symbol_trace(
@@ -744,6 +750,7 @@ fn decode_symbol_trace(
     request: &SemanticRequest,
     result: &SemanticQueryResponse,
     symbol: SemanticSymbol,
+    scope: &ResponseScope,
 ) -> Result<SemanticSymbolTrace, TypeAwareError> {
     let identity = semantic_identity(response, request, result.status);
     if result.status == SemanticCompleteness::Unavailable {
@@ -778,8 +785,7 @@ fn decode_symbol_trace(
             "type-aware symbol trace totals are smaller than returned evidence".to_string(),
         ));
     }
-    let scope = ResponseScope::new(Path::new(&request.root));
-    let references = decode_symbol_trace_evidence(result, &scope)?;
+    let references = decode_symbol_trace_evidence(result, scope)?;
     Ok(SemanticSymbolTrace {
         target: data.symbol,
         identity,
@@ -813,7 +819,13 @@ pub fn symbol_impact(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware impact response omitted its query result".to_string())
     })?;
-    decode_symbol_impact(&response, &request, result, symbol)
+    decode_symbol_impact(
+        &response,
+        &request,
+        result,
+        symbol,
+        &ResponseScope::new(root),
+    )
 }
 
 fn decode_symbol_impact(
@@ -821,6 +833,7 @@ fn decode_symbol_impact(
     request: &SemanticRequest,
     result: &SemanticQueryResponse,
     symbol: SemanticSymbol,
+    scope: &ResponseScope,
 ) -> Result<SemanticSymbolImpact, TypeAwareError> {
     let identity = semantic_identity(response, request, result.status);
     if result.status == SemanticCompleteness::Unavailable {
@@ -865,7 +878,6 @@ fn decode_symbol_impact(
             "type-aware symbol impact totals are smaller than returned paths".to_string(),
         ));
     }
-    let scope = ResponseScope::new(Path::new(&request.root));
     let direct_consumers = data
         .direct_consumers
         .into_iter()
@@ -877,12 +889,8 @@ fn decode_symbol_impact(
             via: Vec::new(),
         })
         .collect();
-    let affected_files = impact_paths(
-        data.transitive_affected_files,
-        "transitive-consumer",
-        &scope,
-    );
-    let targeted_tests = impact_paths(data.targeted_tests, "targeted-test", &scope);
+    let affected_files = impact_paths(data.transitive_affected_files, "transitive-consumer", scope);
+    let targeted_tests = impact_paths(data.targeted_tests, "targeted-test", scope);
     Ok(SemanticSymbolImpact {
         target: data.symbol,
         identity,
@@ -991,7 +999,9 @@ pub fn inspect_symbol(
         .ok_or_else(|| {
             TypeAwareError::from("semantic inspect omitted symbol impact".to_string())
         })?;
-    let trace = decode_symbol_trace(&response, &request, trace_result, symbol.clone())?;
+    // One scope for the whole request, because the decoders share it.
+    let scope = ResponseScope::new(Path::new(&request.root));
+    let trace = decode_symbol_trace(&response, &request, trace_result, symbol.clone(), &scope)?;
     let api_query = request
         .queries
         .iter()
@@ -1000,7 +1010,7 @@ pub fn inspect_symbol(
             TypeAwareError::from("semantic inspect omitted its API surface query".to_string())
         })?;
     let api_surface = decode_api_surface(api_query, api_result)?;
-    let impact = decode_symbol_impact(&response, &request, impact_result, symbol)?;
+    let impact = decode_symbol_impact(&response, &request, impact_result, symbol, &scope)?;
     let type_aware = inspect_type_aware_outcome(&response, &request, &trace, &api_surface, &impact);
     Ok(SemanticInspectOutcome {
         trace,
@@ -3698,102 +3708,6 @@ mod tests {
         assert!(applied.entries.is_empty());
         assert_eq!(decoded.status, SemanticCompleteness::Unavailable);
         assert!(decoded.private_type_leaks.is_empty());
-    }
-
-    #[test]
-    fn partial_symbol_impact_preserves_valid_consumers_and_targeted_tests() {
-        let target = symbol();
-        let request = SemanticRequest {
-            protocol_version: PROTOCOL_VERSION,
-            operation: OPERATION,
-            root: ".".to_string(),
-            projects: vec!["tsconfig.json".to_string()],
-            evidence_limit: EVIDENCE_LIMIT,
-            queries: vec![SemanticQuery::SymbolImpact {
-                id: 0,
-                symbol: target.clone(),
-            }],
-        };
-        let result = SemanticQueryResponse {
-            query_id: 0,
-            operation: SemanticOperation::SymbolImpact,
-            assertion: "consumers-found".to_string(),
-            status: SemanticCompleteness::Partial,
-            reason_code: Some(SemanticGapReason::DynamicBehavior),
-            actions: vec!["Review dynamic consumers.".to_string()],
-            evidence: Vec::new(),
-            total_evidence_count: 2,
-            truncated: false,
-            omissions: vec![SemanticOmission {
-                reason_code: SemanticGapReason::DynamicBehavior,
-                count: 1,
-            }],
-            data: json!({
-                "symbol": target,
-                "selected_project": "tsconfig.json",
-                "direct_consumers": [{
-                    "path": "src/consumer.ts",
-                    "namespace": "value"
-                }],
-                "total_direct_consumer_count": 1,
-                "transitive_affected_files": [{
-                    "path": "src/transitive.ts",
-                    "provenance": ["src/consumer.ts", "src/transitive.ts"]
-                }],
-                "total_transitive_affected_file_count": 1,
-                "targeted_tests": [{
-                    "path": "test/config.test.ts",
-                    "provenance": ["src/consumer.ts", "test/config.test.ts"]
-                }],
-                "total_targeted_test_count": 1,
-                "confidence": "bounded"
-            }),
-        };
-        let response = SemanticResponse {
-            protocol_version: PROTOCOL_VERSION,
-            operation: OPERATION.to_string(),
-            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
-            backend: BACKEND_FAMILY.to_string(),
-            backend_version: BACKEND_VERSION.to_string(),
-            selected_tsconfigs: vec!["tsconfig.json".to_string()],
-            projects: Vec::new(),
-            results: vec![result.clone()],
-            phase_timings_ms: SemanticPhaseTimings {
-                project_setup: 1,
-                diagnostics: 1,
-                semantic_queries: 1,
-            },
-            warnings: Vec::new(),
-            elapsed_ms: 3,
-        };
-
-        let impact =
-            decode_symbol_impact(&response, &request, &result, symbol()).expect("valid impact");
-
-        assert_eq!(impact.status, SemanticCompleteness::Partial);
-        assert_eq!(impact.total_direct_consumer_count, 1);
-        assert_eq!(
-            impact.direct_consumers[0].path,
-            PathBuf::from("src/consumer.ts")
-        );
-        assert_eq!(impact.total_affected_file_count, 1);
-        assert_eq!(impact.total_targeted_test_count, 1);
-        assert_eq!(
-            impact.targeted_tests[0].path,
-            PathBuf::from("test/config.test.ts")
-        );
-        assert_eq!(impact.confidence, SemanticImpactConfidence::Bounded);
-
-        let mut invalid_confidence = result.clone();
-        invalid_confidence.data["confidence"] = json!("certain");
-        assert!(decode_symbol_impact(&response, &request, &invalid_confidence, symbol()).is_err());
-
-        let mut invalid_path = result;
-        invalid_path.data["direct_consumers"][0]["path"] = json!("/outside.ts");
-        let impact = decode_symbol_impact(&response, &request, &invalid_path, symbol())
-            .expect("an outside path drops only its own entry");
-        assert!(impact.direct_consumers.is_empty());
-        assert_eq!(impact.targeted_tests.len(), 1);
     }
 
     #[test]

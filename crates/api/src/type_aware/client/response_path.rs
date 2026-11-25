@@ -288,4 +288,104 @@ mod tests {
             SemanticCandidateDecisionKind::RetainedUnresolved
         );
     }
+
+    #[test]
+    fn partial_symbol_impact_preserves_valid_consumers_and_targeted_tests() {
+        let target = symbol();
+        let scope = ResponseScope::new(Path::new("."));
+        let request = SemanticRequest {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION,
+            root: ".".to_string(),
+            projects: vec!["tsconfig.json".to_string()],
+            evidence_limit: EVIDENCE_LIMIT,
+            queries: vec![SemanticQuery::SymbolImpact {
+                id: 0,
+                symbol: target.clone(),
+            }],
+        };
+        let result = SemanticQueryResponse {
+            query_id: 0,
+            operation: SemanticOperation::SymbolImpact,
+            assertion: "consumers-found".to_string(),
+            status: SemanticCompleteness::Partial,
+            reason_code: Some(SemanticGapReason::DynamicBehavior),
+            actions: vec!["Review dynamic consumers.".to_string()],
+            evidence: Vec::new(),
+            total_evidence_count: 2,
+            truncated: false,
+            omissions: vec![SemanticOmission {
+                reason_code: SemanticGapReason::DynamicBehavior,
+                count: 1,
+            }],
+            data: json!({
+                "symbol": target,
+                "selected_project": "tsconfig.json",
+                "direct_consumers": [{
+                    "path": "src/consumer.ts",
+                    "namespace": "value"
+                }],
+                "total_direct_consumer_count": 1,
+                "transitive_affected_files": [{
+                    "path": "src/transitive.ts",
+                    "provenance": ["src/consumer.ts", "src/transitive.ts"]
+                }],
+                "total_transitive_affected_file_count": 1,
+                "targeted_tests": [{
+                    "path": "test/config.test.ts",
+                    "provenance": ["src/consumer.ts", "test/config.test.ts"]
+                }],
+                "total_targeted_test_count": 1,
+                "confidence": "bounded"
+            }),
+        };
+        let response = SemanticResponse {
+            protocol_version: PROTOCOL_VERSION,
+            operation: OPERATION.to_string(),
+            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
+            backend: BACKEND_FAMILY.to_string(),
+            backend_version: BACKEND_VERSION.to_string(),
+            selected_tsconfigs: vec!["tsconfig.json".to_string()],
+            projects: Vec::new(),
+            results: vec![result.clone()],
+            phase_timings_ms: SemanticPhaseTimings {
+                project_setup: 1,
+                diagnostics: 1,
+                semantic_queries: 1,
+            },
+            warnings: Vec::new(),
+            elapsed_ms: 3,
+        };
+
+        let impact = decode_symbol_impact(&response, &request, &result, symbol(), &scope)
+            .expect("valid impact");
+
+        assert_eq!(impact.status, SemanticCompleteness::Partial);
+        assert_eq!(impact.total_direct_consumer_count, 1);
+        assert_eq!(
+            impact.direct_consumers[0].path,
+            PathBuf::from("src/consumer.ts")
+        );
+        assert_eq!(impact.total_affected_file_count, 1);
+        assert_eq!(impact.total_targeted_test_count, 1);
+        assert_eq!(
+            impact.targeted_tests[0].path,
+            PathBuf::from("test/config.test.ts")
+        );
+        assert_eq!(impact.confidence, SemanticImpactConfidence::Bounded);
+
+        let mut invalid_confidence = result.clone();
+        invalid_confidence.data["confidence"] = json!("certain");
+        assert!(
+            decode_symbol_impact(&response, &request, &invalid_confidence, symbol(), &scope)
+                .is_err()
+        );
+
+        let mut invalid_path = result;
+        invalid_path.data["direct_consumers"][0]["path"] = json!("/outside.ts");
+        let impact = decode_symbol_impact(&response, &request, &invalid_path, symbol(), &scope)
+            .expect("an outside path drops only its own entry");
+        assert!(impact.direct_consumers.is_empty());
+        assert_eq!(impact.targeted_tests.len(), 1);
+    }
 }
