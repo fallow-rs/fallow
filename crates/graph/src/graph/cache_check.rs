@@ -7,8 +7,9 @@ use super::types::ReferencePathNode;
 
 impl ModuleGraph {
     /// True when every `FileId`, edge range and reference path id of the
-    /// graph is in bounds. A graph that a cache file supplies can break these
-    /// invariants, and the detectors index with them without a check.
+    /// graph is in bounds, and each re-export cycle names its members by the
+    /// paths of their modules. A graph that a cache file supplies can break
+    /// these invariants, and the detectors index with them without a check.
     #[must_use]
     pub fn has_valid_structure(&self) -> bool {
         let module_count = self.modules.len();
@@ -53,9 +54,23 @@ impl ModuleGraph {
         .into_iter()
         .flat_map(|usage| usage.values().flatten())
         .all(in_range);
+        let cycles_valid = self.re_export_cycles.iter().all(|cycle| {
+            cycle.files.len() == cycle.file_ids.len()
+                && cycle.file_ids.iter().zip(&cycle.files).all(|(id, path)| {
+                    self.modules
+                        .get(id.0 as usize)
+                        .is_some_and(|module| module.path == *path)
+                })
+        });
+        let escapes_valid = self
+            .namespace_escapes
+            .iter()
+            .all(|escape| in_range(&escape.consumer) && in_range(&escape.target));
         modules_valid
             && paths_valid
             && usage_valid
+            && cycles_valid
+            && escapes_valid
             && self.eager_package_imports.keys().all(in_range)
             && self
                 .edges
