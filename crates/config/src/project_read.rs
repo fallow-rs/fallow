@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn share_and_device_paths_are_refused_by_text() {
-        let base = Path::new("/base");
+        let base = &abs("/base");
         for path in [
             "//host/share/x",
             r"\\host\share\x",
@@ -558,20 +558,16 @@ mod tests {
                 "{path}"
             );
         }
-        assert!(absolute_path_text_inside(
-            Path::new("/base/a/../b"),
-            base,
-            base
-        ));
+        assert!(absolute_path_text_inside(&abs("/base/a/../b"), base, base));
         assert!(!absolute_path_text_inside(
-            Path::new("/base/../other"),
+            &abs("/base/../other"),
             base,
             base
         ));
         assert!(absolute_path_text_inside(
-            Path::new("/given/a"),
+            &abs("/given/a"),
             base,
-            Path::new("/given")
+            &abs("/given")
         ));
     }
 
@@ -606,16 +602,26 @@ mod tests {
     fn the_base_keeps_the_spelling_of_the_given_root() {
         assert_eq!(
             base_as_given(
-                Path::new("/link/repo/packages/a"),
-                Path::new("/real/repo/packages/a"),
-                Path::new("/real/repo"),
+                &abs("/link/repo/packages/a"),
+                &abs("/real/repo/packages/a"),
+                &abs("/real/repo"),
             ),
-            PathBuf::from("/link/repo")
+            abs("/link/repo")
         );
         assert_eq!(
-            base_as_given(Path::new("/x"), Path::new("/real/x"), Path::new("/other")),
-            PathBuf::from("/other")
+            base_as_given(&abs("/x"), &abs("/real/x"), &abs("/other")),
+            abs("/other")
         );
+    }
+
+    /// The absolute path of the Unix spelling `path`: the same path on Unix,
+    /// and the path on drive `C:` with backslash separators on Windows.
+    fn abs(path: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:{}", path.replace('/', "\\")))
+        } else {
+            PathBuf::from(path)
+        }
     }
 
     #[cfg(unix)]
