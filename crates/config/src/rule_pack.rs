@@ -1487,6 +1487,43 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn rejects_a_pack_link_to_a_pipe_inside_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(dir.path().join("pipe"))
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo must create the test pipe");
+        std::os::unix::fs::symlink("pipe", dir.path().join("policy.json")).unwrap();
+        let errors = load_rule_packs(dir.path(), &["policy.json".to_owned()]).unwrap_err();
+        assert!(
+            errors[0].message.contains("not a regular file"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_dot_dot_after_a_pack_link_is_outside_whether_or_not_the_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        let root = outer.join("project");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(outer.join("policy.json"), valid_pack_json()).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("sub/home")).unwrap();
+        let existing =
+            load_rule_packs(&root, &["sub/home/../../policy.json".to_owned()]).unwrap_err();
+        let missing =
+            load_rule_packs(&root, &["sub/home/../../missing.json".to_owned()]).unwrap_err();
+        assert!(existing[0].message.contains("outside the project root"));
+        assert_eq!(existing[0].message, missing[0].message);
+    }
+
     #[test]
     fn schema_validates_doc_example_shape() {
         let schema = RulePackDef::json_schema();

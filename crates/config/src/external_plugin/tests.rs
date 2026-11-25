@@ -1090,11 +1090,16 @@ fn root_check_refuses_a_path_that_does_not_resolve() {
     assert!(!is_within_root(&root.join("missing.toml"), &root));
     std::fs::write(root.join("present.toml"), "").unwrap();
     assert!(is_within_root(&root.join("present.toml"), &root));
+    assert!(!is_within_root(
+        &root.join("present.toml/inner.toml"),
+        &root
+    ));
+    assert!(!is_within_root(&root.join("a/b/c/d/missing.toml"), &root));
+    let deep: std::path::PathBuf = std::iter::repeat_n("d", 3000).collect();
+    assert!(!is_within_root(&root.join(deep).join("p.toml"), &root));
 }
 
-#[cfg(unix)]
 #[test]
-#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
 fn plugin_parse_warning_text_omits_the_file_content() {
     let source = "name = \"p\"\nkey=marker-7531\n";
     let text = plugin_parse_error(source, &PluginFormat::Toml).unwrap_err();

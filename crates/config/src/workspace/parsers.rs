@@ -637,6 +637,25 @@ mod tests {
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_reference_with_a_dot_dot_after_a_link_gets_no_diagnostic() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        let root = outer.join("project");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("sub/home")).unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "references": [{ "path": "./sub/home/../../missing-sibling" }] }"#,
+        )
+        .unwrap();
+
+        let (_, diagnostics) = reference_diagnostics(&root);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn references_and_extends_outside_the_root_get_no_diagnostic() {
