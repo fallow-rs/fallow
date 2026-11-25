@@ -16,6 +16,18 @@ use super::{
     extract_function_body_final_return_expr, static_member_object_name, unwrap_paren_expr,
 };
 
+/// The Pinia store property that holds the whole state object.
+const PINIA_STATE_PROPERTY: &str = "$state";
+
+/// The receiver of a Pinia store member read.
+enum StoreReceiver {
+    /// An inline factory call, `useFooStore()`: credit the factory import.
+    Factory(String),
+    /// A bound store instance local or member path: credit it through its
+    /// binding target.
+    Local(String),
+}
+
 /// Whether a call's callee is a bare `defineStore` identifier (Pinia). The
 /// harvest is loose here; the analyzer's `pinia` / `@pinia/nuxt` dependency
 /// gate is the activation boundary.
@@ -143,6 +155,121 @@ impl<'a> Visit<'a> for SetupBodyReadCollector<'_> {
     }
 }
 
+/// Option-store state keys that a getter or an action reads through
+/// `this.$state`. Pinia exposes each state key on the store, so
+/// `this.$state.key` reads `key`. A `this.$state` value that no key read,
+/// destructure or whole write consumes can reach every state key, so it
+/// credits each key of `state`. It credits no getter or action, because
+/// `$state` holds only the state.
+fn option_store_state_read_through_this(args: &[Argument<'_>]) -> Vec<String> {
+    let Some(Expression::ObjectExpression(options)) = args
+        .get(1)
+        .and_then(Argument::as_expression)
+        .map(unwrap_paren_expr)
+    else {
+        return Vec::new();
+    };
+    let mut collector = ThisStateReadCollector::default();
+    collector.visit_object_expression(options);
+    if collector.escaped {
+        return option_store_state_keys(options);
+    }
+    let mut keys: Vec<String> = collector.keys.into_iter().collect();
+    keys.sort_unstable();
+    keys
+}
+
+fn option_store_state_keys(options: &ObjectExpression<'_>) -> Vec<String> {
+    let mut keys = Vec::new();
+    for prop in &options.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && prop.key.static_name().is_some_and(|name| name == "state")
+            && let Some(state_obj) = state_returned_object(&prop.value)
+        {
+            let mut members = Vec::new();
+            collect_store_member_keys(state_obj, &mut members);
+            keys.extend(members.into_iter().map(|member| member.name));
+        }
+    }
+    keys
+}
+
+/// The span start of a `this.$state` expression.
+fn this_state_start(expr: &Expression<'_>) -> Option<u32> {
+    match unwrap_paren_expr(expr) {
+        Expression::StaticMemberExpression(member) if is_this_state(member) => {
+            Some(member.span.start)
+        }
+        _ => None,
+    }
+}
+
+fn is_this_state(member: &StaticMemberExpression<'_>) -> bool {
+    member.property.name == PINIA_STATE_PROPERTY
+        && matches!(member.object, Expression::ThisExpression(_))
+}
+
+/// Collect the state keys that an option store reads through `this.$state`.
+/// A parent node consumes its `this.$state` child before the walk reaches the
+/// child, so `named_uses` holds each consumed child when the child is visited.
+#[derive(Default)]
+struct ThisStateReadCollector {
+    keys: FxHashSet<String>,
+    named_uses: FxHashSet<u32>,
+    escaped: bool,
+}
+
+impl<'a> Visit<'a> for ThisStateReadCollector {
+    fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        if let Some(start) = this_state_start(&expr.object) {
+            self.named_uses.insert(start);
+            self.keys.insert(expr.property.name.to_string());
+        }
+        if is_this_state(expr) && !self.named_uses.contains(&expr.span.start) {
+            self.escaped = true;
+        }
+        walk::walk_static_member_expression(self, expr);
+    }
+
+    fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Some(start) = this_state_start(&expr.object)
+            && let Some(key) = expr.static_property_name()
+        {
+            self.named_uses.insert(start);
+            self.keys.insert(key.text().into_owned());
+        }
+        walk::walk_computed_member_expression(self, expr);
+    }
+
+    /// Pinia applies `this.$state = { ... }` as a patch, and the write reads
+    /// no key.
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if expr.operator == AssignmentOperator::Assign
+            && let AssignmentTarget::StaticMemberExpression(member) = &expr.left
+            && is_this_state(member)
+        {
+            self.named_uses.insert(member.span.start);
+        }
+        walk::walk_assignment_expression(self, expr);
+    }
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        if let BindingPattern::ObjectPattern(pattern) = &decl.id
+            && pattern.rest.is_none()
+            && let Some(start) = decl.init.as_ref().and_then(this_state_start)
+            && let Some(keys) = pattern
+                .properties
+                .iter()
+                .map(|prop| prop.key.static_name().map(|name| name.text().into_owned()))
+                .collect::<Option<Vec<_>>>()
+        {
+            self.named_uses.insert(start);
+            self.keys.extend(keys);
+        }
+        walk::walk_variable_declarator(self, decl);
+    }
+}
+
 fn harvest_option_store(obj: &ObjectExpression<'_>) -> Vec<MemberInfo> {
     let mut members = Vec::new();
     for prop in &obj.properties {
@@ -242,6 +369,12 @@ impl ModuleInfoExtractor {
             && is_define_store_callee(&call.callee)
         {
             if let Some(members) = harvest_define_store_members(&call.arguments) {
+                for member in option_store_state_read_through_this(&call.arguments) {
+                    self.member_accesses.push(MemberAccess {
+                        object: id.name.to_string(),
+                        member,
+                    });
+                }
                 self.store_member_decls.insert(id.name.to_string(), members);
             }
             for member in setup_store_members_read_in_body(&call.arguments) {
@@ -270,6 +403,20 @@ impl ModuleInfoExtractor {
             return;
         };
         if obj_pat.rest.is_some() {
+            return;
+        }
+        if let Expression::StaticMemberExpression(state) = init
+            && obj_pat
+                .properties
+                .iter()
+                .all(|prop| prop.key.static_name().is_some())
+            && let Some(receiver) = self.pinia_state_receiver(state)
+        {
+            self.pinia_state_named_uses.insert(state.span.start);
+            let object = match receiver {
+                StoreReceiver::Factory(name) | StoreReceiver::Local(name) => name,
+            };
+            self.credit_store_pattern_members(obj_pat, &object);
             return;
         }
 
@@ -316,6 +463,76 @@ impl ModuleInfoExtractor {
             }
             _ => {}
         }
+    }
+
+    /// The store receiver of a `<store>.$state` expression, or `None` when the
+    /// expression is not `$state` or its object is not a known store.
+    fn pinia_state_receiver(&self, state: &StaticMemberExpression<'_>) -> Option<StoreReceiver> {
+        if state.property.name != PINIA_STATE_PROPERTY {
+            return None;
+        }
+        if let Some(factory) = Self::inline_store_factory_receiver(&state.object) {
+            return Some(StoreReceiver::Factory(factory));
+        }
+        let path = static_member_object_name(&state.object)?;
+        let is_store = self.store_instance_locals.contains(&path)
+            || matches!(
+                self.binding_target_names.get(&path),
+                Some(BindingTarget::Class(factory))
+                    if factory.starts_with("use") && factory.ends_with("Store")
+            );
+        is_store.then_some(StoreReceiver::Local(path))
+    }
+
+    /// Credit `key` on the store when `object` is `<store>.$state`
+    /// (`store.$state.key`, `store.$state['key']`). Pinia exposes each state
+    /// key on the store itself, so the read is the same as `store.key`.
+    pub(super) fn record_pinia_state_key_read(&mut self, object: &Expression<'_>, key: &str) {
+        let Expression::StaticMemberExpression(state) = unwrap_paren_expr(object) else {
+            return;
+        };
+        let Some(receiver) = self.pinia_state_receiver(state) else {
+            return;
+        };
+        self.pinia_state_named_uses.insert(state.span.start);
+        match receiver {
+            StoreReceiver::Factory(factory) => self.member_accesses.push(MemberAccess {
+                object: factory,
+                member: key.to_string(),
+            }),
+            StoreReceiver::Local(path) => self.record_named_member_access(&path, key),
+        }
+    }
+
+    /// Mark a whole `store.$state = { ... }` write as consumed. Pinia applies
+    /// the write as a patch, and the write reads no key.
+    pub(super) fn record_pinia_state_write(&mut self, expr: &AssignmentExpression<'_>) {
+        if expr.operator == AssignmentOperator::Assign
+            && let AssignmentTarget::StaticMemberExpression(member) = &expr.left
+            && member.property.name == PINIA_STATE_PROPERTY
+        {
+            self.pinia_state_named_uses.insert(member.span.start);
+        }
+    }
+
+    /// Record a `<store>.$state.key` read on the store, and mark the whole store
+    /// as used for a store `$state` value that no key read, destructure or write
+    /// consumes (a call argument, a spread, an alias), as it can reach every key.
+    pub(super) fn record_pinia_state_access(&mut self, expr: &StaticMemberExpression<'_>) {
+        self.record_pinia_state_key_read(&expr.object, expr.property.name.as_str());
+        self.record_pinia_state_escape(expr);
+    }
+
+    fn record_pinia_state_escape(&mut self, state: &StaticMemberExpression<'_>) {
+        if self.pinia_state_named_uses.contains(&state.span.start) {
+            return;
+        }
+        let Some(receiver) = self.pinia_state_receiver(state) else {
+            return;
+        };
+        self.push_whole_object_use(match receiver {
+            StoreReceiver::Factory(name) | StoreReceiver::Local(name) => name,
+        });
     }
 
     /// Options-API map helpers reference store members as string-array or object
@@ -397,6 +614,84 @@ impl ModuleInfoExtractor {
         };
         let factory = ident.name.to_string();
         (factory.starts_with("use") && factory.ends_with("Store")).then_some(factory)
+    }
+
+    /// The store factory of each object-type property typed with an inline
+    /// `ReturnType<typeof useFooStore>`, by dotted property path.
+    /// `{ deps: { store: ReturnType<typeof useFooStore> } }` maps `deps.store`
+    /// to `useFooStore`. The type name of such a property is `ReturnType`, so
+    /// a lookup by type name cannot find the store.
+    pub(super) fn store_return_type_properties(ty: &TSType<'_>) -> FxHashMap<String, String> {
+        let mut properties = FxHashMap::default();
+        Self::collect_store_return_type_properties(ty, None, &mut properties);
+        properties
+    }
+
+    fn collect_store_return_type_properties(
+        ty: &TSType<'_>,
+        prefix: Option<&str>,
+        properties: &mut FxHashMap<String, String>,
+    ) {
+        match ty {
+            TSType::TSTypeLiteral(type_lit) => {
+                for member in &type_lit.members {
+                    let TSSignature::TSPropertySignature(prop) = member else {
+                        continue;
+                    };
+                    let (Some(name), Some(annotation)) =
+                        (prop.key.static_name(), prop.type_annotation.as_deref())
+                    else {
+                        continue;
+                    };
+                    let path = match prefix {
+                        Some(prefix) => format!("{prefix}.{}", name.text()),
+                        None => name.text().into_owned(),
+                    };
+                    let property_type = &annotation.type_annotation;
+                    if let Some(factory) = Self::store_factory_of_property_type(property_type) {
+                        properties.insert(path, factory);
+                    } else {
+                        Self::collect_store_return_type_properties(
+                            property_type,
+                            Some(&path),
+                            properties,
+                        );
+                    }
+                }
+            }
+            TSType::TSParenthesizedType(paren) => {
+                Self::collect_store_return_type_properties(
+                    &paren.type_annotation,
+                    prefix,
+                    properties,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// The store factory of a property type `ReturnType<typeof useFooStore>`,
+    /// also in parentheses or in a union with `null` or `undefined`.
+    fn store_factory_of_property_type(ty: &TSType<'_>) -> Option<String> {
+        match ty {
+            TSType::TSParenthesizedType(paren) => {
+                Self::store_factory_of_property_type(&paren.type_annotation)
+            }
+            TSType::TSUnionType(union) => {
+                let mut present = union.types.iter().filter(|branch| {
+                    !matches!(
+                        branch,
+                        TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_)
+                    )
+                });
+                let only = present.next()?;
+                if present.next().is_some() {
+                    return None;
+                }
+                Self::store_factory_of_property_type(only)
+            }
+            _ => Self::store_factory_from_return_type(ty),
+        }
     }
 
     /// Resolve a param type annotation to a store factory, accepting either the

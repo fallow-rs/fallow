@@ -883,3 +883,88 @@ fn dynamic_probe_keys_record_no_member_name_probe() {
     );
     assert!(member_name_probes(&info).is_empty());
 }
+
+/// Issue #5064: a bare use of a local that shadows a namespace import is not
+/// a use of the import. Each source declares a local `e` in a scope form that
+/// a name-based scope stack misses, and uses it as a whole value.
+#[test]
+fn shadowing_local_is_not_a_whole_object_use_of_namespace_import() {
+    let cases = [
+        (
+            "catch parameter",
+            "export const run = () => { try { e.a(); } catch (e) { return String(e); } };",
+        ),
+        (
+            "static block",
+            "e.a(); export class C { static { const e = 1; String(e); } }",
+        ),
+        (
+            "named function expression",
+            "e.a(); export const f = function e() { return String(e); };",
+        ),
+        (
+            "named class expression",
+            "e.a(); export const K = class e { m() { return String(e); } };",
+        ),
+    ];
+    for (form, body) in cases {
+        let info = parse_source(&format!("import * as e from './errors';\n{body}"));
+        assert!(
+            !info.whole_object_uses.contains(&"e".to_string()),
+            "a {form} named `e` must not use the namespace import as a whole, found: {:?}",
+            info.whole_object_uses
+        );
+    }
+}
+
+/// Issue #5064: a use of the import binding still counts when a shadowing
+/// local of the same name exists in another scope of the file.
+#[test]
+fn namespace_import_whole_use_survives_shadowing_catch_parameter() {
+    let info = parse_source(
+        "import * as e from './errors';
+        export const run = () => {
+            try { return Object.keys(e); } catch (e) { return String(e); }
+        };",
+    );
+    assert!(
+        info.whole_object_uses.contains(&"e".to_string()),
+        "the use of the import binding must stay a whole-object use, found: {:?}",
+        info.whole_object_uses
+    );
+}
+
+/// Issue #5064: a nested namespace binding with the name of a namespace
+/// import is not a shadow that removes the credit. A whole use of the
+/// nested `require` binding still records the name.
+#[test]
+fn nested_require_namespace_with_import_name_keeps_whole_object_use() {
+    let info = parse_source(
+        "import * as e from './errors';
+        e.a();
+        export const f = () => { const e = require('./other'); return Object.keys(e); };",
+    );
+    assert!(
+        info.whole_object_uses.contains(&"e".to_string()),
+        "a whole use of the nested require binding must stay recorded, found: {:?}",
+        info.whole_object_uses
+    );
+}
+
+/// Issue #5064: a nested namespace binding of the import name in one
+/// function does not keep the credit for a shadowing local in another.
+#[test]
+fn sibling_require_namespace_does_not_keep_credit_for_catch_shadow() {
+    let info = parse_source(
+        "import * as e from './errors';
+        e.a();
+        function f() { const e = require('./x'); e.b(); }
+        function g() { try {} catch (e) { String(e); } }
+        export { f, g };",
+    );
+    assert!(
+        !info.whole_object_uses.contains(&"e".to_string()),
+        "the catch parameter in `g` must not use the import as a whole, found: {:?}",
+        info.whole_object_uses
+    );
+}

@@ -268,3 +268,50 @@ fn ignore_findings_hides_the_degradation_of_a_covered_file() {
         "a pattern that covers a broken fixture is a used pattern"
     );
 }
+
+#[test]
+fn an_astro_page_with_top_level_frontmatter_return_reports_no_degradation() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    std::fs::create_dir_all(root.join("src/pages")).expect("create pages dir");
+    std::fs::create_dir_all(root.join("src/components")).expect("create components dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "astro-top-level-return", "private": true, "type": "module", "dependencies": { "astro": "5.0.0" } }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(root.join("astro.config.mjs"), "export default {};\n")
+        .expect("write astro config");
+    std::fs::write(
+        root.join("src/components/Banner.astro"),
+        "---\nexport interface Props { title: string }\nconst { title } = Astro.props;\n---\n<p>{title}</p>\n",
+    )
+    .expect("write component");
+    std::fs::write(
+        root.join("src/pages/rewrite-to-privacy.astro"),
+        "---\nreturn Astro.rewrite('/privacy');\n---\n",
+    )
+    .expect("write rewrite page");
+    std::fs::write(
+        root.join("src/pages/guarded.astro"),
+        "---\nimport Banner from '../components/Banner.astro';\nif (!Astro.locals.user) {\n  return Astro.redirect('/');\n}\n---\n<Banner title=\"hi\" />\n",
+    )
+    .expect("write redirect page");
+    let config = create_config_with_cache(root, temp.path().join("cache"));
+
+    let results = fallow_core::analyze(&config).expect("astro analysis succeeds");
+
+    let degraded = degraded_diagnostics(&config.root);
+    assert!(
+        degraded.is_empty(),
+        "top-level return in Astro frontmatter must not report source-parse-degraded: {degraded:?}"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|issue| issue.file.path.ends_with("Banner.astro")),
+        "Banner.astro imported alongside top-level frontmatter return must stay reachable: {:?}",
+        results.unused_files
+    );
+}

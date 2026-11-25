@@ -30,8 +30,18 @@ Options:
   -h, --help                 Print help
 ";
 
-pub fn collect_report(root: &Path, config_path: Option<&Path>) -> DoctorOutput {
-    fallow_api::run_doctor(&fallow_api::DoctorOptions { root, config_path })
+/// Run the doctor checks. `root_is_current_dir` is true when no `--root` is
+/// given and `root` is the current directory.
+pub fn collect_report(
+    root: &Path,
+    config_path: Option<&Path>,
+    root_is_current_dir: bool,
+) -> DoctorOutput {
+    fallow_api::run_doctor(&fallow_api::DoctorOptions {
+        root,
+        config_path,
+        root_is_current_dir,
+    })
 }
 
 pub fn render_report(
@@ -146,6 +156,7 @@ mod tests {
         let report = fallow_api::run_doctor(&fallow_api::DoctorOptions {
             root: Path::new("/definitely/missing/fallow-doctor-root"),
             config_path: None,
+            root_is_current_dir: false,
         });
         assert_eq!(report_exit(&report), exit_invalid_input());
         // A required failure still emits the complete envelope, in the stable

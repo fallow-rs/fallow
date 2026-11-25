@@ -257,6 +257,9 @@ pub fn load_health_config_in(
     if opts.gates.fail_on_parse_error {
         config.fail_on_parse_error = true;
     }
+    if opts.shallow_directories {
+        config.call_facts_requested = true;
+    }
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
     Ok((config, config_ms))
 }
@@ -376,11 +379,14 @@ fn execute_health_with_config_and_seams(
     let files = parts.files;
     let modules = parts.modules;
     let workspaces = parts.workspaces;
-    let workspace_diagnostics = if pre_computed_analysis.is_some() {
+    let mut workspace_diagnostics = if pre_computed_analysis.is_some() {
         session.current_workspace_diagnostics()
     } else {
         parts.workspace_diagnostics
     };
+    workspace_diagnostics.extend(fallow_engine::ignore_list_notes::health_ignore_diagnostics(
+        &config, &files,
+    ));
     let parse_ms = parts.parse_ms;
     let parse_cpu_ms = parts.parse_cpu_ms;
 
@@ -536,9 +542,7 @@ pub fn run_health(
     if let Some(evidence) = mutation_evidence.as_ref() {
         mutation_report::attach_to_result(&mut result, evidence);
     }
-    if let Some(ref timings) = result.timings {
-        report::print_health_performance(timings, opts.output, json_style);
-    }
+    print_run_notes(&result, opts, json_style);
     report_loaded_baseline(&mut result, opts.baseline);
     if let Some(grouping) = result.grouping.as_ref() {
         crate::requests::record_group_filter(grouping, opts.quiet);
@@ -863,6 +867,23 @@ fn health_exit_code(result: &HealthResult, options: HealthPrintOptions<'_>) -> u
 /// health's.
 /// The note also records the writer in `baseline_staleness.saved_by`, which
 /// the gate line reads, so the note, the gate line and the envelope agree.
+/// The stderr notes of a standalone run: the `--performance` panel and the
+/// `health.ignore` globs that match no file.
+fn print_run_notes(
+    result: &HealthResult,
+    opts: &HealthOptions<'_>,
+    json_style: crate::json_style::JsonStyle,
+) {
+    if let Some(ref timings) = result.timings {
+        report::print_health_performance(timings, opts.output, json_style);
+    }
+    report::config_pattern_text::print_section_stderr_notes(
+        &result.workspace_diagnostics,
+        opts.output,
+        opts.quiet,
+    );
+}
+
 fn report_loaded_baseline(result: &mut HealthResult, baseline_path: Option<&std::path::Path>) {
     let Some(path) = baseline_path else {
         return;

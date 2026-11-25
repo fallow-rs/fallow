@@ -57,9 +57,10 @@ pub use caller_review::*;
 pub use component_health::ERROR_ONLY_RESULT_KEYS;
 
 use crate::serde_path;
-use crate::suppress::closest_known_kind_name;
 #[path = "results_ignore_findings.rs"]
 mod ignore_findings;
+#[path = "results_stale_suppression_text.rs"]
+mod stale_suppression_text;
 use ignore_findings::classify_ignore_findings_fields;
 
 #[path = "results_active_suppression.rs"]
@@ -3815,6 +3816,15 @@ pub struct StaleSuppression {
     /// comment or tag that has no reason.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub missing_reason: bool,
+    /// Issue kinds that fallow found on the target line of a stale
+    /// `fallow-ignore-next-line` marker. The marker names another kind, so it
+    /// does not suppress these findings. Absent when the list is empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_line_kinds: Vec<String>,
+    /// True when the line after a stale `fallow-ignore-next-line` marker is
+    /// blank. The marker applies only to the line directly after it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub next_line_blank: bool,
     /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
     /// `~<k>` suffix when several findings of one type share an identity.
     /// Line and column are not inputs, so the id survives line shifts,
@@ -3871,113 +3881,6 @@ impl StaleSuppression {
             }));
         }
         actions
-    }
-
-    /// Produce a human-readable description of this stale suppression.
-    #[must_use]
-    pub fn description(&self) -> String {
-        match &self.origin {
-            SuppressionOrigin::Comment {
-                issue_kind,
-                reason,
-                is_file_level,
-                is_range,
-                ..
-            } => {
-                let directive = if *is_range {
-                    "fallow-ignore-start"
-                } else if *is_file_level {
-                    "fallow-ignore-file"
-                } else {
-                    "fallow-ignore-next-line"
-                };
-                match issue_kind {
-                    Some(kind) => match reason {
-                        Some(reason) => format!("// {directive} {kind} -- {reason}"),
-                        None => format!("// {directive} {kind}"),
-                    },
-                    None => match reason {
-                        Some(reason) => format!("// {directive} -- {reason}"),
-                        None => format!("// {directive}"),
-                    },
-                }
-            }
-            SuppressionOrigin::JsdocTag {
-                export_name,
-                reason,
-            } => match reason {
-                Some(reason) => format!("@expected-unused on {export_name} -- {reason}"),
-                None => format!("@expected-unused on {export_name}"),
-            },
-        }
-    }
-
-    /// Produce an explanation of why this suppression is stale.
-    ///
-    /// For comment suppressions where `kind_known == false`, surfaces the
-    /// unknown token plus a Levenshtein "did you mean?" hint when one is
-    /// within edit distance 2. Other tokens on the same comment line still
-    /// apply normally (see issue #449).
-    #[must_use]
-    pub fn explanation(&self) -> String {
-        match &self.origin {
-            SuppressionOrigin::Comment {
-                issue_kind,
-                is_file_level,
-                kind_known,
-                ..
-            } => {
-                if self.missing_reason {
-                    return "suppression is missing a reason".to_string();
-                }
-                let scope = if *is_file_level {
-                    "in this file"
-                } else {
-                    "on the next line"
-                };
-                match issue_kind {
-                    Some(kind) if !*kind_known => match closest_known_kind_name(kind) {
-                        Some(suggestion) => format!(
-                            "'{kind}' is not a recognized fallow issue kind. Did you mean '{suggestion}'? Other tokens on this line still apply."
-                        ),
-                        None => format!(
-                            "'{kind}' is not a recognized fallow issue kind. Other tokens on this line still apply."
-                        ),
-                    },
-                    Some(kind) => format!("no {kind} issue found {scope}"),
-                    None => format!("no issues found {scope}"),
-                }
-            }
-            SuppressionOrigin::JsdocTag { export_name, .. } => {
-                if self.missing_reason {
-                    return "suppression is missing a reason".to_string();
-                }
-                format!("{export_name} is now used")
-            }
-        }
-    }
-
-    /// Per-format display message combining `description()` and `explanation()`
-    /// for the unknown-kind case so SARIF, CodeClimate, and compact consumers
-    /// surface the typo-fix copy and Levenshtein hint without needing to
-    /// branch on `origin.kind_known` themselves. Stale-but-known and JSDoc
-    /// origins keep the bare `description()` so existing wire bytes stay
-    /// unchanged. See issue #449.
-    #[must_use]
-    pub fn display_message(&self) -> String {
-        match &self.origin {
-            SuppressionOrigin::Comment {
-                kind_known: false, ..
-            } => format!("{} ({})", self.description(), self.explanation()),
-            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. }
-                if self.missing_reason =>
-            {
-                format!("{} ({})", self.description(), self.explanation())
-            }
-            SuppressionOrigin::Comment { .. } | SuppressionOrigin::JsdocTag { .. } => {
-                self.description()
-            }
-        }
     }
 }
 

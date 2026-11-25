@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::super::protocol::{RunResult, RunStatus, TestStatus};
+use super::dry_facts::bounded_test_error;
 use super::{BaselineFailure, DryRunFacts, ScheduleOutcome};
 
 /// Why a control run did not pass.
@@ -43,18 +44,6 @@ impl FailedTest {
             .and_then(bounded_test_error)
             .map_or_else(|| reason.to_owned(), |error| format!("{reason}: {error}"))
     }
-}
-
-/// The error of a test from the companion, trimmed and cut at
-/// [`MAX_TEST_ERROR_BYTES`]. Gives `None` for an error with no text.
-pub(super) fn bounded_test_error(error: &str) -> Option<String> {
-    let error = error.trim();
-    if error.is_empty() {
-        return None;
-    }
-    let kept = &error[..error.floor_char_boundary(MAX_TEST_ERROR_BYTES)];
-    let ellipsis = if kept.len() < error.len() { "..." } else { "" };
-    Some(format!("{kept}{ellipsis}"))
 }
 
 impl ControlFault {
@@ -150,11 +139,6 @@ const PARALLEL_STATE_HINT: &str = "; try --concurrency 1 or set mutation.concurr
 pub(super) const fn parallel_state_hint(workers: usize) -> &'static str {
     if workers > 1 { PARALLEL_STATE_HINT } else { "" }
 }
-
-/// The longest test error that a baseline failure keeps, in bytes. The
-/// companion bounds the error too. This bound guards the pipe from the
-/// companion.
-const MAX_TEST_ERROR_BYTES: usize = 8 * 1024;
 
 /// Splits the message of a baseline failure from a control run or from the
 /// dry run of a restarted companion into its fixed reason and the test error

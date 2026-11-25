@@ -370,7 +370,7 @@ impl<'a> Gate<'a> {
             .filter(|(file, _)| {
                 self.input
                     .graph
-                    .modules
+                    .modules()
                     .get(file.0 as usize)
                     .is_some_and(|node| node.is_runtime_reachable())
             })
@@ -459,7 +459,7 @@ impl<'a> Gate<'a> {
     /// from the source text. A declaration file has no code that runs.
     fn block_broken_module(&mut self, file: FileId) {
         self.block_module(file, Abstain::ParseIncomplete);
-        let Some(node) = self.input.graph.modules.get(file.0 as usize) else {
+        let Some(node) = self.input.graph.module(file) else {
             self.block_all_exports(Abstain::ParseIncomplete);
             return;
         };
@@ -479,7 +479,7 @@ impl<'a> Gate<'a> {
     /// `file` can reach. A text that the rule cannot read, or a specifier
     /// that can name any module, blocks each export.
     fn block_scanned_targets(&mut self, file: FileId, reason: Abstain) {
-        let Some(node) = self.input.graph.modules.get(file.0 as usize) else {
+        let Some(node) = self.input.graph.module(file) else {
             self.block_all_exports(reason);
             return;
         };
@@ -511,7 +511,7 @@ impl<'a> Gate<'a> {
         let index = self.module_index.get_or_insert_with(|| {
             specifiers::ModuleIndex::new(
                 graph
-                    .modules
+                    .modules()
                     .iter()
                     .map(|node| (node.file_id, node.path.as_path())),
             )
@@ -594,7 +594,7 @@ impl<'a> Gate<'a> {
         }
         let graph = self.input.graph;
         let entries: Vec<FileId> = graph
-            .modules
+            .modules()
             .iter()
             .filter(|node| node.is_entry_point())
             .map(|node| node.file_id)
@@ -693,7 +693,7 @@ impl<'a> Gate<'a> {
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
         for file in files {
-            if let Some(node) = self.input.graph.modules.get(file.0 as usize) {
+            if let Some(node) = self.input.graph.module(file) {
                 tracing::debug!(
                     path = %node.path.display(),
                     "constant-parameter: the value of an unknown-source load escapes"
@@ -719,7 +719,7 @@ impl<'a> Gate<'a> {
         }
         let mut names: Vec<&str> = names.into_iter().collect();
         names.sort_unstable();
-        let files: Vec<FileId> = graph.modules.iter().map(|node| node.file_id).collect();
+        let files: Vec<FileId> = graph.modules().iter().map(|node| node.file_id).collect();
         for name in names {
             for &file in &files {
                 match graph.resolve_export(file, name, ExportNamespace::Value) {
@@ -783,7 +783,7 @@ impl<'a> Gate<'a> {
 
     fn scan_module(&mut self, module: &'a ModuleInfo) {
         let file = module.file_id;
-        let node = self.input.graph.modules.get(file.0 as usize);
+        let node = self.input.graph.module(file);
         let has_cjs = node.is_some_and(|node| node.has_cjs_exports());
         let facts = facts(module);
         let script = node.is_none_or(|node| is_script_path(&node.path));
@@ -1128,7 +1128,7 @@ impl<'a> Gate<'a> {
             let reachable = self
                 .input
                 .graph
-                .modules
+                .modules()
                 .get(module.file_id.0 as usize)
                 .is_some_and(|node| node.is_runtime_reachable());
             if !reachable {
@@ -1269,7 +1269,7 @@ impl<'a> Gate<'a> {
         let mut sites: Vec<ConstantParameterCallSite> = calls
             .iter()
             .filter_map(|call| {
-                let node = self.input.graph.modules.get(call.file.0 as usize)?;
+                let node = self.input.graph.module(call.file)?;
                 let (line, col) = byte_offset_to_line_col(offsets, call.file, call.site.span_start);
                 Some(ConstantParameterCallSite {
                     path: node.path.clone(),
@@ -1289,7 +1289,7 @@ impl<'a> Gate<'a> {
         let path = self
             .input
             .graph
-            .modules
+            .modules()
             .get(module.file_id.0 as usize)
             .map_or_else(|| Path::new("").to_path_buf(), |node| node.path.clone());
         ConstantParameter {
@@ -1471,7 +1471,7 @@ fn exported_contracts<'m>(
 
 /// `true` when the rule is on for the project or for an override.
 fn rule_enabled(config: &ResolvedConfig) -> bool {
-    config.reads_call_facts()
+    config.constant_parameters_enabled()
 }
 
 /// Release the extraction payload that resolution copied, before analysis.
@@ -1505,7 +1505,7 @@ fn log_broken_modules(graph: &ModuleGraph, broken: &[&ModuleInfo]) {
         "constant-parameter blocked by parse errors"
     );
     for module in broken.iter().take(MAX_LOGGED_BROKEN_MODULES) {
-        let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
+        let Some(node) = graph.module(module.file_id) else {
             continue;
         };
         tracing::debug!(
@@ -1552,12 +1552,12 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
     } else {
         input
             .graph
-            .modules
+            .modules()
             .iter()
             .filter(|node| {
                 let relative = node.path.strip_prefix(&config.root).unwrap_or(&node.path);
                 let relative = relative.to_string_lossy().replace('\\', "/");
-                matchers.iter().any(|rule| rule.matches(&relative))
+                matchers.any_match(&relative)
             })
             .map(|node| node.file_id)
             .collect()

@@ -44,11 +44,14 @@ mod fixability;
 pub mod jsonc;
 pub mod levenshtein;
 mod package_manager;
+mod parse_error;
 #[doc(hidden)]
 pub mod permutation;
 /// Edit plans for the catalogs of `pnpm-workspace.yaml`.
 pub mod pnpm_catalog_edit;
 mod production_env;
+mod project_read;
+pub use project_read::{clear_project_scope_bases, project_scope_base};
 mod rule_pack;
 mod run_inputs;
 mod source_walk;

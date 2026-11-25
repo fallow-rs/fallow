@@ -8,11 +8,18 @@ mod flags;
 mod format;
 pub mod glob_validation;
 mod health;
+mod ignore_list_effect;
 mod ignore_patterns;
 mod keep_export_tags;
 mod legacy_glob;
 mod markup_extensions;
 mod mutation;
+mod outside_root;
+mod outside_values;
+#[cfg(all(test, unix))]
+pub use outside_root::test_tracked_link_probe;
+pub use outside_root::{OutsideKeys, TrackedLinkProbe, set_tracked_link_probe};
+pub use outside_values::{outside_value_error, outside_value_files};
 mod override_effect;
 mod parsing;
 mod resolution;
@@ -47,8 +54,9 @@ pub use format::OutputFormat;
 pub use glob_validation::compile_path_glob;
 pub use health::{
     ChangeCouplingConfig, CyclomaticPolicy, EmailMode, HealthConfig, HealthThresholdOverride,
-    OwnershipConfig,
+    OwnershipConfig, ShallowDirectoriesConfig,
 };
+pub use ignore_list_effect::{IgnoreExportName, IgnoreListEffect, OverrideGlob};
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
 pub use keep_export_tags::{KeepExportTag, KeepExportTags};
 pub use legacy_glob::{
@@ -60,7 +68,10 @@ pub use markup_extensions::{
 };
 pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
 pub use override_effect::{IneffectiveOverrideRule, project_level_override_rules};
-pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions, extends_timeout_from_env_value};
+pub use parsing::{
+    CONFIG_FILE_NAMES, ConfigLoadOptions, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,
+    extends_timeout_from_env_value,
+};
 pub use resolution::{
     AnalysisSnapshot, CACHE_DIR_ENV, CACHE_MAX_SIZE_ENV, CompiledIgnoreCatalogReferenceRule,
     CompiledIgnoreDependencyOverrideRule, CompiledIgnoreExportRule, ConfigOverride,
@@ -536,7 +547,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub used_class_members: Vec<UsedClassMemberRule>,
 
-    /// Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in ignores for generated output and test and mock files), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`, plus `consistentIdentifiers`, which with `ignoreIdentifiers` requires a one-to-one name mapping between clone instances). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.
+    /// Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage; the default 0 turns the gate off and is not zero tolerance), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in ignores for generated output and test and mock files), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`, plus `consistentIdentifiers`, which with `ignoreIdentifiers` requires a one-to-one name mapping between clone instances). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.
     #[serde(default)]
     pub duplicates: DuplicatesConfig,
 
@@ -645,7 +656,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 
-    /// A project-root-relative path to a CODEOWNERS file, used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
+    /// A path to a CODEOWNERS file, relative to the project root or absolute, that must resolve inside the project scope base (the git top level of the root), used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codeowners: Option<String>,
 
@@ -684,6 +695,14 @@ pub struct FallowConfig {
     /// Overrides the location and size ceiling of fallow's persistent extraction cache (default `.fallow/cache.bin` under the project root). Set to relocate the cache or cap its footprint; the object holds `dir` (cache directory, relative paths resolve from the project root) and `maxSizeMb` (extraction-cache size limit in megabytes). The `FALLOW_CACHE_MAX_SIZE` environment variable overrides `maxSizeMb`.
     #[serde(default, skip_serializing_if = "CacheConfig::is_default")]
     pub cache: CacheConfig,
+
+    /// The keys whose value can come from a local config file outside the
+    /// project, set by the load. Checks after the load name these keys
+    /// without their values. It is not part of the config file format.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[doc(hidden)]
+    pub outside_keys: OutsideKeys,
 }
 
 /// Scopes `fallow security` catalogue behavior. An absent category block admits

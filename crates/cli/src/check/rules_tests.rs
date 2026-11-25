@@ -1342,6 +1342,8 @@ fn stale_suppression(path: &str, missing_reason: bool) -> StaleSuppression {
             kind_known: true,
         },
         missing_reason,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(missing_reason),
         effective_severity: None,
     }

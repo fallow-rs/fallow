@@ -9,6 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::CategorizedEntryPoints;
 use super::entry_points::relative_paths_for;
+use super::non_manual_paths;
 use crate::results::EntryPointSummary;
 
 /// Summarize entry points by source category for user-facing output.
@@ -40,17 +41,6 @@ pub fn summarize_entry_points(entry_points: &[EntryPoint]) -> EntryPointSummary 
         total: entry_points.len(),
         by_source,
     }
-}
-
-/// The paths of `entries` that a source other than the `entry` config
-/// declares. The root pass collects them before its dedup, which keeps the
-/// manual entry and drops the other source of the same path.
-pub(super) fn non_manual_paths(entries: &[EntryPoint]) -> FxHashSet<PathBuf> {
-    entries
-        .iter()
-        .filter(|entry| !matches!(entry.source, EntryPointSource::ManualEntry))
-        .map(|entry| entry.path.clone())
-        .collect()
 }
 
 /// Record which `entry` patterns matched a file that no other source made a

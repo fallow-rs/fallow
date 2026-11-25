@@ -159,6 +159,7 @@ fn build_health_report(
             report_hotspots: prelude.report_hotspots,
             report_hotspot_summary: prelude.report_hotspot_summary,
             change_coupling,
+            shallow_directories: prelude.shallow_directories,
             runtime_coverage,
             large_functions,
             targets,
@@ -178,6 +179,7 @@ struct ReportPrelude {
     file_scores: Vec<fallow_output::FileHealthScore>,
     report_hotspots: Vec<fallow_output::HotspotEntry>,
     report_hotspot_summary: Option<fallow_output::HotspotSummary>,
+    shallow_directories: Option<fallow_output::ShallowDirectoriesReport>,
 }
 
 /// Build the score-output-derived report sections, consuming `score_output`,
@@ -198,19 +200,34 @@ fn compute_report_prelude(
     } else {
         build_render_fan_in_top(score_output.as_ref())
     };
-    let (coverage_gaps, prop_drilling_chains, scores) = score_output.map_or_else(
-        || (None, Vec::new(), Vec::new()),
-        |output| {
-            let coverage_gaps =
-                (report_coverage_gaps && !opts.score_only_output).then_some(output.coverage.report);
-            let prop_drilling_chains = if opts.score_only_output {
-                Vec::new()
-            } else {
-                output.prop_drilling_chains
-            };
-            (coverage_gaps, prop_drilling_chains, output.scores)
-        },
-    );
+    let (coverage_gaps, prop_drilling_chains, shallow_directories, scores) = score_output
+        .map_or_else(
+            || (None, Vec::new(), None, Vec::new()),
+            |output| {
+                let coverage_gaps = (report_coverage_gaps && !opts.score_only_output)
+                    .then_some(output.coverage.report);
+                let prop_drilling_chains = if opts.score_only_output {
+                    Vec::new()
+                } else {
+                    output.prop_drilling_chains
+                };
+                let shallow_directories = output
+                    .shallow_directories
+                    .filter(|_| opts.shallow_directories && !opts.score_only_output)
+                    .map(|mut report| {
+                        if let Some(top) = opts.top {
+                            report.directories.truncate(top);
+                        }
+                        report
+                    });
+                (
+                    coverage_gaps,
+                    prop_drilling_chains,
+                    shallow_directories,
+                    output.scores,
+                )
+            },
+        );
     let file_scores = build_report_file_scores(opts, scores);
     let (report_hotspots, report_hotspot_summary) =
         report_hotspot_data(opts, hotspots, hotspot_summary);
@@ -221,6 +238,7 @@ fn compute_report_prelude(
         file_scores,
         report_hotspots,
         report_hotspot_summary,
+        shallow_directories,
     }
 }
 
@@ -237,6 +255,7 @@ struct HealthReportStructParts {
     report_hotspots: Vec<fallow_output::HotspotEntry>,
     report_hotspot_summary: Option<fallow_output::HotspotSummary>,
     change_coupling: Option<fallow_output::ChangeCouplingReport>,
+    shallow_directories: Option<fallow_output::ShallowDirectoriesReport>,
     runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
     large_functions: Vec<fallow_output::LargeFunctionEntry>,
     targets: Vec<fallow_output::RefactoringTarget>,
@@ -290,6 +309,7 @@ fn build_health_report_struct(
             parts.report_hotspot_summary
         },
         change_coupling: parts.change_coupling,
+        shallow_directories: parts.shallow_directories,
         runtime_coverage: parts.runtime_coverage,
         mutation: None,
         coverage_intelligence: None,
@@ -349,6 +369,10 @@ fn produced_sections(
             parts.runtime_coverage.is_some(),
         ),
         (HealthSection::Css, opts.css),
+        (
+            HealthSection::ShallowDirectories,
+            full && parts.shallow_directories.is_some(),
+        ),
     ]
     .into_iter()
     .filter_map(|(section, produced)| produced.then_some(section))

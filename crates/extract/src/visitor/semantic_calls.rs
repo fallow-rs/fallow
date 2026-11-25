@@ -32,6 +32,65 @@ impl ModuleInfoExtractor {
             .collect()
     }
 
+    /// Record a bare reference to a namespace-like binding as a whole-object
+    /// use. A reference to a namespace import local waits for the semantic
+    /// pass, which keeps it only when it resolves to the import binding. A
+    /// catch parameter or another local of the same name can shadow the
+    /// import where the scope stack of the walk does not see it (issue #5064).
+    pub(super) fn record_namespace_whole_object_use(&mut self, span: Span, name: &str) {
+        // A nested namespace binding of the same name in scope here
+        // (`const NS = require('./x')` in a function) is not a shadow.
+        let walk_needs_name = name == "loaderData"
+            || self.route_loader_data_bindings.contains(name)
+            || self.walk_order_class_bindings.contains_key(name)
+            || self
+                .scoped_namespace_binding_names
+                .iter()
+                .any(|scope| scope.contains(name));
+        if self.namespace_import_locals.contains(name) && !walk_needs_name {
+            self.shadowed_reads
+                .namespace_whole_uses
+                .push((span, name.to_string()));
+            return;
+        }
+        self.record_whole_object_identifier_use(name);
+    }
+
+    pub(crate) fn namespace_whole_object_use_candidates(&self) -> FxHashSet<Span> {
+        self.shadowed_reads
+            .namespace_whole_uses
+            .iter()
+            .map(|(span, _)| *span)
+            .collect()
+    }
+
+    /// Record the pending namespace references in `import_references` as
+    /// whole-object uses, and drop the others: a local of the same name in a
+    /// nested scope declares their binding.
+    pub(crate) fn resolve_namespace_whole_object_uses(
+        &mut self,
+        import_references: &FxHashSet<Span>,
+    ) {
+        for (span, name) in std::mem::take(&mut self.shadowed_reads.namespace_whole_uses) {
+            if import_references.contains(&span) {
+                self.push_whole_object_use(name);
+            }
+        }
+    }
+
+    /// Record each pending namespace reference as a whole-object use. An
+    /// extractor that no semantic pass resolves keeps the conservative credit.
+    pub(crate) fn flush_pending_namespace_whole_object_uses(&mut self) {
+        for (_, name) in std::mem::take(&mut self.shadowed_reads.namespace_whole_uses) {
+            self.push_whole_object_use(name);
+        }
+    }
+
+    pub(super) fn begin_resolution_phase(&mut self) {
+        self.flush_pending_namespace_whole_object_uses();
+        self.resolve_typed_destructure_bindings();
+    }
+
     pub(crate) fn resolve_imported_call_sites(&mut self, references: &FxHashSet<Span>) {
         self.imported_call_sites.extend(
             self.pending_imported_call_sites

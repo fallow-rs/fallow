@@ -500,7 +500,7 @@ fn find_absent_component_props(input: &AbsentPropInput<'_>) -> Vec<AbsentCompone
     let mut consumers: FxHashMap<ComponentId, Vec<Consumer<'_>>> = FxHashMap::default();
     block_public_and_entries(&index, &mut blocked);
     for module in input.modules {
-        let Some(node) = input.graph.modules.get(module.file_id.0 as usize) else {
+        let Some(node) = input.graph.module(module.file_id) else {
             continue;
         };
         if !node.is_runtime_reachable() {
@@ -581,7 +581,7 @@ fn find_absent_component_props(input: &AbsentPropInput<'_>) -> Vec<AbsentCompone
     for resolved in input.resolved_modules {
         if !input
             .graph
-            .modules
+            .modules()
             .get(resolved.file_id.0 as usize)
             .is_some_and(|node| node.is_runtime_reachable())
         {
@@ -610,7 +610,7 @@ fn block_public_and_entries(index: &ContractIndex<'_>, blocked: &mut FxHashSet<C
             && index
                 .input
                 .graph
-                .modules
+                .modules()
                 .get(module.file_id.0 as usize)
                 .is_some_and(|node| node.is_entry_point())
         {
@@ -648,7 +648,7 @@ fn emit_findings(
         if blocked.contains(id) {
             continue;
         }
-        let Some(node) = index.input.graph.modules.get(id.file.0 as usize) else {
+        let Some(node) = index.input.graph.module(id.file) else {
             continue;
         };
         if !node.is_runtime_reachable() {
@@ -693,7 +693,7 @@ fn emit_findings(
             let mut inspected_call_sites: Vec<_> = callers
                 .iter()
                 .filter_map(|caller| {
-                    let node = index.input.graph.modules.get(caller.file.0 as usize)?;
+                    let node = index.input.graph.module(caller.file)?;
                     let (line, col) = byte_offset_to_line_col(
                         index.input.line_offsets_by_file,
                         caller.file,

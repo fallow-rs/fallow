@@ -253,7 +253,7 @@ fn impact_reset(
 /// prints the full report.
 fn render_impact_status_human(root: &Path, quiet: bool) -> ExitCode {
     let report = impact::build_report(&impact::load(root));
-    let store = impact::resolved_store_path(root).map_or_else(
+    let store = impact::store_path(root).map_or_else(
         || "(no user config dir resolved; not persisted)".to_owned(),
         |path| path.display().to_string(),
     );
@@ -324,7 +324,7 @@ fn render_impact_status(
     println!("{rendered}");
     if is_human && !quiet {
         println!("  Store key: {}", impact::resolved_project_key(root));
-        match impact::resolved_store_path(root) {
+        match impact::store_path(root) {
             Some(path) => println!("  Store file: {}", path.display()),
             None => println!("  Store file: (no user config dir resolved; not persisted)"),
         }

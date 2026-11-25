@@ -58,7 +58,7 @@ impl KeepExportTag {
 impl<'de> Deserialize<'de> for KeepExportTag {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
+        Self::parse(&raw).map_err(|e| serde::de::Error::custom(crate::parse_error::own_message(e)))
     }
 }
 

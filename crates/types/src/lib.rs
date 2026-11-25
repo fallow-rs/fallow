@@ -35,6 +35,8 @@ pub mod cloud;
 pub mod command_surfaces;
 /// Per-construct complexity increments behind the complexity scores.
 pub mod complexity_contribution;
+/// The config file names that discovery reads and the near-miss names.
+pub mod config_file_names;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
 /// Shared duplicate-code output contracts.
@@ -99,6 +101,9 @@ pub mod path_guard;
 pub mod path_util;
 /// The `--performance` span tree and the process-level clock.
 pub mod pipeline_spans;
+/// Bounded reads of project files: no link out of the root, regular files
+/// only, and a size limit.
+pub mod read_guard;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
 /// The `Next:` step of a `client-server-leak` candidate, shared by the CLI

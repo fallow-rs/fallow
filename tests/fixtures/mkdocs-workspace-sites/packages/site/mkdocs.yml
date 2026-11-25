@@ -1,0 +1,3 @@
+site_name: Site
+extra_javascript:
+  - js/site.js

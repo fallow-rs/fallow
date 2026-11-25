@@ -80,7 +80,7 @@ pub(super) fn collect_implicit_package_credits<'a>(
         .into_iter()
         .filter(|module| module.jsx_runtime_from_config || has_virtual_module_providers)
     {
-        let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
+        let Some(node) = graph.module(module.file_id) else {
             continue;
         };
         let path = node.path.as_path();

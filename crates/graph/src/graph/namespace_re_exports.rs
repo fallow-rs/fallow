@@ -36,6 +36,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::build::re_exports_class_map;
 use super::namespace_indexes::{
     NamespacePropagationIndexes, NamespaceReferenceRoutes, ReachableNamespaceExports,
 };
@@ -99,13 +100,15 @@ pub(super) fn propagate_namespace_re_exports(
     exposed_namespace_targets: &ExposedNamespaceTargets,
     reference_paths: &mut ReferencePathInterner,
 ) {
-    let ns_edges: Vec<(FileId, FileId, String, bool)> = graph
-        .modules
+    let modules = &graph.modules;
+    let ns_edges: Vec<(FileId, FileId, String, bool)> = modules
         .iter()
         .flat_map(|m| {
             let barrel_file = m.file_id;
             m.re_exports.iter().filter_map(move |re| {
-                if re.imported_name == "*" && re.exported_name != "*" {
+                if (re.imported_name == "*" && re.exported_name != "*")
+                    || forwards_class_map(modules, re)
+                {
                     Some((
                         barrel_file,
                         re.source_file,
@@ -315,6 +318,17 @@ fn exposed_star_sources(
         }
         (whole_object || re.exported_name != "default").then_some((re.source_file, true))
     })
+}
+
+/// Whether `re` forwards the default of a CSS Module. That default is the
+/// class map object, so its consumers read classes as namespace members.
+fn forwards_class_map(
+    modules: &[super::types::ModuleNode],
+    re: &super::types::ReExportEdge,
+) -> bool {
+    modules
+        .get(re.source_file.0 as usize)
+        .is_some_and(|source| re_exports_class_map(&re.imported_name, &source.path))
 }
 
 /// Map a `FileId` to its index in `graph.modules`. Returns `None` if the id

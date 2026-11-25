@@ -142,7 +142,7 @@ impl WorkspaceOwnershipIndex {
             .map(|(index, root)| (*root, index))
             .collect();
         let workspace_by_file = graph
-            .modules
+            .modules()
             .par_iter()
             .map(|module| {
                 module
@@ -494,7 +494,7 @@ fn collect_externalizing_workspaces(
         if !build_files.contains(id) {
             continue;
         }
-        let Some(module) = graph.modules.get(id.0 as usize) else {
+        let Some(module) = graph.module(*id) else {
             continue;
         };
         if std::fs::read_to_string(&module.path)
@@ -528,7 +528,7 @@ fn collect_build_files(
         return FxHashSet::default();
     }
     let mut pending: Vec<FileId> = graph
-        .modules
+        .modules()
         .iter()
         .filter(|module| {
             ownership
@@ -634,7 +634,7 @@ fn ancestor_satisfying_import<'m, 'a>(
     if owner.installed.contains(package_name) {
         return None;
     }
-    let module = graph.modules.get(id.0 as usize)?;
+    let module = graph.module(id)?;
     if !accepts_ancestor_declaration(owner.is_private, module, config) {
         return None;
     }
@@ -799,7 +799,7 @@ impl<'a> RootImporters<'a> {
                 .extend(manifest.runtime_hosts.iter().map(String::as_str));
         }
         let mut peers = FxHashSet::default();
-        let mut resolver = PeerDependencyResolver::new();
+        let mut resolver = PeerDependencyResolver::new(&config.root);
         for (owner, seeds) in seeds_by_owner {
             let package_root = owner
                 .and_then(|index| self.manifests.get(index))
@@ -1371,7 +1371,7 @@ fn collect_dependency_usage_indices<'a>(
             .iter()
             .flat_map(|manifest| manifest.declared.iter()),
     );
-    let root_peer_used = PeerDependencyResolver::new().peer_dependency_closure(
+    let root_peer_used = PeerDependencyResolver::new(&config.root).peer_dependency_closure(
         &config.root,
         used_packages.iter().copied().chain(root_peer_seeds.iter()),
         &closure_listed,
@@ -1565,7 +1565,7 @@ fn collect_workspace_unused_dependencies<'a>(
         .flatten()
         .copied()
         .collect();
-    let ws_peer_used = PeerDependencyResolver::new().peer_dependency_closure(
+    let ws_peer_used = PeerDependencyResolver::new(&inputs.config.root).peer_dependency_closure(
         ws_root,
         ws_used_packages.iter().copied().chain(ws_peer_seeds.iter()),
         inputs.closure_listed,
@@ -1881,7 +1881,7 @@ fn production_value_importers(
                 return None;
             }
             graph
-                .modules
+                .modules()
                 .get(id.0 as usize)
                 .filter(|module| is_production_module(module, config))
                 .map(|_| id)
@@ -1907,7 +1907,7 @@ fn dependency_has_prod_value_import(
     production_value_importers(dep, graph, config)
         .into_iter()
         .any(|id| {
-            graph.modules.get(id.0 as usize).is_some_and(|module| {
+            graph.module(id).is_some_and(|module| {
                 !workspaces
                     .iter()
                     .any(|ws| module.path.starts_with(&ws.root))
@@ -2203,7 +2203,7 @@ fn add_source_package_manifests(
     let mut visited = FxHashSet::default();
     let canonical_root = dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         let source = normalize_lexically(&module.path);
         if !source.starts_with(&config.root) {
             continue;
@@ -2485,7 +2485,7 @@ fn collect_unlisted_import_site(
     id: FileId,
     ctx: &UnlistedDependencyContext<'_>,
 ) -> Option<ImportSite> {
-    let module = ctx.graph.modules.get(id.0 as usize)?;
+    let module = ctx.graph.module(id)?;
     if package_name == "bun"
         && package_imports_are_all_builtin(ctx.import_spans_by_file, id, package_name)
     {

@@ -37,7 +37,72 @@ use std::sync::OnceLock;
 pub struct WriteScope {
     root: PathBuf,
     work_tree: Option<PathBuf>,
+    /// The Git work tree that contains the root, wherever the run starts.
+    /// A symlink in it is a link that the repository controls.
+    checkout: Option<PathBuf>,
+    /// The Git directory and common Git directory of the root. No symlink
+    /// may resolve into them, wherever they are.
+    git_dirs: fallow_types::path_guard::GitDirs,
     shared_dirs: Vec<PathBuf>,
+}
+
+/// Why [`WriteScope`] refuses a path.
+enum Refusal {
+    /// The path resolves outside the allowed directories.
+    Outside,
+    /// A symlink in the project leads out of the project, or into a `.git`
+    /// or `node_modules` directory.
+    Link {
+        link: PathBuf,
+        target: PathBuf,
+        kind: LinkTarget,
+    },
+    /// The path names a file that is not a regular file or a directory, and
+    /// is not a character device or named pipe that the user named directly.
+    Special,
+}
+
+/// Where a refused symlink in the project leads.
+#[derive(Clone, Copy)]
+enum LinkTarget {
+    /// Out of the project root and its allowed Git work tree.
+    Outside,
+    /// Into a `node_modules` directory.
+    Packages,
+    /// Into a `.git` directory, or the Git directory that a `.git` file names.
+    GitMetadata,
+}
+
+impl LinkTarget {
+    /// The place, as the end of a sentence that starts with "resolves".
+    const fn phrase(self) -> &'static str {
+        match self {
+            Self::Outside => "outside the project",
+            Self::Packages => "into a node_modules directory",
+            Self::GitMetadata => "into Git metadata",
+        }
+    }
+
+    fn of(within: Option<&Path>, target: &Path) -> Option<Self> {
+        let Some(within) = within else {
+            return Some(Self::Outside);
+        };
+        if !fallow_types::path_guard::is_protected_link_target(within, target) {
+            return None;
+        }
+        let below = target.strip_prefix(within).unwrap_or(target);
+        let in_packages = below.components().any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("node_modules"))
+        });
+        Some(if in_packages {
+            Self::Packages
+        } else {
+            Self::GitMetadata
+        })
+    }
 }
 
 impl WriteScope {
@@ -60,54 +125,195 @@ impl WriteScope {
             )
         })?;
         let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-        let work_tree = root
-            .ancestors()
-            .find(|dir| dir.join(".git").exists())
-            .filter(|tree| cwd.starts_with(tree))
-            .map(Path::to_path_buf);
+        let checkout = fallow_types::path_guard::work_tree_top(&root).map(Path::to_path_buf);
+        let work_tree = checkout.clone().filter(|tree| cwd.starts_with(tree));
+        let git_dirs = fallow_types::path_guard::GitDirs::of(&root);
         Ok(Self {
             root,
             work_tree,
+            checkout,
+            git_dirs,
             shared_dirs,
         })
     }
 
-    /// Whether a resolved path lies inside one of the allowed directories, or
-    /// is an existing character device or named pipe.
+    /// Whether a write to the absolute path `path`, as written, stays in the
+    /// scope. See [`Self::check`] for the rules.
     #[must_use]
     pub fn contains(&self, path: &Path) -> bool {
-        is_stream_target(path)
-            || path.starts_with(&self.root)
-            || self
-                .work_tree
-                .as_deref()
-                .is_some_and(|tree| path.starts_with(tree))
-            || self.shared_dirs.iter().any(|dir| path.starts_with(dir))
+        walk(path).is_ok_and(|walk| self.refusal(&walk).is_none())
     }
 
-    /// Return an error message when `path`, relative to `cwd`, resolves
-    /// outside the allowed directories. `flag` names the option that asked
-    /// for the write.
+    /// Return an error message when a write to `path`, relative to `cwd`,
+    /// leaves the scope. `flag` names the option that asked for the write.
+    ///
+    /// - The path must resolve inside one of the allowed directories, or be
+    ///   an existing character device or named pipe.
+    /// - Each symlink on the way that lies in the project root or its Git
+    ///   work tree must resolve inside the root or the allowed work tree.
+    /// - No symlink on the way, wherever it lies, may resolve into a `.git`
+    ///   or `node_modules` directory
+    ///   ([`fallow_types::path_guard::is_protected_link_target`]), or into
+    ///   the Git directory or common Git directory of the root, also when
+    ///   that directory is outside the work tree. A shared
+    ///   directory or a device is allowed only for a path that reaches it
+    ///   without such a link.
+    /// - An existing target that is not a regular file or a directory is
+    ///   refused, except a character device or named pipe that is reached
+    ///   without such a link.
+    /// - A path component that cannot be read for a reason other than "not
+    ///   found" is refused.
     #[must_use]
     pub fn check(&self, flag: &str, path: &Path, cwd: &Path) -> Option<String> {
         if is_null_device(path) {
             return None;
         }
-        let resolved = resolve(&cwd.join(path));
-        if self.contains(&resolved) {
-            return None;
+        let walk = match walk(&cwd.join(path)) {
+            Ok(walk) => walk,
+            Err(err) => {
+                return Some(format!(
+                    "{flag} {} cannot be resolved ({err}). Choose a path that fallow can read.",
+                    path.display()
+                ));
+            }
+        };
+        let refusal = self.refusal(&walk)?;
+        Some(match refusal {
+            Refusal::Outside => format!(
+                "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or a temp directory (RUNNER_TEMP, the system temp directory, or /tmp on Unix).",
+                path.display(),
+                walk.resolved.display(),
+                self.root.display(),
+                self.work_tree
+                    .as_deref()
+                    .filter(|tree| *tree != self.root)
+                    .map(|tree| format!(" or its Git work tree {}", tree.display()))
+                    .unwrap_or_default(),
+            ),
+            Refusal::Link { link, target, kind } => format!(
+                "{flag} {} goes through the symlink {}, which resolves {} ({}). No symlink on the path may resolve into a .git or node_modules directory, and a symlink in the project must resolve inside the project. Choose a path without the symlink.",
+                path.display(),
+                link.display(),
+                kind.phrase(),
+                target.display(),
+            ),
+            Refusal::Special => format!(
+                "{flag} {} resolves to {}, which is not a regular file. Choose a path to a regular file.",
+                path.display(),
+                walk.resolved.display(),
+            ),
+        })
+    }
+
+    fn refusal(&self, walk: &Walk) -> Option<Refusal> {
+        let mut through_project_link = false;
+        for link in &walk.links {
+            let kind = if self.git_dirs.holds(&link.target) {
+                Some(LinkTarget::GitMetadata)
+            } else if self.in_checkout(&link.location) {
+                through_project_link = true;
+                let within = if link.target.starts_with(&self.root) {
+                    Some(self.root.as_path())
+                } else {
+                    self.work_tree
+                        .as_deref()
+                        .filter(|tree| link.target.starts_with(tree))
+                };
+                LinkTarget::of(within, &link.target)
+            } else {
+                // A link elsewhere may lead anywhere outside the project, but
+                // not into Git metadata or installed packages.
+                LinkTarget::of(Some(self.protected_scope_for(link)), &link.target)
+                    .filter(|kind| !matches!(kind, LinkTarget::Outside))
+            };
+            if let Some(kind) = kind {
+                return Some(Refusal::Link {
+                    link: link.location.clone(),
+                    target: link.target.clone(),
+                    kind,
+                });
+            }
         }
-        Some(format!(
-            "{flag} {} resolves to {}, which is outside the project root {}. Choose a path inside the project root{}, or inside the CI workspace (GITHUB_WORKSPACE or CI_PROJECT_DIR) or a temp directory (RUNNER_TEMP, the system temp directory, or /tmp on Unix).",
-            path.display(),
-            resolved.display(),
-            self.root.display(),
-            self.work_tree
+        match std::fs::metadata(&walk.resolved) {
+            Ok(meta) if !meta.is_file() && !meta.is_dir() => {
+                return (through_project_link || !is_stream_target(&walk.resolved))
+                    .then_some(Refusal::Special);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Some(Refusal::Special),
+        }
+        let path = walk.resolved.as_path();
+        let inside = path.starts_with(&self.root)
+            || self
+                .work_tree
                 .as_deref()
-                .filter(|tree| *tree != self.root)
-                .map(|tree| format!(" or its Git work tree {}", tree.display()))
-                .unwrap_or_default(),
-        ))
+                .is_some_and(|tree| path.starts_with(tree))
+            || self.shared_dirs.iter().any(|dir| path.starts_with(dir));
+        (!inside).then_some(Refusal::Outside)
+    }
+
+    /// Why a write to the absolute path `path` leaves the scope, as the end
+    /// of a sentence that starts with "resolves", or `None` when it stays in
+    /// the scope.
+    #[must_use]
+    pub fn refusal_reason(&self, path: &Path) -> Option<&'static str> {
+        let Ok(walk) = walk(path) else {
+            return Some("to a path that cannot be read");
+        };
+        Some(match self.refusal(&walk)? {
+            Refusal::Outside => "outside the project",
+            Refusal::Link { kind, .. } => kind.phrase(),
+            Refusal::Special => "to a file that is not a regular file",
+        })
+    }
+
+    /// The directory that the protected names of the target of a link
+    /// outside the checkout are read below: the root or the checkout when the
+    /// target is inside one, else the folder of the link.
+    fn protected_scope_for<'a>(&'a self, link: &'a Link) -> &'a Path {
+        if link.target.starts_with(&self.root) {
+            return &self.root;
+        }
+        if let Some(tree) = self
+            .checkout
+            .as_deref()
+            .filter(|tree| link.target.starts_with(tree))
+        {
+            return tree;
+        }
+        link.location.parent().unwrap_or(&link.location)
+    }
+
+    fn in_checkout(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+            || self
+                .checkout
+                .as_deref()
+                .is_some_and(|tree| path.starts_with(tree))
+    }
+
+    fn refusal_error(&self, requested: &Path, walk: &Walk) -> Option<io::Error> {
+        let reason = match self.refusal(walk)? {
+            Refusal::Outside => format!(
+                "{} resolves to {}, which is outside the directories this run may write to",
+                requested.display(),
+                walk.resolved.display()
+            ),
+            Refusal::Link { link, target, kind } => format!(
+                "{} goes through the symlink {}, which resolves {} ({}), so fallow did not write it",
+                requested.display(),
+                link.display(),
+                kind.phrase(),
+                target.display()
+            ),
+            Refusal::Special => format!(
+                "{} resolves to {}, which is not a regular file, so fallow did not write it",
+                requested.display(),
+                walk.resolved.display()
+            ),
+        };
+        Some(io::Error::new(io::ErrorKind::PermissionDenied, reason))
     }
 }
 
@@ -315,19 +521,13 @@ fn create_checked(
     if is_null_device(requested) {
         return open_null_device().map_err(WriteFailure::File);
     }
-    let resolved = resolve(absolute);
+    let walk = walk(absolute).map_err(WriteFailure::File)?;
+    if let Some(error) = scope.and_then(|scope| scope.refusal_error(requested, &walk)) {
+        return Err(WriteFailure::File(error));
+    }
+    let resolved = walk.resolved;
     if is_stream_target(&resolved) {
         return open_stream(&resolved).map_err(WriteFailure::File);
-    }
-    if scope.is_some_and(|scope| !scope.contains(&resolved)) {
-        return Err(WriteFailure::File(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "{} resolves to {}, which is outside the directories this run may write to",
-                requested.display(),
-                resolved.display()
-            ),
-        )));
     }
     if let Some(parent) = resolved.parent()
         && !parent.as_os_str().is_empty()
@@ -430,19 +630,105 @@ fn open_no_follow(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-/// How many dangling symlinks [`resolve`] follows before it gives up.
+/// How many symlinks [`resolve`] follows before it gives up.
 const MAX_LINK_HOPS: usize = 40;
 
-/// Resolve `path` the way a write would reach it: symlinks and `..` in the
-/// part that exists are resolved by the file system, and the rest, which a
-/// write would create, is normalised lexically. A dangling symlink is followed
-/// to its target, because a write through it lands there.
+/// Resolve `path` the way a write would reach it: each component that exists
+/// is resolved by the file system, one at a time, so a symlink after a `..`
+/// is resolved too, and the rest, which a write would create, is kept as
+/// written. A dangling symlink is followed to its target, because a write
+/// through it lands there. When a component cannot be read, the path is
+/// normalised from its longest existing part.
 #[must_use]
 pub fn resolve(path: &Path) -> PathBuf {
-    resolve_with_hops(path, 0)
+    walk(path).map_or_else(|_| canonical_form(path, 0), |walk| walk.resolved)
 }
 
-fn resolve_with_hops(path: &Path, hops: usize) -> PathBuf {
+/// A symlink that a walk followed.
+struct Link {
+    /// Where the link is: its resolved parent directory and its name.
+    location: PathBuf,
+    /// Where the link leads, resolved.
+    target: PathBuf,
+}
+
+/// Where a write to a path lands, and the symlinks on the way.
+struct Walk {
+    resolved: PathBuf,
+    links: Vec<Link>,
+}
+
+/// Resolve `path` one component at a time, and record each symlink on the
+/// way. A relative path is relative to the working directory.
+///
+/// # Errors
+///
+/// Returns the error of a component that cannot be read for a reason other
+/// than "not found", an error after [`MAX_LINK_HOPS`] symlinks, and the error
+/// of the working directory for a relative path.
+fn walk(path: &Path) -> io::Result<Walk> {
+    let absolute;
+    let path = if path.is_absolute() {
+        path
+    } else {
+        absolute = std::env::current_dir()?.join(path);
+        &absolute
+    };
+    let mut links = Vec::new();
+    let mut hops = 0;
+    let walked = walk_components(path, &mut links, &mut hops)?;
+    Ok(Walk {
+        resolved: canonical_form(&walked, 0),
+        links,
+    })
+}
+
+fn walk_components(path: &Path, links: &mut Vec<Link>, hops: &mut usize) -> io::Result<PathBuf> {
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
+        let name = match component {
+            Component::Prefix(_) | Component::RootDir => {
+                resolved.push(component.as_os_str());
+                continue;
+            }
+            Component::CurDir => continue,
+            Component::ParentDir => {
+                resolved.pop();
+                continue;
+            }
+            Component::Normal(name) => name,
+        };
+        let candidate = resolved.join(name);
+        match candidate.symlink_metadata() {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                *hops += 1;
+                if *hops > MAX_LINK_HOPS {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("{} goes through too many symlinks", path.display()),
+                    ));
+                }
+                let target = std::fs::read_link(&candidate)?;
+                let followed = walk_components(&resolved.join(target), links, hops)?;
+                links.push(Link {
+                    location: canonical_form(&resolved, 0).join(name),
+                    target: canonical_form(&followed, 0),
+                });
+                resolved = followed;
+            }
+            Ok(_) => resolved = candidate,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => resolved = candidate,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(resolved)
+}
+
+/// `path` with its longest existing part canonicalized and the rest appended
+/// as written. For a path from [`walk_components`] this only gives the
+/// spelling that `canonicalize` uses on this platform, so it compares equal
+/// with the canonical allowed directories.
+fn canonical_form(path: &Path, hops: usize) -> PathBuf {
     let mut existing = path;
     let mut missing = Vec::new();
     loop {
@@ -453,7 +739,7 @@ fn resolve_with_hops(path: &Path, hops: usize) -> PathBuf {
             && let Ok(target) = std::fs::read_link(existing)
         {
             let base = existing.parent().unwrap_or_else(|| Path::new(""));
-            let followed = resolve_with_hops(&base.join(target), hops + 1);
+            let followed = canonical_form(&base.join(target), hops + 1);
             return append_missing(followed, &missing);
         }
         let (Some(parent), Some(last)) = (existing.parent(), existing.components().next_back())
@@ -763,6 +1049,256 @@ mod tests {
 
         assert!(create_checked(&target, &target, Some(&scope)).is_err());
         assert!(!outside.exists());
+    }
+
+    /// A `..` after a folder that does not exist yet returns to a folder that
+    /// exists, so a link after it is resolved too. Nothing is created
+    /// outside the project.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_after_a_parent_step_is_resolved() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.join("away")).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        let requested = Path::new("build/../away/x/r.json");
+        assert!(scope.check("--output-file", requested, &root).is_some());
+        let absolute = root.join(requested);
+        assert!(create_checked(requested, &absolute, Some(&scope)).is_err());
+        assert!(!elsewhere.join("x").exists());
+        assert!(!root.join("build").exists());
+    }
+
+    /// A link in the project that leads into a shared directory, such as the
+    /// temp directory or the CI workspace, does not carry a write there.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_link_into_a_shared_dir_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let shared = dir.path().join("workspace");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(shared.join("run.sh"), "keep").unwrap();
+        std::os::unix::fs::symlink(shared.join("run.sh"), root.join("report.sarif")).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        let target = root.join("report.sarif");
+        assert!(scope.check("--sarif-file", &target, &root).is_some());
+        assert!(create_checked(&target, &target, Some(&scope)).is_err());
+        assert_eq!(
+            std::fs::read_to_string(shared.join("run.sh")).unwrap(),
+            "keep"
+        );
+        assert!(
+            scope
+                .check("--sarif-file", &shared.join("report.sarif"), &root)
+                .is_none()
+        );
+    }
+
+    /// A link in the project to a named pipe is refused, while a pipe that
+    /// the user names directly stays allowed.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_link_to_a_named_pipe_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let fifo = dir.path().join("report.fifo");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(made.success());
+        std::os::unix::fs::symlink(&fifo, root.join("report.json")).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        assert!(
+            scope
+                .check("--output-file", &root.join("report.json"), &root)
+                .is_some()
+        );
+        assert!(scope.check("--output-file", &fifo, &root).is_none());
+    }
+
+    /// A link that stays in the project but leads into `.git` or
+    /// `node_modules` is refused. A link to another project folder passes.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_link_into_git_or_node_modules_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(root.join("reports")).unwrap();
+        std::os::unix::fs::symlink(root.join(".git"), root.join("meta")).unwrap();
+        std::os::unix::fs::symlink(root.join("node_modules/pkg"), root.join("pkg")).unwrap();
+        std::os::unix::fs::symlink(root.join("reports"), root.join("out")).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        for refused in ["meta/config", "pkg/index.js"] {
+            assert!(
+                scope
+                    .check("--output-file", Path::new(refused), &root)
+                    .is_some(),
+                "{refused}"
+            );
+            let absolute = root.join(refused);
+            assert!(create_checked(Path::new(refused), &absolute, Some(&scope)).is_err());
+        }
+        assert!(!root.join(".git/config").exists());
+        assert!(
+            scope
+                .check("--output-file", Path::new("out/r.json"), &root)
+                .is_none()
+        );
+    }
+
+    /// A link outside the project that leads into the `.git` directory of
+    /// the project is refused too, and the hook keeps its content.
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_link_into_git_metadata_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        let hook = root.join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "keep").unwrap();
+        let link = shared.join("r.json");
+        std::os::unix::fs::symlink(&hook, &link).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert!(scope.check("--output-file", &link, &root).is_some());
+        assert!(create_checked(&link, &link, Some(&scope)).is_err());
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// A project whose Git directory is outside the work tree
+    /// (`git init --separate-git-dir`) keeps its hooks there. A link outside
+    /// the project into that Git directory is refused too.
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_link_into_a_separate_git_dir_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let shared = dir.path().join("shared");
+        let git_dir = shared.join("gd");
+        std::fs::create_dir_all(git_dir.join("hooks")).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+        let hook = git_dir.join("hooks/pre-commit");
+        std::fs::write(&hook, "keep").unwrap();
+        let link = shared.join("r.json");
+        std::os::unix::fs::symlink(&hook, &link).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert!(scope.check("--output-file", &link, &root).is_some());
+        assert!(!scope.contains(&link));
+        assert!(create_checked(&link, &link, Some(&scope)).is_err());
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// The same for a worktree of a bare repository: the link leads into the
+    /// common Git directory, which holds the hooks.
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_link_into_the_common_git_dir_of_a_worktree_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let shared = dir.path().join("shared");
+        let bare = shared.join("repo.git");
+        let linked = bare.join("worktrees/project");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::create_dir_all(bare.join("hooks")).unwrap();
+        std::fs::write(linked.join("commondir"), "../..\n").unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        let hook = bare.join("hooks/pre-commit");
+        std::fs::write(&hook, "keep").unwrap();
+        let link = shared.join("r.json");
+        std::os::unix::fs::symlink(&hook, &link).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert!(scope.check("--output-file", &link, &root).is_some());
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// A worktree of a bare repository lies inside the common Git directory.
+    /// A link in it to another file of the same worktree is allowed, and a
+    /// link into the Git directory is still refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_a_worktree_of_a_bare_repository_is_allowed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bare = dir.path().join("proj.git");
+        let linked = bare.join("worktrees/main");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::create_dir_all(bare.join("hooks")).unwrap();
+        std::fs::write(linked.join("commondir"), "../..\n").unwrap();
+        let root = bare.join("main");
+        std::fs::create_dir_all(root.join("reports")).unwrap();
+        std::fs::write(root.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        std::os::unix::fs::symlink(root.join("reports"), root.join("out")).unwrap();
+        std::os::unix::fs::symlink(bare.join("hooks"), root.join("hooks")).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        assert!(scope.contains(&root.join("out/r.json")));
+        assert!(scope.contains(&root.join("reports/r.json")));
+        assert!(!scope.contains(&root.join("hooks/pre-commit")));
+    }
+
+    /// A `.git` entry counts for the checkout when it exists as an entry,
+    /// also as a dangling link, the same rule that the cache guard uses.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_git_link_marks_the_checkout() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join("pkg")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("missing"), repo.join(".git")).unwrap();
+        let scope = WriteScope::new(&repo.join("pkg"), &repo, Vec::new()).expect("scope");
+        assert!(scope.contains(&repo.join("r.json")));
+    }
+
+    /// A socket is not a regular file, so a write to it is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_socket_target_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let socket = root.join("s.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind");
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        assert!(scope.check("--output-file", &socket, &root).is_some());
+    }
+
+    /// A folder that cannot be read is refused instead of treated as
+    /// missing.
+    #[cfg(unix)]
+    #[test]
+    fn a_component_that_cannot_be_read_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let closed = root.join("closed");
+        std::fs::create_dir_all(&closed).unwrap();
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = closed.join("probe").symlink_metadata();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        let result = scope.check("--output-file", Path::new("closed/sub/r.json"), &root);
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A superuser reads the folder anyway, so the case does not apply.
+        if readable.is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied) {
+            assert!(result.is_some());
+        }
     }
 
     /// The open itself refuses a symlink at the final component, which covers

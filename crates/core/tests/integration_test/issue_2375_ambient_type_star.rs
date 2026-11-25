@@ -176,13 +176,13 @@ fn ambient_type_star_leaves_no_surface_on_the_declaring_file() {
         .as_ref()
         .expect("analyze_with_trace retains the graph");
 
-    let ambient = module_named(&graph.modules, "src/ambient.d.ts");
+    let ambient = module_named(graph.modules(), "src/ambient.d.ts");
     assert!(
         ambient.is_entry_point(),
         "the fixture must keep the declaring file an entry point (package.json `types`): \
          that is where the type star used to launder the target's value exports"
     );
-    let shim = module_named(&graph.modules, "src/shim.ts");
+    let shim = module_named(graph.modules(), "src/shim.ts");
     assert!(
         shim.is_reachable() && !shim.is_entry_point(),
         "the fixture must keep shim.ts a reachable non-entry module so the credit cannot \
@@ -195,7 +195,7 @@ fn ambient_type_star_leaves_no_surface_on_the_declaring_file() {
         "src/ambient-value.d.ts",
         "src/shim.ts",
     ] {
-        let module = module_named(&graph.modules, path);
+        let module = module_named(graph.modules(), path);
         let re_exports: Vec<(&str, &str)> = module
             .re_exports
             .iter()
@@ -223,7 +223,7 @@ fn ambient_type_star_references_land_in_the_type_namespace() {
         .as_ref()
         .expect("analyze_with_trace retains the graph");
 
-    let entry_pair = module_named(&graph.modules, "src/entry-pair.ts");
+    let entry_pair = module_named(graph.modules(), "src/entry-pair.ts");
     assert_eq!(
         reference_shapes(slot(entry_pair, "EntryPair", true)),
         vec![(ReferenceKind::NamespaceImport, ExportNamespace::Type)],
@@ -234,7 +234,7 @@ fn ambient_type_star_references_land_in_the_type_namespace() {
         "the const half of the pair carries no reference at all"
     );
 
-    let ns_pair = module_named(&graph.modules, "src/ns-pair.ts");
+    let ns_pair = module_named(graph.modules(), "src/ns-pair.ts");
     assert!(
         reference_shapes(slot(ns_pair, "default", false))
             .contains(&(ReferenceKind::DefaultImport, ExportNamespace::Type)),

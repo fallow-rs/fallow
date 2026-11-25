@@ -109,7 +109,7 @@ fn wrapped_group_origins<'a>(
 /// the full surface and does not count. A star edge that the graph layer
 /// synthesizes has an empty span and does not count.
 fn star_re_exports(graph: &ModuleGraph, module_idx: usize, target: FileId) -> bool {
-    graph.modules.get(module_idx).is_some_and(|module| {
+    graph.modules().get(module_idx).is_some_and(|module| {
         module.re_exports.iter().any(|edge| {
             edge.source_file == target
                 && edge.imported_name == "*"

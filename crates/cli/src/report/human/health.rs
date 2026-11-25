@@ -65,17 +65,7 @@ pub(in crate::report) fn print_health_human(input: &PrintHealthHumanInput<'_>) {
 
     let has_score = report.health_score.is_some();
     let parse_note = parse_degraded_note_lines(input.parse_degraded);
-    if report.findings.is_empty()
-        && report.file_scores.is_empty()
-        && report.coverage_gaps.is_none()
-        && report.hotspots.is_empty()
-        && report.targets.is_empty()
-        && report.runtime_coverage.is_none()
-        && report.coverage_intelligence.is_none()
-        && report.threshold_overrides.is_empty()
-        && report.inline_threshold_overrides.is_empty()
-        && report.inline_threshold_override_problems.is_empty()
-        && report.css_analytics.is_none()
+    if super::health_status::has_nothing_to_render(report)
         && !css_requested
         && type_coupling.is_none()
         && !has_score
@@ -203,7 +193,6 @@ fn insert_parse_degraded_note(lines: &mut Vec<String>, note: Vec<String>, after_
 }
 
 /// Build human-readable output lines for health (complexity) findings.
-///
 #[cfg(test)]
 fn build_health_human_lines(report: &fallow_output::HealthReport, root: &Path) -> Vec<String> {
     build_health_human_lines_with_explain(report, root, false, false, false, None)
@@ -236,6 +225,7 @@ fn build_health_human_lines_with_explain(
     render_file_scores(&mut lines, report, root);
     render_hotspots(&mut lines, report, root);
     render_change_coupling(&mut lines, report, root);
+    super::health_shallow::render_shallow_directories(&mut lines, report);
     render_refactoring_targets(&mut lines, report, root);
     render_css_analytics(&mut lines, report, css_requested);
     if explain {
@@ -1128,27 +1118,6 @@ fn health_explain_for_header(line: &str) -> Option<String> {
 
 fn rule_full(id: &str) -> Option<String> {
     crate::explain::rule_by_id(id).map(|rule| rule.full.to_string())
-}
-
-/// Format `seconds` as a human-readable window label like "12 min" or "6 h".
-///
-/// Used by both the terminal and markdown renderers so a multi-day window
-/// consistently reads as "N d" in both surfaces instead of diverging to
-/// "N h" in one of them.
-pub(in crate::report) fn format_window(seconds: u64) -> String {
-    if seconds < 60 {
-        return format!("{seconds} s");
-    }
-    let minutes = seconds / 60;
-    if minutes < 120 {
-        return format!("{minutes} min");
-    }
-    let hours = minutes / 60;
-    if hours < 48 {
-        format!("{hours} h")
-    } else {
-        format!("{} d", hours / 24)
-    }
 }
 
 pub fn render_health_score(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {

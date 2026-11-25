@@ -136,7 +136,7 @@ fn star_export_ambiguity(
     let mut sources: Vec<PathBuf> = collisions
         .iter()
         .flat_map(|collision| collision.contributors.iter())
-        .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
+        .filter_map(|contributor| graph.module(*contributor))
         .map(|module| relativize(&module.path, root))
         .collect();
     sources.sort();
@@ -229,7 +229,7 @@ fn collect_callees(
         if current_depth > depth {
             continue;
         }
-        let Some(module) = graph.modules.get(module_id.0 as usize) else {
+        let Some(module) = graph.module(module_id) else {
             continue;
         };
         // The import edge for a re-export has no binding. Its names live on
@@ -318,7 +318,7 @@ fn importing_symbols<'g>(
 
 fn module_path(graph: &ModuleGraph, file_id: FileId, root: &Path) -> PathBuf {
     graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)
         .map_or_else(|| PathBuf::from("<unknown>"), |m| relativize(&m.path, root))
 }

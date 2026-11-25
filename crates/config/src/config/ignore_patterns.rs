@@ -14,7 +14,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use globset::{GlobSet, GlobSetBuilder};
 
 use super::compile_path_glob;
-use super::resolution::{DEFAULT_IGNORE_PATTERNS, normalize_user_glob_pattern};
+use super::glob_validation::normalize_path_pattern;
+use super::resolution::DEFAULT_IGNORE_PATTERNS;
 
 /// Path components that a `!` exception can never lift.
 pub const UNLIFTABLE_IGNORE_SEGMENTS: &[&str] = &["node_modules", ".git"];
@@ -298,10 +299,10 @@ pub(super) fn compile_ignore_patterns(ignore_patterns: &[String]) -> (IgnorePatt
     let mut exceptions: Vec<&str> = Vec::new();
     for pattern in ignore_patterns {
         if let Some(body) = pattern.strip_prefix('!') {
-            exceptions.push(normalize_user_glob_pattern(body));
+            exceptions.push(normalize_path_pattern(body));
             continue;
         }
-        let normalized = normalize_user_glob_pattern(pattern);
+        let normalized = normalize_path_pattern(pattern);
         ignore_builder.add(
             compile_path_glob(normalized)
                 .expect("ignorePatterns entry was validated at config load time"),

@@ -976,20 +976,20 @@ const releasedSkillFiles = (name) => {
   return walk("").toSorted();
 };
 
-test("released skills agree across the npm package, the CLI embed, and agent install", () => {
+test("released skills agree across the npm package, the fallow-api embed, and agent install", () => {
   const released = releasedSkillNames(".");
   assert.deepEqual(released, ["fallow", "fallow-setup"]);
 
-  const buildScript = readFileSync("crates/cli/build.rs", "utf8");
+  const buildScript = readFileSync("crates/api/build/embed_skills.rs", "utf8");
   const embedded = [...buildScript.matchAll(/^ {8}"([a-z-]+)",\n {8}&\[\n([\s\S]*?)^ {8}\],/gmu)];
   assert.deepEqual(
     embedded.map(([, name]) => name),
     released,
-    "crates/cli/build.rs must embed every released skill in the same order",
+    "crates/api/build/embed_skills.rs must embed every released skill in the same order",
   );
   for (const [, name, list] of embedded) {
     const files = [...list.matchAll(/"([^"]+)"/gu)].map(([, path]) => path).toSorted();
-    assert.deepEqual(files, releasedSkillFiles(name), `build.rs file list for ${name}`);
+    assert.deepEqual(files, releasedSkillFiles(name), `embed_skills.rs file list for ${name}`);
   }
 
   const install = readFileSync("crates/cli/src/agent_install/skill.rs", "utf8");

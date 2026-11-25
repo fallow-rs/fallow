@@ -38,9 +38,13 @@ use crate::visitor::ModuleInfoExtractor;
 /// so each `<` nested in such a list multiplies the work, and a few hundred
 /// bytes such as `t<{[t<{[t<{[...` keep the parser busy for minutes. The scan
 /// counts a `<` that is still open where the next one opens behind a deeper
-/// `(` or `[`. One level can cost up to four times the level inside it, so
-/// the cap keeps the worst case near a million steps. Real code, minified
-/// bundles and generated declaration files included, stays below this cap.
+/// `(` or `[`. A grouping `(` before `{`, `[` or `(` adds one more level:
+/// the parser also tries it as a parameter list, so each `<` of
+/// `t<({[t<({[...` costs about three times the level inside it. With that
+/// count, one level costs at most about two times the level inside it, and a
+/// source at the cap parses in less than a millisecond in a release build.
+/// Real code, minified bundles and generated declaration files included,
+/// stays below this cap.
 const MAX_TYPE_ARGUMENT_NESTING: u32 = 10;
 
 /// Bracket nesting depth past which a file is not parsed.
@@ -59,6 +63,16 @@ pub const MAX_NESTING_DEPTH: u32 = 1024;
 /// such nesting doubles the parse time. Real stylesheets nest a few color
 /// functions at most, for example `color-mix(in srgb, light-dark(rgb(...)))`.
 pub const MAX_COLOR_FUNCTION_DEPTH: usize = 8;
+
+/// Estimated extra parse work of one outermost color function past which
+/// lightningcss does not parse the stylesheet.
+///
+/// Each nested color function doubles the parse time of the text inside it,
+/// so a byte inside `k` open color functions costs about `2^k`, see
+/// [`Scanner::color_cost`]. Real color functions are short, so real
+/// stylesheets stay far below this budget, also when they hold many of them.
+/// Eight unclosed functions in front of 5 KB of text pass it.
+const MAX_COLOR_PARSE_COST: usize = 1 << 20;
 
 /// The CSS functions that lightningcss tries to parse as a color first.
 const COLOR_FUNCTIONS: &[&[u8]] = &[
@@ -135,7 +149,7 @@ pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) ->
 /// `style_parse_is_safe`.
 pub fn parse_style_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
     let scan = scan_depth(source, MAX_NESTING_DEPTH, Dialect::Style);
-    if scan.max_colors > MAX_COLOR_FUNCTION_DEPTH {
+    if scan.max_colors > MAX_COLOR_FUNCTION_DEPTH || scan.color_cost > MAX_COLOR_PARSE_COST {
         return None;
     }
     run_bounded(source, scan.max_depth, || {
@@ -230,6 +244,7 @@ fn max_depth(source: &str, limit: u32, dialect: Dialect) -> u32 {
 fn scan_depth(source: &str, limit: u32, dialect: Dialect) -> Scanner<'_> {
     let mut scanner = Scanner::new(source, limit, dialect);
     scanner.scan();
+    scanner.end_open_color_functions();
     scanner
 }
 
@@ -253,13 +268,24 @@ struct Scanner<'a> {
     /// Depth of each open `(` and `[`, innermost last. Only these brackets
     /// can hold an expression inside a type.
     expression_brackets: Vec<u32>,
+    /// Depth of each open `(` that the parser can also try as a parameter
+    /// list, innermost last, see [`Scanner::opens_parameter_list`].
+    parameter_lists: Vec<u32>,
     /// Whether this scanner reads the body of a guessed regex as code, see
     /// [`Scanner::count_regex_type_arguments`].
     regex_body: bool,
-    /// Depth of each open stylesheet color function, innermost last.
-    colors: Vec<u32>,
+    /// Depth and `(` offset of each open stylesheet color function,
+    /// innermost last.
+    colors: Vec<(u32, usize)>,
     /// Maximum number of color functions open at one time.
     max_colors: usize,
+    /// The highest extra parse work of one outermost color function: the sum
+    /// over the color functions nested in it of the byte length of each,
+    /// doubled once for each color function around it. A byte inside `k`
+    /// nested color functions adds `2^k - 2`.
+    color_cost: usize,
+    /// The extra parse work of the outermost color function that is open.
+    open_color_cost: usize,
     /// The closing byte of each open stylesheet block, innermost last. In CSS
     /// only the matching byte ends a block, so a `}` inside an open `(` is a
     /// plain token.
@@ -289,9 +315,12 @@ impl<'a> Scanner<'a> {
             type_arguments: Vec::new(),
             max_type_arguments: 0,
             expression_brackets: Vec::new(),
+            parameter_lists: Vec::new(),
             regex_body: false,
             colors: Vec::new(),
             max_colors: 0,
+            color_cost: 0,
+            open_color_cost: 0,
             style_closers: Vec::new(),
         }
     }
@@ -350,9 +379,13 @@ impl Scanner<'_> {
 
     /// Opens a bracket. A `(` or `[` can hold an expression inside a type.
     fn open_bracket(&mut self, byte: u8) {
+        let parameter_list = byte == b'(' && self.opens_parameter_list();
         self.open();
         if byte != b'{' {
             self.expression_brackets.push(self.depth);
+        }
+        if parameter_list {
+            self.parameter_lists.push(self.depth);
         }
         if self.dialect == Dialect::Style {
             self.style_closers.push(match byte {
@@ -372,6 +405,22 @@ impl Scanner<'_> {
         }
         self.style_closers.pop();
         true
+    }
+
+    /// Whether the `(` at `pos - 1` can open a parameter list that holds an
+    /// expression. A `(` that does not follow an operand groups an
+    /// expression, and the parser also tries it as the parameters of an
+    /// arrow function or a function type. A computed key or a default value
+    /// in such a pattern holds an expression, so a `{`, `[` or `(` after the
+    /// `(` makes the parser read the inner part once more. A `/` can start a
+    /// comment before such a pattern, so it counts too. A call such as
+    /// `f({` holds no parameters.
+    fn opens_parameter_list(&self) -> bool {
+        if self.dialect != Dialect::Script || !(self.regex_allowed || self.after_keyword()) {
+            return false;
+        }
+        let rest = self.bytes[self.pos..].trim_ascii_start();
+        matches!(rest.first(), Some(b'{' | b'[' | b'(' | b'/'))
     }
 
     /// Handles the script tokens that stylesheets do not have: a template
@@ -419,11 +468,14 @@ impl Scanner<'_> {
             .type_arguments
             .last()
             .map_or(1, |outer| {
-                let behind_expression = self
-                    .expression_brackets
-                    .last()
-                    .is_some_and(|&bracket| bracket > outer.depth);
-                outer.level + u32::from(behind_expression)
+                let behind = |brackets: &[u32]| {
+                    brackets
+                        .last()
+                        .is_some_and(|&bracket| bracket > outer.depth)
+                };
+                outer.level
+                    + u32::from(behind(&self.expression_brackets))
+                    + u32::from(behind(&self.parameter_lists))
             })
             .max(replaced);
         self.type_arguments.push(TypeArguments {
@@ -468,12 +520,10 @@ impl Scanner<'_> {
         {
             self.type_arguments.pop();
         }
-        while self
-            .expression_brackets
-            .last()
-            .is_some_and(|&bracket| bracket > self.depth)
-        {
-            self.expression_brackets.pop();
+        for brackets in [&mut self.expression_brackets, &mut self.parameter_lists] {
+            while brackets.last().is_some_and(|&bracket| bracket > self.depth) {
+                brackets.pop();
+            }
         }
     }
 
@@ -488,7 +538,7 @@ impl Scanner<'_> {
             _ if self.at_color_function() => {
                 self.open();
                 self.style_closers.push(b')');
-                self.colors.push(self.depth);
+                self.colors.push((self.depth, self.pos - 1));
                 self.max_colors = self.max_colors.max(self.colors.len());
             }
             _ => return false,
@@ -498,9 +548,41 @@ impl Scanner<'_> {
 
     /// Ends the color functions that a closing bracket closed.
     fn close_color_functions(&mut self) {
-        while self.colors.last().is_some_and(|open| *open > self.depth) {
-            self.colors.pop();
+        while self
+            .colors
+            .last()
+            .is_some_and(|(open, _)| *open > self.depth)
+        {
+            self.end_color_function(self.pos);
         }
+    }
+
+    /// Ends the color functions that are still open at the end of the source.
+    /// lightningcss reads each of them to the end.
+    fn end_open_color_functions(&mut self) {
+        while !self.colors.is_empty() {
+            self.end_color_function(self.bytes.len());
+        }
+    }
+
+    /// Ends the innermost color function at the byte offset `end`. A nested
+    /// function adds its weighted span to the work of its outermost function,
+    /// and an outermost function updates [`Scanner::color_cost`].
+    fn end_color_function(&mut self, end: usize) {
+        let Some((_, start)) = self.colors.pop() else {
+            return;
+        };
+        let outer = self.colors.len();
+        if outer == 0 {
+            self.color_cost = self.color_cost.max(self.open_color_cost);
+            self.open_color_cost = 0;
+            return;
+        }
+        let span = end.saturating_sub(start);
+        let weight = 1usize.checked_shl(outer as u32).unwrap_or(usize::MAX);
+        self.open_color_cost = self
+            .open_color_cost
+            .saturating_add(span.saturating_mul(weight));
     }
 
     /// Skips a comment, a regex literal, or a division operator.
@@ -734,16 +816,18 @@ impl Scanner<'_> {
         for list in &scanner.type_arguments {
             self.carry_type_arguments(base + list.depth, open.saturating_add(list.level));
         }
-        for &bracket in &scanner.expression_brackets {
-            let depth = (base + bracket).min(self.depth);
-            if self
-                .expression_brackets
-                .last()
-                .is_none_or(|&last| last < depth)
-            {
-                self.expression_brackets.push(depth);
-            }
-        }
+        carry_brackets(
+            &mut self.expression_brackets,
+            &scanner.expression_brackets,
+            base,
+            self.depth,
+        );
+        carry_brackets(
+            &mut self.parameter_lists,
+            &scanner.parameter_lists,
+            base,
+            self.depth,
+        );
         self.max_type_arguments = self
             .max_type_arguments
             .max(open.saturating_add(scanner.max_type_arguments));
@@ -786,6 +870,18 @@ impl Scanner<'_> {
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Keeps the brackets that stay open at the end of a regex body open after
+/// it. A body bracket at `depth` from `base` is open at `base + depth`, at
+/// most the running `depth`. The entries of `open` stay in depth order.
+fn carry_brackets(open: &mut Vec<u32>, body: &[u32], base: u32, depth: u32) {
+    for &bracket in body {
+        let bracket = (base + bracket).min(depth);
+        if open.last().is_none_or(|&last| last < bracket) {
+            open.push(bracket);
         }
     }
 }
@@ -950,6 +1046,38 @@ mod tests {
         assert_eq!(color_depth_of(".a{x:light-dark(((light-dark(}"), 2);
     }
 
+    fn color_cost_of(source: &str) -> usize {
+        scan_depth(source, u32::MAX, Dialect::Style).color_cost
+    }
+
+    #[test]
+    fn color_cost_doubles_with_each_nested_color_function() {
+        assert_eq!(color_cost_of(".a{color:red}"), 0);
+        // An outermost color function costs no extra work.
+        assert_eq!(color_cost_of(".a{x:rgb(1)}"), 0);
+        // The inner arguments `(1)` span 3 bytes, doubled at the second level.
+        assert_eq!(color_cost_of(".a{x:rgb(rgb(1))}"), 6);
+        // A third level doubles again.
+        assert_eq!(color_cost_of(".a{x:rgb(rgb(rgb(1)))}"), 2 * 8 + 4 * 3);
+        // Sibling functions do not add up: the most expensive one counts.
+        assert_eq!(color_cost_of(".a{x:rgb(rgb(1)) rgb(rgb(1))}"), 6);
+        // An unclosed color function spans the rest of the source.
+        assert_eq!(color_cost_of("rgb(rgb(1"), 2 * 2);
+    }
+
+    /// OSS-Fuzz test case 6315655184580608: eight nested `light-dark(` calls
+    /// that are never closed, with 90 KB of text after them, made the parse
+    /// take more than a minute.
+    #[test]
+    fn deeply_nested_unclosed_color_functions_skip_the_parse() {
+        let source = format!("@x {}{}", "light-dark(".repeat(8), "a b ".repeat(20_000));
+        assert!(crate::parse_style_bounded(&source, || ()).is_none());
+        // A large stylesheet of many short color functions stays parsed.
+        let flat = ".a{color:color-mix(in oklab, light-dark(red, blue) 50%, transparent)}\n"
+            .repeat(60_000);
+        assert!(crate::parse_style_bounded(&flat, || ()).is_some());
+    }
+
     #[test]
     fn an_escaped_function_name_counts_as_a_color_function() {
         assert_eq!(color_depth_of(".a{x:r\\67 b(r\\gb(\\72\tgb(1)))}"), 3);
@@ -1028,7 +1156,6 @@ mod tests {
     #[test]
     fn type_argument_nesting_counts_open_lists_behind_expression_brackets() {
         assert_eq!(type_argument_nesting_of(&"t<{[".repeat(5)), 5);
-        assert_eq!(type_argument_nesting_of(&"t<({[".repeat(5)), 5);
         // A `<` at the same depth replaces the open one.
         assert_eq!(type_argument_nesting_of("f(a<b, c<d, e<(g<h))"), 2);
         // `&&`, `||`, `??` and `=` cannot appear in a type, so they end the
@@ -1065,6 +1192,22 @@ mod tests {
             scan_nesting(&"a>{[".repeat(40), Dialect::Style).type_arguments,
             0
         );
+    }
+
+    /// The parser also tries a grouping `(` before a pattern as a parameter
+    /// list, so it reads each level of `t<({[` three times.
+    #[test]
+    fn a_parenthesized_pattern_adds_a_type_argument_level() {
+        assert_eq!(type_argument_nesting_of(&"t<({[".repeat(5)), 9);
+        assert_eq!(type_argument_nesting_of(&"t<( /**/ [{[".repeat(5)), 9);
+        assert_eq!(type_argument_nesting_of(&"t<(({[".repeat(5)), 9);
+        assert!(exceeds_nesting_limit(&"t<({[".repeat(6)));
+        assert_eq!(type_argument_nesting_of("a < ({ [k]: b < c })"), 3);
+        assert_eq!(type_argument_nesting_of("a < (typeof ({ [k]: b < c }))"), 3);
+        // A call and a `(` before an operand hold no pattern of parameters.
+        assert_eq!(type_argument_nesting_of(&"t<f({[".repeat(5)), 5);
+        assert_eq!(type_argument_nesting_of(&"t<(a, {[".repeat(5)), 5);
+        assert_eq!(type_argument_nesting_of("a < (b) + f(c < d)"), 2);
     }
 
     #[test]

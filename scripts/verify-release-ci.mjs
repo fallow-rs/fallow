@@ -63,7 +63,10 @@ const IGNORED_FILES = new Set(["release.yml", "release-published.yml"]);
  * Scheduled runs that do not count for the release commit. The nightly
  * Benchmarks run adds walltime jobs on a macro runner from a shared monthly
  * minute pool. It can stay queued, and a release must not wait on it. The push
- * run of the release commit is the result that counts.
+ * run of the release commit is the result that counts. That run also carries
+ * the walltime jobs, so the gate waits on them. They usually end before the
+ * slowest simulation shard of that run. When they wait on a macro runner, a
+ * plain dispatch of bench.yml replaces that run without walltime jobs.
  */
 const IGNORED_SCHEDULED_FILES = new Set(["bench.yml"]);
 

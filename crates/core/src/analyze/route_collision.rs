@@ -77,7 +77,7 @@ fn collect_route_collision_buckets<'a>(
     pkg_root_refs: &[&Path],
 ) -> FxHashMap<BucketKey, Vec<(FileId, &'a Path)>> {
     let mut buckets: FxHashMap<BucketKey, Vec<(FileId, &Path)>> = FxHashMap::default();
-    for module in &graph.modules {
+    for module in graph.modules() {
         let Some(classified) = classify_route_file(module.path.as_path(), pkg_root_refs) else {
             continue;
         };

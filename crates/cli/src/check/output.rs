@@ -603,6 +603,7 @@ mod tests {
     fn make_resolved_config() -> fallow_config::ResolvedConfig {
         fallow_config::ResolvedConfig {
             extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
+            call_facts_requested: false,
             shared_state_allowlist: Vec::new(),
             detection_config_digest: String::new(),
             legacy_glob_groups: Vec::new(),
@@ -612,6 +613,7 @@ mod tests {
             workspace_settings: fallow_config::ResolvedWorkspaceSettings::default(),
             entry_pattern_effect: fallow_config::EntryEffectRecord::default(),
             circular_dependencies_allow_effect: fallow_config::EntryEffectRecord::default(),
+            ignore_list_effect: fallow_config::IgnoreListEffect::default(),
             ignore_patterns: fallow_config::IgnorePatternSet::empty(),
             user_ignore_pattern_count: 0,
             ignore_findings: fallow_config::FindingIgnoreMatcher::default(),

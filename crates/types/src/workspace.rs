@@ -28,6 +28,8 @@ mod health_text;
 mod kind_class;
 #[path = "workspace_merge.rs"]
 mod merge;
+#[path = "workspace_override_glob_text.rs"]
+mod override_glob_text;
 #[path = "workspace_plugin_text.rs"]
 mod plugin_text;
 #[path = "workspace_production_text.rs"]
@@ -37,6 +39,10 @@ mod run_notices;
 
 pub use config_entry::{OVERRIDE_REASON_BASE_RULE_OFF, OVERRIDE_REASON_PROJECT_LEVEL};
 pub use merge::{dedupe_workspace_diagnostics, merge_workspace_diagnostics};
+pub use override_glob_text::{
+    OVERRIDE_GLOB_REASON_DIRECTORY, OVERRIDE_GLOB_REASON_GLOB_UNMATCHED,
+    OVERRIDE_GLOB_REASON_NOT_A_PATH, OVERRIDE_GLOB_REASON_PATH_NOT_FOUND,
+};
 
 /// Why the declared pnpm version ignores the `overrides` section of
 /// `pnpm-workspace.yaml`.
@@ -694,6 +700,60 @@ pub enum WorkspaceDiagnosticKind {
         /// The `ignorePatterns` glob, as written in the config.
         pattern: String,
     },
+    /// An `ignoreExports` rule whose `file` glob matched no file of the
+    /// dead-code run (issue #5167). The usual cause is a file that was moved
+    /// or deleted. Not for a `--production` run. `path` is the root. Not
+    /// degraded.
+    IgnoreExportsFileUnmatched {
+        /// The `file` glob of the rule, as written in the config.
+        pattern: String,
+    },
+    /// An export name of an `ignoreExports` rule that no file of its `file`
+    /// glob declares or re-exports (issue #5167). The usual cause is an
+    /// export that was renamed or removed. A file with `export *` counts as
+    /// a file that can declare any name. Not for a `--production` run, nor
+    /// for the name `*`. `path` is the root. Not degraded.
+    IgnoreExportsNameUnmatched {
+        /// The entry as one line: the export name, `in`, and the glob.
+        pattern: String,
+        /// The `file` glob of the rule, as written in the config.
+        file: String,
+        /// The export name, as written in the config.
+        export: String,
+    },
+    /// A `duplicates.ignore` glob that matched no file of the dead-code run
+    /// (issue #5167). Not for a `--production` run. `path` is the root. Not
+    /// degraded.
+    DuplicatesIgnoreUnmatched {
+        /// The glob, as written in the config.
+        pattern: String,
+    },
+    /// A `health.ignore` glob that matched no file of the dead-code run
+    /// (issue #5167). Not for a `--production` run. `path` is the root. Not
+    /// degraded.
+    HealthIgnoreUnmatched {
+        /// The glob, as written in the config.
+        pattern: String,
+    },
+    /// A glob of an `overrides[].files` list that matched no project file
+    /// (issue #5227), so the override has no effect for it. The check reads
+    /// the analyzed files and the other project files, so the answer does not
+    /// depend on `--changed-since`, `--workspace` or `--production`. An
+    /// override whose every rule has a `project-level`
+    /// `override-rule-ineffective` entry gets no entry of this kind. `reason`
+    /// is `glob-unmatched`, `directory`, `path-not-found` or `not-a-path`.
+    /// The token set is open. `path` is the root. Not degraded.
+    OverrideFilesUnmatched {
+        /// The glob, as written in the config.
+        pattern: String,
+        /// The `files` globs of the override, as written in the config.
+        files: Vec<String>,
+        /// The canonical names of the rules of the override that apply per
+        /// file, also when the config uses an alias.
+        rules: Vec<String>,
+        /// Why the glob matched no file, as a kebab-case token.
+        reason: String,
+    },
     /// A `circularDependencies.allow` entry matched no cycle of the run
     /// (issue #4623): no cycle has exactly these files in this order, from
     /// any start file. The usual cause is a cycle that the code no longer
@@ -780,6 +840,15 @@ pub enum WorkspaceDiagnosticKind {
         used: String,
         /// The file name that the run ignored.
         ignored: String,
+    },
+    /// The project root has a file whose name looks like a fallow config,
+    /// such as `fallow.jsonc`, but no config file name that discovery reads
+    /// (issue #5166). The run does not load that file, so its settings do not
+    /// apply. One entry per such file. Not for a run with an explicit config
+    /// file. `path` is the file.
+    ConfigFileNameUnrecognized {
+        /// The file name that the run did not read.
+        name: String,
     },
     /// The `security.categories` config names a category that fallow does not
     /// know, so the run ignores that entry. `path` is the root.
@@ -1314,6 +1383,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         WorkspaceDiagnosticKind::InertFlag { .. }
         | WorkspaceDiagnosticKind::ConfigLoadFellBack { .. }
         | WorkspaceDiagnosticKind::ConfigFileShadowed { .. }
+        | WorkspaceDiagnosticKind::ConfigFileNameUnrecognized { .. }
         | WorkspaceDiagnosticKind::UnknownSecurityCategory { .. }
         | WorkspaceDiagnosticKind::EnvValueIgnored { .. } => {
             run_notices::run_notice_message(&display, kind)
@@ -1352,6 +1422,11 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         | WorkspaceDiagnosticKind::EntryPatternRedundant { .. }
         | WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant { .. }
         | WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant { .. }
+        | WorkspaceDiagnosticKind::IgnoreExportsFileUnmatched { .. }
+        | WorkspaceDiagnosticKind::IgnoreExportsNameUnmatched { .. }
+        | WorkspaceDiagnosticKind::DuplicatesIgnoreUnmatched { .. }
+        | WorkspaceDiagnosticKind::HealthIgnoreUnmatched { .. }
+        | WorkspaceDiagnosticKind::OverrideFilesUnmatched { .. }
         | WorkspaceDiagnosticKind::CircularDependenciesAllowUnmatched { .. }
         | WorkspaceDiagnosticKind::OverrideRuleIneffective { .. }
         | WorkspaceDiagnosticKind::RequestedRuleOff { .. } => {

@@ -673,7 +673,18 @@ fn scan_dir_for_pattern(dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The `{a,b}` expansions of `pattern` that a disk probe may join to a
+/// root. An expansion that is absolute or has a `..` segment is dropped, so
+/// no probe of a config pattern reads outside the root that it joins.
 pub(super) fn expand_brace_pattern(pattern: &str) -> Vec<String> {
+    let mut expanded = expand_brace_groups(pattern);
+    expanded.retain(|text| {
+        fallow_config::glob_validation::validate_user_path(text, "configPatterns").is_ok()
+    });
+    expanded
+}
+
+fn expand_brace_groups(pattern: &str) -> Vec<String> {
     let Some(open) = pattern.find('{') else {
         return vec![pattern.to_string()];
     };
@@ -687,7 +698,7 @@ pub(super) fn expand_brace_pattern(pattern: &str) -> Vec<String> {
     let inner = &pattern[open + 1..close];
     let mut expanded = Vec::new();
     for option in inner.split(',') {
-        for tail in expand_brace_pattern(suffix) {
+        for tail in expand_brace_groups(suffix) {
             expanded.push(format!("{prefix}{option}{tail}"));
         }
     }
@@ -987,6 +998,31 @@ pub fn check_plugin_detection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn brace_expansions_that_leave_the_root_are_dropped() {
+        assert_eq!(expand_brace_pattern("{..,x}/a.json"), vec!["x/a.json"]);
+        assert_eq!(expand_brace_pattern("{/abs/name,b}"), vec!["b"]);
+        assert!(expand_brace_pattern("../a.json").is_empty());
+        assert_eq!(
+            expand_brace_pattern("{vite,vitest}.config.ts"),
+            vec!["vite.config.ts", "vitest.config.ts"]
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn config_file_probes_stay_inside_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("outside.json"), "{}").unwrap();
+        let hits: Vec<PathBuf> = expand_brace_pattern("{..,x}/outside.json")
+            .iter()
+            .flat_map(|pattern| discover_pattern_matches(&root, pattern))
+            .collect();
+        assert!(hits.is_empty(), "{hits:?}");
+    }
 
     #[test]
     fn pattern_needs_filesystem_only_for_non_allowlisted_hidden_dirs() {

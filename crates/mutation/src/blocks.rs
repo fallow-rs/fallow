@@ -115,6 +115,7 @@ pub fn instrument_blocks(
                 .as_ref()
                 .map(|ranges| local_ranges(ranges, block.span)),
             record_exports: false,
+            excluded: options.excluded.clone(),
         };
         let result = instrument_text(&input, &local_options, &mut seen_ids)?;
         append_block(result, start, &starts, &mut output)?;

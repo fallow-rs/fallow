@@ -217,6 +217,22 @@ error by suppressing a downstream detector.
   entry point reads only store members, so its enum, class and namespace
   members are not reported either, unless `includeEntryExports` covers the
   file (issue #4990).
+- A Pinia state key read through the `$state` object of a known store is a
+  read of that store member: `store.$state.key`, `store.$state['key']` and
+  `const { key } = store.$state`. Any other use of a store `$state` value (a
+  call argument, a spread, an alias, a type assertion, a dynamic key, a rest
+  or dynamic-key destructure) marks the whole store as used. A whole write
+  `store.$state = { ... }` reads no key (issue #5168).
+- In a getter or an action of an option store, `this.$state.key`,
+  `this.$state['key']` and `const { key } = this.$state` read `key`. Any other
+  use of `this.$state` reads every key of `state`, but no getter or action. A
+  whole write `this.$state = { ... }` reads no key. An alias of `this`, such as
+  `const { $state } = this`, is not tracked (issue #5203).
+- A property of an object type typed `ReturnType<typeof useFooStore>` binds
+  to the store factory, also when it is nested or destructured:
+  `(deps: { store: ReturnType<typeof useFooStore> }) => deps.store.key` reads
+  `key`. The type name of such a property is `ReturnType`, so the lookup by
+  type name alone cannot find the store (issue #5207).
 - A plugin fixture pattern (`fixture_patterns`, for example `**/fixtures/**`
   of Vitest, Jest and Playwright) seeds each matching file as a support entry
   point, so the file is never an unused file. Discovery records the files that
@@ -266,6 +282,15 @@ error by suppressing a downstream detector.
   (`.module.css`, `.module.scss`, `.module.sass`, `.module.less`). The
   narrowing gate uses that same resolved-target set, so extensionless and
   path-aliased imports receive identical member and whole-object handling.
+- A barrel can forward the class map: `export { default as ui } from
+  './ui.module.css'` (issue #5162). The effective export index seeds an
+  implicit `default` binding for each CSS Module, as it does for an SFC file,
+  so the re-exported name resolves and its importers credit the barrel export.
+  The namespace re-export pass treats the edge like `export * as ui`: it
+  credits the classes that consumers of `ui` read, through every outer barrel,
+  and credits every class on a whole-object use. Duplicate-export grouping
+  keeps one location per binding that several barrels forward from one
+  module outside the group, so such a chain is one origin.
 - `import X = require('./x')` is the TypeScript spelling of a CommonJS require
   binding, so the extractor records the same non-destructured require call a
   `const X = require('./x')` declaration records (issue #2365): one CommonJS

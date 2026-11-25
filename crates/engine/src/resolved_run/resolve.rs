@@ -450,7 +450,14 @@ fn resolve_root(inputs: &RunInputs) -> Result<Sourced<PathBuf>, ResolveError> {
             ),
         )
     })?;
-    let canonical = crate::validate::validate_root(&path)
+    // A relative root is validated as the user gave it, so the check also
+    // covers its spelling from `PWD`.
+    let validated = match (inputs.root.is_some(), inputs.env().cwd()) {
+        (true, Some(cwd)) => crate::validate::validate_root_in(candidate.value(), cwd),
+        (true, None) => crate::validate::validate_root(&path),
+        (false, _) => crate::validate::validate_current_dir_root(&path),
+    };
+    let canonical = validated
         .map_err(|message| ResolveError::input(InputField::Root, InputProblem::Invalid, message))?;
     Ok(candidate.map(|_| canonical))
 }

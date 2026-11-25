@@ -174,7 +174,7 @@
       "default": []
     },
     "duplicates": {
-      "description": "Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in ignores for generated output and test and mock files), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`, plus `consistentIdentifiers`, which with `ignoreIdentifiers` requires a one-to-one name mapping between clone instances). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.",
+      "description": "Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage; the default 0 turns the gate off and is not zero tolerance), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in ignores for generated output and test and mock files), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`, plus `consistentIdentifiers`, which with `ignoreIdentifiers` requires a one-to-one name mapping between clone instances). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.",
       "$ref": "#/$defs/DuplicatesConfig",
       "default": {
         "enabled": true,
@@ -237,6 +237,10 @@
           "minRevisions": 5,
           "minSharedRevisions": 5,
           "minDegree": 0.3
+        },
+        "shallowDirectories": {
+          "minInterface": 8,
+          "ignore": []
         },
         "suggestInlineSuppression": true,
         "inlineThresholdOverrides": true
@@ -432,7 +436,7 @@
       "default": []
     },
     "codeowners": {
-      "description": "A project-root-relative path to a CODEOWNERS file, used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.",
+      "description": "A path to a CODEOWNERS file, relative to the project root or absolute, that must resolve inside the project scope base (the git top level of the root), used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.",
       "type": [
         "string",
         "null"
@@ -1072,7 +1076,7 @@
           "default": 2
         },
         "threshold": {
-          "description": "Maximum allowed duplication percentage (0 = no limit).",
+          "description": "Maximum allowed duplication percentage. The default `0` turns the\npercentage gate off: it is not zero tolerance. To fail when fallow\nfinds any clone group, use `--fail-on-issues`.",
           "type": "number",
           "format": "double",
           "default": 0.0
@@ -1314,7 +1318,7 @@
       "description": "The test runner of `fallow mutation`.",
       "oneOf": [
         {
-          "description": "Detect the runner from the project: the `vitest` dependency, the\ntest module that the test files import, a Bun file at the root, or a\n`node --test` script.",
+          "description": "Detect the runner from the project: the `vitest` dependency, the\ntest module that the test files import, the `vite-plus` dependency, a\nBun file at the root, or a `node --test` script.",
           "type": "string",
           "const": "auto"
         },
@@ -1507,7 +1511,7 @@
           "minimum": 0
         },
         "coverage": {
-          "description": "Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage\n(a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate\nper-function CRAP scores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,\n`fallow viz`, and the MCP `audit` / `check_health` tools.",
+          "description": "Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage\n(a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate\nper-function CRAP scores. A relative path is taken from the project\nroot. A relative or absolute path may name a file up to the project\nscope base (the git top level of the root); use the CLI flag for a\nfile outside the project. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,\n`fallow viz`, and the MCP `audit` / `check_health` tools.",
           "type": [
             "string",
             "null"
@@ -1567,6 +1571,14 @@
             "minRevisions": 5,
             "minSharedRevisions": 5,
             "minDegree": 0.3
+          }
+        },
+        "shallowDirectories": {
+          "description": "Settings for the shallow directories section\n(`fallow health --shallow-directories`). Older fallow versions reject\nthis key as unknown, so pair it with `minimumVersion` set to the\nrelease that added it.",
+          "$ref": "#/$defs/ShallowDirectoriesConfig",
+          "default": {
+            "minInterface": 8,
+            "ignore": []
           }
         },
         "suggestInlineSuppression": {
@@ -1758,6 +1770,28 @@
           "minimum": 0.0,
           "maximum": 1.0,
           "default": 0.3
+        }
+      },
+      "additionalProperties": false
+    },
+    "ShallowDirectoriesConfig": {
+      "description": "Settings for the shallow directories section\n(`fallow health --shallow-directories`).\n\nA directory is shallow when files outside it use at least as many of its\ninterface items as it keeps inside, and it shows at least `minInterface`\nitems.",
+      "type": "object",
+      "properties": {
+        "minInterface": {
+          "description": "Minimum number of interface items that files outside a directory use\nbefore the directory can be shallow (default: 8, at least 1).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "default": 8
+        },
+        "ignore": {
+          "description": "Glob patterns for directories to leave out of the section, relative to\nthe project root (for example `src/generated` or `src/api/**`). A\npattern matches the directory path, not the files in it.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false
@@ -2663,7 +2697,7 @@
       "type": "object",
       "properties": {
         "files": {
-          "description": "Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `[\"src/generated/**\", \"**/*.test.ts\"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories.",
+          "description": "Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `[\"src/generated/**\", \"**/*.test.ts\"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories. A glob must match the file that has the finding: for unresolved-imports, the importing file, not the import target. Package and binary names are not file globs; use `ignoreDependencies` and `ignoreBinaries` for them. Fallow reports each glob that matches no project file as an `override-files-unmatched` diagnostic.",
           "type": "array",
           "items": {
             "type": "string"

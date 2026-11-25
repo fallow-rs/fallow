@@ -59,7 +59,7 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
     diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<PathBuf> {
     let tsconfig_path = root.join("tsconfig.json");
-    let Ok(content) = std::fs::read_to_string(&tsconfig_path) else {
+    let Some(content) = read_root_tsconfig(root) else {
         return Vec::new();
     };
 
@@ -80,7 +80,12 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
         }
     };
 
-    for (parent_path, error) in super::tsconfig::malformed_extends_parents(&tsconfig_path, &value) {
+    // A parent outside the root is a normal `extends` target, but its syntax
+    // is not a problem of this project, so it gets no diagnostic.
+    for (parent_path, error) in super::tsconfig::malformed_extends_parents(&tsconfig_path, &value)
+        .into_iter()
+        .filter(|(parent_path, _)| fallow_types::read_guard::is_inside_root(root, parent_path))
+    {
         diagnostics.push(WorkspaceDiagnostic::new(
             root,
             parent_path,
@@ -92,6 +97,7 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
         return Vec::new();
     };
 
+    let canonical_root = dunce::canonicalize(root).ok();
     let mut results = Vec::new();
     for r in refs {
         let Some(raw_path) = r.get("path").and_then(|p| p.as_str()) else {
@@ -105,6 +111,16 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
         }
 
         if candidate.is_file() {
+            continue;
+        }
+        // Only a reference that stays inside the root, and names nothing
+        // there, is a missing directory of this project. A reference outside
+        // the root gets no diagnostic.
+        let missing_inside = canonical_root.as_deref().is_some_and(|canonical| {
+            crate::project_read::project_entry(canonical, Path::new(cleaned))
+                == crate::project_read::ProjectEntry::Missing
+        });
+        if !missing_inside {
             continue;
         }
 
@@ -126,6 +142,25 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
     results
 }
 
+/// The content of the `tsconfig.json` at `root`. A file that is missing, a
+/// link that resolves outside `root`, a file that is not a regular file and
+/// a very large file give `None`. Each refusal except a missing file logs a
+/// warning that names the path only.
+fn read_root_tsconfig(root: &Path) -> Option<String> {
+    match fallow_types::read_guard::read_to_string_inside(
+        root,
+        Path::new("tsconfig.json"),
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) {
+        Ok(content) => Some(content),
+        Err(refusal) if refusal.is_not_found() => None,
+        Err(refusal) => {
+            tracing::warn!("{refusal}");
+            None
+        }
+    }
+}
+
 /// Read `compilerOptions.rootDir` of the `tsconfig.json` at the project root,
 /// through its `extends` chain.
 ///
@@ -138,7 +173,8 @@ pub(super) fn parse_tsconfig_references_with_diagnostics(
 /// Returns `None` if the file is missing, malformed, or no config of the
 /// chain sets `rootDir`.
 pub fn parse_tsconfig_root_dir(root: &Path) -> Option<String> {
-    let tsconfig = super::MergedTsconfig::read(&root.join("tsconfig.json"))?;
+    let source = read_root_tsconfig(root)?;
+    let tsconfig = super::MergedTsconfig::read_with_source(&root.join("tsconfig.json"), &source)?;
     let option = tsconfig.compiler_option("rootDir")?;
     let value = option.as_str()?;
     if option.origin() == tsconfig.config_dir() && !value.starts_with("${configDir}") {
@@ -570,6 +606,77 @@ fn collect_matched_workspace_dir(path: &Path, input: &mut WorkspaceDirWalkInput<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reference_diagnostics(root: &Path) -> (Vec<PathBuf>, Vec<WorkspaceDiagnostic>) {
+        let mut diagnostics = Vec::new();
+        let refs = parse_tsconfig_references_with_diagnostics(
+            root,
+            &crate::IgnorePatternSet::empty(),
+            &mut diagnostics,
+        );
+        (refs, diagnostics)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_tsconfig_link_out_of_the_root_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{ "references": [{ "path": "./other-project-name" }] }"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(dir.path().join("tsconfig.json"), root.join("tsconfig.json"))
+            .unwrap();
+
+        let (refs, diagnostics) = reference_diagnostics(&root);
+        assert!(refs.is_empty(), "{refs:?}");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_reference_with_a_dot_dot_after_a_link_gets_no_diagnostic() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        let root = outer.join("project");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::os::unix::fs::symlink(&root, root.join("sub/home")).unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "references": [{ "path": "./sub/home/../../missing-sibling" }] }"#,
+        )
+        .unwrap();
+
+        let (_, diagnostics) = reference_diagnostics(&root);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn references_and_extends_outside_the_root_get_no_diagnostic() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("base.json"), "{ not json").unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "extends": "../base.json",
+                 "references": [{ "path": "../missing-sibling" }, { "path": "./missing-inside" }] }"#,
+        )
+        .unwrap();
+
+        let (_, diagnostics) = reference_diagnostics(&root);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(
+            diagnostics[0].path.ends_with("missing-inside"),
+            "{diagnostics:?}"
+        );
+    }
 
     #[test]
     fn tsconfig_references_from_dir() {

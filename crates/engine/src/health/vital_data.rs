@@ -12,9 +12,10 @@ use super::actions::active_health_coverage_model;
 use super::filters::filter_large_functions_by_diff;
 use super::large_functions::{LargeFunctionInput, collect_large_functions};
 use super::scoring;
+use super::subset_filter::SubsetFilter;
 use super::{
-    HealthError, HealthExecutionOptions, SubsetFilter, VitalSignsAndCountsInput,
-    apply_duplication_metrics, compute_vital_signs_and_counts,
+    HealthError, HealthExecutionOptions, VitalSignsAndCountsInput, apply_duplication_metrics,
+    compute_vital_signs_and_counts,
 };
 
 pub struct HealthVitalData {

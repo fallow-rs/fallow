@@ -246,9 +246,38 @@ fn subpath_capture<'a>(path: &'a str, parts: &[&str]) -> Option<&'a str> {
     (stars == 1 || parts.join(capture) == path).then_some(capture)
 }
 
+/// The sub-package directories that the `exports` keys of the root
+/// `package.json` name. A directory must resolve inside the canonical root
+/// before the search reads its `package.json`.
+pub(super) fn exports_package_dirs(
+    root: &Path,
+    canonical_root: &Path,
+    names: &[String],
+) -> Vec<PathBuf> {
+    names
+        .iter()
+        .map(|name| root.join(name))
+        .filter(|dir| dir.is_dir())
+        .filter(|dir| fallow_types::read_guard::is_inside_root(canonical_root, dir))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn exports_package_dirs_stay_inside_the_root() {
+        let outside = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir(root.join("compat")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("linked")).unwrap();
+        let dirs = exports_package_dirs(&root, &root, &["compat".to_owned(), "linked".to_owned()]);
+        assert_eq!(dirs, vec![root.join("compat")]);
+    }
     use fallow_types::discover::FileId;
 
     fn discovered_files_under(root: &Path) -> Vec<DiscoveredFile> {

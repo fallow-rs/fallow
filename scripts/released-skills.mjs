@@ -1,7 +1,8 @@
 /**
  * The released Fallow skills: every directory under `npm/fallow/skills/` that
- * has a `SKILL.md`. The npm package ships each of them, the CLI embeds them
- * (`crates/cli/build.rs`), the maintainer tree mirrors them, and the companion
+ * has a `SKILL.md`. The npm package ships each of them, `fallow-api` embeds
+ * them (`crates/api/build/embed_skills.rs`) for `fallow agent install` and the
+ * MCP server, the maintainer tree mirrors them, and the companion
  * `fallow-skills` repository vendors them.
  */
 

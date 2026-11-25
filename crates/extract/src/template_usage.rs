@@ -159,6 +159,13 @@ impl TemplateUsage {
         }
     }
 
+    /// Whether the template mentions `name` other than as the object of a
+    /// member access, for example in a shorthand attribute, a spread or a
+    /// call argument.
+    pub(crate) fn uses_whole(&self, name: &str) -> bool {
+        self.whole_object_uses.iter().any(|whole| whole == name)
+    }
+
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.used_bindings.is_empty()
@@ -266,6 +273,7 @@ pub fn analyze_template_snippet_into(usage: &mut TemplateUsage, input: &Template
     extractor.register_template_object_locals(used_bindings.iter().cloned());
     extractor.visit_program(&parser_return.program);
 
+    extractor.flush_pending_namespace_whole_object_uses();
     let member_accesses = std::mem::take(&mut extractor.member_accesses);
     let whole_object_uses = std::mem::take(&mut extractor.whole_object_uses);
     if let Some(sink) = usage.markup.as_mut()

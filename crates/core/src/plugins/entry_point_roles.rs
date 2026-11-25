@@ -38,6 +38,7 @@ pub(super) const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "gnome-shell-extension",
     "hardhat",
     "kibana",
+    "mkdocs",
     "module-federation",
     "nestjs",
     "next-intl",

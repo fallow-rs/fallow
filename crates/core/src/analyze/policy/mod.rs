@@ -174,7 +174,7 @@ pub(super) fn find_policy_violations(input: PolicyAnalysisInput<'_>) -> Vec<Poli
         &[]
     });
     let mut violations = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         let zone = *zones_by_file.entry(node.file_id).or_insert_with(|| {
             node.path.strip_prefix(&config.root).ok().and_then(|path| {
                 let relative = path.to_string_lossy().replace('\\', "/");

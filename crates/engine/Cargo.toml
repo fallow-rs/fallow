@@ -71,7 +71,7 @@ schema = ["fallow-output/schema", "fallow-types/schema"]
 # `cargo publish` drops it from the published manifest.
 fallow-engine = { path = ".", features = ["testing"] }
 fallow-config = { workspace = true, features = ["testing"] }
-fallow-graph = { workspace = true, features = ["read-trace"] }
+fallow-graph = { workspace = true, features = ["read-trace", "testing"] }
 criterion = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }

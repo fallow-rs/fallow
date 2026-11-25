@@ -129,6 +129,9 @@ pub struct DynamicOccurrence {
     pub position: String,
     /// The dynamic segment as written (`[id]`, `[...slug]`, `[[...slug]]`).
     pub spelling: String,
+    /// Whether the segment is a single, catch-all, or optional catch-all
+    /// segment.
+    pub kind: DynKind,
 }
 
 impl ClassifiedRoute<'_> {
@@ -175,11 +178,12 @@ impl ClassifiedRoute<'_> {
             match seg {
                 RouteSegment::Group(_) => {}
                 RouteSegment::Slot(name) => slots.push(name),
-                RouteSegment::Dynamic { raw, .. } => {
+                RouteSegment::Dynamic { raw, kind } => {
                     out.push(DynamicOccurrence {
                         slot_key: join_slot_key(&slots),
                         position: join_url(&url_parts),
                         spelling: (*raw).to_string(),
+                        kind: *kind,
                     });
                     url_parts.push(raw);
                 }

@@ -449,6 +449,8 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
@@ -465,6 +467,8 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
             kind_known: true,
         },
         missing_reason: true,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(true),
         effective_severity: None,
     });
@@ -1779,6 +1783,8 @@ fn stale_suppression_fallback_preserves_introduced_annotation() {
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
@@ -2161,6 +2167,8 @@ fn audit_suppression(root: &Path, line: u32, reason: Option<&str>) -> StaleSuppr
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     }

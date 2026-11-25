@@ -18,6 +18,7 @@ use lightningcss::properties::custom::{
     CustomProperty, CustomPropertyName, Token, TokenOrValue, UnparsedProperty, Variable,
 };
 use lightningcss::properties::font::FontFamily;
+use lightningcss::properties::grid::GridTemplateAreas;
 use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::rules::font_face::FontFaceProperty;
@@ -544,8 +545,21 @@ fn insert_rendered_css<T: ToCss>(value: &T, out: &mut FxHashSet<String>) {
     }
 }
 
+/// Whether `property` is a `grid-template-areas` with no rows. lightningcss
+/// 1.0.0-alpha.72 closes an indent that it never opened when it prints one,
+/// and the subtraction overflows.
+fn is_empty_grid_template_areas(property: &Property<'_>) -> bool {
+    matches!(
+        property,
+        Property::GridTemplateAreas(GridTemplateAreas::Areas { areas, .. }) if areas.is_empty()
+    )
+}
+
 fn collect_raw_style_value(property: &Property<'_>, acc: &mut Accumulator, line: u32) {
     if acc.analytics.raw_style_values.len() >= MAX_RAW_STYLE_VALUES {
+        return;
+    }
+    if is_empty_grid_template_areas(property) {
         return;
     }
     let Ok(rendered) = property.to_css_string(false, PrinterOptions::default()) else {

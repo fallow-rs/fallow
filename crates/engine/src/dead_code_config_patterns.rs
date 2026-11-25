@@ -17,23 +17,31 @@ use fallow_config::{
 ///   anyway;
 /// - each `ignorePatterns` glob that excluded no file the run would otherwise
 ///   analyze;
-/// - each `overrides` rule that cannot change a result of this config.
-/// - each `circularDependencies.allow` entry that matched no cycle.
+/// - each `circularDependencies.allow` entry that matched no cycle;
+/// - each `ignoreExports` file glob that matched no file, and each
+///   `ignoreExports` name that no file of its glob declares;
+/// - each `duplicates.ignore` and `health.ignore` glob that matched no file;
+/// - each `overrides` rule that cannot change a result of this config;
+/// - each `overrides[].files` glob that matched no project file.
 ///
 /// The `ignoreDependencies` entries need `reports_dependencies`. A surface
 /// passes `reports_dependencies = false` when its run does not report
 /// dependency findings (an issue-type filter without the dependency types, or
 /// a file scope), because a dependency entry is then not relevant to what the
 /// run shows. A `--production` run checks fewer files and dependency
-/// sections, so it reports no redundant entry (issue #3824) and no unmatched
-/// `circularDependencies.allow` entry: a cycle through a test file is not
-/// in that run.
+/// sections, so it reports no redundant entry (issue #3824), no unmatched
+/// `circularDependencies.allow` entry (a cycle through a test file is not
+/// in that run) and no unmatched ignore list entry (a glob for test files
+/// matches no file of that run).
 /// A normal run does not report an `ignoreDependencies` entry that a
 /// `--production` run could need, because following the note would add a
 /// finding to that run.
 ///
 /// An `overrides` rule reports also in a `--production` run, because its cause
-/// does not depend on the files of the run. The `reports_dependencies` gate
+/// does not depend on the files of the run. The same is true for an
+/// `overrides[].files` glob: its check reads every project file, so the
+/// answer does not depend on `--production`, `--changed-since` or
+/// `--workspace` (issue #5227). The `reports_dependencies` gate
 /// removes the dependency rules (issue #4065). Read `config` after CLI flags
 /// changed its rules, because a flag can start a detector.
 ///
@@ -67,6 +75,11 @@ pub fn config_pattern_diagnostics(
     } else {
         (Vec::new(), Vec::new())
     };
+    let ignore_lists = if checks_redundancy {
+        unmatched_ignore_list_kinds(config)
+    } else {
+        Vec::new()
+    };
     let finding_patterns = config.ignore_findings.unmatched_patterns();
     let unmatched_cycles = if checks_redundancy {
         config
@@ -79,6 +92,7 @@ pub fn config_pattern_diagnostics(
         .ineffective_override_rules()
         .into_iter()
         .filter(|entry| reports_dependencies || !entry.dependency_rule);
+    let unmatched_override_globs = super::override_globs::unmatched_override_globs(config);
     let kinds = finding_patterns
         .into_iter()
         .map(
@@ -112,19 +126,70 @@ pub fn config_pattern_diagnostics(
                 files: files.clone(),
             }
         }))
+        .chain(ignore_lists)
         .chain(ineffective_overrides.map(|entry| {
             WorkspaceDiagnosticKind::OverrideRuleIneffective {
                 rule: entry.rule.to_owned(),
                 files: entry.files,
                 reason: entry.reason.to_owned(),
             }
-        }));
+        }))
+        .chain(unmatched_override_globs);
     kinds
         .map(|kind| {
             WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)
                 .into_root_relative(&config.root)
         })
         .collect()
+}
+
+/// The `ignoreExports`, `duplicates.ignore` and `health.ignore` entries that
+/// matched no file or export of the latest dead-code pass, in that order and
+/// in config order per setting (issue #5167).
+fn unmatched_ignore_list_kinds(config: &ResolvedConfig) -> Vec<WorkspaceDiagnosticKind> {
+    let effect = &config.ignore_list_effect;
+    let unmatched_rules: Vec<&str> = effect
+        .ignore_export_files
+        .ineffective(&config.ignore_export_rules)
+        .into_iter()
+        .map(|rule| rule.file.as_str())
+        .collect();
+    let files =
+        unmatched_rules.iter().map(
+            |pattern| WorkspaceDiagnosticKind::IgnoreExportsFileUnmatched {
+                pattern: (*pattern).to_owned(),
+            },
+        );
+    // A rule whose glob matched no file already has a note; a note per name
+    // of that rule would repeat it.
+    let names = config.ignore_export_names();
+    let names = effect
+        .ignore_export_names
+        .ineffective(&names)
+        .into_iter()
+        .filter(|name| !unmatched_rules.contains(&name.file))
+        .map(|name| WorkspaceDiagnosticKind::IgnoreExportsNameUnmatched {
+            pattern: format!("{} in {}", name.export, name.file),
+            file: name.file.to_owned(),
+            export: name.export.to_owned(),
+        });
+    let duplicates = effect
+        .duplicates_ignore
+        .ineffective(&config.duplicates.ignore)
+        .into_iter()
+        .map(
+            |pattern| WorkspaceDiagnosticKind::DuplicatesIgnoreUnmatched {
+                pattern: pattern.clone(),
+            },
+        );
+    let health = effect
+        .health_ignore
+        .ineffective(&config.health.ignore)
+        .into_iter()
+        .map(|pattern| WorkspaceDiagnosticKind::HealthIgnoreUnmatched {
+            pattern: pattern.clone(),
+        });
+    files.chain(names).chain(duplicates).chain(health).collect()
 }
 
 /// Whether at least one rule that `ignoreDependencies` controls is on. With

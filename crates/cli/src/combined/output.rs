@@ -43,6 +43,7 @@ pub(super) fn print_combined_report(
         workspace_patterns,
         opts.output,
     )?;
+    print_section_ignore_list_notes(opts, check_result, dupes_result, health_result);
 
     if let Some(code) = print_machine_combined_report(
         opts,
@@ -73,6 +74,32 @@ pub(super) fn print_combined_report(
         health_result,
         resolver,
     ))
+}
+
+/// Print the notes that only the duplication or health section states, for
+/// example the `duplicates.ignore` globs of a `--only dupes` run. The
+/// dead-code section prints its own notes, so an entry that it also states
+/// gets no second note.
+fn print_section_ignore_list_notes(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) {
+    let stated = check_result.map_or(&[][..], |check| check.workspace_diagnostics.as_slice());
+    let sections: Vec<fallow_config::WorkspaceDiagnostic> = dupes_result
+        .map(|result| result.workspace_diagnostics.as_slice())
+        .into_iter()
+        .chain(health_result.map(|result| result.workspace_diagnostics.as_slice()))
+        .flatten()
+        .filter(|diagnostic| {
+            !stated
+                .iter()
+                .any(|own| own.kind == diagnostic.kind && own.path == diagnostic.path)
+        })
+        .cloned()
+        .collect();
+    report::config_pattern_text::print_section_stderr_notes(&sections, opts.output, opts.quiet);
 }
 
 /// Apply the opt-in stale-baseline gate to a machine-rendered combined run.
@@ -1409,7 +1436,7 @@ fn build_combined_codeclimate_issues(
 
 /// Convert an ExitCode to u8 for comparison.
 /// ExitCode doesn't implement Ord, so we use this workaround.
-pub(super) fn exit_code_to_u8(code: ExitCode) -> u8 {
+fn exit_code_to_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
 }
 

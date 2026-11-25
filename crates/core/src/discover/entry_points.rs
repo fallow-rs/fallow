@@ -22,7 +22,7 @@ use manual_entries::{push_manual_entry_matches, push_support_entry_matches};
 use plugin_entries::discover_plugin_entry_point_sets;
 pub use plugin_entries::is_below_fixture_dir;
 pub use plugin_entries::{discover_plugin_entry_point_sets_timed, discover_plugin_entry_points};
-use wildcard_entries::expand_wildcard_entries;
+use wildcard_entries::{expand_wildcard_entries, exports_package_dirs};
 
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
 
@@ -1076,7 +1076,7 @@ pub fn discover_root_entry_points(
         discovery.entries = apply_default_fallback(files, &config.root, None);
     }
 
-    discovery.non_manual_runtime_paths = super::entry_report::non_manual_paths(&discovery.entries);
+    discovery.non_manual_runtime_paths = super::non_manual_paths(&discovery.entries);
     dedup_entry_paths(&mut discovery.entries);
     dedup_entry_paths(&mut discovery.support_entries);
 
@@ -1197,9 +1197,9 @@ fn discover_nested_package_entries(
         }
     }
 
-    for dir_name in search.exports_subdirectories {
-        let pkg_dir = root.join(dir_name);
-        if pkg_dir.is_dir() && visited.insert(pkg_dir.clone()) {
+    let dirs = exports_package_dirs(root, search.canonical_root, search.exports_subdirectories);
+    for pkg_dir in dirs {
+        if visited.insert(pkg_dir.clone()) {
             collect_nested_package_entries(&pkg_dir, entries, search, skipped_entries);
         }
     }

@@ -31,18 +31,18 @@ use crate::coverage::upload_common::{format_count, to_posix_string};
 
 /// Cap on the routes in one upload. Routes past the cap, in pattern order, are
 /// dropped and counted in [`RouteLimits::dropped_routes`].
-pub(super) const MAX_ROUTES: usize = 500;
+const MAX_ROUTES: usize = 500;
 
 /// Cap on the route ids of one function. A function that more routes reach
 /// keeps the first ids in route order and counts in
 /// [`RouteLimits::truncated_functions`].
-pub(super) const MAX_ROUTES_PER_FUNCTION: usize = 50;
+const MAX_ROUTES_PER_FUNCTION: usize = 50;
 
 /// Cap on the route ids of all functions together, so a large project with
 /// many shared files cannot grow the body past the server limit. When the ids
 /// do not fit, the per-function cap goes down until they fit, and the header
 /// reports the cap that applied.
-pub(super) const MAX_ROUTE_ID_REFS: usize = 250_000;
+const MAX_ROUTE_ID_REFS: usize = 250_000;
 
 /// Cap on the files of one route (parallel slots and page plus server files
 /// that serve one pattern).
@@ -91,7 +91,7 @@ pub(super) enum MethodRule {
 
 /// A route that a file path gives, before the method split.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DerivedRoute {
+struct DerivedRoute {
     pub(super) framework: &'static str,
     pub(super) pattern: String,
     pub(super) methods: MethodRule,
@@ -171,7 +171,7 @@ struct MergedRoute {
 /// Derive the route of a framework route file from its path relative to its
 /// package root. `None` when the file is not a URL owner of `plugin` (a layout,
 /// a middleware, a config file, a private folder).
-pub(super) fn derive_route(plugin: &str, rel: &str) -> Option<DerivedRoute> {
+fn derive_route(plugin: &str, rel: &str) -> Option<DerivedRoute> {
     let parts: Vec<&str> = rel.split('/').collect();
     let (dirs, file) = parts.split_at(parts.len().checked_sub(1)?);
     let file = *file.first()?;
@@ -361,7 +361,7 @@ fn derive_nuxt(dirs: &[&str], file: &str) -> Option<DerivedRoute> {
 /// segment. A trailing `_` (`posts_`) only opts out of the parent layout. A
 /// trailing `/` marks the index route of its parent, also under a pathless
 /// layout (`/_auth/` serves `/`).
-pub(super) fn tanstack_pattern(route_id: &str) -> Option<String> {
+fn tanstack_pattern(route_id: &str) -> Option<String> {
     let is_index = route_id.ends_with('/');
     let segments: Vec<&str> = route_id.split('/').filter(|seg| !seg.is_empty()).collect();
     if !is_index && segments.last().is_some_and(|seg| seg.starts_with('_')) {
@@ -404,7 +404,7 @@ fn route_id(framework: &str, root: &str, pattern: &str, method: Option<&str>) ->
 
 /// Expand one derived route into its wire routes, one per HTTP method when the
 /// rule reads the exports of the file.
-pub(super) fn expand_methods(
+fn expand_methods(
     derived: &DerivedRoute,
     root: &str,
     file: &str,
@@ -638,7 +638,7 @@ pub(super) fn attach_routes(
     )
 }
 
-pub(super) fn attach_routes_with_budget(
+fn attach_routes_with_budget(
     candidates: Vec<RouteCandidate>,
     forward: &[Vec<usize>],
     file_index_by_repo_path: &FxHashMap<String, usize>,

@@ -16,6 +16,8 @@
 mod common;
 #[path = "../common/http_stub.rs"]
 mod http_stub;
+#[cfg(unix)]
+mod linked_cwd_root_tests;
 #[path = "../common/sign.rs"]
 mod sign;
 
@@ -50,12 +52,15 @@ mod audit_worsened_tests;
 mod banned_call_new_tests;
 mod banned_import_allow_names_tests;
 mod bare_run_resolve_tests;
+#[cfg(unix)]
+mod base_root_link_tests;
 mod baseline_cache_dir_tests;
 mod baseline_growth_tests;
 mod baseline_install_state_tests;
 mod baseline_prune_advice_tests;
 mod baseline_scope_comparison_tests;
 mod baselines_prune_tests;
+mod cache_eviction_warning_tests;
 mod cache_symlink_tests;
 mod callee_every_site_tests;
 mod cascade_tests;
@@ -139,6 +144,7 @@ mod health_v8_private_method_tests;
 mod hook_native_json_tests;
 mod hooks_install_summary_tests;
 mod human_summary_line_tests;
+mod ignore_list_notes_tests;
 mod impact_store_schema_tests;
 mod inert_plugin_warning_tests;
 mod init_tests;
@@ -162,6 +168,7 @@ mod mutation_tests;
 mod non_gating_ci_level_tests;
 mod nx_run_commands_tests;
 mod output_file_tests;
+mod override_files_unmatched_tests;
 mod override_rule_ineffective_tests;
 mod package_baselines_tests;
 mod package_cycle_tests;
@@ -199,6 +206,7 @@ mod security_override_tests;
 mod security_stable_id_tests;
 mod security_workflow_tests;
 mod sfc_callee_line_tests;
+mod shallow_directory_tests;
 mod sidecar_discovery_spawn_tests;
 mod signal_tests;
 mod snapshot_tests;
@@ -214,6 +222,7 @@ mod trace_error_tests;
 mod trace_federation_tests;
 mod trace_path_tests;
 mod trace_plugin_credit_tests;
+mod trace_sfc_default_tests;
 mod trace_tooling_credit_tests;
 mod type_aware_backend_tests;
 mod type_aware_constant_parameter_tests;

@@ -219,7 +219,8 @@ pub struct CombinedParams {
     #[schemars(range(min = 2))]
     pub dupes_min_occurrences: Option<u32>,
 
-    /// Fail if duplication exceeds this percentage in the dupes section (0 = no limit).
+    /// Fail if duplication exceeds this percentage in the dupes section. 0 turns the gate off and is
+    /// not zero tolerance.
     pub dupes_threshold: Option<f64>,
 
     /// Only report cross-directory duplicates in the dupes section.
@@ -571,8 +572,8 @@ pub struct FindDupesParams {
     #[schemars(range(min = 2))]
     pub min_occurrences: Option<u32>,
 
-    /// Fail if duplication exceeds this percentage (0 = no limit). Defaults
-    /// to the project config, or 0 if unset.
+    /// Fail if duplication exceeds this percentage. Defaults to the project
+    /// config, or 0 if unset. 0 turns the gate off and is not zero tolerance.
     pub threshold: Option<f64>,
 
     /// Only report cross-directory duplicates.
@@ -1276,8 +1277,8 @@ pub struct TraceCloneParams {
     #[schemars(range(min = 2))]
     pub min_occurrences: Option<u32>,
 
-    /// Fail if duplication exceeds this percentage (0 = no limit). Defaults
-    /// to the project config, or 0 if unset.
+    /// Fail if duplication exceeds this percentage. Defaults to the project
+    /// config, or 0 if unset. 0 turns the gate off and is not zero tolerance.
     pub threshold: Option<f64>,
 
     /// Only report cross-directory duplicates.

@@ -51,10 +51,17 @@ serde_json = { workspace = true }
 # Record the paths that import resolution reads (see `read_trace`). Tests
 # use it to check that the graph cache key covers each read.
 read-trace = []
+# Mutable access to a built graph for tests in other crates. Only a
+# `[dev-dependencies]` entry may turn it on.
+testing = []
 
 [dev-dependencies]
 fallow-config = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
+# Parse the crate sources for the graph cache source pin test.
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full", "visit-mut"] }
 tempfile = { workspace = true }
 fallow-types = { workspace = true }
 rustc-hash = { workspace = true }

@@ -29,7 +29,7 @@ use crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE as EXIT_NO_CONFIG;
 /// loads (matching the rest of the CLI's error contract); other formats
 /// render to stderr.
 #[cfg(test)]
-pub fn run_config(
+fn run_config(
     root: &Path,
     explicit_config: Option<&Path>,
     path_only: bool,

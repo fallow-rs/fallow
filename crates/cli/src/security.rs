@@ -54,6 +54,8 @@ pub use fallow_api::SecurityGateMode;
 
 #[path = "security_base_cache.rs"]
 mod base_cache;
+#[path = "security_base_options.rs"]
+mod base_options;
 #[path = "security_gate_new.rs"]
 mod gate_new;
 #[path = "security_human.rs"]
@@ -1037,7 +1039,7 @@ use base_cache::{load_cached_security_base_snapshot, save_cached_security_base_s
 
 const SECURITY_BASE_SNAPSHOT_CACHE_VERSION: u8 = 2;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SecurityKeySnapshot {
     reachable: FxHashSet<String>,
 }
@@ -1099,7 +1101,13 @@ fn compute_base_security_snapshot(
             opts.output,
         ));
     };
-    let base_root = fallow_engine::repo_refs::base_analysis_root(opts.root, worktree.path());
+    let fallow_engine::repo_refs::BaseAnalysisRoot::Present(base_root) =
+        fallow_engine::repo_refs::resolve_base_analysis_root(opts.root, worktree.path())
+    else {
+        // A root that the base commit does not contain, or that a link in the
+        // base commit moves out of the base worktree, has no base findings.
+        return Ok(SecurityKeySnapshot::default());
+    };
     let given = |value| fallow_types::sourced::Given {
         value,
         origin: fallow_types::sourced::Origin::Flag("--changed-since"),
@@ -1119,7 +1127,7 @@ fn compute_base_security_snapshot(
         .map_err(|message| emit_input_error(&message, opts.output))?;
     // The findings of the base run name files under its canonical root.
     let base_root = base_run.root().value().clone();
-    let base_opts = base_snapshot_security_options(opts, &base_root, &base_run);
+    let base_opts = base_options::base_snapshot_security_options(opts, &base_root, &base_run);
     let mut base_config = crate::cli_production::dead_code_runnable(&base_run, opts.output)?
         .config()
         .clone();
@@ -1134,43 +1142,6 @@ fn compute_base_security_snapshot(
     Ok(SecurityKeySnapshot {
         reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
     })
-}
-
-/// Build the quiet, non-gating `SecurityOptions` used to re-analyze the base
-/// worktree for the `--gate newly-reachable` snapshot.
-fn base_snapshot_security_options<'a>(
-    opts: &SecurityOptions<'a>,
-    base_root: &'a Path,
-    run: &'a fallow_engine::resolved_run::ResolvedRun,
-) -> SecurityOptions<'a> {
-    SecurityOptions {
-        root: base_root,
-        run,
-        output: opts.output,
-        json_style: opts.json_style,
-        no_cache: opts.no_cache,
-        threads: opts.threads,
-        quiet: true,
-        allow_remote_extends: opts.allow_remote_extends,
-        fail_on_issues: false,
-        sarif_file: None,
-        summary: false,
-        changed_since: None,
-        use_shared_diff_index: false,
-        workspace: opts.workspace,
-        changed_workspaces: None,
-        file: &[],
-        surface: false,
-        // Deliberately unscoped: the base pass runs in another worktree whose
-        // path spelling differs, so a head-root scope would empty the base
-        // snapshot. The head pass is already scope-narrowed; a full base
-        // snapshot joins correctly against it.
-        scope: None,
-        gate: None,
-        runtime_coverage: None,
-        min_invocations_hot: opts.min_invocations_hot,
-        explain: false,
-    }
 }
 
 /// Apply the run's `--workspace` scope to the base-snapshot results so the
@@ -1739,7 +1710,7 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 /// JSON: the `SecurityOutput` envelope, pretty-printed.
 #[must_use]
 #[cfg(test)]
-pub fn render_json(output: &SecurityOutput) -> String {
+fn render_json(output: &SecurityOutput) -> String {
     render_json_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }
@@ -1759,7 +1730,7 @@ fn render_json_with_style(
 /// JSON summary: compact aggregate payload without per-finding arrays.
 #[must_use]
 #[cfg(test)]
-pub fn render_json_summary(output: &SecurityOutput) -> String {
+fn render_json_summary(output: &SecurityOutput) -> String {
     render_json_summary_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }
@@ -1786,7 +1757,7 @@ fn render_survivors_output(
 
 #[must_use]
 #[cfg(test)]
-pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
+fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
     render_survivors_json_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }
@@ -1992,7 +1963,7 @@ fn render_blind_spots_output(
 
 #[must_use]
 #[cfg(test)]
-pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
+fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
     render_blind_spots_json_with_style(output, crate::json_style::JsonStyle::Compact)
         .expect("security output serializes")
 }

@@ -401,6 +401,135 @@ fn pinia_setup_store_credits_returned_members_read_in_setup_body() {
 }
 
 #[test]
+fn pinia_state_key_reads_credit_the_key_and_writes_credit_nothing() {
+    // Issue #5168: Pinia exposes each state key on the store, so a key read
+    // through `$state` is a read of the store member.
+    let info = parse(
+        "import { useSStore } from './s'\nconst s = useSStore()\ns.$state?.optional\ns.$state?.['indexed']\ns.$state.counter += 1\nconst { picked } = s.$state\n;(s.$state).wrapped\nuseSStore().$state.inline\ns.$state = { replaced: 1 }\nconst plain = { $state: { other: 1 } }\nplain.$state.other\nsend(plain.$state)",
+    );
+    let accesses = store_member_accesses(&info);
+    for credited in [
+        "optional", "indexed", "counter", "picked", "wrapped", "inline",
+    ] {
+        assert!(
+            accesses.iter().any(|(_, member)| member == credited),
+            "{credited} is read through `$state` and must be credited: {accesses:?}"
+        );
+    }
+    assert!(
+        !accesses.iter().any(|(_, member)| member == "replaced"),
+        "a whole `$state` write reads no key: {accesses:?}"
+    );
+    assert!(
+        !info
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "s" || name == "useSStore"),
+        "named reads, a whole write and a non-store `$state` must not mark a whole store: {:?}",
+        info.whole_object_uses
+    );
+}
+
+#[test]
+fn pinia_state_value_that_escapes_marks_the_whole_store() {
+    let info = parse(
+        "import { useAStore, useBStore, useCStore, useDStore, useEStore, useFStore } from './s'\nconst a = useAStore()\nsend(a.$state)\nconst b = useBStore()\n;(b.$state as { k: number }).k\nconst c = useCStore()\nc.$state[key]\nconst d = useDStore()\nconst { x, ...rest } = d.$state\nconst e = useEStore()\nconst { [key]: v } = e.$state\nconst copy = { ...useFStore().$state }",
+    );
+    for store in [
+        "useAStore",
+        "useBStore",
+        "useCStore",
+        "useDStore",
+        "useEStore",
+        "useFStore",
+    ] {
+        assert!(
+            info.whole_object_uses.iter().any(|name| name == store),
+            "{store} has an escaped `$state` and must be a whole use: {:?}",
+            info.whole_object_uses
+        );
+    }
+}
+
+#[test]
+fn pinia_option_store_this_state_key_reads_credit_the_key() {
+    let info = parse(
+        "export const useAStore = defineStore('a', {\n  state: () => ({ dot: 1, bracket: 2, pattern: 3, written: 4, dead: 5 }),\n  actions: {\n    run() {\n      const { pattern } = this.$state\n      this.$state = { written: 0 }\n      return this.$state.dot + this.$state['bracket'] + pattern\n    },\n  },\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for key in ["dot", "bracket", "pattern"] {
+        assert!(
+            accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "`this.$state` read of {key} must credit it: {accesses:?}"
+        );
+    }
+    for key in ["written", "dead"] {
+        assert!(
+            !accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "{key} has no read and must stay uncredited: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_option_store_this_state_getter_and_optional_reads_credit_the_key() {
+    let info = parse(
+        "export const useAStore = defineStore('a', {\n  state: () => ({ inGetter: 1, optional: 2, dead: 3 }),\n  getters: { twice() { return this.$state.inGetter * 2 } },\n  actions: { read() { return this.$state?.optional } },\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for key in ["inGetter", "optional"] {
+        assert!(
+            accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "`this.$state` read of {key} must credit it: {accesses:?}"
+        );
+    }
+    assert!(
+        !accesses.contains(&("useAStore".to_string(), "dead".to_string())),
+        "dead has no read: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_option_store_this_state_dynamic_key_or_rest_credits_every_state_key() {
+    for body in [
+        "return this.$state[key]",
+        "const { one, ...rest } = this.$state; return rest",
+        "const { [key]: value } = this.$state; return value",
+    ] {
+        let info = parse(&format!(
+            "export const useAStore = defineStore('a', {{\n  state: () => ({{ one: 1, other: 2 }}),\n  actions: {{ read(key) {{ {body} }} }},\n}})"
+        ));
+        let accesses = store_member_accesses(&info);
+        for key in ["one", "other"] {
+            assert!(
+                accesses.contains(&("useAStore".to_string(), key.to_string())),
+                "`{body}` can read {key}: {accesses:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn pinia_option_store_this_state_escape_credits_every_state_key() {
+    let info = parse(
+        "export const useAStore = defineStore('a', {\n  state: () => ({ one: 1, other: 2 }),\n  getters: { two: (state) => state.one },\n  actions: {\n    save() { send(this.$state) },\n  },\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for key in ["one", "other"] {
+        assert!(
+            accesses.contains(&("useAStore".to_string(), key.to_string())),
+            "an escaped `this.$state` must credit {key}: {accesses:?}"
+        );
+    }
+    for member in ["two", "save"] {
+        assert!(
+            !accesses.contains(&("useAStore".to_string(), member.to_string())),
+            "`$state` holds no getter or action, so {member} stays uncredited: {accesses:?}"
+        );
+    }
+}
+
+#[test]
 fn pinia_credits_member_read_on_param_typed_return_type_of_type_only_store_import() {
     // Issue #3348 case A: a helper in another file reads a store member through
     // a param typed `ReturnType<typeof useCounterStore>` with a type-only import.
@@ -412,6 +541,48 @@ fn pinia_credits_member_read_on_param_typed_return_type_of_type_only_store_impor
         accesses.contains(&("useCounterStore".to_string(), "doubled".to_string())),
         "a read on a ReturnType-typed store param should credit the store factory: {accesses:?}"
     );
+}
+
+#[test]
+fn pinia_credits_member_read_on_property_typed_inline_return_type() {
+    let info = parse(
+        "import type { useCounterStore } from './store'\nexport const a = (deps: { store: ReturnType<typeof useCounterStore> }) => deps.store.viaProp\nexport const b = ({ store }: { store: ReturnType<typeof useCounterStore> }) => store.viaDestructure\nexport const c = (deps: { inner: { store: ReturnType<typeof useCounterStore> } }) => deps.inner.store.viaNested",
+    );
+    let accesses = store_member_accesses(&info);
+    for member in ["viaProp", "viaDestructure", "viaNested"] {
+        assert!(
+            accesses.contains(&("useCounterStore".to_string(), member.to_string())),
+            "a read through a property typed with an inline store ReturnType must credit {member}: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_credits_member_read_on_nullable_or_renamed_inline_return_type_property() {
+    let info = parse(
+        "import type { useCounterStore } from './store'\nexport const a = (deps: { store: ReturnType<typeof useCounterStore> | null }) => deps.store?.viaNullable\nexport const b = (deps: { store?: (ReturnType<typeof useCounterStore>) }) => deps.store?.viaOptional\nexport const c = ({ store: s }: { store: ReturnType<typeof useCounterStore> }) => s.viaRenamed",
+    );
+    let accesses = store_member_accesses(&info);
+    for member in ["viaNullable", "viaOptional", "viaRenamed"] {
+        assert!(
+            accesses.contains(&("useCounterStore".to_string(), member.to_string())),
+            "the read must credit {member}: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_inline_return_type_property_of_a_non_store_credits_no_store() {
+    let info = parse(
+        "import type { useCounter, makeStore } from './lib'\nexport const a = (deps: { counter: ReturnType<typeof useCounter> }) => deps.counter.one\nexport const b = (deps: { store: ReturnType<typeof makeStore> | number }) => deps.store.two",
+    );
+    let accesses = store_member_accesses(&info);
+    for factory in ["useCounter", "makeStore"] {
+        assert!(
+            !accesses.iter().any(|(object, _)| object == factory),
+            "{factory} is not a store factory: {accesses:?}"
+        );
+    }
 }
 
 #[test]

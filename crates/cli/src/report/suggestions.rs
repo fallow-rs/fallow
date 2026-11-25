@@ -326,7 +326,7 @@ pub fn build_combined_next_steps(
 /// does it (in-memory finding paths are absolute; the wire form is relative).
 #[must_use]
 #[cfg(test)]
-pub fn build_audit_next_steps(
+fn build_audit_next_steps(
     check: Option<(&AnalysisResults, &Path)>,
     complexity: Option<&HealthReport>,
 ) -> Vec<NextStep> {

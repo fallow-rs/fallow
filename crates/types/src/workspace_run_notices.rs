@@ -21,6 +21,11 @@ pub(super) fn run_notice_message(display: &str, kind: &WorkspaceDiagnosticKind) 
             "Two fallow config files exist in one directory: this run loads '{used}' and \
              ignores '{display}' ({ignored}). Remove the file that you do not use."
         ),
+        WorkspaceDiagnosticKind::ConfigFileNameUnrecognized { name } => format!(
+            "fallow does not read '{name}', so this run does not use its settings. Rename it \
+             to {}.",
+            accepted_config_names()
+        ),
         WorkspaceDiagnosticKind::UnknownSecurityCategory { id } => format!(
             "The security category '{id}' in security.categories is not known, so the run \
              ignores it. Run fallow schema to see the valid ids."
@@ -30,6 +35,18 @@ pub(super) fn run_notice_message(display: &str, kind: &WorkspaceDiagnosticKind) 
              true or false."
         ),
         _ => String::new(),
+    }
+}
+
+/// The config file names that discovery reads, as `a, b or c`.
+fn accepted_config_names() -> String {
+    let names: Vec<String> = crate::config_file_names::CONFIG_FILE_NAMES
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect();
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => names.concat(),
     }
 }
 
@@ -88,6 +105,9 @@ mod tests {
                 used: ".fallowrc.json".to_owned(),
                 ignored: "fallow.toml".to_owned(),
             },
+            WorkspaceDiagnosticKind::ConfigFileNameUnrecognized {
+                name: "fallow.jsonc".to_owned(),
+            },
             WorkspaceDiagnosticKind::UnknownSecurityCategory { id: "x".to_owned() },
             WorkspaceDiagnosticKind::EnvValueIgnored {
                 name: "FALLOW_PRODUCTION".to_owned(),
@@ -96,12 +116,23 @@ mod tests {
         let degrading: Vec<bool> = notices.iter().map(|kind| kind.warns_on_stderr()).collect();
         // The run ignores an unknown category id, and each analysis runs on
         // its full input, so the kind is not a reason to distrust findings.
-        assert_eq!(degrading, [false, true, true, false, true]);
+        assert_eq!(degrading, [false, true, true, true, false, true]);
         assert!(notices.iter().all(WorkspaceDiagnosticKind::is_run_notice));
         assert!(
             notices
                 .iter()
                 .all(|kind| !run_notice_message(".", kind).is_empty())
+        );
+    }
+
+    #[test]
+    fn the_unrecognized_config_name_message_lists_the_accepted_names() {
+        assert_eq!(
+            message(WorkspaceDiagnosticKind::ConfigFileNameUnrecognized {
+                name: "fallow.jsonc".to_owned(),
+            }),
+            "fallow does not read 'fallow.jsonc', so this run does not use its settings. Rename \
+             it to '.fallowrc.json', '.fallowrc.jsonc', 'fallow.toml' or '.fallow.toml'."
         );
     }
 

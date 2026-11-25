@@ -27,14 +27,14 @@ mod severity;
 mod stable_id;
 
 pub use call_forms::{ArgumentSelector, CallForms};
-pub use identity::{security_rule_id, stamp_security_finding_ids};
+pub use identity::stamp_security_finding_ids;
 pub use provenance::{ProvenanceBindings, import_source_matches};
 pub use rules::{
     enable_security_rules, resolve_security_finding_severity, retain_enabled_security_findings,
     security_rules_can_error,
 };
 pub use severity::{derive_security_severity, security_catalogue_title};
-pub use stable_id::STABLE_SECURITY_ID_SCHEME;
+pub use stable_id::{STABLE_SECURITY_ID_SCHEME, security_rule_id};
 
 pub const HARDCODED_SECRET_CATEGORY_ID: &str = "hardcoded-secret";
 const HARDCODED_SECRET_CATEGORY_TITLE: &str = "Hardcoded secret candidate";

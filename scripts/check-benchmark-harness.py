@@ -209,6 +209,12 @@ def assert_codspeed_action_modes(text: str) -> list[str]:
         expected = "walltime" if job in WALLTIME_JOBS else "simulation"
         if modes != {expected}:
             errors.append(f"{job} must use only {expected} mode, found {sorted(modes)}")
+        # The cycle estimate follows the CPU of the hosted runner, which
+        # changes between runs. The instruction count does not.
+        if expected == "simulation" and not re.search(
+            r"^\s+cycle-estimation:\s*'false'\s*$", block, re.M
+        ):
+            errors.append(f"{job} must set cycle-estimation: 'false'")
         if expected == "walltime" and f"runs-on: {MACRO_RUNNER}" not in block:
             errors.append(f"{job} must run on {MACRO_RUNNER}")
         if "id-token: write" not in block:

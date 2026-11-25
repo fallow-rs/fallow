@@ -769,6 +769,7 @@ fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_
         complexity: true,
         file_scores: false,
         coverage_gaps: false,
+        shallow_directories: false,
         config_activates_coverage_gaps: false,
         hotspots: false,
         ownership: false,

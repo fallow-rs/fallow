@@ -4,7 +4,15 @@ use oxc_ast::ast::*;
 
 use rustc_hash::FxHashSet;
 
-use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
+/// The most links a recorded receiver name holds (`a` plus 64 `.b`).
+///
+/// No real receiver path is this deep, and factory credit reads only the start
+/// of a path. Without a cap, each link of a long chain records the full name of
+/// its receiver, so the output grows with the square of the chain length. The
+/// builders return `None` past the cap, so every caller treats a deeper
+/// receiver as a name it cannot read: it records no member access and no
+/// binding key for it.
+pub(super) const MAX_RECORDED_CHAIN_LINKS: usize = 64;
 
 /// Flatten an expression to a dotted member path, unwrapping `await` and parens.
 /// Returns `None` for anything that is not an identifier-rooted static-member

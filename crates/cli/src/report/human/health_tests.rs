@@ -1157,15 +1157,6 @@ fn health_runtime_coverage_long_capture_shows_neither_warning_nor_prompt() {
 }
 
 #[test]
-fn format_window_labels() {
-    assert_eq!(super::format_window(30), "30 s");
-    assert_eq!(super::format_window(60), "1 min");
-    assert_eq!(super::format_window(720), "12 min");
-    assert_eq!(super::format_window(3600 * 3), "3 h");
-    assert_eq!(super::format_window(3600 * 24 * 3), "3 d");
-}
-
-#[test]
 fn health_coverage_gaps_render_section() {
     use fallow_output::*;
 

@@ -291,6 +291,54 @@ generic and conditional types, declaration merging, `import("./module").Type`,
 and `typeof import("./module").Value`. Fallow only asks these semantic
 questions for exports its normal module graph already considers unused.
 
+An unused type with no reference can still be necessary for declaration
+emit. In this example, no file names `Entry`, but the `.d.ts` file of
+`game.ts` must import it:
+
+```ts
+// schemas.ts
+import * as z from "zod/mini";
+export interface Entry { label: string }
+const entrySchema: z.ZodMiniType<Entry> = z.object({ label: z.string() });
+export const status = z.object({ entry: entrySchema });
+// game.ts
+import { status } from "./schemas";
+export class Game { readonly latency = status; }
+```
+
+Only the checker knows the result type of a library call, so the syntactic
+pass cannot credit `Entry`. The type-aware pass walks the inferred types of
+the exported declarations of each file: a variable without an annotation, a
+function or method without a return type, a class property without an
+annotation, and `export default` of an expression. Declaration emit must
+name each project interface of another file that the walk reaches. For
+each such interface, the pass adds an evidence item with the role
+`declaration-emit` at the holding declaration, and the result is
+`confirmed-used`. The client credits the item like any other read, so the
+holding file must be reachable. The walk has these limits (each one keeps
+the finding):
+
+- It runs only in a project that emits declaration files: `declaration` or
+  `composite` in the compiler options, or a `types`, `typings` or
+  `exports` `types` entry in the nearest `package.json`.
+- A type alias gets no credit. Declaration emit writes the structure of an
+  alias that has no export.
+- The walk stops at an alias that emit can name (an exported project alias
+  or a library alias), and reads only its type arguments.
+- A `private` or `#private` class member gets no credit. Declaration emit
+  writes it without a type. A `protected` member gets credit.
+- The walk reads only the files that import the file of a target type,
+  directly or through other files. An inferred type reaches another file
+  only through an import.
+- The walk stops at the type of a function or a namespace that the code can
+  import. Emit writes `typeof g` for it, not its structure.
+- The walk reads at most 10,000 types for each file.
+- No file names the type, so emit must write it with an import type, for
+  example `import("./schemas").Entry`. One `typeToString` call for each
+  inferred type looks for that text first, and only a match starts the walk.
+  The walk then decides by the exact declaration. A type that emit writes
+  through a namespace import (`schemas.Entry`) gets no credit.
+
 Trace one exact exported symbol through aliases and re-exports:
 
 ```bash

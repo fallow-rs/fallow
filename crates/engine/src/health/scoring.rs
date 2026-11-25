@@ -5,8 +5,8 @@ use crate::module_graph::StaticTestCoverage;
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
 use super::coverage_input::{CoverageInput, read_coverage_input};
-use super::test_reach::build_test_referenced_exports;
 use super::threshold_overrides::ThresholdOverrideResolver;
+use super::{subset_filter::SubsetFilter, test_reach::build_test_referenced_exports};
 
 const MAX_FUNCTION_EVIDENCE: usize = 3;
 
@@ -75,6 +75,8 @@ pub struct FileScoreOutput {
     /// hidden co-change pair from a pair that an import already explains.
     /// `None` when the run reads no commit history.
     pub(crate) static_links: Option<crate::change_coupling::StaticLinkIndex>,
+    /// Shallow directories. `Some` when the run has `--shallow-directories`.
+    pub(crate) shallow_directories: Option<fallow_output::ShallowDirectoriesReport>,
 }
 
 struct FileScoreOutputParts<'a> {
@@ -143,7 +145,7 @@ impl AnalysisCountsSnapshot {
     /// available per-subset today (mirrors the project-wide behaviour).
     pub(crate) fn counts_for(
         &self,
-        subset: &crate::health::SubsetFilter<'_>,
+        subset: &SubsetFilter<'_>,
         defaults: &crate::vital_signs::AnalysisCounts,
     ) -> crate::vital_signs::AnalysisCounts {
         if subset.is_full() {
@@ -189,13 +191,13 @@ impl AnalysisCountsSnapshot {
 /// Return true when an unused dependency's `package.json` path belongs to
 /// the subset.
 ///
-/// For [`crate::health::SubsetFilter::Paths`] the dep's containing workspace
+/// For [`SubsetFilter::Paths`] the dep's containing workspace
 /// (its `package.json` parent directory) is considered in scope when at
 /// least one source file in the subset lives under that directory.
-fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path::Path) -> bool {
+fn dep_in_subset(subset: &SubsetFilter<'_>, dep_path: &std::path::Path) -> bool {
     match subset {
-        crate::health::SubsetFilter::Full => true,
-        crate::health::SubsetFilter::Paths(set) => {
+        SubsetFilter::Full => true,
+        SubsetFilter::Paths(set) => {
             let Some(workspace_root) = dep_path.parent() else {
                 return false;
             };
@@ -667,7 +669,7 @@ fn build_template_inherit_contexts(
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if let Some(context) =
             template_inherit_context_for_node(node, graph, test_coverage, module_by_id, file_paths)
         {
@@ -767,7 +769,7 @@ fn template_owner<'a>(
     module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<(&'a fallow_graph::graph::ModuleNode, &'a std::path::PathBuf)> {
-    let owner_node = graph.modules.get(importer_id.0 as usize)?;
+    let owner_node = graph.module(importer_id)?;
     let owner_path = *file_paths.get(&importer_id)?;
     if !is_template_owner_path(owner_path) || graph.test_entry_points.contains(&importer_id) {
         return None;
@@ -794,7 +796,7 @@ fn collect_direct_callers(
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>> {
     let mut callers_by_target = rustc_hash::FxHashMap::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         let Some(target_path) = file_paths.get(&node.file_id) else {
             continue;
         };
@@ -2608,9 +2610,9 @@ pub(super) fn compute_file_scores(
     let graph = retained_graph.as_graph();
     let results = &analysis_output.results;
 
-    let circular_files = collect_circular_files(results);
+    let circular_files = super::cycle_files::collect_circular_files(results);
     let top_complex_fns = collect_top_complex_fns(modules, file_paths);
-    let cycle_members = collect_cycle_members(results);
+    let cycle_members = super::cycle_files::collect_cycle_members(results);
     let direct_callers = collect_direct_callers(graph, file_paths);
     let unused_export_names = collect_unused_export_names(results);
 
@@ -2735,9 +2737,9 @@ fn accumulate_file_scores(
         istanbul_files_total: ctx
             .istanbul_coverage
             .map_or(0, IstanbulCoverage::file_count),
-        ..FileScoreAccumulator::with_capacity(ctx.graph.modules.len())
+        ..FileScoreAccumulator::with_capacity(ctx.graph.module_count())
     };
-    for node in &ctx.graph.modules {
+    for node in ctx.graph.modules() {
         let Some(path) = ctx.file_paths.get(&node.file_id) else {
             continue;
         };
@@ -2883,7 +2885,7 @@ fn compute_file_score_metrics(
 }
 
 fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
-    let total_exports: usize = parts.graph.modules.iter().map(|m| m.exports.len()).sum();
+    let total_exports: usize = parts.graph.modules().iter().map(|m| m.exports.len()).sum();
     let unused_deps = parts.results.unused_dependencies.len()
         + parts.results.unused_dev_dependencies.len()
         + parts.results.unused_optional_dependencies.len();
@@ -2919,6 +2921,7 @@ fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
         static_links: parts
             .with_static_links
             .then(|| crate::change_coupling::StaticLinkIndex::from_graph(parts.graph)),
+        shallow_directories: None,
     }
 }
 
@@ -3157,16 +3160,6 @@ fn prepare_file_score_coverage_setup<'a>(
     }
 }
 
-fn collect_circular_files(
-    results: &crate::results::AnalysisResults,
-) -> rustc_hash::FxHashSet<std::path::PathBuf> {
-    results
-        .circular_dependencies
-        .iter()
-        .flat_map(|c| c.cycle.files.iter().cloned())
-        .collect()
-}
-
 fn collect_top_complex_fns(
     modules: &[crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
@@ -3198,33 +3191,6 @@ fn collect_top_complex_fns(
     top_complex_fns
 }
 
-fn collect_cycle_members(
-    results: &crate::results::AnalysisResults,
-) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> {
-    let mut cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
-        rustc_hash::FxHashMap::default();
-    for cycle in &results.circular_dependencies {
-        for file in &cycle.cycle.files {
-            let others: Vec<std::path::PathBuf> = cycle
-                .cycle
-                .files
-                .iter()
-                .filter(|f| *f != file)
-                .cloned()
-                .collect();
-            cycle_members
-                .entry(file.clone())
-                .or_default()
-                .extend(others);
-        }
-    }
-    for members in cycle_members.values_mut() {
-        members.sort();
-        members.dedup();
-    }
-    cycle_members
-}
-
 fn collect_unused_export_names(
     results: &crate::results::AnalysisResults,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>> {
@@ -3246,10 +3212,10 @@ fn build_analysis_counts_snapshot(
     unused_deps: usize,
 ) -> AnalysisCountsSnapshot {
     let mut module_export_counts = rustc_hash::FxHashMap::with_capacity_and_hasher(
-        graph.modules.len(),
+        graph.module_count(),
         rustc_hash::FxBuildHasher,
     );
-    for module in &graph.modules {
+    for module in graph.modules() {
         if let Some(path) = file_paths.get(&module.file_id) {
             module_export_counts.insert((*path).clone(), module.exports.len());
         }

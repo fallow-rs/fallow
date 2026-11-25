@@ -917,6 +917,57 @@ kind: "ignore-patterns-entry-redundant"
  */
 pattern: string
 } | {
+kind: "ignore-exports-file-unmatched"
+/**
+ * The `file` glob of the rule, as written in the config.
+ */
+pattern: string
+} | {
+kind: "ignore-exports-name-unmatched"
+/**
+ * The entry as one line: the export name, `in`, and the glob.
+ */
+pattern: string
+/**
+ * The `file` glob of the rule, as written in the config.
+ */
+file: string
+/**
+ * The export name, as written in the config.
+ */
+export: string
+} | {
+kind: "duplicates-ignore-unmatched"
+/**
+ * The glob, as written in the config.
+ */
+pattern: string
+} | {
+kind: "health-ignore-unmatched"
+/**
+ * The glob, as written in the config.
+ */
+pattern: string
+} | {
+kind: "override-files-unmatched"
+/**
+ * The glob, as written in the config.
+ */
+pattern: string
+/**
+ * The `files` globs of the override, as written in the config.
+ */
+files: string[]
+/**
+ * The canonical names of the rules of the override that apply per
+ * file, also when the config uses an alias.
+ */
+rules: string[]
+/**
+ * Why the glob matched no file, as a kebab-case token.
+ */
+reason: string
+} | {
 kind: "circular-dependencies-allow-unmatched"
 /**
  * The entry as one line: the files joined by `, ` in brackets.
@@ -992,6 +1043,12 @@ used: string
  * The file name that the run ignored.
  */
 ignored: string
+} | {
+kind: "config-file-name-unrecognized"
+/**
+ * The file name that the run did not read.
+ */
+name: string
 } | {
 kind: "unknown-security-category"
 /**
@@ -1141,7 +1198,7 @@ export type CoverageSourceConsistency = ("uniform" | "mixed")
  * set is open: a later release can add a section, so a consumer must accept
  * a token that it does not know.
  */
-export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "mutation" | "css")
+export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "mutation" | "css" | "shallow-directories")
 /**
  * Lifecycle state for a configured threshold override.
  */
@@ -1200,6 +1257,14 @@ export type HotspotActionHeuristic = "directory-deepest"
  * run over the same commit; `wall_clock` does not.
  */
 export type ClockSource = ("environment" | "head_commit" | "wall_clock")
+/**
+ * The kind of a shown interface item.
+ */
+export type ShallowDirectoryItemKind = ("function" | "class")
+/**
+ * The kind of a shallow directory action.
+ */
+export type ShallowDirectoryActionType = ("narrow-interface" | "ignore-directory")
 /**
  * Runtime coverage JSON contract version. This is scoped to the
  * `runtime_coverage` block and is independent of the top-level fallow
@@ -6315,6 +6380,17 @@ origin: SuppressionOrigin
  */
 missing_reason?: boolean
 /**
+ * Issue kinds that fallow found on the target line of a stale
+ * `fallow-ignore-next-line` marker. The marker names another kind, so it
+ * does not suppress these findings. Absent when the list is empty.
+ */
+next_line_kinds?: string[]
+/**
+ * True when the line after a stale `fallow-ignore-next-line` marker is
+ * blank. The marker applies only to the line directly after it.
+ */
+next_line_blank?: boolean
+/**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
  * Line and column are not inputs, so the id survives line shifts,
@@ -9029,6 +9105,12 @@ hotspot_summary?: (HotspotSummary | null)
  */
 change_coupling?: (ChangeCouplingReport | null)
 /**
+ * Directories whose interface is as large as what they hide. Present
+ * when the run has `--shallow-directories`. Advisory: no health score
+ * weight.
+ */
+shallow_directories?: (ShallowDirectoriesReport | null)
+/**
  * Runtime coverage findings from the runtime coverage add-on (only
  * populated with `--runtime-coverage`).
  */
@@ -10805,6 +10887,133 @@ degree: number
  * `resolve_hidden_coupling` refactoring target.
  */
 strong?: boolean
+}
+/**
+ * Directories whose interface is as large as what they hide.
+ *
+ * A directory is a module: files outside it use its interface items, and it
+ * keeps the rest inside. A deep directory hides much code behind a small
+ * interface. A shallow directory shows almost all that it has, so each
+ * caller must learn many names and gets little in return.
+ *
+ * The section is advisory: it has no health score weight and never gates.
+ */
+export interface ShallowDirectoriesReport {
+/**
+ * Minimum number of shown interface items for a shallow directory
+ * (`health.shallowDirectories.minInterface`).
+ */
+min_interface: number
+/**
+ * Shallow directories in scope before `--top` cuts `directories`.
+ */
+total: number
+/**
+ * Shallow directories, sorted by `shown_count` (descending), then by
+ * `path`.
+ */
+directories: ShallowDirectoryFinding[]
+}
+/**
+ * One shallow directory.
+ */
+export interface ShallowDirectoryFinding {
+/**
+ * The directory, relative to the project root.
+ */
+path: string
+/**
+ * The file that represents the directory in file-based formats (SARIF,
+ * CodeClimate): the `index` barrel of the directory when it has one,
+ * else the first source file by path. Relative to the project root.
+ */
+anchor_file: string
+/**
+ * Interface items of the directory that at least one file outside the
+ * directory uses. An interface item is a module-scope function or a
+ * class. A type-only export, a constant and an enum are not items.
+ */
+shown_count: number
+/**
+ * Files of the directory that declare at least one shown item.
+ */
+shown_files: number
+/**
+ * Function items and classes of the directory that no file outside the
+ * directory uses.
+ */
+hidden_count: number
+/**
+ * The shown items with the most outside users, at most 7 (the cap of the
+ * engine). Sorted by
+ * `outside_files` (descending), then by `name`, then by `path`.
+ */
+items: ShallowDirectoryItem[]
+/**
+ * Shown items that `items` leaves out.
+ */
+more_items: number
+/**
+ * Machine-actionable hints. The list always starts with
+ * `narrow-interface`.
+ */
+actions: ShallowDirectoryAction[]
+}
+/**
+ * One shown interface item of a shallow directory.
+ */
+export interface ShallowDirectoryItem {
+/**
+ * The exported name. For a default export: the local binding name, else
+ * the file stem.
+ */
+name: string
+/**
+ * True for a default export.
+ */
+is_default?: boolean
+/**
+ * The file that declares the item, relative to the project root.
+ */
+path: string
+/**
+ * 1-based line of the export.
+ */
+line: number
+kind: ShallowDirectoryItemKind
+/**
+ * Files outside the directory that use the item.
+ */
+outside_files: number
+/**
+ * Public members of a class item. Absent for a function.
+ */
+members?: (number | null)
+}
+/**
+ * A hint for one shallow directory.
+ */
+export interface ShallowDirectoryAction {
+type: ShallowDirectoryActionType
+/**
+ * Always `false`: fallow does not change the code of a directory.
+ */
+auto_fixable: boolean
+/**
+ * What the action does.
+ */
+description: string
+/**
+ * For `ignore-directory`: the config key that takes the pattern,
+ * `health.shallowDirectories.ignore`. Absent for other actions.
+ */
+config_key?: (string | null)
+/**
+ * For `ignore-directory`: the glob pattern to add to `config_key`. The
+ * pattern escapes the glob characters of the directory path. Absent for
+ * other actions.
+ */
+value?: (string | null)
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by
@@ -15774,6 +15983,12 @@ hotspot_summary?: (HotspotSummary | null)
  * Advisory: no health score weight.
  */
 change_coupling?: (ChangeCouplingReport | null)
+/**
+ * Directories whose interface is as large as what they hide. Present
+ * when the run has `--shallow-directories`. Advisory: no health score
+ * weight.
+ */
+shallow_directories?: (ShallowDirectoriesReport | null)
 /**
  * Runtime coverage findings from the runtime coverage add-on (only
  * populated with `--runtime-coverage`).

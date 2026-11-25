@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    CONFIG_FILE_NAMES, EnvSnapshot, EnvValue, EnvVar, FallowConfig, WorkspaceDiagnostic,
-    WorkspaceDiagnosticKind,
+    CONFIG_FILE_NAMES, EnvSnapshot, EnvValue, EnvVar, FallowConfig, UNRECOGNIZED_CONFIG_FILE_NAMES,
+    WorkspaceDiagnostic, WorkspaceDiagnosticKind,
 };
 use fallow_types::sourced::{Source, Sourced};
 use rustc_hash::FxHashSet;
@@ -37,7 +37,8 @@ pub(super) struct NoticeInput<'a> {
 }
 
 /// The notices of one run, in a fixed order: the ignored variables, the
-/// fallback, the shadowed config files and the unknown security categories.
+/// fallback, the shadowed config files, the unrecognized config file names
+/// and the unknown security categories.
 pub(super) fn run_notices(input: &NoticeInput<'_>) -> Vec<WorkspaceDiagnostic> {
     // A notice names its path relative to the root, as every root-anchored
     // diagnostic does, so no output holds the absolute path of the host.
@@ -73,6 +74,16 @@ pub(super) fn run_notices(input: &NoticeInput<'_>) -> Vec<WorkspaceDiagnostic> {
                     ignored: file_name(&ignored),
                 };
                 notice(ignored, kind)
+            }),
+    );
+    notices.extend(
+        unrecognized_config_files(input.root, input.config_file)
+            .into_iter()
+            .map(|path| {
+                let kind = WorkspaceDiagnosticKind::ConfigFileNameUnrecognized {
+                    name: file_name(&path),
+                };
+                notice(path, kind)
             }),
     );
     notices.extend(
@@ -118,6 +129,31 @@ fn shadowed_config_files(config_file: &Sourced<Option<PathBuf>>) -> Vec<(String,
         .map(|name| dir.join(name))
         .filter(|candidate| candidate.exists())
         .map(|ignored| (used.clone(), ignored))
+        .collect()
+}
+
+/// The files in `root` with a near-miss config name, when `root` has no
+/// config file name that discovery reads (issue #5166). A run with an
+/// explicit config file reports none, because the user chose the file.
+fn unrecognized_config_files(root: &Path, config_file: &Sourced<Option<PathBuf>>) -> Vec<PathBuf> {
+    if !matches!(
+        config_file.source(),
+        Source::Derived { from: "discovery" } | Source::Default { .. }
+    ) {
+        return Vec::new();
+    }
+    // Discovery tests `exists`, so a directory with an accepted name also
+    // makes the run load it (and fail), not skip it.
+    if CONFIG_FILE_NAMES
+        .iter()
+        .any(|name| root.join(name).exists())
+    {
+        return Vec::new();
+    }
+    UNRECOGNIZED_CONFIG_FILE_NAMES
+        .iter()
+        .map(|name| root.join(name))
+        .filter(|candidate| candidate.is_file())
         .collect()
 }
 
@@ -233,6 +269,90 @@ mod tests {
         let run = resolve(&root, Surface::Cli, &[]);
         assert_eq!(kinds(&run), ["config-file-shadowed"]);
         assert_eq!(run.notices()[0].path, std::path::Path::new("fallow.toml"));
+    }
+
+    #[test]
+    fn a_near_miss_config_name_without_an_accepted_config_is_a_notice() {
+        let (_dir, root) = project(&[("fallow.jsonc", r#"{"entry": ["src/tool.ts"]}"#)]);
+        let run = resolve(&root, Surface::Cli, &[]);
+        assert_eq!(kinds(&run), ["config-file-name-unrecognized"]);
+        let notice = &run.notices()[0];
+        assert_eq!(notice.path, std::path::Path::new("fallow.jsonc"));
+        assert!(
+            notice.message.contains("'fallow.jsonc'"),
+            "{}",
+            notice.message
+        );
+        assert!(
+            notice.message.contains(".fallowrc.jsonc"),
+            "{}",
+            notice.message
+        );
+
+        let (_dir, root) = project(&[("fallow.yaml", ""), ("fallow.json", "{}")]);
+        let run = resolve(&root, Surface::Lsp, &[]);
+        assert_eq!(
+            kinds(&run),
+            [
+                "config-file-name-unrecognized",
+                "config-file-name-unrecognized"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_near_miss_config_name_next_to_an_accepted_config_is_no_notice() {
+        let (_dir, root) = project(&[(".fallowrc.jsonc", "{}"), ("fallow.jsonc", "{}")]);
+        let run = resolve(&root, Surface::Cli, &[]);
+        assert!(kinds(&run).is_empty(), "{:?}", kinds(&run));
+
+        let (_dir, root) = project(&[("fallow.toml", ""), ("fallow.json", "{}")]);
+        let run = resolve(&root, Surface::Cli, &[]);
+        assert!(kinds(&run).is_empty(), "{:?}", kinds(&run));
+    }
+
+    #[test]
+    fn a_broken_accepted_config_next_to_a_near_miss_name_is_only_a_fallback() {
+        let (_dir, root) = project(&[(".fallowrc.json", "{ not json"), ("fallow.jsonc", "{}")]);
+        let run = resolve(&root, Surface::Lsp, &[]);
+        assert_eq!(kinds(&run), ["config-load-fell-back"]);
+    }
+
+    #[test]
+    fn a_near_miss_name_in_a_root_below_a_discovered_parent_config_is_a_notice() {
+        let (_dir, repo) = project(&[(".fallowrc.json", "{}")]);
+        let root = repo.join("app");
+        std::fs::create_dir(&root).expect("app dir");
+        std::fs::write(root.join("package.json"), r#"{"name":"app"}"#).expect("package.json");
+        std::fs::write(root.join("fallow.json"), "{}").expect("near-miss file");
+        let run = resolve(&root, Surface::Cli, &[]);
+        assert_eq!(
+            run.config_file().value().as_deref(),
+            Some(repo.join(".fallowrc.json").as_path()),
+            "discovery loads the parent config"
+        );
+        assert_eq!(kinds(&run), ["config-file-name-unrecognized"]);
+    }
+
+    #[test]
+    fn an_explicit_config_with_a_near_miss_name_is_no_notice() {
+        let (_dir, root) = project(&[("fallow.jsonc", "{}")]);
+        let mut inputs = RunInputs::new(
+            Surface::Cli,
+            EnvSnapshot::from_pairs(&[], Some(&root)),
+            CommandKind::DeadCode,
+            SelectionInput::Single(PlannedAnalysis::DeadCode),
+        );
+        inputs.root = Some(Given {
+            value: root.clone(),
+            origin: Origin::ApiOption("test"),
+        });
+        inputs.config_path = Some(Given {
+            value: root.join("fallow.jsonc"),
+            origin: Origin::ApiOption("test"),
+        });
+        let run = resolve_run(&inputs).expect("run resolves");
+        assert!(kinds(&run).is_empty(), "{:?}", kinds(&run));
     }
 
     #[test]

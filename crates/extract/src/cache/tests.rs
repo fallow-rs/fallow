@@ -2786,3 +2786,150 @@ fn a_run_without_call_facts_keeps_the_stored_facts() {
     assert!(entry.complexity_extracted);
     assert_eq!(entry.call_facts, blob);
 }
+
+#[test]
+fn working_set_eviction_counts_entries_when_working_set_exceeds_cap() {
+    let dir = test_cache_dir("working_set_exceeds_cap");
+    let mut store = CacheStore::new(Path::new(""));
+    let latest_seen = 1_000_000;
+    let files: Vec<String> = (0..50u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&files) {
+        store.insert(Path::new(path), synthetic_module(i, latest_seen, 1));
+    }
+
+    let cap = 32 * 1024;
+    CacheStore::reset_last_working_set_evicted_count();
+    store.save(at(&dir), 1, cap).expect("save with eviction");
+
+    let evicted_ws = CacheStore::last_working_set_evicted_count();
+    assert!(
+        evicted_ws > 0,
+        "working set exceeds cap, so working-set entries must be evicted"
+    );
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
+    assert_eq!(
+        loaded.len(),
+        files.len() - evicted_ws,
+        "store must retain exactly the non-evicted entries"
+    );
+    assert!(
+        !loaded.is_empty(),
+        "at least one entry remains in the cache"
+    );
+}
+
+#[test]
+fn stale_eviction_alone_does_not_track_working_set_eviction() {
+    let dir = test_cache_dir("stale_eviction_only");
+    let mut store = CacheStore::new(Path::new(""));
+    let stale: Vec<String> = (0..40u64).map(|i| format!("stale{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&stale) {
+        store.insert(Path::new(path), synthetic_module(i, 1 + i, 1));
+    }
+    let latest_seen = 1_000_000;
+    let working_set: Vec<String> = (0..20u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&working_set) {
+        store.insert(Path::new(path), synthetic_module(100 + i, latest_seen, 1));
+    }
+
+    let cap = 64 * 1024;
+    CacheStore::reset_last_working_set_evicted_count();
+    store.save(at(&dir), 1, cap).expect("save with eviction");
+
+    assert_eq!(
+        CacheStore::last_working_set_evicted_count(),
+        0,
+        "only stale entries should be evicted when working set fits cap"
+    );
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
+    assert!(
+        loaded.len() < stale.len() + working_set.len(),
+        "stale eviction must prune entries to stay under target"
+    );
+    let kept_working_set = working_set
+        .iter()
+        .filter(|path| loaded.get_by_path_only(Path::new(path)).is_some())
+        .count();
+    assert_eq!(
+        kept_working_set,
+        working_set.len(),
+        "all working set entries must survive"
+    );
+}
+
+#[test]
+fn working_set_within_cap_is_not_evicted() {
+    let dir = test_cache_dir("within_cap_no_eviction");
+    let mut store = CacheStore::new(Path::new(""));
+    let latest_seen = 1_000_000;
+    let working_set: Vec<String> = (0..10u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&working_set) {
+        store.insert(Path::new(path), synthetic_module(i, latest_seen, 1));
+    }
+
+    let cap = 64 * 1024;
+    CacheStore::reset_last_working_set_evicted_count();
+    store.save(at(&dir), 1, cap).expect("save succeeds");
+
+    assert_eq!(
+        CacheStore::last_working_set_evicted_count(),
+        0,
+        "no eviction when well under cap threshold"
+    );
+
+    let loaded =
+        CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE).expect("load succeeds");
+    assert_eq!(loaded.len(), 10, "all 10 entries preserved");
+}
+
+/// The warning names the evicted share of the run, the cap, both settings,
+/// and a cap that holds the working set with headroom.
+#[test]
+fn working_set_eviction_message_names_the_share_and_a_larger_cap() {
+    let eviction = super::store::WorkingSetEviction {
+        entries: 40_100,
+        evicted: 7_801,
+        encoded_bytes: 6 * 1024 * 1024,
+    };
+    let message = super::store::working_set_eviction_message(&eviction, 4 * 1024 * 1024)
+        .expect("an evicted working set gives a warning");
+    assert!(
+        message.contains("7801 of 40100 files of this run (19%)"),
+        "{message}"
+    );
+    assert!(message.contains("the 4 MiB cap"), "{message}");
+    assert!(message.contains("`cache.maxSizeMb`"), "{message}");
+    assert!(
+        message.contains("config or FALLOW_CACHE_MAX_SIZE to 8 or more"),
+        "{message}"
+    );
+}
+
+/// A suggestion at or below the current cap gives no help, so the message
+/// asks for at least 1 MiB more.
+#[test]
+fn working_set_eviction_message_suggests_more_than_the_current_cap() {
+    let eviction = super::store::WorkingSetEviction {
+        entries: 10,
+        evicted: 1,
+        encoded_bytes: 1024,
+    };
+    let message =
+        super::store::working_set_eviction_message(&eviction, 4 * 1024 * 1024).expect("warning");
+    assert!(message.contains("(10%)"), "{message}");
+    assert!(message.contains("to 5 or more"), "{message}");
+}
+
+#[test]
+fn working_set_eviction_message_is_none_when_nothing_of_the_run_was_evicted() {
+    let eviction = super::store::WorkingSetEviction {
+        entries: 10,
+        evicted: 0,
+        encoded_bytes: 1024,
+    };
+    assert!(super::store::working_set_eviction_message(&eviction, 1024 * 1024).is_none());
+}

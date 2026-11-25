@@ -49,8 +49,9 @@ mod types;
 use types::drop_types_paired_with_schemas;
 pub use types::suppress_signature_backing_types;
 
-/// Pre-compiled glob matchers for plugin/framework used_exports rules.
-pub(super) type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
+/// Pre-compiled glob matchers for plugin/framework used_exports rules, with
+/// the export names of each rule.
+pub(super) type PluginMatchers<'a> = crate::plugins::PathRuleIndex<Vec<&'a str>>;
 
 const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
@@ -85,12 +86,9 @@ pub(super) fn compile_plugin_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
-        return Vec::new();
+        return PluginMatchers::default();
     };
-    pr.used_exports
-        .iter()
-        .filter_map(compile_used_export_rule)
-        .collect()
+    compile_used_export_rules(pr.used_exports.iter())
 }
 
 /// Compile TanStack route contract export rules for duplicate-export filtering.
@@ -98,13 +96,13 @@ fn compile_tanstack_duplicate_export_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
-        return Vec::new();
+        return PluginMatchers::default();
     };
-    pr.used_exports
-        .iter()
-        .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME)
-        .filter_map(compile_used_export_rule)
-        .collect()
+    compile_used_export_rules(
+        pr.used_exports
+            .iter()
+            .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME),
+    )
 }
 
 fn is_tanstack_router_active(
@@ -124,27 +122,18 @@ fn is_react_native_active(plugin_result: Option<&crate::plugins::AggregatedPlugi
     plugin_result.is_some_and(|pr| has_react_native_plugin(&pr.active_plugins))
 }
 
-pub(super) struct CompiledUsedExportRule<'a> {
-    path: crate::plugins::CompiledPathRule,
-    exports: Vec<&'a str>,
-}
-
-impl CompiledUsedExportRule<'_> {
-    pub(super) fn matches(&self, path: &str) -> bool {
-        self.path.matches(path)
-    }
-}
-
-fn compile_used_export_rule(
-    rule: &crate::plugins::PluginUsedExportRule,
-) -> Option<CompiledUsedExportRule<'_>> {
-    Some(CompiledUsedExportRule {
-        path: crate::plugins::CompiledPathRule::for_used_export_rule(
-            &rule.rule.path,
-            "used_exports pattern",
-        )?,
-        exports: rule.rule.exports.iter().map(String::as_str).collect(),
-    })
+fn compile_used_export_rules<'a>(
+    rules: impl Iterator<Item = &'a crate::plugins::PluginUsedExportRule>,
+) -> PluginMatchers<'a> {
+    PluginMatchers::build(
+        rules.map(|rule| {
+            (
+                &rule.rule.path,
+                rule.rule.exports.iter().map(String::as_str).collect(),
+            )
+        }),
+        "used_exports pattern",
+    )
 }
 
 /// Whether the only export of `module` is the default that an `export = x`
@@ -202,9 +191,9 @@ fn matchers_for_module<'a>(
         .map(|rule| rule.exports.as_slice())
         .collect();
     let mp: Vec<&[&str]> = plugin_matchers
-        .iter()
-        .filter(|rule| rule.matches(file_str.as_ref()))
-        .map(|rule| rule.exports.as_slice())
+        .matching(file_str.as_ref())
+        .into_iter()
+        .map(Vec::as_slice)
         .collect();
     (mi, mp)
 }
@@ -253,7 +242,7 @@ fn is_route_referenced_by_tanstack_generated_tree(
         && has_route_path_segment(&module.path, config_root)
         && export.references.iter().any(|reference| {
             graph
-                .modules
+                .modules()
                 .get(reference.from_file.0 as usize)
                 .is_some_and(|from| is_route_tree_generated_file(&from.path))
         })
@@ -362,7 +351,7 @@ fn export_has_reachable_reference(
         return !export.references.is_empty();
     }
     export.references.iter().any(|r| {
-        graph.modules.get(r.from_file.0 as usize).is_some_and(|m| {
+        graph.module(r.from_file).is_some_and(|m| {
             debug_assert_eq!(
                 m.file_id, r.from_file,
                 "ModuleGraph::modules FileId-as-index invariant broken"
@@ -389,6 +378,8 @@ fn stale_expected_unused_suppression(
             reason: export.expected_unused_reason.clone(),
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     }
@@ -418,6 +409,8 @@ fn record_expected_unused_stale(
                 reason: None,
             },
             missing_reason: true,
+            next_line_kinds: Vec::new(),
+            next_line_blank: false,
             actions: StaleSuppression::actions_for(true),
             effective_severity: None,
         });
@@ -461,7 +454,7 @@ pub fn find_unused_exports(
     };
     with_unused_export_context(input, false, |module_context| {
         let module_results: Vec<UnusedExportModuleResult> = graph
-            .modules
+            .modules()
             .par_iter()
             .map(|module| find_unused_exports_for_module(module, module_context, None))
             .collect();
@@ -715,9 +708,11 @@ fn unused_export_for_module(
         .suppressions
         .is_suppressed(module.file_id, line, issue_kind)
         || (is_schema
-            && ctx
-                .suppressions
-                .is_suppressed(module.file_id, line, IssueKind::UnusedExport));
+            && ctx.suppressions.is_suppressed_by_compat_kind(
+                module.file_id,
+                line,
+                IssueKind::UnusedExport,
+            ));
     if suppressed {
         return None;
     }
@@ -928,7 +923,7 @@ pub fn find_private_type_leaks(
         {
             continue;
         }
-        let Some(module) = graph.modules.get(module_info.file_id.0 as usize) else {
+        let Some(module) = graph.module(module_info.file_id) else {
             continue;
         };
         debug_assert_eq!(
@@ -1020,7 +1015,7 @@ fn collect_dynamic_reexport_sources(
 
     for resolved in resolved_modules {
         let wrapper_idx = resolved.file_id.0 as usize;
-        let Some(wrapper) = graph.modules.get(wrapper_idx) else {
+        let Some(wrapper) = graph.modules().get(wrapper_idx) else {
             continue;
         };
         debug_assert_eq!(
@@ -1045,7 +1040,7 @@ fn collect_dynamic_reexport_sources(
             }
 
             let source_idx = source_file_id.0 as usize;
-            if source_idx >= graph.modules.len() {
+            if source_idx >= graph.module_count() {
                 continue;
             }
             re_export_sources
@@ -1278,7 +1273,7 @@ fn collect_duplicate_export_locations(
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
 
-    for (idx, module) in graph.modules.iter().enumerate() {
+    for (idx, module) in graph.modules().iter().enumerate() {
         collect_module_duplicate_export_locations(
             &mut export_locations,
             DuplicateExportModuleInput {
@@ -1453,6 +1448,7 @@ fn evaluate_duplicate_export_group(
             ) && !overlays.contains(&entry.file_id)
         })
         .collect();
+    let independent_entries = collapse_shared_forwarded_bindings(independent_entries, &name, graph);
 
     // Collapse after the re-export strip so a barrel that re-exports from the
     // platform winner is still recognized as a chain member of the family.
@@ -1570,6 +1566,37 @@ fn platform_family_representative(
     Some(representative.file_id)
 }
 
+/// Keep one entry per binding that the entries forward from a module outside
+/// the group.
+///
+/// `export { default as ui } from './ui'` and a second barrel that forwards
+/// `ui` both bind the default of `./ui`. That module does not export `ui`, so
+/// [`is_re_export_chain_member`] cannot see the chain. The entries are aliases
+/// of one origin, not duplicates of each other (issue #5162).
+fn collapse_shared_forwarded_bindings(
+    entries: Vec<ExportEntry>,
+    export_name: &str,
+    graph: &ModuleGraph,
+) -> Vec<ExportEntry> {
+    let mut seen = FxHashSet::default();
+    entries
+        .into_iter()
+        .filter(|entry| {
+            let forwarded = entry.namespaces().iter().find_map(|&namespace| {
+                match graph.resolve_export(entry.file_id, export_name, namespace) {
+                    EffectiveExportResolution::Unique(binding)
+                        if binding.origin_file() != entry.file_id =>
+                    {
+                        Some(binding)
+                    }
+                    _ => None,
+                }
+            });
+            forwarded.is_none_or(|binding| seen.insert(binding))
+        })
+        .collect()
+}
+
 fn is_re_export_chain_member(
     entry: &ExportEntry,
     export_name: &str,
@@ -1653,14 +1680,14 @@ pub fn collect_export_usages(
     let mut usages = Vec::new();
 
     let file_paths: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
+        .modules()
         .iter()
         .map(|m| (m.file_id, m.path.as_path()))
         .collect();
 
     let mut source_cache: FxHashMap<FileId, (String, Vec<u32>)> = FxHashMap::default();
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         if !module.is_reachable() {
             continue;
         }

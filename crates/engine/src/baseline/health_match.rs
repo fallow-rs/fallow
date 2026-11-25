@@ -12,7 +12,7 @@ use super::health_categories::{
     HEALTH_FINDING_DIMENSIONS, HealthFindingCategory, health_finding_categories,
     health_finding_counts, severity_counts_for_dimension, severity_index,
 };
-use super::identity_counts::{PlaceholderLoan, placeholder_loans};
+use super::identity_counts::{PlaceholderLoan, match_severity_slots, placeholder_loans};
 use super::{
     HealthBaselineCount, HealthBaselineData, HealthBaselineMode, HealthBaselineOverlap,
     HealthFindingCountMap, health_bucket_key, health_finding_key, moved_identity_bucket_remaps,
@@ -23,44 +23,6 @@ const SEVERITIES: [fallow_output::FindingSeverity; 3] = [
     fallow_output::FindingSeverity::High,
     fallow_output::FindingSeverity::Critical,
 ];
-
-/// The result of the greedy match for one bucket and one dimension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct SeveritySlotMatch {
-    /// Saved slots per severity that a current finding uses.
-    pub(super) used: [usize; 3],
-    /// `true` for a severity that has more current findings than
-    /// compatible slots.
-    pub(super) overflow: [bool; 3],
-}
-
-/// Match current findings to saved slots, lowest severity first. A finding
-/// takes the lowest free slot of its own or a higher severity.
-pub(super) fn match_severity_slots(current: [usize; 3], saved: [usize; 3]) -> SeveritySlotMatch {
-    let mut available = saved;
-    let mut overflow = [false; 3];
-    for severity_idx in 0..3 {
-        let compatible = available[severity_idx..].iter().sum::<usize>();
-        overflow[severity_idx] = compatible < current[severity_idx];
-        let mut matched = current[severity_idx].min(compatible);
-        for slot in available.iter_mut().skip(severity_idx) {
-            let taken = matched.min(*slot);
-            *slot -= taken;
-            matched -= taken;
-            if matched == 0 {
-                break;
-            }
-        }
-    }
-    SeveritySlotMatch {
-        used: [
-            saved[0] - available[0],
-            saved[1] - available[1],
-            saved[2] - available[2],
-        ],
-        overflow,
-    }
-}
 
 /// The match of all saved buckets against all current buckets.
 pub(super) struct HealthMatch {

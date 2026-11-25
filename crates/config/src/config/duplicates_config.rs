@@ -26,8 +26,10 @@ where
 {
     let value = usize::deserialize(deserializer)?;
     if value < 2 {
-        return Err(serde::de::Error::custom(format!(
-            "minOccurrences must be at least 2 (got {value}); a single occurrence isn't a duplicate"
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
+            format!(
+                "minOccurrences must be at least 2 (got {value}); a single occurrence isn't a duplicate"
+            ),
         )));
     }
     Ok(value)
@@ -40,8 +42,10 @@ where
     let values = Vec::<String>::deserialize(deserializer)?;
     for (index, value) in values.iter().enumerate() {
         if !is_valid_ignored_clone_key(value) {
-            return Err(serde::de::Error::custom(format!(
-                "ignoredClones[{index}] must use <fingerprint>:<instance_count> (for example dup:6f12ab34:2); got {value:?}"
+            return Err(serde::de::Error::custom(crate::parse_error::own_message(
+                format!(
+                    "ignoredClones[{index}] must use <fingerprint>:<instance_count> (for example dup:6f12ab34:2); got {value:?}"
+                ),
             )));
         }
     }
@@ -132,7 +136,9 @@ pub struct DuplicatesConfig {
     #[schemars(range(min = 2))]
     pub min_occurrences: usize,
 
-    /// Maximum allowed duplication percentage (0 = no limit).
+    /// Maximum allowed duplication percentage. The default `0` turns the
+    /// percentage gate off: it is not zero tolerance. To fail when fallow
+    /// finds any clone group, use `--fail-on-issues`.
     #[serde(default)]
     pub threshold: f64,
 

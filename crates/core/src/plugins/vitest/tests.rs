@@ -648,6 +648,41 @@ fn vitest4_inline_project_inherits_only_with_extends_true() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn an_installed_vitest_link_out_of_the_project_is_not_read() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let outer = dunce::canonicalize(temp.path()).expect("canonical tempdir");
+    let dir = outer.join("project");
+    std::fs::create_dir_all(dir.join(".git")).expect("create project");
+    std::fs::write(
+        dir.join("package.json"),
+        r#"{ "devDependencies": { "vitest": "^4.1.0" } }"#,
+    )
+    .expect("write package.json");
+    let elsewhere = outer.join("elsewhere/vitest");
+    std::fs::create_dir_all(&elsewhere).expect("create outside vitest");
+    std::fs::write(
+        elsewhere.join("package.json"),
+        r#"{ "name": "vitest", "version": "5.0.1" }"#,
+    )
+    .expect("write outside vitest");
+    std::fs::create_dir_all(dir.join("node_modules")).expect("create node_modules");
+    std::os::unix::fs::symlink(&elsewhere, dir.join("node_modules/vitest")).expect("link vitest");
+    let source = r"
+        export default defineConfig({
+            oxc: { jsx: { importSource: './jsx' } },
+            test: { projects: [{ test: { include: ['a/**/*.test.tsx'] } }] },
+        });
+    ";
+    // The declared Vitest 4 range applies, so the inline project does not
+    // inherit the JSX import source.
+    let rules = VitestPlugin
+        .resolve_config(&dir.join("vitest.config.ts"), source, &dir)
+        .jsx_import_sources;
+    assert!(rules.is_empty(), "{rules:?}");
+}
+
 #[test]
 fn vitest_range_max_major_reads_the_upper_major() {
     assert_eq!(range_max_major("^4.0.0"), Some(4));

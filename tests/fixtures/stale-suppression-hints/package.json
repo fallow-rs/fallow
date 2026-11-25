@@ -1,0 +1,5 @@
+{
+  "name": "stale-suppression-hints",
+  "private": true,
+  "main": "src/index.ts"
+}

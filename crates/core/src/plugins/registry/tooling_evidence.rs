@@ -390,6 +390,27 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_brace_expansion_never_probes_outside_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("outside.txt"), "").unwrap();
+        let absolute = dir.path().join("outside.txt");
+        assert_eq!(first_file_match(&root, "{..,x}/outside.txt"), None);
+        assert_eq!(
+            first_file_match(&root, &format!("{{{},x}}", absolute.display())),
+            None
+        );
+        assert_eq!(first_file_match(&root, "{..,x}/outside.*"), None);
+        std::fs::write(root.join("inside.txt"), "").unwrap();
+        assert_eq!(
+            first_file_match(&root, "{inside,x}.txt"),
+            Some(root.join("inside.txt"))
+        );
+    }
+
+    #[test]
     fn manifest_config_key_counts_top_level_and_config_section() {
         let manifest = serde_json::json!({
             "simple-git-hooks": { "pre-commit": "npx tool" },

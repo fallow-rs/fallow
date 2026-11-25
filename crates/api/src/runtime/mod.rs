@@ -263,7 +263,7 @@ impl ProgrammaticHealthRunner for EngineHealthRunner {
             } else {
                 resolve()?
             };
-            run_programmatic_health_on_engine(&resolved, options, &run)
+            run_programmatic_health_on_engine(&resolved, options, &run, true)
         })
     }
 
@@ -284,19 +284,29 @@ pub(super) fn health_config_load_error() -> ProgrammaticError {
     )
 }
 
+/// With `standalone`, the output also states each `health.ignore` glob that
+/// matches no project file. In an audit or combined run, the dead-code
+/// section states them.
 fn run_programmatic_health_on_engine(
     resolved: &ProgrammaticAnalysisContext,
     options: &ComplexityOptions,
     run: &ResolvedRun,
+    standalone: bool,
 ) -> ProgrammaticResult<ProgrammaticHealthRun> {
     let health_options = derive_programmatic_health_execution_options(resolved, options);
     let health = crate::run::runnable(run, PlannedAnalysis::Health)?;
     let loaded = fallow_engine::health::UngroupedHealthSession::load(&health_options, &health)
         .map_err(|error| programmatic_health_error("health", error))?;
     let workspace_roots = workspace_roots_for_session(resolved, loaded.workspaces())?;
-    let result = loaded
+    let mut result = loaded
         .run(&health_options, workspace_roots)
         .map_err(|error| programmatic_health_error("health", error))?;
+    if standalone {
+        // The result holds no file list, so the project walk checks each glob.
+        let stale =
+            fallow_engine::ignore_list_notes::health_ignore_diagnostics(&result.config, &[]);
+        result.workspace_diagnostics.extend(stale);
+    }
     resolved.record_changed_since_from_runner(result.changed_files_analyzed.as_deref());
 
     Ok(programmatic_health_run_from_engine_result(
@@ -428,6 +438,8 @@ fn derive_programmatic_health_execution_options<'a>(
         complexity: run.sections.complexity,
         file_scores: run.sections.file_scores,
         coverage_gaps: run.sections.coverage_gaps,
+        // The programmatic API has no shallow directories option yet.
+        shallow_directories: false,
         config_activates_coverage_gaps: options.config_activates_coverage_gaps
             || !run.sections.any_section,
         hotspots: run.sections.hotspots,
@@ -495,7 +507,8 @@ pub(super) fn run_health_in_run(
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
     crate::analysis_context::ensure_options_not_cancelled(&options.analysis, "health analysis")?;
-    let health = resolved.install(|| run_programmatic_health_on_engine(resolved, options, run))?;
+    let health =
+        resolved.install(|| run_programmatic_health_on_engine(resolved, options, run, false))?;
     Ok(assemble_health_programmatic_output(options, health))
 }
 

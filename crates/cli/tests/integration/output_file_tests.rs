@@ -535,3 +535,37 @@ fn report_from_a_saved_file_writes_a_separate_output_file() {
     assert!(!read(&dir.path().join("report.md")).is_empty());
     assert_eq!(read(&dir.path().join("report.json")), saved);
 }
+
+/// `viz --out` through a project folder that is a symlink to a place outside
+/// the project is refused, and no map is written there.
+#[cfg(unix)]
+#[test]
+fn viz_out_through_a_project_link_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("project");
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir_all(root.join("src")).expect("src");
+    std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"viz-link","main":"src/index.ts"}"#,
+    )
+    .expect("package.json");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("index");
+    std::os::unix::fs::symlink(&elsewhere, root.join("maps")).expect("link");
+
+    let result = run_fallow_raw_in_dir(
+        &root,
+        &["viz", "--out", "maps/map.html", "--no-open", "--quiet"],
+    );
+    assert_eq!(result.code, 2, "stderr: {}", result.stderr);
+    assert!(result.stderr.contains("--out"), "stderr: {}", result.stderr);
+    assert!(!elsewhere.join("map.html").exists());
+
+    let inside = run_fallow_raw_in_dir(
+        &root,
+        &["viz", "--out", "reports/map.html", "--no-open", "--quiet"],
+    );
+    assert_eq!(inside.code, 0, "stderr: {}", inside.stderr);
+    assert!(root.join("reports/map.html").is_file());
+}

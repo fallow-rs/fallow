@@ -2,22 +2,17 @@ use std::net::Ipv6Addr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::FallowConfig;
 
-/// Config file names the loader accepts, in discovery priority order.
-///
-/// Public because surfaces outside config loading have to react to the same
-/// set: the language server registers a file watcher per name, so a name added
-/// here reaches the editor without a second list to keep in step.
-pub const CONFIG_FILE_NAMES: &[&str] = &[
-    ".fallowrc.json",
-    ".fallowrc.jsonc",
-    "fallow.toml",
-    ".fallow.toml",
-];
+#[path = "parsing_extends.rs"]
+mod extends_entry;
+use extends_entry::{ExtendsTarget, LocalExtendsEntry, extends_target, outside_extends_error};
+
+pub use fallow_types::config_file_names::{
+    CONFIG_FILE_NAMES, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,
+};
 
 /// Supported config file names in priority order.
 const CONFIG_NAMES: &[&str] = CONFIG_FILE_NAMES;
@@ -111,30 +106,107 @@ fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
 }
 
 pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, miette::Report> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
+    parse_config_to_value_in(path, true)
+}
+
+/// [`parse_config_to_value`] for a file that is `inside` the project or
+/// not. A parse error of a file outside the project names the position
+/// only.
+fn parse_config_to_value_in(
+    path: &Path,
+    inside: bool,
+) -> Result<serde_json::Value, miette::Report> {
+    // An `extends` target can be outside the project by design, so the read
+    // has no root check. It still refuses devices and very large files, and
+    // the parse errors below name a position but never quote the file.
+    let content = fallow_types::read_guard::read_to_string_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .map_err(|e| miette::miette!("Failed to read config file: {e}"))?;
     let content = content.trim_start_matches('\u{FEFF}');
 
     match ConfigFormat::from_path(path) {
         ConfigFormat::Toml => {
             let toml_value: toml::Value = crate::toml_input::from_str(content).map_err(|e| {
-                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
+                let reason = if inside {
+                    crate::parse_error::describe_toml(&e, content)
+                } else {
+                    crate::parse_error::position_only(crate::parse_error::toml_position(
+                        &e, content,
+                    ))
+                };
+                miette::miette!("Failed to parse config file {}: {reason}", path.display())
             })?;
             serde_json::to_value(toml_value).map_err(|e| {
                 miette::miette!(
                     "Failed to convert TOML to JSON for {}: {}",
                     path.display(),
-                    e
+                    crate::parse_error::describe_json(&e)
                 )
             })
         }
-        ConfigFormat::Json => crate::jsonc::parse_to_value(content)
-            .map_err(|e| miette::miette!("Failed to parse config file {}: {}", path.display(), e)),
+        ConfigFormat::Json => crate::jsonc::parse_to_value(content).map_err(|e| {
+            let reason = if inside {
+                crate::parse_error::describe_jsonc(&e)
+            } else {
+                crate::parse_error::position_only(Some(crate::parse_error::jsonc_position(&e)))
+            };
+            miette::miette!("Failed to parse config file {}: {reason}", path.display())
+        }),
     }
 }
 
+/// True when `dir` holds a `.git`, `.hg` or `.svn` entry. A link counts by
+/// its own presence, not by its target.
 fn is_repo_root(dir: &Path) -> bool {
-    dir.join(".git").exists() || dir.join(".hg").exists() || dir.join(".svn").exists()
+    [".git", ".hg", ".svn"]
+        .iter()
+        .any(|marker| entry_present(&dir.join(marker)))
+}
+
+/// True when `path` names an entry, also a dangling link. The check reads
+/// the entry itself and does not follow a link.
+fn entry_present(path: &Path) -> bool {
+    path.symlink_metadata().is_ok()
+}
+
+/// The directory that a discovered config file in `dir` must resolve in:
+/// the nearest repository root at or above `dir`, else `dir` itself. A
+/// repository root above `dir` at the home directory or above it holds
+/// dotfiles, not the project, so it does not count.
+fn discovery_base(dir: &Path) -> &Path {
+    dir.ancestors()
+        .find(|ancestor| is_repo_root(ancestor))
+        .filter(|top| {
+            *top == dir
+                || dunce::canonicalize(top)
+                    .is_ok_and(|top| !crate::project_read::is_home_or_above(&top))
+        })
+        .unwrap_or(dir)
+}
+
+/// Refuse a discovered config file that is a link which does not resolve
+/// inside its [`discovery_base`], when git tracks the link or no git
+/// checkout holds it. A local link that git does not track, such as a link
+/// to a dotfiles config, stays allowed. The message names only the link,
+/// and it is the same for a dangling link and a link to a file that exists.
+fn check_discovered_config(dir: &Path, candidate: &Path) -> Result<(), String> {
+    let is_link = candidate
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink());
+    let base = discovery_base(dir);
+    if !is_link
+        || fallow_types::read_guard::is_inside_root(base, candidate)
+        || super::outside_root::git_tracks(candidate) == Some(false)
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to load {}: it is a symbolic link that does not resolve to a file inside {}",
+        candidate.display(),
+        base.display()
+    ))
 }
 
 fn resolve_confined(
@@ -232,7 +304,8 @@ fn find_config_in_npm_package(
 ) -> Result<PathBuf, miette::Report> {
     let pkg_json_path = package_dir.join("package.json");
     if pkg_json_path.exists() {
-        let content = crate::PackageJson::read_source(&pkg_json_path)
+        let scope = crate::project_scope_base(source_config.parent().unwrap_or(package_dir));
+        let content = crate::PackageJson::read_source_in_scope(&scope, &pkg_json_path)
             .map_err(|e| miette::miette!("Failed to read {}: {}", pkg_json_path.display(), e))?;
         let pkg: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| miette::miette!("Failed to parse {}: {}", pkg_json_path.display(), e))?;
@@ -548,6 +621,13 @@ struct ExtendsResolver<'a, Fetcher> {
     /// records it.
     merge_order: MergeOrder,
     record_merge_order: bool,
+    /// The directory that the files of the walk count as inside, set from
+    /// the directory that holds the first local file, before a link
+    /// resolves. See [`crate::project_scope_base`].
+    scope: Option<PathBuf>,
+    /// Each local file of the walk with its own value, and whether it is
+    /// inside `scope`.
+    local_values: Vec<super::outside_root::LocalValue>,
     fetcher: &'a mut Fetcher,
 }
 
@@ -584,16 +664,6 @@ struct ResolvedConfig {
     merge_order: MergeOrder,
 }
 
-#[derive(Clone, Copy)]
-struct LocalExtendsEntry<'a> {
-    path: &'a Path,
-    config_dir: &'a Path,
-    entry: &'a str,
-    sealed: bool,
-    sealed_dir_canonical: Option<&'a Path>,
-    depth: usize,
-}
-
 impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
     fn new(options: ConfigLoadOptions, fetcher: &'a mut Fetcher) -> Self {
         Self {
@@ -604,6 +674,8 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             order_frames: Vec::new(),
             merge_order: MergeOrder::default(),
             record_merge_order: false,
+            scope: None,
+            local_values: Vec::new(),
             fetcher,
         }
     }
@@ -662,6 +734,14 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             )
         })?;
         let identity = ConfigResourceId::Local(canonical.clone());
+        // The first file is the config of the project, and it can be a link
+        // to a file elsewhere. The scope comes from the directory that holds
+        // the config entry, not from the link target.
+        let scope = self.scope.get_or_insert_with(|| {
+            let entry = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+            crate::project_scope_base(entry.parent().unwrap_or(&canonical))
+        });
+        let inside = canonical.starts_with(scope);
         if let Some(value) = self.reuse_resolved(&identity) {
             return Ok(value);
         }
@@ -672,9 +752,16 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             ));
         }
 
-        self.local_files.push(canonical.clone());
+        // The list holds the files that the walk reads, so a file that the
+        // bounded read refuses for its type or size is not in it.
+        if fallow_types::read_guard::is_bounded_regular_file(
+            &canonical,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) {
+            self.local_files.push(canonical.clone());
+        }
         self.open_order_frame();
-        let result = self.resolve_local_uncached(&canonical, depth);
+        let result = self.resolve_local_uncached(&canonical, depth, inside);
         self.active.remove(&identity);
         let order = self.close_order_frame(&identity, result.is_ok());
         if let Ok(value) = &result {
@@ -715,9 +802,12 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         &mut self,
         path: &Path,
         depth: usize,
+        inside: bool,
     ) -> Result<serde_json::Value, miette::Report> {
-        let mut value = parse_config_to_value(path)?;
+        let mut value = parse_config_to_value_in(path, inside)?;
         let extends = extract_extends(&mut value, &path.display().to_string())?;
+        self.local_values
+            .push(super::outside_root::LocalValue::new(path, inside, &value));
         if extends.is_empty() {
             return Ok(value);
         }
@@ -730,69 +820,29 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
         let mut merged = serde_json::Value::Object(serde_json::Map::new());
         for entry in &extends {
-            let base = self.resolve_local_entry(LocalExtendsEntry {
+            let target = extends_target(LocalExtendsEntry {
                 path,
                 config_dir,
                 entry,
                 sealed,
                 sealed_dir_canonical: sealed_dir_canonical.as_deref(),
-                depth,
+            })
+            .map_err(|error| {
+                if inside {
+                    error
+                } else {
+                    outside_extends_error(path)
+                }
             })?;
+            let base = match target {
+                ExtendsTarget::Remote(url) => self.resolve_remote(url, depth + 1)?,
+                ExtendsTarget::Local(target) => self.resolve_local(&target, depth + 1)?,
+            };
             deep_merge_json(&mut merged, base);
         }
         deep_merge_json(&mut merged, value);
         Ok(merged)
     }
-
-    fn resolve_local_entry(
-        &mut self,
-        input: LocalExtendsEntry<'_>,
-    ) -> Result<serde_json::Value, miette::Report> {
-        let LocalExtendsEntry {
-            path,
-            config_dir,
-            entry,
-            sealed,
-            sealed_dir_canonical,
-            depth,
-        } = input;
-        if starts_with_url_prefix(entry, HTTPS_PREFIX) {
-            reject_sealed_remote_extends(path, entry, sealed, "URL")?;
-            return self.resolve_remote(entry, depth + 1);
-        }
-        if starts_with_url_prefix(entry, HTTP_PREFIX) {
-            let entry_display = remote_config_display(entry);
-            return Err(miette::miette!(
-                "URL extends must use https://, got http:// URL '{}' (in {}). \
-                 Change the URL to use https:// instead",
-                entry_display,
-                path.display()
-            ));
-        }
-        if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
-            reject_sealed_remote_extends(path, entry, sealed, "npm")?;
-            let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
-            return self.resolve_local(&npm_path, depth + 1);
-        }
-        if is_absolute_path_any_platform(Path::new(entry)) {
-            return Err(miette::miette!(
-                "extends paths must be relative, got absolute path: {} (in {})",
-                entry,
-                path.display()
-            ));
-        }
-        let resolved_path = config_dir.join(entry);
-        if !resolved_path.exists() {
-            return Err(miette::miette!(
-                "Extended config file not found: {} (referenced from {})",
-                resolved_path.display(),
-                path.display()
-            ));
-        }
-        validate_sealed_relative_extends(path, entry, &resolved_path, sealed_dir_canonical)?;
-        self.resolve_local(&resolved_path, depth + 1)
-    }
-
     fn resolve_remote(
         &mut self,
         url: &str,
@@ -949,56 +999,6 @@ fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>,
     })
 }
 
-fn reject_sealed_remote_extends(
-    path: &Path,
-    entry: &str,
-    sealed: bool,
-    kind: &str,
-) -> Result<(), miette::Report> {
-    if sealed {
-        let entry_display = remote_config_display(entry);
-        Err(miette::miette!(
-            "'sealed: true' config at {} rejects {} extends '{}'. \
-             Sealed configs only allow file-relative extends within \
-             the config's directory",
-            path.display(),
-            kind,
-            entry_display
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_sealed_relative_extends(
-    path: &Path,
-    entry: &str,
-    resolved_path: &Path,
-    sealed_dir_canonical: Option<&Path>,
-) -> Result<(), miette::Report> {
-    let Some(dir_canonical) = sealed_dir_canonical else {
-        return Ok(());
-    };
-    let p_canonical = dunce::canonicalize(resolved_path).map_err(|e| {
-        miette::miette!(
-            "Sealed config extends path '{}' could not be canonicalized: {e}",
-            resolved_path.display()
-        )
-    })?;
-    if p_canonical.starts_with(dir_canonical) {
-        Ok(())
-    } else {
-        Err(miette::miette!(
-            "'sealed: true' config at {} rejects extends '{}' which resolves \
-             outside the config's directory ({}). Sealed configs only allow \
-             extends within the config's directory",
-            path.display(),
-            entry,
-            p_canonical.display()
-        ))
-    }
-}
-
 /// Public entry point: resolve a config file with all its extends chain.
 ///
 /// Delegates to [`resolve_extends_file`] with a fresh visited set.
@@ -1107,11 +1107,19 @@ pub(super) fn version_triple(value: &str) -> Option<(u64, u64, u64)> {
 fn assert_binary_meets_minimum_version(
     path: &Path,
     merged: &serde_json::Value,
+    outside: &super::outside_root::OutsideKeys,
 ) -> Result<(), miette::Report> {
     let Some(declared) = merged.get("minimumVersion") else {
         return Ok(());
     };
     let declared = declared.as_str().and_then(version_triple).ok_or_else(|| {
+        if outside.covers("minimumVersion") {
+            return miette::miette!(
+                "{} in {}",
+                outside.field_message("minimumVersion"),
+                path.display()
+            );
+        }
         miette::miette!(
             "minimumVersion must be MAJOR.MINOR.PATCH in {}, found {declared}",
             path.display()
@@ -1187,7 +1195,7 @@ fn shadowed_config_names(dir: &Path, chosen_index: usize) -> Vec<&'static str> {
     CONFIG_NAMES
         .iter()
         .skip(chosen_index + 1)
-        .filter(|name| dir.join(name).exists())
+        .filter(|name| entry_present(&dir.join(name)))
         .copied()
         .collect()
 }
@@ -1224,7 +1232,11 @@ fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<C
 
 /// Warn once per config file about each key under `workspaces` that fallow
 /// does not know. An error would break configs that carry a stray key today.
-fn warn_on_unknown_workspace_keys(config_path: &Path, workspaces: Option<&crate::WorkspaceConfig>) {
+fn warn_on_unknown_workspace_keys(
+    config_path: &Path,
+    workspaces: Option<&crate::WorkspaceConfig>,
+    outside: &super::outside_root::OutsideKeys,
+) {
     use std::sync::{Mutex, OnceLock};
 
     static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
@@ -1233,6 +1245,17 @@ fn warn_on_unknown_workspace_keys(config_path: &Path, workspaces: Option<&crate:
     };
     let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
     for key in workspaces.unknown_keys.keys() {
+        if outside.covers(&format!("workspaces.{key}")) {
+            let dedupe_key = format!("{}::outside", config_path.display());
+            if warned.lock().is_ok_and(|mut set| set.insert(dedupe_key)) {
+                tracing::warn!(
+                    "unknown key under 'workspaces' in a config file outside the project ({}); \
+                     fallow ignores it. The text of a file outside the project is not shown.",
+                    outside.file_list(),
+                );
+            }
+            continue;
+        }
         let dedupe_key = format!("{}::{key}", config_path.display());
         if let Ok(mut set) = warned.lock()
             && !set.insert(dedupe_key)
@@ -1311,8 +1334,9 @@ fn load_with_fetcher<Fetcher: RemoteConfigFetcher>(
     options: ConfigLoadOptions,
     fetcher: &mut Fetcher,
 ) -> Result<FallowConfig, miette::Report> {
-    let merged = ExtendsResolver::new(options, fetcher).resolve_local(path, 0)?;
-    FallowConfig::from_merged(path, merged)
+    let mut resolver = ExtendsResolver::new(options, fetcher);
+    let merged = resolver.resolve_local(path, 0)?;
+    FallowConfig::from_merged(path, merged, &resolver.local_values)
 }
 
 impl FallowConfig {
@@ -1398,9 +1422,21 @@ impl FallowConfig {
         Some(sources.collect())
     }
 
-    fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
-        assert_binary_meets_minimum_version(path, &merged)?;
-        warn_on_unknown_rule_keys(path, &merged);
+    fn from_merged(
+        path: &Path,
+        merged: serde_json::Value,
+        local_values: &[super::outside_root::LocalValue],
+    ) -> Result<Self, miette::Report> {
+        let outside_keys = super::outside_root::OutsideKeys::from_values(local_values);
+        assert_binary_meets_minimum_version(path, &merged, &outside_keys)?;
+        let outside = super::outside_root::has_outside(local_values);
+        if outside {
+            for value in local_values.iter().filter(|value| value.inside) {
+                warn_on_unknown_rule_keys(path, &value.value);
+            }
+        } else {
+            warn_on_unknown_rule_keys(path, &merged);
+        }
 
         let private_type_leaks_configured = merged
             .get("rules")
@@ -1409,7 +1445,10 @@ impl FallowConfig {
                 rules.contains_key("private-type-leaks") || rules.contains_key("private-type-leak")
             });
         let mut config: Self = serde_json::from_value(merged).map_err(|e| {
-            let reason = e.to_string();
+            if outside {
+                return super::outside_root::merged_error(path, local_values);
+            }
+            let reason = crate::parse_error::describe_json(&e);
             // Unknown fields on overrides/ignoreExports entries are usually
             // inline annotations; point at JSONC comments as the fix.
             let hint = if matches!(ConfigFormat::from_path(path), ConfigFormat::Json)
@@ -1424,23 +1463,37 @@ impl FallowConfig {
             miette::miette!("{reason} in {}{hint}", path.display())
         })?;
         config.rules.private_type_leaks_configured = private_type_leaks_configured;
-        warn_on_unknown_workspace_keys(path, config.workspaces.as_ref());
+        config.outside_keys = outside_keys;
+        warn_on_unknown_workspace_keys(path, config.workspaces.as_ref(), &config.outside_keys);
+        config.check_merged_values()?;
+        Ok(config)
+    }
 
-        config.validate_user_globs().map_err(|errors| {
+    /// The checks of the merged config that serde cannot express. A message
+    /// for a value that can come from a config file outside the project
+    /// names the key and that file only, see
+    /// [`super::outside_root::OutsideKeys`].
+    fn check_merged_values(&self) -> Result<(), miette::Report> {
+        let config = self;
+        let invalid = |errors: Vec<String>| {
             let joined = errors
-                .iter()
-                .map(ToString::to_string)
+                .into_iter()
+                .map(|error| config.outside_keys.redact(error))
                 .collect::<Vec<_>>()
                 .join("\n  - ");
             miette::miette!("invalid config:\n  - {}", joined)
-        })?;
+        };
+        config
+            .validate_user_globs()
+            .map_err(|errors| invalid(errors.iter().map(ToString::to_string).collect()))?;
         if !config.security.request_receivers_are_valid() {
-            return Err(miette::miette!(
-                "invalid config:\n  - security.requestReceivers entries must be non-empty strings"
-            ));
+            return Err(invalid(vec![
+                "security.requestReceivers entries must be non-empty strings".to_owned(),
+            ]));
         }
         let mut health_errors = config.health.threshold_override_errors();
         health_errors.extend(config.health.change_coupling.errors());
+        health_errors.extend(config.health.shallow_directories.errors());
         for (index, pattern) in config.health.tailwind_ignore_patterns.iter().enumerate() {
             if let Err(error) = regex::Regex::new(pattern) {
                 health_errors.push(format!(
@@ -1449,27 +1502,20 @@ impl FallowConfig {
             }
         }
         if !health_errors.is_empty() {
-            return Err(miette::miette!(
-                "invalid config:\n  - {}",
-                health_errors.join("\n  - ")
-            ));
+            return Err(invalid(health_errors));
         }
         let allow_errors = config.circular_dependencies.allow_errors();
         if !allow_errors.is_empty() {
-            return Err(miette::miette!(
-                "invalid config:\n  - {}",
-                allow_errors.join("\n  - ")
-            ));
+            return Err(invalid(allow_errors));
         }
         if let Some(pattern) = &config.unused_component_props.ignore_pattern
             && let Err(e) = regex::Regex::new(pattern)
         {
-            return Err(miette::miette!(
-                "invalid config:\n  - unusedComponentProps.ignorePattern is not a valid regex: {e}"
-            ));
+            return Err(invalid(vec![format!(
+                "unusedComponentProps.ignorePattern is not a valid regex: {e}"
+            )]));
         }
-
-        Ok(config)
+        Ok(())
     }
 
     /// Validate all user-supplied glob patterns and directory paths in this config.
@@ -1524,6 +1570,82 @@ impl FallowConfig {
         }
     }
 
+    /// The config keys that name one file, with their values.
+    pub(super) fn file_path_keys(&self) -> [(Option<String>, &'static str); 5] {
+        let coverage = self
+            .health
+            .coverage
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
+        [
+            (self.codeowners.clone(), "codeowners"),
+            (coverage, "health.coverage"),
+            (
+                self.audit.dead_code_baseline.clone(),
+                "audit.deadCodeBaseline",
+            ),
+            (self.audit.health_baseline.clone(), "audit.healthBaseline"),
+            (self.audit.dupes_baseline.clone(), "audit.dupesBaseline"),
+        ]
+    }
+
+    /// Check that each config key that names one file resolves inside the
+    /// project scope base of `root` (see [`crate::project_scope_base`]). A
+    /// relative path is taken from `root`, so a config of a monorepo package
+    /// can name `../../.github/CODEOWNERS`. An absolute path is allowed too.
+    /// A key whose path leaves the scope base, by text or through a link,
+    /// is refused. A path that does not exist yet passes, so a later read
+    /// can report it as missing. When `root` does not resolve, each key that
+    /// is set is refused. CLI flags and environment variables that override
+    /// these keys are not checked here.
+    ///
+    /// # Errors
+    ///
+    /// Returns one message for each refused key. A message names the key and
+    /// its value, never a resolved path outside `root`.
+    pub fn check_file_path_keys_inside(&self, root: &Path) -> Result<(), Vec<String>> {
+        let canonical_root = dunce::canonicalize(root).ok();
+        let base = crate::project_scope_base(root);
+        let given_base = canonical_root.as_deref().map_or_else(
+            || base.clone(),
+            |canonical_root| crate::project_read::base_as_given(root, canonical_root, &base),
+        );
+        let errors: Vec<String> = self
+            .file_path_keys()
+            .into_iter()
+            .filter_map(|(value, field)| value.map(|value| (value, field)))
+            .filter(|(value, _)| {
+                canonical_root.as_deref().is_none_or(|canonical_root| {
+                    crate::project_read::project_path_entry(
+                        &base,
+                        &given_base,
+                        canonical_root,
+                        Path::new(value),
+                    ) == crate::project_read::ProjectEntry::Outside
+                })
+            })
+            .map(|(value, field)| {
+                if self.outside_keys.covers(field) {
+                    format!(
+                        "{field}: a value from a config file outside the project ({}) resolves \
+                         to a location outside the project scope base. The text of a file \
+                         outside the project is not shown",
+                        self.outside_keys.file_list()
+                    )
+                } else {
+                    format!(
+                        "{field}: '{value}' resolves to a location outside the project scope base"
+                    )
+                }
+            })
+            .collect();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     /// Validate the top-level filesystem and specifier glob fields plus the
     /// per-override and threshold-override file globs.
     fn validate_top_level_globs(
@@ -1569,6 +1691,11 @@ impl FallowConfig {
         validate_user_globs(&self.duplicates.ignore, "duplicates.ignore", errors);
         validate_user_globs(&self.similar_code.ignore, "similarCode.ignore", errors);
         validate_user_globs(&self.health.ignore, "health.ignore", errors);
+        validate_user_globs(
+            &self.health.shallow_directories.ignore,
+            "health.shallowDirectories.ignore",
+            errors,
+        );
         for override_entry in &self.health.threshold_overrides {
             validate_user_globs(
                 &override_entry.files,
@@ -1655,14 +1782,19 @@ impl FallowConfig {
 
     /// Find the config file path without loading it.
     /// Searches the same locations as `find_and_load`.
+    ///
+    /// A config link that `find_and_load` refuses gives `None`, and the
+    /// search stops there, as the load stops there with an error.
     #[must_use]
     pub fn find_config_path(start: &Path) -> Option<PathBuf> {
         let mut dir = start;
         loop {
             for name in CONFIG_NAMES {
                 let candidate = dir.join(name);
-                if candidate.exists() {
-                    return Some(candidate);
+                if entry_present(&candidate) {
+                    return check_discovered_config(dir, &candidate)
+                        .is_ok()
+                        .then_some(candidate);
                 }
             }
             if is_repo_root(dir) {
@@ -1696,7 +1828,8 @@ impl FallowConfig {
         loop {
             for (idx, name) in CONFIG_NAMES.iter().enumerate() {
                 let candidate = dir.join(name);
-                if candidate.exists() {
+                if entry_present(&candidate) {
+                    check_discovered_config(dir, &candidate)?;
                     warn_on_coexisting_configs(&candidate, &shadowed_config_names(dir, idx));
                     match Self::load_with_options(&candidate, options) {
                         Ok(config) => return Ok(Some((config, candidate))),
@@ -1803,3 +1936,7 @@ impl FallowConfig {
 #[cfg(test)]
 #[path = "parsing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "parsing_read_tests.rs"]
+mod read_tests;

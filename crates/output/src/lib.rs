@@ -62,6 +62,7 @@ mod health_mutation;
 mod health_report;
 mod health_runtime_coverage;
 mod health_scores;
+mod health_shallow_directories;
 mod health_targets;
 mod health_trends;
 mod health_vital_signs;
@@ -174,8 +175,7 @@ pub use ci_output::{
     ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
     ReviewGitlabDiffRefs, apply_path_prefix, command_title, github_check_conclusion,
     group_review_issues_by_path_line, is_file_scoped_rule, is_project_level_rule,
-    issues_from_codeclimate, issues_from_codeclimate_issues, markdown_code_span,
-    markdown_table_code_span, markdown_table_text, pr_verdict_title, render_pr_comment,
+    issues_from_codeclimate, issues_from_codeclimate_issues, pr_verdict_title, render_pr_comment,
     render_pr_comment_with_verdict, render_review_comment_for_group, render_review_envelope,
     render_review_envelope_with_conclusion, render_scoped_review_envelope,
     render_scoped_review_envelope_with_conclusion, summary_label,
@@ -304,6 +304,10 @@ pub use health_scores::{
     ThresholdOverrideStatus, ThresholdSource, compute_finding_severity, letter_grade,
     summarize_coverage_source_consistency,
 };
+pub use health_shallow_directories::{
+    ShallowDirectoriesReport, ShallowDirectoryAction, ShallowDirectoryActionType,
+    ShallowDirectoryFinding, ShallowDirectoryItem, ShallowDirectoryItemKind,
+};
 pub use health_targets::{
     CloneSiblingEvidence, CoChangePartnerEvidence, Confidence, ContributingFactor,
     DirectCallerEvidence, DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction,
@@ -348,7 +352,10 @@ pub use list_envelopes::{
     ListBoundariesOutput, ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspaceInfo,
     WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
 };
-pub use markdown_prose::{markdown_table_prose, unwrap_code_spans};
+pub use markdown_prose::{
+    markdown_code_span, markdown_table_code_span, markdown_table_prose, markdown_table_text,
+    unwrap_code_spans,
+};
 pub use mutation::{
     DUPLICATE_TEST_IDS_CODE, MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION,
     MUTATION_SCHEMA_VERSION, MUTATION_TASKS_SCHEMA_VERSION, MutantAttempt, MutantChange,
@@ -427,7 +434,7 @@ pub use root_envelopes::{
     AUDIT_SCHEMA_VERSION, AuditCommand, AuditOutput, COMBINED_SCHEMA_VERSION, CombinedMeta,
     CombinedOutput, FallowOutput, SkipReasonName, SkippedAnalysis, SkippedAnalysisName,
     attach_telemetry_meta, serialize_audit_json_output, serialize_combined_json_output,
-    serialize_json_root_output, serialize_named_json_output,
+    serialize_named_json_output,
 };
 pub use sarif::{
     GHAS_SARIF_FINGERPRINT_KEY, SARIF_CATEGORY_AUDIT_DEAD_CODE, SARIF_CATEGORY_AUDIT_DIFF_RISK,

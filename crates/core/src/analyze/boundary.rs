@@ -40,7 +40,7 @@ pub fn find_boundary_violations(
     };
     (ctx.public_files, ctx.public_file_ids) = collect_public_files(&mut zone_cache, &ctx);
 
-    for node in &graph.modules {
+    for node in graph.modules() {
         collect_node_boundary_violations(&mut violations, node, &mut zone_cache, &ctx);
     }
 
@@ -80,7 +80,7 @@ fn collect_public_files(
     if paths.is_empty() {
         return (paths, files);
     }
-    for node in &ctx.graph.modules {
+    for node in ctx.graph.modules() {
         if let Some(zone) = classify_boundary_zone(node.file_id, zone_cache, ctx)
             && let Some(zone_paths) = paths.get_mut(&zone)
             && relative_path(node.file_id, ctx)
@@ -97,7 +97,7 @@ fn collect_public_files(
 }
 
 fn relative_path(file_id: FileId, ctx: &BoundaryContext<'_>) -> Option<String> {
-    ctx.graph.modules[file_id.0 as usize]
+    ctx.graph.modules()[file_id.0 as usize]
         .path
         .strip_prefix(&ctx.config.root)
         .ok()
@@ -288,7 +288,7 @@ fn resolve_chain_origin(
                     type_only,
                 });
             };
-            let hop_type_only = ctx.graph.modules[current.0 as usize]
+            let hop_type_only = ctx.graph.modules()[current.0 as usize]
                 .re_exports
                 .iter()
                 .any(|re| {
@@ -336,7 +336,7 @@ fn next_chain_hop(
     ctx: &BoundaryContext<'_>,
 ) -> Option<ChainHop> {
     let expected = EffectiveExportResolution::Unique(binding);
-    ctx.graph.modules[current.0 as usize]
+    ctx.graph.modules()[current.0 as usize]
         .re_exports
         .iter()
         .filter(|re| namespace == ExportNamespace::Type || !re.is_type_only)
@@ -429,7 +429,7 @@ fn push_boundary_violation(
         return;
     }
 
-    let target_node = &ctx.graph.modules[edge.target_id.0 as usize];
+    let target_node = &ctx.graph.modules()[edge.target_id.0 as usize];
     let public_files = match reason {
         BoundaryViolationReason::InternalFile => {
             ctx.public_files.get(&to_zone).cloned().unwrap_or_default()
@@ -446,7 +446,7 @@ fn push_boundary_violation(
         col,
         via_path: edge
             .via
-            .map(|via| ctx.graph.modules[via.0 as usize].path.clone()),
+            .map(|via| ctx.graph.modules()[via.0 as usize].path.clone()),
         reason,
         public_files,
     });
@@ -473,8 +473,8 @@ fn is_boundary_import_allowed(
             "boundary type-only allowed: '{}' -> '{}' ({} -> {})",
             from_zone,
             to_zone,
-            ctx.graph.modules[from.0 as usize].path.display(),
-            ctx.graph.modules[target_id.0 as usize].path.display()
+            ctx.graph.modules()[from.0 as usize].path.display(),
+            ctx.graph.modules()[target_id.0 as usize].path.display()
         );
         return true;
     }

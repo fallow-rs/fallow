@@ -23,16 +23,6 @@ pub fn refusal_message(path: &str, link: &str) -> String {
     format!("Refusing to change {path}: {link} {OUTSIDE_LINK}; {OUTSIDE_LINK_REMEDY}.")
 }
 
-/// The first entry below `root`, up to and including `path`, that is a
-/// symlink whose resolved target is outside the canonical `root`. A dangling
-/// link also counts, because its target can appear outside the root later.
-/// A path outside `root`, one with a `..` or `.` component, or a root that
-/// does not resolve returns `path` itself. A missing entry ends the walk,
-/// because nothing below it exists yet.
-pub fn symlinked_component(root: &Path, path: &Path) -> Option<PathBuf> {
-    fallow_types::path_guard::outside_link(root, path)
-}
-
 /// A planned file and the first symlink on the way to it that resolves
 /// outside the project root.
 #[derive(Debug, PartialEq, Eq)]
@@ -89,7 +79,7 @@ impl Plan {
             paths.push(&gitignore);
         }
         paths.into_iter().find_map(|path| {
-            symlinked_component(opts.root, path).map(|link| SymlinkedTarget {
+            fallow_types::path_guard::outside_link(opts.root, path).map(|link| SymlinkedTarget {
                 path: path.to_path_buf(),
                 link,
             })
@@ -153,7 +143,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn symlinked_component_allows_links_that_resolve_inside_the_root() {
+    fn outside_link_allows_links_that_resolve_inside_the_root() {
         use std::os::unix::fs::symlink;
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -163,16 +153,22 @@ mod tests {
         std::fs::create_dir_all(root.join(".claude")).unwrap();
         symlink("../.agents/skills", root.join(".claude/skills")).unwrap();
 
-        assert_eq!(symlinked_component(root, &root.join("CLAUDE.md")), None);
         assert_eq!(
-            symlinked_component(root, &root.join(".claude/skills/fallow/SKILL.md")),
+            fallow_types::path_guard::outside_link(root, &root.join("CLAUDE.md")),
+            None
+        );
+        assert_eq!(
+            fallow_types::path_guard::outside_link(
+                root,
+                &root.join(".claude/skills/fallow/SKILL.md")
+            ),
             None
         );
     }
 
     #[cfg(unix)]
     #[test]
-    fn symlinked_component_refuses_links_that_resolve_outside_or_dangle() {
+    fn outside_link_refuses_links_that_resolve_outside_or_dangle() {
         use std::os::unix::fs::symlink;
         let tmp = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
@@ -185,25 +181,34 @@ mod tests {
 
         for name in [".mcp.json", "AGENTS.md", "chain.json"] {
             assert_eq!(
-                symlinked_component(root, &root.join(name)),
+                fallow_types::path_guard::outside_link(root, &root.join(name)),
                 Some(root.join(name))
             );
         }
         assert_eq!(
-            symlinked_component(root, &root.join(".codex/hooks.json")),
+            fallow_types::path_guard::outside_link(root, &root.join(".codex/hooks.json")),
             Some(root.join(".codex"))
         );
     }
 
     #[test]
-    fn symlinked_component_rejects_paths_that_leave_the_root() {
+    fn outside_link_rejects_paths_that_leave_the_root() {
         let tmp = tempfile::tempdir().unwrap();
         let escape = tmp.path().join("..").join("x");
-        assert_eq!(symlinked_component(tmp.path(), &escape), Some(escape));
-        let elsewhere = PathBuf::from("/elsewhere/.mcp.json");
-        assert_eq!(symlinked_component(tmp.path(), &elsewhere), Some(elsewhere));
         assert_eq!(
-            symlinked_component(tmp.path(), &tmp.path().join(".claude/settings.json")),
+            fallow_types::path_guard::outside_link(tmp.path(), &escape),
+            Some(escape)
+        );
+        let elsewhere = PathBuf::from("/elsewhere/.mcp.json");
+        assert_eq!(
+            fallow_types::path_guard::outside_link(tmp.path(), &elsewhere),
+            Some(elsewhere)
+        );
+        assert_eq!(
+            fallow_types::path_guard::outside_link(
+                tmp.path(),
+                &tmp.path().join(".claude/settings.json")
+            ),
             None
         );
     }

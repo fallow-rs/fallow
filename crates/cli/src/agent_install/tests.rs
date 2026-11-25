@@ -584,7 +584,7 @@ fn codex_toml_merge_keeps_comments_and_other_tables() {
         source: mcp::McpSource::NodeModules,
     };
     assert_eq!(
-        mcp::merge_codex(&path, Some(&command), false, false).unwrap(),
+        mcp::merge_codex(&path, Some(&command), false, false, false).unwrap(),
         mcp::FileOutcome::Changed
     );
     let text = std::fs::read_to_string(&path).unwrap();
@@ -597,11 +597,11 @@ fn codex_toml_merge_keeps_comments_and_other_tables() {
     );
     assert!(!text.contains("\n[mcp_servers]\n"));
     assert_eq!(
-        mcp::merge_codex(&path, Some(&command), false, false).unwrap(),
+        mcp::merge_codex(&path, Some(&command), false, false, false).unwrap(),
         mcp::FileOutcome::Unchanged
     );
     assert_eq!(
-        mcp::merge_codex(&path, None, false, false).unwrap(),
+        mcp::merge_codex(&path, None, false, false, false).unwrap(),
         mcp::FileOutcome::Changed
     );
     let text = std::fs::read_to_string(&path).unwrap();
@@ -625,7 +625,7 @@ fn codex_toml_merge_keeps_siblings_in_an_inline_servers_table() {
     let command = npx_fallow_command();
 
     assert_eq!(
-        mcp::merge_codex(&path, Some(&command), false, false).unwrap(),
+        mcp::merge_codex(&path, Some(&command), false, false, false).unwrap(),
         mcp::FileOutcome::Changed
     );
     let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
@@ -635,12 +635,12 @@ fn codex_toml_merge_keeps_siblings_in_an_inline_servers_table() {
         Some("npx")
     );
     assert_eq!(
-        mcp::merge_codex(&path, Some(&command), false, false).unwrap(),
+        mcp::merge_codex(&path, Some(&command), false, false, false).unwrap(),
         mcp::FileOutcome::Unchanged
     );
 
     assert_eq!(
-        mcp::merge_codex(&path, None, false, false).unwrap(),
+        mcp::merge_codex(&path, None, false, false, false).unwrap(),
         mcp::FileOutcome::Changed
     );
     let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
@@ -656,13 +656,13 @@ fn codex_toml_merge_refuses_a_servers_value_that_is_not_a_table() {
     std::fs::write(&path, original).unwrap();
 
     assert_eq!(
-        mcp::merge_codex(&path, Some(&npx_fallow_command()), false, false).unwrap(),
+        mcp::merge_codex(&path, Some(&npx_fallow_command()), false, false, false).unwrap(),
         mcp::FileOutcome::ServersNotATable
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 
     assert_eq!(
-        mcp::merge_codex(&path, Some(&npx_fallow_command()), false, true).unwrap(),
+        mcp::merge_codex(&path, Some(&npx_fallow_command()), false, false, true).unwrap(),
         mcp::FileOutcome::Changed
     );
     let doc: toml_edit::DocumentMut = std::fs::read_to_string(&path).unwrap().parse().unwrap();
@@ -683,7 +683,7 @@ fn codex_toml_uninstall_removes_a_file_whose_inline_table_held_only_fallow() {
     .unwrap();
 
     assert_eq!(
-        mcp::merge_codex(&path, None, false, false).unwrap(),
+        mcp::merge_codex(&path, None, false, false, false).unwrap(),
         mcp::FileOutcome::Deleted
     );
     assert!(!path.exists());
@@ -727,7 +727,12 @@ fn dry_run_touches_nothing() {
         args: Vec::new(),
         source: mcp::McpSource::Path,
     };
-    steps.extend(mcp::install(&ctx, &[Harness::Claude], Some(&command)));
+    steps.extend(mcp::install(
+        &ctx,
+        &[Harness::Claude],
+        Some(&command),
+        false,
+    ));
     steps.extend(hooks::install(&ctx, &[Harness::Claude]));
     assert!(
         steps.iter().any(|s| s.status == StepStatus::Written),
@@ -756,7 +761,7 @@ fn approval_is_opt_in_and_lands_in_local_settings() {
         source: mcp::McpSource::Path,
     };
     let without = ctx(dir.path(), Mode::Install);
-    let steps = mcp::install(&without, &[Harness::Claude], Some(&command));
+    let steps = mcp::install(&without, &[Harness::Claude], Some(&command), false);
     let approval = steps
         .iter()
         .find(|s| s.path.as_deref() == Some(".claude/settings.local.json"))
@@ -769,7 +774,7 @@ fn approval_is_opt_in_and_lands_in_local_settings() {
         approve: true,
         ..without
     };
-    let steps = mcp::install(&with, &[Harness::Claude], Some(&command));
+    let steps = mcp::install(&with, &[Harness::Claude], Some(&command), false);
     let approval = steps
         .iter()
         .find(|s| s.path.as_deref() == Some(".claude/settings.local.json"))
@@ -787,7 +792,7 @@ fn approval_is_opt_in_and_lands_in_local_settings() {
         "{\n  \"disabledMcpjsonServers\": [\"fallow\"]\n}\n",
     )
     .unwrap();
-    let steps = mcp::install(&with, &[Harness::Claude], Some(&command));
+    let steps = mcp::install(&with, &[Harness::Claude], Some(&command), false);
     let approval = steps
         .iter()
         .find(|s| s.path.as_deref() == Some(".claude/settings.local.json"))
@@ -1018,4 +1023,192 @@ fn resolve_root_prefers_git_toplevel_unless_explicit() {
     std::fs::create_dir_all(&nested).unwrap();
     assert_eq!(resolve_root(&nested, false), root);
     assert_eq!(resolve_root(&nested, true), nested);
+}
+
+fn write_stale_agents_skill(base: &Path, name: &str) -> std::path::PathBuf {
+    let skill_dir = base.join(".agents/skills").join(name);
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        format!(
+            "---\nname: {name}\n---\n<!-- {MARKER_PREFIX} {MARKER_VERSION} skill=stub version=0.0.1-old -->\nold copy\n"
+        ),
+    )
+    .unwrap();
+    skill_dir
+}
+
+fn assert_refreshed(skill_dir: &Path) {
+    assert_eq!(
+        skill::inspect(skill_dir),
+        skill::SkillState::Managed {
+            flavor: skill::Flavor::Stub,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    );
+}
+
+#[test]
+fn claude_install_refreshes_stale_managed_agents_skill_in_project_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let stale = write_stale_agents_skill(dir.path(), "fallow");
+    let steps = skill::install(&ctx(dir.path(), Mode::Install), &[Harness::Claude]);
+    assert_eq!(
+        step_status(&steps, ".agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    assert_refreshed(&stale);
+    assert!(
+        !dir.path().join(".agents/skills/fallow-setup").exists(),
+        "an absent `.agents` skill must not be created for Claude alone: {steps:?}"
+    );
+}
+
+#[test]
+fn claude_install_refreshes_stale_managed_agents_skill_in_user_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let stale = write_stale_agents_skill(home.path(), "fallow");
+    let user = |dry_run: bool| Ctx {
+        home: Some(home.path().to_path_buf()),
+        user: true,
+        dry_run,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let planned = skill::install(&user(true), &[Harness::Claude]);
+    assert_eq!(
+        step_status(&planned, "~/.agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    assert!(
+        std::fs::read_to_string(stale.join("SKILL.md"))
+            .unwrap()
+            .contains("0.0.1-old"),
+        "a dry run must not write"
+    );
+    let steps = skill::install(&user(false), &[Harness::Claude]);
+    assert_eq!(
+        step_status(&steps, "~/.agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    assert_refreshed(&stale);
+    assert!(!dir.path().join(".agents").exists());
+}
+
+#[test]
+fn claude_install_creates_no_agents_skill_when_none_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let steps = skill::install(&ctx(dir.path(), Mode::Install), &[Harness::Claude]);
+    assert!(
+        steps
+            .iter()
+            .all(|s| !s.path.as_deref().unwrap_or("").starts_with(".agents")),
+        "{steps:?}"
+    );
+    assert!(!dir.path().join(".agents").exists());
+}
+
+#[test]
+fn claude_install_leaves_unmarked_agents_skill_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    ship_skill(dir.path(), "fallow");
+    let skill_dir = dir.path().join(".agents/skills/fallow");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let own = "---\nname: fallow\n---\nmaintainer skill\n";
+    std::fs::write(skill_dir.join("SKILL.md"), own).unwrap();
+    let forced = Ctx {
+        force: true,
+        ..ctx(dir.path(), Mode::Install)
+    };
+    let steps = skill::install(&forced, &[Harness::Claude]);
+    assert!(
+        steps
+            .iter()
+            .all(|s| s.path.as_deref() != Some(".agents/skills/fallow")),
+        "{steps:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
+        own
+    );
+}
+
+#[test]
+fn mcp_entry_turns_server_skills_off_when_skills_are_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx(dir.path(), Mode::Install);
+    let command = npx_fallow_command();
+
+    mcp::install(
+        &ctx,
+        &[Harness::Claude, Harness::Cursor],
+        Some(&command),
+        true,
+    );
+    for file in [".mcp.json", ".cursor/mcp.json"] {
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join(file)).unwrap()).unwrap();
+        assert_eq!(
+            value["mcpServers"]["fallow"]["env"],
+            serde_json::json!({ "FALLOW_MCP_SKILLS": "off" }),
+            "{file}"
+        );
+    }
+
+    mcp::install(&ctx, &[Harness::Claude], Some(&command), false);
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join(".mcp.json")).unwrap())
+            .unwrap();
+    assert!(
+        value["mcpServers"]["fallow"].get("env").is_none(),
+        "the entry with the switch stays fallow-managed and is replaced without --force"
+    );
+}
+
+#[test]
+fn mcp_entry_with_another_env_stays_foreign() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".mcp.json");
+    let foreign = serde_json::json!({
+        "mcpServers": { "fallow": {
+            "command": "npx",
+            "args": ["--no", "fallow-mcp"],
+            "env": { "FALLOW_MCP_SKILLS": "off", "FALLOW_TIMEOUT_SECS": "600" }
+        } }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&foreign).unwrap()).unwrap();
+    let entry = serde_json::json!({ "command": "npx", "args": ["--no", "fallow-mcp"] });
+    assert_eq!(
+        mcp::merge_json_server(&path, "mcpServers", Some(&entry), false, false).unwrap(),
+        mcp::FileOutcome::Foreign
+    );
+}
+
+#[test]
+fn codex_entry_turns_server_skills_off_and_stays_managed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let command = npx_fallow_command();
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&command), true, false, false).unwrap(),
+        mcp::FileOutcome::Changed
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("env = { FALLOW_MCP_SKILLS = \"off\" }"),
+        "{text}"
+    );
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&command), true, false, false).unwrap(),
+        mcp::FileOutcome::Unchanged
+    );
+    assert_eq!(
+        mcp::merge_codex(&path, Some(&command), false, false, false).unwrap(),
+        mcp::FileOutcome::Changed,
+        "the entry with the switch is fallow-managed"
+    );
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("env"));
 }

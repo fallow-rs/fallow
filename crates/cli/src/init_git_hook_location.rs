@@ -73,12 +73,6 @@ fn repository_folder_of(root: &Path, dir: &Path) -> Option<PathBuf> {
         .then_some(top)
 }
 
-/// `path` relative to `root` when it is below the root, else in full.
-pub fn display_hook_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
-}
-
 /// Write a hook file and set the executable permission on Unix.
 pub fn write_hook(path: &Path, content: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {

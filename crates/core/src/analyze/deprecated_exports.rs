@@ -31,21 +31,21 @@ pub fn find_deprecated_exports_in_use(
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<DeprecatedExportInUse> {
     if !graph
-        .modules
+        .modules()
         .iter()
         .any(|module| module.exports.iter().any(|export| export.deprecated))
     {
         return Vec::new();
     }
     let file_paths: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
+        .modules()
         .iter()
         .map(|m| (m.file_id, m.path.as_path()))
         .collect();
     let re_exporters = re_exporters_by_source(graph);
 
     graph
-        .modules
+        .modules()
         .par_iter()
         .filter(|module| module.exports.iter().any(|export| export.deprecated))
         .flat_map_iter(|module| {
@@ -77,7 +77,7 @@ type ReExporters<'a> = FxHashMap<FileId, Vec<(FileId, &'a ReExportEdge)>>;
 
 fn re_exporters_by_source(graph: &ModuleGraph) -> ReExporters<'_> {
     let mut by_source: ReExporters<'_> = FxHashMap::default();
-    for module in &graph.modules {
+    for module in graph.modules() {
         for edge in &module.re_exports {
             by_source
                 .entry(edge.source_file)
@@ -153,7 +153,7 @@ fn reachable_consumers(
         .physical_references()
         .filter(|reference| {
             graph
-                .modules
+                .modules()
                 .get(reference.from_file.0 as usize)
                 .is_some_and(ModuleNode::is_reachable)
         })
@@ -225,7 +225,7 @@ fn re_export_chain_reaches_entry_point(
                 continue;
             };
             if graph
-                .modules
+                .modules()
                 .get(barrel.0 as usize)
                 .is_some_and(ModuleNode::is_entry_point)
             {
@@ -253,7 +253,7 @@ fn with_re_export_span(
     {
         return reference;
     }
-    let Some(barrel) = graph.modules.get(reference.from_file.0 as usize) else {
+    let Some(barrel) = graph.module(reference.from_file) else {
         return reference;
     };
     let spanned = || {

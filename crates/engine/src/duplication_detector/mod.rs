@@ -167,7 +167,7 @@ fn tokenize_corpus_for_duplicates(
     let token_cache = cache_root.map(|cache_root| {
         TokenCache::load(
             cache_root,
-            fallow_types::path_guard::cache_write_base(input.root, cache_root),
+            &fallow_types::path_guard::cache_write_base(input.root, cache_root),
         )
     });
 

@@ -1237,6 +1237,97 @@ test("release runs Zed verification on macOS and Windows without credentials", (
   assert.match(job, /cargo fmt --check --manifest-path editors\/zed\/Cargo.toml/);
 });
 
+/** The binary names that the unix archive step of the release build packs. */
+const archivedBinaries = (build) => {
+  const step = workflowSteps(build).find((s) => s.startsWith("name: Package binaries (unix)"));
+  assert.ok(step, "missing step Package binaries (unix)");
+  const tar = step.match(/tar czf "[^"]+" (.+)$/mu);
+  assert.ok(tar, "the archive step runs no tar command");
+  const entry = matrixEntry(build, "x86_64-unknown-linux-gnu");
+  return tar[1].split(/\s+/u).map((word) => {
+    const variable = word.match(/^"\$(\w+)"$/u);
+    if (!variable) return word;
+    const key = step.match(new RegExp(`${variable[1]}: \\$\\{\\{ matrix\\.(\\w+) \\}\\}`, "u"));
+    assert.ok(key, `the archive step does not set ${variable[1]} from the matrix`);
+    const value = entry.match(new RegExp(`^\\s*${key[1]}: (\\S+)$`, "mu"));
+    assert.ok(value, `the build matrix has no ${key[1]}`);
+    return value[1];
+  });
+};
+
+/** The manifest directory and the package name of the Cargo package with bin `name`. */
+const packageOfBinary = (name) => {
+  const manifests = [
+    ...readdirSync("crates").map((dir) => `crates/${dir}`),
+    "tools/similar-code-sidecar",
+  ].filter((dir) => existsSync(`${dir}/Cargo.toml`));
+  for (const dir of manifests) {
+    const manifest = readFileSync(`${dir}/Cargo.toml`, "utf8");
+    if (!manifest.includes(`[[bin]]\nname = "${name}"\n`)) continue;
+    return { dir, name: manifest.match(/^\[package\]\nname = "([^"]+)"/mu)[1] };
+  }
+  assert.fail(`no Cargo package has the bin ${name}`);
+};
+
+test("release SBOMs cover every binary of the target archive and only its crates", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const sbom = indentedBlock(workflow, "sbom", 2);
+  const script = stepScript(sbom, "Generate SBOM");
+
+  assert.match(sbom, /permissions:\n\s+contents: read/);
+  assert.match(sbom, /actions\/setup-node@[0-9a-f]{40}/);
+  assert.match(script, /^set -euo pipefail\n/u);
+
+  const shipped = archivedBinaries(indentedBlock(workflow, "build", 2));
+  assert.deepEqual(
+    shipped.toSorted(),
+    ["fallow", "fallow-lsp", "fallow-mcp", "fallow-similar-code"],
+    "the archive ships these binaries",
+  );
+  const bins = Array.from(script.matchAll(/--bin (\S+)/gu), (match) => match[1]);
+  assert.deepEqual(bins.toSorted(), shipped.toSorted(), "the SBOM keeps the shipped bins only");
+
+  const trees = script.match(/cargo tree [^>]+/gu) ?? [];
+  for (const tree of trees) {
+    assert.match(tree, /--target "\$FALLOW_TARGET" -e normal,build/u);
+    assert.match(tree, /--locked/u);
+  }
+  const sidecar = script.match(/^sidecar=(\S+)$/mu)?.[1];
+  for (const binary of shipped) {
+    const pkg = packageOfBinary(binary);
+    assert.ok(
+      script.includes(`"${pkg.dir}/fallow-\${FALLOW_TARGET}.cdx.json"`),
+      `the merge reads the SBOM of ${pkg.name}`,
+    );
+    if (sidecar === `${pkg.dir}/Cargo.toml`) {
+      assert.ok(
+        trees.some((tree) => tree.includes('--manifest-path "$sidecar"')),
+        `a cargo tree covers ${pkg.name}`,
+      );
+      assert.match(
+        script,
+        /for manifest in [^\n]*"\$sidecar"; do\n\s+cargo cyclonedx --manifest-path "\$manifest"/u,
+      );
+    } else {
+      assert.ok(
+        trees.some((tree) => new RegExp(`-p ${pkg.name}(?![\\w-])`, "u").test(tree)),
+        `a cargo tree covers ${pkg.name}`,
+      );
+    }
+  }
+
+  // The merge writes the file that the job uploads, and every tree feeds it.
+  const out = '"sbom/fallow-${FALLOW_TARGET}.cdx.json"';
+  assert.match(script, /mkdir sbom\nnode \.github\/scripts\/filter-sbom\.mjs/u);
+  assert.ok(script.includes(`--out ${out}`), "the merge writes the uploaded SBOM");
+  assert.ok(sbom.includes("path: sbom/fallow-${{ matrix.target }}.cdx.json"));
+  const treeFiles = Array.from(script.matchAll(/> "(\$RUNNER_TEMP\/[^"]+)"/gu), (m) => m[1]);
+  assert.equal(treeFiles.length, trees.length);
+  for (const file of treeFiles) {
+    assert.ok(script.includes(`--tree "${file}"`), `the merge reads ${file}`);
+  }
+});
+
 test("release publication waits for the aggregate verification gate", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const context = indentedBlock(workflow, "release-context", 2);
@@ -2840,41 +2931,96 @@ test("bench.yml measures main nightly and a push only for the release commit", a
   );
   assert.deepEqual(triggers, ["pull_request", "push", "schedule", "workflow_dispatch"]);
 
-  const gate = indentedBlock(benchmark, "benchmark-harness", 2)
-    .match(/^    if: >-\n((?: {6}.+\n)+)/mu)[1]
-    .replace(/\s+/gu, " ")
-    .trim();
-  const expression = gate
-    .replaceAll("github.event.pull_request.labels.*.name", "__labels")
-    .replaceAll("startsWith(", "__startsWith(")
-    .replaceAll("contains(", "__contains(");
-  const runs = (event_name, { labels = [], ...event } = {}) =>
-    runInNewContext(expression, {
-      __labels: labels,
-      __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
-      __contains: (list, value) => list.includes(value),
-      github: { event_name, event: { head_commit: {}, label: {}, ...event } },
-    });
+  // Evaluate a GitHub expression of bench.yml for one event. A job condition
+  // without a label of its own reads `github.event.label` as an empty object.
+  const evaluate = (
+    source,
+    event_name,
+    { labels = [], walltime = false, fork = false, message = "", ...event } = {},
+  ) =>
+    runInNewContext(
+      source
+        .replace(/\s+/gu, " ")
+        .trim()
+        .replaceAll("github.event.pull_request.labels.*.name", "__labels")
+        .replaceAll("startsWith(", "__startsWith(")
+        .replaceAll("contains(", "__contains("),
+      {
+        __labels: labels,
+        __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
+        __contains: (list, value) => list.includes(value),
+        github: {
+          event_name,
+          ref: "refs/pull/1/merge",
+          repository: "fallow-rs/fallow",
+          run_id: 42,
+          event: {
+            head_commit: { message },
+            label: {},
+            pull_request: {
+              head: { repo: { full_name: fork ? "contributor/fallow" : "fallow-rs/fallow" } },
+            },
+            ...event,
+          },
+        },
+        inputs: { walltime },
+      },
+    );
+  const jobIf = (name) => {
+    const job = indentedBlock(benchmark, name, 2);
+    const condition =
+      job.match(/^    if: >-\n((?: {6}.+\n)+)/mu)?.[1] ?? job.match(/^    if: (.+)$/mu)?.[1];
+    assert.ok(condition, `${name} has an if`);
+    return condition;
+  };
+  const labeled = (name, options = {}) => ({ action: "labeled", label: { name }, ...options });
+  const release = { message: "chore: release v3.49.0" };
+
+  const runs = (...args) => evaluate(jobIf("benchmark-harness"), ...args);
   assert.equal(runs("schedule"), true);
   assert.equal(runs("workflow_dispatch"), true);
-  assert.equal(runs("push", { head_commit: { message: "chore: release v3.44.0" } }), true);
-  assert.equal(runs("push", { head_commit: { message: "fix: something" } }), false);
+  assert.equal(runs("push", release), true);
+  assert.equal(runs("push", { message: "fix: something" }), false);
   assert.equal(runs("pull_request", { action: "synchronize" }), false);
   assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:perf"] }), true);
   // A label event for another label must not start a second ci:perf run.
+  assert.equal(runs("pull_request", labeled("other", { labels: ["ci:perf"] })), false);
+  assert.equal(runs("pull_request", labeled("ci:perf", { labels: ["ci:perf"] })), true);
+  // The "ci:walltime" label starts one run, with or without "ci:perf", but
+  // not for a fork and not again on a later push.
+  for (const labels of [["ci:walltime"], ["ci:perf", "ci:walltime"]]) {
+    assert.equal(runs("pull_request", labeled("ci:walltime", { labels })), true, String(labels));
+  }
   assert.equal(
-    runs("pull_request", { action: "labeled", label: { name: "other" }, labels: ["ci:perf"] }),
+    runs("pull_request", labeled("ci:walltime", { labels: ["ci:walltime"], fork: true })),
     false,
   );
-  assert.equal(
-    runs("pull_request", { action: "labeled", label: { name: "ci:perf" }, labels: ["ci:perf"] }),
-    true,
-  );
-  // The release push must not wait on a release build of the CLI corpus.
-  assert.match(
-    indentedBlock(benchmark, "cli-instructions", 2),
-    /^    if: github\.event_name != 'push'$/mu,
-  );
+  assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:walltime"] }), false);
+
+  // The run of the "ci:walltime" label skips the simulation jobs. The fast
+  // shards need determine-matrix. The release push must not wait on a release
+  // build of the CLI corpus.
+  assert.match(indentedBlock(benchmark, "benchmark", 2), /^      - determine-matrix$/mu);
+  const simulation = {
+    "determine-matrix": { release: true, perf: true, walltime: false },
+    "cli-instructions": { release: false, perf: true, walltime: false },
+    "benchmark-full": { release: true, perf: false, walltime: false },
+  };
+  for (const [name, expected] of Object.entries(simulation)) {
+    const condition = jobIf(name);
+    assert.equal(evaluate(condition, "schedule"), true, `${name} nightly`);
+    assert.equal(evaluate(condition, "push", release), expected.release, `${name} release`);
+    assert.equal(
+      evaluate(condition, "pull_request", labeled("ci:perf", { labels: ["ci:perf"] })),
+      expected.perf,
+      `${name} ci:perf`,
+    );
+    assert.equal(
+      evaluate(condition, "pull_request", labeled("ci:walltime", { labels: ["ci:perf"] })),
+      expected.walltime,
+      `${name} ci:walltime`,
+    );
+  }
   for (const trigger of ["pull_request", "push"]) {
     assert.match(
       indentedBlock(indentedBlock(benchmark, "on", 0), trigger, 2),
@@ -2882,15 +3028,49 @@ test("bench.yml measures main nightly and a push only for the release commit", a
       trigger,
     );
   }
+  // The label must start a run for a change of the type-aware companion alone.
+  assert.match(
+    indentedBlock(indentedBlock(benchmark, "on", 0), "pull_request", 2),
+    /- 'tools\/type-aware-sidecar\/\*\*'/u,
+  );
 
-  // The organization shares 600 free macro runner minutes per month, so the
-  // walltime jobs run only at night and on demand. The release build runs on
-  // a free GitHub runner with the Ubuntu release of the macro runner image.
+  // A ci:walltime run gets a group of its own: it does not cancel a ci:perf
+  // run, and a later push does not cancel it.
+  const group = indentedBlock(benchmark, "concurrency", 0).match(
+    /^ {2}group: "bench-\$\{\{ (.+) \}\}"$/mu,
+  )?.[1];
+  assert.ok(group, "bench.yml has a concurrency group");
+  const refGroup = "refs/pull/1/merge";
+  assert.equal(evaluate(group, "pull_request", { action: "synchronize" }), refGroup);
+  assert.equal(evaluate(group, "pull_request", labeled("ci:perf")), refGroup);
+  assert.equal(evaluate(group, "pull_request", labeled("ci:walltime")), 42);
+  assert.equal(evaluate(group, "push", release), 42);
+
+  // The walltime jobs run at night, on the release commit, on a dispatch with
+  // the walltime input and on the "labeled" event of "ci:walltime" for a
+  // branch of this repository. A plain dispatch, such as the one of
+  // scripts/verify-release-ci.mjs --dispatch-missing, must not wait on a macro
+  // runner. A push to a pull request must not run them again. The release
+  // build runs on a free GitHub runner with the Ubuntu release of the macro
+  // runner image.
   for (const name of ["walltime-build-cli", "type-aware"]) {
-    assert.match(
-      indentedBlock(benchmark, name, 2),
-      /^    if: github\.event_name == 'schedule' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.walltime\)$/mu,
-      name,
+    const runsWalltime = (...args) => evaluate(jobIf(name), ...args);
+    assert.equal(runsWalltime("schedule"), true, `${name} nightly`);
+    assert.equal(runsWalltime("workflow_dispatch", { walltime: true }), true, `${name} input`);
+    assert.equal(runsWalltime("workflow_dispatch"), false, `${name} plain dispatch`);
+    assert.equal(runsWalltime("push", release), true, `${name} release`);
+    assert.equal(runsWalltime("push", { message: "fix: something" }), false, name);
+    assert.equal(runsWalltime("pull_request", labeled("ci:walltime")), true, `${name} label`);
+    assert.equal(
+      runsWalltime("pull_request", labeled("ci:walltime", { fork: true })),
+      false,
+      `${name} fork`,
+    );
+    assert.equal(runsWalltime("pull_request", labeled("ci:perf")), false, `${name} ci:perf`);
+    assert.equal(
+      runsWalltime("pull_request", { action: "synchronize", labels: ["ci:walltime"] }),
+      false,
+      `${name} push to a labeled pull request`,
     );
   }
   assert.match(

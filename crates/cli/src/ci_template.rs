@@ -1,5 +1,5 @@
 use crate::exit_codes::exit_invalid_input;
-use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
+use crate::setup_hooks::symlink_guard::refusal_message;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -90,7 +90,7 @@ fn outside_link(root: &Path) -> Option<(PathBuf, PathBuf)> {
     root.symlink_metadata().ok()?;
     GITLAB_FILES.iter().find_map(|file| {
         let path = root.join(file.path);
-        symlinked_component(root, &path).map(|link| (path, link))
+        fallow_types::path_guard::outside_link(root, &path).map(|link| (path, link))
     })
 }
 

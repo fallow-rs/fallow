@@ -21,9 +21,6 @@ use fallow_types::extract::{
     ordinary_whole_object_uses,
 };
 
-use super::predicates::{
-    is_angular_lifecycle_method, is_react_lifecycle_method, is_runtime_protocol_method,
-};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 mod cloudflare_runtime;
@@ -32,10 +29,16 @@ mod factory;
 mod fluent_chain;
 mod heritage;
 mod instance;
+mod lifecycle;
 mod member_probe;
 mod namespace;
 mod playwright;
 mod typed_property;
+
+use lifecycle::{
+    is_angular_lifecycle_method, is_react_class_static_property, is_react_lifecycle_method,
+    is_runtime_protocol_method,
+};
 
 use cloudflare_runtime::{
     build_cloudflare_runtime_subclass_handlers, is_cloudflare_runtime_handler,
@@ -978,7 +981,7 @@ impl MemberReportContext<'_, '_> {
     fn collect(&self) -> Vec<MemberScanBuckets> {
         self.input
             .graph
-            .modules
+            .modules()
             .par_iter()
             .map(|module| self.collect_module(module))
             .collect()
@@ -1513,7 +1516,7 @@ fn propagate_computed_enum_key_accesses(
     if used_property_names.is_empty() {
         return;
     }
-    for module in &graph.modules {
+    for module in graph.modules() {
         for export in &module.exports {
             for member in &export.members {
                 if matches!(
@@ -1723,7 +1726,8 @@ fn class_member_runtime_credit_applies(member: &MemberInfo, ctx: &MemberSkipCont
     );
     is_class_member_kind(member.kind)
         && (((is_react_lifecycle_method(&member.name)
-            || is_angular_lifecycle_method(&member.name))
+            || is_angular_lifecycle_method(&member.name)
+            || (member.is_static && is_react_class_static_property(&member.name)))
             && !semantic_framework_candidate)
             || is_runtime_protocol_method(&member.name)
             || member.pairs_with_symbol_dispose
@@ -1754,7 +1758,7 @@ fn record_seen_ignore_decorators(graph: &ModuleGraph, ignore_decorators: &Ignore
     if ignore_decorators.is_empty() {
         return;
     }
-    for module in &graph.modules {
+    for module in graph.modules() {
         for export in &module.exports {
             for member in &export.members {
                 for decorator in &member.decorator_names {
@@ -1796,7 +1800,7 @@ fn namespace_re_export_targets(graph: &ModuleGraph, key: &ExportKey) -> Vec<File
         .iter()
         .filter_map(|origin| {
             graph
-                .modules
+                .modules()
                 .get(origin.file_id.0 as usize)
                 .map(|m| (m, origin))
         })

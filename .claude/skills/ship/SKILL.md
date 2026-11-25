@@ -6,7 +6,17 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 
 # Ship
 
-1. Confirm the branch and diff exactly match the reviewed scope. Then run
+1. Search for a competing pull request before the merge. A contributor can
+   open one for a new issue within an hour, also while your branch is in
+   review. Run
+   `gh pr list --state open --search "<issue number> OR <key terms>"`,
+   with the key terms of the change, because a pull request can have no
+   link to the issue. When a pull request of another author makes the same
+   change, do not merge yours. Report both pull requests to the maintainer
+   with a recommendation. A pull request that came first gets the credit:
+   recommend to review it and build on it. A pull request of this
+   objective does not count.
+   Confirm the branch and diff exactly match the reviewed scope. Then run
    `node scripts/ship-rebase.mjs --pr <number> --if-needed --push`, also
    for one pull request. Do not rebase by hand. The required checks of
    `main` do not require an up-to-date branch, so a rebase is only
@@ -32,9 +42,13 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    companion change into the default branch of its repository (for example
    fallow-docs `main`). A pushed feature branch is not enough: the release
    then must merge it. When the merged change touches `npm/fallow/skills`,
-   run `node scripts/sync-skills-companion.mjs --pin <merge commit>` right
-   after the merge. Publish its commit with the commands that it prints.
-   `ship-wait-checks.mjs` prints this step for such a change.
+   the Skills companion sync workflow opens a `sync-fallow-skills` pull
+   request in fallow-skills a few minutes after the merge. Merge that pull
+   request. Run `node scripts/sync-skills-companion.mjs --pin <merge commit>`
+   by hand only when no such pull request opens, because a hand run next to
+   it makes a second pull request with the same content.
+   `ship-wait-checks.mjs --commit` names the sync pull request, or gives the
+   hand-run command when it finds none.
 4. Create signed conventional commits only.
 5. Merge with pinned auto-merge after steps 1 to 4. Arm it before any CI
    wait, except in a serial merge (see "Serial merge of many pull
@@ -87,10 +101,8 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    each hunk in a file that your pull request changed. Such a merge can make
    your code, a comment or a doc wrong without a text conflict. Fix that in
    a follow-up pull request.
-8. Return every touched checkout to a clean, synchronized state. When
-   the status of step 10 is `DONE` and `.plans/<task>.md` lists no open
-   item, delete `.plans/<task>.md` and `.plans/<task>/`. Keep both for a
-   `BLOCKED` or `RUNNING` status.
+8. Return every touched checkout to a clean, synchronized state. Keep
+   `.plans/<task>.md`, because `sweep` reads it and deletes it at the end.
 9. Run the `sweep` skill as the last step of the objective. Do not wait
    for a prompt from the maintainer, and do not end the turn before it.
 10. Start the final report with one status line:

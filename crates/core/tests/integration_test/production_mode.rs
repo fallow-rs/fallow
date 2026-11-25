@@ -54,6 +54,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }

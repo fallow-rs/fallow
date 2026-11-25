@@ -1,0 +1,5 @@
+{
+  "name": "trace-sfc-implicit-default",
+  "private": true,
+  "main": "src/main.ts"
+}

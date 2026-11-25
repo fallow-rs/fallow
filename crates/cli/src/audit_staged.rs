@@ -57,13 +57,17 @@ impl StagedTree {
         let root = if relative_root.as_os_str().is_empty() {
             path.clone()
         } else {
-            path.join(relative_root)
+            path.join(&relative_root)
         };
+        let host_root_in_checkout = host_toplevel.join(&relative_root);
         let tree = Self {
             host_toplevel,
             path,
             root,
         };
+        // A drop of `tree` removes the worktree, so the check runs after its
+        // construction and before the first read or write under the root.
+        check_staged_root(&tree.path, &tree.root, &host_root_in_checkout)?;
         let patterns = workspace_patterns(&tree.root, config);
         fallow_engine::repo_refs::materialize_base_dependency_context(
             host_root, &tree.root, &patterns,
@@ -83,6 +87,28 @@ impl StagedTree {
 impl Drop for StagedTree {
     fn drop(&mut self) {
         fallow_engine::repo_refs::remove_staged_index_worktree(&self.host_toplevel, &self.path);
+    }
+}
+
+/// Refuse a `root` in the staged worktree at `worktree` that a link in the
+/// staged index moves out of the worktree. `host_root` is the same root in
+/// the checkout of the user, for the message. A root that the index does not
+/// hold stays allowed here.
+fn check_staged_root(worktree: &Path, root: &Path, host_root: &Path) -> Result<(), String> {
+    if std::fs::symlink_metadata(root).is_err() {
+        return Ok(());
+    }
+    match dunce::canonicalize(root) {
+        Ok(resolved) if resolved.starts_with(worktree) => Ok(()),
+        Ok(resolved) => Err(format!(
+            "--staged refuses the root '{}': a link in the staged index resolves it to '{}', outside the staged worktree",
+            host_root.display(),
+            resolved.display()
+        )),
+        Err(err) => Err(format!(
+            "--staged refuses the root '{}': a link in the staged index makes it a path that cannot be resolved: {err}",
+            host_root.display()
+        )),
     }
 }
 
@@ -169,5 +195,72 @@ mod tests {
             ..ConfigFlags::default()
         };
         assert_eq!(workspace_patterns(root, flags), ["packages/*"]);
+    }
+
+    /// The index can hold a link where the checkout has a directory. A root
+    /// below that link must not move the staged audit out of its worktree.
+    #[cfg(unix)]
+    #[test]
+    fn staged_tree_refuses_a_root_that_a_staged_link_moves_outside_the_worktree() {
+        use fallow_engine::git_fixture::fixture_git_capture as git;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        let app = repo.join("apps").join("mobile");
+        std::fs::create_dir_all(&app).expect("app dir");
+        std::fs::write(app.join("index.ts"), "export const a = 1;\n").expect("source");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(outside.join("mobile")).expect("outside dir");
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["rm", "-q", "-r", "--cached", "apps"]);
+        let link_blob = {
+            let path = temp.path().join("link-target");
+            std::fs::write(&path, outside.display().to_string()).expect("link target");
+            git(&repo, &["hash-object", "-w", path.to_str().expect("utf-8")])
+        };
+        git(
+            &repo,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{link_blob},apps"),
+            ],
+        );
+
+        let err = StagedTree::create(&app, ConfigFlags::default())
+            .err()
+            .expect("the staged tree refuses the root");
+        assert!(err.contains("outside the staged worktree"), "got: {err}");
+        let host_root = format!("'{}'", dunce::canonicalize(&app).unwrap().display());
+        assert!(err.contains(&host_root), "the host root: {err}");
+        let target = dunce::canonicalize(outside.join("mobile")).unwrap();
+        assert!(
+            err.contains(&format!("'{}'", target.display())),
+            "the real target: {err}"
+        );
+    }
+
+    /// A staged link with no target leaves the root without a real path.
+    #[cfg(unix)]
+    #[test]
+    fn staged_root_check_names_a_root_that_cannot_be_resolved() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let worktree = temp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+        std::os::unix::fs::symlink("/nonexistent-fallow-target", worktree.join("apps"))
+            .expect("link");
+        let host_root = Path::new("/host/repo/apps");
+
+        let err = check_staged_root(&worktree, &worktree.join("apps"), host_root).unwrap_err();
+        assert!(err.contains("'/host/repo/apps'"), "got: {err}");
+        assert!(err.contains("cannot be resolved"), "got: {err}");
+        assert_eq!(
+            check_staged_root(&worktree, &worktree.join("absent"), host_root),
+            Ok(()),
+            "a root that the index does not hold"
+        );
     }
 }

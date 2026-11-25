@@ -21,6 +21,10 @@ use rustc_hash::FxHashMap;
 /// Lockfiles of Bun.
 const BUN_LOCKFILES: &[&str] = &["bun.lock", "bun.lockb"];
 
+/// Below this number of entries, a check runs on the calling thread: the
+/// rayon pool costs more than a few `stat` calls.
+pub(crate) const PARALLEL_MIN: usize = 64;
+
 /// The `version` field of each read package manifest that a Bun lockfile
 /// governs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -87,7 +91,7 @@ impl InstalledVersions {
             !std::fs::read(root.join(&entry.manifest))
                 .is_ok_and(|content| version_of(&content) == entry.version)
         };
-        if self.entries.len() < crate::missed_probes::PARALLEL_MIN {
+        if self.entries.len() < PARALLEL_MIN {
             return self.entries.iter().any(check);
         }
         use rayon::prelude::*;

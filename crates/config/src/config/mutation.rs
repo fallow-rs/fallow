@@ -6,8 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum MutationRunner {
     /// Detect the runner from the project: the `vitest` dependency, the
-    /// test module that the test files import, a Bun file at the root, or a
-    /// `node --test` script.
+    /// test module that the test files import, the `vite-plus` dependency, a
+    /// Bun file at the root, or a `node --test` script.
     #[default]
     Auto,
     /// Vitest 4.1 to 5 from the project `node_modules`.
@@ -116,8 +116,8 @@ where
     if let Some(score) = value
         && (!score.is_finite() || !(0.0..=100.0).contains(&score))
     {
-        return Err(serde::de::Error::custom(format!(
-            "mutation.minScore must be between 0 and 100 (got {score})"
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
+            format!("mutation.minScore must be between 0 and 100 (got {score})"),
         )));
     }
     Ok(value)
@@ -129,9 +129,9 @@ where
 {
     let value = Option::<usize>::deserialize(deserializer)?;
     if value == Some(0) {
-        return Err(serde::de::Error::custom(
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
             "mutation.concurrency must be at least 1",
-        ));
+        )));
     }
     Ok(value)
 }
@@ -142,9 +142,9 @@ where
 {
     let value = Option::<usize>::deserialize(deserializer)?;
     if value == Some(0) {
-        return Err(serde::de::Error::custom(
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
             "mutation.mutantsPerLine must be at least 1",
-        ));
+        )));
     }
     Ok(value)
 }

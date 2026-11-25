@@ -7,20 +7,14 @@ use crate::state_file::{Existing, load_existing};
 /// Path to the per-project store file in the user's private config dir, or
 /// `None` when no config dir is resolvable (e.g. stripped CI env), in which
 /// case Impact is inert (no persistence). NEVER writes into the analyzed repo.
-pub(super) fn store_path(root: &Path) -> Option<PathBuf> {
+#[must_use]
+pub fn store_path(root: &Path) -> Option<PathBuf> {
     let (project_key, _, _) = project_identity(root);
     Some(
         impact_config_dir()?
             .join("impact")
             .join(format!("{project_key}.json")),
     )
-}
-
-/// The resolved per-project store-file path for `root`, for `status` display
-/// (so a wrong key is debuggable). `None` when no config dir is resolvable.
-#[must_use]
-pub fn resolved_store_path(root: &Path) -> Option<PathBuf> {
-    store_path(root)
 }
 
 /// Path to a project's legacy in-repo store (`<root>/.fallow/impact.json`),
@@ -256,7 +250,7 @@ fn parse_store_text(content: &str, path: &Path) -> Result<Result<ImpactStore, Ne
 
 /// Read one store file. `Ok(None)` means that the file does not exist. This
 /// function never writes and never logs.
-pub(super) fn read_store_file(path: &Path) -> Result<Option<ImpactStore>, StoreReadError> {
+fn read_store_file(path: &Path) -> Result<Option<ImpactStore>, StoreReadError> {
     match load_existing(path, |content| parse_store_text(content, path)) {
         Existing::Absent => Ok(None),
         Existing::Loaded(Ok(store)) => Ok(Some(store)),

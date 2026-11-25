@@ -16,6 +16,13 @@ pub enum ConfigFixPlan {
         /// Directory containing the workspace marker that blocked creation.
         workspace_root: PathBuf,
     },
+    /// The config file is a symbolic link that resolves outside the project
+    /// scope base, or a link that discovery refused. A fix does not write
+    /// through it and does not replace it.
+    BlockedConfigLink {
+        /// Path of the config file link.
+        config_path: PathBuf,
+    },
     /// No fallow config exists and config creation was disabled.
     BlockedNoCreate {
         /// Path where the config would have been created.
@@ -36,11 +43,38 @@ pub fn classify_config_fix_plan(
     no_create_config: bool,
 ) -> ConfigFixPlan {
     if let Some(existing) = resolve_existing_config_path(root, explicit) {
+        // Discovery can load a config link that git does not track, for
+        // example to a dotfiles config. A fix never writes through a link
+        // that leaves the project scope base.
+        let is_link = existing
+            .symlink_metadata()
+            .is_ok_and(|meta| meta.file_type().is_symlink());
+        if is_link
+            && !fallow_types::read_guard::is_inside_root(
+                &crate::project_scope_base(root),
+                &existing,
+            )
+        {
+            return ConfigFixPlan::BlockedConfigLink {
+                config_path: existing,
+            };
+        }
         return ConfigFixPlan::Edit {
             config_path: existing,
         };
     }
     let target = root.join(".fallowrc.json");
+    // An entry at the target that discovery refused, such as a link out of
+    // the root, must not be replaced by a new config file.
+    match target.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return ConfigFixPlan::BlockedConfigLink {
+                config_path: target,
+            };
+        }
+        Ok(_) => return ConfigFixPlan::BlockedNoCreate { target },
+        Err(_) => {}
+    }
     if let Some(workspace_root) = find_workspace_root_above(root) {
         return ConfigFixPlan::BlockedMonorepo { workspace_root };
     }
@@ -108,7 +142,10 @@ fn has_workspace_marker(dir: &Path) -> bool {
     if !pkg_path.exists() {
         return false;
     }
-    let Ok(content) = std::fs::read_to_string(&pkg_path) else {
+    let Ok(content) = fallow_types::read_guard::read_to_string_bounded(
+        &pkg_path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) else {
         return false;
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
@@ -122,6 +159,53 @@ fn has_workspace_marker(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_config_link_out_of_the_root_is_neither_edited_nor_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(dir.path().join("outside.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("outside.json"), root.join(".fallowrc.json"))
+            .unwrap();
+        let plan = classify_config_fix_plan(&root, None, false);
+        assert!(
+            matches!(plan, ConfigFixPlan::BlockedConfigLink { .. }),
+            "{plan:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_untracked_config_link_out_of_the_root_is_not_edited() {
+        crate::set_tracked_link_probe(crate::config::test_tracked_link_probe);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["init", "-q"])
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git init");
+        std::fs::write(dir.path().join("dotfiles.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(
+            dir.path().join("dotfiles.json"),
+            root.join(".fallowrc.json"),
+        )
+        .unwrap();
+        let plan = classify_config_fix_plan(&root, None, false);
+        assert!(
+            matches!(plan, ConfigFixPlan::BlockedConfigLink { .. }),
+            "{plan:?}"
+        );
+    }
 
     #[test]
     fn config_fixable_true_when_config_exists() {
@@ -147,5 +231,27 @@ mod tests {
         let sub = dir.path().join("packages/app");
         std::fs::create_dir_all(&sub).unwrap();
         assert!(!is_config_fixable(&sub, None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_pipe_as_a_parent_manifest_does_not_block_the_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(dir.path().join("package.json"))
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo must create the test pipe");
+        let sub = dir.path().join("packages/app");
+        std::fs::create_dir_all(&sub).unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(is_config_fixable(&sub, None));
+        });
+        let fixable = receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the check must not wait on a pipe");
+        assert!(fixable);
     }
 }

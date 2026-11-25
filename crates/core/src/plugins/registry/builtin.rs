@@ -22,7 +22,7 @@ use super::super::{
     jest::JestPlugin, k6::K6Plugin, karma::KarmaPlugin, kibana::KibanaPlugin, knex::KnexPlugin,
     kysely::KyselyPlugin, lefthook::LefthookPlugin, lexical::LexicalPlugin,
     lint_staged::LintStagedPlugin, lit::LitPlugin, markdownlint::MarkdownlintPlugin,
-    mintlify::MintlifyPlugin, mise::MisePlugin, mocha::MochaPlugin,
+    mintlify::MintlifyPlugin, mise::MisePlugin, mkdocs::MkdocsPlugin, mocha::MochaPlugin,
     module_federation::ModuleFederationPlugin, msw::MswPlugin, n8n::N8nPlugin,
     napi_rs::NapiRsPlugin, nest_commander::NestCommanderPlugin, nestjs::NestJsPlugin,
     nestjs_trpc::NestJsTrpcPlugin, next_intl::NextIntlPlugin, nextjs::NextJsPlugin,
@@ -49,9 +49,9 @@ use super::super::{
     unocss::UnoCssPlugin, unplugin_icons::UnpluginIconsPlugin, varlock::VarlockPlugin,
     velite::VelitePlugin, vercel::VercelPlugin, vite::VitePlugin,
     vite_plugin_pages::VitePluginPagesPlugin, vite_plus::VitePlusPlugin,
-    vitepress::VitePressPlugin, vitest::VitestPlugin, vscode::VscodePlugin, waku::WakuPlugin,
-    webdriverio::WebdriverioPlugin, webpack::WebpackPlugin, wrangler::WranglerPlugin,
-    wuchale::WuchalePlugin, wxt::WxtPlugin,
+    vite_pwa_assets_generator::VitePwaAssetsGeneratorPlugin, vitepress::VitePressPlugin,
+    vitest::VitestPlugin, vscode::VscodePlugin, waku::WakuPlugin, webdriverio::WebdriverioPlugin,
+    webpack::WebpackPlugin, wrangler::WranglerPlugin, wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
 
 macro_rules! push_plugins {
@@ -131,6 +131,7 @@ fn add_content_and_platform_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         ContentlayerPlugin,
         FumadocsPlugin,
         MintlifyPlugin,
+        MkdocsPlugin,
         VelitePlugin,
         EmberPlugin,
         EvePlugin,
@@ -229,6 +230,7 @@ fn add_tooling_and_infra_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         SimpleGitHooksPlugin,
         SizeLimitPlugin,
         SvgoPlugin,
+        VitePwaAssetsGeneratorPlugin,
         SvgrPlugin,
         GraphqlCodegenPlugin,
         GraphqlConfigPlugin,

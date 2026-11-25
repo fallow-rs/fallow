@@ -28,7 +28,7 @@ fn best_class_suggestion<'a>(
             if defined.len() < MIN_DEFINED_CLASS_LEN {
                 continue;
             }
-            if crate::css::is_typo_edit(token, defined)
+            if fallow_extract::css_classes::is_typo_edit(token, defined)
                 && best.is_none_or(|current| defined < current)
             {
                 best = Some(defined);
@@ -79,7 +79,7 @@ fn collect_unresolved_class_refs_in_file(
     out: &mut Vec<fallow_output::UnresolvedClassReference>,
 ) {
     use fallow_output::{CssCandidateAction, UnresolvedClassReference};
-    for token in crate::css::scan_markup_class_tokens(source).static_tokens {
+    for token in fallow_extract::css_classes::scan_markup_class_tokens(source).static_tokens {
         if token.value.len() < MIN_TOKEN_LEN
             || is_tailwind_shaped(&token.value)
             || (targets.uses_tailwind && tailwind_utilities::is_tailwind_utility(&token.value))
@@ -560,7 +560,7 @@ pub(super) fn css_class_inventory(
             continue;
         };
         if has_style_blocks {
-            for style in crate::css::extract_sfc_styles(&source) {
+            for style in fallow_extract::sfc::extract_sfc_styles(&source) {
                 inventory.loads_tailwind |=
                     tailwind_utilities::stylesheet_loads_tailwind(&style.body);
                 // A component styles a class passed to a child component's root
@@ -570,7 +570,9 @@ pub(super) fn css_class_inventory(
                     .lang
                     .as_deref()
                     .is_some_and(|lang| matches!(lang, "scss" | "sass"));
-                for export in crate::css::extract_css_module_exports(&style.body, is_style_scss) {
+                for export in
+                    fallow_extract::css::extract_css_module_exports(&style.body, is_style_scss)
+                {
                     if let ExportName::Named(name) = export.name {
                         inventory.typo_target_classes.insert(name);
                     }
@@ -586,7 +588,7 @@ pub(super) fn css_class_inventory(
             .extend(global_scoped.iter().cloned());
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut classes: Vec<(String, u32)> = Vec::new();
-        for export in crate::css::extract_css_module_exports(&source, is_preprocessor) {
+        for export in fallow_extract::css::extract_css_module_exports(&source, is_preprocessor) {
             let ExportName::Named(name) = export.name else {
                 continue;
             };
@@ -1093,7 +1095,7 @@ fn collect_css_reference_surface_file(
     if !is_markup_surface {
         return;
     }
-    let scan = crate::css::scan_markup_class_tokens(&source);
+    let scan = fallow_extract::css_classes::scan_markup_class_tokens(&source);
     for token in scan.static_tokens {
         surface.static_tokens.insert(token.value);
     }
@@ -1101,7 +1103,7 @@ fn collect_css_reference_surface_file(
     if extension == Some("vue") {
         surface
             .static_tokens
-            .extend(crate::css::vue_transition_classes(&source));
+            .extend(fallow_extract::sfc_css::vue_transition_classes(&source));
     }
     if scan.has_dynamic {
         collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
@@ -1129,7 +1131,7 @@ fn has_jsx_class_attribute(source: &str) -> bool {
 /// object properties). For a plain JS/TS file, only those values count, not
 /// every string in the file.
 fn collect_dom_class_reference_surface(surface: &mut CssReferenceSurfaceBuilder, source: &str) {
-    let scan = crate::css::scan_dom_class_values(source);
+    let scan = fallow_extract::dom_classes::scan_dom_class_values(source);
     surface.static_tokens.extend(scan.static_tokens);
     for value in scan.dynamic_values {
         collect_dynamic_class_interpolants(&value, &mut surface.dynamic_interpolants);
@@ -1195,7 +1197,7 @@ fn collect_markdown_reference_surface_file(
     };
     surface.source_corpus.push_str(&source);
     surface.source_corpus.push('\n');
-    let scan = crate::css::scan_markup_class_tokens(&source);
+    let scan = fallow_extract::css_classes::scan_markup_class_tokens(&source);
     for token in scan.static_tokens {
         surface.static_tokens.insert(token.value);
     }

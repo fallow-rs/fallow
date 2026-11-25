@@ -1,7 +1,8 @@
 //! Config entries that had no effect, as diagnostics on the config file: the
 //! patterns that matched nothing (`ignoreFindings`, `ignoreDependencies`), the
-//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`) and the
-//! `overrides` rules that cannot change a result.
+//! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
+//! `overrides` rules that cannot change a result, and the `overrides[].files`
+//! globs that matched no file.
 //!
 //! The CLI reports these patterns in `workspace_diagnostics[]`. The editor
 //! marks the entry in the config file that declares it. A pattern whose entry
@@ -51,6 +52,9 @@ pub fn collect(
             let span = if let Some((setting, pattern)) = diagnostic.kind.unmatched_config_pattern()
             {
                 config_path.and_then(|path| FallowConfig::locate_list_entry(path, setting, pattern))
+            } else if let Some((pattern, files, _, _)) = diagnostic.kind.unmatched_override_glob() {
+                config_path
+                    .and_then(|path| FallowConfig::locate_override_glob(path, files, pattern))
             } else {
                 let (rule, files, _) = diagnostic.kind.ineffective_override()?;
                 config_path.and_then(|path| FallowConfig::locate_override_rule(path, rule, files))

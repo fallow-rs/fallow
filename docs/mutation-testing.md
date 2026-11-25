@@ -538,6 +538,13 @@ or relational mutant, so it adds little test-strength signal for its run time.
   plan counts report these mutants as `pruned_build_tool_only`, a field that
   is absent when it is 0. The rule lives in `build_tool_reach`
   (`crates/engine/src/mutation/build_tool.rs`).
+- The instrumented copy of a file holds only the mutants that the plan does
+  not prune. A pruned mutant keeps its original text, so a build plugin that
+  parses the copy reads each config value as written. An example is the
+  `codeSplitGroupings` of a TanStack Router route, which the code splitter
+  reads as string literals. The ids of the other mutants do not change
+  (`without_pruned` in `crates/engine/src/mutation/plan.rs`). A
+  `fallow-ignore` comment does not prune a mutant, so the copy keeps it.
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on
@@ -1382,13 +1389,16 @@ selects one. The default `auto` reads the project in this order:
 
 1. `vitest` in the root `package.json` dependencies selects Vitest.
 2. Otherwise the test module that the most static test files import:
-   `vitest`, `bun:test` or `node:test`. A tie goes to Vitest, then
+   `vitest` or `vite-plus/test`, `bun:test` or `node:test`. A tie goes to
+   Vitest, then `bun test`.
+3. Otherwise `vite-plus` in the root `package.json` dependencies selects
+   Vitest. Vite+ runs Vitest through `vp test`, but a project can use Vite+
+   only to build, lint or format, so the test imports come first.
+4. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
    `bun test`.
-3. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
-   `bun test`.
-4. Otherwise a `node --test` or `borp` command in a `package.json` script
+5. Otherwise a `node --test` or `borp` command in a `package.json` script
    selects `node:test`.
-5. Otherwise Vitest.
+6. Otherwise Vitest.
 
 | Runner | Config value | Versions | Runtime of the companion |
 |---|---|---|---|

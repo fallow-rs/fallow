@@ -2108,7 +2108,7 @@
           "name": "--threshold",
           "type": "string",
           "required": false,
-          "description": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in the config file, or `0` if unset)"
+          "description": "Fail if duplication exceeds this percentage. `0` turns the gate off and is not zero tolerance: use `--fail-on-issues` to fail on any clone group (defaults to the value in the config file, or `0` if unset)"
         },
         {
           "name": "path",
@@ -2200,6 +2200,16 @@
           "type": "bool",
           "required": false,
           "description": "Show only static test coverage gaps: runtime files and exports with no dependency path from any discovered test root. Requires full analysis pipeline",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--shallow-directories",
+          "type": "bool",
+          "required": false,
+          "description": "Show only shallow directories: directories whose interface is as large as what they hide. Advisory, no health score weight. Requires full analysis pipeline",
           "possible_values": [
             "true",
             "false"
@@ -5491,6 +5501,37 @@
       "docs_url": "https://fallow.tools/docs/rules/refactoring-target/"
     },
     {
+      "id": "shallow-directory",
+      "rule_id": "fallow/shallow-directory",
+      "command": "health",
+      "category": "Health",
+      "description": "Directory shows as many interface items as it hides",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "deprecated_filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "default_severity": null,
+      "opt_in": null,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/rules/shallow-directory/"
+    },
+    {
       "id": "css-token-drift",
       "rule_id": "fallow/css-token-drift",
       "command": "health",
@@ -7882,6 +7923,7 @@
     "FALLOW_DIFF_FILE": "MCP server: path to a unified diff that scopes all findings by changed line.",
     "FALLOW_CHANGED_SINCE": "MCP server: git ref that scopes file discovery for analysis tools.",
     "FALLOW_MCP_WARM_SESSION": "MCP server: set to 0, false, off or no to stop typed tool calls from keeping parsed modules in memory between calls (default on).",
+    "FALLOW_MCP_SKILLS": "MCP server: set to 0, false, off or no to stop serving the fallow and fallow-setup skills through the MCP skills extension (default on). fallow agent install writes off into the MCP entry when it also installs the skills on disk.",
     "FALLOW_INTEGRATION_SURFACE": "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
     "FALLOW_MCP_TOOL": "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp.",
     "FALLOW_LSP_REUSE_SESSION": "Language server: set to 0/false/off/no to load a new project session on each analysis run. By default the server keeps one session per project root between saves and parses only the changed files.",
@@ -9170,7 +9212,7 @@
     ]
   },
   "plugins": {
-    "count": 158,
+    "count": 160,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -9222,6 +9264,7 @@
       "contentlayer",
       "fumadocs",
       "mintlify",
+      "mkdocs",
       "velite",
       "ember",
       "eve",
@@ -9302,6 +9345,7 @@
       "simple-git-hooks",
       "size-limit",
       "svgo",
+      "vite-pwa-assets-generator",
       "svgr",
       "graphql-codegen",
       "graphql-config",

@@ -1,0 +1,8 @@
+[project]
+site_name = "Demo"
+docs_dir = "chapters"
+extra_css = ["stylesheets/extra.css"]
+extra_javascript = [
+  "javascripts/nav.mjs",
+  { path = "javascripts/module.mjs", type = "module" },
+]

@@ -16,15 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ExportName;
 use crate::css::extract_css_module_exports;
-
-/// Matches `<style ...>BODY</style>` blocks, capturing the opening-tag
-/// attributes and the body. Mirrors the SFC style scanner: handles `>` inside
-/// quoted attribute values.
-static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
-    )
-});
+use crate::sfc_blocks::style_blocks;
 
 /// Returns `true` when an opening-`<style>` attribute string carries a bare
 /// `scoped` attribute.
@@ -106,21 +98,16 @@ pub fn scoped_unused_classes_at(source: &str) -> Option<ScopedUnusedClasses> {
     // class's own definition does not count as a use of itself.
     let mut style_ranges: Vec<(usize, usize)> = Vec::new();
 
-    for caps in STYLE_BLOCK_RE.captures_iter(source) {
-        if let Some(whole) = caps.get(0) {
-            style_ranges.push((whole.start(), whole.end()));
-        }
-        let attrs = caps.name("attrs").map_or("", |m| m.as_str());
-        let Some(body) = caps.name("body") else {
-            continue;
-        };
-        if !has_scoped_attr(attrs) || has_non_css_lang(attrs) || block_escapes_scope(body.as_str())
-        {
+    for block in style_blocks(source) {
+        style_ranges.push((block.span.start, block.span.end));
+        let attrs = &source[block.attrs];
+        let body = &source[block.body.clone()];
+        if !has_scoped_attr(attrs) || has_non_css_lang(attrs) || block_escapes_scope(body) {
             continue;
         }
-        for export in extract_css_module_exports(body.as_str(), false) {
+        for export in extract_css_module_exports(body, false) {
             if let ExportName::Named(name) = export.name {
-                let offset = body.start() + export.span.start as usize;
+                let offset = block.body.start + export.span.start as usize;
                 scoped_classes
                     .entry(name)
                     .and_modify(|first| *first = (*first).min(offset))
@@ -327,16 +314,13 @@ fn virtual_stylesheet(source: &str, keep: impl Fn(&str) -> bool) -> Option<Strin
     let mut out = String::new();
     let mut current_line: usize = 1;
     let mut found = false;
-    for caps in STYLE_BLOCK_RE.captures_iter(source) {
-        let attrs = caps.name("attrs").map_or("", |m| m.as_str());
-        if !keep(attrs) {
+    for block in style_blocks(source) {
+        if !keep(&source[block.attrs]) {
             continue;
         }
-        let Some(body) = caps.name("body") else {
-            continue;
-        };
+        let body = &source[block.body.clone()];
         found = true;
-        let block_line = 1 + source[..body.start()]
+        let block_line = 1 + source[..block.body.start]
             .bytes()
             .filter(|&b| b == b'\n')
             .count();
@@ -344,8 +328,8 @@ fn virtual_stylesheet(source: &str, keep: impl Fn(&str) -> bool) -> Option<Strin
             out.push('\n');
             current_line += 1;
         }
-        out.push_str(body.as_str());
-        current_line += body.as_str().bytes().filter(|&b| b == b'\n').count();
+        out.push_str(body);
+        current_line += body.bytes().filter(|&b| b == b'\n').count();
     }
     found.then_some(out)
 }

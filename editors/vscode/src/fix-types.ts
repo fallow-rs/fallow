@@ -48,6 +48,9 @@ export interface FixAction {
    *   refused to create `.fallowrc.json` inside a monorepo subpackage).
    * - `no_create_config` (`--no-create-config` was passed and no fallow
    *   config exists).
+   * - `config_link_outside_scope` (the fallow config file is a symbolic
+   *   link that resolves outside the project scope base, so the
+   *   duplicate-export config-add path does not write through it).
    * - `content_changed` (#454: file's xxh3 content hash at fix time
    *   differs from the hash captured during analysis; applying offsets
    *   would land on bytes the analysis never saw). Re-run `fallow fix`
@@ -106,7 +109,8 @@ export interface FallowFixResult {
    * Count of fixer-logic skips (catalog `hardcoded_consumers`,
    * `multi_document_yaml`, `not_found`, `not_empty`,
    * `unsupported_yaml_style`, `unsafe_edit`, `monorepo_subpackage`,
-   * `no_create_config`). Semantics unchanged since pre-#454; disjoint
+   * `no_create_config`, `config_link_outside_scope`). Semantics unchanged
+   * since pre-#454; disjoint
    * from `skipped_content_changed`.
    */
   readonly skipped?: number;

@@ -311,7 +311,7 @@ use crate::base_worktree::{
     materialize_base_dependency_context, parse_worktree_list, paths_equal, process_is_alive,
     record_last_used, remove_audit_worktree, reusable_audit_worktree_path,
     reusable_worktree_last_used_path, reusable_worktree_lock_path, reusable_worktree_sha_path,
-    sweep_orphan_audit_worktrees_in, touch_last_used, unregister_worktree,
+    sweep_orphan_audit_worktrees_in, touch_last_used,
 };
 
 pub use fallow_api::audit_keys as keys;
@@ -542,7 +542,7 @@ impl AuditBackend for CliAuditBackend<'_> {
 
     fn save_cached_base(&self, key: &AuditBaseSnapshotCacheKey, snapshot: &AuditKeySnapshot) {
         if !self.type_aware.cli_enabled() {
-            save_cached_base_snapshot(self.opts, key, snapshot);
+            save_cached_base_snapshot(self.opts, self.host_root, key, snapshot);
         }
     }
 
@@ -2457,15 +2457,15 @@ fn build_audit_health_options<'a>(
         complexity: true,
         file_scores: false,
         coverage_gaps: false,
+        shallow_directories: false,
         config_activates_coverage_gaps: false,
         hotspots: false,
         ownership: false,
         ownership_emails: None,
         targets: false,
-        // Styling analytics surface in `fallow audit` so a coding agent gets
-        // styling feedback in the same stream it already reads for dead-code +
-        // complexity. Changed-file-scoped (cheap) + dep-gated; descriptive only
-        // (verdict-neutral). See .plans/styling-findings-in-audit.md (Slice 1).
+        // Styling analytics are in `fallow audit` next to dead code and complexity.
+        // They read the changed files only, need the styling dependencies, and
+        // never change the verdict.
         css: opts.css,
         css_deep: opts.css_deep,
         force_full: false,

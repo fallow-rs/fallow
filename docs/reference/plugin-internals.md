@@ -148,7 +148,11 @@ tool loads the package, so a `--production` run skips it.
 The current producers are:
 
 - the TypeScript plugin, for each bare `compilerOptions.plugins[].name`,
-  except the plugins that editor extensions ship (`EDITOR_BUNDLED_PLUGINS`);
+  except the plugins that editor extensions ship (`EDITOR_BUNDLED_PLUGINS`).
+  `PLUGIN_PROVIDERS` lists the other packages that provide a plugin name, for
+  example `@effect/tsgo` for `@effect/language-service`. A requirement keeps
+  these packages in `provided_by`: a listed provider satisfies it and counts
+  as used;
 - the Expo and Expo Router plugins, for `expo-system-ui` when the app config
   sets `userInterfaceStyle` at the top level or under `android`. iOS applies
   its own key without `expo-system-ui`.
@@ -437,6 +441,13 @@ Rstest plugin does not, so its boundary is the `root` argument. In a workspace
 run, Rstest therefore does not follow a sibling package. This is stricter than
 the project root.
 
+The Nx plugin also keeps the `root` argument as its boundary. It reads the
+`package.json` of a local plugin or executor path, and the executor and
+generator collections that the manifest names. Nx resolves these paths from
+the workspace root. The root run reads each `project.json` of the workspace
+with the project root as `root`, so a local executor in a workspace package
+still resolves.
+
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto
@@ -559,6 +570,31 @@ Docker action, such as the Fallow action, changes nothing. The `runs.pre`,
 the source index fallback then apply. The plugin collects the skipped paths,
 so a missing target writes no warning. An action in a nested directory, such
 as `.github/actions/<name>/action.yml`, is not read.
+
+## MkDocs and Zensical site assets
+
+The `mkdocs` plugin reads `mkdocs.yml`, `mkdocs.yaml` and `zensical.toml`.
+Both tools are Python tools with no npm dependency, so a config file
+activates the plugin. A JavaScript project often keeps its site in a
+directory such as `docs/` that is not a workspace package. The plugin
+therefore activates on a config anywhere below the root, through
+`ConfigCandidateIndex::any_descendant_contains`. Config discovery then reads
+each nested config that is an ancestor of a source file. In production mode,
+only a config in the root activates the plugin.
+
+Each item of `extra_javascript` and `extra_css` is a path string or a
+mapping with a `path` key. The plugin joins the path to `docs_dir` (default
+`docs`) next to the config, and resolves `.` and `..` without the
+filesystem. It drops a path that leaves the root or names a URL. Zensical
+keeps the same keys in its `[project]` table. The YAML reader accepts the
+custom tags of a Material for MkDocs config, such as `!!python/name:` and
+`!ENV`.
+
+Each entry rule sets `PathRule::package_relative`. The workspace prefix then
+applies also when the path starts with the name of its package. A site in a
+workspace package named `docs` with the default `docs_dir` needs this. The
+flag matters only for a workspace pass that runs without the root pass, for
+example in production mode with no root config.
 
 ## VitePress `vite` block
 

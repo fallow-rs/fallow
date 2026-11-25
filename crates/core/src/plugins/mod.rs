@@ -703,20 +703,6 @@ impl PluginResult {
     }
 }
 
-/// Whether an extensionless value names a file under `root`: the value itself,
-/// the value with a source extension, or the index file of the directory it
-/// names. This is the order in which a bundler resolves a path.
-fn names_project_file(root: &Path, value: &str) -> bool {
-    let base = root.join(value);
-    base.is_file()
-        || crate::discover::SOURCE_EXTENSIONS.iter().any(|extension| {
-            let mut candidate = base.clone().into_os_string();
-            candidate.push(".");
-            candidate.push(extension);
-            Path::new(&candidate).is_file() || base.join(format!("index.{extension}")).is_file()
-        })
-}
-
 /// Brace list of the extensions a bundler tries for a request that names no
 /// extension. Entry patterns are plain globs with no extension expansion, so a
 /// bare `src/Button` would match no file.
@@ -750,6 +736,10 @@ pub struct PathRule {
     /// such as the Storybook `../src/**`, which must not climb out of the
     /// workspace.
     pub parent_relative: bool,
+    /// Whether `pattern` is always relative to the plugin root. The workspace
+    /// prefix then applies also to a pattern that starts with the prefix text,
+    /// such as `docs/js/x.js` in a workspace package named `docs`.
+    pub package_relative: bool,
 }
 
 impl PathRule {
@@ -761,6 +751,7 @@ impl PathRule {
             exclude_regexes: Vec::new(),
             exclude_segment_regexes: Vec::new(),
             parent_relative: false,
+            package_relative: false,
         }
     }
 
@@ -832,6 +823,8 @@ impl PathRule {
         let prefix = |pattern: &str| {
             if self.parent_relative && pattern.starts_with("../") {
                 resolve_parent_relative_pattern(pattern, ws_prefix)
+            } else if self.package_relative {
+                format!("{ws_prefix}/{pattern}")
             } else {
                 prefix_workspace_pattern(pattern, ws_prefix)
             }
@@ -850,6 +843,7 @@ impl PathRule {
                 .collect(),
             exclude_segment_regexes: self.exclude_segment_regexes.clone(),
             parent_relative: false,
+            package_relative: false,
         }
     }
 }
@@ -1786,10 +1780,11 @@ mod flue;
 mod jasmine;
 mod manifest;
 mod module_request;
-use module_request::{has_glob_syntax, has_source_extension, module_request};
+use module_request::{has_glob_syntax, has_source_extension, module_request, names_project_file};
 pub mod manifest_entries;
 mod mise;
 mod osls;
+mod path_rule_index;
 mod project_glob;
 mod railway;
 pub mod registry;
@@ -1805,6 +1800,7 @@ pub use config_dependencies::RequiredDependency;
 use config_dependencies::add_import_referenced_dependencies;
 pub use federation_source::{FederationSource, FederationSourceTarget};
 pub(crate) use module_federation::runtime_remotes;
+pub(crate) use path_rule_index::PathRuleIndex;
 pub(crate) use registry::module_specifiers;
 pub use registry::{
     AggregatedPluginResult, CheckedAliasPrefix, PluginRegistry, PluginToolingDependencies,
@@ -1884,6 +1880,7 @@ mod lint_staged;
 mod lit;
 mod markdownlint;
 mod mintlify;
+mod mkdocs;
 mod mocha;
 mod module_federation;
 mod msw;
@@ -1968,6 +1965,7 @@ mod vercel;
 mod vite;
 mod vite_plugin_pages;
 pub(crate) mod vite_plus;
+mod vite_pwa_assets_generator;
 mod vitepress;
 mod vitest;
 mod vscode;

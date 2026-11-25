@@ -78,7 +78,7 @@ pub fn find_mixed_client_server_barrels(
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
     let path_by_id: FxHashMap<FileId, &std::path::Path> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();

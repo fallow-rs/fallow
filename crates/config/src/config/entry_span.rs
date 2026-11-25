@@ -57,6 +57,20 @@ impl FallowConfig {
         })
     }
 
+    /// Find the glob `pattern` in the `files` list of the `overrides` entry
+    /// with exactly these `files` globs. The rules of
+    /// [`Self::locate_override_rule`] apply.
+    #[must_use]
+    pub fn locate_override_glob(
+        config_path: &Path,
+        files: &[String],
+        pattern: &str,
+    ) -> Option<ConfigEntrySpan> {
+        Self::locate_in_setting(config_path, "overrides", |path, content| {
+            override_glob_range(path, content, files, pattern)
+        })
+    }
+
     /// Run `range_in` on the last source in merge order that sets `setting`.
     fn locate_in_setting(
         config_path: &Path,
@@ -71,7 +85,11 @@ impl FallowConfig {
             if !sets_list {
                 continue;
             }
-            let content = std::fs::read_to_string(path).ok()?;
+            let content = fallow_types::read_guard::read_to_string_bounded(
+                path,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            )
+            .ok()?;
             let (start, end) = range_in(path, &content)?;
             return Some(ConfigEntrySpan {
                 path: path.to_path_buf(),
@@ -100,20 +118,84 @@ fn override_rule_range(
     Some((start + offset, end + offset))
 }
 
-fn json_override_rule_range(content: &str, rule: &str, files: &[String]) -> Option<(usize, usize)> {
-    let parsed = jsonc_parser::parse_to_ast(
+/// The byte range of the glob `pattern` in the `files` list of the override
+/// with exactly these `files` globs, in one config file.
+fn override_glob_range(
+    path: &Path,
+    content: &str,
+    files: &[String],
+    pattern: &str,
+) -> Option<(usize, usize)> {
+    let text = content.trim_start_matches('\u{FEFF}');
+    let offset = content.len() - text.len();
+    let (start, end) = match ConfigFormat::from_path(path) {
+        ConfigFormat::Json => json_override_glob_range(text, files, pattern),
+        ConfigFormat::Toml => toml_override_glob_range(text, files, pattern),
+    }?;
+    Some((start + offset, end + offset))
+}
+
+fn json_override_glob_range(
+    content: &str,
+    files: &[String],
+    pattern: &str,
+) -> Option<(usize, usize)> {
+    let parsed = parse_json_ast(content)?;
+    let jsonc_parser::ast::Value::Object(root) = parsed.value.as_ref()? else {
+        return None;
+    };
+    json_override_entries(root, files).find_map(|entry| {
+        entry
+            .get_array("files")?
+            .elements
+            .iter()
+            .find_map(|glob| match glob {
+                jsonc_parser::ast::Value::StringLit(literal) if literal.value == pattern => {
+                    Some((literal.range.start, literal.range.end))
+                }
+                _ => None,
+            })
+    })
+}
+
+fn toml_override_glob_range(
+    content: &str,
+    files: &[String],
+    pattern: &str,
+) -> Option<(usize, usize)> {
+    let document = parse_toml_document(content)?;
+    toml_override_entries(&document, files)
+        .into_iter()
+        .find_map(|entry| {
+            entry
+                .get("files")?
+                .as_array()?
+                .iter()
+                .find(|glob| glob.as_str() == Some(pattern))?
+                .span()
+                .map(|span| (span.start, span.end))
+        })
+}
+
+fn parse_json_ast(content: &str) -> Option<jsonc_parser::ParseResult<'_>> {
+    jsonc_parser::parse_to_ast(
         content,
         &jsonc_parser::CollectOptions::default(),
         &crate::jsonc::parse_options(),
     )
-    .ok()?;
-    let jsonc_parser::ast::Value::Object(root) = parsed.value? else {
-        return None;
-    };
-    root.get_array("overrides")?
-        .elements
-        .iter()
-        .find_map(|element| {
+    .ok()
+}
+
+/// The `overrides` entries whose `files` list is exactly `files`, in config
+/// order. Two entries can have the same list and set other rules.
+fn json_override_entries<'a>(
+    root: &'a jsonc_parser::ast::Object<'a>,
+    files: &'a [String],
+) -> impl Iterator<Item = &'a jsonc_parser::ast::Object<'a>> {
+    root.get_array("overrides")
+        .into_iter()
+        .flat_map(|overrides| overrides.elements.iter())
+        .filter_map(move |element| {
             let jsonc_parser::ast::Value::Object(entry) = element else {
                 return None;
             };
@@ -123,23 +205,30 @@ fn json_override_rule_range(content: &str, rule: &str, files: &[String]) -> Opti
                     matches!(glob, jsonc_parser::ast::Value::StringLit(literal)
                         if literal.value == file.as_str())
                 });
-            if !same_files {
-                return None;
-            }
-            entry
-                .get_object("rules")?
-                .properties
-                .iter()
-                .find_map(|property| {
-                    let (name, range) = match &property.name {
-                        jsonc_parser::ast::ObjectPropName::String(literal) => {
-                            (literal.value.as_ref(), literal.range)
-                        }
-                        jsonc_parser::ast::ObjectPropName::Word(word) => (word.value, word.range),
-                    };
-                    key_sets_rule(name, rule).then_some((range.start, range.end))
-                })
+            same_files.then_some(entry)
         })
+}
+
+fn json_override_rule_range(content: &str, rule: &str, files: &[String]) -> Option<(usize, usize)> {
+    let parsed = parse_json_ast(content)?;
+    let jsonc_parser::ast::Value::Object(root) = parsed.value.as_ref()? else {
+        return None;
+    };
+    json_override_entries(root, files).find_map(|entry| {
+        entry
+            .get_object("rules")?
+            .properties
+            .iter()
+            .find_map(|property| {
+                let (name, range) = match &property.name {
+                    jsonc_parser::ast::ObjectPropName::String(literal) => {
+                        (literal.value.as_ref(), literal.range)
+                    }
+                    jsonc_parser::ast::ObjectPropName::Word(word) => (word.value, word.range),
+                };
+                key_sets_rule(name, rule).then_some((range.start, range.end))
+            })
+    })
 }
 
 /// Parse the text of a TOML config file. This text comes from a second read
@@ -153,38 +242,57 @@ fn parse_toml_document(content: &str) -> Option<toml_edit::Document<&str>> {
 
 fn toml_override_rule_range(content: &str, rule: &str, files: &[String]) -> Option<(usize, usize)> {
     let document = parse_toml_document(content)?;
-    let overrides = document.as_table().get("overrides")?;
+    toml_override_entries(&document, files)
+        .into_iter()
+        .find_map(|entry| {
+            let rules = entry.get("rules")?.as_table_like()?;
+            rules.iter().find_map(|(name, _)| {
+                if !key_sets_rule(name, rule) {
+                    return None;
+                }
+                let span = rules.key(name)?.span()?;
+                Some((span.start, span.end))
+            })
+        })
+}
+
+/// The `overrides` entries whose `files` list is exactly `files`, in config
+/// order: tables of an array of tables, or inline tables of an array.
+fn toml_override_entries<'a>(
+    document: &'a toml_edit::Document<&str>,
+    files: &[String],
+) -> Vec<&'a dyn toml_edit::TableLike> {
+    let Some(overrides) = document.as_table().get("overrides") else {
+        return Vec::new();
+    };
     let entries: Vec<&dyn toml_edit::TableLike> = match overrides.as_array_of_tables() {
         Some(tables) => tables
             .iter()
             .map(|table| table as &dyn toml_edit::TableLike)
             .collect(),
         None => overrides
-            .as_array()?
-            .iter()
+            .as_array()
+            .into_iter()
+            .flat_map(toml_edit::Array::iter)
             .filter_map(toml_edit::Value::as_inline_table)
             .map(|table| table as &dyn toml_edit::TableLike)
             .collect(),
     };
-    entries.into_iter().find_map(|entry| {
-        let globs = entry.get("files")?.as_array()?;
-        let same_files = globs.len() == files.len()
-            && globs
-                .iter()
-                .zip(files)
-                .all(|(glob, file)| glob.as_str() == Some(file.as_str()));
-        if !same_files {
-            return None;
-        }
-        let rules = entry.get("rules")?.as_table_like()?;
-        rules.iter().find_map(|(name, _)| {
-            if !key_sets_rule(name, rule) {
-                return None;
-            }
-            let span = rules.key(name)?.span()?;
-            Some((span.start, span.end))
+    entries
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .get("files")
+                .and_then(toml_edit::Item::as_array)
+                .is_some_and(|globs| {
+                    globs.len() == files.len()
+                        && globs
+                            .iter()
+                            .zip(files)
+                            .all(|(glob, file)| glob.as_str() == Some(file.as_str()))
+                })
         })
-    })
+        .collect()
 }
 
 /// The byte range of `entry` in the `setting` list of one config file. The
@@ -292,6 +400,60 @@ mod tests {
         let span = FallowConfig::locate_override_rule(&path, "re-export-cycle", &files)
             .expect("rule is found");
         assert_eq!(located_text(&span), "re-export-cycle");
+    }
+
+    #[test]
+    fn finds_an_override_rule_in_a_later_entry_with_the_same_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let files = ["src/**".to_owned()];
+        let json = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &json,
+            "{\"overrides\": [{\"files\": [\"src/**\"], \"rules\": {\"unused-exports\": \"off\"}}, {\"files\": [\"src/**\"], \"rules\": {\"unused-dependencies\": \"off\"}}]}\n",
+        )
+        .expect("write config");
+        let span = FallowConfig::locate_override_rule(&json, "unused-dependencies", &files)
+            .expect("rule of the second entry is found");
+        assert_eq!(located_text(&span), "\"unused-dependencies\"");
+
+        let toml = dir.path().join("fallow.toml");
+        std::fs::write(
+            &toml,
+            "[[overrides]]\nfiles = [\"src/**\"]\n[overrides.rules]\nunused-exports = \"off\"\n\n[[overrides]]\nfiles = [\"src/**\"]\n[overrides.rules]\nunused-dependencies = \"off\"\n",
+        )
+        .expect("write config");
+        let span = FallowConfig::locate_override_rule(&toml, "unused-dependencies", &files)
+            .expect("rule of the second entry is found");
+        assert_eq!(located_text(&span), "unused-dependencies");
+    }
+
+    #[test]
+    fn finds_an_override_glob_in_jsonc_and_toml() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let files = ["src/**".to_owned(), "vendor/x.css".to_owned()];
+        let json = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &json,
+            "{\n  // other entry first\n  \"overrides\": [\n    { \"files\": [\"vendor/x.css\"], \"rules\": {} },\n    { \"files\": [\"src/**\", \"vendor/x.css\"], \"rules\": {} }\n  ]\n}\n",
+        )
+        .expect("write config");
+        let span = FallowConfig::locate_override_glob(&json, &files, "vendor/x.css").expect("glob");
+        assert_eq!(located_text(&span), "\"vendor/x.css\"");
+        let content = std::fs::read_to_string(&json).expect("read");
+        assert!(
+            span.start > content.find("src/**").expect("second entry"),
+            "the glob of the entry with the same files list"
+        );
+
+        let toml = dir.path().join("fallow.toml");
+        std::fs::write(
+            &toml,
+            "[[overrides]]\nfiles = [\"src/**\", \"vendor/x.css\"]\n\n[overrides.rules]\n",
+        )
+        .expect("write config");
+        let span = FallowConfig::locate_override_glob(&toml, &files, "vendor/x.css").expect("glob");
+        assert_eq!(located_text(&span), "\"vendor/x.css\"");
+        assert!(FallowConfig::locate_override_glob(&toml, &files, "lib/**").is_none());
     }
 
     #[test]
@@ -487,6 +649,27 @@ mod tests {
         );
         assert_eq!(
             FallowConfig::locate_list_entry(&path, "ignoreDependencies", "a/**"),
+            None
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_oversize_source_gives_no_span() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("base.json");
+        let file = std::fs::File::create(&base).expect("create base");
+        file.set_len(fallow_types::read_guard::DEFAULT_MAX_READ_BYTES + 1)
+            .expect("size base");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"extends": "./base.json", "ignoreDependencies": ["a"]}"#,
+        )
+        .expect("write config");
+
+        assert_eq!(
+            FallowConfig::locate_list_entry(&path, "ignoreDependencies", "a"),
             None
         );
     }

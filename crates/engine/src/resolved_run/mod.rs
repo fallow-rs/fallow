@@ -307,6 +307,17 @@ impl ResolvedRun {
         fallow_config::diagnose_configured_external_plugins(self.root.value(), &self.file.plugins)
     }
 
+    /// Every external plugin that the project declares: the plugin files and
+    /// the inline `framework` plugins. Unlike the resolved config, the list
+    /// keeps a plugin whose globs fail the config glob check, so a command
+    /// that checks plugins can report it. The analysis never uses this list.
+    pub fn declared_external_plugins(&self) -> Vec<fallow_config::ExternalPluginDef> {
+        let mut plugins =
+            fallow_config::discover_external_plugins(self.root.value(), &self.file.plugins);
+        plugins.extend(self.file.framework.iter().cloned());
+        plugins
+    }
+
     /// The mode entry of a production mode.
     fn entry(&self, production: bool) -> Option<&ModeEntry> {
         if production {

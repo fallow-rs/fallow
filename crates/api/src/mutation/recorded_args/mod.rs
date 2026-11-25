@@ -446,7 +446,7 @@ pub fn store(
     functions: &[RecordedFunction],
     now: u64,
 ) -> std::io::Result<Vec<(String, StoredFunction)>> {
-    crate::mutation::last_report::ignore_cache_dir(cache_dir)?;
+    crate::mutation::ignore_cache_dir(cache_dir)?;
     let path = store_path(cache_dir);
     let mut store = read_store(&path);
     store.format = STORE_FORMAT;

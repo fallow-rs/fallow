@@ -74,13 +74,6 @@ static TEMPLATE_MEMBER_TAG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r"<\s*([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+)")
 });
 
-/// Regex matching the `define:vars=` directive prefix. The expression object
-/// that follows (`define:vars={{ a, b: c }}`) passes frontmatter values into a
-/// scoped `<style>` / `<script>` / element, so the identifiers it references are
-/// real prop / import uses.
-static DEFINE_VARS_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r"define:vars\s*="));
-
 /// Build the disjoint, ascending list of byte ranges to mask when scanning the
 /// Astro template: whole `<script>` / `<style>` blocks (opening tag included)
 /// and HTML comments. The three `find_iter` passes are concatenated (not
@@ -146,10 +139,11 @@ fn collect_astro_template_used_names(
     // Identifiers inside `{ ... }` expression regions.
     collect_brace_expression_idents(template, &is_masked, &mut used);
 
-    // Identifiers inside `define:vars={ ... }` directive values. These sit in the
-    // opening tag of a `<style>` / `<script>` block (masked above), so they are
-    // scanned separately over the unmasked template.
-    collect_define_vars_idents(template, &mut used);
+    // Identifiers inside `{ ... }` expressions in `<style>` and `<script>`
+    // opening tag attributes (such as `set:html={CSS}` or `define:vars={{ a }}`).
+    // Their opening tags are part of the masked block range above, so they are
+    // scanned separately over `block.attrs` while keeping block bodies masked.
+    collect_masked_tag_attr_expression_idents(template, &mut used);
 
     used
 }
@@ -187,31 +181,82 @@ fn brace_body_end(bytes: &[u8], open: usize) -> usize {
     if depth == 0 { j - 1 } else { len }
 }
 
-/// Credit every identifier inside each `define:vars={ ... }` directive value.
-/// Astro's `define:vars` injects frontmatter values into a scoped `<style>` /
-/// `<script>` (or element) as the expression object, so a prop or import used
-/// only there is a genuine use. Because the directive sits inside the opening tag
-/// of a `<style>` / `<script>` block that the main scanner masks, this runs over
-/// the unmasked template and matches the directive directly. Over-crediting (e.g.
-/// an identifier-shaped fragment of a quoted CSS-variable key) only suppresses a
-/// finding, never creates one.
-fn collect_define_vars_idents(template: &str, used: &mut FxHashSet<String>) {
-    let bytes = template.as_bytes();
-    for m in DEFINE_VARS_RE.find_iter(template) {
-        // Skip whitespace after `define:vars=` to the JSX expression `{`.
-        let mut k = m.end();
-        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
-            k += 1;
-        }
-        if k >= bytes.len() || bytes[k] != b'{' {
+/// Credit identifiers inside `{ ... }` expressions on `<style>` and `<script>`
+/// opening tag attributes (e.g. `set:html={CSS}`, `is:inline src={URL}`,
+/// `define:vars={{ a, b: c }}`, or `data-*={VAL}`). Those opening tags fall
+/// within `(block.start, block.end)` masked by [`build_masked_ranges`] so
+/// their CSS/JS bodies stay hidden from `extend_template_expression_usage`.
+/// Scanning each non-commented, non-nested block's `attrs` slice separately
+/// credits genuine frontmatter imports/props without exposing `<style>` or
+/// `<script>` tag names as rendered components or bypassing #2355 guards.
+fn collect_masked_tag_attr_expression_idents(template: &str, used: &mut FxHashSet<String>) {
+    let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
+        .find_iter(template)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+
+    let mut candidate_blocks: Vec<blocks::Block> =
+        blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE))
+            .into_iter()
+            .chain(blocks::scan(
+                template,
+                &STYLE_PREFIX_RE,
+                Some(&STYLE_CLOSE_RE),
+            ))
+            .filter(|b| !pos_in_ranges(&comment_ranges, b.start))
+            .collect();
+    candidate_blocks.sort_unstable_by_key(|b| b.start);
+
+    let mut covered_end = 0;
+    for block in candidate_blocks {
+        // Ignore a `<style>` inside a `<script>` body (or vice versa).
+        if block.start < covered_end {
             continue;
         }
-        let end = brace_body_end(bytes, k);
-        if let Some(region) = template.get(k + 1..end) {
+        covered_end = block.end;
+        scan_tag_attr_brace_idents(template, block.attrs.start, block.attrs.end, used);
+    }
+}
+
+/// Scan a `<style>` / `<script>` opening tag's `attrs` byte range for unquoted
+/// `{ ... }` JSX expressions and insert identifier tokens into `used`. Static
+/// quoted attribute literals (`title="{Literal}"`) are skipped.
+fn scan_tag_attr_brace_idents(
+    template: &str,
+    start: usize,
+    end: usize,
+    used: &mut FxHashSet<String>,
+) {
+    let Some(bytes) = template.as_bytes().get(..end) else {
+        return;
+    };
+    let mut i = start;
+    let mut quote: Option<u8> = None;
+
+    while let Some(&b) = bytes.get(i) {
+        if let Some(q) = quote {
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if matches!(b, b'"' | b'\'') {
+            quote = Some(b);
+            i += 1;
+            continue;
+        }
+        if b != b'{' {
+            i += 1;
+            continue;
+        }
+        let brace_end = brace_body_end(bytes, i);
+        if let Some(region) = template.get(i + 1..brace_end) {
             for token in TEMPLATE_IDENT_RE.find_iter(region) {
                 used.insert(token.as_str().to_string());
             }
         }
+        i = brace_end + 1;
     }
 }
 
@@ -749,7 +794,9 @@ fn analyze_astro_frontmatter(
     };
     let source_type = SourceType::ts();
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+    let parser_return = Parser::new(&allocator, &script.body, source_type)
+        .with_options(crate::parse_options::astro_frontmatter_parse_options())
+        .parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_top_level_is_component_body(true);
     extractor.set_template_reads_root(true);
@@ -1842,6 +1889,64 @@ mod tests {
         assert!(
             accesses.contains(&("FD".to_string(), "Moon".to_string())),
             "the dotted-only frontmatter access should be recorded; got {accesses:?}"
+        );
+    }
+
+    /// Issue #5098: attribute brace expressions on `<style>` and `<script>` tags
+    /// (such as `set:html={CSS}`, `is:inline set:html={JS}`, `data-*={VAL}`, and
+    /// `define:vars={{ ... }}`) must credit their referenced frontmatter imports
+    /// without unmasking block bodies, quoted static attributes, HTML comments,
+    /// cross-nested block strings, or `<style>`/`<script>` tag names.
+    #[test]
+    fn astro_style_and_script_tag_attr_expressions_credit_imports() {
+        let template = "\
+<style set:html={CSS} data-theme={STYLE_DATA} data-dir=\"C:\\\" define:vars={{ VarA }}>\n\
+  .box { color: red; }\n\
+</style>\n\
+<script is:inline set:html={JS} nonce={SCRIPT_NONCE}>\n\
+  const dummy = '<style set:html={CrossNestedStyle}></style>';\n\
+</script>\n\
+<style title=\"{StaticQuoted}\" data-single='{SingleQuoted}'>/* <script set:html={CrossNestedScript}></script> */</style>\n\
+<!-- <script set:html={CommentedOut}></script> -->\n";
+        let masked = build_masked_ranges(template);
+        let used = collect_astro_template_used_names(template, &masked);
+
+        for expected in ["CSS", "STYLE_DATA", "VarA", "JS", "SCRIPT_NONCE"] {
+            assert!(
+                used.contains(expected),
+                "expected {expected} from tag attr expression to be credited; got {used:?}"
+            );
+        }
+        for ignored in [
+            "StaticQuoted",
+            "SingleQuoted",
+            "CommentedOut",
+            "CrossNestedStyle",
+            "CrossNestedScript",
+            "style",
+            "script",
+            "box",
+            "color",
+            "red",
+        ] {
+            assert!(
+                !used.contains(ignored),
+                "expected {ignored} not to be credited; got {used:?}"
+            );
+        }
+
+        let source = format!(
+            "---\n\
+             import {{ CSS, JS, STYLE_DATA, SCRIPT_NONCE, VarA, StaticQuoted, CommentedOut, Unused }} from './lib';\n\
+             import style from './style';\n\
+             import script from './script';\n\
+             ---\n{template}"
+        );
+        let mut unused = parse_astro_to_module(FileId(0), &source, 0, false).unused_import_bindings;
+        unused.sort();
+        assert_eq!(
+            unused,
+            vec!["CommentedOut", "StaticQuoted", "Unused", "script", "style"]
         );
     }
 }

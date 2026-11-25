@@ -75,7 +75,7 @@ fn entry_weight_listing(
     let mut entries: Vec<EntryWeightOutput> = entry_ids
         .into_iter()
         .filter_map(|entry| {
-            let module = graph.modules.get(entry.0 as usize)?;
+            let module = graph.module(entry)?;
             // A declaration file is erased at build time, so nothing loads it.
             if is_declaration_file_path(&module.path) {
                 return None;
@@ -134,7 +134,7 @@ fn entry_weight(
         .iter()
         .filter(|&&id| {
             graph
-                .modules
+                .modules()
                 .get(id.0 as usize)
                 .is_some_and(|m| is_stylesheet(&m.path))
         })
@@ -209,7 +209,7 @@ fn dominating_import_output(
 
 fn relative_path(graph: &ModuleGraph, id: FileId, root: &Path) -> String {
     graph
-        .modules
+        .modules()
         .get(id.0 as usize)
         .map(|module| crate::trace::trace_impl::relativize(&module.path, root))
         .unwrap_or_default()
@@ -254,7 +254,7 @@ struct LineOffsetCache(FxHashMap<FileId, Option<Vec<u32>>>);
 impl LineOffsetCache {
     fn line(&mut self, graph: &ModuleGraph, file: FileId, byte_offset: u32) -> Option<u32> {
         let offsets = self.0.entry(file).or_insert_with(|| {
-            let module = graph.modules.get(file.0 as usize)?;
+            let module = graph.module(file)?;
             std::fs::read_to_string(&module.path)
                 .ok()
                 .map(|source| fallow_types::extract::compute_line_offsets(&source))

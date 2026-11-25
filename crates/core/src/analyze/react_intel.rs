@@ -89,7 +89,7 @@ pub fn compute_react_component_intel(
     };
 
     let mut intel = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }
@@ -140,7 +140,7 @@ fn aggregate_render_edges(
     let mut per_component: FxHashMap<CompKey, RenderAccum> = FxHashMap::default();
     let mut prop_passes: FxHashMap<(CompKey, String), u32> = FxHashMap::default();
 
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }

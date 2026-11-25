@@ -289,8 +289,8 @@ fn entry_namespace_credit_is_routed_through_the_chain() {
     // sub.ts's `export *` source is credited through sub.ts's star chain and
     // its `export * as sub2` source through the namespace object sub.ts
     // exposes; sub2.ts's own chain follows the same two rules.
-    let sub = module_named(&graph.modules, "src/sub.ts");
-    let deep_x = export_named(module_named(&graph.modules, "src/deep.ts"), "deepX");
+    let sub = module_named(graph.modules(), "src/sub.ts");
+    let deep_x = export_named(module_named(graph.modules(), "src/deep.ts"), "deepX");
     assert!(
         deep_x
             .references
@@ -303,7 +303,7 @@ fn entry_namespace_credit_is_routed_through_the_chain() {
             .map(|r| (r.kind, r.namespace, r.from_file))
             .collect::<Vec<_>>()
     );
-    let sub2 = module_named(&graph.modules, "src/sub2.ts");
+    let sub2 = module_named(graph.modules(), "src/sub2.ts");
     for name in ["sub2X", "default"] {
         let export = export_named(sub2, name);
         assert!(
@@ -320,7 +320,7 @@ fn entry_namespace_credit_is_routed_through_the_chain() {
                 .collect::<Vec<_>>()
         );
     }
-    let sub3_default = export_named(module_named(&graph.modules, "src/sub3.ts"), "default");
+    let sub3_default = export_named(module_named(graph.modules(), "src/sub3.ts"), "default");
     assert!(
         sub3_default
             .references
@@ -334,7 +334,7 @@ fn entry_namespace_credit_is_routed_through_the_chain() {
             .collect::<Vec<_>>()
     );
     assert!(
-        export_named(module_named(&graph.modules, "src/deep.ts"), "default")
+        export_named(module_named(graph.modules(), "src/deep.ts"), "default")
             .references
             .is_empty(),
         "deep.ts:default is not part of sub.ts's `export *` surface"

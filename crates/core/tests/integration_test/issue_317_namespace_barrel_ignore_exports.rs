@@ -62,6 +62,7 @@ fn make_config(
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }

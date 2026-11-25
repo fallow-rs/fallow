@@ -56,7 +56,7 @@ pub fn find_unused_svelte_events(
     // Pass 2: flag each reachable `.svelte` component's dispatched events whose
     // name is in no listener.
     let mut findings = Vec::new();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_svelte_file(&node.path) {
             continue;
         }

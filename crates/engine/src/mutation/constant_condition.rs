@@ -17,7 +17,7 @@ use fallow_types::results::{
 };
 use rustc_hash::FxHashMap;
 
-use super::plan::RankEntry;
+use super::sampling::RankEntry;
 
 /// One parameter whose calls each pass the same literal.
 struct ConstantArgument<'a> {

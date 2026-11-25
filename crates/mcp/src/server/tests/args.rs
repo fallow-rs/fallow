@@ -1790,6 +1790,12 @@ fn type_aware_options_reach_analyze_health_and_audit() {
     assert!(health.contains(&"--type-aware".to_string()));
     assert!(health.contains(&"--type-coupling".to_string()));
 
+    let shallow = build_health_args(&HealthParams {
+        shallow_directories: Some(true),
+        ..Default::default()
+    });
+    assert!(shallow.contains(&"--shallow-directories".to_string()));
+
     let audit = build_audit_args(&AuditParams {
         type_aware: Some(true),
         type_aware_require: Some(TypeAwareRequireParam::BestEffort),
@@ -1836,6 +1842,7 @@ fn health_args_with_all_options() {
         type_aware_projects: None,
         type_aware_require: None,
         type_coupling: None,
+        shallow_directories: None,
         churn_file: None,
         workspace: Some("packages/ui".to_string()),
         production: Some(true),

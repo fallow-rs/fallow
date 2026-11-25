@@ -6,10 +6,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
-use crate::setup_hooks::symlink_guard::{
-    OUTSIDE_LINK, OUTSIDE_LINK_REMEDY, refusal_message, symlinked_component,
-};
+use crate::setup_hooks::symlink_guard::{OUTSIDE_LINK, OUTSIDE_LINK_REMEDY, refusal_message};
 use crate::state_file::read_optional_bytes;
+
+/// `path` relative to `root` when it is below the root, else in full.
+pub(super) fn display_hook_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
+}
 
 /// [`refuse_outside_link`] for a Git hook in the work tree, such as a
 /// `core.hooksPath` of `.githooks`. A hook under `.git`, or in the common
@@ -25,14 +29,14 @@ pub(super) fn refuse_tracked_hook_link(root: &Path, path: &Path) -> Result<(), E
 /// Print an error and fail when `path` goes through a symlink that resolves
 /// outside `root`.
 pub(super) fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), ExitCode> {
-    let Some(link) = symlinked_component(root, path) else {
+    let Some(link) = fallow_types::path_guard::outside_link(root, path) else {
         return Ok(());
     };
     eprintln!(
         "Error: {}",
         refusal_message(
-            &super::display_hook_path(root, path),
-            &super::display_hook_path(root, &link)
+            &display_hook_path(root, path),
+            &display_hook_path(root, &link)
         )
     );
     Err(exit_invalid_input())
@@ -45,10 +49,10 @@ pub(super) fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), ExitCo
 /// the file is created).
 pub(super) fn ensure_gitignore(root: &Path) {
     let gitignore_path = root.join(".gitignore");
-    if let Some(link) = symlinked_component(root, &gitignore_path) {
+    if let Some(link) = fallow_types::path_guard::outside_link(root, &gitignore_path) {
         eprintln!(
             "Warning: Did not update .gitignore: {} {}; {}.",
-            super::display_hook_path(root, &link),
+            display_hook_path(root, &link),
             OUTSIDE_LINK,
             OUTSIDE_LINK_REMEDY
         );

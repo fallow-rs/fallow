@@ -1,7 +1,7 @@
 //! Used-export rules: the export names that a plugin marks as used in the
 //! files that a path rule matches.
 
-use super::{AggregatedPluginResult, CompiledPathRule, PathRule, PluginResult};
+use super::{AggregatedPluginResult, PathRule, PathRuleIndex, PluginResult};
 
 impl PluginResult {
     pub(super) fn push_used_export_rule(
@@ -126,7 +126,7 @@ impl PluginUsedExportRule {
 /// decide whether to analyse it. This credit never feeds that decision, so
 /// output without `includeEntryExports` does not change.
 pub struct ConfigExportCredit<'a> {
-    matchers: Vec<(CompiledPathRule, &'a [String])>,
+    matchers: PathRuleIndex<&'a [String]>,
 }
 
 impl<'a> ConfigExportCredit<'a> {
@@ -138,16 +138,12 @@ impl<'a> ConfigExportCredit<'a> {
         let matchers = plugin_result
             .filter(|_| include_entry_exports)
             .map(|pr| {
-                pr.config_export_credits
-                    .iter()
-                    .filter_map(|rule| {
-                        CompiledPathRule::for_used_export_rule(
-                            &rule.rule.path,
-                            "config export credit pattern",
-                        )
-                        .map(|matcher| (matcher, rule.rule.exports.as_slice()))
-                    })
-                    .collect()
+                PathRuleIndex::build(
+                    pr.config_export_credits
+                        .iter()
+                        .map(|rule| (&rule.rule.path, rule.rule.exports.as_slice())),
+                    "config export credit pattern",
+                )
             })
             .unwrap_or_default();
         Self { matchers }
@@ -161,11 +157,7 @@ impl<'a> ConfigExportCredit<'a> {
     /// The credited export names of each rule that matches the
     /// project-relative `path`.
     pub fn exports_for(&self, path: &str) -> Vec<&'a [String]> {
-        self.matchers
-            .iter()
-            .filter(|(matcher, _)| matcher.matches(path))
-            .map(|(_, exports)| *exports)
-            .collect()
+        self.matchers.matching(path).into_iter().copied().collect()
     }
 
     /// Whether the export lists from [`Self::exports_for`] credit

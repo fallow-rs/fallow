@@ -805,7 +805,7 @@ mod tests {
         });
     }
 
-    pub(super) fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
+    fn make_export(path: &Path, name: &str, line: u32) -> UnusedExport {
         UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),

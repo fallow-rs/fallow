@@ -92,6 +92,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/shallow-directory",
+              "shortDescription": {
+                "text": "Directory shows as many interface items as it hides"
+              },
+              "fullDescription": {
+                "text": "Files outside the directory use at least as many of its interface items as it keeps inside, and it shows at least `health.shallowDirectories.minInterface` items (default 8). An interface item is a module-scope function or an exported class with a method; types, constants, enums, UI components and exports that a package entry publishes are no items. Only runtime imports from files that are not tests or stories count. A catalog (about one item per file), a family of functions with one parameter list, and items with about one outside user are not reported. The section is opt-in with `fallow health --shallow-directories`, advisory, and has no health score weight."
+              },
+              "helpUri": "https://fallow.tools/docs/rules/shallow-directory/",
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
               "id": "fallow/untested-file",
               "shortDescription": {
                 "text": "Runtime-reachable file has no test dependency path"

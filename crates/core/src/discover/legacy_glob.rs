@@ -3,6 +3,7 @@
 //! [`fallow_config::find_legacy_glob_narrowings`]).
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use fallow_config::ResolvedConfig;
 use fallow_types::discover::{DiscoveredFile, EntryPointSource};
@@ -10,7 +11,19 @@ use fallow_types::path_util::display_relative;
 use rustc_hash::FxHashSet;
 
 use super::CategorizedEntryPoints;
-use super::walk::should_emit_note_once;
+
+/// Process-wide dedupe of the size-skip / largest-files stderr notes, keyed by a
+/// content-derived string, so combined-mode (`fallow` runs check + dupes +
+/// health, each of which can trigger a source walk) emits each note at most once
+/// per distinct content. Mirrors the workspace-diagnostics `should_emit`
+/// pattern (issue #1086).
+pub(super) fn should_emit_note_once(key: String) -> bool {
+    static EMITTED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    EMITTED
+        .get_or_init(|| Mutex::new(FxHashSet::default()))
+        .lock()
+        .map_or(true, |mut set| set.insert(key))
+}
 
 /// Find the config globs that match fewer discovered files now that a
 /// single `*` or `?` stays within one path segment. `entry_fields` selects

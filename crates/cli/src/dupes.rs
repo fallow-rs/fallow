@@ -517,7 +517,7 @@ fn execute_dupes_inner(
                 &dupes_config,
                 effective_changed_files,
             );
-            workspace_diagnostics = session.workspace_diagnostics().to_vec();
+            workspace_diagnostics = analysis::session_workspace_diagnostics(&session);
             (analysis, change_scope)
         }
     };
@@ -862,9 +862,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    if opts.performance {
-        print_dupes_performance(&result, opts.output);
-    }
+    analysis::print_run_notes(&result, opts);
     let resolver = match crate::build_ownership_resolver(
         opts.group_by,
         opts.root,
@@ -1323,6 +1321,7 @@ fn print_ignore_imports_note(result: &DupesResult, quiet: bool, scope: DupesOptO
 mod tests {
     use super::*;
     use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
+    use crate::report::ci::diff_filter::DiffIndex;
     use fallow_config::{DetectionMode, DuplicatesConfig, NormalizationConfig};
     use fallow_engine::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
     use fallow_engine::diff_scope::filter_duplication_by_diff as filter_by_diff;
@@ -2569,10 +2568,6 @@ mod tests {
         assert!(report.clone_groups.is_empty());
     }
 
-    fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
-        crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
-    }
-
     #[test]
     fn filter_by_diff_keeps_group_when_one_of_four_instances_overlaps() {
         let group = make_group(
@@ -2586,7 +2581,7 @@ mod tests {
             10,
         );
         let mut report = make_report(vec![group], 10, 1000);
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -2616,7 +2611,7 @@ mod tests {
             10,
         );
         let mut report = make_report(vec![group], 10, 1000);
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/elsewhere.ts b/src/elsewhere.ts\n\
              --- a/src/elsewhere.ts\n\
              +++ b/src/elsewhere.ts\n\
@@ -2640,7 +2635,7 @@ mod tests {
             10,
         );
         let mut report = make_report(vec![group], 10, 1000);
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -2665,7 +2660,7 @@ mod tests {
             200,
         );
         let mut report = make_report(vec![group], 10, 5000);
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/big.ts b/src/big.ts\n\
              --- a/src/big.ts\n\
              +++ b/src/big.ts\n\

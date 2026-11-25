@@ -20,6 +20,7 @@ mod effect;
 mod gitignored_targets;
 mod graph_confidence;
 mod iconify;
+mod ignore_list_effect;
 mod import_and_duplicate_detectors;
 mod inline_loaders;
 mod invalid_client_exports;
@@ -334,7 +335,7 @@ fn add_exportless_package_source_indexes(
         roots.push(canonical);
     }
 
-    for module in &graph.modules {
+    for module in graph.modules() {
         if roots
             .iter()
             .any(|root| is_source_index_under_package(&module.path, root))
@@ -672,11 +673,10 @@ pub(crate) fn find_dead_code_full(
     // fixed pnpm-workspace.yaml or a new text bun.lock does not leave a stale
     // entry (issue #2366).
     fallow_config::clear_analysis_stage_diagnostics(&config.root);
-    // The same reason for the config pattern matchers: a long-lived process
-    // keeps one resolved config, and the unmatched-pattern diagnostics must
-    // describe this pass only. `ignoreFindings` is consulted by the engine
-    // right after this pass, so this is its start as well.
-    config.begin_dead_code_pass(workspaces);
+    // The config pattern records restart here for the same reason: a long-lived
+    // process keeps one resolved config, and their diagnostics describe this
+    // pass only. The engine reads `ignoreFindings` right after this pass.
+    ignore_list_effect::begin_pass(graph, config, workspaces);
     fallow_config::record_workspace_diagnostics(
         &config.root,
         production_excluded_imports::diagnostics(config, resolved_modules, workspaces, excluded),
@@ -842,7 +842,7 @@ fn collect_federation_runtime_remotes(
         .iter()
         .filter(|m| !input.excluded.contains(&m.file_id));
     let sources = included.filter_map(|module| {
-        let node = input.graph.modules.get(module.file_id.0 as usize)?;
+        let node = input.graph.module(module.file_id)?;
         Some((node.path.as_path(), &*module.semantic_facts))
     });
     let remotes = crate::plugins::runtime_remotes(sources, &input.config.root, input.workspaces);
@@ -1385,7 +1385,7 @@ fn collect_prop_drilling_findings(
 /// This avoids filesystem probes for every module when the raw index is sufficient.
 fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
     graph
-        .modules
+        .modules()
         .iter()
         .map(|node| (node.path.as_path(), node.file_id))
         .collect()

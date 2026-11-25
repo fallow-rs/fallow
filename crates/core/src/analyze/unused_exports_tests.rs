@@ -355,8 +355,8 @@ fn duplicate_exports_empty_graph() {
 #[test]
 fn duplicate_exports_no_duplicates_single_module() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20), make_export("bar", 30, 40)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20), make_export("bar", 30, 40)];
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -389,8 +389,8 @@ fn duplicate_exports_skips_default_exports() {
         ("/src/a.ts", false),
         ("/src/b.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![ExportSymbol {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![ExportSymbol {
         name: ExportName::Default,
         is_type_only: false,
         is_side_effect_used: false,
@@ -403,8 +403,8 @@ fn duplicate_exports_skips_default_exports() {
         deprecated: false,
         deprecated_reason: None,
     }];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![ExportSymbol {
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![ExportSymbol {
         name: ExportName::Default,
         is_type_only: false,
         is_side_effect_used: false,
@@ -430,10 +430,10 @@ fn duplicate_exports_skips_synthetic_re_export_entries() {
         ("/src/a.ts", false),
         ("/src/b.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("helper", 0, 0)]; // synthetic
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("helper", 10, 20)]; // real
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 0, 0)]; // synthetic
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("helper", 10, 20)]; // real
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -447,9 +447,9 @@ fn duplicate_exports_skips_unreachable_modules() {
         ("/src/a.ts", false),
         ("/src/b.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-    graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[2].exports = vec![make_export("helper", 10, 20)];
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -459,9 +459,9 @@ fn duplicate_exports_skips_unreachable_modules() {
 #[test]
 fn duplicate_exports_skips_entry_points() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/b.ts", false)]);
-    graph.modules[0].exports = vec![make_export("helper", 10, 20)];
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[0].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 10, 20)];
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -475,17 +475,17 @@ fn duplicate_exports_filters_re_export_chains() {
         ("/src/index.ts", false),
         ("/src/helper.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-    graph.modules[1].re_exports = vec![ReExportEdge {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[1].re_exports = vec![ReExportEdge {
         source_file: FileId(2),
         imported_name: "helper".to_string(),
         exported_name: "helper".to_string(),
         is_type_only: false,
         span: oxc_span::Span::default(),
     }];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("helper", 5, 15)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("helper", 5, 15)];
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -696,10 +696,10 @@ fn duplicate_exports_suppressed_file_wide() {
         ("/src/a.ts", false),
         ("/src/b.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("helper", 10, 20)];
 
     let supp = vec![Suppression::issue(0, 1, IssueKind::DuplicateExport)];
     let mut supp_map: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
@@ -746,10 +746,10 @@ fn duplicate_exports_unrelated_leaf_files_not_flagged() {
         ("/src/routes/foo/page.ts", false),
         ("/src/routes/bar/page.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("Area", 10, 20)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("Area", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("Area", 10, 20)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("Area", 10, 20)];
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -766,10 +766,10 @@ fn duplicate_exports_different_names_not_duplicated() {
         ("/src/a.ts", false),
         ("/src/b.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("bar", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("bar", 10, 20)];
     let suppressions = SuppressionContext::empty();
     let config = test_config();
     let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default(), &[]);
@@ -779,8 +779,8 @@ fn duplicate_exports_different_names_not_duplicated() {
 #[test]
 fn duplicate_exports_value_type_merging_not_flagged() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/schema.ts", false)]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![
         make_export("Status", 10, 20),
         make_type_export("Status", 50, 60),
     ];
@@ -801,10 +801,10 @@ fn duplicate_exports_value_type_cross_file_not_flagged() {
         ("/src/a.ts", false),
         ("/src/b.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("Status", 10, 20)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_type_export("Status", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("Status", 10, 20)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_type_export("Status", 10, 20)];
     graph.reverse_deps[1] = vec![FileId(0)];
     graph.reverse_deps[2] = vec![FileId(0)];
     let suppressions = SuppressionContext::empty();
@@ -862,17 +862,17 @@ fn duplicate_exports_cross_package_backend_does_not_defeat_value_type_suppressio
         ("/src/frontend/consumer.ts", false),
     ]);
     // Reachable non-entry modules
-    graph.modules[2].set_reachable(true);
-    graph.modules[3].set_reachable(true);
-    graph.modules[4].set_reachable(true);
-    graph.modules[5].set_reachable(true);
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[3].set_reachable(true);
+    graph.modules_mut()[4].set_reachable(true);
+    graph.modules_mut()[5].set_reachable(true);
 
     // Backend: value export `Label`
-    graph.modules[2].exports = vec![make_export("Label", 10, 20)];
+    graph.modules_mut()[2].exports = vec![make_export("Label", 10, 20)];
     // Frontend value: `function Label`
-    graph.modules[3].exports = vec![make_export("Label", 10, 20)];
+    graph.modules_mut()[3].exports = vec![make_export("Label", 10, 20)];
     // Frontend type: `export type Label`
-    graph.modules[4].exports = vec![make_type_export("Label", 10, 20)];
+    graph.modules_mut()[4].exports = vec![make_type_export("Label", 10, 20)];
 
     // Backend label is imported only by the backend entry (FileId 0).
     graph.reverse_deps[2] = vec![FileId(0)];
@@ -994,10 +994,10 @@ fn dynamic_import_then_member_not_flagged_as_duplicate() {
         ("/src/Foo.tsx", false),
         ("/src/Foo-lazy.tsx", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("Foo", 10, 30)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("Foo", 10, 30)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("Foo", 10, 30)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("Foo", 10, 30)];
     graph.reverse_deps[1] = vec![FileId(0)];
     graph.reverse_deps[2] = vec![FileId(0)];
 
@@ -1045,10 +1045,10 @@ fn dynamic_import_without_then_default_not_flagged_as_duplicate() {
         ("/src/Foo.tsx", false),
         ("/src/Foo-lazy.tsx", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_default_export()];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_default_export()];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_default_export()];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_default_export()];
     graph.reverse_deps[1] = vec![FileId(0)];
     graph.reverse_deps[2] = vec![FileId(0)];
 
@@ -1219,10 +1219,12 @@ fn duplicate_exports_skipped_when_ignore_exports_matches_with_wildcard() {
         ("/src/ui/dialog/index.ts", false),
         ("/src/ui/card/index.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("Root", 10, 30), make_export("Content", 40, 60)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("Root", 10, 30), make_export("Content", 40, 60)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports =
+        vec![make_export("Root", 10, 30), make_export("Content", 40, 60)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports =
+        vec![make_export("Root", 10, 30), make_export("Content", 40, 60)];
     graph.reverse_deps[1] = vec![FileId(0)];
     graph.reverse_deps[2] = vec![FileId(0)];
 
@@ -1350,8 +1352,8 @@ fn unused_exports_detects_unreferenced_export() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, types, _stale) = find_unused_exports(
@@ -1400,8 +1402,8 @@ fn unused_exports_skips_public_export() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![ExportSymbol {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![ExportSymbol {
         name: ExportName::Named("publicFn".to_string()),
         is_type_only: false,
         is_side_effect_used: false,
@@ -1434,8 +1436,8 @@ fn unused_exports_separates_types_from_values() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![
         make_export("valueFn", 10, 20),
         make_type_export("MyType", 30, 40),
     ];
@@ -1461,7 +1463,7 @@ fn unused_exports_skips_unreachable_module() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/dead.ts", false),
     ]);
-    graph.modules[1].exports = vec![make_export("orphan", 10, 20)];
+    graph.modules_mut()[1].exports = vec![make_export("orphan", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, types, _stale) = find_unused_exports(
@@ -1479,7 +1481,7 @@ fn unused_exports_skips_unreachable_module() {
 #[test]
 fn unused_exports_skips_entry_point() {
     let mut graph = build_graph(&[("/tmp/test/src/entry.ts", true)]);
-    graph.modules[0].exports = vec![make_export("main", 10, 20)];
+    graph.modules_mut()[0].exports = vec![make_export("main", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, types, _stale) = find_unused_exports(
@@ -1497,8 +1499,8 @@ fn unused_exports_skips_entry_point() {
 #[test]
 fn unused_exports_reports_non_framework_exports_in_entry_point_with_plugin_rules() {
     let mut graph = build_graph(&[("/tmp/test/src/app/page.tsx", true)]);
-    graph.modules[0].set_reachable(true);
-    graph.modules[0].exports = vec![
+    graph.modules_mut()[0].set_reachable(true);
+    graph.modules_mut()[0].exports = vec![
         make_export("default", 10, 20),
         make_export("generateMetadata", 30, 40),
         make_export("helper", 50, 60),
@@ -1531,9 +1533,9 @@ fn unused_exports_skips_cjs_only_module() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/legacy.js", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].set_cjs_exports(true);
-    graph.modules[1].exports = vec![];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].set_cjs_exports(true);
+    graph.modules_mut()[1].exports = vec![];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, types, _stale) = find_unused_exports(
@@ -1554,9 +1556,9 @@ fn unused_exports_does_not_skip_cjs_module_with_named_exports() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/mixed.js", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].set_cjs_exports(true);
-    graph.modules[1].exports = vec![make_export("namedFn", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].set_cjs_exports(true);
+    graph.modules_mut()[1].exports = vec![make_export("namedFn", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, _, _stale) = find_unused_exports(
@@ -1577,8 +1579,8 @@ fn unused_exports_skips_svelte_files() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/Component.svelte", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("count", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("count", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, types, _stale) = find_unused_exports(
@@ -1599,9 +1601,9 @@ fn unused_exports_reports_reachable_non_entry_non_cjs_non_svelte() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].set_cjs_exports(false);
-    graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].set_cjs_exports(false);
+    graph.modules_mut()[1].exports = vec![make_export("helper", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, _, _stale) = find_unused_exports(
@@ -1622,8 +1624,8 @@ fn unused_exports_empty_ignore_config() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, _, _stale) = find_unused_exports(
@@ -1648,10 +1650,10 @@ fn unused_exports_ignore_multiple_patterns() {
         ("/tmp/test/src/types.ts", false),
         ("/tmp/test/src/constants.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("MyType", 10, 20)];
-    graph.modules[2].set_reachable(true);
-    graph.modules[2].exports = vec![make_export("MY_CONST", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("MyType", 10, 20)];
+    graph.modules_mut()[2].set_reachable(true);
+    graph.modules_mut()[2].exports = vec![make_export("MY_CONST", 10, 20)];
 
     let config = test_config_with_ignore_exports(vec![
         fallow_config::IgnoreExportRule {
@@ -1693,8 +1695,9 @@ fn unused_exports_ignore_wildcard_matches_all() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/types.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("TypeA", 10, 20), make_export("TypeB", 30, 40)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports =
+        vec![make_export("TypeA", 10, 20), make_export("TypeB", 30, 40)];
 
     let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
         file: "src/types.ts".to_string(),
@@ -1721,8 +1724,8 @@ fn unused_exports_ignore_specific_name_only() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![
         make_export("ignored", 10, 20),
         make_export("reported", 30, 40),
     ];
@@ -1750,8 +1753,8 @@ fn unused_exports_ignore_rule_wrong_file_no_effect() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20)];
 
     let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
         file: "src/other.ts".to_string(),
@@ -1779,8 +1782,8 @@ fn unused_exports_no_plugin_result() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let (exports, _, _stale) = find_unused_exports(
@@ -1804,8 +1807,8 @@ fn unused_exports_plugin_no_used_exports() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let pr = make_plugin_result(vec![]);
@@ -1830,8 +1833,8 @@ fn unused_exports_plugin_used_exports_suppresses() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/pages/index.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![
         make_export("getStaticProps", 10, 20),
         make_export("unusedHelper", 30, 40),
     ];
@@ -1859,8 +1862,8 @@ fn unused_exports_both_config_and_plugin_ignore() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/api/handler.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("handler", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("handler", 10, 20)];
 
     let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
         file: "src/api/*.ts".to_string(),
@@ -1891,8 +1894,8 @@ fn unused_exports_invalid_plugin_glob_skipped() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("foo", 10, 20)];
     let config = test_config();
     let suppressions = SuppressionContext::empty();
     let pr = make_plugin_result(vec![("[invalid".to_string(), vec!["foo".to_string()])]);
@@ -1913,9 +1916,9 @@ fn unused_exports_marks_re_export_semantically() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/barrel.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![make_export("reexported", 100, 120)];
-    graph.modules[1].re_exports = vec![ReExportEdge {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![make_export("reexported", 100, 120)];
+    graph.modules_mut()[1].re_exports = vec![ReExportEdge {
         source_file: FileId(0),
         imported_name: "reexported".to_string(),
         exported_name: "reexported".to_string(),
@@ -1950,7 +1953,7 @@ fn collect_usages_empty_graph() {
 #[test]
 fn collect_usages_skips_unreachable_modules() {
     let mut graph = build_graph(&[("/src/dead.ts", false)]);
-    graph.modules[0].exports = vec![make_export("unused", 10, 20)];
+    graph.modules_mut()[0].exports = vec![make_export("unused", 10, 20)];
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert!(result.is_empty());
 }
@@ -1958,7 +1961,7 @@ fn collect_usages_skips_unreachable_modules() {
 #[test]
 fn collect_usages_skips_synthetic_exports() {
     let mut graph = build_graph(&[("/src/barrel.ts", true)]);
-    graph.modules[0].exports = vec![make_export("reexported", 0, 0)];
+    graph.modules_mut()[0].exports = vec![make_export("reexported", 0, 0)];
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert!(result.is_empty());
 }
@@ -1992,7 +1995,7 @@ fn collect_usages_collapses_namespaces_at_one_physical_site() {
             import_span: Span::new(0, 10),
         })
         .collect();
-    graph.modules[0].exports = vec![export];
+    graph.modules_mut()[0].exports = vec![export];
 
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert_eq!(result[0].reference_count, 1);
@@ -2013,7 +2016,7 @@ fn collect_usages_counts_two_import_sites_in_one_file_as_one_file() {
     let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
     let mut export = make_export("helper", 10, 20);
     export.references = vec![named_import_from(1, 0, 10), named_import_from(1, 20, 30)];
-    graph.modules[0].exports = vec![export];
+    graph.modules_mut()[0].exports = vec![export];
 
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert_eq!(result[0].reference_count, 1);
@@ -2033,7 +2036,7 @@ fn collect_usages_counts_distinct_importing_files() {
         named_import_from(2, 0, 10),
         named_import_from(1, 20, 30),
     ];
-    graph.modules[0].exports = vec![export];
+    graph.modules_mut()[0].exports = vec![export];
 
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert_eq!(result[0].reference_count, 2);
@@ -2044,7 +2047,7 @@ fn collect_usages_counts_file_whose_import_has_no_span() {
     let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
     let mut export = make_export("helper", 10, 20);
     export.references = vec![named_import_from(1, 0, 0)];
-    graph.modules[0].exports = vec![export];
+    graph.modules_mut()[0].exports = vec![export];
 
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert_eq!(result[0].reference_count, 1);
@@ -2054,7 +2057,7 @@ fn collect_usages_counts_file_whose_import_has_no_span() {
 #[test]
 fn collect_usages_zero_references_still_reported() {
     let mut graph = build_graph(&[("/src/utils.ts", true)]);
-    graph.modules[0].exports = vec![make_export("unused", 10, 20)];
+    graph.modules_mut()[0].exports = vec![make_export("unused", 10, 20)];
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].export_name, "unused");
@@ -2065,7 +2068,8 @@ fn collect_usages_zero_references_still_reported() {
 #[test]
 fn collect_usages_multiple_exports_same_module() {
     let mut graph = build_graph(&[("/src/utils.ts", true)]);
-    graph.modules[0].exports = vec![make_export("alpha", 10, 20), make_export("beta", 30, 40)];
+    graph.modules_mut()[0].exports =
+        vec![make_export("alpha", 10, 20), make_export("beta", 30, 40)];
     let result = collect_export_usages(&graph, &FxHashMap::default());
     assert_eq!(result.len(), 2);
     let names: FxHashSet<&str> = result.iter().map(|u| u.export_name.as_str()).collect();
@@ -2087,7 +2091,7 @@ fn unused_exports_checks_unreachable_module_with_mixed_references() {
         30,
         2,
     );
-    graph.modules[1]
+    graph.modules_mut()[1]
         .exports
         .push(make_export("totallyUnused", 40, 55));
 
@@ -2151,8 +2155,8 @@ fn unused_exports_skips_internal_visibility() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![ExportSymbol {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![ExportSymbol {
         name: ExportName::Named("internalHelper".to_string()),
         is_type_only: false,
         is_side_effect_used: false,
@@ -2188,8 +2192,8 @@ fn unused_exports_skips_beta_visibility() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![ExportSymbol {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![ExportSymbol {
         name: ExportName::Named("betaFeature".to_string()),
         is_type_only: false,
         is_side_effect_used: false,
@@ -2225,8 +2229,8 @@ fn unused_exports_skips_alpha_visibility() {
         ("/tmp/test/src/entry.ts", true),
         ("/tmp/test/src/utils.ts", false),
     ]);
-    graph.modules[1].set_reachable(true);
-    graph.modules[1].exports = vec![ExportSymbol {
+    graph.modules_mut()[1].set_reachable(true);
+    graph.modules_mut()[1].exports = vec![ExportSymbol {
         name: ExportName::Named("alphaFeature".to_string()),
         is_type_only: false,
         is_side_effect_used: false,
@@ -2259,7 +2263,7 @@ fn unused_exports_skips_alpha_visibility() {
 #[test]
 fn unused_exports_include_entry_exports_flag() {
     let mut graph = build_graph(&[("/tmp/test/src/entry.ts", true)]);
-    graph.modules[0].exports = vec![make_export("main", 10, 20)];
+    graph.modules_mut()[0].exports = vec![make_export("main", 10, 20)];
 
     let config_off = test_config();
     assert!(!config_off.include_entry_exports);

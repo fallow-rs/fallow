@@ -33,10 +33,55 @@ pub struct RegressionBaseline {
     pub dupes: Option<DupesCounts>,
     /// Startup import weight per runtime entry, from `list --entry-weight`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_weight: Option<super::entry_weight::EntryWeightCounts>,
+    pub entry_weight: Option<EntryWeightCounts>,
     /// Feature flag counts, from `fallow flags --retirement`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<FlagsCounts>,
+}
+
+/// Entry weights saved in a regression baseline file.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct EntryWeightCounts {
+    /// One row per runtime entry, sorted by path.
+    #[serde(default)]
+    pub entries: Vec<EntryWeightBaselineEntry>,
+}
+
+/// Saved weight of one runtime entry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EntryWeightBaselineEntry {
+    /// Entry file, relative to the project root.
+    pub path: String,
+    /// Source bytes that load before the entry runs.
+    pub eager_bytes: u64,
+    /// Modules that load before the entry runs.
+    pub eager_modules: usize,
+    /// Names of the packages on the eager path.
+    #[serde(default)]
+    pub eager_packages: Vec<String>,
+}
+
+impl EntryWeightCounts {
+    /// Capture the weights of the current listing.
+    #[must_use]
+    pub fn from_listing(listing: &fallow_output::EntryWeightListing) -> Self {
+        let mut entries: Vec<EntryWeightBaselineEntry> = listing
+            .entries
+            .iter()
+            .map(|entry| EntryWeightBaselineEntry {
+                path: entry.path.clone(),
+                eager_bytes: entry.eager_bytes,
+                eager_modules: entry.eager_modules,
+                eager_packages: entry
+                    .eager_packages
+                    .iter()
+                    .map(|package| package.name.clone())
+                    .collect(),
+            })
+            .collect();
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        Self { entries }
+    }
 }
 
 pub const REGRESSION_SCHEMA_VERSION: u32 = 2;

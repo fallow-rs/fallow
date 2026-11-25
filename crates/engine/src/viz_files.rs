@@ -55,7 +55,7 @@ pub(super) fn build_files(
         .map(|(i, file)| {
             let viz_idx = clamp_u32(i);
             let node_idx = file.id.0 as usize;
-            let node = graph.modules.get(node_idx);
+            let node = graph.modules().get(node_idx);
             let is_entry = node.is_some_and(|n| n.is_entry_point());
             let export_count = node.map_or(0, |n| clamp_u16(n.exports.len()));
             let import_count = clamp_u16(graph.edges_for(file.id).len());

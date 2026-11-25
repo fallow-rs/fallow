@@ -87,3 +87,20 @@ pub(super) fn functions_above_after_baseline(
             (remaining, total.saturating_sub(remaining))
         })
 }
+
+/// Whether the report has no section to render, so the human output prints
+/// the empty state.
+pub(super) fn has_nothing_to_render(report: &fallow_output::HealthReport) -> bool {
+    report.findings.is_empty()
+        && report.file_scores.is_empty()
+        && report.coverage_gaps.is_none()
+        && report.hotspots.is_empty()
+        && report.targets.is_empty()
+        && report.runtime_coverage.is_none()
+        && report.coverage_intelligence.is_none()
+        && report.threshold_overrides.is_empty()
+        && report.inline_threshold_overrides.is_empty()
+        && report.inline_threshold_override_problems.is_empty()
+        && report.css_analytics.is_none()
+        && report.shallow_directories.is_none()
+}

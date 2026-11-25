@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use fallow_output::CodeClimateIssue;
 
 use super::diff_filter::DiffIndex;
+use super::pr_comment::review_conclusion;
 use crate::exit_codes::exit_invalid_input;
 use crate::report::emit_json;
 use fallow_output::PrDecisionConclusion;
@@ -57,7 +58,7 @@ impl AuditGatePolicy {
     /// Read the policy from the `attribution` object of a saved audit
     /// envelope. `None` when the envelope has no gate mode.
     #[must_use]
-    pub fn from_audit_envelope(envelope: &serde_json::Value) -> Option<Self> {
+    pub(crate) fn from_audit_envelope(envelope: &serde_json::Value) -> Option<Self> {
         let attribution = envelope.get("attribution")?;
         let gate: fallow_config::AuditGate =
             serde_json::from_value(attribution.get("gate")?.clone()).ok()?;
@@ -348,19 +349,6 @@ fn print_review_envelope_from_ci_issues(
         }
     };
     emit_json(&value, "review envelope")
-}
-
-/// Translate a gate conclusion into the review/check vocabulary. Shared with
-/// the sticky comment renderer so both surfaces phrase one gate outcome the
-/// same way.
-pub(crate) const fn review_conclusion(conclusion: PrDecisionConclusion) -> ReviewCheckConclusion {
-    match conclusion {
-        PrDecisionConclusion::Success => ReviewCheckConclusion::Success,
-        PrDecisionConclusion::Failure => ReviewCheckConclusion::Failure,
-        PrDecisionConclusion::Neutral | PrDecisionConclusion::Skipped => {
-            ReviewCheckConclusion::Neutral
-        }
-    }
 }
 
 fn review_id_from_env() -> Result<Option<ReviewId>, String> {

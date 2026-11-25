@@ -265,3 +265,198 @@ fn modern_request_metadata_uses_invalid_params_for_unknown_uri() {
         "structured data must survive modern error classification: {error}"
     );
 }
+
+const SKILLS_EXTENSION: &str = "io.modelcontextprotocol/skills";
+const RELEASED_SKILLS: &[&str] = &["fallow", "fallow-setup"];
+
+fn released_skill_dir(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../npm/fallow/skills")
+    .join(name)
+}
+
+/// A source build from crates.io has no skill trees, so it embeds and serves
+/// no skills. The skill tests have nothing to check there.
+fn skill_trees_present() -> bool {
+    RELEASED_SKILLS
+        .iter()
+        .all(|name| released_skill_dir(name).join("SKILL.md").is_file())
+}
+
+/// Every file below `dir`, as a path relative to `dir` with forward slashes.
+fn files_below(dir: &std::path::Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        for entry in std::fs::read_dir(&current).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let relative = path.strip_prefix(dir).unwrap();
+                found.push(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn released_skills_are_served_byte_for_byte() {
+    if !skill_trees_present() {
+        return;
+    }
+    let mut server = McpServer::start_with("2025-11-25");
+    let extensions = &server.initialize_result["capabilities"]["extensions"];
+    assert!(
+        extensions[SKILLS_EXTENSION].is_object(),
+        "initialize must declare the skills extension: {extensions}"
+    );
+    assert!(
+        extensions[SKILLS_EXTENSION]["directoryRead"] != true,
+        "the manifest is complete, so directory reads are not offered: {extensions}"
+    );
+
+    let listing = server.request(2, "skills/list", &serde_json::json!({}));
+    let skills = listing["result"]["skills"]
+        .as_array()
+        .unwrap_or_else(|| panic!("skills array: {listing}"));
+    let names: Vec<&str> = skills
+        .iter()
+        .map(|skill| skill["frontmatter"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, RELEASED_SKILLS, "{listing}");
+
+    let mut id = 10;
+    for skill in skills {
+        let name = skill["frontmatter"]["name"].as_str().unwrap();
+        let uri = format!("skill://{name}/SKILL.md");
+        assert_eq!(skill["uri"], uri.as_str());
+        assert_eq!(skill["frontmatter"]["license"], "MIT", "{skill}");
+        assert!(skill["frontmatter"]["description"].is_string(), "{skill}");
+
+        let dir = released_skill_dir(name);
+        let manifest = skill["resources"].as_array().unwrap();
+        let mut served: Vec<String> = manifest
+            .iter()
+            .map(|file| {
+                file["uri"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix(&format!("skill://{name}/"))
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        served.sort();
+        assert_eq!(
+            served,
+            files_below(&dir),
+            "manifest of {name} lists every released file"
+        );
+
+        for file in manifest {
+            let file_uri = file["uri"].as_str().unwrap();
+            let relative = file_uri.strip_prefix(&format!("skill://{name}/")).unwrap();
+            let on_disk = std::fs::read(dir.join(relative)).unwrap();
+            assert_eq!(file["size"], on_disk.len(), "{file_uri}");
+            assert_eq!(
+                file["digest"],
+                rmcp::model::sha256_digest(&on_disk),
+                "{file_uri}"
+            );
+
+            id += 1;
+            let read = server.request(
+                id,
+                "resources/read",
+                &serde_json::json!({ "uri": file_uri }),
+            );
+            let contents = &read["result"]["contents"][0];
+            assert_eq!(contents["uri"], file_uri, "{read}");
+            assert_eq!(
+                contents["text"].as_str().map(str::as_bytes),
+                Some(on_disk.as_slice()),
+                "{file_uri} is served byte for byte"
+            );
+        }
+
+        id += 1;
+        let got = server.request(id, "skills/get", &serde_json::json!({ "uri": uri }));
+        assert_eq!(
+            &got["result"]["skill"], skill,
+            "skills/get matches skills/list"
+        );
+    }
+}
+
+#[test]
+fn unknown_skill_uri_is_invalid_params() {
+    if !skill_trees_present() {
+        return;
+    }
+    let mut server = McpServer::start_with("2025-11-25");
+    let error = server.request(
+        2,
+        "skills/get",
+        &serde_json::json!({ "uri": "skill://nope/SKILL.md" }),
+    );
+    assert_eq!(error["error"]["code"], -32602, "{error}");
+    let missing = server.request(
+        3,
+        "resources/read",
+        &serde_json::json!({ "uri": "skill://fallow/references/nope.md" }),
+    );
+    assert_eq!(missing["error"]["code"], -32602, "{missing}");
+    assert_eq!(
+        missing["error"]["data"]["skill"], "skill://fallow/SKILL.md",
+        "{missing}"
+    );
+    let known = missing["error"]["data"]["known_uris"].as_array().unwrap();
+    assert!(
+        known
+            .iter()
+            .any(|uri| uri == "skill://fallow/references/gotchas.md"),
+        "the error lists the files of the named skill: {missing}"
+    );
+    assert!(
+        known
+            .iter()
+            .all(|uri| uri.as_str().unwrap().starts_with("skill://fallow/")),
+        "the error lists no fallow:// resources: {missing}"
+    );
+}
+
+#[test]
+fn skills_are_listed_with_modern_request_metadata() {
+    if !skill_trees_present() {
+        return;
+    }
+    let mut server = McpServer::spawn();
+    let listing = server.request(
+        2,
+        "skills/list",
+        &serde_json::json!({
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {"name": "resources-test", "version": "0"},
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }),
+    );
+    assert_eq!(listing["result"]["resultType"], "complete", "{listing}");
+    assert!(
+        listing["result"]["ttlMs"]
+            .as_u64()
+            .is_some_and(|ttl| ttl > 0),
+        "compiled-in skills are cacheable: {listing}"
+    );
+    assert_eq!(listing["result"]["cacheScope"], "public", "{listing}");
+    assert_eq!(
+        listing["result"]["skills"].as_array().map(Vec::len),
+        Some(2)
+    );
+}

@@ -20,6 +20,12 @@ Workflow:
    output, a flag, the docs or an MCP tool result. The issue form field
    "How did you run fallow?" often shows this. Name the unclear part of the
    contract in the acceptance criteria.
+8. Set the issue status: `Todo` or `Backlog` for an open issue, and
+   `Not planned` or `Duplicate` when you close it. Do not set
+   `In progress` or `In review`, and do not change an issue that already
+   has one of them: a linked pull request or another owner set it.
+   `docs/development/issue-status.md` gives
+   the meaning of each status and the commands.
 
 Give each claim about cause or history one confidence level:
 - direct: you ran it, or the source shows it;

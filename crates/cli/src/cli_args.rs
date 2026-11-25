@@ -842,7 +842,7 @@ pub enum Command {
         #[arg(value_name = "FILE:LINE|dup:<fingerprint>")]
         trace: Option<String>,
 
-        /// Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in the config file, or `0` if unset).
+        /// Fail if duplication exceeds this percentage. `0` turns the gate off and is not zero tolerance: use `--fail-on-issues` to fail on any clone group (defaults to the value in the config file, or `0` if unset).
         #[arg(long, help_heading = "Gates")]
         threshold: Option<f64>,
 
@@ -911,6 +911,12 @@ pub enum Command {
         /// dependency path from any discovered test root. Requires full analysis pipeline.
         #[arg(long, help_heading = "Sections")]
         coverage_gaps: bool,
+
+        /// Show only shallow directories: directories whose interface is as large
+        /// as what they hide. Advisory, no health score weight. Requires full
+        /// analysis pipeline.
+        #[arg(long, help_heading = "Sections")]
+        shallow_directories: bool,
 
         /// Show only hotspots: files that are both complex and frequently changing.
         /// Combines git churn history with complexity data. Requires a git repository.

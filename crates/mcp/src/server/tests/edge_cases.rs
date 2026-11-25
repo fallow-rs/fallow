@@ -677,6 +677,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         type_aware_projects: None,
         type_aware_require: None,
         type_coupling: None,
+        shallow_directories: None,
         trend: Some(true),
         effort: Some("high".to_string()),
         summary: Some(true),

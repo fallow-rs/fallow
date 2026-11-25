@@ -134,7 +134,6 @@ signal-hook = { workspace = true }
 windows-sys = { workspace = true }
 
 [build-dependencies]
-flate2 = { workspace = true }
 # Feature-only build dep: unifies the proc-macro `syn` features that
 # napi-derive and darling enable in a workspace build (see the note above).
 syn = { version = "3", default-features = false, features = ["extra-traits", "fold"] }

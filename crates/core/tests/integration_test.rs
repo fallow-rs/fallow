@@ -217,6 +217,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/metro_extra_node_modules.rs"]
 mod metro_extra_node_modules;
+#[path = "integration_test/mkdocs_extra_assets.rs"]
+mod mkdocs_extra_assets;
 #[path = "integration_test/module_dir_path_references.rs"]
 mod module_dir_path_references;
 #[path = "integration_test/n8n_plugin.rs"]
@@ -352,6 +354,8 @@ mod production_mode;
 mod prop_drilling;
 #[path = "integration_test/re_export_chains.rs"]
 mod re_export_chains;
+#[path = "integration_test/react_class_statics.rs"]
+mod react_class_statics;
 #[path = "integration_test/react_component_intel.rs"]
 mod react_component_intel;
 #[path = "integration_test/react_native_platform_family_re_export.rs"]
@@ -850,6 +854,12 @@ mod issue_4990_entry_file_members;
 mod issue_5019_sveltekit_virtual_module_credit;
 #[path = "integration_test/issue_5053_entry_namespace_reexport.rs"]
 mod issue_5053_entry_namespace_reexport;
+#[path = "integration_test/issue_5064_shadowed_namespace_import.rs"]
+mod issue_5064_shadowed_namespace_import;
+#[path = "integration_test/issue_5098_astro_tag_attrs.rs"]
+mod issue_5098_astro_tag_attrs;
+#[path = "integration_test/issue_5162_css_module_barrel.rs"]
+mod issue_5162_css_module_barrel;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
@@ -902,6 +912,8 @@ mod typescript_content_mapper_plugin;
 mod vite_nested_config_entries;
 #[path = "integration_test/vite_plus_plugin.rs"]
 mod vite_plus_plugin;
+#[path = "integration_test/vite_pwa_assets_generator_config.rs"]
+mod vite_pwa_assets_generator_config;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
 #[path = "integration_test/vitest_include_scope.rs"]

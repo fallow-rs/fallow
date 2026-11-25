@@ -271,6 +271,7 @@ fn viz_health_options<'a>(
         complexity: true,
         file_scores: true,
         coverage_gaps: true,
+        shallow_directories: false,
         config_activates_coverage_gaps: false,
         // Churn and ownership require a full git-history walk. Keep Viz on the
         // retained single-session artifacts and report those capabilities as
@@ -343,7 +344,9 @@ fn escape_payload_json(json: &str) -> String {
 }
 
 /// Write the rendered HTML, refusing to follow a planted symlink and
-/// creating missing `--out` parent directories.
+/// creating missing `--out` parent directories. The write goes through
+/// [`fallow_engine::write_guard`], so it stays in the scope that the command
+/// line check recorded for `--out`.
 fn write_output(path: &Path, content: &str) -> Result<(), String> {
     if let Ok(meta) = path.symlink_metadata()
         && meta.file_type().is_symlink()
@@ -353,18 +356,22 @@ fn write_output(path: &Path, content: &str) -> Result<(), String> {
             path.display()
         ));
     }
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-        && !parent.exists()
-    {
-        std::fs::create_dir_all(parent).map_err(|e| {
+    fallow_engine::write_guard::write_file(
+        path,
+        content.as_bytes(),
+        fallow_engine::write_guard::WriteTarget::Path,
+    )
+    .map_err(|failure| {
+        if failure.is_directory() {
+            let parent = path.parent().unwrap_or(path);
             format!(
-                "Failed to create output directory {}: {e}",
+                "Failed to create output directory {}: {failure}",
                 parent.display()
             )
-        })?;
-    }
-    std::fs::write(path, content).map_err(|e| format!("Failed to write output file: {e}"))
+        } else {
+            format!("Failed to write output file: {failure}")
+        }
+    })
 }
 
 fn write_html(opts: &VizOptions<'_>, data: &VizData, elapsed: std::time::Duration) -> ExitCode {

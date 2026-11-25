@@ -11,16 +11,6 @@ use super::shared::{
     merge_statement_usage_allow_dollar_refs_with_bound_targets, parse_tag_attrs,
 };
 
-static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>[\s\S]*?)</style>"#)
-});
-
-static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    crate::static_regex(
-        r#"(?is)<script\b(?:[^>"'{]|"[^"]*"|'[^']*'|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}"'`]|"[^"]*"|'[^']*'|`[^`]*`|\{[^{}]*\})*\})*\}|\{)*>(?P<body>[\s\S]*?)</script>"#,
-    )
-});
-
 static SVELTE_EACH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(
         r"(?is)^#each\s+(?P<iterable>.+?)\s+as\s+(?P<bindings>.+?)(?:\s*\((?P<key>.+)\))?$",
@@ -225,15 +215,15 @@ pub(super) fn strip_non_template_content(source: &str) -> String {
     // Only the script body is hidden. The opening tag stays visible, because a
     // `<script>` element in markup can read component state in its attribute
     // expressions, for example `onload={handleLoad}`.
-    hidden_ranges.extend(SCRIPT_BLOCK_RE.captures_iter(source).filter_map(|caps| {
-        let whole = caps.get(0)?;
-        let body = caps.name("body")?;
-        Some((body.start(), whole.end()))
-    }));
     hidden_ranges.extend(
-        STYLE_BLOCK_RE
-            .find_iter(source)
-            .map(|m| (m.start(), m.end())),
+        crate::sfc_blocks::script_blocks(source)
+            .into_iter()
+            .map(|block| (block.body.start, block.span.end)),
+    );
+    hidden_ranges.extend(
+        crate::sfc_blocks::style_blocks(source)
+            .into_iter()
+            .map(|block| (block.span.start, block.span.end)),
     );
     hidden_ranges.sort_unstable_by_key(|range| range.0);
 
@@ -1150,6 +1140,17 @@ mod tests {
         );
 
         assert!(usage.used_bindings.contains("page"));
+    }
+
+    #[test]
+    fn shadowed_shorthand_attribute_records_no_whole_object_use() {
+        let usage = collect_template_usage(
+            "{#each rows as { data }}<Row {data} />{/each}\
+             {#snippet cell(data)}<Cell {data} />{/snippet}",
+            &imported(&["data"]),
+        );
+
+        assert!(usage.whole_object_uses.is_empty(), "{usage:?}");
     }
 
     #[test]

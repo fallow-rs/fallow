@@ -180,7 +180,7 @@ fn collect_shape_buckets(
     let mut buckets: FxHashMap<Vec<String>, Vec<Member>> = FxHashMap::default();
     let mut components_scanned = 0usize;
 
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }

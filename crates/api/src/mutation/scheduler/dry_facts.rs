@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// The longest test error that a baseline failure keeps, in bytes. The
+/// companion bounds the error too. This bound guards the pipe from the
+/// companion.
+const MAX_TEST_ERROR_BYTES: usize = 8 * 1024;
+
+/// The error of a test from the companion, trimmed and cut at
+/// [`MAX_TEST_ERROR_BYTES`]. Gives `None` for an error with no text.
+pub(super) fn bounded_test_error(error: &str) -> Option<String> {
+    let error = error.trim();
+    if error.is_empty() {
+        return None;
+    }
+    let kept = &error[..error.floor_char_boundary(MAX_TEST_ERROR_BYTES)];
+    let ellipsis = if kept.len() < error.len() { "..." } else { "" };
+    Some(format!("{kept}{ellipsis}"))
+}
+
 /// The facts of the dry run that the scheduler uses.
 pub(super) struct DryRunFacts {
     /// Each passing test that is not in an excluded file, with its duration.

@@ -171,7 +171,8 @@ fn annotate_type_aware_sarif_value(sarif: &mut serde_json::Value, type_aware: &s
 
 /// Add the config entries that had no effect (unmatched `ignoreDependencies`
 /// and `ignoreFindings` patterns, redundant `entry`, `ignoreDependencies` and
-/// `ignorePatterns` entries, and `overrides` rules with no effect) to the first
+/// `ignorePatterns` entries, `overrides` rules with no effect, and
+/// `overrides[].files` globs that matched no file) to the first
 /// run as SARIF configuration notifications.
 ///
 /// SARIF keeps findings in `results` and facts about the tool configuration in
@@ -191,6 +192,16 @@ pub fn annotate_config_pattern_sarif(
                     serde_json::json!({ "setting": setting, "pattern": pattern })
                 } else if let Some((rule, flag)) = diagnostic.kind.requested_rule_off() {
                     serde_json::json!({ "setting": "rules", "rule": rule, "flag": flag })
+                } else if let Some((pattern, files, rules, reason)) =
+                    diagnostic.kind.unmatched_override_glob()
+                {
+                    serde_json::json!({
+                        "setting": "overrides",
+                        "pattern": pattern,
+                        "files": files,
+                        "rules": rules,
+                        "reason": reason,
+                    })
                 } else {
                     let (rule, files, reason) = diagnostic.kind.ineffective_override()?;
                     serde_json::json!({
@@ -645,7 +656,7 @@ fn saved_dead_code_results(
 }
 
 /// Whether `report --from` finds a config for the rules it falls back to.
-pub(super) fn saved_report_config_found(root: &Path, report_config: ConfigFlags<'_>) -> bool {
+fn saved_report_config_found(root: &Path, report_config: ConfigFlags<'_>) -> bool {
     report_config.explicit(root).is_some() || report_config.discovered(root).is_some()
 }
 

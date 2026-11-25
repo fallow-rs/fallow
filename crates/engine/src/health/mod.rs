@@ -33,6 +33,7 @@ mod coverage_intelligence;
 mod coverage_settings;
 pub mod coverage_v8;
 mod css_analytics;
+mod cycle_files;
 mod cyclomatic_policy;
 mod derived_sections;
 pub(crate) mod diagnostics;
@@ -65,7 +66,9 @@ mod scope;
 /// File health scoring: maintainability index, CRAP risk, triage concern
 /// classification, and Istanbul coverage ingestion.
 pub mod scoring;
+mod shallow_directories;
 pub mod styling_score;
+mod subset_filter;
 mod tailwind_theme;
 mod targets;
 mod test_reach;
@@ -99,8 +102,7 @@ pub use runner::{
 pub use test_reach::TestReachGraph;
 use vital_data::{HealthVitalData, HealthVitalDataInput, prepare_health_vital_data};
 use vital_signs_scope::{
-    SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
-    compute_vital_signs_and_counts,
+    VitalSignsAndCountsInput, apply_duplication_metrics, compute_vital_signs_and_counts,
 };
 
 pub(crate) fn build_styling_analysis_artifacts(
@@ -165,6 +167,7 @@ pub fn should_precompute_dead_code_analysis(
         .unwrap_or(config.health.max_crap);
     options.file_scores
         || options.coverage_gaps
+        || options.shallow_directories
         || options.config_activates_coverage_gaps
         || options.hotspots
         || options.targets
@@ -366,6 +369,7 @@ pub struct HealthSectionOptions {
     complexity: bool,
     file_scores: bool,
     coverage_gaps: bool,
+    shallow_directories: bool,
     hotspots: bool,
     targets: bool,
     css: bool,
@@ -387,6 +391,8 @@ pub struct DerivedHealthSections {
     pub file_scores: bool,
     /// Render the static coverage gaps section.
     pub coverage_gaps: bool,
+    /// Render the shallow directories section.
+    pub shallow_directories: bool,
     /// Render the churn-based hotspots section.
     pub hotspots: bool,
     /// Render the refactoring targets section.
@@ -401,6 +407,23 @@ pub struct DerivedHealthSections {
     /// True when the score is the only requested surface, so output can skip
     /// section rendering entirely.
     pub score_only_output: bool,
+}
+
+impl DerivedHealthSections {
+    /// No section, no score and no full run.
+    pub const NONE: Self = Self {
+        any_section: false,
+        complexity: false,
+        file_scores: false,
+        coverage_gaps: false,
+        shallow_directories: false,
+        hotspots: false,
+        targets: false,
+        css: false,
+        score: false,
+        force_full: false,
+        score_only_output: false,
+    };
 }
 
 /// Command-neutral inputs used to normalize a health run before it reaches a
@@ -421,6 +444,8 @@ pub struct HealthRunOptionsInput<'a> {
     pub file_scores: bool,
     /// Explicit request for the static coverage gaps section.
     pub coverage_gaps: bool,
+    /// Explicit request for the shallow directories section.
+    pub shallow_directories: bool,
     /// Explicit request for the churn-based hotspots section.
     pub hotspots: bool,
     /// Attribute hotspots to owners (implies the hotspots section data).
@@ -556,6 +581,8 @@ pub struct HealthExecutionOptions<'a> {
     /// Let config-enabled coverage settings activate the coverage gaps
     /// section even when it was not requested on this run.
     pub config_activates_coverage_gaps: bool,
+    /// Render the shallow directories section.
+    pub shallow_directories: bool,
     /// Render the churn-based hotspots section.
     pub hotspots: bool,
     /// Attribute hotspots to owners.
@@ -621,12 +648,7 @@ fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSectio
         || options.score_gate
         || options.trend
         || matches!(options.output, OutputFormat::Badge);
-    let any_section = options.complexity
-        || options.file_scores
-        || options.coverage_gaps
-        || options.hotspots
-        || options.targets
-        || score;
+    let any_section = score || requests_a_section(options);
     let effective_score = if any_section { score } else { true } || options.snapshot_requested;
     let force_full = options.snapshot_requested || effective_score;
 
@@ -647,6 +669,7 @@ fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSectio
         } else {
             false
         },
+        shallow_directories: options.shallow_directories,
         hotspots: if any_section { options.hotspots } else { true }
             || options.snapshot_requested
             || options.trend,
@@ -658,6 +681,16 @@ fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSectio
     }
 }
 
+/// Whether the request selects a section other than the score.
+fn requests_a_section(options: &HealthSectionOptions) -> bool {
+    options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || options.shallow_directories
+        || options.hotspots
+        || options.targets
+}
+
 /// Normalize health run inputs into the engine-owned run contract.
 #[must_use]
 pub fn derive_health_run_options(input: HealthRunOptionsInput<'_>) -> HealthRunOptions<'_> {
@@ -667,6 +700,7 @@ pub fn derive_health_run_options(input: HealthRunOptionsInput<'_>) -> HealthRunO
         complexity: input.complexity,
         file_scores: input.file_scores,
         coverage_gaps: input.coverage_gaps,
+        shallow_directories: input.shallow_directories,
         hotspots: input.hotspots,
         targets,
         css: input.css,
@@ -697,6 +731,7 @@ fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> b
         && !options.complexity
         && !options.file_scores
         && !options.coverage_gaps
+        && !options.shallow_directories
         && !options.hotspots
         && !options.targets
         && !options.trend
@@ -751,6 +786,7 @@ mod tests {
             complexity: false,
             file_scores: false,
             coverage_gaps: false,
+            shallow_directories: false,
             hotspots: false,
             ownership: false,
             ownership_emails: None,
@@ -816,6 +852,7 @@ mod tests {
             complexity: true,
             file_scores: true,
             coverage_gaps: false,
+            shallow_directories: false,
             config_activates_coverage_gaps: false,
             hotspots: true,
             ownership: false,
@@ -927,6 +964,7 @@ mod tests {
                 complexity: true,
                 file_scores: false,
                 coverage_gaps: false,
+                shallow_directories: false,
                 config_activates_coverage_gaps: false,
                 hotspots: false,
                 ownership: false,

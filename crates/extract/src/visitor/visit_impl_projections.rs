@@ -12,7 +12,7 @@ use super::super::{
     ModuleInfoExtractor, ProjectedMemberAccess, SemanticFact, TypedPropertyExpansion,
 };
 use super::unwrap_static_expr;
-use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
+use super::visit_source_paths::MAX_RECORDED_CHAIN_LINKS;
 use crate::js_text::JsText;
 
 pub(in crate::visitor) const MAX_PROJECTION_VALUES: usize = 8192;

@@ -55,13 +55,8 @@ fn type_aware_resolution_file(path: &Path) -> bool {
                 | "yarn.lock"
                 | "bun.lock"
                 | "bun.lockb"
-                | "fallow.json"
-                | "fallow.jsonc"
-                | "fallow.yaml"
-                | "fallow.yml"
-                | "fallow.toml"
         )
-        || fallow_config::CONFIG_FILE_NAMES.contains(&name)
+        || fallow_config::config_file_name(name)
         || name.ends_with(".d.ts")
 }
 
@@ -246,6 +241,7 @@ fn watched_file_globs() -> Vec<String> {
             session_store::SESSION_INPUT_FILE_NAMES
                 .iter()
                 .chain(fallow_config::CONFIG_FILE_NAMES)
+                .chain(fallow_config::UNRECOGNIZED_CONFIG_FILE_NAMES)
                 .map(|name| format!("**/{name}")),
         )
         .collect()
@@ -297,10 +293,29 @@ struct CompletedRun<'a> {
     attempted_type_aware_changes: &'a fallow_api::TypeAwareFileChanges,
 }
 
+/// Why an analysis skips the workspace root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RootProblem {
+    message: String,
+    /// Whether the client shows the problem to the user, and does not only
+    /// log it.
+    show: bool,
+}
+
 #[derive(Clone)]
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
+    /// The spelling of a workspace folder that did not exist at initialize.
+    /// The first analysis after the folder appears validates and resolves
+    /// it. See `analysis_root`.
+    pending_root: Arc<RwLock<Option<PathBuf>>>,
+    /// Why the root validation refused a folder that appeared after
+    /// initialize. Each later analysis skips the run with this reason.
+    refused_root: Arc<RwLock<Option<RootProblem>>>,
+    /// The last root problem that the server reported, so that each problem
+    /// is reported once per change and not on each save.
+    reported_root_problem: Arc<std::sync::Mutex<Option<RootProblem>>>,
     analysis: Arc<RwLock<Option<LspAnalysisSnapshot>>>,
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
@@ -419,9 +434,17 @@ impl LanguageServer for FallowLspServer {
                     .root_uri
                     .and_then(|u| u.to_file_path().map(|path| path.into_owned()))
             });
-        let canonical_root = root.map(|path| canonicalize_for_lsp(&path));
-        if let Some(path) = &canonical_root {
-            *self.root.write().await = Some(path.clone());
+        match root.as_deref().map(path_utils::resolve_folder) {
+            Some(path_utils::FolderRoot::Valid(path)) => *self.root.write().await = Some(path),
+            Some(path_utils::FolderRoot::Absent) => *self.pending_root.write().await = root,
+            Some(path_utils::FolderRoot::Refused(message)) => {
+                let message = format!("fallow does not analyze this workspace: {message}");
+                self.client
+                    .log_message(MessageType::ERROR, message.clone())
+                    .await;
+                self.client.show_message(MessageType::ERROR, message).await;
+            }
+            None => {}
         }
 
         if let Some(opts) = &params.initialization_options {
@@ -771,6 +794,9 @@ impl FallowLspServer {
         Self {
             client,
             root: Arc::new(RwLock::new(None)),
+            pending_root: Arc::new(RwLock::new(None)),
+            refused_root: Arc::new(RwLock::new(None)),
+            reported_root_problem: Arc::new(std::sync::Mutex::new(None)),
             analysis: Arc::new(RwLock::new(None)),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
@@ -868,13 +894,18 @@ impl FallowLspServer {
     /// run, for the reason on `startup_analysis_started`. It runs only when
     /// sessions are kept and the workspace root has a `package.json`.
     async fn spawn_prewarm(&self) {
-        let Some(root) = self.root.read().await.clone() else {
-            return;
+        let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
+        let root = match self.analysis_root().await {
+            Ok(Some(root)) => root,
+            Ok(None) => return,
+            Err(problem) => {
+                self.report_root_problem(problem).await;
+                return;
+            }
         };
         if !self.lock_sessions().is_enabled() || !root.join("package.json").is_file() {
             return;
         }
-        let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
         let input = analysis::PrewarmInput {
             project_roots: find_project_roots(&root),
             run_options: self.run_options.read().await.clone(),
@@ -1000,18 +1031,107 @@ impl FallowLspServer {
         }
     }
 
+    /// The root of the next analysis, or why the analysis must skip it.
+    /// The caller holds `analysis_guard`, so the run uses the real path that
+    /// this call just resolved.
+    ///
+    /// A folder that did not exist at initialize is validated and resolved
+    /// once it exists, as at initialize. While it does not exist, there is
+    /// no root and the analysis does not run. A resolved root must still
+    /// resolve to the same path (see `path_utils::moved_root_reason`).
+    async fn analysis_root(&self) -> std::result::Result<Option<PathBuf>, RootProblem> {
+        let refused = self.refused_root.read().await.clone();
+        if let Some(problem) = refused {
+            return Err(problem);
+        }
+        let pending = self.pending_root.read().await.clone();
+        if let Some(spelled) = pending {
+            match path_utils::resolve_folder(&spelled) {
+                path_utils::FolderRoot::Absent => return Ok(None),
+                path_utils::FolderRoot::Valid(root) => {
+                    *self.root.write().await = Some(root.clone());
+                    *self.pending_root.write().await = None;
+                    self.clear_root_problem();
+                    return Ok(Some(root));
+                }
+                path_utils::FolderRoot::Refused(message) => {
+                    let problem = RootProblem {
+                        message: format!("fallow does not analyze this workspace: {message}"),
+                        show: true,
+                    };
+                    *self.root.write().await = None;
+                    *self.pending_root.write().await = None;
+                    *self.refused_root.write().await = Some(problem.clone());
+                    return Err(problem);
+                }
+            }
+        }
+        let Some(root) = self.root.read().await.clone() else {
+            return Ok(None);
+        };
+        match path_utils::moved_root_reason(&root) {
+            None => {
+                self.clear_root_problem();
+                Ok(Some(root))
+            }
+            Some(message) => Err(RootProblem {
+                message,
+                show: false,
+            }),
+        }
+    }
+
+    /// Report `problem` to the client, unless it is the last problem that
+    /// the server reported.
+    async fn report_root_problem(&self, problem: RootProblem) {
+        {
+            let mut reported = self
+                .reported_root_problem
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if reported.as_ref() == Some(&problem) {
+                return;
+            }
+            *reported = Some(problem.clone());
+        }
+        if problem.show {
+            self.client
+                .show_message(MessageType::ERROR, problem.message.clone())
+                .await;
+        }
+        self.client
+            .log_message(MessageType::ERROR, problem.message)
+            .await;
+    }
+
+    /// Forget the last reported root problem, so that the next problem is
+    /// reported again.
+    fn clear_root_problem(&self) {
+        *self
+            .reported_root_problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
     async fn run_analysis(&self) {
         if self.cancellation.load(Ordering::SeqCst) {
             return;
         }
 
-        let root = self.root.read().await.clone();
-        let Some(root) = root else { return };
-
         let _guard = self.analysis_guard.lock().await;
         if self.cancellation.load(Ordering::SeqCst) {
             return;
         }
+
+        let root = match self.analysis_root().await {
+            Ok(Some(root)) => root,
+            Ok(None) => return,
+            Err(problem) => {
+                self.lock_scheduler().clear_pending();
+                self.report_root_problem(problem).await;
+                return;
+            }
+        };
 
         let (analysis_epoch, run_cancellation) = {
             let mut scheduler = self.lock_scheduler();

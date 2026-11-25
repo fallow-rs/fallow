@@ -1,5 +1,6 @@
 use fallow_output::{FileHealthScore, HotspotEntry};
 
+use super::subset_filter::SubsetFilter;
 use crate::vital_signs;
 
 /// Apply duplication metrics to a vital-signs result.
@@ -13,31 +14,6 @@ pub fn apply_duplication_metrics(
     counts.duplicated_lines = Some(stats.duplicated_lines);
     if let Some(ref mut vc) = vital_signs.counts {
         vc.duplicated_lines = Some(stats.duplicated_lines);
-    }
-}
-
-/// Subset selector used when scoping `vital_signs`, `health_score`, and
-/// `analysis_counts` to a workspace package or a `--group-by` bucket.
-///
-/// `Full` skips filtering entirely (project-wide). `Paths` matches files whose
-/// absolute path is in the given set (exact match), which is what scoped
-/// project runs and `--group-by` use to keep every score input on the same
-/// filtered file set.
-pub enum SubsetFilter<'a> {
-    Full,
-    Paths(&'a rustc_hash::FxHashSet<std::path::PathBuf>),
-}
-
-impl SubsetFilter<'_> {
-    pub fn is_full(&self) -> bool {
-        matches!(self, Self::Full)
-    }
-
-    pub fn matches(&self, path: &std::path::Path) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Paths(set) => set.contains(path),
-        }
     }
 }
 

@@ -930,6 +930,8 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: false,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
@@ -946,6 +948,8 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             kind_known: true,
         },
         missing_reason: false,
+        next_line_kinds: Vec::new(),
+        next_line_blank: false,
         actions: StaleSuppression::actions_for(false),
         effective_severity: None,
     });
@@ -2770,6 +2774,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         hotspots: vec![],
         hotspot_summary: None,
         change_coupling: None,
+        shallow_directories: None,
         large_functions: vec![],
         targets: vec![],
         target_thresholds: None,
@@ -3059,6 +3064,7 @@ fn empty_health_report() -> HealthReport {
         hotspots: vec![],
         hotspot_summary: None,
         change_coupling: None,
+        shallow_directories: None,
         large_functions: vec![],
         targets: vec![],
         target_thresholds: None,

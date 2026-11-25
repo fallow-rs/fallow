@@ -392,7 +392,7 @@ fn run_command() -> ExitCode {
     install_signal_handlers();
     signal::install_panic_drain();
     install_spawn_hooks();
-
+    fallow_engine::project_config::register_tracked_link_probe();
     if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some() {
         return signal_test_helper();
     }
@@ -886,7 +886,7 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
             root.join(path)
         }
     });
-    let report = doctor::collect_report(&root, config_path.as_deref());
+    let report = doctor::collect_report(&root, config_path.as_deref(), cli.root.is_none());
     Some(doctor::render_report(
         &report,
         format.output,

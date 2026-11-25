@@ -299,6 +299,30 @@ fn extracts_scss_forward() {
     assert_eq!(info.imports[0].source, "./mixins");
 }
 
+/// A `@use` or `@forward` of a blank string names no module. OSS-Fuzz test
+/// case 5184338726289408 found an import with the inverted span 7..6 here.
+#[test]
+fn scss_use_of_a_blank_string_adds_no_import() {
+    for source in [r#"@use " ";"#, r#"@forward "  ";"#, r#"@use "";"#] {
+        let info = parse_css(source, "styles.scss");
+        assert!(info.imports.is_empty(), "{source}: {:?}", info.imports);
+    }
+}
+
+#[test]
+fn trimmed_span_of_a_blank_match_is_not_inverted() {
+    let re = regex::Regex::new(r#""([^"]*)""#).expect("valid regex");
+    let source = r#"@use "   ";"#;
+    let m = re
+        .captures(source)
+        .and_then(|cap| cap.get(1))
+        .expect("the quoted body matches");
+    let (text, span) = crate::css::trimmed_match_with_span(m);
+    assert_eq!(text, "");
+    assert!(span.start <= span.end, "inverted span {span:?}");
+    assert!(source.get(span.start as usize..span.end as usize).is_some());
+}
+
 #[test]
 fn scss_use_not_extracted_from_css() {
     let info = parse_css(r#"@use "./variables";"#, "styles.css");

@@ -91,7 +91,7 @@ pub fn credit_production_ignores(
     };
 
     let in_production_run = |id: &FileId| {
-        graph.modules.get(id.0 as usize).is_some_and(|module| {
+        graph.module(*id).is_some_and(|module| {
             let relative = module
                 .path
                 .strip_prefix(&config.root)

@@ -221,3 +221,51 @@ fn list_does_not_count_a_run_notice_as_a_workspace_diagnostic() {
         output.stderr
     );
 }
+
+#[test]
+fn a_misnamed_config_file_is_a_notice_and_a_note() {
+    let tmp = project("{}");
+    let dir = tmp.path();
+    fs::remove_file(dir.join(".fallowrc.json")).unwrap();
+    fs::write(dir.join("fallow.jsonc"), r#"{ "entry": ["src/lib.js"] }"#).unwrap();
+    let root = root_arg(&tmp);
+
+    let output = run_fallow_raw_with_env(
+        &["dead-code", "--root", &root, "--format", "json", "--quiet"],
+        &[],
+    );
+    let json = parse_json(&output);
+    let unrecognized = notices(
+        &json["workspace_diagnostics"],
+        "config-file-name-unrecognized",
+    );
+    assert_eq!(unrecognized.len(), 1, "{json:#}");
+    assert_eq!(unrecognized[0]["name"], "fallow.jsonc");
+    assert_eq!(unrecognized[0]["path"], "fallow.jsonc");
+
+    let human = run_fallow_raw_with_env(&["dead-code", "--root", &root], &[]);
+    assert_eq!(
+        human
+            .stderr
+            .matches("Note: fallow does not read 'fallow.jsonc'")
+            .count(),
+        1,
+        "{}",
+        human.stderr
+    );
+
+    fs::write(dir.join(".fallowrc.json"), "{}").unwrap();
+    let output = run_fallow_raw_with_env(
+        &["dead-code", "--root", &root, "--format", "json", "--quiet"],
+        &[],
+    );
+    let json = parse_json(&output);
+    assert!(
+        notices(
+            &json["workspace_diagnostics"],
+            "config-file-name-unrecognized"
+        )
+        .is_empty(),
+        "an accepted config next to the near-miss file loads, so no notice: {json:#}"
+    );
+}

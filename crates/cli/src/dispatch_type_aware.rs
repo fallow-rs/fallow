@@ -20,7 +20,7 @@ fn backend_label(family: Option<&str>) -> &str {
 }
 
 /// The message of the human `type-aware status` line for an available companion.
-pub(super) fn available_message(status: &TypeAwareStatus) -> String {
+fn available_message(status: &TypeAwareStatus) -> String {
     format!(
         "Type-aware companion: available ({}, protocol {}, {} {})",
         status.package_version.as_deref().unwrap_or("unknown"),

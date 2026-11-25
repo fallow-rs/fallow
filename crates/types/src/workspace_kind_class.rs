@@ -54,6 +54,11 @@ impl WorkspaceDiagnosticKind {
             Self::EntryPatternRedundant { .. } => "entry-pattern-redundant",
             Self::IgnoreDependenciesEntryRedundant { .. } => "ignore-dependencies-entry-redundant",
             Self::IgnorePatternsEntryRedundant { .. } => "ignore-patterns-entry-redundant",
+            Self::IgnoreExportsFileUnmatched { .. } => "ignore-exports-file-unmatched",
+            Self::IgnoreExportsNameUnmatched { .. } => "ignore-exports-name-unmatched",
+            Self::DuplicatesIgnoreUnmatched { .. } => "duplicates-ignore-unmatched",
+            Self::HealthIgnoreUnmatched { .. } => "health-ignore-unmatched",
+            Self::OverrideFilesUnmatched { .. } => "override-files-unmatched",
             Self::CircularDependenciesAllowUnmatched { .. } => {
                 "circular-dependencies-allow-unmatched"
             }
@@ -63,6 +68,7 @@ impl WorkspaceDiagnosticKind {
             Self::InertFlag { .. } => "inert-flag",
             Self::ConfigLoadFellBack { .. } => "config-load-fell-back",
             Self::ConfigFileShadowed { .. } => "config-file-shadowed",
+            Self::ConfigFileNameUnrecognized { .. } => "config-file-name-unrecognized",
             Self::UnknownSecurityCategory { .. } => "unknown-security-category",
             Self::EnvValueIgnored { .. } => "env-value-ignored",
         }
@@ -115,6 +121,11 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -156,6 +167,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BaselineInstallStateMismatch { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::EnvValueIgnored { .. } => true,
         }
     }
@@ -298,6 +310,11 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -305,6 +322,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -373,6 +391,11 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -380,6 +403,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -450,6 +474,11 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -457,6 +486,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -528,6 +558,11 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::IgnoreExportsFileUnmatched { .. }
+            | Self::IgnoreExportsNameUnmatched { .. }
+            | Self::DuplicatesIgnoreUnmatched { .. }
+            | Self::HealthIgnoreUnmatched { .. }
+            | Self::OverrideFilesUnmatched { .. }
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
@@ -535,6 +570,7 @@ impl WorkspaceDiagnosticKind {
             | Self::InertFlag { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
+            | Self::ConfigFileNameUnrecognized { .. }
             | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => false,
         }
@@ -552,6 +588,7 @@ impl WorkspaceDiagnosticKind {
             Self::InertFlag { .. }
                 | Self::ConfigLoadFellBack { .. }
                 | Self::ConfigFileShadowed { .. }
+                | Self::ConfigFileNameUnrecognized { .. }
                 | Self::UnknownSecurityCategory { .. }
                 | Self::EnvValueIgnored { .. }
         )

@@ -233,6 +233,9 @@ impl HealthArgsBuilder<'_> {
         if self.params.coverage_gaps == Some(true) {
             self.args.push("--coverage-gaps".to_string());
         }
+        if self.params.shallow_directories == Some(true) {
+            self.args.push("--shallow-directories".to_string());
+        }
     }
 
     fn push_score_and_severity(&mut self) {
@@ -338,6 +341,7 @@ impl HealthArgsBuilder<'_> {
 
 fn requires_cli_fallback(params: &HealthParams) -> bool {
     params.type_coupling == Some(true)
+        || params.shallow_directories == Some(true)
         || type_aware_requested(
             params.type_aware,
             params.type_aware_projects.as_deref(),
@@ -628,6 +632,10 @@ mod tests {
             },
             HealthParams {
                 group_by: Some("owner".to_string()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                shallow_directories: Some(true),
                 ..HealthParams::default()
             },
         ] {

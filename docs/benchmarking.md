@@ -17,12 +17,18 @@ the same workflow on one commit are fine.
   simulation shard, the CLI instruction counts and the walltime jobs.
 - A push to `main` measures only the release commit (`chore: release v`),
   because `scripts/verify-release-ci.mjs` reads that result before a release.
-  That run has the Rust shards only. The other pushes skip every job.
+  That run has the Rust shards and the walltime jobs. The other pushes skip
+  every job.
 - A pull request with the `ci:perf` label runs the affected simulation shards
   and the CLI instruction counts. CodSpeed compares it with the latest `main`
   commit that has a run, usually the last nightly run. The comparison then
   also holds the changes merged after that run. For a precise result, start a
   run on `main` first with `gh workflow run bench.yml`.
+- When a pull request from a branch of this repository gets the
+  `ci:walltime` label, one run measures its head commit with the walltime
+  jobs only. The run does not need `ci:perf`,
+  and it skips the simulation jobs. A later push does not start the walltime
+  jobs again. To measure a new commit, remove the label and add it again.
 - `gh workflow run bench.yml --ref <branch>` measures a branch with the
   simulation jobs. Add `-f walltime=true` for the walltime jobs too. A plain
   dispatch never waits on a macro runner, so the dispatch of
@@ -45,7 +51,7 @@ CPU. Benchmarks outside `crates/benchmarks` include the same helper with a
 
 Simulation leaves syscall time out of the value. A benchmark that CodSpeed
 marks "dominated by syscalls" does not show file-system cost, so do not use it
-to judge an I/O change. The nightly walltime jobs (below) measure that cost.
+to judge an I/O change. The walltime jobs (below) measure that cost.
 
 Most fallow benchmarks get this warning even when they do no I/O. The analysis
 runs on a rayon pool, and the bench thread waits on a futex until a pool worker
@@ -53,9 +59,24 @@ finishes. CodSpeed counts that wait as syscall time. For example,
 `workspace_file_bucketing` is pure in-memory work, but CodSpeed reports 10
 syscalls that take more time than the work itself. The simulated value still
 counts the instructions of the worker, so the warning alone is no reason to
-distrust a result. A change in the result between runs of the same code
-usually comes from the CPU model of the hosted runner. Compare complete runs of
-the same commit before you act on a flagged change.
+distrust a result.
+
+Every simulation job sets `cycle-estimation: 'false'`, so each instruction has
+the same cost and the value follows the instruction count. The cycle estimate
+of CodSpeed adds a cost for cache misses from a cache model of the physical
+CPU. The hosted runners change between Intel and AMD CPUs from run to run, so
+that estimate moves on the same code. The instruction count does not depend on
+the CPU.
+
+Thus a change of cache locality or memory layout, for example a new
+struct layout or a `Vec` that becomes a hash map, does not show in these
+shards. The walltime jobs show that cost for the CLI. For a Rust component,
+use the local walltime retain gates below.
+
+`scripts/check-benchmark-harness.py` rejects a simulation job without the
+setting. The Rust shards set it in #5197. Each value dropped once at that change,
+because the value no longer holds the cache-miss cost. Do not compare a run
+from before that change with a run after it.
 
 `cargo codspeed build` and `cargo bench` use `[profile.bench]` in the root
 `Cargo.toml`. It inherits `release` but uses thin LTO, because fat LTO of the
@@ -87,12 +108,12 @@ the full fast matrix, and global benchmark or Cargo changes fall back to all
 fast shards. The shared fixtures under `crates/benchmarks/benches/support/`
 count as a global benchmark change.
 
-## Nightly walltime jobs
+## Walltime jobs
 
 The `walltime-cli` and `type-aware` jobs of `.github/workflows/bench.yml` run
 walltime benchmarks on a CodSpeed Macro Runner, a dedicated bare-metal ARM64
 (Graviton) machine.
-The hardware is the same each night, so the values are comparable between
+The hardware is the same for each run, so the values are comparable between
 runs. CodSpeed marks walltime from a shared GitHub-hosted runner as unreliable,
 so no other job uses walltime.
 
@@ -105,11 +126,20 @@ so no other job uses walltime.
   integration to track cold Program construction and warm persistent-session
   reuse as distinct benchmarks.
 
-The fallow-rs organization shares 600 free macro runner minutes per month, so
-these jobs run only in the nightly run and in a dispatch with
-`-f walltime=true`. The release build runs on
-a free `ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro
-runner image, and the macro runner job only measures.
+The CodSpeed Hobby plan of the fallow-rs organization gives about 1,560 macro
+runner minutes per month. One run of the two jobs uses about 4 of these
+minutes. These jobs run in the nightly run, on the release commit, in a
+dispatch with `-f walltime=true`, and on the label event of `ci:walltime`.
+Each label event starts one run, and a later push starts none, so pushes to
+a labeled pull request use no more minutes. The label has no effect on a pull
+request from a fork: the fork gets no OIDC token for the upload, and its code
+does not run on the macro runner. The pull request paths include
+`tools/type-aware-sidecar/**`, so a change of the companion alone can get a
+run. The release build runs on a free
+`ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro runner
+image, and the macro runner job only measures. On the release commit, the
+walltime jobs usually end before the slowest simulation shard, so the release gate
+does not wait longer.
 
 ## Local walltime retain gates
 

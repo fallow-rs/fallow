@@ -488,6 +488,12 @@ fn type_aware_file_classification_covers_source_and_resolution_inputs() {
             "{name} is a config file the loader reads, so it must invalidate the semantic session"
         );
     }
+    for name in fallow_config::UNRECOGNIZED_CONFIG_FILE_NAMES {
+        assert!(
+            type_aware_resolution_file(Path::new(name)),
+            "{name} is a near-miss config name, and configPath can name the JSON ones, so it must invalidate the semantic session"
+        );
+    }
     for path in ["src/index.ts", "src/view.tsx", "src/runtime.js"] {
         assert!(type_aware_source_file(Path::new(path)));
         assert!(!type_aware_resolution_file(Path::new(path)));
@@ -1503,6 +1509,36 @@ fn an_ineffective_override_rule_is_a_diagnostic_on_the_written_key() {
             .iter()
             .any(|(_, message)| message.contains("overrides.rules")),
         "a located entry is not logged: {messages:?}"
+    );
+}
+
+#[test]
+fn an_unmatched_override_glob_is_a_diagnostic_on_the_glob() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    let config = "{\n  \"overrides\": [\n    { \"files\": [\"src/**\", \"./vendor/missing.css\"], \"rules\": { \"unresolved-import\": \"off\" } }\n  ]\n}\n";
+    write_unmatched_pattern_project(root, (".fallowrc.json", config));
+
+    let (_, map) = unmatched_patterns_of(root);
+
+    let config_path = dunce::canonicalize(root.join(".fallowrc.json")).expect("canonical");
+    let uri = Uri::from_file_path(&config_path).expect("config uri");
+    let diagnostics = map.get(&uri).expect("diagnostics on the config file");
+    let found: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code
+                == Some(NumberOrString::String(
+                    "override-files-unmatched".to_string(),
+                ))
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "{diagnostics:?}");
+    assert_eq!(text_at(config, found[0].range), "\"./vendor/missing.css\"");
+    assert!(
+        found[0].message.contains("`ignoreUnresolvedImports`"),
+        "{}",
+        found[0].message
     );
 }
 
@@ -6161,3 +6197,259 @@ async fn absent_prop_actions_require_the_saved_analysed_document_version() {
 
 #[path = "tests_capabilities.rs"]
 mod capabilities;
+
+/// A workspace folder below a committed link that leaves the git checkout
+/// must not become the analysis root.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn initialize_refuses_a_workspace_folder_below_a_link_that_leaves_the_checkout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo dir");
+    fallow_api::git_fixture::fixture_git(&repo, &["init", "-q", "-b", "main"]);
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(outside.join("app")).expect("outside dir");
+    std::os::unix::fs::symlink(&outside, repo.join("packages")).expect("link");
+    fallow_api::git_fixture::fixture_git(&repo, &["add", "packages"]);
+    fallow_api::git_fixture::fixture_git(&repo, &["commit", "-q", "-m", "link"]);
+    let folder = repo.join("packages").join("app");
+    let uri = Uri::from_file_path(&folder).expect("file uri");
+
+    use futures::StreamExt;
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    // The server waits until the client reads each message it sends.
+    let reader = tokio::spawn(async move {
+        let mut methods = Vec::new();
+        while let Some(message) = socket.next().await {
+            methods.push(message.method().to_string());
+            if methods.iter().any(|method| method == "window/showMessage") {
+                break;
+            }
+        }
+        methods
+    });
+    let request = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{ "uri": uri.as_str(), "name": "app" }],
+        }))
+        .id(1)
+        .finish();
+    let response = service
+        .ready()
+        .await
+        .expect("ready")
+        .call(request)
+        .await
+        .expect("initialize handled")
+        .expect("response");
+    assert!(response.is_ok());
+    assert_eq!(*service.inner().root.read().await, None);
+    let methods = tokio::time::timeout(Duration::from_secs(5), reader)
+        .await
+        .expect("the server reports the refusal")
+        .expect("reader task");
+    assert!(methods.iter().any(|method| method == "window/showMessage"));
+}
+
+/// A workspace folder that does not exist at initialize gives no analysis
+/// root. Once the folder exists, the next analysis resolves its spelling
+/// instead of treating the folder as moved.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn analysis_root_resolves_a_folder_that_appears_after_initialize() {
+    use futures::StreamExt;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let real = temp.path().join("real");
+    std::fs::create_dir_all(&real).expect("real dir");
+    let alias = temp.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).expect("alias link");
+    let spelled = alias.join("project");
+    let uri = Uri::from_file_path(&spelled).expect("file uri");
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    tokio::spawn(async move { while socket.next().await.is_some() {} });
+    let request = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{ "uri": uri.as_str(), "name": "project" }],
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("ready")
+        .call(request)
+        .await
+        .expect("initialize handled")
+        .expect("response");
+    let backend = service.inner();
+    assert_eq!(backend.analysis_root().await, Ok(None));
+    assert_eq!(*backend.root.read().await, None);
+
+    std::fs::create_dir(real.join("project")).expect("create folder");
+    // The stored spelling is not the real path, so a moved-root check on it
+    // alone would skip every later analysis.
+    assert!(path_utils::moved_root_reason(&spelled).is_some());
+    let resolved = dunce::canonicalize(real.join("project")).unwrap();
+    assert_eq!(backend.analysis_root().await, Ok(Some(resolved.clone())));
+    assert_eq!(*backend.root.read().await, Some(resolved));
+}
+
+/// The methods and texts of the messages that the server sends, read from
+/// the client socket of `service`.
+#[cfg(unix)]
+fn record_messages(
+    socket: tower_lsp_server::ClientSocket,
+) -> std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> {
+    use futures::StreamExt;
+
+    let messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = std::sync::Arc::clone(&messages);
+    let mut socket = socket;
+    tokio::spawn(async move {
+        while let Some(message) = socket.next().await {
+            let params = message
+                .params()
+                .map_or_else(String::new, ToString::to_string);
+            sink.lock()
+                .unwrap()
+                .push((message.method().to_string(), params));
+        }
+    });
+    messages
+}
+
+#[cfg(unix)]
+async fn initialize_with_folder(
+    service: &mut LspService<FallowLspServer>,
+    folder: &std::path::Path,
+) {
+    let uri = Uri::from_file_path(folder).expect("file uri");
+    let request = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{ "uri": uri.as_str(), "name": "project" }],
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("ready")
+        .call(request)
+        .await
+        .expect("initialize handled")
+        .expect("response");
+}
+
+/// How many recorded messages have `method` and a text with `needle`.
+///
+/// The recorder task stores the messages on its own schedule, so this waits
+/// until at least `expected` messages match, up to a timeout. Then it lets
+/// the recorder take each message that is already sent, so a surplus
+/// message is in the count too.
+#[cfg(unix)]
+async fn count_messages(
+    messages: &std::sync::Mutex<Vec<(String, String)>>,
+    method: &str,
+    needle: &str,
+    expected: usize,
+) -> usize {
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const POLL: Duration = Duration::from_millis(5);
+    const SETTLE_YIELDS: usize = 16;
+    let count = || {
+        messages
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, params)| name == method && params.contains(needle))
+            .count()
+    };
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while count() < expected && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(POLL).await;
+    }
+    for _ in 0..SETTLE_YIELDS {
+        tokio::task::yield_now().await;
+    }
+    count()
+}
+
+/// A folder that appears after initialize below a committed link that
+/// leaves the checkout stays refused. The user sees the refusal once, also
+/// when the prewarm resolves the folder first.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_late_folder_refusal_is_shown_once_and_kept() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo dir");
+    fallow_api::git_fixture::fixture_git(&repo, &["init", "-q", "-b", "main"]);
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(&outside).expect("outside dir");
+    std::os::unix::fs::symlink(&outside, repo.join("packages")).expect("link");
+    fallow_api::git_fixture::fixture_git(&repo, &["add", "packages"]);
+    fallow_api::git_fixture::fixture_git(&repo, &["commit", "-q", "-m", "link"]);
+    let folder = repo.join("packages").join("app");
+
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let messages = record_messages(socket);
+    initialize_with_folder(&mut service, &folder).await;
+    let backend = service.inner();
+    assert_eq!(backend.analysis_root().await, Ok(None));
+
+    std::fs::create_dir(outside.join("app")).expect("create folder");
+    backend.spawn_prewarm().await;
+    let refused = backend.analysis_root().await;
+    assert!(
+        matches!(&refused, Err(problem) if problem.message.contains("outside the checkout")),
+        "got: {refused:?}"
+    );
+    backend.run_analysis().await;
+    backend.run_analysis().await;
+
+    let shown = count_messages(&messages, "window/showMessage", "outside the checkout", 1).await;
+    assert_eq!(shown, 1);
+}
+
+/// A root that a link replaces is logged once per change, not on each run.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_moved_root_is_logged_once_per_change() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let base = dunce::canonicalize(temp.path()).unwrap();
+    let root = base.join("project");
+    std::fs::create_dir(&root).expect("root");
+    let elsewhere = base.join("elsewhere");
+    std::fs::create_dir(&elsewhere).expect("other dir");
+
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let messages = record_messages(socket);
+    initialize_with_folder(&mut service, &root).await;
+    let backend = service.inner();
+
+    std::fs::remove_dir(&root).expect("remove root");
+    std::os::unix::fs::symlink(&elsewhere, &root).expect("link root");
+    backend.run_analysis().await;
+    backend.run_analysis().await;
+    assert_eq!(
+        count_messages(&messages, "window/logMessage", "now resolves to", 1).await,
+        1
+    );
+
+    std::fs::remove_file(&root).expect("remove link");
+    std::fs::create_dir(&root).expect("root again");
+    assert_eq!(backend.analysis_root().await, Ok(Some(root.clone())));
+    std::fs::remove_dir(&root).expect("remove root");
+    std::os::unix::fs::symlink(&elsewhere, &root).expect("link root again");
+    backend.run_analysis().await;
+    assert_eq!(
+        count_messages(&messages, "window/logMessage", "now resolves to", 2).await,
+        2
+    );
+}

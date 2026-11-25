@@ -6,8 +6,9 @@ use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, ComplexityViolation,
     CoverageIntelligenceFinding, CoverageIntelligenceRecommendation, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, HealthSummary, RuntimeCoverageFinding,
-    RuntimeCoverageVerdict, StylingFinding, StylingFindingSeverity, UntestedExportFinding,
-    UntestedFileFinding, build_codeclimate_issue, codeclimate_fingerprint_hash, normalize_uri,
+    RuntimeCoverageVerdict, ShallowDirectoryFinding, StylingFinding, StylingFindingSeverity,
+    UntestedExportFinding, UntestedFileFinding, build_codeclimate_issue,
+    codeclimate_fingerprint_hash, normalize_uri,
 };
 use fallow_types::output_dead_code::EffectiveSeverity;
 
@@ -183,6 +184,27 @@ impl HealthCodeClimateContext<'_> {
         })
     }
 
+    /// The anchor file holds the issue. The fingerprint reads the directory,
+    /// so a new anchor file keeps the fingerprint.
+    fn shallow_directory_issue(dir: &ShallowDirectoryFinding) -> CodeClimateIssue {
+        let directory = normalize_uri(&dir.path.display().to_string());
+        let path = normalize_uri(&dir.anchor_file.display().to_string());
+        let description = format!(
+            "Directory {directory} is shallow: files outside it use {} interface items, and it hides {}",
+            dir.shown_count, dir.hidden_count,
+        );
+        let fp = codeclimate_fingerprint_hash(&["fallow/shallow-directory", &directory]);
+        build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/shallow-directory",
+            description: &description,
+            severity: CodeClimateSeverity::Info,
+            category: "Complexity",
+            path: &path,
+            begin_line: None,
+            fingerprint: &fp,
+        })
+    }
+
     fn untested_export_issue(&self, item: &UntestedExportFinding) -> CodeClimateIssue {
         let path = codeclimate_path(&item.export.path, self.root);
         let description = format!(
@@ -277,15 +299,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
         }
     }
 
-    if let Some(ref gaps) = report.coverage_gaps {
-        for item in &gaps.files {
-            issues.push(ctx.untested_file_issue(item));
-        }
-
-        for item in &gaps.exports {
-            issues.push(ctx.untested_export_issue(item));
-        }
-    }
+    push_section_issues(&ctx, report, &mut issues);
 
     issues
 }
@@ -390,6 +404,30 @@ const fn coverage_intelligence_severity(
         CoverageIntelligenceVerdict::ReviewRequired
         | CoverageIntelligenceVerdict::RefactorCarefully => Some(CodeClimateSeverity::Minor),
         CoverageIntelligenceVerdict::Clean | CoverageIntelligenceVerdict::Unknown => None,
+    }
+}
+
+/// The issues of the coverage gaps and shallow directories sections.
+fn push_section_issues(
+    ctx: &HealthCodeClimateContext<'_>,
+    report: &HealthReport,
+    issues: &mut Vec<CodeClimateIssue>,
+) {
+    if let Some(ref gaps) = report.coverage_gaps {
+        issues.extend(gaps.files.iter().map(|item| ctx.untested_file_issue(item)));
+        issues.extend(
+            gaps.exports
+                .iter()
+                .map(|item| ctx.untested_export_issue(item)),
+        );
+    }
+    if let Some(ref section) = report.shallow_directories {
+        issues.extend(
+            section
+                .directories
+                .iter()
+                .map(HealthCodeClimateContext::shallow_directory_issue),
+        );
     }
 }
 

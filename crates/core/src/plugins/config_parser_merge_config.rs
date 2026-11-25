@@ -10,12 +10,16 @@
 use oxc_ast::ast::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::multi_config::MAX_MULTI_CONFIGS;
 use super::{
     MAX_CONFIG_WRAPPER_DEPTH, extract_object_from_arrow_function, extract_object_from_function,
     find_config_object, find_variable_init, get_nested_expression, is_module_exports_target,
     top_level_variable_declarations, unwrap_to_identifier_name,
 };
+
+/// The maximum number of configs read from one exported array, in source order.
+/// A build can export one config per locale or per target. The work for each
+/// config is linear in its size, and the inline budget bounds the copies.
+pub(super) const MAX_MULTI_CONFIGS: usize = 64;
 
 const MERGE_CONFIG: &str = "mergeConfig";
 

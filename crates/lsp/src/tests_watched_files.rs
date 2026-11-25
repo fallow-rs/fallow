@@ -31,6 +31,23 @@ fn watched_file_globs_cover_every_config_file_name() {
 }
 
 #[test]
+fn watched_file_globs_cover_every_near_miss_config_file_name() {
+    let globs = watched_file_globs();
+
+    for name in fallow_config::UNRECOGNIZED_CONFIG_FILE_NAMES {
+        let expected = format!("**/{name}");
+        assert!(
+            globs.contains(&expected),
+            "a run reports a notice for {name}, so the watcher must register {expected}: {globs:?}"
+        );
+        assert!(
+            session_store::session_input_file(Path::new(name)),
+            "a created or removed {name} must load the kept sessions again"
+        );
+    }
+}
+
+#[test]
 fn workspace_manifests_are_watched_session_inputs() {
     let globs = watched_file_globs();
 

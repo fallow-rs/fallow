@@ -31,12 +31,20 @@ impl ManifestPatternMatcher {
     /// that declares nothing; discovery reports the parse error.
     #[must_use]
     pub fn load(root: &Path) -> Self {
+        let declared = collect_declared_patterns(root, &[]).unwrap_or_default();
+        Self::from_patterns(declared.iter().map(|declared| declared.pattern.as_str()))
+    }
+
+    /// Build the matcher from workspace patterns, as a root manifest
+    /// declares them. A `!` pattern excludes.
+    #[must_use]
+    pub fn from_patterns<'p>(patterns: impl Iterator<Item = &'p str>) -> Self {
         let mut positive = globset::GlobSetBuilder::new();
         let mut negative = globset::GlobSetBuilder::new();
-        for declared in collect_declared_patterns(root, &[]).unwrap_or_default() {
-            let (builder, pattern) = match declared.pattern.strip_prefix('!') {
+        for declared in patterns {
+            let (builder, pattern) = match declared.strip_prefix('!') {
                 Some(rest) => (&mut negative, rest),
-                None => (&mut positive, declared.pattern.as_str()),
+                None => (&mut positive, declared),
             };
             let pattern = crate::glob_validation::normalize_path_pattern(pattern);
             let pattern = if pattern.ends_with('/') {
@@ -202,9 +210,12 @@ pub(super) fn collect_nested_project_workspaces(
 
 /// The `packages` entries of the `pnpm-workspace.yaml` in `project_dir`, as
 /// written in the file. Each entry names that file as its source.
+///
+/// The file must resolve inside `project_dir`, the same rule as the root
+/// `pnpm-workspace.yaml` of the analysis root.
 pub(super) fn nested_declared_patterns(project_dir: &Path) -> Vec<DeclaredPattern> {
     let source = project_dir.join(PNPM_WORKSPACE_FILE);
-    let Ok(content) = std::fs::read_to_string(&source) else {
+    let Some(content) = super::pnpm_workspace::read_pnpm_workspace(project_dir) else {
         return Vec::new();
     };
     pnpm_workspace_packages(&content)

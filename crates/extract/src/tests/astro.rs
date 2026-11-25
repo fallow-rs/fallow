@@ -596,3 +596,80 @@ fn astro_script_block_complexity_is_skipped_without_need_complexity() {
     );
     assert!(info.complexity.is_empty());
 }
+
+#[test]
+fn astro_frontmatter_top_level_return_parses_without_errors() {
+    for (name, stmt) in [
+        ("rewrite.astro", "return Astro.rewrite('/privacy')"),
+        ("redirect.astro", "return Astro.redirect('/')"),
+    ] {
+        let source = format!("---\n{stmt}\n---\n");
+        let info = parse_source_to_module(FileId(0), Path::new(name), &source, 0, true);
+        assert_eq!(
+            info.parse_error_count, 0,
+            "{name} top-level frontmatter return must parse without errors"
+        );
+    }
+}
+
+#[test]
+fn astro_frontmatter_early_return_keeps_imports_complexity_and_template_credit() {
+    let source = r"---
+import Banner from '../components/Banner.astro';
+import { getLabel, UnusedHelper } from '../lib/labels';
+
+export const check = (flag: boolean) => (flag ? 1 : 0);
+
+if (!Astro.locals.user) {
+  return Astro.rewrite('/privacy');
+}
+
+const title = getLabel();
+---
+<Banner title={title} />
+";
+    let info = parse_astro_with_complexity(source);
+    assert_eq!(
+        info.parse_error_count, 0,
+        "conditional top-level return in Astro frontmatter must not degrade the file"
+    );
+    assert_eq!(info.imports.len(), 3);
+    assert!(
+        !info.unused_import_bindings.contains(&"Banner".to_string()),
+        "template component after early return must stay credited: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"getLabel".to_string()),
+        "post-return import use must stay credited: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        info.unused_import_bindings
+            .contains(&"UnusedHelper".to_string()),
+        "genuinely unused import must still be flagged: {:?}",
+        info.unused_import_bindings
+    );
+    assert!(
+        info.complexity.iter().any(|fc| fc.name == "check"),
+        "frontmatter complexity must still be computed: {:?}",
+        info.complexity
+    );
+}
+
+#[test]
+fn astro_frontmatter_syntax_error_still_reports_parse_error() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Broken.astro"),
+        "---\nreturn = Astro.rewrite('/privacy');\n---\n",
+        0,
+        false,
+    );
+    assert!(
+        info.parse_error_count > 0,
+        "malformed frontmatter must still record a parse error"
+    );
+}

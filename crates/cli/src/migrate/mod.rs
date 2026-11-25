@@ -19,7 +19,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
-use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
+use crate::setup_hooks::symlink_guard::refusal_message;
 use jscpd::migrate_jscpd;
 use jsonc::generate_jsonc;
 use knip::migrate_knip;
@@ -149,7 +149,7 @@ pub fn run_migrate(
     } else {
         let filename = format.filename();
         let output_path = root.join(filename);
-        if let Some(link) = symlinked_component(root, &output_path) {
+        if let Some(link) = fallow_types::path_guard::outside_link(root, &output_path) {
             let link = link.strip_prefix(root).unwrap_or(&link);
             eprintln!(
                 "Error: {}",

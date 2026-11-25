@@ -144,7 +144,7 @@ impl OwnershipResolver {
     /// matches. The slice is empty for a rule before the first section
     /// header. Used to emit the `owners` metadata array in grouped JSON
     /// output.
-    pub(crate) fn section_owners_of<'a>(&'a self, rel_path: &'a Path) -> Option<&'a [String]> {
+    fn section_owners_of<'a>(&'a self, rel_path: &'a Path) -> Option<&'a [String]> {
         self.group_of(rel_path).section_owners
     }
 }

@@ -17,6 +17,12 @@ and parse-cache changes.
   for Angular, Vue, Svelte, and Astro, over a shared JS-expression engine.
 - `crates/extract/src/sfc.rs`, `astro/mod.rs`, `glimmer.rs`, `mdx.rs`, and
   `graphql.rs`: component and embedded-language extraction.
+- `crates/extract/src/sfc_blocks.rs`: the `<script>` and `<style>` block scan
+  of Vue and Svelte files. It gives the same blocks as the leftmost-first
+  regexes in its module docs, in linear time. A regex search costs quadratic
+  time on a file with many unclosed attribute quotes. The tests in
+  `crates/extract/src/tests/sfc_blocks.rs` compare the scan with those
+  regexes on generated input.
 - `crates/extract/src/sfc_template/`: template-visible usage for supported
   component formats.
 - `crates/extract/src/css.rs`, `css_metrics.rs`, `css_classes.rs`,
@@ -51,7 +57,10 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   - The same scan counts the `<` tokens that the TypeScript parser can try
     as nested type-argument lists: an open `<` with a later `<` behind a
     deeper `(` or `[`. Each such level makes the parser try the inner part
-    again, so the parse time grows exponentially with the level. A file past
+    again, so the parse time grows exponentially with the level. A grouping
+    `(` before `{`, `[` or `(` adds one more level, because the parser also
+    tries it as a parameter list, and a computed key or a default value in
+    that pattern holds the inner part. A file past
     `MAX_TYPE_ARGUMENT_NESTING` returns `None` in the same way as a file
     past `MAX_NESTING_DEPTH`.
   - It then runs the parse on a stack of
@@ -281,7 +290,8 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   one member is a whole-object use, so the graph credits every export of the
   target instead of narrowing to the dotted accesses
   (`record_bare_namespace_reference` in
-  `crates/extract/src/visitor/visit_impl.rs`). The resolved positions are the
+  `crates/extract/src/visitor/visit_impl_namespace_references.rs`).
+  The resolved positions are the
   exclusions: the object of a static access or of a computed access whose key
   names members (see the computed member access rule), the root of a
   JSX member tag, the left side of a dotted type name, a destructure
@@ -297,6 +307,18 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   from the program's statement list, because an import declaration is legal
   after the code that reads it. Namespace objects bound by `require` or a
   dynamic import keep the older allow-list.
+- The visitor keeps a bare reference to a namespace import local as a
+  candidate with its span (`record_namespace_whole_object_use` in
+  `crates/extract/src/visitor/semantic_calls.rs`). The semantic pass keeps
+  only the candidates that resolve to a root-scope binding, which is the
+  import binding. The other candidates resolve to a local with the name of
+  the import, for example a `catch` parameter, a binding in a static block,
+  or the name of a named function or class expression. A use of that local
+  is not a use of the import (issue #5064). A nested namespace binding with
+  the same name in scope at the reference, such as `const NS =
+  require('./x')` in a function, keeps the credit. An extractor that no
+  semantic pass resolves, such as a template-expression pass, records every
+  candidate.
 - The MDX line scan hands the statement lines of the whole file to the parser
   as one program, and a rejected program is an empty program, so one
   misclassified line would drop every import of the file. A line opens a

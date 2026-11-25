@@ -1,9 +1,11 @@
 //! The text of the config entries that had no effect outside JSON and SARIF:
 //! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`,
-//! `circularDependencies.allow`), the
+//! `circularDependencies.allow`, `ignoreExports`, `duplicates.ignore`,
+//! `health.ignore`), the
 //! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
-//! `overrides` rules that cannot change a result, and the requested checks that
-//! did not run because their rule is off.
+//! `overrides` rules that cannot change a result, the `overrides[].files`
+//! globs that matched no file, and the requested checks that did not run
+//! because their rule is off.
 //!
 //! Every output reads the same `workspace_diagnostics[]` entries, and each
 //! format carries them in exactly one place:
@@ -12,6 +14,12 @@
 //! - Markdown, the job summary, the PR comment and the review summary body
 //!   have a Markdown section.
 //! - Every other format has a stderr note, so its stdout stays unchanged.
+//!
+//! The `fallow dupes` and `fallow health` runs state only their own
+//! `ignore` globs. JSON, the PR comment, the review summary body and the job
+//! summary carry them. Their SARIF and Markdown documents have no config
+//! section, so those formats get a stderr note, see
+//! [`print_section_stderr_notes`].
 //!
 //! A live run and `fallow report --from` use the same place for one format,
 //! so a re-render of a saved envelope states what the live run stated.
@@ -75,11 +83,38 @@ pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFor
     }
 }
 
+/// Print the stderr notes of a duplication or health run, unless `format`
+/// carries the entries in its document or `quiet` is set. The SARIF and
+/// Markdown documents of these runs have no config section, so they get a
+/// note.
+pub fn print_section_stderr_notes(
+    diagnostics: &[WorkspaceDiagnostic],
+    format: OutputFormat,
+    quiet: bool,
+) {
+    let carries = matches!(
+        format,
+        OutputFormat::Json
+            | OutputFormat::GithubSummary
+            | OutputFormat::PrCommentGithub
+            | OutputFormat::PrCommentGitlab
+            | OutputFormat::ReviewGithub
+            | OutputFormat::ReviewGitlab
+    );
+    if quiet || carries {
+        return;
+    }
+    for note in stderr_notes(diagnostics) {
+        eprintln!("{note}");
+    }
+}
+
 /// One note line per config setting with unmatched patterns, in the order
 /// `ignoreFindings`, `ignoreDependencies`, `circularDependencies.allow`, then one note line per config
 /// setting with redundant entries, in the order `entry`,
 /// `ignoreDependencies`, `ignorePatterns`, then one note line per `overrides`
-/// rule that had no effect, then one note line per requested rule that is off.
+/// rule that had no effect, then one note line per `overrides[].files` glob
+/// that matched no file, then one note line per requested rule that is off.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
     let patterns_of = |kind: &str| -> Vec<String> {
@@ -113,6 +148,30 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             "an entry lists the files of one cycle in import order; check the paths",
         ),
         (
+            "ignore-exports-file-unmatched",
+            ("ignoreExports file glob", "ignoreExports file globs"),
+            "matched no file this run",
+            "globs are project-root-relative; fix the glob or remove the rule",
+        ),
+        (
+            "ignore-exports-name-unmatched",
+            ("ignoreExports name", "ignoreExports names"),
+            "is not an export of its files this run",
+            "remove the name, or fix it if the export was renamed",
+        ),
+        (
+            "duplicates-ignore-unmatched",
+            ("duplicates.ignore glob", "duplicates.ignore globs"),
+            "matched no file this run",
+            "globs are project-root-relative; check for typos",
+        ),
+        (
+            "health-ignore-unmatched",
+            ("health.ignore glob", "health.ignore globs"),
+            "matched no file this run",
+            "globs are project-root-relative; check for typos",
+        ),
+        (
             "entry-pattern-redundant",
             ("entry pattern", "entry patterns"),
             "matched only files that are entry points anyway",
@@ -144,6 +203,20 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             "Note: override rule had no effect: {rule} for [{globs}] ({hint})."
         ))
     });
+    let override_glob_notes =
+        override_glob_groups(diagnostics)
+            .into_iter()
+            .map(|(hint, patterns)| {
+                let noun = if patterns.len() == 1 { "glob" } else { "globs" };
+                let patterns = patterns
+                    .iter()
+                    .map(|pattern| single_line(pattern))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Note: overrides[].files {noun} matched no file this run: {patterns} ({hint})."
+                )
+            });
     let requested_notes = diagnostics.iter().filter_map(|diagnostic| {
         let (rule, flag) = diagnostic.kind.requested_rule_off()?;
         Some(format!(
@@ -171,8 +244,32 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             ))
         })
         .chain(override_notes)
+        .chain(override_glob_notes)
         .chain(requested_notes)
         .collect()
+}
+
+/// The `overrides[].files` globs that matched no file, grouped by their hint
+/// in the order of the first glob of each group.
+fn override_glob_groups(diagnostics: &[WorkspaceDiagnostic]) -> Vec<(&'static str, Vec<&str>)> {
+    let mut groups: Vec<(&'static str, Vec<&str>)> = Vec::new();
+    for diagnostic in diagnostics {
+        let Some((pattern, _, _, _)) = diagnostic.kind.unmatched_override_glob() else {
+            continue;
+        };
+        let Some(hint) = diagnostic.kind.unmatched_override_glob_hint() else {
+            continue;
+        };
+        match groups.iter_mut().find(|(known, _)| *known == hint) {
+            Some((_, patterns)) => {
+                if !patterns.contains(&pattern) {
+                    patterns.push(pattern);
+                }
+            }
+            None => groups.push((hint, vec![pattern])),
+        }
+    }
+    groups
 }
 
 /// The Markdown sections that list the unmatched patterns, the redundant
@@ -248,6 +345,21 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
             overrides.join("\n")
         ));
     }
+    let override_globs: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (pattern, _, _, _) = diagnostic.kind.unmatched_override_glob()?;
+            let hint = diagnostic.kind.unmatched_override_glob_hint()?;
+            Some(format!("- {}: {hint}", markdown_value(pattern)))
+        })
+        .collect();
+    if !override_globs.is_empty() {
+        sections.push(format!(
+            "\n## Override globs that match no file\n\nThese `overrides[].files` globs \
+             matched no project file, so their override has no effect for them.\n\n{}",
+            override_globs.join("\n")
+        ));
+    }
     (!sections.is_empty()).then(|| sections.join("\n"))
 }
 
@@ -273,6 +385,7 @@ pub fn envelope_diagnostics(envelope: &serde_json::Value) -> Vec<WorkspaceDiagno
             .filter(|diagnostic| {
                 diagnostic.kind.unmatched_config_pattern().is_some()
                     || diagnostic.kind.ineffective_override().is_some()
+                    || diagnostic.kind.unmatched_override_glob().is_some()
                     || diagnostic.kind.requested_rule_off().is_some()
             });
         for diagnostic in entries {

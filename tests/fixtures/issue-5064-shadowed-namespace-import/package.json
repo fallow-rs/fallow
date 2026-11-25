@@ -1,0 +1,5 @@
+{
+  "name": "issue-5064-shadowed-namespace-import",
+  "version": "1.0.0",
+  "main": "src/index.ts"
+}

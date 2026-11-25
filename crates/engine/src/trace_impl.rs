@@ -4,12 +4,13 @@ use fallow_types::discover::FileId;
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
-    ImportPathTraceSchemaVersion, NamespacedExportReferences, PeerClosureSeeds, ReExportChain,
-    SearchGapReason, ToolingCredit, TracedCloneGroup, TracedExport, TracedReExport,
+    ImportPathTraceSchemaVersion, PeerClosureSeeds, ReExportChain, SearchGapReason, ToolingCredit,
+    TracedCloneGroup, TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::trace_export_references::{crediting_export_references, implicit_default_references};
 use crate::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
     group_refactoring_suggestion,
@@ -41,7 +42,7 @@ pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str
     let mut exact = Vec::new();
     let mut suffix = Vec::new();
     let suffix_pattern = format!("/{normalized}");
-    for (index, module) in graph.modules.iter().enumerate() {
+    for (index, module) in graph.modules().iter().enumerate() {
         let module_path = forward_slash_path(&module.path);
         let is_exact = module_path == normalized || exact_targets.contains(&module.path);
         if is_exact {
@@ -84,7 +85,7 @@ impl<'g> ModulePathLookup<'g> {
     fn new(graph: &'g ModuleGraph, root: &'g Path) -> Self {
         let mut by_path: FxHashMap<String, Vec<usize>> = FxHashMap::default();
         let mut by_file_name: FxHashMap<String, Vec<usize>> = FxHashMap::default();
-        for (index, module) in graph.modules.iter().enumerate() {
+        for (index, module) in graph.modules().iter().enumerate() {
             by_path
                 .entry(path_key(&module.path))
                 .or_default()
@@ -134,7 +135,7 @@ impl<'g> ModulePathLookup<'g> {
             .flatten()
             .copied()
             .filter(|&index| {
-                forward_slash_path(&self.graph.modules[index].path).ends_with(&suffix_pattern)
+                forward_slash_path(&self.graph.modules()[index].path).ends_with(&suffix_pattern)
             })
             .collect()
     }
@@ -157,7 +158,7 @@ pub fn find_module<'a>(
 ) -> Option<&'a ModuleNode> {
     matching_module_indexes(graph, root, user_path)
         .first()
-        .map(|&index| &graph.modules[index])
+        .map(|&index| &graph.modules()[index])
 }
 
 /// Reconcile checker-backed reference evidence with the retained graph's
@@ -178,7 +179,7 @@ pub fn reconcile_semantic_trace_reachability(
             lookup
                 .matching(&reference.path.to_string_lossy())
                 .iter()
-                .any(|&index| graph.modules[index].is_reachable())
+                .any(|&index| graph.modules()[index].is_reachable())
         })
     };
     if has_reachable_reference {
@@ -196,12 +197,12 @@ pub fn reconcile_semantic_trace_reachability(
 }
 
 /// Map a reference's `from_file` id to a root-relative [`ExportReference`].
-fn reference_to_export_reference(
+pub(super) fn reference_to_export_reference(
     graph: &ModuleGraph,
     root: &Path,
     r: &crate::graph::SymbolReference,
 ) -> ExportReference {
-    let from_path = graph.modules.get(r.from_file.0 as usize).map_or_else(
+    let from_path = graph.module(r.from_file).map_or_else(
         || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
         |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
     );
@@ -220,7 +221,7 @@ fn collect_re_export_chains(
         .effective_re_export_routes(target_file_id, export_name, namespace)
         .into_iter()
         .filter_map(|route| {
-            let module = graph.modules.get(route.barrel_file().0 as usize)?;
+            let module = graph.module(route.barrel_file())?;
             Some(ReExportChain {
                 barrel_file: relative_module_path(&module.path, root),
                 exported_as: route.exported_name().to_string(),
@@ -233,7 +234,7 @@ fn collect_re_export_chains(
                     .into_iter()
                     .filter(|reference| {
                         graph
-                            .modules
+                            .modules()
                             .get(reference.from_file.0 as usize)
                             .is_some_and(crate::graph::ModuleNode::is_reachable)
                     })
@@ -275,21 +276,34 @@ pub fn trace_export(
             semantic: None,
         });
     };
+    let implicit_component_default = surface.export().is_none()
+        && surface.binding().is_implicit_default()
+        && surface.binding().origin_file() == module.file_id;
     let (namespace, direct_references, direct_references_by_namespace) =
-        crediting_export_references(graph, root, module.file_id, export_name, surface);
+        if implicit_component_default {
+            (
+                ExportNamespace::Value,
+                implicit_default_references(graph, root, module.file_id),
+                Vec::new(),
+            )
+        } else {
+            crediting_export_references(graph, root, module.file_id, export_name, surface)
+        };
 
     let re_export_chains =
         collect_re_export_chains(graph, root, module.file_id, export_name, namespace);
 
-    let reference_count = direct_references.len();
-    let is_used = module.is_reachable() && reference_count > 0;
-    let (kept_by_tag, reason) = super::trace_export_reason::export_verdict(
+    let verdict = super::trace_export_reason::export_verdict(
         module,
         (export_name, namespace),
-        reference_count,
+        super::trace_export_reason::ExportCredit {
+            reference_count: direct_references.len(),
+            implicit_component_default,
+        },
         &re_export_chains,
         star_export_ambiguity.is_some(),
     );
+    let (is_used, kept_by_tag, reason) = (verdict.is_used, verdict.kept_by_tag, verdict.reason);
 
     Some(ExportTrace {
         file: relative_module_path(&module.path, root),
@@ -313,124 +327,8 @@ pub fn trace_export(
 }
 
 /// The root-relative path of a module, or the path as it is outside `root`.
-fn relative_module_path(path: &Path, root: &Path) -> PathBuf {
+pub(super) fn relative_module_path(path: &Path, root: &Path) -> PathBuf {
     path.strip_prefix(root).unwrap_or(path).to_path_buf()
-}
-
-/// Distinct referencing files of one module export surface in one namespace.
-///
-/// Each reference carries the literal-search check: the consumer source is
-/// read on demand and compared with a whole-word search for the export name.
-fn direct_export_references(
-    graph: &ModuleGraph,
-    root: &Path,
-    sources: &mut SourceCache<'_>,
-    file_id: crate::discover::FileId,
-    export_name: &str,
-    namespace: ExportNamespace,
-) -> Vec<ExportReference> {
-    let mut referenced_files = FxHashSet::default();
-    let references: Vec<_> = graph
-        .effective_export_surface_references(file_id, export_name, namespace)
-        .into_iter()
-        .filter(|reference| {
-            graph
-                .modules
-                .get(reference.from_file.0 as usize)
-                .is_some_and(crate::graph::ModuleNode::is_reachable)
-        })
-        .filter(|reference| referenced_files.insert(reference.from_file))
-        .collect();
-    if references.is_empty() {
-        return Vec::new();
-    }
-    let target = SearchTarget::new(graph, sources, file_id, export_name, namespace);
-    references
-        .into_iter()
-        .map(|reference| {
-            let mut export_reference = reference_to_export_reference(graph, root, reference);
-            if let Some(check) = target.check(graph, sources, reference) {
-                apply_search_check(&mut export_reference, check);
-            }
-            export_reference
-        })
-        .collect()
-}
-
-fn apply_search_check(reference: &mut ExportReference, check: SearchCheck) {
-    reference.line = check.line;
-    reference.search_visibility = Some(check.visibility);
-    reference.reason = check.reason;
-    reference.search_as = check.search_as;
-}
-
-/// References that credit the traced declaration, with the namespace that
-/// carries them.
-///
-/// The preferred surface wins whenever its lane carries a reference. When it
-/// carries none, the other namespace is consulted only if it resolves to the
-/// same effective binding: that is the type lane falling back onto a
-/// value-only declaration (`import type { helper }` of `export const helper`),
-/// which the unused-export analyzer counts as a use regardless of namespace.
-/// A distinct same-name declaration in the other namespace keeps the preferred
-/// lane, because its references credit that other declaration and dead-code
-/// still reports the traced one. See issue #2371.
-fn crediting_export_references(
-    graph: &ModuleGraph,
-    root: &Path,
-    file_id: crate::discover::FileId,
-    export_name: &str,
-    surface: crate::graph::EffectiveExportSurface<'_>,
-) -> (
-    ExportNamespace,
-    Vec<ExportReference>,
-    Vec<NamespacedExportReferences>,
-) {
-    let namespace = surface.namespace();
-    let mut sources = SourceCache::new(graph);
-    let references =
-        direct_export_references(graph, root, &mut sources, file_id, export_name, namespace);
-    let other = match namespace {
-        ExportNamespace::Type => ExportNamespace::Value,
-        ExportNamespace::Value => ExportNamespace::Type,
-    };
-    let same_binding = graph
-        .effective_export_surface(file_id, export_name, other)
-        .is_some_and(|candidate| {
-            graph.effective_bindings_share_declaration_group(candidate.binding(), surface.binding())
-        });
-    if !same_binding {
-        return (namespace, references, Vec::new());
-    }
-    let other_references =
-        direct_export_references(graph, root, &mut sources, file_id, export_name, other);
-    let by_namespace = if references.is_empty() || other_references.is_empty() {
-        Vec::new()
-    } else {
-        vec![
-            namespaced_references(namespace, references.clone()),
-            namespaced_references(other, other_references.clone()),
-        ]
-    };
-    if references.is_empty() && !other_references.is_empty() {
-        (other, other_references, by_namespace)
-    } else {
-        (namespace, references, by_namespace)
-    }
-}
-
-fn namespaced_references(
-    namespace: ExportNamespace,
-    references: Vec<ExportReference>,
-) -> NamespacedExportReferences {
-    NamespacedExportReferences {
-        namespace: match namespace {
-            ExportNamespace::Type => fallow_types::semantic::SemanticNamespace::Type,
-            ExportNamespace::Value => fallow_types::semantic::SemanticNamespace::Value,
-        },
-        reference_count: references.len(),
-        references,
-    }
 }
 
 fn trace_star_export_ambiguity(
@@ -453,7 +351,7 @@ fn trace_star_export_ambiguity(
     let mut sources: Vec<_> = collisions
         .iter()
         .flat_map(|collision| collision.contributors.iter())
-        .filter_map(|contributor| graph.modules.get(contributor.0 as usize))
+        .filter_map(|contributor| graph.module(*contributor))
         .map(|module| relative_module_path(&module.path, root))
         .collect();
     sources.sort();
@@ -501,7 +399,7 @@ pub fn semantic_symbol_for_export(
         (module, re_export.span, export_name, local_name)
     } else {
         let origin = surface.origin()?;
-        let origin_module = graph.modules.get(origin.file_id().0 as usize)?;
+        let origin_module = graph.module(origin.file_id())?;
         let origin_export = origin.export();
         let origin_name = match &origin_export.name {
             fallow_types::extract::ExportName::Named(name) => name.as_str(),
@@ -816,7 +714,7 @@ fn traced_imports_from(
         .iter()
         .filter_map(|target_id| {
             graph
-                .modules
+                .modules()
                 .get(target_id.0 as usize)
                 .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
         })
@@ -836,7 +734,7 @@ fn traced_imported_by(
             deps.iter()
                 .filter_map(|fid| {
                     graph
-                        .modules
+                        .modules()
                         .get(fid.0 as usize)
                         .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
                 })
@@ -855,7 +753,7 @@ fn traced_re_exports(
         .re_exports
         .iter()
         .map(|re| {
-            let source_path = graph.modules.get(re.source_file.0 as usize).map_or_else(
+            let source_path = graph.module(re.source_file).map_or_else(
                 || PathBuf::from(format!("<unknown:{}>", re.source_file.0)),
                 |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
             );
@@ -969,7 +867,7 @@ fn package_importers(
         let Some(total) = all.remove(&fid) else {
             continue;
         };
-        let Some(module) = graph.modules.get(fid.0 as usize) else {
+        let Some(module) = graph.module(fid) else {
             continue;
         };
         let path = relative_module_path(&module.path, root);
@@ -997,7 +895,7 @@ fn imported_types_target_credit(graph: &ModuleGraph, package_name: &str) -> Opti
         })
 }
 
-fn format_reference_kind(kind: ReferenceKind) -> String {
+pub(super) fn format_reference_kind(kind: ReferenceKind) -> String {
     match kind {
         ReferenceKind::NamedImport => "named import".to_string(),
         ReferenceKind::DefaultImport => "default import".to_string(),
@@ -1062,7 +960,7 @@ fn impact_closure_trace(
             consumer_search_checks(graph, module.file_id)
                 .into_iter()
                 .filter_map(|(file_id, check)| {
-                    let consumer = graph.modules.get(file_id.0 as usize)?;
+                    let consumer = graph.module(file_id)?;
                     let path = consumer
                         .path
                         .strip_prefix(root)
@@ -1106,7 +1004,7 @@ fn consumer_search_checks(
     seed: FileId,
 ) -> FxHashMap<FileId, (String, SearchCheck)> {
     let mut checks: FxHashMap<FileId, (String, SearchCheck)> = FxHashMap::default();
-    let Some(module) = graph.modules.get(seed.0 as usize) else {
+    let Some(module) = graph.module(seed) else {
         return checks;
     };
     let mut sources = SourceCache::new(graph);
@@ -1191,8 +1089,8 @@ fn resolve_import_path_hops(
     let mut line_offsets: FxHashMap<FileId, Option<Vec<u32>>> = FxHashMap::default();
     hops.iter()
         .filter_map(|hop| {
-            let from = graph.modules.get(hop.from.0 as usize)?;
-            let to = graph.modules.get(hop.to.0 as usize)?;
+            let from = graph.module(hop.from)?;
+            let to = graph.module(hop.to)?;
             let import_line = hop.import_span_start.and_then(|span_start| {
                 line_offsets
                     .entry(hop.from)
@@ -2653,7 +2551,7 @@ mod tests {
                 Err(expected),
             );
         }
-        graph.modules[0].exports[0].members[2].kind = MemberKind::ClassProperty;
+        graph.modules_mut()[0].exports[0].members[2].kind = MemberKind::ClassProperty;
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,
@@ -2664,8 +2562,8 @@ mod tests {
             ),
             Err(SemanticClassMethodResolutionError::UnsupportedSyntax),
         );
-        graph.modules[0].exports[0].members[2].kind = MemberKind::ClassMethod;
-        std::fs::remove_file(&graph.modules[0].path).expect("remove fixture source");
+        graph.modules_mut()[0].exports[0].members[2].kind = MemberKind::ClassMethod;
+        std::fs::remove_file(&graph.modules()[0].path).expect("remove fixture source");
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,
@@ -2677,11 +2575,11 @@ mod tests {
             Err(SemanticClassMethodResolutionError::SymbolNotFound),
         );
         let (_other_temp, mut other_graph) = exact_class_method_fixture();
-        let duplicate = other_graph.modules[0]
+        let duplicate = other_graph.modules_mut()[0]
             .exports
             .pop()
             .expect("fixture declares an owner");
-        graph.modules[0].exports.push(duplicate);
+        graph.modules_mut()[0].exports.push(duplicate);
         assert_eq!(
             semantic_symbol_for_exact_class_method(
                 &graph,

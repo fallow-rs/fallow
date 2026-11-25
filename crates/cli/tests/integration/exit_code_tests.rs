@@ -2099,6 +2099,35 @@ fn a_fallow_symlink_that_leaves_the_project_is_not_used_for_the_cache() {
     assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
 }
 
+/// A `.fallow` symlink into `node_modules` is not used for the cache, and the
+/// note names the reason.
+#[cfg(unix)]
+#[test]
+fn a_fallow_symlink_into_node_modules_is_not_used_for_the_cache() {
+    let (dir, root) = write_confinement_project();
+    let store = root.join("node_modules/.cache/fallow");
+    std::fs::create_dir_all(&store).unwrap();
+    std::os::unix::fs::symlink(&store, root.join(".fallow")).unwrap();
+    let output = run_fallow_from(dir.path(), &root, &["dead-code", "--format", "json"]);
+    assert_ne!(output.code, 2, "{}", output.stderr);
+    assert!(
+        output.stderr.contains("not used for the cache"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("into a node_modules directory"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("outside the project"),
+        "{}",
+        output.stderr
+    );
+    assert_eq!(std::fs::read_dir(&store).unwrap().count(), 0);
+}
+
 /// A `.fallow` symlink that stays inside the project keeps the cache.
 #[cfg(unix)]
 #[test]

@@ -86,7 +86,7 @@ pub fn find_thin_wrappers(
     let resolver = ChildResolver::new(graph, &modules_by_id, &resolved_by_id);
 
     let mut scan = ThinWrapperScan::default();
-    for node in &graph.modules {
+    for node in graph.modules() {
         if !node.is_reachable() || !is_react_file(&node.path) {
             continue;
         }

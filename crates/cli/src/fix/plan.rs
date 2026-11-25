@@ -14,6 +14,9 @@ struct PlannedWrite {
     path: PathBuf,
     content: Vec<u8>,
     expected: ExpectedTargetState,
+    /// The canonical directory that the write must resolve in, when it is
+    /// not the project root. See [`FixPlan::stage_existing_within`].
+    base: Option<PathBuf>,
 }
 
 /// Disk state a fixer based its rewrite on.
@@ -256,12 +259,29 @@ impl FixPlan {
             content_hash: xxhash_rust::xxh3::xxh3_64(original_content),
             resolved: std::fs::canonicalize(&path).ok(),
         };
-        self.stage_with_expected(path, content, expected);
+        self.stage_with_expected(path, content, expected, None);
+    }
+
+    /// [`Self::stage_existing`] for a target that may resolve anywhere in
+    /// the canonical directory `base`, such as a config file link into the
+    /// project scope base above the root.
+    pub(super) fn stage_existing_within(
+        &mut self,
+        path: PathBuf,
+        base: PathBuf,
+        original_content: &[u8],
+        content: Vec<u8>,
+    ) {
+        let expected = ExpectedTargetState::Present {
+            content_hash: xxhash_rust::xxh3::xxh3_64(original_content),
+            resolved: std::fs::canonicalize(&path).ok(),
+        };
+        self.stage_with_expected(path, content, expected, Some(base));
     }
 
     /// Queue creation of a target that was absent when the fixer planned it.
     pub(super) fn stage_creation(&mut self, path: PathBuf, content: Vec<u8>) {
-        self.stage_with_expected(path, content, ExpectedTargetState::Missing);
+        self.stage_with_expected(path, content, ExpectedTargetState::Missing, None);
     }
 
     fn stage_with_expected(
@@ -269,6 +289,7 @@ impl FixPlan {
         path: PathBuf,
         content: Vec<u8>,
         expected: ExpectedTargetState,
+        base: Option<PathBuf>,
     ) {
         if let Some(existing) = self.entries.iter_mut().find(|e| e.path == path) {
             existing.content = content;
@@ -278,6 +299,7 @@ impl FixPlan {
             path,
             content,
             expected,
+            base,
         });
     }
 
@@ -398,6 +420,7 @@ struct StagedEntry {
     requested: PathBuf,
     resolved: PathBuf,
     expected: ExpectedTargetState,
+    base: Option<PathBuf>,
 }
 
 fn stage_one(
@@ -406,7 +429,8 @@ fn stage_one(
 ) -> Result<StagedEntry, (PathBuf, std::io::Error)> {
     let target = entry.path;
     let resolved = resolve_target_for_staging(&target).map_err(|error| (target.clone(), error))?;
-    ensure_within_root(canonical_root, &resolved).map_err(|error| (target.clone(), error))?;
+    let base = entry.base.as_deref().unwrap_or(canonical_root);
+    ensure_within_root(base, &resolved).map_err(|error| (target.clone(), error))?;
     let dir = resolved.parent().ok_or_else(|| {
         (
             target.clone(),
@@ -431,6 +455,7 @@ fn stage_one(
         requested: target,
         resolved,
         expected: entry.expected,
+        base: entry.base,
     })
 }
 
@@ -467,7 +492,7 @@ fn revalidate_staged_target(canonical_root: &Path, stage: &StagedEntry) -> std::
         }
         Err(error) => return Err(error),
     };
-    ensure_within_root(canonical_root, &current)?;
+    ensure_within_root(stage.base.as_deref().unwrap_or(canonical_root), &current)?;
     if current != stage.resolved {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -511,18 +536,30 @@ fn revalidate_expected_state(stage: &StagedEntry) -> std::io::Result<()> {
     }
 }
 
+/// Fail unless the resolved `target` is inside the project root and not in a
+/// `.git` or `node_modules` directory below it. A fix target is a source or
+/// manifest file of the project, so a target there came through a symlink.
 fn ensure_within_root(canonical_root: &Path, target: &Path) -> std::io::Result<()> {
-    if target.starts_with(canonical_root) {
-        return Ok(());
+    if !target.starts_with(canonical_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "fix plan target {} resolves outside project root {}",
+                target.to_string_lossy().replace('\\', "/"),
+                canonical_root.to_string_lossy().replace('\\', "/")
+            ),
+        ));
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        format!(
-            "fix plan target {} resolves outside project root {}",
-            target.to_string_lossy().replace('\\', "/"),
-            canonical_root.to_string_lossy().replace('\\', "/")
-        ),
-    ))
+    if fallow_types::path_guard::is_protected_link_target(canonical_root, target) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "fix plan target {} resolves into a .git or node_modules directory",
+                target.to_string_lossy().replace('\\', "/")
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Map of absolute file path to the xxh3 content hash captured during the
@@ -973,6 +1010,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn commit_rejects_symlink_target_in_the_git_dir_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::write(root.join(".git/config"), "[core]\n").unwrap();
+        std::fs::write(root.join("node_modules/pkg/index.js"), "store").unwrap();
+        let config_link = root.join("config.ts");
+        let package_link = root.join("pkg.ts");
+        std::os::unix::fs::symlink(root.join(".git/config"), &config_link).unwrap();
+        std::os::unix::fs::symlink(root.join("node_modules/pkg/index.js"), &package_link).unwrap();
+
+        for link in [&config_link, &package_link] {
+            let mut plan = FixPlan::for_root(&root).unwrap();
+            plan.stage(link.clone(), b"rewritten".to_vec());
+            let outcome = plan.commit();
+            assert!(outcome.written.is_empty());
+            assert_eq!(outcome.failed.len(), 1);
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".git/config")).unwrap(),
+            "[core]\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("node_modules/pkg/index.js")).unwrap(),
+            "store"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn commit_rejects_symlink_target_outside_root_without_writing_batch() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("project");
@@ -998,6 +1066,31 @@ mod tests {
             std::fs::read_to_string(&outside).unwrap(),
             "outside original"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_within_a_base_may_resolve_above_the_root_but_not_out_of_the_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap().join("repo");
+        let root = base.join("packages/app");
+        std::fs::create_dir_all(&root).unwrap();
+        let shared = base.join("shared.json");
+        let outside = dir.path().join("outside.json");
+        std::fs::write(&shared, "{}").unwrap();
+        std::fs::write(&outside, "{}").unwrap();
+        std::os::unix::fs::symlink(&shared, root.join("a.json")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("b.json")).unwrap();
+
+        let mut plan = FixPlan::for_root(&root).unwrap();
+        plan.stage_existing_within(root.join("a.json"), base.clone(), b"{}", b"[]".to_vec());
+        assert!(plan.commit().failed.is_empty());
+        assert_eq!(std::fs::read_to_string(&shared).unwrap(), "[]");
+
+        let mut plan = FixPlan::for_root(&root).unwrap();
+        plan.stage_existing_within(root.join("b.json"), base, b"{}", b"[]".to_vec());
+        assert_eq!(plan.commit().failed.len(), 1);
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "{}");
     }
 
     #[test]

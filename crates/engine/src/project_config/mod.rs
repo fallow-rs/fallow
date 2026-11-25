@@ -31,7 +31,7 @@ pub use direct_load::{
 pub use loader::load_count;
 pub use loader::{
     ConfigChainSnapshot, ConfigFile, ConfigFileOptions, ConfigLoadError, find_config_file,
-    load_config_file,
+    load_config_file, register_tracked_link_probe,
 };
 
 /// The production flags of a config load without a resolved run: the global

@@ -280,3 +280,39 @@ export default function Home() {
         "warm direct-core analysis must match cold analysis"
     );
 }
+
+#[test]
+fn sveltekit_shorthand_data_attribute_abstains_route_load_keys() {
+    let project = tempfile::tempdir().expect("create project");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("src/routes/media")).expect("create route dir");
+    std::fs::create_dir_all(root.join("src/lib")).expect("create lib dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"sveltekit-shorthand-data","private":true,"dependencies":{"@sveltejs/kit":"^2.0.0","svelte":"^5.0.0"}}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/routes/media/+page.ts"),
+        "export const load = async () => ({ items: [1], total: 1 });\n",
+    )
+    .expect("write load producer");
+    std::fs::write(
+        root.join("src/lib/View.svelte"),
+        "<script lang=\"ts\">\n  let { data } = $props();\n</script>\n<p>{data.total}</p>\n",
+    )
+    .expect("write child view");
+    std::fs::write(
+        root.join("src/routes/media/+page.svelte"),
+        "<script lang=\"ts\">\n  import View from '../../lib/View.svelte';\n  let { data } = $props();\n</script>\n\n<View {data} />\n",
+    )
+    .expect("write route page");
+    let config = create_config_with_cache(root.to_path_buf(), root.join("cache"));
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert!(
+        results.unused_load_data_keys.is_empty(),
+        "<View {{data}} /> shorthand pass in +page.svelte must abstain route load keys: {:?}",
+        key_names(&results)
+    );
+}

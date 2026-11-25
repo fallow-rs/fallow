@@ -107,14 +107,14 @@ fn imports_of(root: &Path, from: &str) -> Vec<String> {
         .graph
         .expect("retained graph");
     let source = graph
-        .modules
+        .modules()
         .iter()
         .find(|module| relative(root, &module.path) == from)
         .unwrap_or_else(|| panic!("importer discovered: {from}"));
     let mut targets: Vec<String> = graph
         .edges_for(source.file_id)
         .into_iter()
-        .map(|target| relative(root, &graph.modules[target.0 as usize].path))
+        .map(|target| relative(root, &graph.modules()[target.0 as usize].path))
         .collect();
     targets.sort();
     targets

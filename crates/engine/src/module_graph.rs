@@ -148,7 +148,7 @@ impl<'a> StaticTestCoverage<'a> {
             return Some((file_id, export));
         }
         let graph_file_id = self.graph_file_id(file_id)?;
-        let node = self.graph.modules.get(graph_file_id.0 as usize)?;
+        let node = self.graph.module(graph_file_id)?;
         node.exports
             .iter()
             .find(|candidate| candidate.name == export.name)
@@ -218,7 +218,7 @@ pub struct NamedReExport {
 pub fn named_re_exports(graph: &RetainedModuleGraph) -> Vec<NamedReExport> {
     let graph = graph.as_graph();
     graph
-        .modules
+        .modules()
         .iter()
         .flat_map(|node| {
             node.re_exports
@@ -229,7 +229,7 @@ pub fn named_re_exports(graph: &RetainedModuleGraph) -> Vec<NamedReExport> {
                         && !(edge.span.start == 0 && edge.span.end == 0)
                 })
                 .filter_map(|edge| {
-                    let source = graph.modules.get(edge.source_file.0 as usize)?;
+                    let source = graph.module(edge.source_file)?;
                     Some(NamedReExport {
                         path: node.path.clone(),
                         exported_name: edge.exported_name.clone(),
@@ -434,7 +434,7 @@ pub fn module_value_exports_with_test_reach(
     let graph = graph.as_graph();
 
     graph
-        .modules
+        .modules()
         .iter()
         .flat_map(|node| {
             node.exports
@@ -517,7 +517,7 @@ pub fn export_lines_for_changed_paths(
     let graph = graph.as_graph();
     let changed_norm = normalized_changed_paths(changed_files);
     let mut map: FxHashMap<String, Vec<(String, u32)>> = FxHashMap::default();
-    for module in &graph.modules {
+    for module in graph.modules() {
         let abs = normalize_path(&module.path);
         if !changed_norm.contains(&abs) || module.exports.is_empty() {
             continue;
@@ -625,7 +625,7 @@ pub fn changed_exports_for_changed_paths(
     changed_ids.sort_unstable_by_key(|id| id.0);
     let mut changed_exports = Vec::new();
     for file_id in changed_ids {
-        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+        let Some(module) = graph.module(file_id) else {
             continue;
         };
         if module.exports.is_empty() {
@@ -647,7 +647,7 @@ pub(crate) fn module_exports(
     file_id: FileId,
     source: &str,
 ) -> Vec<ChangedExport> {
-    let Some(module) = graph.modules.get(file_id.0 as usize) else {
+    let Some(module) = graph.module(file_id) else {
         return Vec::new();
     };
     if module.exports.is_empty() {
@@ -711,7 +711,7 @@ pub fn search_gaps_for_changed_paths(
     let mut gaps = Vec::new();
     for changed in changed_exports {
         let Some(export) = graph
-            .modules
+            .modules()
             .get(changed.file_id.0 as usize)
             .and_then(|module| module.exports.get(changed.export_index))
         else {
@@ -724,7 +724,7 @@ pub fn search_gaps_for_changed_paths(
             .filter(|reference| {
                 !changed_set.contains(&reference.from_file)
                     && graph
-                        .modules
+                        .modules()
                         .get(reference.from_file.0 as usize)
                         .is_some_and(fallow_graph::graph::ModuleNode::is_reachable)
                     && seen.insert(reference.from_file)
@@ -752,7 +752,7 @@ pub fn search_gaps_for_changed_paths(
                 if check.visibility == SearchVisibility::Found {
                     return None;
                 }
-                let consumer = graph.modules.get(reference.from_file.0 as usize)?;
+                let consumer = graph.module(reference.from_file)?;
                 Some(ConsumerSearchGapPaths {
                     consumer_file: relative_key_path(&consumer.path, root),
                     check,
@@ -884,7 +884,7 @@ pub fn test_reach_for_changed_paths(
         *test_files.entry(file_id).or_insert_with(|| {
             graph.test_entry_points.contains(&file_id)
                 || graph
-                    .modules
+                    .modules()
                     .get(file_id.0 as usize)
                     .is_some_and(|module| is_test_path(&relative_key_path(&module.path, root)))
         })
@@ -921,7 +921,7 @@ pub(crate) fn classify_export_test_reach(
     if changed.is_type_only || changed.is_re_export {
         return None;
     }
-    let module = graph.modules.get(changed.file_id.0 as usize)?;
+    let module = graph.module(changed.file_id)?;
     let export = module.exports.get(changed.export_index)?;
     if !is_reach_subject(&module.path) || is_test_file(changed.file_id) {
         return None;
@@ -945,7 +945,7 @@ pub(crate) fn classify_export_test_reach(
     let paths_of = |files: &[FileId]| -> Vec<String> {
         let mut paths: Vec<String> = files
             .iter()
-            .filter_map(|file_id| graph.modules.get(file_id.0 as usize))
+            .filter_map(|file_id| graph.module(*file_id))
             .map(|node| relative_key_path(&node.path, root))
             .collect();
         paths.sort_unstable();
@@ -985,13 +985,13 @@ pub fn internal_consumers_for_changed_paths(
     let graph = graph.as_graph();
     let changed_norm = normalized_changed_paths(changed_files);
     let id_to_norm: FxHashMap<FileId, String> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.file_id, normalize_path(&module.path)))
         .collect();
 
     let mut map: FxHashMap<String, u64> = FxHashMap::default();
-    for module in &graph.modules {
+    for module in graph.modules() {
         let abs = normalize_path(&module.path);
         if !changed_norm.contains(&abs) {
             continue;
@@ -1027,7 +1027,7 @@ pub fn test_adjacency_for_changed_paths(
     // A project with no test files at all gets no adjacency claims: "no direct
     // test" on every unit would say nothing about the change.
     if !graph
-        .modules
+        .modules()
         .iter()
         .any(|module| is_test_path(&relative_key_path(&module.path, root)))
     {
@@ -1035,7 +1035,7 @@ pub fn test_adjacency_for_changed_paths(
     }
     let changed_norm = normalized_changed_paths(changed_files);
     let mut map: FxHashMap<String, TestAdjacency> = FxHashMap::default();
-    for module in &graph.modules {
+    for module in graph.modules() {
         if !changed_norm.contains(&normalize_path(&module.path)) {
             continue;
         }
@@ -1045,7 +1045,7 @@ pub fn test_adjacency_for_changed_paths(
         }
         let mut adjacency = TestAdjacency::None;
         for importer in graph.importers_of(module.file_id) {
-            let Some(node) = graph.modules.get(importer.0 as usize) else {
+            let Some(node) = graph.module(*importer) else {
                 continue;
             };
             if !is_test_path(&relative_key_path(&node.path, root)) {
@@ -1095,7 +1095,7 @@ pub fn package_importers_for_changed_paths(
     }
     let changed_norm = normalized_changed_paths(changed_files);
     let id_to_norm: FxHashMap<FileId, String> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.file_id, normalize_path(&module.path)))
         .collect();
@@ -1135,7 +1135,7 @@ pub fn package_importers_for_changed_paths(
 
 fn changed_file_ids(graph: &ModuleGraph, changed_files: &FxHashSet<PathBuf>) -> Vec<FileId> {
     let path_to_id: FxHashMap<String, FileId> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (normalize_path(&module.path), module.file_id))
         .collect();

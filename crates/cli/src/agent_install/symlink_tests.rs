@@ -74,7 +74,7 @@ fn forced_mcp_install_does_not_write_or_copy_a_symlinked_mcp_json() {
         force: true,
         ..ctx(root.path(), Mode::Install)
     };
-    let steps = mcp::install(&forced, &[Harness::Claude], Some(&command()));
+    let steps = mcp::install(&forced, &[Harness::Claude], Some(&command()), false);
 
     assert_eq!(
         std::fs::read_to_string(&secret).unwrap(),
@@ -110,6 +110,7 @@ fn mcp_install_does_not_follow_a_symlinked_parent_directory() {
         &ctx(root.path(), Mode::Install),
         &[Harness::Cursor, Harness::Codex],
         Some(&command()),
+        false,
     );
 
     assert!(entries(outside.path()).is_empty());
@@ -130,7 +131,7 @@ fn mcp_install_does_not_write_through_a_symlinked_backup_path() {
         force: true,
         ..ctx(root.path(), Mode::Install)
     };
-    let steps = mcp::install(&forced, &[Harness::Claude], Some(&command()));
+    let steps = mcp::install(&forced, &[Harness::Claude], Some(&command()), false);
 
     assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
     assert_eq!(
@@ -151,7 +152,7 @@ fn approval_does_not_follow_a_symlinked_claude_directory() {
         approve: true,
         ..ctx(root.path(), Mode::Install)
     };
-    let steps = mcp::install(&approve, &[Harness::Claude], Some(&command()));
+    let steps = mcp::install(&approve, &[Harness::Claude], Some(&command()), false);
 
     assert!(entries(outside.path()).is_empty());
     assert_symlink_skip(row(&steps, ".claude/settings.local.json"));
@@ -256,7 +257,7 @@ fn user_scope_writes_through_symlinked_dotfiles() {
         user: true,
         ..ctx(root.path(), Mode::Install)
     };
-    let mut steps = mcp::install(&user, &[Harness::Cursor], Some(&command()));
+    let mut steps = mcp::install(&user, &[Harness::Cursor], Some(&command()), false);
     steps.extend(hooks::install(&user, &[Harness::Codex]));
 
     assert!(

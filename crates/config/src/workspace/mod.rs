@@ -1,6 +1,7 @@
 mod deno_json;
 mod diagnostics;
 mod link_dependencies;
+mod manifest_cache;
 mod missing_pattern_dirs;
 mod negation;
 mod nested_project;
@@ -15,8 +16,6 @@ mod undeclared;
 mod workspace_config;
 
 use std::path::{Path, PathBuf};
-
-use rustc_hash::FxHashMap;
 
 use crate::permutation::{PermutationSite, permute};
 pub use deno_json::{
@@ -36,6 +35,7 @@ pub use diagnostics::{
 };
 use diagnostics::{emit_diagnostics, is_skip_listed_dir};
 use link_dependencies::collect_link_dependency_workspaces;
+use manifest_cache::{ManifestCache, load_member_package_manifest_cached};
 use missing_pattern_dirs::missing_dir_patterns;
 pub use missing_pattern_dirs::{has_missing_workspace_pattern_dirs, nested_member_dirs_missing};
 use negation::NegatedPatterns;
@@ -172,9 +172,9 @@ pub fn discover_workspaces_with_diagnostics_and_patterns(
     ignore_patterns: &crate::IgnorePatternSet,
     extra_patterns: &[String],
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
+    crate::clear_project_scope_bases();
     let (workspaces, diagnostics) =
         collect_workspaces_and_diagnostics(root, ignore_patterns, extra_patterns)?;
-
     emit_diagnostics(root, &diagnostics);
 
     Ok((workspaces, diagnostics))
@@ -220,7 +220,7 @@ fn collect_workspaces_and_diagnostics(
     }));
     let patterns = split_outside_root_patterns(root, declared, &mut diagnostics);
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let mut manifest_cache = ManifestCache::default();
+    let mut manifest_cache = ManifestCache::new(root);
 
     let mut workspaces = collect_declared_workspaces(
         root,
@@ -311,7 +311,7 @@ pub fn link_only_workspace_dependencies(
     workspaces: &[WorkspaceInfo],
     extra_patterns: &[String],
 ) -> rustc_hash::FxHashSet<String> {
-    let Ok(root_pkg) = PackageJson::load(&root.join("package.json")) else {
+    let Ok(root_pkg) = PackageJson::load_inside(root, &root.join("package.json")) else {
         return rustc_hash::FxHashSet::default();
     };
     let links = root_pkg.local_link_dependencies();
@@ -337,7 +337,7 @@ pub fn link_only_workspace_dependencies(
         &canonical(root),
         ignore_patterns,
         &mut Vec::new(),
-        &mut ManifestCache::default(),
+        &mut ManifestCache::new(root),
     )
     .into_iter()
     .map(|(ws, _)| canonical(&ws.root))
@@ -406,8 +406,8 @@ fn collect_declared_patterns(
     };
 
     let pkg_path = root.join("package.json");
-    if pkg_path.exists() {
-        match PackageJson::load(&pkg_path) {
+    if pkg_path.symlink_metadata().is_ok() {
+        match PackageJson::load_inside(root, &pkg_path) {
             Ok(pkg) => push_all(&pkg_path, pkg.workspace_patterns()),
             Err(error) => {
                 return Err(WorkspaceLoadError::MalformedRootPackageJson {
@@ -419,7 +419,7 @@ fn collect_declared_patterns(
     }
 
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
-    if let Ok(content) = std::fs::read_to_string(&pnpm_workspace) {
+    if let Some(content) = pnpm_workspace::read_pnpm_workspace(root) {
         push_all(&pnpm_workspace, pnpm_workspace_packages(&content));
     }
 
@@ -466,29 +466,6 @@ fn split_outside_root_patterns(
         patterns.push(pattern);
     }
     patterns
-}
-
-/// Memoized [`load_member_package_manifest`] outcomes for one discovery run.
-///
-/// The same directory is commonly matched by more than one workspace source
-/// (identical globs in `package.json` and `pnpm-workspace.yaml`, tsconfig
-/// references overlapping npm workspaces). Each manifest load costs a
-/// `package.json` read plus Deno `deno.json` / `deno.jsonc` probes, so repeat
-/// visits replay the memoized outcome instead of touching the filesystem again.
-type ManifestCache = FxHashMap<PathBuf, Result<Option<(String, PackageJson, Vec<String>)>, String>>;
-
-/// Load a member manifest through the per-discovery memo, preserving the
-/// exact per-call outcome (including errors) on repeat visits.
-fn load_member_package_manifest_cached(
-    dir: &Path,
-    cache: &mut ManifestCache,
-) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
-    if let Some(cached) = cache.get(dir) {
-        return cached.clone();
-    }
-    let outcome = load_member_package_manifest(dir);
-    cache.insert(dir.to_path_buf(), outcome.clone());
-    outcome
 }
 
 /// Expand workspace glob patterns to discover workspace directories.

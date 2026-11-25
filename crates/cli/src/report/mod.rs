@@ -23,7 +23,7 @@ pub(crate) mod sink;
 mod status;
 pub(crate) mod suggestions;
 #[cfg(test)]
-pub(crate) mod test_helpers;
+mod test_helpers;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -31,6 +31,8 @@ use std::time::Duration;
 
 use fallow_api::DuplicationGrouping;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
+#[cfg(test)]
+use fallow_output::normalize_uri;
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 use fallow_types::semantic::SemanticSymbolImpact;
@@ -187,7 +189,7 @@ pub(crate) enum ArchitectureLayout {
 }
 
 /// The subcommand name of `fallow architecture`.
-pub(crate) const ARCHITECTURE_COMMAND: &str = "architecture";
+const ARCHITECTURE_COMMAND: &str = "architecture";
 
 impl ArchitectureLayout {
     /// The subcommand that a JSON report in this layout names in its
@@ -251,7 +253,7 @@ pub(crate) fn format_display_path(path: &Path, root: &Path) -> String {
 /// Split a path string into (directory, filename) for display.
 /// Directory includes the trailing `/`. If no directory, returns `("", filename)`.
 #[must_use]
-pub(crate) fn split_dir_filename(path: &str) -> (&str, &str) {
+fn split_dir_filename(path: &str) -> (&str, &str) {
     path.rfind('/')
         .map_or(("", path), |pos| (&path[..=pos], &path[pos + 1..]))
 }
@@ -362,7 +364,7 @@ pub(crate) fn render_check_json(
 ///
 /// Example: `elide_common_prefix("a/b/c/foo.ts", "a/b/d/bar.ts")` → `"d/bar.ts"`
 #[must_use]
-pub(crate) fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
+fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
     let mut last_sep = 0;
     for (i, (a, b)) in base.bytes().zip(target.bytes()).enumerate() {
         if a != b {
@@ -385,25 +387,16 @@ fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
 
-/// Normalize a path string to a valid URI: forward slashes and percent-encoded brackets.
-///
-/// Brackets (`[`, `]`) are not valid in URI path segments per RFC 3986 and cause
-/// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
-#[must_use]
-pub(crate) fn normalize_uri(path_str: &str) -> String {
-    fallow_output::normalize_uri(path_str)
-}
-
 /// Severity level for human-readable output.
 #[derive(Clone, Copy, Debug)]
-pub enum Level {
+pub(crate) enum Level {
     Warn,
     Info,
     Error,
 }
 
 #[must_use]
-pub(crate) const fn severity_to_level(s: Severity) -> Level {
+const fn severity_to_level(s: Severity) -> Level {
     match s {
         Severity::Error => Level::Error,
         Severity::Warn => Level::Warn,
@@ -685,7 +678,7 @@ fn print_results_ci_comment(
     // Analysis-root-relative on purpose: the review renderer applies the
     // presentation prefix after its diff lookups, and rebasing here would
     // prefix twice and key the filter in the wrong namespace.
-    let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
+    let issues = fallow_api::build_codeclimate(results, ctx.root, ctx.rules);
     let incomplete = ci::required_type_aware_incomplete(ctx.type_aware);
     let conclusion = incomplete.then_some(fallow_output::PrDecisionConclusion::Failure);
     let advisory =
@@ -911,7 +904,7 @@ fn print_duplication_ci_comment(
     ctx: &ReportContext<'_>,
     grouping_dropped: Option<&str>,
 ) -> ExitCode {
-    let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
+    let issues = fallow_api::build_duplication_codeclimate(report, root);
     let advisory =
         baseline_advisory_text::advisory_line_for_staleness(ctx.baseline_staleness.as_ref());
     let requests = crate::requests::request_outcomes();
@@ -930,7 +923,7 @@ fn print_duplication_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
-            config_patterns: &[],
+            config_patterns: ctx.workspace_diagnostics,
         },
     )
     .unwrap_or_else(|| {
@@ -1289,7 +1282,7 @@ fn print_health_ci_comment(
     ctx: &ReportContext<'_>,
     grouping_dropped: Option<&str>,
 ) -> ExitCode {
-    let issues = codeclimate::api_health_codeclimate_issues(report, root);
+    let issues = fallow_api::build_health_codeclimate(report, root);
     // Health's own summary is the carrier on the envelope, and the report in
     // hand is the same object, so read it from there rather than from the
     // context: a grouped render rebuilds the report but not the context.
@@ -1312,7 +1305,7 @@ fn print_health_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
-            config_patterns: &[],
+            config_patterns: ctx.workspace_diagnostics,
         },
     )
     .unwrap_or_else(|| {

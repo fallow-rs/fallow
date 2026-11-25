@@ -440,7 +440,10 @@ request only with the `ci:perf` label:
   pushes to `main` start the workflow, but every job skips. See
   [Benchmarking](../benchmarking.md#when-codspeed-runs).
 
-Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
+Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run.
+Add the `ci:walltime` label to a pull request from a branch of this
+repository to measure the head commit with the CodSpeed walltime jobs. That label event starts one walltime run, and a later push does
+not start it again. A pull request
 without the label starts these workflows, but every job skips and uses no
 runner, except one.
 
@@ -1218,6 +1221,18 @@ before and after each rebase of the serial merge flow. With `--if-needed`,
 it also compares the values of a squash merge without a rebase, and it
 rebases when that merge loses a bump. Both scripts use
 `scripts/version-constants.mjs`.
+
+These checks see a bump, but they cannot see a missing one. The graph cache
+key has no binary version, so a change to how the graph is built must bump
+`GRAPH_CACHE_VERSION`, or a warm run replays the old graph. The
+`cache::source_pin` test in `crates/graph` parses each production module of
+the crate and pins a hash of its tokens to the version. When that code
+changes, the test fails. Bump the version when the persisted graph can hold
+other facts, then set the pin to the values that the failure prints. Comments,
+formatting and code that compiles only with `test` do not change the hash. The
+pin covers only `fallow-graph`. A change in a crate that feeds the graph, such
+as the extraction or the plugin config code, still needs a decision without a
+test.
 
 ## Evidence standard
 

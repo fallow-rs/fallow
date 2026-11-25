@@ -135,7 +135,7 @@ impl CompiledIgnoreDependencyOverrideRule {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigOverride {
-    /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories.
+    /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories. A glob must match the file that has the finding: for unresolved-imports, the importing file, not the import target. Package and binary names are not file globs; use `ignoreDependencies` and `ignoreBinaries` for them. Fallow reports each glob that matches no project file as an `override-files-unmatched` diagnostic.
     pub files: Vec<String>,
     /// Partial per-rule severity map applied only to files matching this entry's `files` globs; each rule key takes `error`, `warn`, or `off`, and omitted rules keep their top-level severity. Set to change how specific rules (e.g. unused-exports, unused-files) behave for the scoped paths. Project-level rules ignore overrides: unused-dependencies, unused-dev-dependencies, unused-optional-dependencies, unlisted-dependencies, unlisted-binaries, type-only-dependencies, test-only-dependencies, dev-dependencies-in-production, duplicate-exports, re-export-cycle and unused-catalog-entries. Fallow reports each such entry as an `override-rule-ineffective` diagnostic that names the mechanism that works. For most other rules, an override cannot start a detector for a rule that is off at top level.
     #[serde(default)]
@@ -211,6 +211,10 @@ pub struct ResolvedConfig {
     /// Which `circularDependencies.allow` entries matched a cycle in the
     /// latest cycle detection (issue #4623).
     pub circular_dependencies_allow_effect: EntryEffectRecord,
+    /// Which `ignoreExports`, `duplicates.ignore` and `health.ignore`
+    /// entries matched a file or an export in the latest dead-code pass
+    /// (issue #5167).
+    pub ignore_list_effect: super::IgnoreListEffect,
     /// Post-analysis finding-path matcher built from `ignoreFindings`; hides
     /// findings without removing files from the module graph.
     pub ignore_findings: FindingIgnoreMatcher,
@@ -232,6 +236,10 @@ pub struct ResolvedConfig {
     pub cache_config_hash: u64,
     /// Optional facts collected for this run. Immutable after session creation.
     pub extraction_mode: fallow_types::shared_state::ExtractionMode,
+    /// The run reads the call facts for a section, not for a rule: the
+    /// shallow directories section of `fallow health` reads the module-scope
+    /// functions from them. Set before the session parses.
+    pub call_facts_requested: bool,
     /// Exact global root/slot pairs omitted from the inventory.
     pub shared_state_allowlist: Vec<[String; 2]>,
     /// Package names and package-name globs excluded from both
@@ -603,9 +611,30 @@ pub fn config_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
         .ok();
     if let Some(relative) = relative
         && relative.components().next().is_some()
-        && !relative.components().any(|part| part.as_os_str() == ".git")
+        && !relative.components().any(|part| {
+            // Git metadata in any case. Windows drops trailing dots and
+            // spaces from a name, so `.git.` and `.git ` name `.git` there.
+            // A `:` names an NTFS stream (`.git::$INDEX_ALLOCATION`), and
+            // `GIT~1` is the 8.3 short name of `.git`. A name that is not
+            // UTF-8 is refused too. The rule is the same on every platform.
+            part.as_os_str().to_str().is_none_or(|name| {
+                let trimmed = name.trim_end_matches(['.', ' ']);
+                let short_name = trimmed
+                    .get(..4)
+                    .is_some_and(|head| head.eq_ignore_ascii_case("git~"))
+                    && trimmed.len() > 4
+                    && trimmed[4..].bytes().all(|byte| byte.is_ascii_digit());
+                trimmed.eq_ignore_ascii_case(".git") || name.contains(':') || short_name
+            })
+        })
     {
         return root.join(relative);
+    }
+    if let Some(files) = super::outside_value_files(root, "cache.dir", &configured) {
+        tracing::warn!(
+            "ignoring cache.dir from a config file outside the project ({files}): it must be a directory inside the project; set {CACHE_DIR_ENV} to put the cache outside the project. The text of a file outside the project is not shown"
+        );
+        return default;
     }
     tracing::warn!(
         "ignoring cache.dir `{}` from the config file: it must be a directory inside the project; set {CACHE_DIR_ENV} to put the cache outside the project",
@@ -661,10 +690,6 @@ fn per_root_cache_subdir(root: &Path) -> String {
     }
 }
 
-pub(super) fn normalize_user_glob_pattern(pattern: &str) -> &str {
-    super::glob_validation::normalize_path_pattern(pattern)
-}
-
 /// Built-in discovery ignore patterns, unioned into
 /// [`ResolvedConfig::ignore_patterns`] after the user's own `ignorePatterns`.
 ///
@@ -704,7 +729,7 @@ fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<GlobMatcher> {
     patterns
         .iter()
         .map(|pattern| {
-            let normalized = normalize_user_glob_pattern(pattern);
+            let normalized = super::glob_validation::normalize_path_pattern(pattern);
             Glob::new(normalized)
                 .expect("ignoreUnresolvedImports entry was validated at config load time")
                 .compile_matcher()
@@ -724,28 +749,11 @@ fn resolve_boundaries(
     mut boundaries: super::boundaries::BoundaryConfig,
     root: &Path,
 ) -> ResolvedBoundaryConfig {
-    expand_boundary_preset(&mut boundaries, root);
+    super::boundaries::expand_boundary_preset(&mut boundaries, root);
     let logical_groups = boundaries.expand_auto_discover(root);
     let mut resolved = boundaries.resolve();
     resolved.logical_groups = logical_groups;
     resolved
-}
-
-/// Expand the boundary preset in place, with the tsconfig `rootDir` as the
-/// source root. Does nothing without a preset.
-pub(super) fn expand_boundary_preset(
-    boundaries: &mut super::boundaries::BoundaryConfig,
-    root: &Path,
-) {
-    if boundaries.preset.is_some() {
-        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
-            .filter(|r| r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute())
-            .unwrap_or_else(|| "src".to_owned());
-        if source_root != "src" {
-            tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
-        }
-        boundaries.expand(&source_root);
-    }
 }
 
 #[expect(
@@ -1069,6 +1077,7 @@ impl FallowConfig {
             user_ignore_pattern_count: compiled_ignores.user_pattern_count,
             entry_pattern_effect: EntryEffectRecord::default(),
             circular_dependencies_allow_effect: EntryEffectRecord::default(),
+            ignore_list_effect: super::IgnoreListEffect::default(),
             ignore_findings: compiled_ignores.findings,
             output,
             cache_dir: cache.dir,
@@ -1077,6 +1086,7 @@ impl FallowConfig {
             cache_max_size_mb: cache.max_size_mb,
             cache_config_hash: cache.config_hash,
             extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
+            call_facts_requested: false,
             shared_state_allowlist: self.shared_state_allowlist,
             ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
             ignore_binaries: IgnoreDependencyMatcher::compile(&self.ignore_binaries),
@@ -1269,14 +1279,23 @@ impl ResolvedConfig {
 mod tests;
 
 impl ResolvedConfig {
-    /// Whether a rule of this config reads the call facts of the modules: the
-    /// `constant-parameter` rule is on, globally or in an override.
+    /// Whether the run reads the call facts of the modules: the
+    /// `constant-parameter` rule is on, globally or in an override, or a
+    /// section set [`Self::call_facts_requested`].
     ///
     /// A run for which this is `false` neither stores nor decodes call facts.
     /// The parse cache records which entries hold them, so a later run that
     /// reads them parses only the files whose entry lacks them.
     #[must_use]
     pub fn reads_call_facts(&self) -> bool {
+        self.call_facts_requested || self.constant_parameters_enabled()
+    }
+
+    /// Whether the `constant-parameter` rule is on, globally or in an
+    /// override. A section that requests the call facts does not turn the
+    /// rule on.
+    #[must_use]
+    pub fn constant_parameters_enabled(&self) -> bool {
         self.rules.constant_parameters != crate::Severity::Off
             || self.overrides.iter().any(|overrides| {
                 overrides

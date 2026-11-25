@@ -47,7 +47,7 @@ pub(super) fn declaration_sibling_credit(
     infos_by_id: Option<&FxHashMap<FileId, &ModuleInfo>>,
 ) -> DeclarationSiblingCredit {
     let pairs: Vec<(FileId, PathBuf)> = graph
-        .modules
+        .modules()
         .iter()
         .filter_map(|module| runtime_sibling_path(&module.path).map(|path| (module.file_id, path)))
         .collect();
@@ -55,7 +55,7 @@ pub(super) fn declaration_sibling_credit(
         return DeclarationSiblingCredit::default();
     }
     let by_path: FxHashMap<&Path, FileId> = graph
-        .modules
+        .modules()
         .iter()
         .map(|module| (module.path.as_path(), module.file_id))
         .collect();
@@ -119,7 +119,7 @@ fn used_names_of(
             }
         }
     }
-    if let Some(module) = graph.modules.get(runtime.0 as usize) {
+    if let Some(module) = graph.module(runtime) {
         names.extend(
             module
                 .exports
@@ -146,7 +146,7 @@ fn namespace_members_read<'a>(
 
 fn is_reachable_module(graph: &ModuleGraph, file_id: FileId) -> bool {
     graph
-        .modules
+        .modules()
         .get(file_id.0 as usize)
         .is_some_and(ModuleNode::is_reachable)
 }

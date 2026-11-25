@@ -765,3 +765,42 @@ fn thread_fallback_is_one() {
     let four = std::num::NonZeroUsize::new(4).expect("non-zero");
     assert_eq!(super::threads_or_one(Ok(four)), 4);
 }
+
+/// A relative root starts at the current directory of the snapshot, as the
+/// caller spells it. A committed link in that spelling that leaves the
+/// checkout refuses the root.
+#[cfg(unix)]
+#[test]
+fn a_relative_root_is_checked_from_the_spelled_current_directory() {
+    use crate::git_fixture::fixture_git;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let base = dunce::canonicalize(dir.path()).expect("canonical base");
+    let repo = base.join("repo");
+    let app = base.join("outside").join("app");
+    std::fs::create_dir_all(&repo).expect("repo dir");
+    std::fs::create_dir_all(&app).expect("app dir");
+    std::fs::write(app.join("package.json"), r#"{"name":"app"}"#).expect("package.json");
+    fixture_git(&repo, &["init", "-q", "-b", "main"]);
+    std::os::unix::fs::symlink(base.join("outside"), repo.join("packages")).expect("link");
+    fixture_git(&repo, &["add", "packages"]);
+    fixture_git(&repo, &["commit", "-q", "-m", "link"]);
+
+    let from = |cwd: PathBuf| {
+        inputs(
+            Path::new("app"),
+            Surface::Cli,
+            EnvSnapshot::none().with_cwd(cwd),
+            CommandKind::DeadCode,
+            SelectionInput::Single(PlannedAnalysis::DeadCode),
+        )
+    };
+    let err = resolve_run(&from(repo.join("packages"))).expect_err("the root is refused");
+    let ResolveError::Input { message, .. } = err else {
+        panic!("an input error: {err:?}");
+    };
+    assert!(message.contains("outside the checkout"), "got: {message}");
+
+    let run = resolve_run(&from(base.join("outside"))).expect("the resolved spelling is allowed");
+    assert_eq!(run.root().value(), &app);
+}

@@ -83,7 +83,9 @@ fn build_plugin_check_doc(
     let root = canonical.as_path();
     let dead_code = crate::cli_production::runnable(run, fallow_config::PlannedAnalysis::DeadCode)
         .ok_or_else(|| "the run skips the dead-code analysis".to_owned())?;
-    let external = &dead_code.config().external_plugins;
+    // The resolved config leaves out a plugin with a glob that leaves the
+    // root, but this command exists to report such a plugin.
+    let external = run.declared_external_plugins();
 
     let packages = plugin_packages(root, dead_code.config())?;
     let mut plugins: Vec<Value> = external
@@ -313,8 +315,13 @@ fn warning_value(warning: &CheckWarning) -> Value {
 /// disk. Brace groups are expanded first (the `glob` crate does not support
 /// them); wildcard expansions are checked via `glob::glob`, literal ones via a
 /// direct stat.
+/// An expansion that is absolute or has a `..` segment never matches, so the
+/// probe stays below `root`.
 fn entry_path_exists(root: &Path, entry: &str) -> bool {
     expand_braces(entry).iter().any(|pattern| {
+        if fallow_config::glob_validation::validate_user_path(pattern, "entry").is_err() {
+            return false;
+        }
         if pattern.contains(['*', '?', '[']) {
             fallow_config::glob_validation::expand_disk_glob(root, pattern)
                 .is_some_and(|mut paths| paths.next().is_some())
@@ -530,6 +537,24 @@ fn human_warning(warning: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn entry_brace_expansions_never_probe_outside_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("outside.txt"), "").unwrap();
+        let absolute = dir.path().join("outside.txt");
+        assert!(!entry_path_exists(&root, "{..,x}/outside.txt"));
+        assert!(!entry_path_exists(
+            &root,
+            &format!("{{{},x}}", absolute.display())
+        ));
+        assert!(!entry_path_exists(&root, "{..,x}/outside.*"));
+        std::fs::write(root.join("inside.ts"), "").unwrap();
+        assert!(entry_path_exists(&root, "inside.{js,ts}"));
+    }
 
     fn test_run(root: &Path) -> fallow_engine::resolved_run::ResolvedRun {
         crate::cli_production::benchmark_run(root, fallow_config::CommandKind::PluginCheck, 1)
