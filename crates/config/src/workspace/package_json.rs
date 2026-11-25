@@ -71,7 +71,17 @@ where
 /// must be a regular file with a size limit, at a location that
 /// [`manifest_location_allowed`] accepts.
 pub(super) fn read_manifest(path: &std::path::Path) -> Result<String, String> {
-    if path.symlink_metadata().is_ok() && !manifest_location_allowed(path) {
+    read_manifest_in(None, path)
+}
+
+/// [`read_manifest`] with the project scope base `scope` (see
+/// [`crate::project_scope_base`]). `None` takes the scope base from the
+/// location of the manifest.
+fn read_manifest_in(
+    scope: Option<&std::path::Path>,
+    path: &std::path::Path,
+) -> Result<String, String> {
+    if path.symlink_metadata().is_ok() && !manifest_location_allowed(scope, path) {
         return Err(format!(
             "refusing to read {}: it resolves to a location outside its package",
             path.display()
@@ -84,32 +94,42 @@ pub(super) fn read_manifest(path: &std::path::Path) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
-/// Whether the manifest at `path` resolves to an allowed place.
+/// Whether the manifest at `path` resolves to an allowed place. A relative
+/// `path` is taken relative to the current directory.
 ///
 /// - Below a `node_modules` directory, the resolved file must be inside the
-///   resolved `node_modules` directory of the first such segment of `path`.
-///   That covers the linked packages and the `.pnpm` store of pnpm, which
-///   sit in the `node_modules` directory of the project. A store outside
-///   the project, such as a global pnpm store, is refused.
+///   project scope base `scope`. That covers the `.pnpm` and `.bun` stores
+///   of the project, a pnpm link from a workspace package into the store at
+///   the root, and a workspace link such as
+///   `node_modules/@x/pkg -> ../packages/pkg`. A store outside the project,
+///   such as a global store, is refused. The resolved `node_modules`
+///   directory that holds the first such segment also counts.
 /// - Elsewhere, the resolved file must be in the resolved directory of
-///   `path`. When that directory is a link, it must resolve inside the
-///   directory that holds the link.
-fn manifest_location_allowed(path: &std::path::Path) -> bool {
+///   `path`. When that directory is a link, it must resolve inside `scope`
+///   or inside the directory that holds the link.
+///
+/// When `scope` is `None`, the scope base is the one of the directory that
+/// holds the first `node_modules` segment, or of the directory that holds
+/// the package directory.
+fn manifest_location_allowed(scope: Option<&std::path::Path>, path: &std::path::Path) -> bool {
     use std::path::Component;
     let Ok(target) = dunce::canonicalize(path) else {
         return false;
     };
-    let lexical = fallow_types::path_guard::lexically_normalized(path);
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let lexical = fallow_types::path_guard::lexically_normalized(&absolute);
+    let scope_base = |dir: &std::path::Path| {
+        scope.map_or_else(
+            || crate::project_scope_base(dir),
+            std::path::Path::to_path_buf,
+        )
+    };
     let mut prefix = std::path::PathBuf::new();
     for component in lexical.components() {
         if matches!(component, Component::Normal(name) if name == "node_modules") {
-            let base = if prefix.as_os_str().is_empty() {
-                std::path::Path::new(".")
-            } else {
-                prefix.as_path()
-            };
-            return dunce::canonicalize(base)
-                .is_ok_and(|base| target.starts_with(base.join("node_modules")));
+            return target.starts_with(scope_base(&prefix))
+                || dunce::canonicalize(&prefix)
+                    .is_ok_and(|base| target.starts_with(base.join("node_modules")));
         }
         prefix.push(component);
     }
@@ -119,17 +139,19 @@ fn manifest_location_allowed(path: &std::path::Path) -> bool {
     let Ok(canonical_dir) = dunce::canonicalize(dir) else {
         return false;
     };
+    if target.parent() != Some(canonical_dir.as_path()) {
+        return false;
+    }
     let dir_is_link = dir
         .symlink_metadata()
         .is_ok_and(|meta| meta.file_type().is_symlink());
-    let container = if dir_is_link {
-        dir.parent()
-            .and_then(|holder| dunce::canonicalize(holder).ok())
-    } else {
-        Some(canonical_dir.clone())
-    };
-    target.parent() == Some(canonical_dir.as_path())
-        && container.is_some_and(|container| target.starts_with(container))
+    if !dir_is_link {
+        return true;
+    }
+    dir.parent().is_some_and(|holder| {
+        target.starts_with(scope_base(holder))
+            || dunce::canonicalize(holder).is_ok_and(|holder| target.starts_with(holder))
+    })
 }
 
 /// The `package.json` keys that hold the inline config of a built-in plugin
@@ -417,6 +439,19 @@ impl PackageJson {
         Self::parse_named(path, &content)
     }
 
+    /// [`Self::load`] for a manifest that dependency resolution finds, such
+    /// as `node_modules/<name>/package.json`, with the project scope base
+    /// `scope` from [`crate::project_scope_base`]. A manifest below
+    /// `node_modules` may resolve anywhere inside `scope`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::load`].
+    pub fn load_in_scope(scope: &std::path::Path, path: &std::path::Path) -> Result<Self, String> {
+        let content = read_manifest_in(Some(scope), path)?;
+        Self::parse_named(path, &content)
+    }
+
     /// [`Self::load`] for a manifest of the project, for example the root
     /// `package.json` or the one of a workspace member: the file must
     /// resolve inside `root`.
@@ -455,7 +490,27 @@ impl PackageJson {
     /// Returns the I/O error when the file cannot be read as UTF-8 text, or
     /// a `PermissionDenied` error when a check refuses the file.
     pub fn read_source(path: &std::path::Path) -> std::io::Result<String> {
-        let mut source = read_manifest(path).map_err(|message| {
+        Self::read_source_in(None, path)
+    }
+
+    /// [`Self::read_source`] with the project scope base `scope`, as
+    /// [`Self::load_in_scope`] takes it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::read_source`].
+    pub fn read_source_in_scope(
+        scope: &std::path::Path,
+        path: &std::path::Path,
+    ) -> std::io::Result<String> {
+        Self::read_source_in(Some(scope), path)
+    }
+
+    fn read_source_in(
+        scope: Option<&std::path::Path>,
+        path: &std::path::Path,
+    ) -> std::io::Result<String> {
+        let mut source = read_manifest_in(scope, path).map_err(|message| {
             if path.symlink_metadata().is_err() {
                 std::io::Error::new(std::io::ErrorKind::NotFound, message)
             } else {
@@ -971,6 +1026,78 @@ mod tests {
         std::os::unix::fs::symlink(&store, &linked).unwrap();
         let pkg = PackageJson::load(&linked.join("package.json")).unwrap();
         assert_eq!(pkg.name.as_deref(), Some("pkg"));
+    }
+
+    #[cfg(unix)]
+    fn store_package(root: &std::path::Path, store: &str, name: &str) -> std::path::PathBuf {
+        let dir = root.join(format!(
+            "node_modules/{store}/{name}@1.0.0/node_modules/{name}"
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), format!(r#"{{"name": "{name}"}}"#)).unwrap();
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn workspace_package_links_into_the_root_store_load() {
+        for store in [".pnpm", ".bun"] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dunce::canonicalize(dir.path()).unwrap();
+            let stored = store_package(&root, store, "react-dom");
+            let member = root.join("packages/a/node_modules");
+            std::fs::create_dir_all(&member).unwrap();
+            std::os::unix::fs::symlink(&stored, member.join("react-dom")).unwrap();
+            let manifest = member.join("react-dom/package.json");
+
+            let pkg = PackageJson::load_in_scope(&root, &manifest).unwrap();
+            assert_eq!(pkg.name.as_deref(), Some("react-dom"), "{store}");
+            std::fs::create_dir(root.join(".git")).unwrap();
+            assert!(PackageJson::load(&manifest).is_ok(), "{store}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_workspace_link_in_node_modules_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("packages/pkg")).unwrap();
+        std::fs::write(
+            root.join("packages/pkg/package.json"),
+            r#"{"name": "@x/pkg"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("node_modules/@x")).unwrap();
+        std::os::unix::fs::symlink("../../packages/pkg", root.join("node_modules/@x/pkg")).unwrap();
+        let manifest = root.join("node_modules/@x/pkg/package.json");
+
+        let pkg = PackageJson::load_in_scope(&root, &manifest).unwrap();
+        assert_eq!(pkg.name.as_deref(), Some("@x/pkg"));
+        std::fs::create_dir(root.join(".git")).unwrap();
+        assert!(PackageJson::load(&manifest).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_node_modules_link_out_of_the_scope_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        let elsewhere = outer.join("elsewhere/node_modules/x");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("package.json"), r#"{"name": "x"}"#).unwrap();
+        let root = outer.join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.join("node_modules/x")).unwrap();
+        let manifest = root.join("node_modules/x/package.json");
+
+        assert!(PackageJson::load_in_scope(&root, &manifest).is_err());
+        assert!(PackageJson::load(&manifest).is_err());
+        assert!(PackageJson::read_source_in_scope(&root, &manifest).is_err());
     }
 
     #[test]

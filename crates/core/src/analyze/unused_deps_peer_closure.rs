@@ -17,6 +17,8 @@ use super::{
 
 pub(super) struct PeerDependencyResolver {
     cache: FxHashMap<(PathBuf, String), Vec<InstalledPeer>>,
+    /// The project scope base that an installed manifest must resolve in.
+    scope: PathBuf,
 }
 
 /// One entry of an installed package's `peerDependencies`.
@@ -28,9 +30,14 @@ struct InstalledPeer {
 }
 
 impl PeerDependencyResolver {
-    pub(super) fn new() -> Self {
+    /// A resolver for the project at `project_root`. An installed manifest
+    /// must resolve inside the scope base of that root (see
+    /// [`fallow_config::project_scope_base`]), so a pnpm or Bun store link
+    /// of a workspace package into the root store loads.
+    pub(super) fn new(project_root: &Path) -> Self {
         Self {
             cache: FxHashMap::default(),
+            scope: fallow_config::project_scope_base(project_root),
         }
     }
 
@@ -89,7 +96,7 @@ impl PeerDependencyResolver {
 
         let peer_dependencies: Vec<InstalledPeer> =
             find_installed_package_json(package_root, package_name)
-                .and_then(|path| PackageJson::load(&path).ok())
+                .and_then(|path| PackageJson::load_in_scope(&self.scope, &path).ok())
                 .map(|pkg| {
                     pkg.peer_dependency_names()
                         .into_iter()
@@ -158,7 +165,7 @@ pub fn peer_dependency_hosts(
         .iter()
         .map(|(ws_root, _)| *ws_root)
         .collect();
-    let mut resolver = PeerDependencyResolver::new();
+    let mut resolver = PeerDependencyResolver::new(project_root);
     let mut hosts = resolver
         .peer_dependency_closure(
             project_root,
