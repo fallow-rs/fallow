@@ -2,17 +2,14 @@
 //!
 //! The companion reports each path relative to the analysis root. The
 //! companion can read files above the root: the files of the read scope base
-//! (the Git work tree of the root) and the files in a real `node_modules`
-//! directory at or above the root, for example a hoisted
-//! `../../node_modules/@angular/core/index.d.ts`. The companion also reads
-//! the library files of its compiler package, which can be installed outside
-//! the project (`npx`, `npm -g`). A returned path, with its
-//! `..` segments applied to the root, must stay inside one of those
+//! (the Git work tree of the root), also a hoisted
+//! `../../node_modules/@angular/core/index.d.ts` of that work tree. The
+//! companion also reads the library files of its compiler package, which can
+//! be installed outside the project (`npx`, `npm -g`). A returned path, with
+//! its `..` segments applied to the root, must stay inside one of those
 //! directories. The caller drops each entry with a path that does not.
 
 use std::path::{Component, Path, PathBuf};
-
-const NODE_MODULES: &str = "node_modules";
 
 /// The directories that a returned path may name for one analysis root.
 pub(super) struct ResponseScope {
@@ -21,9 +18,8 @@ pub(super) struct ResponseScope {
 }
 
 impl ResponseScope {
-    /// The scope of `root`: its read scope base, each real `node_modules`
-    /// directory at or above it, and the compiler package directories of the
-    /// companion. A `node_modules` link does not count.
+    /// The scope of `root`: its read scope base and the compiler package
+    /// directories of the companion.
     pub(super) fn new(root: &Path) -> Self {
         Self::with_compiler_dirs(
             root,
@@ -39,14 +35,6 @@ impl ResponseScope {
             &root,
             home.as_deref(),
         )];
-        allowed.extend(
-            root.ancestors()
-                .map(|dir| dir.join(NODE_MODULES))
-                .filter(|dir| {
-                    dir.symlink_metadata()
-                        .is_ok_and(|metadata| metadata.file_type().is_dir())
-                }),
-        );
         allowed.extend(compiler_dirs);
         Self { root, allowed }
     }
@@ -178,7 +166,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
-    fn a_root_without_a_work_tree_accepts_only_its_own_paths_and_real_node_modules() {
+    fn a_root_without_a_work_tree_accepts_only_its_own_paths() {
         let dir = tempfile::tempdir().expect("temp dir");
         let outer = dunce::canonicalize(dir.path()).expect("canonical");
         let root = outer.join("app");
@@ -187,7 +175,7 @@ mod tests {
         let scope = ResponseScope::new(&root);
 
         assert!(scope.allows(Path::new("src/a.ts")));
-        assert!(scope.allows(Path::new("../node_modules/pkg/index.d.ts")));
+        assert!(!scope.allows(Path::new("../node_modules/pkg/index.d.ts")));
         assert!(!scope.allows(Path::new("../shared/consumer.ts")));
     }
 

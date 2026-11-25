@@ -222,3 +222,13 @@ test("a path check ignores case only on Windows", () => {
   assert.equal(isWithin(dir, file, "linux"), false);
   assert.equal(isWithin(dir, path.join(path.sep, "repo", "apps", "a.ts"), "win32"), false);
 });
+
+test("a node_modules directory above the scope base stays out of scope", () => {
+  withLayout(({ base, root }) => {
+    const above = path.join(base, "node_modules", "pkg");
+    mkdirSync(above, { recursive: true });
+    writeFileSync(path.join(above, "index.d.ts"), OUTSIDE_TEXT);
+    const scope = createReadScope(root, [], "");
+    assert.equal(scope.readable(path.join(above, "index.d.ts")), false);
+  });
+});
