@@ -1112,17 +1112,17 @@ fn compute_base_security_snapshot(
         value,
         origin: fallow_types::sourced::Origin::Flag("--changed-since"),
     };
-    let base_side = fallow_engine::resolved_run::BaseSide {
-        root: given(base_root.clone()),
-        config: fallow_engine::resolved_run::BaseConfig::BaseCopy,
-        cache_dir: Some(given(
+    let base_side = fallow_engine::resolved_run::BaseSide::base(
+        given(base_root.clone()),
+        fallow_engine::resolved_run::BaseConfig::BaseCopy,
+        Some(given(
             fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
                 opts.root,
                 &base_root,
                 &config.cache_dir,
             ),
         )),
-    };
+    );
     let base_run = crate::cli_production::base_copy_run(opts.run, base_side)
         .map_err(|message| emit_input_error(&message, opts.output))?;
     // The findings of the base run name files under its canonical root.

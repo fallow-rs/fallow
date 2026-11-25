@@ -80,6 +80,13 @@ pub enum ZoneValidationError {
     RedundantRootPrefix(RedundantRootPrefix),
     /// A forbidden-call entry carries an unusable callee pattern.
     InvalidForbiddenCallee(InvalidForbiddenCallee),
+    /// The `deep-modules` preset found none of its module root candidates.
+    /// Holds the project-relative candidate folders, in the order they were
+    /// tried.
+    PresetModuleRootMissing(Vec<String>),
+    /// `presetPublicFiles` is set, but the preset does not define public
+    /// entry files. Holds the preset name, or `None` without a preset.
+    PresetPublicFilesUnsupported(Option<String>),
 }
 
 impl fmt::Display for ZoneValidationError {
@@ -104,6 +111,23 @@ impl fmt::Display for ZoneValidationError {
                 "boundaries.calls.forbidden[{}].callee: pattern '{}' {}",
                 err.rule_index, err.pattern, err.reason,
             ),
+            Self::PresetModuleRootMissing(candidates) => write!(
+                f,
+                "boundaries.preset: the deep-modules preset needs a module folder, but none of {} exists. Create one, or replace the preset zone 'modules' with a zone that names your module folder.",
+                candidates
+                    .iter()
+                    .map(|dir| format!("'{dir}'"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Self::PresetPublicFilesUnsupported(preset) => write!(
+                f,
+                "boundaries.presetPublicFiles: {}. Remove presetPublicFiles, use the bulletproof or feature-sliced preset, or set publicFiles on a zone.",
+                preset.as_deref().map_or_else(
+                    || "no preset is set".to_owned(),
+                    |name| format!("the {name} preset has no public entry files"),
+                ),
+            ),
             Self::RedundantRootPrefix(err) => write!(
                 f,
                 "FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX: zone '{}': pattern '{}' starts with the zone root '{}'. Patterns are now resolved relative to root; remove the redundant prefix from the pattern.",
@@ -127,6 +151,38 @@ pub enum BoundaryPreset {
     FeatureSliced,
     /// Bulletproof React.
     Bulletproof,
+    /// One zone for each module folder; other zones import a module only
+    /// through its index file.
+    DeepModules,
+}
+
+/// The index file globs that the `deep-modules` preset and `presetPublicFiles`
+/// use as public entry files. An explicit extension list, so that a file such
+/// as `index.internal.ts` stays internal.
+const INDEX_FILE_GLOB: &str = "index.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
+
+/// The folders under the source root that the `deep-modules` preset tries as
+/// its module root, in order.
+pub const DEEP_MODULES_ROOT_CANDIDATES: [&str; 2] = ["modules", "features"];
+
+/// The `deep-modules` zones that many projects leave empty: the loose files
+/// under the module root, the rest of the source root, and the out-of-tree
+/// tests.
+const DEEP_MODULES_OPTIONAL_ZONES: [&str; 3] = ["modules", "app", "tests"];
+
+/// The `deep-modules` zones that go after the user zones.
+const DEEP_MODULES_TRAILING_ZONES: [&str; 2] = ["app", "tests"];
+
+/// The project facts that shape a preset expansion.
+#[derive(Debug, Clone, Copy)]
+pub struct PresetLayout<'a> {
+    /// The source root, for example `src`.
+    pub source_root: &'a str,
+    /// The module root of the `deep-modules` preset, for example
+    /// `src/modules`.
+    pub module_root: &'a str,
+    /// Whether `presetPublicFiles` is set.
+    pub public_files: bool,
 }
 
 impl BoundaryPreset {
@@ -142,6 +198,7 @@ impl BoundaryPreset {
             Self::Hexagonal,
             Self::FeatureSliced,
             Self::Bulletproof,
+            Self::DeepModules,
         ]
     }
 
@@ -153,6 +210,7 @@ impl BoundaryPreset {
             Self::Hexagonal => "hexagonal",
             Self::FeatureSliced => "feature-sliced",
             Self::Bulletproof => "bulletproof",
+            Self::DeepModules => "deep-modules",
         }
     }
 
@@ -176,17 +234,43 @@ impl BoundaryPreset {
                 "Bulletproof React: app and features depend on shared and server; \
                  features stay isolated from each other."
             }
+            Self::DeepModules => {
+                "Deep modules: each folder under src/modules (or src/features) is a zone; \
+                 other zones and out-of-tree tests import a module only through its index file."
+            }
         }
+    }
+
+    /// Whether the preset zone goes after the user zones. A catch-all zone,
+    /// such as the `app` zone of `deep-modules` (`src/**`), would otherwise
+    /// take each file of a user zone, because the first matching zone wins.
+    #[must_use]
+    pub fn is_trailing_zone(&self, zone_name: &str) -> bool {
+        *self == Self::DeepModules && DEEP_MODULES_TRAILING_ZONES.contains(&zone_name)
+    }
+
+    /// Whether `presetPublicFiles` applies to this preset.
+    #[must_use]
+    pub const fn supports_public_files(&self) -> bool {
+        matches!(
+            self,
+            Self::FeatureSliced | Self::Bulletproof | Self::DeepModules
+        )
     }
 
     /// Expand the preset into default zones and rules.
     #[must_use]
-    pub fn default_config(&self, source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
+    pub fn default_config(
+        &self,
+        layout: PresetLayout<'_>,
+    ) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
+        let source_root = layout.source_root;
         match self {
             Self::Layered => Self::layered_config(source_root),
             Self::Hexagonal => Self::hexagonal_config(source_root),
-            Self::FeatureSliced => Self::feature_sliced_config(source_root),
-            Self::Bulletproof => Self::bulletproof_config(source_root),
+            Self::FeatureSliced => Self::feature_sliced_config(source_root, layout.public_files),
+            Self::Bulletproof => Self::bulletproof_config(source_root, layout.public_files),
+            Self::DeepModules => Self::deep_modules_config(source_root, layout.module_root),
         }
     }
 
@@ -238,11 +322,20 @@ impl BoundaryPreset {
         (zones, rules)
     }
 
-    fn feature_sliced_config(source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
+    fn feature_sliced_config(
+        source_root: &str,
+        public_files: bool,
+    ) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
         let layer_names = ["app", "pages", "widgets", "features", "entities", "shared"];
         let zones = layer_names
             .iter()
-            .map(|name| Self::zone(name, source_root))
+            .map(|name| {
+                let mut zone = Self::zone(name, source_root);
+                if public_files {
+                    zone.public_files = Self::feature_sliced_public_files(name, source_root);
+                }
+                zone
+            })
             .collect();
         let rules = layer_names
             .iter()
@@ -255,13 +348,37 @@ impl BoundaryPreset {
         (zones, rules)
     }
 
-    fn bulletproof_config(source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
+    /// The public API of each slice of a sliced layer: the slice index file,
+    /// and for `entities` also the `@x` cross-import files. `app` has no
+    /// slices, and `shared` segments are imported directly.
+    fn feature_sliced_public_files(layer: &str, source_root: &str) -> Vec<String> {
+        match layer {
+            "pages" | "widgets" | "features" => {
+                vec![format!("{source_root}/{layer}/*/{INDEX_FILE_GLOB}")]
+            }
+            "entities" => vec![
+                format!("{source_root}/{layer}/*/{INDEX_FILE_GLOB}"),
+                format!("{source_root}/{layer}/*/@x/*"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn bulletproof_config(
+        source_root: &str,
+        public_files: bool,
+    ) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
         let zones = vec![
             Self::zone("app", source_root),
             BoundaryZone {
                 name: "features".to_owned(),
                 patterns: vec![format!("{source_root}/features/**")],
                 auto_discover: vec![format!("{source_root}/features")],
+                public_files: if public_files {
+                    vec![INDEX_FILE_GLOB.to_owned()]
+                } else {
+                    Vec::new()
+                },
                 ..BoundaryZone::default()
             },
             BoundaryZone {
@@ -293,6 +410,50 @@ impl BoundaryPreset {
         ];
         (zones, rules)
     }
+
+    /// One zone for each module folder, with its index file as the public
+    /// entry. The first matching zone wins, so the order matters:
+    ///
+    /// - `modules/<name>`: the discovered module folders. A test next to the
+    ///   module code is in the module zone and may import internal files.
+    /// - `modules`: the loose files directly under the module root, without
+    ///   public files.
+    /// - the user zones, which [`BoundaryConfig::expand`] puts here.
+    /// - `app`: the rest of the source root, so an entry file such as
+    ///   `src/main.ts` cannot bypass the index files.
+    /// - `tests`: the out-of-tree test folders. A test there must import a
+    ///   module through its index file.
+    ///
+    /// No zone has a rule. A zone without a rule may import each zone, but it
+    /// must still use the public files of other zones.
+    fn deep_modules_config(
+        source_root: &str,
+        module_root: &str,
+    ) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
+        let zones = vec![
+            BoundaryZone {
+                name: "modules".to_owned(),
+                patterns: vec![format!("{module_root}/**")],
+                auto_discover: vec![module_root.to_owned()],
+                public_files: vec![INDEX_FILE_GLOB.to_owned()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "app".to_owned(),
+                patterns: vec![format!("{source_root}/**")],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "tests".to_owned(),
+                patterns: ["test/**", "tests/**", "e2e/**"]
+                    .iter()
+                    .map(|pattern| (*pattern).to_owned())
+                    .collect(),
+                ..BoundaryZone::default()
+            },
+        ];
+        (zones, Vec::new())
+    }
 }
 
 /// Architecture boundary configuration.
@@ -302,6 +463,13 @@ pub struct BoundaryConfig {
     /// Optional built-in preset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<BoundaryPreset>,
+    /// Give the zones of the `bulletproof` and `feature-sliced` presets
+    /// their index files as public entry files (`publicFiles`). Other zones
+    /// must then import a feature or a slice through its index file. The
+    /// `deep-modules` preset always does this. Older fallow versions ignore
+    /// this key and report the preset without public entry files.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preset_public_files: bool,
     /// Zone definitions.
     #[serde(default)]
     pub zones: Vec<BoundaryZone>,
@@ -449,6 +617,10 @@ pub struct ResolvedBoundaryConfig {
     /// Patterns stay raw strings; the analysis layer parses them into its
     /// segment-aware matcher.
     pub calls_forbidden_by_zone: rustc_hash::FxHashMap<String, Vec<String>>,
+    /// Zones that a preset adds for files that a project may not have, such
+    /// as the `tests` zone of `deep-modules`. A run does not warn when such
+    /// a zone matches no file.
+    pub optional_zones: Vec<String>,
 }
 
 /// Resolved boundary zone coverage policy.
@@ -565,32 +737,46 @@ impl BoundaryConfig {
             && self.calls.is_empty()
     }
 
-    /// Expand the preset into explicit zones and rules.
+    /// Expand the preset into explicit zones and rules. The `deep-modules`
+    /// preset uses `<source_root>/modules` as its module root.
     pub fn expand(&mut self, source_root: &str) {
+        let module_root = format!("{source_root}/{}", DEEP_MODULES_ROOT_CANDIDATES[0]);
+        self.expand_with_module_root(source_root, &module_root);
+    }
+
+    /// Expand the preset into explicit zones and rules, with the given module
+    /// root for the `deep-modules` preset.
+    pub fn expand_with_module_root(&mut self, source_root: &str, module_root: &str) {
         let Some(preset) = self.preset.take() else {
             return;
         };
 
-        let (preset_zones, preset_rules) = preset.default_config(source_root);
+        let (preset_zones, preset_rules) = preset.default_config(PresetLayout {
+            source_root,
+            module_root,
+            public_files: self.preset_public_files,
+        });
 
         let user_zone_names: rustc_hash::FxHashSet<&str> =
             self.zones.iter().map(|z| z.name.as_str()).collect();
 
-        let mut merged_zones: Vec<BoundaryZone> = preset_zones
-            .into_iter()
-            .filter(|pz| {
-                if user_zone_names.contains(pz.name.as_str()) {
-                    tracing::info!(
-                        "boundary preset: user zone '{}' replaces preset zone",
-                        pz.name
-                    );
-                    false
-                } else {
-                    true
-                }
-            })
-            .collect();
+        let (mut merged_zones, mut trailing_zones): (Vec<BoundaryZone>, Vec<BoundaryZone>) =
+            preset_zones
+                .into_iter()
+                .filter(|pz| {
+                    if user_zone_names.contains(pz.name.as_str()) {
+                        tracing::info!(
+                            "boundary preset: user zone '{}' replaces preset zone",
+                            pz.name
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .partition(|pz| !preset.is_trailing_zone(&pz.name));
         merged_zones.append(&mut self.zones);
+        merged_zones.append(&mut trailing_zones);
         self.zones = merged_zones;
 
         let user_rule_sources: rustc_hash::FxHashSet<&str> =
@@ -645,9 +831,52 @@ impl BoundaryConfig {
                 })
             })
             .collect();
+        if self.preset == Some(BoundaryPreset::DeepModules) {
+            // The module root is the first candidate that exists, so a new
+            // candidate folder can change the zones.
+            let source_root = preset_source_root(project_root);
+            dirs.extend(
+                DEEP_MODULES_ROOT_CANDIDATES
+                    .iter()
+                    .map(|dir| project_root.join(&source_root).join(dir)),
+            );
+        }
         dirs.sort();
         dirs.dedup();
         dirs
+    }
+
+    /// Validate the preset settings that depend on the project layout: the
+    /// module root of the `deep-modules` preset and the use of
+    /// `presetPublicFiles`.
+    #[must_use]
+    pub fn validate_preset(&self, project_root: &Path) -> Vec<ZoneValidationError> {
+        let mut errors = Vec::new();
+        if self.preset_public_files
+            && !self
+                .preset
+                .as_ref()
+                .is_some_and(BoundaryPreset::supports_public_files)
+        {
+            errors.push(ZoneValidationError::PresetPublicFilesUnsupported(
+                self.preset.as_ref().map(|preset| preset.name().to_owned()),
+            ));
+        }
+        // A user zone named `modules` replaces the preset zone, so the
+        // preset needs no module folder of its own.
+        let replaces_modules = self.zones.iter().any(|zone| zone.name == "modules");
+        if self.preset == Some(BoundaryPreset::DeepModules) && !replaces_modules {
+            let source_root = preset_source_root(project_root);
+            if deep_modules_root(project_root, &source_root).is_none() {
+                errors.push(ZoneValidationError::PresetModuleRootMissing(
+                    DEEP_MODULES_ROOT_CANDIDATES
+                        .iter()
+                        .map(|dir| format!("{source_root}/{dir}"))
+                        .collect(),
+                ));
+            }
+        }
+        errors
     }
 
     /// Expand `autoDiscover` zones into concrete child zones.
@@ -698,18 +927,59 @@ impl BoundaryConfig {
     }
 }
 
+/// The source root of a preset: the tsconfig `rootDir` when it is a folder
+/// inside the project, else `src`.
+fn preset_source_root(root: &Path) -> String {
+    crate::workspace::parse_tsconfig_root_dir(root)
+        .filter(|r| r != "." && !r.starts_with("..") && !Path::new(r).is_absolute())
+        .unwrap_or_else(|| "src".to_owned())
+}
+
+/// The module root of the `deep-modules` preset: the first candidate folder
+/// under the source root that exists.
+/// A candidate folder with at least one child folder wins over an empty one,
+/// so an empty `src/modules` does not hide the modules in `src/features`.
+fn deep_modules_root(root: &Path, source_root: &str) -> Option<String> {
+    let candidates: Vec<String> = DEEP_MODULES_ROOT_CANDIDATES
+        .iter()
+        .map(|dir| format!("{source_root}/{dir}"))
+        .filter(|dir| root.join(dir).is_dir())
+        .collect();
+    let has_child_dir = |dir: &String| {
+        std::fs::read_dir(root.join(dir)).is_ok_and(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        })
+    };
+    candidates
+        .iter()
+        .find(|dir| has_child_dir(dir))
+        .or_else(|| candidates.first())
+        .cloned()
+}
+
 /// Expand the boundary preset in place, with the tsconfig `rootDir` as the
 /// source root. Does nothing without a preset.
-pub(super) fn expand_boundary_preset(boundaries: &mut BoundaryConfig, root: &Path) {
-    if boundaries.preset.is_some() {
-        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
-            .filter(|r| r != "." && !r.starts_with("..") && !std::path::Path::new(r).is_absolute())
-            .unwrap_or_else(|| "src".to_owned());
-        if source_root != "src" {
-            tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
-        }
-        boundaries.expand(&source_root);
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "the parent module is glob re-exported from lib.rs, so `pub` would leak this helper into the public API; pub(crate) is the minimal widening for the rule-pack validator"
+)]
+pub(crate) fn expand_boundary_preset(boundaries: &mut BoundaryConfig, root: &Path) {
+    let Some(preset) = boundaries.preset.as_ref() else {
+        return;
+    };
+    let source_root = preset_source_root(root);
+    if source_root != "src" {
+        tracing::info!("boundary preset: using rootDir '{source_root}' from tsconfig.json");
     }
+    let module_root = if *preset == BoundaryPreset::DeepModules {
+        deep_modules_root(root, &source_root)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| format!("{source_root}/{}", DEEP_MODULES_ROOT_CANDIDATES[0]));
+    boundaries.expand_with_module_root(&source_root, &module_root);
 }
 
 struct AutoDiscoverExpansion {
@@ -1128,7 +1398,23 @@ impl BoundaryConfig {
             logical_groups: Vec::new(),
             coverage: self.resolve_coverage(),
             calls_forbidden_by_zone: self.resolve_calls_forbidden_by_zone(),
+            optional_zones: Vec::new(),
         }
+    }
+
+    /// The zones of the preset that may match no file, before the preset
+    /// expansion. A zone that the user declares with the same name replaces
+    /// the preset zone, so it is not optional.
+    #[must_use]
+    pub fn optional_preset_zones(&self) -> Vec<String> {
+        if self.preset != Some(BoundaryPreset::DeepModules) {
+            return Vec::new();
+        }
+        DEEP_MODULES_OPTIONAL_ZONES
+            .iter()
+            .filter(|name| !self.zones.iter().any(|zone| zone.name == **name))
+            .map(|name| (*name).to_owned())
+            .collect()
     }
 
     /// Compile each zone's membership patterns into glob matchers.
@@ -1644,3 +1930,7 @@ mod tests;
 #[cfg(test)]
 #[path = "boundaries_read_tests.rs"]
 mod read_tests;
+
+#[cfg(test)]
+#[path = "boundaries_preset_tests.rs"]
+mod preset_tests;

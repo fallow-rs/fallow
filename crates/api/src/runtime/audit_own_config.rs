@@ -92,6 +92,7 @@ fn base_copy_run(
             },
             config: fallow_engine::resolved_run::BaseConfig::BaseCopy,
             cache_dir: None,
+            snapshot: fallow_config::AnalysisSnapshot::Base,
         },
     )
     .ok()

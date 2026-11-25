@@ -30,18 +30,18 @@ mod similar_code;
 mod used_class_members;
 mod workspace_settings;
 
+pub use boundaries::{
+    AuthoredRule, BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset,
+    BoundaryRule, BoundaryZone, DEEP_MODULES_ROOT_CANDIDATES, ForbiddenCallRule, ForbiddenCallee,
+    InvalidForbiddenCallee, LogicalGroup, LogicalGroupStatus, PresetLayout, RedundantRootPrefix,
+    ResolvedBoundaryConfig, ResolvedBoundaryCoverageConfig, ResolvedBoundaryRule, ResolvedZone,
+    UnknownZoneRef, ZoneReferenceKind, ZoneValidationError,
+};
 #[expect(
     clippy::redundant_pub_crate,
     reason = "this module is glob re-exported from lib.rs, so `pub` would leak the helper into the public API; pub(crate) keeps it internal to the crate"
 )]
-pub(crate) use boundaries::wildcard_placement_error;
-pub use boundaries::{
-    AuthoredRule, BoundaryCallsConfig, BoundaryConfig, BoundaryCoverageConfig, BoundaryPreset,
-    BoundaryRule, BoundaryZone, ForbiddenCallRule, ForbiddenCallee, InvalidForbiddenCallee,
-    LogicalGroup, LogicalGroupStatus, RedundantRootPrefix, ResolvedBoundaryConfig,
-    ResolvedBoundaryCoverageConfig, ResolvedBoundaryRule, ResolvedZone, UnknownZoneRef,
-    ZoneReferenceKind, ZoneValidationError,
-};
+pub(crate) use boundaries::{expand_boundary_preset, wildcard_placement_error};
 pub use dependency_ignore::{IgnoreDependencyMatcher, is_dependency_glob};
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,

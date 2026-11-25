@@ -337,12 +337,7 @@ pub fn validate_rule_pack_zones(
 }
 
 fn expanded_zone_names(mut boundaries: BoundaryConfig, root: &Path) -> Vec<String> {
-    if boundaries.preset.is_some() {
-        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
-            .filter(|r| r != "." && !r.starts_with("..") && !Path::new(r).is_absolute())
-            .unwrap_or_else(|| "src".to_owned());
-        boundaries.expand(&source_root);
-    }
+    crate::config::expand_boundary_preset(&mut boundaries, root);
     let _logical_groups = boundaries.expand_auto_discover(root);
     boundaries.zones.into_iter().map(|zone| zone.name).collect()
 }
@@ -1014,6 +1009,27 @@ mod tests {
                 root: None,
                 public_files: vec![],
             }],
+            ..BoundaryConfig::default()
+        };
+
+        assert!(validate_rule_pack_zones(dir.path(), &boundaries, &[path], &packs).is_empty());
+    }
+
+    #[test]
+    fn accepts_rule_pack_zones_of_the_deep_modules_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src/features/billing")).unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "p", "rules": [
+                { "id": "module-network", "kind": "banned-effect",
+                  "effects": ["network"], "zones": ["modules/billing", "app"] }
+            ] }"#,
+        );
+        let packs = load_rule_packs(dir.path(), std::slice::from_ref(&path)).unwrap();
+        let boundaries = BoundaryConfig {
+            preset: Some(crate::config::BoundaryPreset::DeepModules),
             ..BoundaryConfig::default()
         };
 

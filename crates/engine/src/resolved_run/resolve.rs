@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    AnalysisRequest, AnalysisSelection, CommandKind, ConfigFallback, EnvSnapshot, EnvVar,
-    FallowConfig, PlannedAnalysis, RunCommand, RunInputs, RunPlan, RunRequest, SelectionInput,
-    Surface,
+    AnalysisRequest, AnalysisSelection, AnalysisSnapshot, CommandKind, ConfigFallback, EnvSnapshot,
+    EnvVar, FallowConfig, PlannedAnalysis, RunCommand, RunInputs, RunPlan, RunRequest,
+    SelectionInput, Surface,
 };
 use fallow_types::sourced::{Given, Origin, Scope, Source, Sourced};
 
@@ -194,6 +194,27 @@ pub struct BaseSide {
     /// The cache directory of the base side. `None` keeps the cache input of
     /// the head run.
     pub cache_dir: Option<Given<PathBuf>>,
+    /// The revision that the side holds. A base revision skips the config
+    /// validation that needs a folder of the change. The staged side of
+    /// `audit --staged` holds the change, so it is the current revision.
+    pub snapshot: AnalysisSnapshot,
+}
+
+impl BaseSide {
+    /// The side of a base revision.
+    #[must_use]
+    pub const fn base(
+        root: Given<PathBuf>,
+        config: BaseConfig,
+        cache_dir: Option<Given<PathBuf>>,
+    ) -> Self {
+        Self {
+            root,
+            config,
+            cache_dir,
+            snapshot: AnalysisSnapshot::Base,
+        }
+    }
 }
 
 /// Resolve the base side of a comparison with a base ref: the inputs of
@@ -233,6 +254,7 @@ fn resolve_base_side(
         root,
         config,
         cache_dir,
+        snapshot,
     } = base;
     let file = base_config_file(head, &root.value, config);
     let mut inputs = (*head.inputs).clone();
@@ -247,9 +269,10 @@ fn resolve_base_side(
     }
     inputs.quiet = true;
     resolve_with(&inputs, |ctx, _| {
-        ctx.load(
+        ctx.load_snapshot(
             file.as_ref()
                 .map(|(path, source)| (path.as_path(), source.clone())),
+            snapshot,
         )
     })
 }
@@ -527,6 +550,17 @@ impl Context<'_> {
     /// `explicit` is a config file with its source; `None` discovers the
     /// config from the root.
     fn load(&self, explicit: Option<(&Path, Source)>) -> Result<Loaded, ResolveError> {
+        self.load_snapshot(explicit, AnalysisSnapshot::Current)
+    }
+
+    /// [`Self::load`] for the given revision. The base revision of
+    /// `audit --base` skips the validation that needs a folder of the
+    /// change, such as the module folder of the `deep-modules` preset.
+    fn load_snapshot(
+        &self,
+        explicit: Option<(&Path, Source)>,
+        snapshot: AnalysisSnapshot,
+    ) -> Result<Loaded, ResolveError> {
         let options = ConfigFileOptions::new(*self.allow_remote_extends().value(), self.env);
         let ConfigFile {
             config,
@@ -534,12 +568,12 @@ impl Context<'_> {
             chain,
         } = load_config_file(self.root, explicit.as_ref().map(|(path, _)| *path), options)
             .map_err(ResolveError::ConfigLoad)?;
-        steps::validate_command_config(self.inputs.command, self.root, &config).map_err(|err| {
-            ResolveError::ConfigInvalid {
+        steps::validate_command_config(self.inputs.command, self.root, &config, snapshot).map_err(
+            |err| ResolveError::ConfigInvalid {
                 file: path.clone(),
                 message: err.to_string(),
-            }
-        })?;
+            },
+        )?;
         let config_file = match (explicit, path) {
             (Some((_, source)), Some(path)) => Sourced::new(Some(path), source, Scope::Global),
             (None, Some(path)) => Sourced::new(

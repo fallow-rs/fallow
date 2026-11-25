@@ -66,7 +66,14 @@ fn the_worktree_side_keeps_the_head_plan_and_production_modes() {
     let head_run = audit_head(&head, &[]);
     assert!(runs(&head_run, PlannedAnalysis::Duplication));
 
-    let run = worktree_side_run(&head_run, &base, true, "--base").expect("base run");
+    let run = worktree_side_run(
+        &head_run,
+        &base,
+        true,
+        "--base",
+        fallow_config::AnalysisSnapshot::Base,
+    )
+    .expect("base run");
 
     assert_eq!(
         run.config_file().value().as_deref(),

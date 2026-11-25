@@ -60,6 +60,7 @@ fn base_run(head: &ResolvedRun, base_root: &Path, config: BaseConfig) -> Resolve
             root: given(base_root.to_path_buf()),
             config,
             cache_dir: None,
+            snapshot: fallow_config::AnalysisSnapshot::Base,
         },
     )
     .expect("base run")
@@ -176,6 +177,7 @@ fn a_base_run_keeps_the_given_inputs_and_is_quiet() {
             root: given(base),
             config: BaseConfig::BaseCopy,
             cache_dir: Some(given(cache.clone())),
+            snapshot: fallow_config::AnalysisSnapshot::Base,
         },
     )
     .expect("base run");

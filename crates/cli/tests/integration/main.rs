@@ -60,6 +60,7 @@ mod baseline_install_state_tests;
 mod baseline_prune_advice_tests;
 mod baseline_scope_comparison_tests;
 mod baselines_prune_tests;
+mod boundary_preset_public_files_tests;
 mod cache_eviction_warning_tests;
 mod cache_symlink_tests;
 mod callee_every_site_tests;

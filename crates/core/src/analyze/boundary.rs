@@ -499,7 +499,9 @@ fn warn_unmatched_boundary_zones(
     let classified_zones: rustc_hash::FxHashSet<&str> =
         zone_cache.values().filter_map(|z| z.as_deref()).collect();
     for zone in &config.boundaries.zones {
-        if !classified_zones.contains(zone.name.as_str()) {
+        if !classified_zones.contains(zone.name.as_str())
+            && !config.boundaries.optional_zones.contains(&zone.name)
+        {
             tracing::warn!(
                 target: fallow_types::ANALYSIS_DIAGNOSTIC_LOG_TARGET,
                 "{}",
@@ -683,6 +685,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
@@ -725,6 +728,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
@@ -776,6 +780,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
@@ -809,6 +814,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
@@ -842,6 +848,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
@@ -888,6 +895,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
@@ -998,6 +1006,7 @@ mod tests {
             coverage: BoundaryCoverageConfig::default(),
             calls: BoundaryCallsConfig::default(),
             preset: None,
+            preset_public_files: false,
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
