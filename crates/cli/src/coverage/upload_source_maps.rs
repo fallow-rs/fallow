@@ -364,9 +364,7 @@ fn collect_source_maps(
             dir.display()
         ))
     })?;
-    let normalized = fallow_types::path_guard::lexically_normalized(dir);
-    let below_root = normalized.starts_with(repo_root)
-        || std::fs::canonicalize(repo_root).is_ok_and(|root| normalized.starts_with(root));
+    let below_root = fallow_engine::saved_file::lies_below(repo_root, dir);
     if below_root && !fallow_types::read_guard::is_inside_root(repo_root, dir) {
         return Err(UploadSourceMapsError::Validation(format!(
             "selected build directory {} resolves outside the repository root",

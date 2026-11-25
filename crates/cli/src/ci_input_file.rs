@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use fallow_types::path_guard::lexically_normalized;
+use fallow_engine::saved_file::lies_below;
 use fallow_types::read_guard::{DEFAULT_MAX_READ_BYTES, is_inside_root, read_to_string_bounded};
 
 /// Read the `ci` input file at `path`, with `label` in each error.
@@ -25,7 +25,7 @@ pub(super) fn read_text_file(path: &Path, label: &str) -> Result<String, String>
 
 fn read_text_file_from(cwd: &Path, path: &Path, label: &str) -> Result<String, String> {
     let absolute = cwd.join(path);
-    if lexically_normalized(&absolute).starts_with(cwd) && !is_inside_root(cwd, &absolute) {
+    if lies_below(cwd, &absolute) && !is_inside_root(cwd, &absolute) {
         // A missing file below the working directory reads as missing.
         if absolute.symlink_metadata().is_ok() {
             return Err(format!(
@@ -69,5 +69,10 @@ mod tests {
         );
         assert!(read_text_file_from(&cwd, Path::new("sub"), "body").is_err());
         assert!(read_text_file_from(&cwd, Path::new("missing.md"), "body").is_err());
+
+        // The same link, named through another spelling of the working directory.
+        let alias = cwd.parent().expect("parent").join("alias");
+        std::os::unix::fs::symlink(&cwd, &alias).expect("link");
+        assert!(read_text_file_from(&cwd, &alias.join("comment.md"), "body").is_err());
     }
 }

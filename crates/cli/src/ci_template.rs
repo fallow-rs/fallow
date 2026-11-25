@@ -1,5 +1,6 @@
 use crate::exit_codes::exit_invalid_input;
 use crate::setup_hooks::symlink_guard::refusal_message;
+use fallow_engine::saved_file::base_in_path_spelling;
 use fallow_types::path_guard::lexically_normalized;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -97,15 +98,16 @@ fn outside_link(root: &Path) -> Option<(PathBuf, PathBuf)> {
         return Some((path.clone(), path));
     };
     let vendor = lexically_normalized(&cwd.join(root));
-    let (base, vendor) = if vendor.starts_with(&cwd) {
-        (cwd, vendor)
+    let (base, vendor) = if let Some(base) = base_in_path_spelling(&cwd, &vendor) {
+        (base, vendor)
     } else {
         root.symlink_metadata().ok()?;
         (root.to_path_buf(), root.to_path_buf())
     };
     GITLAB_FILES.iter().find_map(|file| {
         let checked = vendor.join(file.path);
-        fallow_types::path_guard::outside_link(&base, &checked).map(|link| (root.join(file.path), link))
+        fallow_types::path_guard::outside_link(&base, &checked)
+            .map(|link| (root.join(file.path), link))
     })
 }
 
