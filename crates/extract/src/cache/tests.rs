@@ -2816,10 +2816,10 @@ impl tracing::Subscriber for WarnLogCollector {
         }
         let mut msg = String::new();
         event.record(&mut MessageVisitor(&mut msg));
-        if !msg.is_empty() {
-            if let Ok(mut logs) = self.0.lock() {
-                logs.push(msg);
-            }
+        if !msg.is_empty()
+            && let Ok(mut logs) = self.0.lock()
+        {
+            logs.push(msg);
         }
     }
     fn enter(&self, _span: &tracing::span::Id) {}
@@ -2853,7 +2853,10 @@ fn working_set_eviction_tracks_and_warns_when_working_set_exceeds_cap() {
         files.len() - evicted_ws,
         "store must retain exactly the non-evicted entries"
     );
-    assert!(loaded.len() > 0, "at least one entry remains in the cache");
+    assert!(
+        !loaded.is_empty(),
+        "at least one entry remains in the cache"
+    );
 }
 
 #[test]
@@ -2867,10 +2870,7 @@ fn stale_eviction_alone_does_not_track_working_set_eviction() {
     let latest_seen = 1_000_000;
     let working_set: Vec<String> = (0..20u64).map(|i| format!("live{i:02}.ts")).collect();
     for (i, path) in (0u64..).zip(&working_set) {
-        store.insert(
-            Path::new(path),
-            synthetic_module(100 + i, latest_seen, 1),
-        );
+        store.insert(Path::new(path), synthetic_module(100 + i, latest_seen, 1));
     }
 
     let cap = 64 * 1024;
@@ -2920,8 +2920,8 @@ fn working_set_within_cap_does_not_evict_or_warn() {
         "no eviction when well under cap threshold"
     );
 
-    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
-        .expect("load succeeds");
+    let loaded =
+        CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE).expect("load succeeds");
     assert_eq!(loaded.len(), 10, "all 10 entries preserved");
 }
 
@@ -2948,7 +2948,7 @@ fn working_set_eviction_emits_warn_log() {
     assert!(
         messages.iter().any(|msg| {
             msg.contains("Repository working set exceeds cache cap")
-                && msg.contains("FALLOW_CACHE_MAX_SIZE")
+                && msg.contains("Increase FALLOW_CACHE_MAX_SIZE")
                 && msg.contains("cache.maxSizeMb")
         }),
         "warning log must be emitted when working-set entries are evicted: {messages:?}"

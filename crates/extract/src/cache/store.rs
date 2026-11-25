@@ -309,8 +309,7 @@ impl CacheStore {
             );
         }
         let working_set_target = target_bytes.max(working_set_bytes);
-        let mut working_set_evicted = 0;
-        if encoded.len() > working_set_target {
+        let working_set_evicted = if encoded.len() > working_set_target {
             let keep_newest_from = order.len().saturating_sub(1);
             let before_ws_idx = cursor.idx;
             encoded = self.evict_order_range(
@@ -320,8 +319,10 @@ impl CacheStore {
                 working_set_target,
                 encoded,
             );
-            working_set_evicted = cursor.idx.saturating_sub(before_ws_idx);
-        }
+            cursor.idx.saturating_sub(before_ws_idx)
+        } else {
+            0
+        };
 
         if encoded.len() > working_set_target && self.entries.len() == 1 {
             tracing::warn!(
