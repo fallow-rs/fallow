@@ -1099,6 +1099,39 @@ pub fn merge_codex(
     Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup))
 }
 
+/// The warning for a Codex project gate in a repository nested in another
+/// work tree. The Codex handler runs no gate there.
+pub(super) const NESTED_CODEX_GATE_WARNING: &str = "warning: the Codex gate does not run in a repository nested in another work tree; install in the outer repository";
+
+/// True when the git work tree of `root` lies inside the work tree of
+/// another repository (for example a submodule or a nested clone), and the
+/// outer repository does not list it as a linked worktree. A work tree at
+/// `home` does not count as the outer work tree.
+pub(super) fn is_nested_repository(root: &Path, home: Option<&Path>) -> bool {
+    let Some(top) = crate::base_worktree::git_toplevel(root) else {
+        return false;
+    };
+    let Some(outer) = top.parent().and_then(crate::base_worktree::git_toplevel) else {
+        return false;
+    };
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if home.is_some_and(|home| canonical(home) == outer) {
+        return false;
+    }
+    let listed = fallow_engine::changed_files::git_command_in(&outer)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| line.strip_prefix("worktree "))
+                .any(|path| canonical(Path::new(path)) == top)
+        });
+    !listed
+}
+
 /// Where `root` sits relative to git.
 pub(super) enum GitTop {
     /// No directory at or above `root` holds a `.git` entry.

@@ -866,3 +866,101 @@ fn status_suggests_user_install_for_stale_and_foreign_home_skills() {
         let _ = fs::remove_dir_all(&dir);
     }
 }
+
+fn git_at(dir: &Path, args: &[&str]) {
+    fs::create_dir_all(dir).unwrap();
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn commit_at(dir: &Path) {
+    git_at(dir, &["add", "-A"]);
+    git_at(
+        dir,
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    );
+}
+
+/// The Codex project handler runs no gate in a repository nested in another
+/// work tree, such as a submodule. Install and status say so; a linked
+/// worktree of the outer repository gets no warning.
+#[test]
+fn install_and_status_warn_for_a_codex_gate_in_a_nested_repository() {
+    const WARNING: &str = "the Codex gate does not run in a repository nested in another work tree";
+    let dir = agent_temp_dir("nested-codex");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let inner = dir.join("inner");
+    git_at(&inner, &["init", "-q"]);
+    commit_at(&inner);
+    let outer = dir.join("outer");
+    git_at(&outer, &["init", "-q"]);
+    commit_at(&outer);
+    git_at(
+        &outer,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            inner.to_str().unwrap(),
+            "lib",
+        ],
+    );
+    let linked = outer.join(".worktrees/feat");
+    git_at(
+        &outer,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            linked.to_str().unwrap(),
+        ],
+    );
+
+    let install = run_agent(
+        &outer.join("lib"),
+        &home,
+        &["install", "--harness", "codex"],
+    );
+    assert!(install.stderr.contains(WARNING), "{}", install.stderr);
+    let status = run_fallow_raw_with_env(
+        &[
+            "agent",
+            "status",
+            "--root",
+            outer.join("lib").to_str().unwrap(),
+        ],
+        &[("HOME", home.to_str().unwrap())],
+    );
+    assert!(status.stderr.contains(WARNING), "{}", status.stderr);
+    let linked_install = run_agent(&linked, &home, &["install", "--harness", "codex"]);
+    assert!(
+        !linked_install.stderr.contains(WARNING),
+        "{}",
+        linked_install.stderr
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

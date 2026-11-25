@@ -285,10 +285,11 @@ fn codex_handler_runs_no_gate_in_an_unregistered_nested_checkout() {
     assert!(out.status.success());
 }
 
-/// A submodule is its own checkout of another repository. The Codex handler
-/// of the submodule runs its own gate script.
+/// `git worktree list` does not name a submodule, and the gate script of a
+/// submodule comes from the tree of the submodule. The Codex handler runs no
+/// gate there; install and status warn instead.
 #[test]
-fn codex_handler_runs_the_gate_of_a_submodule() {
+fn codex_handler_runs_no_gate_in_a_submodule() {
     let tmp = tempdir().unwrap();
     let base = tmp.path().canonicalize().unwrap();
     let inner = base.join("inner");
@@ -313,12 +314,12 @@ fn codex_handler_runs_the_gate_of_a_submodule() {
 
     let out = run_handler_stub(&codex("."), ".codex", &lib, &lib.join("src"), &lib);
 
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        lib.to_string_lossy(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+    assert!(
+        out.stdout.is_empty(),
+        "the handler ran the gate of the submodule: {}",
+        String::from_utf8_lossy(&out.stdout)
     );
+    assert!(out.status.success());
 }
 
 /// A nested repository, submodule or vendored package below the project

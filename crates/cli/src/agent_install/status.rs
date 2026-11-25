@@ -276,6 +276,11 @@ pub fn run_agent_status(
     let root = resolve_root(root, root_explicit);
     let home = fallow_process::HostPaths::from_env().home;
     let surfaces = surfaces(&root, home.as_deref());
+    if root.join(".codex/hooks/fallow-gate.sh").is_file()
+        && mcp::is_nested_repository(&root, home.as_deref())
+    {
+        eprintln!("{}", mcp::NESTED_CODEX_GATE_WARNING);
+    }
     let root_arg = root_explicit.then(|| super::root_arg(&root));
     let next_actions = status_next_actions(&surfaces, root_arg.as_deref());
     let report = StatusReport {

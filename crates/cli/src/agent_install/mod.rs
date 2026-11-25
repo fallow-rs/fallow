@@ -487,6 +487,12 @@ pub fn run_agent_install(
     };
     if !skip(Step::Hooks) {
         steps.extend(hooks::install(&ctx, &harnesses));
+        if !ctx.user
+            && harnesses.contains(&Harness::Codex)
+            && mcp::is_nested_repository(&root, ctx.home.as_deref())
+        {
+            eprintln!("{}", mcp::NESTED_CODEX_GATE_WARNING);
+        }
     }
 
     // `codex mcp add` writes a user-level entry, so the printed command uses
