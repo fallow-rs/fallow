@@ -74,7 +74,7 @@ impl ConfigChainSnapshot {
             .into_iter()
             .flat_map(FallowConfig::local_source_files)
             .map(|file| {
-                let bytes = std::fs::read(&file).ok();
+                let bytes = read_chain_file(&file);
                 (file, bytes)
             })
             .collect();
@@ -101,8 +101,18 @@ impl ConfigChainSnapshot {
             || self
                 .files
                 .iter()
-                .any(|(path, bytes)| std::fs::read(path).ok() != *bytes)
+                .any(|(path, bytes)| read_chain_file(path) != *bytes)
     }
+}
+
+/// The bytes of a file of the `extends` chain: a regular file within the
+/// size limit of the config read, else `None`.
+fn read_chain_file(path: &Path) -> Option<Vec<u8>> {
+    fallow_types::read_guard::read_bytes_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
 }
 
 /// The error of [`load_config_file`].
@@ -502,5 +512,77 @@ mod tests {
             file.config.production,
             fallow_config::ProductionConfig::default()
         );
+    }
+
+    /// Run `load_config_file` for `root` on a thread: `Some(true)` when the
+    /// load fails within a few seconds, `None` when it does not return.
+    #[cfg(unix)]
+    fn load_fails_in_time(root: &Path) -> Option<bool> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let root = root.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = sender.send(load_config_file(&root, None, ConfigFileOptions::default()));
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .ok()
+            .map(|result| result.is_err())
+    }
+
+    /// A project with a `.git` entry whose config extends `entry`.
+    #[cfg(unix)]
+    fn project_extending(entry: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dunce::canonicalize(dir.path()).expect("canonical");
+        std::fs::create_dir(root.join(".git")).expect("git marker");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            format!(r#"{{ "extends": "{entry}" }}"#),
+        )
+        .expect("config");
+        (dir, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_pipe_in_the_extends_chain_is_refused_without_a_wait() {
+        let (_dir, root) = project_extending("./pipe.json");
+        let status = std::process::Command::new("mkfifo")
+            .arg(root.join("pipe.json"))
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo must create the test pipe");
+
+        assert_eq!(load_fails_in_time(&root), Some(true));
+        let files = FallowConfig::local_source_files(&root.join(".fallowrc.json"));
+        assert!(
+            !files.iter().any(|file| file.ends_with("pipe.json")),
+            "{files:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_device_in_the_extends_chain_is_refused() {
+        for device in ["null", "zero"] {
+            let probe = tempfile::tempdir().expect("tempdir");
+            let depth = dunce::canonicalize(probe.path())
+                .expect("canonical")
+                .components()
+                .count();
+            // The project is one level below the temp dir, and the first
+            // component is the file system root.
+            let up = "../".repeat(depth);
+            let (_dir, root) = project_extending(&format!("{up}dev/{device}"));
+
+            let files = FallowConfig::local_source_files(&root.join(".fallowrc.json"));
+            assert!(
+                !files.iter().any(|file| file.starts_with("/dev")),
+                "{device}: {files:?}"
+            );
+            assert_eq!(load_fails_in_time(&root), Some(true), "{device}");
+        }
     }
 }

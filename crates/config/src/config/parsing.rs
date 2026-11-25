@@ -752,7 +752,14 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             ));
         }
 
-        self.local_files.push(canonical.clone());
+        // The list holds the files that the walk reads, so a file that the
+        // bounded read refuses for its type or size is not in it.
+        if fallow_types::read_guard::is_bounded_regular_file(
+            &canonical,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) {
+            self.local_files.push(canonical.clone());
+        }
         self.open_order_frame();
         let result = self.resolve_local_uncached(&canonical, depth, inside);
         self.active.remove(&identity);

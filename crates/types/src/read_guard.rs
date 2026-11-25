@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 /// The default size limit for a project file that fallow reads in full.
 ///
 /// Config files, `tsconfig.json` files, rule packs and `CODEOWNERS` files of
-/// large monorepos stay well below 1 MiB. 16 MiB leaves room for generated
-/// configs and still stops a read of a device or a multi-gigabyte file.
+/// large monorepos stay well below 1 MiB. 16 MiB leaves room for configs
+/// that tools write, and still stops a read of a device or a multi-gigabyte
+/// file.
 pub const DEFAULT_MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
 
 /// The reason that a bounded read refused a file.
@@ -226,6 +227,24 @@ pub fn read_to_string_bounded(path: &Path, max_bytes: u64) -> Result<String, Rea
     into_string(path, bytes)
 }
 
+/// [`read_to_string_bounded`] for bytes: read `path` in full when it is a
+/// regular file with at most `max_bytes` bytes, with no root check.
+///
+/// # Errors
+///
+/// Returns a [`ReadRefusal`] when a check fails or the read fails.
+pub fn read_bytes_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>, ReadRefusal> {
+    read_resolved(path, path, max_bytes)
+}
+
+/// Whether `path` is a regular file with at most `max_bytes` bytes, after a
+/// link resolves. A bounded read of such a file does not refuse it for its
+/// type or size.
+#[must_use]
+pub fn is_bounded_regular_file(path: &Path, max_bytes: u64) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() <= max_bytes)
+}
+
 fn read_resolved(path: &Path, resolved: &Path, max_bytes: u64) -> Result<Vec<u8>, ReadRefusal> {
     let io = |source: std::io::Error| ReadRefusal::Io {
         path: path.to_path_buf(),
@@ -281,6 +300,20 @@ mod tests {
         let abs = dir.path().join("a.json");
         assert_eq!(read_bytes_inside(dir.path(), &abs, 16).unwrap(), b"{}");
         assert!(is_inside_root(dir.path(), &abs));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn bounded_bytes_read_takes_regular_files_within_the_limit_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.json");
+        std::fs::write(&file, "{}").unwrap();
+        assert_eq!(read_bytes_bounded(&file, 16).unwrap(), b"{}");
+        assert!(is_bounded_regular_file(&file, 16));
+        assert!(read_bytes_bounded(&file, 1).is_err());
+        assert!(!is_bounded_regular_file(&file, 1));
+        assert!(read_bytes_bounded(dir.path(), 16).is_err());
+        assert!(!is_bounded_regular_file(dir.path(), 16));
     }
 
     #[test]
