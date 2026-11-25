@@ -344,7 +344,7 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
         .map(String::as_str)
         .chain(std::iter::once(pattern));
     for text in texts {
-        if is_absolute_pattern(text) {
+        if is_absolute_pattern(text) || folds_to_absolute_path(text) {
             return Err(GlobValidationError::AbsolutePath {
                 field,
                 pattern: pattern.to_owned(),
@@ -592,6 +592,13 @@ pub fn validate_user_finding_ignore_globs(
     }
 }
 
+/// Whether `text` is absolute after the loaders fold `\` to `/` and strip each
+/// leading `./`. For example, `.//home` becomes `/home`.
+fn folds_to_absolute_path(text: &str) -> bool {
+    let folded = text.replace('\\', "/");
+    is_absolute_pattern(folded.trim_start_matches("./"))
+}
+
 /// Validate a user-supplied DIRECTORY PATH (not a glob). Same absolute-path
 /// and traversal checks as `compile_user_glob`, but skips the glob-syntax
 /// check because the value is a literal path, not a pattern.
@@ -608,11 +615,7 @@ pub fn validate_user_finding_ignore_globs(
 /// Returns `AbsolutePath` or `TraversalSegment` for the same shapes
 /// `compile_user_glob` rejects. Never returns `InvalidSyntax`.
 pub fn validate_user_path(path: &str, field: &'static str) -> Result<(), GlobValidationError> {
-    // The loaders fold `\` to `/` and strip each leading `./`, so `.//home`
-    // becomes `/home`. The check also runs on that folded text.
-    let folded = path.replace('\\', "/");
-    let stripped = folded.trim_start_matches("./");
-    if is_absolute_pattern(path) || is_absolute_pattern(stripped) {
+    if is_absolute_pattern(path) || folds_to_absolute_path(path) {
         return Err(GlobValidationError::AbsolutePath {
             field,
             pattern: path.to_owned(),
@@ -803,6 +806,23 @@ mod tests {
             .filter_map(Result::ok)
             .collect();
         assert_eq!(hits, vec![root.join("libs/b.json")]);
+    }
+
+    #[test]
+    fn a_glob_that_folds_to_an_absolute_path_is_refused() {
+        for pattern in [".//", ".//home/*", "././/etc/x", ".\\/x"] {
+            assert!(
+                validate_user_path(pattern, "entry").is_err(),
+                "path check accepted {pattern:?}"
+            );
+            assert!(
+                compile_user_glob(pattern, "entry").is_err(),
+                "glob check accepted {pattern:?}"
+            );
+        }
+        // Only the glob check expands braces; a path keeps them as a name.
+        assert!(compile_user_glob("{.//,a}/b", "entry").is_err());
+        assert!(compile_user_glob("./src/**/*.ts", "entry").is_ok());
     }
 
     #[test]
