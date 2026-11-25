@@ -73,7 +73,7 @@ fn add_configured_schema(result: &mut PluginResult, config_path: &Path, root: &P
         result.always_used_files.push(normalized);
         result
             .referenced_dependencies
-            .extend(read_schema_provider_dependencies(&absolute));
+            .extend(read_schema_provider_dependencies(root, &absolute));
         return;
     }
 
@@ -82,37 +82,41 @@ fn add_configured_schema(result: &mut PluginResult, config_path: &Path, root: &P
         .push(format!("{}/**/*.prisma", normalized.trim_end_matches('/')));
     result
         .referenced_dependencies
-        .extend(read_schema_folder_provider_dependencies(&absolute));
+        .extend(read_schema_folder_provider_dependencies(root, &absolute));
 }
 
 fn is_schema_file_path(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "prisma") || path.is_file()
 }
 
-fn read_schema_provider_dependencies(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
+fn read_schema_provider_dependencies(root: &Path, path: &Path) -> Vec<String> {
+    crate::discover::project_read::read_project_file(root, path)
         .map(|source| parse_generator_providers(&source))
         .unwrap_or_default()
 }
 
-fn read_schema_folder_provider_dependencies(path: &Path) -> Vec<String> {
+fn read_schema_folder_provider_dependencies(root: &Path, path: &Path) -> Vec<String> {
     let mut providers = Vec::new();
-    collect_schema_folder_provider_dependencies(path, &mut providers);
+    collect_schema_folder_provider_dependencies(root, path, &mut providers);
     providers.sort();
     providers.dedup();
     providers
 }
 
-fn collect_schema_folder_provider_dependencies(path: &Path, providers: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(path) else {
+fn collect_schema_folder_provider_dependencies(
+    root: &Path,
+    path: &Path,
+    providers: &mut Vec<String>,
+) {
+    let Some(entries) = crate::discover::project_read::read_project_dir(root, path) else {
         return;
     };
     for entry in entries.filter_map(Result::ok) {
         let child = entry.path();
         if child.is_dir() {
-            collect_schema_folder_provider_dependencies(&child, providers);
+            collect_schema_folder_provider_dependencies(root, &child, providers);
         } else if child.extension().is_some_and(|ext| ext == "prisma") {
-            providers.extend(read_schema_provider_dependencies(&child));
+            providers.extend(read_schema_provider_dependencies(root, &child));
         }
     }
 }

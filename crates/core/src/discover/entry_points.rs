@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use super::walk::SOURCE_EXTENSIONS;
+use super::{project_read, walk::SOURCE_EXTENSIONS};
 use fallow_config::{PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution};
 use fallow_graph::resolve::{OUTPUT_DIRS, directory_index_entry, output_entry_to_source_path};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
@@ -1212,7 +1212,7 @@ fn collect_nested_package_entries(
     search: &NestedPackageSearch<'_>,
     skipped_entries: &mut FxHashMap<String, usize>,
 ) {
-    let Some(pkg) = fallow_config::load_dir_package_json(pkg_dir) else {
+    let Some(pkg) = project_read::package_json(search.workspaces.project_root, pkg_dir) else {
         return;
     };
     let output_map = TsconfigOutputMap::from_project(pkg_dir);

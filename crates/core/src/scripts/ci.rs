@@ -92,7 +92,8 @@ pub fn analyze_ci_files(
     let mut ci_files: Vec<CiFile> = std::iter::once(".gitlab-ci.yml".to_string())
         .chain(workflow_files(root))
         .filter_map(|file| {
-            let content = std::fs::read_to_string(root.join(&file)).ok()?;
+            let content =
+                crate::discover::project_read::read_project_file(root, &root.join(&file))?;
             Some(CiFile {
                 file,
                 action_dir: None,
@@ -156,7 +157,9 @@ fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiA
 /// The project-root-relative paths of the `.github/workflows/*.yml` and
 /// `*.yaml` files, sorted by name.
 fn workflow_files(root: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(root.join(".github/workflows")) else {
+    let Some(entries) =
+        crate::discover::project_read::read_project_dir(root, &root.join(".github/workflows"))
+    else {
         return Vec::new();
     };
     let mut files: Vec<String> = entries
@@ -266,7 +269,9 @@ fn analyze_command_group(
 fn read_composite_actions(root: &Path) -> Vec<CiFile> {
     let mut actions = Vec::new();
     push_action_file(root, "", &mut actions);
-    let Ok(entries) = std::fs::read_dir(root.join(".github/actions")) else {
+    let Some(entries) =
+        crate::discover::project_read::read_project_dir(root, &root.join(".github/actions"))
+    else {
         return actions;
     };
     let mut dirs: Vec<String> = entries
@@ -279,7 +284,9 @@ fn read_composite_actions(root: &Path) -> Vec<CiFile> {
         if push_action_file(root, &dir, &mut actions) {
             continue;
         }
-        let Ok(children) = std::fs::read_dir(root.join(&dir)) else {
+        let Some(children) =
+            crate::discover::project_read::read_project_dir(root, &root.join(&dir))
+        else {
             continue;
         };
         let mut nested: Vec<String> = children
@@ -299,7 +306,9 @@ fn read_composite_actions(root: &Path) -> Vec<CiFile> {
 /// directory holds one.
 fn push_action_file(root: &Path, dir: &str, actions: &mut Vec<CiFile>) -> bool {
     ["action.yml", "action.yaml"].iter().any(|name| {
-        let Ok(content) = std::fs::read_to_string(root.join(dir).join(name)) else {
+        let Some(content) =
+            crate::discover::project_read::read_project_file(root, &root.join(dir).join(name))
+        else {
             return false;
         };
         let file = if dir.is_empty() {

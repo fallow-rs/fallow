@@ -632,7 +632,7 @@ fn match_pattern_in_index(
 fn discover_pattern_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
     if !pattern_has_glob(pattern) {
         let path = root.join(pattern);
-        return if path.is_file() {
+        return if crate::discover::project_read::is_project_file(root, &path) {
             vec![path]
         } else {
             Vec::new()
@@ -651,21 +651,21 @@ fn discover_pattern_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
         None => (root.to_path_buf(), pattern),
     };
 
-    scan_dir_for_pattern(&dir, file_pattern)
+    scan_dir_for_pattern(root, &dir, file_pattern)
 }
 
-fn scan_dir_for_pattern(dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
+fn scan_dir_for_pattern(root: &Path, dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
     let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Some(entries) = crate::discover::project_read::read_project_dir(root, dir) else {
         return Vec::new();
     };
 
     entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.is_file())
+        .filter(|path| crate::discover::project_read::is_project_file(root, path))
         .filter(|path| {
             path.file_name()
                 .is_some_and(|name| matcher.is_match(std::path::Path::new(name)))
