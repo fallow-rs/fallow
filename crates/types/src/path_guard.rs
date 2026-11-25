@@ -124,7 +124,10 @@ fn is_protected_name(name: &OsStr) -> bool {
 
 /// The canonical Git directory and common Git directory of the work tree
 /// that contains `dir`. Empty when no ancestor of `dir` has a `.git` entry.
-fn git_dirs(dir: &Path) -> Vec<PathBuf> {
+/// The two can be outside the work tree, for a separate Git directory or a
+/// worktree of a bare repository.
+#[must_use]
+pub fn git_dirs(dir: &Path) -> Vec<PathBuf> {
     let Some(top) = work_tree_top(dir) else {
         return Vec::new();
     };

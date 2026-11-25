@@ -40,6 +40,10 @@ pub struct WriteScope {
     /// The Git work tree that contains the root, wherever the run starts.
     /// A symlink in it is a link that the repository controls.
     checkout: Option<PathBuf>,
+    /// The Git directory and common Git directory of the root
+    /// ([`fallow_types::path_guard::git_dirs`]). No symlink may resolve into
+    /// them, wherever they are.
+    git_dirs: Vec<PathBuf>,
     shared_dirs: Vec<PathBuf>,
 }
 
@@ -127,10 +131,12 @@ impl WriteScope {
             .find(|dir| dir.join(".git").exists())
             .map(Path::to_path_buf);
         let work_tree = checkout.clone().filter(|tree| cwd.starts_with(tree));
+        let git_dirs = fallow_types::path_guard::git_dirs(&root);
         Ok(Self {
             root,
             work_tree,
             checkout,
+            git_dirs,
             shared_dirs,
         })
     }
@@ -151,7 +157,9 @@ impl WriteScope {
     ///   work tree must resolve inside the root or the allowed work tree.
     /// - No symlink on the way, wherever it lies, may resolve into a `.git`
     ///   or `node_modules` directory
-    ///   ([`fallow_types::path_guard::is_protected_link_target`]). A shared
+    ///   ([`fallow_types::path_guard::is_protected_link_target`]), or into
+    ///   the Git directory or common Git directory of the root, also when
+    ///   that directory is outside the work tree. A shared
     ///   directory or a device is allowed only for a path that reaches it
     ///   without such a link.
     /// - An existing target that is not a regular file or a directory is
@@ -204,7 +212,9 @@ impl WriteScope {
     fn refusal(&self, walk: &Walk) -> Option<Refusal> {
         let mut through_project_link = false;
         for link in &walk.links {
-            let kind = if self.in_checkout(&link.location) {
+            let kind = if self.git_dirs.iter().any(|dir| link.target.starts_with(dir)) {
+                Some(LinkTarget::GitMetadata)
+            } else if self.in_checkout(&link.location) {
                 through_project_link = true;
                 let within = if link.target.starts_with(&self.root) {
                     Some(self.root.as_path())
@@ -1168,6 +1178,60 @@ mod tests {
             WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
         assert!(scope.check("--output-file", &link, &root).is_some());
         assert!(create_checked(&link, &link, Some(&scope)).is_err());
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// A project whose Git directory is outside the work tree
+    /// (`git init --separate-git-dir`) keeps its hooks there. A link outside
+    /// the project into that Git directory is refused too.
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_link_into_a_separate_git_dir_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let shared = dir.path().join("shared");
+        let git_dir = shared.join("gd");
+        std::fs::create_dir_all(git_dir.join("hooks")).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+        let hook = git_dir.join("hooks/pre-commit");
+        std::fs::write(&hook, "keep").unwrap();
+        let link = shared.join("r.json");
+        std::os::unix::fs::symlink(&hook, &link).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert!(scope.check("--output-file", &link, &root).is_some());
+        assert!(!scope.contains(&link));
+        assert!(create_checked(&link, &link, Some(&scope)).is_err());
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// The same for a worktree of a bare repository: the link leads into the
+    /// common Git directory, which holds the hooks.
+    #[cfg(unix)]
+    #[test]
+    fn an_outside_link_into_the_common_git_dir_of_a_worktree_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let shared = dir.path().join("shared");
+        let bare = shared.join("repo.git");
+        let linked = bare.join("worktrees/project");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::create_dir_all(bare.join("hooks")).unwrap();
+        std::fs::write(linked.join("commondir"), "../..\n").unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        let hook = bare.join("hooks/pre-commit");
+        std::fs::write(&hook, "keep").unwrap();
+        let link = shared.join("r.json");
+        std::os::unix::fs::symlink(&hook, &link).unwrap();
+        let scope =
+            WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
+        assert!(scope.check("--output-file", &link, &root).is_some());
         assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
     }
 
