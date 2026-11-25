@@ -542,8 +542,11 @@ fn resolve_package_extends(config_dir: &Path, extends: &str) -> Option<PathBuf> 
 
 fn package_subpath_tsconfig(package_root: &Path, subpath: &str) -> Option<PathBuf> {
     let package_json_path = package_root.join("package.json");
-    if package_json_path.is_file() {
-        let package_json = std::fs::read_to_string(package_json_path).ok()?;
+    // The manifest read is bounded, and a manifest that resolves outside the
+    // project scope base is not read, as for other installed manifests.
+    if package_json_path.is_file()
+        && let Ok(package_json) = crate::PackageJson::read_source(&package_json_path)
+    {
         let package_json: serde_json::Value = serde_json::from_str(&package_json).ok()?;
         if let Some(exports) = package_json.get("exports") {
             let serde_json::Value::Object(exports) = exports else {
@@ -596,8 +599,11 @@ fn package_extends_parts(extends: &str) -> Option<(PathBuf, Option<String>)> {
 
 fn package_root_tsconfig(package_root: &Path) -> Option<PathBuf> {
     let package_json_path = package_root.join("package.json");
-    if package_json_path.is_file() {
-        let package_json = std::fs::read_to_string(package_json_path).ok()?;
+    // The manifest read is bounded, and a manifest that resolves outside the
+    // project scope base is not read, as for other installed manifests.
+    if package_json_path.is_file()
+        && let Ok(package_json) = crate::PackageJson::read_source(&package_json_path)
+    {
         let package_json: serde_json::Value = serde_json::from_str(&package_json).ok()?;
         if let Some(exports) = package_json.get("exports") {
             let target = match exports {

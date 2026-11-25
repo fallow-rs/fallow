@@ -1107,3 +1107,37 @@ fn shared_parent_in_two_extends_branches_is_not_a_cycle() {
         "a real cycle still fails closed"
     );
 }
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_package_manifest_link_out_of_the_scope_is_not_read_for_extends() {
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dunce::canonicalize(dir.path()).unwrap();
+    let root = outer.join("project");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let elsewhere = outer.join("elsewhere/base");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join("tsconfig.json"), "{}").unwrap();
+    std::fs::write(elsewhere.join("custom.json"), "{}").unwrap();
+    std::fs::write(
+        elsewhere.join("package.json"),
+        r#"{"tsconfig": "./custom.json"}"#,
+    )
+    .unwrap();
+    let package = root.join("node_modules/base");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("tsconfig.json"), "{}").unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("package.json"), package.join("package.json"))
+        .unwrap();
+
+    // The linked manifest is not read, so its `tsconfig` field does not apply.
+    assert_eq!(
+        package_root_tsconfig(&package),
+        Some(package.join("tsconfig.json"))
+    );
+    assert_eq!(
+        package_subpath_tsconfig(&package, "tsconfig.json"),
+        Some(package.join("tsconfig.json"))
+    );
+}
