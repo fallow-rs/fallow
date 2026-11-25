@@ -144,7 +144,7 @@ pub fn read_bytes_inside(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec
     let canonical_root = std::fs::canonicalize(root).map_err(io)?;
     let resolved = match std::fs::canonicalize(&joined) {
         Ok(resolved) => resolved,
-        Err(_) if passes_a_link(root, &canonical_root, &joined) => return Err(outside()),
+        Err(_) if unresolved_is_outside(&canonical_root, &joined) => return Err(outside()),
         Err(source) => return Err(io(source)),
     };
     if !resolved.starts_with(&canonical_root) {
@@ -153,45 +153,49 @@ pub fn read_bytes_inside(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec
     read_resolved(path, &resolved, max_bytes)
 }
 
-/// True when the walk from `root` to `joined` passes a link, or when
-/// `joined` is not below `root` by text. The read helpers use it for a path
-/// that does not resolve: such a path gets the same refusal as a path that
-/// resolves outside the root, so a caller cannot tell a dangling link from a
+/// True when `joined`, a path that does not resolve, names a place outside
+/// `canonical_root` or ends in a dangling link. The longest leading part of
+/// `joined` that resolves is resolved, and the rest is taken by text, because
+/// no link exists below a missing entry. A dangling link at the first missing
+/// entry counts as outside, so a caller cannot tell a dangling link from a
 /// link to a file outside the root.
-fn passes_a_link(root: &Path, canonical_root: &Path, joined: &Path) -> bool {
+fn unresolved_is_outside(canonical_root: &Path, joined: &Path) -> bool {
     use std::path::Component;
-    let (base, relative) = match joined.strip_prefix(root) {
-        Ok(relative) => (root, relative),
-        Err(_) => match joined.strip_prefix(canonical_root) {
-            Ok(relative) => (canonical_root, relative),
-            Err(_) => return true,
-        },
+    let components: Vec<Component<'_>> = joined.components().collect();
+    let Some((resolved_len, mut current)) = (0..=components.len()).rev().find_map(|len| {
+        let prefix: PathBuf = components[..len].iter().collect();
+        std::fs::canonicalize(&prefix)
+            .ok()
+            .map(|resolved| (len, resolved))
+    }) else {
+        return true;
     };
-    let mut current = base.to_path_buf();
-    let mut depth = 0_usize;
-    for component in relative.components() {
+    if !current.starts_with(canonical_root) {
+        return true;
+    }
+    for (index, component) in components[resolved_len..].iter().enumerate() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                if depth == 0 {
+                current.pop();
+                if !current.starts_with(canonical_root) {
                     return true;
                 }
-                depth -= 1;
-                current.pop();
             }
             Component::Normal(name) => {
                 current.push(name);
-                depth += 1;
-                match current.symlink_metadata() {
-                    Ok(meta) if meta.file_type().is_symlink() => return true,
-                    Ok(_) => {}
-                    Err(_) => return false,
+                let dangling = index == 0
+                    && current
+                        .symlink_metadata()
+                        .is_ok_and(|meta| meta.file_type().is_symlink());
+                if dangling {
+                    return true;
                 }
             }
             Component::RootDir | Component::Prefix(_) => return true,
         }
     }
-    false
+    !current.starts_with(canonical_root)
 }
 
 /// [`read_bytes_inside`] that also requires valid UTF-8.
@@ -375,6 +379,19 @@ mod tests {
         }
         let err = read_to_string_inside(dir.path(), Path::new("../none.json"), 16).unwrap_err();
         assert!(matches!(err, ReadRefusal::OutsideRoot { .. }), "{err:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_missing_file_through_another_spelling_of_the_root_stays_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("real");
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, dir.path().join("alias")).unwrap();
+        let path = dir.path().join("alias/none.json");
+        let err = read_to_string_inside(&root, &path, 16).unwrap_err();
+        assert!(err.is_not_found(), "{err:?}");
     }
 
     #[cfg(unix)]
