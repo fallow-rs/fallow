@@ -248,7 +248,9 @@ mod tests {
         assert_eq!(urls, vec![url(&root.join("dist/app.js"))]);
     }
 
+    /// The URLs use Unix path spellings.
     #[test]
+    #[cfg(unix)]
     fn script_filter_keeps_missing_files_below_the_root_and_other_urls() {
         let root = Path::new("/project");
         let script = |url: &str| ScriptCoverage {

@@ -4122,7 +4122,7 @@ mod tests {
         .unwrap_or_else(|err| panic!("failed to build source map entry: {err}"));
 
         super::UTF16_CHARS_WALKED.with(|walked| walked.set(0));
-        let remapped = super::remap_script_with_source_map(Path::new("/"), &script, &entry)
+        let remapped = super::remap_script_with_source_map(root, &script, &entry)
             .map_or(0, |mapped| mapped.functions.len());
         let walked = super::UTF16_CHARS_WALKED.with(std::cell::Cell::get);
         (remapped, walked, generated.chars().count())
