@@ -440,7 +440,10 @@ request only with the `ci:perf` label:
   pushes to `main` start the workflow, but every job skips. See
   [Benchmarking](../benchmarking.md#when-codspeed-runs).
 
-Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
+Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run.
+Add the `ci:walltime` label to a pull request from a branch of this
+repository to measure the head commit with the CodSpeed walltime jobs. That label event starts one walltime run, and a later push does
+not start it again. A pull request
 without the label starts these workflows, but every job skips and uses no
 runner, except one.
 

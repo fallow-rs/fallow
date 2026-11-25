@@ -11,8 +11,8 @@ name: Benchmarks
 # also holds the changes merged after that nightly run. A push to main runs
 # the jobs only for the release commit ("chore: release v"), because
 # scripts/verify-release-ci.mjs reads its result before a release. The
-# walltime jobs run at night, on the release commit, and on a dispatch with
-# the walltime input.
+# walltime jobs run at night, on the release commit, on a dispatch with the
+# walltime input, and once when a pull request gets the "ci:walltime" label.
 # The "Perf label for cache formats" job runs on each pull request: it fails
 # when the branch changes a benchmarked cache format without the label.
 on:
@@ -30,6 +30,7 @@ on:
       - '.github/scripts/generate-benchmark-matrix.test.mjs'
       - 'scripts/check-benchmark-harness.py'
       - 'benchmarks/cli-instructions.sh'
+      - 'tools/type-aware-sidecar/**'
       - 'scripts/check-perf-label.mjs'
       - 'scripts/check-version-bumps.mjs'
       - 'scripts/version-constants.mjs'
@@ -62,7 +63,8 @@ on:
 # cancelled: scripts/verify-release-ci.mjs reads the result for the release
 # commit before a release can start.
 # A "labeled" event for another label also gets a group of its own, so it
-# does not cancel a real ci:perf run (its benchmark jobs skip).
+# does not cancel a real ci:perf run. A later push does not cancel the run of
+# the "ci:walltime" label either.
 concurrency:
   group: "bench-${{ ((github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name != 'ci:perf')) || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
   cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
@@ -81,7 +83,9 @@ jobs:
     # Every benchmark job needs this job, so its condition decides whether the
     # run measures anything. On a pull request, run only with the "ci:perf"
     # label, and skip a "labeled" event for another label, so it does not
-    # start a second run. On a push, run only for the release commit.
+    # start a second run. The "labeled" event of "ci:walltime" also runs, for
+    # the walltime jobs only, and only for a branch of this repository. On a
+    # push, run only for the release commit.
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
@@ -89,7 +93,10 @@ jobs:
       startsWith(github.event.head_commit.message, 'chore: release v')) ||
       (github.event_name == 'pull_request' &&
       contains(github.event.pull_request.labels.*.name, 'ci:perf') &&
-      (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:perf')) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'ci:walltime' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
     timeout-minutes: 5
@@ -132,6 +139,9 @@ jobs:
   determine-matrix:
     name: Determine benchmark matrix
     needs: benchmark-harness
+    # The run of the "ci:walltime" label measures walltime only. The fast
+    # simulation shards need this job, so they skip too.
+    if: github.event.label.name != 'ci:walltime'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -293,7 +303,7 @@ jobs:
     # The release push skips it to save runner time: the walltime-cli job
     # measures the release CLI on the same corpus for that commit.
     needs: benchmark-harness
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event.label.name != 'ci:walltime'
     # CodSpeed simulation currently rejects Ubuntu 26.04.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -343,7 +353,11 @@ jobs:
   # GitHub-hosted runner as unreliable. The CodSpeed Hobby plan of the
   # fallow-rs organization gives about 1,560 macro runner minutes per month.
   # A run uses about 4 of these minutes, so these jobs run at night, on the
-  # release commit and on a dispatch with the walltime input. The release
+  # release commit, on a dispatch with the walltime input, and on the
+  # "labeled" event of "ci:walltime" on a branch of this repository. A fork
+  # gets no OIDC token for the upload, and its code does not run on the
+  # macro runner. A later push to the pull request does not start them
+  # again, so each label event costs one run. The release
   # build runs on a free GitHub ARM64 runner. On the release commit, the
   # walltime jobs usually end before the slowest simulation shard, so the
   # release gate does not wait longer. A plain dispatch, such as the one of
@@ -356,7 +370,10 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && inputs.walltime) ||
       (github.event_name == 'push' &&
-      startsWith(github.event.head_commit.message, 'chore: release v'))
+      startsWith(github.event.head_commit.message, 'chore: release v')) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'ci:walltime' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     # The macro runner image is Ubuntu 22.04. A build on the same release keeps
     # the binary inside the glibc version of the runner.
     runs-on: ubuntu-22.04-arm
@@ -431,7 +448,10 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && inputs.walltime) ||
       (github.event_name == 'push' &&
-      startsWith(github.event.head_commit.message, 'chore: release v'))
+      startsWith(github.event.head_commit.message, 'chore: release v')) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'ci:walltime' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
     timeout-minutes: 15
     permissions:

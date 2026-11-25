@@ -43,4 +43,5 @@ When adding a test fixture:
   pinned public projects under CPU simulation, and the same CLI corpus and the
   type-aware companion under walltime on a CodSpeed macro runner. It runs
   nightly on main, on the release push, and on pull requests with the
-  `ci:perf` label
+  `ci:perf` label. The `ci:walltime` label runs the walltime jobs once for a
+  pull request
