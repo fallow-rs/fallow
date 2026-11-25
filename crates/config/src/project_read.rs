@@ -186,16 +186,23 @@ pub fn project_entry_within(
     ProjectEntry::Inside
 }
 
-/// [`project_entry_within`] for a `path` that can also be absolute. An
-/// absolute path does not need the canonical spelling of the base: its
-/// longest part that exists resolves first, and the walk checks the rest.
+/// [`project_entry_within`] for a `path` that can also be absolute.
+///
+/// An absolute path must pass [`absolute_path_text_inside`] against the
+/// base, in its canonical form or in `base_as_given`, before any file
+/// system call. Then its longest part that exists resolves, and the walk
+/// checks the rest, so the path does not need the canonical spelling.
 pub fn project_path_entry(
     canonical_base: &Path,
+    base_as_given: &Path,
     canonical_root: &Path,
     path: &Path,
 ) -> ProjectEntry {
     if !path.is_absolute() {
         return project_entry_within(canonical_base, canonical_root, path);
+    }
+    if !absolute_path_text_inside(path, canonical_base, base_as_given) {
+        return ProjectEntry::Outside;
     }
     let Some((existing, resolved)) = path.ancestors().find_map(|dir| {
         dunce::canonicalize(dir)
@@ -208,6 +215,62 @@ pub fn project_path_entry(
         return ProjectEntry::Outside;
     };
     project_entry_within(canonical_base, canonical_base, &resolved.join(rest))
+}
+
+/// Whether the absolute `path` from a config can name an entry below
+/// `canonical_base` or below `base_as_given`, by its text alone. Call it
+/// before any file system call on such a path.
+///
+/// A path in UNC or device form (`\\host\share`, `//host/share`,
+/// `\\?\` and `\\.\`) is refused, so that a check never reaches a
+/// network share. Else the path, with each `..` applied by text, must
+/// start with one of the two spellings of the base.
+#[must_use]
+pub fn absolute_path_text_inside(path: &Path, canonical_base: &Path, base_as_given: &Path) -> bool {
+    if is_share_or_device_text(path) {
+        return false;
+    }
+    let normalized = fallow_types::path_guard::lexically_normalized(path);
+    let given = std::path::absolute(base_as_given)
+        .map(|base| fallow_types::path_guard::lexically_normalized(&base));
+    normalized.starts_with(canonical_base) || given.is_ok_and(|given| normalized.starts_with(given))
+}
+
+/// Whether `path` starts with two separators, or with a Windows prefix
+/// other than a plain drive letter.
+fn is_share_or_device_text(path: &Path) -> bool {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    let separator = |byte: u8| byte == b'/' || byte == b'\\';
+    if bytes.len() >= 2 && separator(bytes[0]) && separator(bytes[1]) {
+        return true;
+    }
+    matches!(
+        path.components().next(),
+        Some(Component::Prefix(prefix)) if !matches!(prefix.kind(), std::path::Prefix::Disk(_))
+    )
+}
+
+/// The spelling of `canonical_base` as an ancestor of `root_as_given`,
+/// the root as the user named it. The base is the canonical root or an
+/// ancestor of it, so the same number of components goes up from the
+/// given root. When the base is not an ancestor, it is its own spelling.
+#[must_use]
+pub fn base_as_given(
+    root_as_given: &Path,
+    canonical_root: &Path,
+    canonical_base: &Path,
+) -> PathBuf {
+    let Ok(below) = canonical_root.strip_prefix(canonical_base) else {
+        return canonical_base.to_path_buf();
+    };
+    let mut given = std::path::absolute(root_as_given).map_or_else(
+        |_| root_as_given.to_path_buf(),
+        |root| fallow_types::path_guard::lexically_normalized(&root),
+    );
+    for _ in below.components() {
+        given.pop();
+    }
+    given
 }
 
 /// The state of a path whose walk reached the missing entry `missing`, with
@@ -395,5 +458,91 @@ mod tests {
     #[test]
     fn the_file_system_root_is_never_a_checkout_top_level() {
         assert!(is_home_or_above(Path::new("/")));
+    }
+
+    #[test]
+    fn share_and_device_paths_are_refused_by_text() {
+        let base = Path::new("/base");
+        for path in [
+            "//host/share/x",
+            r"\\host\share\x",
+            r"\\?\C:\base\x",
+            r"\\?\UNC\host\share\x",
+            r"\\.\pipe\x",
+            "//./pipe/x",
+        ] {
+            assert!(
+                !absolute_path_text_inside(Path::new(path), base, base),
+                "{path}"
+            );
+        }
+        assert!(absolute_path_text_inside(
+            Path::new("/base/a/../b"),
+            base,
+            base
+        ));
+        assert!(!absolute_path_text_inside(
+            Path::new("/base/../other"),
+            base,
+            base
+        ));
+        assert!(absolute_path_text_inside(
+            Path::new("/given/a"),
+            base,
+            Path::new("/given")
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_share_and_device_prefixes_are_refused() {
+        let base = Path::new(r"C:\base");
+        for path in [
+            r"\\host\share\x",
+            r"\\?\UNC\host\share\x",
+            r"\\?\C:\base\x",
+            r"\\.\COM1",
+        ] {
+            assert!(
+                !absolute_path_text_inside(Path::new(path), base, base),
+                "{path}"
+            );
+            assert_eq!(
+                project_path_entry(base, base, base, Path::new(path)),
+                ProjectEntry::Outside,
+                "{path}"
+            );
+        }
+        assert!(absolute_path_text_inside(
+            Path::new(r"C:\base\x"),
+            base,
+            base
+        ));
+    }
+
+    #[test]
+    fn the_base_keeps_the_spelling_of_the_given_root() {
+        assert_eq!(
+            base_as_given(
+                Path::new("/link/repo/packages/a"),
+                Path::new("/real/repo/packages/a"),
+                Path::new("/real/repo"),
+            ),
+            PathBuf::from("/link/repo")
+        );
+        assert_eq!(
+            base_as_given(Path::new("/x"), Path::new("/real/x"), Path::new("/other")),
+            PathBuf::from("/other")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_share_path_key_is_outside_without_a_file_system_call() {
+        let base = Path::new("/nonexistent-base");
+        assert_eq!(
+            project_path_entry(base, base, base, Path::new("//host/share/CODEOWNERS")),
+            ProjectEntry::Outside
+        );
     }
 }

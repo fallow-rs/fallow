@@ -816,6 +816,13 @@ pub fn diagnose_configured_external_plugins(
 
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
+        if !plugin_path_text_allowed(root, &canonical_root, &path) {
+            diagnostics.push(ConfiguredPluginDiagnostic {
+                kind: ConfiguredPluginDiagnosticKind::OutsideProjectRoot,
+                path,
+            });
+            continue;
+        }
         let metadata = match std::fs::metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) => {
@@ -1115,8 +1122,12 @@ pub fn is_default_external_plugin_file(path: &Path) -> bool {
 #[must_use]
 pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String]) -> Vec<PathBuf> {
     let mut files = Vec::new();
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
+        if !plugin_path_text_allowed(root, &canonical_root, &path) {
+            continue;
+        }
         if path.is_dir() {
             files.extend(plugin_files_in_dir(&path));
         } else {
@@ -1128,6 +1139,14 @@ pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String])
     ));
     files.extend(root_plugin_files(root));
     files
+}
+
+/// Whether the configured plugin path `path`, joined to `root`, may reach a
+/// file system call. An absolute path must name a place below the root by
+/// its text, see [`crate::project_read::absolute_path_text_inside`].
+fn plugin_path_text_allowed(root: &Path, canonical_root: &Path, path: &Path) -> bool {
+    !path.is_absolute()
+        || crate::project_read::absolute_path_text_inside(path, canonical_root, root)
 }
 
 /// True when `path` is a regular file, or a link that does not resolve to

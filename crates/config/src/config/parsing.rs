@@ -1606,14 +1606,22 @@ impl FallowConfig {
     pub fn check_file_path_keys_inside(&self, root: &Path) -> Result<(), Vec<String>> {
         let canonical_root = dunce::canonicalize(root).ok();
         let base = crate::project_scope_base(root);
+        let given_base = canonical_root.as_deref().map_or_else(
+            || base.clone(),
+            |canonical_root| crate::project_read::base_as_given(root, canonical_root, &base),
+        );
         let errors: Vec<String> = self
             .file_path_keys()
             .into_iter()
             .filter_map(|(value, field)| value.map(|value| (value, field)))
             .filter(|(value, _)| {
                 canonical_root.as_deref().is_none_or(|canonical_root| {
-                    crate::project_read::project_path_entry(&base, canonical_root, Path::new(value))
-                        == crate::project_read::ProjectEntry::Outside
+                    crate::project_read::project_path_entry(
+                        &base,
+                        &given_base,
+                        canonical_root,
+                        Path::new(value),
+                    ) == crate::project_read::ProjectEntry::Outside
                 })
             })
             .map(|(value, field)| {
