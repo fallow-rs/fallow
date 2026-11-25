@@ -245,11 +245,20 @@ fn collect_list_data(
     let need_plugin_result = opts.plugins || opts.entry_points || opts.entry_weight || show_all;
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries)
         || opts.entry_weight;
+    // The workspace listing opens the session for its source walk too: the
+    // walk records `skipped-source-dotdir` and the other walk diagnostics,
+    // which degrade the analysis as much as an undeclared workspace does.
+    // Without them `fallow workspaces` showed a partial list (issue #5127).
+    // A session error stops only a listing that needs the session. The
+    // workspace listing then falls back to workspace discovery alone, as it
+    // did before it read the walk diagnostics.
     let session = if need_files || need_plugin_result {
         match crate::cli_production::open_session(run, config) {
             Ok(session) => Some(session),
             Err(err) => return Err(crate::error::emit_input_error(err.message(), opts.output)),
         }
+    } else if opts.workspaces {
+        crate::cli_production::open_session(run, config).ok()
     } else {
         None
     };
@@ -900,13 +909,16 @@ fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explic
     }
     if !diagnostics.is_empty() {
         eprintln!(
-            "{} workspace discovery diagnostic{}:",
+            "{} discovery diagnostic{}:",
             diagnostics.len(),
             if diagnostics.len() == 1 { "" } else { "s" }
         );
         for d in diagnostics {
             eprintln!("  - {}", d.message);
         }
+        eprintln!(
+            "Read and parse failures of source files are not in this list. `fallow dead-code` reports them."
+        );
     }
 }
 

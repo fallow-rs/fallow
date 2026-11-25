@@ -99,7 +99,7 @@ impl SkipReason {
                 "Preserved because imports could not be resolved. Resolve import and configuration diagnostics, then run `fallow fix --dry-run` and review the new preview."
             }
             Self::LowConfidenceIncompleteAnalysis => {
-                "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
+                "Preserved because the import graph is incomplete. Run `fallow dead-code --format json` and resolve each `workspace_diagnostics` entry that leaves a source file unanalyzed (`skipped-source-dotdir`, `skipped-large-file`, `skipped-minified-file`, `source-read-failure`, `source-parse-degraded` or `source-nesting-too-deep`), then run `fallow fix --dry-run` and review the new preview."
             }
             Self::KeptReExport => {
                 "Preserved because a re-export that this run keeps still names this export. Remove that re-export first, then run `fallow fix --dry-run` and review the new preview."

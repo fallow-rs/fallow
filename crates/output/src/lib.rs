@@ -224,7 +224,10 @@ pub use feature_flags::{
     serialize_feature_flags_json_output,
 };
 pub use finding_id_query::{FindingIdQuery, FindingIdQueryReason};
-pub use fix::{FixJsonOutput, FixJsonOutputInput, count_applied_fixes, serialize_fix_json_output};
+pub use fix::{
+    FixJsonOutput, FixJsonOutputInput, IncompleteAnalysisDiagnostic, count_applied_fixes,
+    serialize_fix_json_output,
+};
 pub use gate_outcomes::{
     GateFile, GateFileReason, GateName, GateOutcome, GateOutcomes, GateStatus,
     with_gate_outcome_names,
