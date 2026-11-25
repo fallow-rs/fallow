@@ -5,7 +5,7 @@
     reason = "tests use expect to keep fixture setup concise"
 )]
 
-use crate::common::run_fallow_raw;
+use crate::common::{run_fallow_raw, run_fallow_raw_in_dir};
 
 #[test]
 fn gitlab_vendor_help_names_only_the_directories_it_writes() {
@@ -59,4 +59,25 @@ fn gitlab_template_with_closed_stdout_reader_exits_quietly() {
 
     assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
     assert!(stderr.is_empty(), "stderr must stay empty, got: {stderr}");
+}
+
+/// A link above a vendor directory that does not exist yet is checked from
+/// the working directory, so no file lands outside it.
+#[test]
+#[cfg(unix)]
+fn gitlab_vendor_refuses_a_link_above_a_missing_vendor_dir() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let checkout = dir.path().join("checkout");
+    let outside = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&checkout).expect("mkdir");
+    std::fs::create_dir_all(&outside).expect("mkdir");
+    std::os::unix::fs::symlink(&outside, checkout.join("linked")).expect("symlink");
+
+    let output = run_fallow_raw_in_dir(
+        &checkout,
+        &["ci-template", "gitlab", "--vendor", "linked/vendor"],
+    );
+
+    assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+    assert!(!outside.join("vendor").exists());
 }
