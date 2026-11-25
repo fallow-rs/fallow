@@ -97,13 +97,14 @@ pub(super) fn read_manifest_in(
 /// Whether the manifest at `path` resolves to an allowed place. A relative
 /// `path` is taken relative to the current directory.
 ///
-/// - Below a `node_modules` directory, the resolved file must be inside the
+/// - Below a `node_modules` directory, the resolved directory that holds the
+///   first such segment and the resolved file must both be inside the
 ///   project scope base `scope`. That covers the `.pnpm` and `.bun` stores
 ///   of the project, a pnpm link from a workspace package into the store at
 ///   the root, and a workspace link such as
 ///   `node_modules/@x/pkg -> ../packages/pkg`. A store outside the project,
-///   such as a global store, is refused. The resolved `node_modules`
-///   directory that holds the first such segment also counts.
+///   such as a global store, and a `node_modules` directory above the scope
+///   base are refused.
 /// - Elsewhere, the resolved file must be in the resolved directory of
 ///   `path`. When that directory is a link, it must resolve inside `scope`
 ///   or inside the directory that holds the link.
@@ -127,9 +128,9 @@ fn manifest_location_allowed(scope: Option<&std::path::Path>, path: &std::path::
     let mut prefix = std::path::PathBuf::new();
     for component in lexical.components() {
         if matches!(component, Component::Normal(name) if name == "node_modules") {
-            return target.starts_with(scope_base(&prefix))
-                || dunce::canonicalize(&prefix)
-                    .is_ok_and(|base| target.starts_with(base.join("node_modules")));
+            let base = scope_base(&prefix);
+            return target.starts_with(&base)
+                && dunce::canonicalize(&prefix).is_ok_and(|holder| holder.starts_with(&base));
         }
         prefix.push(component);
     }
@@ -1081,11 +1082,86 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn a_relative_manifest_path_loads() {
         // A unit test runs in the directory of its crate, two levels below
         // the `package.json` of the repository.
         let pkg = PackageJson::load(std::path::Path::new("../../package.json")).unwrap();
         assert!(pkg.name.is_some());
+
+        // A relative path with a leading `..` before `node_modules`.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/x")).unwrap();
+        std::fs::write(root.join("node_modules/x/package.json"), r#"{"name": "x"}"#).unwrap();
+        let cwd = dunce::canonicalize(std::env::current_dir().unwrap()).unwrap();
+        let mut relative = std::path::PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            relative.push("..");
+        }
+        relative.push(root.strip_prefix("/").unwrap());
+        relative.push("node_modules/x/package.json");
+        let pkg = PackageJson::load(&relative).unwrap();
+        assert_eq!(pkg.name.as_deref(), Some("x"));
+    }
+
+    /// A workspace without a `.git` entry, with the member `packages/a` and
+    /// the root file `manifest` that lists it.
+    #[cfg(unix)]
+    fn workspace_without_git(manifest: (&str, &str)) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("packages/a/node_modules")).unwrap();
+        std::fs::write(root.join(manifest.0), manifest.1).unwrap();
+        (dir, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_member_root_without_git_loads_the_manifests_of_the_workspace() {
+        // pnpm: the member links into the store at the workspace root.
+        let (_dir, root) =
+            workspace_without_git(("pnpm-workspace.yaml", "packages:\n  - packages/*\n"));
+        let stored = store_package(&root, ".pnpm", "react");
+        let member = root.join("packages/a");
+        std::os::unix::fs::symlink(&stored, member.join("node_modules/react")).unwrap();
+        let scope = crate::project_scope_base(&member);
+        let pkg =
+            PackageJson::load_in_scope(&scope, &member.join("node_modules/react/package.json"));
+        assert_eq!(pkg.unwrap().name.as_deref(), Some("react"));
+
+        // npm: the package is in the `node_modules` of the workspace root.
+        let (_dir, root) =
+            workspace_without_git(("package.json", r#"{"workspaces": ["packages/*"]}"#));
+        std::fs::create_dir_all(root.join("node_modules/react")).unwrap();
+        std::fs::write(
+            root.join("node_modules/react/package.json"),
+            r#"{"name": "react"}"#,
+        )
+        .unwrap();
+        let scope = crate::project_scope_base(&root.join("packages/a"));
+        let pkg = PackageJson::load_in_scope(&scope, &root.join("node_modules/react/package.json"));
+        assert_eq!(pkg.unwrap().name.as_deref(), Some("react"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_node_modules_dir_outside_the_scope_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        let root = outer.join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(outer.join("node_modules/x")).unwrap();
+        std::fs::write(
+            outer.join("node_modules/x/package.json"),
+            r#"{"name": "x"}"#,
+        )
+        .unwrap();
+        let manifest = outer.join("node_modules/x/package.json");
+
+        assert!(PackageJson::load_in_scope(&root, &manifest).is_err());
+        assert!(PackageJson::load_in_scope(&outer, &manifest).is_ok());
     }
 
     #[cfg(unix)]

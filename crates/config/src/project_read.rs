@@ -17,36 +17,85 @@ pub enum ProjectEntry {
 }
 
 /// The directory that project files of the analysis root `root` may
-/// resolve in: the git top level of the root, found as the nearest
-/// directory at or above the root with a `.git` entry. A top level at the
-/// home directory belongs to a dotfiles checkout, not to the project, so a
-/// root below the home directory then uses the root itself. Without a git
-/// checkout the base is the root. A root that does not resolve is its own
-/// base.
+/// resolve in.
+///
+/// - In a git checkout, it is the git top level of the root, see
+///   [`project_checkout_top`].
+/// - Else it is the nearest workspace root above the root that lists the
+///   root as a member: a directory with a `pnpm-workspace.yaml`, or with a
+///   `package.json` that has `workspaces`. The search stops below the home
+///   directory and below the file system root.
+/// - Else it is the root itself.
+///
+/// A root that does not resolve is its own base.
 #[must_use]
 pub fn project_scope_base(root: &Path) -> PathBuf {
     let Ok(root) = dunce::canonicalize(root) else {
         return root.to_path_buf();
     };
-    let Some(top) = root
-        .ancestors()
-        .find(|dir| dir.join(".git").symlink_metadata().is_ok())
-    else {
-        return root;
-    };
-    if top != root && is_home_dir(top) {
-        return root;
+    if let Some(top) = project_checkout_top(&root) {
+        return top.to_path_buf();
     }
-    top.to_path_buf()
+    workspace_root_above(&root).unwrap_or(root)
 }
 
-fn is_home_dir(dir: &Path) -> bool {
-    ["HOME", "USERPROFILE"]
-        .iter()
-        .filter_map(std::env::var_os)
-        .filter(|home| !home.is_empty())
-        .filter_map(|home| dunce::canonicalize(home).ok())
-        .any(|home| home == dir)
+/// The git top level of the canonical directory `root` that counts as the
+/// checkout of the project: the nearest directory at or above the root with
+/// a `.git` entry. A top level above the root that is the home directory,
+/// an ancestor of it, or the file system root belongs to a dotfiles
+/// checkout and not to the project, so it gives `None`.
+pub fn project_checkout_top(root: &Path) -> Option<&Path> {
+    let top = root
+        .ancestors()
+        .find(|dir| dir.join(".git").symlink_metadata().is_ok())?;
+    (top == root || !is_home_or_above(top)).then_some(top)
+}
+
+/// The nearest workspace root above the canonical directory `root` that
+/// lists the root as a member, below the home directory and the file
+/// system root.
+fn workspace_root_above(root: &Path) -> Option<PathBuf> {
+    root.ancestors()
+        .skip(1)
+        .take_while(|dir| !is_home_or_above(dir))
+        .find(|dir| workspace_root_lists(dir, root))
+        .map(Path::to_path_buf)
+}
+
+/// Whether the `pnpm-workspace.yaml` or the `package.json` `workspaces` of
+/// `workspace_root` lists `member`, a directory below it. The reads are
+/// bounded and must stay inside `workspace_root`.
+fn workspace_root_lists(workspace_root: &Path, member: &Path) -> bool {
+    use fallow_types::read_guard::{DEFAULT_MAX_READ_BYTES, read_to_string_inside};
+    let mut patterns = read_to_string_inside(
+        workspace_root,
+        Path::new("pnpm-workspace.yaml"),
+        DEFAULT_MAX_READ_BYTES,
+    )
+    .map(|content| crate::pnpm_workspace_packages(&content))
+    .unwrap_or_default();
+    let manifest = workspace_root.join("package.json");
+    if manifest.symlink_metadata().is_ok()
+        && let Ok(pkg) = crate::PackageJson::load_inside(workspace_root, &manifest)
+    {
+        patterns.extend(pkg.workspace_patterns());
+    }
+    !patterns.is_empty()
+        && crate::ManifestPatternMatcher::from_patterns(patterns.iter().map(String::as_str))
+            .declares(workspace_root, member)
+}
+
+/// Whether `dir` is the file system root, the home directory, or an
+/// ancestor of the home directory. Without a `HOME` or `USERPROFILE`
+/// variable, only the file system root counts.
+pub fn is_home_or_above(dir: &Path) -> bool {
+    dir.parent().is_none()
+        || ["HOME", "USERPROFILE"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .filter(|home| !home.is_empty())
+            .filter_map(|home| dunce::canonicalize(home).ok())
+            .any(|home| home.starts_with(dir))
 }
 
 /// The state of `path` below the canonical project root `canonical_root`.
@@ -234,5 +283,55 @@ mod tests {
         std::fs::create_dir(top.join(".git")).unwrap();
         assert_eq!(project_scope_base(&package), top);
         assert_eq!(project_scope_base(&top), top);
+    }
+
+    /// A workspace below a temp dir without a `.git` entry, with the member
+    /// `packages/a`. `manifest` is the name and text of the root file that
+    /// lists the members.
+    fn workspace_without_git(manifest: (&str, &str)) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let top = dunce::canonicalize(dir.path()).unwrap().join("ws");
+        let member = top.join("packages/a");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(top.join(manifest.0), manifest.1).unwrap();
+        (dir, top, member)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn without_git_the_scope_base_is_the_workspace_root_that_lists_the_root() {
+        for manifest in [
+            ("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n"),
+            ("package.json", r#"{"workspaces": ["packages/*"]}"#),
+            (
+                "package.json",
+                r#"{"workspaces": {"packages": ["./packages/*"]}}"#,
+            ),
+        ] {
+            let (_dir, top, member) = workspace_without_git(manifest);
+            assert_eq!(project_scope_base(&member), top, "{manifest:?}");
+            assert_eq!(project_scope_base(&top), top, "{manifest:?}");
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn without_git_a_workspace_root_that_does_not_list_the_root_is_not_the_base() {
+        for manifest in [
+            ("pnpm-workspace.yaml", "packages:\n  - 'apps/*'\n"),
+            (
+                "package.json",
+                r#"{"workspaces": ["packages/*", "!packages/a"]}"#,
+            ),
+            ("package.json", r#"{"name": "no-workspaces"}"#),
+        ] {
+            let (_dir, _top, member) = workspace_without_git(manifest);
+            assert_eq!(project_scope_base(&member), member, "{manifest:?}");
+        }
+    }
+
+    #[test]
+    fn the_file_system_root_is_never_a_checkout_top_level() {
+        assert!(is_home_or_above(Path::new("/")));
     }
 }

@@ -31,12 +31,20 @@ impl ManifestPatternMatcher {
     /// that declares nothing; discovery reports the parse error.
     #[must_use]
     pub fn load(root: &Path) -> Self {
+        let declared = collect_declared_patterns(root, &[]).unwrap_or_default();
+        Self::from_patterns(declared.iter().map(|declared| declared.pattern.as_str()))
+    }
+
+    /// Build the matcher from workspace patterns, as a root manifest
+    /// declares them. A `!` pattern excludes.
+    #[must_use]
+    pub fn from_patterns<'p>(patterns: impl Iterator<Item = &'p str>) -> Self {
         let mut positive = globset::GlobSetBuilder::new();
         let mut negative = globset::GlobSetBuilder::new();
-        for declared in collect_declared_patterns(root, &[]).unwrap_or_default() {
-            let (builder, pattern) = match declared.pattern.strip_prefix('!') {
+        for declared in patterns {
+            let (builder, pattern) = match declared.strip_prefix('!') {
                 Some(rest) => (&mut negative, rest),
-                None => (&mut positive, declared.pattern.as_str()),
+                None => (&mut positive, declared),
             };
             let pattern = crate::glob_validation::normalize_path_pattern(pattern);
             let pattern = if pattern.ends_with('/') {
