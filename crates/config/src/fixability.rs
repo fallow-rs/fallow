@@ -16,6 +16,13 @@ pub enum ConfigFixPlan {
         /// Directory containing the workspace marker that blocked creation.
         workspace_root: PathBuf,
     },
+    /// The config file is a symbolic link that resolves outside the project
+    /// scope base, or a link that discovery refused. A fix does not write
+    /// through it and does not replace it.
+    BlockedConfigLink {
+        /// Path of the config file link.
+        config_path: PathBuf,
+    },
     /// No fallow config exists and config creation was disabled.
     BlockedNoCreate {
         /// Path where the config would have been created.
@@ -38,12 +45,19 @@ pub fn classify_config_fix_plan(
     if let Some(existing) = resolve_existing_config_path(root, explicit) {
         // Discovery can load a config link that git does not track, for
         // example to a dotfiles config. A fix never writes through a link
-        // that leaves the root.
+        // that leaves the project scope base.
         let is_link = existing
             .symlink_metadata()
             .is_ok_and(|meta| meta.file_type().is_symlink());
-        if is_link && !fallow_types::read_guard::is_inside_root(root, &existing) {
-            return ConfigFixPlan::BlockedNoCreate { target: existing };
+        if is_link
+            && !fallow_types::read_guard::is_inside_root(
+                &crate::project_scope_base(root),
+                &existing,
+            )
+        {
+            return ConfigFixPlan::BlockedConfigLink {
+                config_path: existing,
+            };
         }
         return ConfigFixPlan::Edit {
             config_path: existing,
@@ -52,8 +66,14 @@ pub fn classify_config_fix_plan(
     let target = root.join(".fallowrc.json");
     // An entry at the target that discovery refused, such as a link out of
     // the root, must not be replaced by a new config file.
-    if target.symlink_metadata().is_ok() {
-        return ConfigFixPlan::BlockedNoCreate { target };
+    match target.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return ConfigFixPlan::BlockedConfigLink {
+                config_path: target,
+            };
+        }
+        Ok(_) => return ConfigFixPlan::BlockedNoCreate { target },
+        Err(_) => {}
     }
     if let Some(workspace_root) = find_workspace_root_above(root) {
         return ConfigFixPlan::BlockedMonorepo { workspace_root };
@@ -152,7 +172,7 @@ mod tests {
             .unwrap();
         let plan = classify_config_fix_plan(&root, None, false);
         assert!(
-            matches!(plan, ConfigFixPlan::BlockedNoCreate { .. }),
+            matches!(plan, ConfigFixPlan::BlockedConfigLink { .. }),
             "{plan:?}"
         );
     }
@@ -182,7 +202,7 @@ mod tests {
         .unwrap();
         let plan = classify_config_fix_plan(&root, None, false);
         assert!(
-            matches!(plan, ConfigFixPlan::BlockedNoCreate { .. }),
+            matches!(plan, ConfigFixPlan::BlockedConfigLink { .. }),
             "{plan:?}"
         );
     }

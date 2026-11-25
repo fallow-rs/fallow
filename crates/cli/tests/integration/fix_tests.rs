@@ -1798,3 +1798,89 @@ fn fix_preview_prints_the_lines_of_a_file_in_line_order() {
         output.stderr
     );
 }
+
+/// A git checkout `repo` with the package `packages/app`, which has two
+/// duplicate exports and a `.fallowrc.json` link to `target` (relative to
+/// the package). Git does not track the link. Returns the temp dir, the
+/// checkout and the package.
+#[cfg(unix)]
+fn duplicate_export_package_with_config_link(
+    target: &str,
+) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dunce::canonicalize(dir.path()).unwrap().join("repo");
+    let root = repo.join("packages/app");
+    std::fs::create_dir_all(root.join("src/one")).unwrap();
+    std::fs::create_dir_all(root.join("src/two")).unwrap();
+    std::fs::create_dir_all(repo.join("shared")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"dup-config","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
+    std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
+    std::fs::write(dir.path().join("outside.json"), "{}\n").unwrap();
+    std::fs::write(repo.join("shared/fallow.json"), "{}\n").unwrap();
+    std::os::unix::fs::symlink(target, root.join(".fallowrc.json")).unwrap();
+    crate::common::git(&repo, &["init", "-q"]);
+    (dir, repo, root)
+}
+
+/// The `add_ignore_exports` entry of a `fallow fix --yes` JSON run.
+fn config_fix_entry(root: &std::path::Path) -> serde_json::Value {
+    let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    let json = parse_json(&output);
+    json["fixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|fix| fix["type"] == "add_ignore_exports")
+        .cloned()
+        .expect("a config fix entry")
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_does_not_edit_a_config_link_out_of_the_scope_base() {
+    let (dir, _repo, root) = duplicate_export_package_with_config_link("../../../outside.json");
+
+    let config_fix = config_fix_entry(&root);
+    assert_eq!(config_fix["skipped"], true, "{config_fix}");
+    assert_eq!(config_fix["skip_reason"], "config_link_outside_scope");
+    assert_eq!(config_fix["file"], ".fallowrc.json");
+
+    let human = run_fallow_in_root("fix", &root, &["--yes"]);
+    assert!(
+        human
+            .stderr
+            .contains("is a symbolic link that resolves outside the project"),
+        "{}",
+        human.stderr
+    );
+    assert!(
+        !human.stderr.contains("--no-create-config"),
+        "{}",
+        human.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("outside.json")).unwrap(),
+        "{}\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_edits_a_config_link_inside_the_scope_base() {
+    let (_dir, repo, root) = duplicate_export_package_with_config_link("../../shared/fallow.json");
+
+    let config_fix = config_fix_entry(&root);
+    assert_eq!(config_fix["applied"], true, "{config_fix}");
+    let written = std::fs::read_to_string(repo.join("shared/fallow.json")).unwrap();
+    assert!(written.contains("ignoreExports"), "{written}");
+}
