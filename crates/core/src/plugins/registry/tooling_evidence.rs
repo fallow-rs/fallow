@@ -400,7 +400,8 @@ mod tests {
     use super::*;
 
     /// A glob match through a directory link that leaves the root is not a
-    /// match, so the probe learns nothing about the outside directory.
+    /// match, and the result does not depend on the files in the target
+    /// directory.
     #[test]
     #[cfg(unix)]
     fn a_glob_match_through_a_link_out_of_the_root_is_skipped() {

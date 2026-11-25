@@ -9,8 +9,8 @@ const MAX_CHECKER_READ_BYTES = 64 * 1024 * 1024;
 
 /**
  * The environment variable that names the read scope base. fallow sets it to
- * the Git work tree of the analysis root (the root itself when the work tree
- * is the home directory).
+ * the Git work tree of the analysis root, or to the root itself when that
+ * work tree may not widen the scope (see `crates/types/src/read_scope.rs`).
  */
 const SCOPE_ROOT_ENV = "FALLOW_TYPE_AWARE_SCOPE_ROOT";
 
@@ -75,8 +75,8 @@ const realOrResolved = (file) => {
 
 /**
  * Each real `node_modules` directory at or above `dir`. A `node_modules`
- * entry that is a link is skipped, because a committed link can point at any
- * directory, also the file system root.
+ * entry that is a link is skipped, so its target does not become an allowed
+ * directory.
  */
 const nodeModulesAbove = (dir) => {
   const found = [];
