@@ -30,9 +30,20 @@ std::thread_local! {
 /// reads in the scope of the project and not of the config directory.
 pub fn with_project_root<T>(project_root: &Path, resolve: impl FnOnce() -> T) -> T {
     let previous = PROJECT_ROOT.with(|root| root.replace(Some(project_root.to_path_buf())));
-    let result = resolve();
-    PROJECT_ROOT.with(|root| *root.borrow_mut() = previous);
-    result
+    let _restore = RestoreProjectRoot(previous);
+    resolve()
+}
+
+/// Puts the previous project root back when it drops, also when `resolve`
+/// of [`with_project_root`] panics.
+struct RestoreProjectRoot(Option<PathBuf>);
+
+impl Drop for RestoreProjectRoot {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        // The thread-local can be gone while the thread ends.
+        let _ = PROJECT_ROOT.try_with(|root| *root.borrow_mut() = previous);
+    }
 }
 
 /// `run` with the project root of this thread (see [`with_project_root`]),
@@ -98,6 +109,24 @@ pub fn package_json(root: &Path, dir: &Path) -> Option<PackageJson> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A panic in the resolution puts the previous project root back.
+    #[test]
+    fn a_panic_in_the_resolution_restores_the_previous_root() {
+        let outer = Path::new("/outer");
+        let inner = Path::new("/inner");
+        with_project_root(outer, || {
+            let result = std::panic::catch_unwind(|| {
+                with_project_root(inner, || panic!("resolution failed"));
+            });
+            assert!(result.is_err());
+            assert_eq!(config_project_root(Path::new("/config")), outer);
+        });
+        assert_eq!(
+            config_project_root(Path::new("/config")),
+            Path::new("/config")
+        );
+    }
 
     #[test]
     #[cfg(unix)]

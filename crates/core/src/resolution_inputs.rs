@@ -304,10 +304,15 @@ fn collect_export_targets<'a>(value: &'a serde_json::Value, targets: &mut Vec<&'
     }
 }
 
-/// The bytes that key the hash for the input file `path`. A file in the
-/// read scope of `root` keys the hash with its content. The resolver also
-/// reads install state above that scope, so such a file keys the hash with
-/// its size and change time, and its content is not read.
+/// The bytes that key the hash for the input file `path`, or `None` when no
+/// regular file is at `path`.
+///
+/// A file in the read scope of `root` keys the hash with its content. This
+/// function does not read the content of an input file outside the read
+/// scope. Such a file keys the hash with its size and modification time.
+/// This covers each input file outside the scope: install state above the
+/// root, an ancestor `package.json` or `tsconfig` file, and an `extends`
+/// target.
 fn input_fingerprint(root: &Path, path: &Path) -> Option<Vec<u8>> {
     if let Some(content) = crate::discover::project_read::read_project_bytes(root, path) {
         return Some(content);
@@ -605,6 +610,29 @@ mod tests {
         assert!(is_tsconfig_name(Path::new("tsconfig.app.jsonc")));
         assert!(!is_tsconfig_name(Path::new("package.json")));
         assert!(!is_tsconfig_name(Path::new("tsconfig.ts")));
+    }
+
+    /// A file in the read scope keys by content. A file above the scope keys
+    /// by size and modification time. A missing file gives no key.
+    #[test]
+    fn input_fingerprint_keys_by_content_in_scope_and_by_size_above_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let base = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = base.join("project");
+        let own = root.join("tsconfig.json");
+        let above = base.join("tsconfig.base.json");
+        write(&own, "{}");
+        write(&above, "{}");
+        fallow_config::clear_project_scope_bases();
+
+        assert_eq!(input_fingerprint(&root, &own), Some(b"{}".to_vec()));
+        let before = input_fingerprint(&root, &above).expect("key above the scope");
+        assert!(before.starts_with(b"outside-scope:2:"));
+        write(&above, "{ }");
+        let after = input_fingerprint(&root, &above).expect("key above the scope");
+        assert!(after.starts_with(b"outside-scope:3:"));
+        assert_ne!(before, after);
+        assert_eq!(input_fingerprint(&root, &root.join("missing.json")), None);
     }
 
     /// A `package.json` that links out of the root does not key the mode.
