@@ -42,29 +42,43 @@ pub fn project_scope_base(root: &Path) -> PathBuf {
         return root.to_path_buf();
     };
     let cache = SCOPE_BASES.get_or_init(Mutex::default);
-    if let Some(base) = cache
-        .lock()
-        .ok()
-        .and_then(|bases| bases.get(&root).cloned())
-    {
-        return base;
-    }
+    let generation = match cache.lock() {
+        Ok(bases) => {
+            if let Some(base) = bases.bases.get(&root) {
+                return base.clone();
+            }
+            bases.generation
+        }
+        Err(_) => return uncached_scope_base(&root),
+    };
     let base = uncached_scope_base(&root);
-    if let Ok(mut bases) = cache.lock() {
-        bases.insert(root, base.clone());
+    // A clear during the search makes the result stale, so it is not kept.
+    if let Ok(mut bases) = cache.lock()
+        && bases.generation == generation
+    {
+        bases.bases.insert(root, base.clone());
     }
     base
 }
 
-/// The scope bases that [`project_scope_base`] found, by resolved root.
-static SCOPE_BASES: OnceLock<Mutex<FxHashMap<PathBuf, PathBuf>>> = OnceLock::new();
+/// The scope bases that [`project_scope_base`] found, by resolved root, and
+/// the count of clears so far.
+#[derive(Default)]
+struct ScopeBases {
+    bases: FxHashMap<PathBuf, PathBuf>,
+    generation: u64,
+}
+
+static SCOPE_BASES: OnceLock<Mutex<ScopeBases>> = OnceLock::new();
 
 /// Forget the scope bases that [`project_scope_base`] found. Workspace
 /// discovery calls it at the start of each analysis, so a long-lived
-/// process (LSP, watch) sees a new `.git` entry or workspace manifest.
+/// process (LSP, watch) sees a new `.git` entry or workspace manifest. A
+/// search that runs during the clear does not keep its result.
 pub fn clear_project_scope_bases() {
     if let Some(Ok(mut bases)) = SCOPE_BASES.get().map(Mutex::lock) {
-        bases.clear();
+        bases.bases.clear();
+        bases.generation = bases.generation.wrapping_add(1);
     }
 }
 
@@ -83,6 +97,7 @@ fn uncached_scope_base(root: &Path) -> PathBuf {
 pub fn project_checkout_top(root: &Path) -> Option<&Path> {
     let top = root
         .ancestors()
+        .take_while(|dir| test_ceiling::allows(dir))
         .find(|dir| dir.join(".git").symlink_metadata().is_ok())?;
     (top == root || !is_home_or_above(top)).then_some(top)
 }
@@ -93,7 +108,7 @@ pub fn project_checkout_top(root: &Path) -> Option<&Path> {
 fn workspace_root_above(root: &Path) -> Option<PathBuf> {
     root.ancestors()
         .skip(1)
-        .take_while(|dir| !is_home_or_above(dir))
+        .take_while(|dir| !is_home_or_above(dir) && test_ceiling::allows(dir))
         .find(|dir| workspace_root_lists(dir, root))
         .map(Path::to_path_buf)
 }
@@ -125,14 +140,55 @@ fn workspace_root_lists(workspace_root: &Path, member: &Path) -> bool {
 /// ancestor of the home directory. Without a `HOME` or `USERPROFILE`
 /// variable, only the file system root counts.
 pub fn is_home_or_above(dir: &Path) -> bool {
-    dir.parent().is_none()
-        || ["HOME", "USERPROFILE"]
-            .iter()
-            .filter_map(std::env::var_os)
-            .filter(|home| !home.is_empty())
-            .filter_map(|home| dunce::canonicalize(home).ok())
-            .any(|home| home.starts_with(dir))
+    let homes = ["HOME", "USERPROFILE"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .filter(|home| !home.is_empty())
+        .filter_map(|home| dunce::canonicalize(home).ok());
+    is_home_or_above_in(dir, homes)
 }
+
+/// [`is_home_or_above`] for the resolved home directories `homes`.
+fn is_home_or_above_in(dir: &Path, mut homes: impl Iterator<Item = PathBuf>) -> bool {
+    dir.parent().is_none() || homes.any(|home| home.starts_with(dir))
+}
+
+/// A test sets a ceiling for its own thread, so that the ancestor searches
+/// of the scope base do not see a git checkout or a workspace above the
+/// temp directory of the test.
+mod test_ceiling {
+    use std::path::Path;
+
+    #[cfg(test)]
+    thread_local! {
+        static CEILING: std::cell::RefCell<Option<std::path::PathBuf>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Search only `dir` and the directories below it on this thread.
+    #[cfg(test)]
+    pub fn set(dir: &Path) {
+        CEILING.with(|ceiling| *ceiling.borrow_mut() = Some(dir.to_path_buf()));
+    }
+
+    #[cfg(test)]
+    pub(super) fn allows(dir: &Path) -> bool {
+        CEILING.with(|ceiling| {
+            ceiling
+                .borrow()
+                .as_ref()
+                .is_none_or(|top| dir.starts_with(top))
+        })
+    }
+
+    #[cfg(not(test))]
+    pub(super) const fn allows(_dir: &Path) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+pub use test_ceiling::set as set_test_ceiling;
 
 /// The state of `path` below the canonical project root `canonical_root`.
 /// A relative `path` is taken relative to the root.
@@ -410,6 +466,7 @@ mod tests {
     fn the_scope_base_is_the_git_top_level_or_the_root() {
         let dir = tempfile::tempdir().unwrap();
         let top = dunce::canonicalize(dir.path()).unwrap();
+        set_test_ceiling(&top);
         let package = top.join("packages/a");
         std::fs::create_dir_all(&package).unwrap();
         assert_eq!(project_scope_base(&package), package);
@@ -425,7 +482,9 @@ mod tests {
     /// lists the members.
     fn workspace_without_git(manifest: (&str, &str)) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let top = dunce::canonicalize(dir.path()).unwrap().join("ws");
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        set_test_ceiling(&outer);
+        let top = outer.join("ws");
         let member = top.join("packages/a");
         std::fs::create_dir_all(&member).unwrap();
         std::fs::write(top.join(manifest.0), manifest.1).unwrap();
@@ -468,6 +527,20 @@ mod tests {
     #[test]
     fn the_file_system_root_is_never_a_checkout_top_level() {
         assert!(is_home_or_above(Path::new("/")));
+    }
+
+    #[test]
+    fn without_home_variables_only_the_file_system_root_counts_as_home() {
+        assert!(is_home_or_above_in(Path::new("/"), std::iter::empty()));
+        assert!(!is_home_or_above_in(Path::new("/srv"), std::iter::empty()));
+        assert!(!is_home_or_above_in(
+            Path::new("/srv/project"),
+            std::iter::empty()
+        ));
+        let homes = || std::iter::once(PathBuf::from("/srv/user"));
+        assert!(is_home_or_above_in(Path::new("/srv"), homes()));
+        assert!(is_home_or_above_in(Path::new("/srv/user"), homes()));
+        assert!(!is_home_or_above_in(Path::new("/srv/user/code"), homes()));
     }
 
     #[test]

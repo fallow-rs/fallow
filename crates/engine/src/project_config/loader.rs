@@ -167,8 +167,10 @@ pub fn find_config_file(root: &Path) -> Option<PathBuf> {
 }
 
 /// Give config discovery the git probe for a config file link out of the
-/// project: discovery allows such a link when git does not track it.
-fn register_tracked_link_probe() {
+/// project: discovery allows such a link when git does not track it. A
+/// host calls it at startup, so that each config discovery, also one
+/// outside the project load, gets the same answer.
+pub fn register_tracked_link_probe() {
     fallow_config::set_tracked_link_probe(git_tracks_entry);
 }
 

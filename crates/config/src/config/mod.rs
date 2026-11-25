@@ -16,6 +16,8 @@ mod markup_extensions;
 mod mutation;
 mod outside_root;
 mod outside_values;
+#[cfg(all(test, unix))]
+pub use outside_root::test_tracked_link_probe;
 pub use outside_root::{OutsideKeys, TrackedLinkProbe, set_tracked_link_probe};
 pub use outside_values::{outside_value_error, outside_value_files};
 mod override_effect;

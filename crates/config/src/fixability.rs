@@ -36,6 +36,15 @@ pub fn classify_config_fix_plan(
     no_create_config: bool,
 ) -> ConfigFixPlan {
     if let Some(existing) = resolve_existing_config_path(root, explicit) {
+        // Discovery can load a config link that git does not track, for
+        // example to a dotfiles config. A fix never writes through a link
+        // that leaves the root.
+        let is_link = existing
+            .symlink_metadata()
+            .is_ok_and(|meta| meta.file_type().is_symlink());
+        if is_link && !fallow_types::read_guard::is_inside_root(root, &existing) {
+            return ConfigFixPlan::BlockedNoCreate { target: existing };
+        }
         return ConfigFixPlan::Edit {
             config_path: existing,
         };
@@ -141,6 +150,36 @@ mod tests {
         std::fs::write(dir.path().join("outside.json"), "{}").unwrap();
         std::os::unix::fs::symlink(dir.path().join("outside.json"), root.join(".fallowrc.json"))
             .unwrap();
+        let plan = classify_config_fix_plan(&root, None, false);
+        assert!(
+            matches!(plan, ConfigFixPlan::BlockedNoCreate { .. }),
+            "{plan:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_untracked_config_link_out_of_the_root_is_not_edited() {
+        crate::set_tracked_link_probe(crate::config::test_tracked_link_probe);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["init", "-q"])
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git init");
+        std::fs::write(dir.path().join("dotfiles.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(
+            dir.path().join("dotfiles.json"),
+            root.join(".fallowrc.json"),
+        )
+        .unwrap();
         let plan = classify_config_fix_plan(&root, None, false);
         assert!(
             matches!(plan, ConfigFixPlan::BlockedNoCreate { .. }),

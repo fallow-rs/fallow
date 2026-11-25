@@ -208,3 +208,23 @@ pub(super) fn git_tracks(path: &Path) -> Option<bool> {
     crate::project_read::project_checkout_top(&dir)?;
     TRACKED_LINK_PROBE.get().and_then(|probe| probe(path))
 }
+
+/// The probe of the tests. A git checkout above the temp dir of a test does
+/// not count: the search of git stops at the parent of the project.
+#[cfg(all(test, unix))]
+pub fn test_tracked_link_probe(path: &std::path::Path) -> Option<bool> {
+    let dir = dunce::canonicalize(path.parent()?).ok()?;
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .env("GIT_CEILING_DIRECTORIES", dir.parent()?)
+        .args(["--literal-pathspecs", "ls-files", "-z", "--"])
+        .arg(path.file_name()?)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(!output.stdout.is_empty())
+}
