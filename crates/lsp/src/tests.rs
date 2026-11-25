@@ -6167,3 +6167,104 @@ async fn absent_prop_actions_require_the_saved_analysed_document_version() {
 
 #[path = "tests_capabilities.rs"]
 mod capabilities;
+
+/// A workspace folder below a committed link that leaves the git checkout
+/// must not become the analysis root.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn initialize_refuses_a_workspace_folder_below_a_link_that_leaves_the_checkout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).expect("repo dir");
+    fallow_api::git_fixture::fixture_git(&repo, &["init", "-q", "-b", "main"]);
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(outside.join("app")).expect("outside dir");
+    std::os::unix::fs::symlink(&outside, repo.join("packages")).expect("link");
+    fallow_api::git_fixture::fixture_git(&repo, &["add", "packages"]);
+    fallow_api::git_fixture::fixture_git(&repo, &["commit", "-q", "-m", "link"]);
+    let folder = repo.join("packages").join("app");
+    let uri = Uri::from_file_path(&folder).expect("file uri");
+
+    use futures::StreamExt;
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    // The server waits until the client reads each message it sends.
+    let reader = tokio::spawn(async move {
+        let mut methods = Vec::new();
+        while let Some(message) = socket.next().await {
+            methods.push(message.method().to_string());
+            if methods.iter().any(|method| method == "window/showMessage") {
+                break;
+            }
+        }
+        methods
+    });
+    let request = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{ "uri": uri.as_str(), "name": "app" }],
+        }))
+        .id(1)
+        .finish();
+    let response = service
+        .ready()
+        .await
+        .expect("ready")
+        .call(request)
+        .await
+        .expect("initialize handled")
+        .expect("response");
+    assert!(response.is_ok());
+    assert_eq!(*service.inner().root.read().await, None);
+    let methods = tokio::time::timeout(Duration::from_secs(5), reader)
+        .await
+        .expect("the server reports the refusal")
+        .expect("reader task");
+    assert!(methods.iter().any(|method| method == "window/showMessage"));
+}
+
+/// A workspace folder that does not exist at initialize gives no analysis
+/// root. Once the folder exists, the next analysis resolves its spelling
+/// instead of treating the folder as moved.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn analysis_root_resolves_a_folder_that_appears_after_initialize() {
+    use futures::StreamExt;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let real = temp.path().join("real");
+    std::fs::create_dir_all(&real).expect("real dir");
+    let alias = temp.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).expect("alias link");
+    let spelled = alias.join("project");
+    let uri = Uri::from_file_path(&spelled).expect("file uri");
+
+    let (mut service, mut socket) = LspService::build(FallowLspServer::new).finish();
+    tokio::spawn(async move { while socket.next().await.is_some() {} });
+    let request = Request::build("initialize")
+        .params(json!({
+            "capabilities": {},
+            "workspaceFolders": [{ "uri": uri.as_str(), "name": "project" }],
+        }))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("ready")
+        .call(request)
+        .await
+        .expect("initialize handled")
+        .expect("response");
+    let backend = service.inner();
+    assert_eq!(backend.analysis_root().await, Ok(None));
+    assert_eq!(*backend.root.read().await, None);
+
+    std::fs::create_dir(real.join("project")).expect("create folder");
+    // The stored spelling is not the real path, so a moved-root check on it
+    // alone would skip every later analysis.
+    assert!(path_utils::moved_root_reason(&spelled).is_some());
+    let resolved = dunce::canonicalize(real.join("project")).unwrap();
+    assert_eq!(backend.analysis_root().await, Ok(Some(resolved.clone())));
+    assert_eq!(*backend.root.read().await, Some(resolved));
+}

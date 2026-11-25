@@ -297,6 +297,10 @@ struct CompletedRun<'a> {
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
+    /// The spelling of a workspace folder that did not exist at initialize.
+    /// The first analysis after the folder appears validates and resolves
+    /// it. See `analysis_root`.
+    pending_root: Arc<RwLock<Option<PathBuf>>>,
     analysis: Arc<RwLock<Option<LspAnalysisSnapshot>>>,
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
@@ -415,9 +419,17 @@ impl LanguageServer for FallowLspServer {
                     .root_uri
                     .and_then(|u| u.to_file_path().map(|path| path.into_owned()))
             });
-        let canonical_root = root.map(|path| canonicalize_for_lsp(&path));
-        if let Some(path) = &canonical_root {
-            *self.root.write().await = Some(path.clone());
+        match root.as_deref().map(path_utils::resolve_folder) {
+            Some(path_utils::FolderRoot::Valid(path)) => *self.root.write().await = Some(path),
+            Some(path_utils::FolderRoot::Absent) => *self.pending_root.write().await = root,
+            Some(path_utils::FolderRoot::Refused(message)) => {
+                let message = format!("fallow does not analyze this workspace: {message}");
+                self.client
+                    .log_message(MessageType::ERROR, message.clone())
+                    .await;
+                self.client.show_message(MessageType::ERROR, message).await;
+            }
+            None => {}
         }
 
         if let Some(opts) = &params.initialization_options {
@@ -767,6 +779,7 @@ impl FallowLspServer {
         Self {
             client,
             root: Arc::new(RwLock::new(None)),
+            pending_root: Arc::new(RwLock::new(None)),
             analysis: Arc::new(RwLock::new(None)),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
@@ -864,13 +877,13 @@ impl FallowLspServer {
     /// run, for the reason on `startup_analysis_started`. It runs only when
     /// sessions are kept and the workspace root has a `package.json`.
     async fn spawn_prewarm(&self) {
-        let Some(root) = self.root.read().await.clone() else {
+        let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
+        let Ok(Some(root)) = self.analysis_root().await else {
             return;
         };
         if !self.lock_sessions().is_enabled() || !root.join("package.json").is_file() {
             return;
         }
-        let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
         let input = analysis::PrewarmInput {
             project_roots: find_project_roots(&root),
             run_options: self.run_options.read().await.clone(),
@@ -996,18 +1009,56 @@ impl FallowLspServer {
         }
     }
 
+    /// The root of the next analysis, or why the analysis must skip it.
+    /// The caller holds `analysis_guard`, so the run uses the real path that
+    /// this call just resolved.
+    ///
+    /// A folder that did not exist at initialize is validated and resolved
+    /// once it exists, as at initialize. While it does not exist, there is
+    /// no root and the analysis does not run. A resolved root must still
+    /// resolve to the same path (see `path_utils::moved_root_reason`).
+    async fn analysis_root(&self) -> std::result::Result<Option<PathBuf>, String> {
+        let pending = self.pending_root.read().await.clone();
+        if let Some(spelled) = pending {
+            match path_utils::resolve_folder(&spelled) {
+                path_utils::FolderRoot::Absent => return Ok(None),
+                path_utils::FolderRoot::Valid(root) => {
+                    *self.root.write().await = Some(root.clone());
+                    *self.pending_root.write().await = None;
+                    return Ok(Some(root));
+                }
+                path_utils::FolderRoot::Refused(message) => {
+                    *self.root.write().await = None;
+                    *self.pending_root.write().await = None;
+                    return Err(format!("fallow does not analyze this workspace: {message}"));
+                }
+            }
+        }
+        let Some(root) = self.root.read().await.clone() else {
+            return Ok(None);
+        };
+        path_utils::moved_root_reason(&root).map_or(Ok(Some(root)), Err)
+    }
+
     async fn run_analysis(&self) {
         if self.cancellation.load(Ordering::SeqCst) {
             return;
         }
 
-        let root = self.root.read().await.clone();
-        let Some(root) = root else { return };
-
         let _guard = self.analysis_guard.lock().await;
         if self.cancellation.load(Ordering::SeqCst) {
             return;
         }
+
+        let root = match self.analysis_root().await {
+            Ok(Some(root)) => root,
+            Ok(None) => return,
+            Err(reason) => {
+                self.lock_scheduler().clear_pending();
+                self.client.log_message(MessageType::ERROR, reason).await;
+                return;
+            }
+        };
 
         let (analysis_epoch, run_cancellation) = {
             let mut scheduler = self.lock_scheduler();
