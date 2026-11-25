@@ -45,3 +45,38 @@ fn a_gitignore_that_cannot_be_read_is_not_replaced() {
     ensure_gitignore(dir.path());
     assert!(path.is_dir());
 }
+
+/// A `.gitignore` that links to a file in `node_modules` is not changed.
+#[cfg(unix)]
+#[test]
+fn a_gitignore_link_into_node_modules_is_not_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let package = dir.path().join("node_modules/left-pad");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("index.js"), b"module.exports = 1;\n").unwrap();
+    std::os::unix::fs::symlink(package.join("index.js"), dir.path().join(".gitignore")).unwrap();
+    ensure_gitignore(dir.path());
+    assert_eq!(
+        std::fs::read(package.join("index.js")).unwrap(),
+        b"module.exports = 1;\n"
+    );
+}
+
+/// A `.gitignore` link to another project file stays writable.
+#[cfg(unix)]
+#[test]
+fn a_gitignore_link_to_a_project_file_is_updated() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("config")).unwrap();
+    std::fs::write(dir.path().join("config/ignore"), b"dist/\n").unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("config/ignore"),
+        dir.path().join(".gitignore"),
+    )
+    .unwrap();
+    ensure_gitignore(dir.path());
+    assert_eq!(
+        std::fs::read(dir.path().join("config/ignore")).unwrap(),
+        b"dist/\n.fallow/\n"
+    );
+}

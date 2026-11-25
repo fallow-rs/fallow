@@ -611,7 +611,22 @@ pub fn config_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
         .ok();
     if let Some(relative) = relative
         && relative.components().next().is_some()
-        && !relative.components().any(|part| part.as_os_str() == ".git")
+        && !relative.components().any(|part| {
+            // Git metadata in any case. Windows drops trailing dots and
+            // spaces from a name, so `.git.` and `.git ` name `.git` there.
+            // A `:` names an NTFS stream (`.git::$INDEX_ALLOCATION`), and
+            // `GIT~1` is the 8.3 short name of `.git`. A name that is not
+            // UTF-8 is refused too. The rule is the same on every platform.
+            part.as_os_str().to_str().is_none_or(|name| {
+                let trimmed = name.trim_end_matches(['.', ' ']);
+                let short_name = trimmed
+                    .get(..4)
+                    .is_some_and(|head| head.eq_ignore_ascii_case("git~"))
+                    && trimmed.len() > 4
+                    && trimmed[4..].bytes().all(|byte| byte.is_ascii_digit());
+                trimmed.eq_ignore_ascii_case(".git") || name.contains(':') || short_name
+            })
+        })
     {
         return root.join(relative);
     }

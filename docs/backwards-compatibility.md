@@ -772,6 +772,76 @@ These are documented for the rare CI script that depended on the old behavior. N
   `fail-on-issues` input or `FALLOW_FAIL_ON_ISSUES` is `true`. So neither
   integration fails a job that did not fail before.
 
+- **A project symlink must not lead a write out of the project, into Git
+  metadata or into installed packages.** The save and report flags, `viz
+  --out`, the cache writers, `fallow fix` and the setup commands (`init`,
+  `hooks install`, `agent install`, `migrate`, `rule-pack init`,
+  `coverage setup`, `ci-template`) now refuse a write through a symlink in
+  the project when the link resolves into a `.git` directory, into the Git
+  directory that a `.git` file names, or into a `node_modules` directory.
+  This applies also when the target stays below the project root. A direct
+  path into `.git`, such as the hook that `hooks install --target git`
+  writes, is not a link and keeps working. For the save and report flags
+  and `viz --out`:
+  - A symlink in the project root or its Git work tree must resolve inside
+    the root or the allowed work tree. A path through such a link to the CI
+    workspace, a temp directory or a device is refused. The same path
+    without the link is still allowed.
+  - A symlink outside the project may lead anywhere that the other rules
+    allow, but not into a `.git` or `node_modules` directory, and not into
+    the Git directory or common Git directory of the root, also when that
+    directory is outside the work tree (`git init --separate-git-dir`, or a
+    worktree of a bare repository). For example,
+    `--output-file /tmp/r.json` is refused when `/tmp/r.json` is a link to
+    a file in `.git`.
+  - A character device or named pipe stays allowed only when the path that
+    the user gives reaches it without such a link. Another file that is not
+    a regular file, such as a socket, is refused.
+  - Each existing path component is resolved in turn, so a symlink after a
+    `..` is resolved too. A component that cannot be read for a reason
+    other than "not found" fails the write.
+  - `viz --out` is checked with the save and report flags, before the
+    analysis runs. A `viz --out` path outside the root, its Git work tree
+    and the temp directories is refused.
+  - A link into the Git directory of a worktree inside a bare repository is
+    refused. The files of the worktree itself stay writable.
+
+  A cache directory that is not below the root, but is below a work tree of
+  the same repository as the root, is checked from the top of that work
+  tree. A work tree counts when its `.git` entry has the same common Git
+  directory as the root: the main checkout, a linked worktree, a submodule,
+  or a worktree of a bare repository. When more than one counts, the
+  lowest one that is not reached through a symlink is the top, so a link
+  in a worktree inside the main checkout cannot lead up into the main
+  checkout. This covers the cache of the checkout when `audit --staged`
+  runs in a temporary worktree. The base snapshot cache of `audit --staged`
+  is checked from the checkout that the run starts in.
+
+  A `..` in a cache path is resolved on disk, so
+  `FALLOW_CACHE_DIR=../shared` from a subdirectory root writes into the
+  work tree, and a link before the `..` is still checked. A configured
+  `cache.dir` is ignored when a part of it names `.git` in any case, with
+  trailing dots or spaces, with a `:` (an NTFS stream), or as
+  `git~<digits>` (an 8.3 short name).
+
+  A `rule-pack init --config` with an absolute path inside the root or its
+  Git work tree gets the same link check as a relative path. A refusal of a
+  save or report flag or of `viz --out` exits 2. A cache write is skipped
+  with a warning that names the reason, and `fallow fix` reports the file
+  as failed. No envelope field changes, and no `schema_version` moves.
+
+  These link setups worked before and are now refused:
+  - A `.fallow` link to a folder in `/tmp` or another temp directory. The
+    run prints the cache note and does not use the cache.
+  - A `.fallow` link into `node_modules`, such as
+    `node_modules/.cache/fallow`. The run prints the cache note.
+  - `FALLOW_CACHE_DIR` or `cache.dir` through a symlink in the checkout,
+    above a subdirectory root. The cache write is skipped with a warning.
+  - A project with no `.git` of its own inside a dotfiles repository at
+    `HOME`: the home repository then counts as the checkout. A symlink below
+    `HOME` on the path of a cache folder there, or on the path of a save or
+    report file, must resolve inside the project root or that repository.
+
 - **Save flags write only into the project and the temp directories.**
   `--save-baseline`, `--save-regression-baseline` and `--save-snapshot` now
   exit 2 with an error document, before the analysis runs, when the file

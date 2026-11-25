@@ -511,18 +511,30 @@ fn revalidate_expected_state(stage: &StagedEntry) -> std::io::Result<()> {
     }
 }
 
+/// Fail unless the resolved `target` is inside the project root and not in a
+/// `.git` or `node_modules` directory below it. A fix target is a source or
+/// manifest file of the project, so a target there came through a symlink.
 fn ensure_within_root(canonical_root: &Path, target: &Path) -> std::io::Result<()> {
-    if target.starts_with(canonical_root) {
-        return Ok(());
+    if !target.starts_with(canonical_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "fix plan target {} resolves outside project root {}",
+                target.to_string_lossy().replace('\\', "/"),
+                canonical_root.to_string_lossy().replace('\\', "/")
+            ),
+        ));
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        format!(
-            "fix plan target {} resolves outside project root {}",
-            target.to_string_lossy().replace('\\', "/"),
-            canonical_root.to_string_lossy().replace('\\', "/")
-        ),
-    ))
+    if fallow_types::path_guard::is_protected_link_target(canonical_root, target) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "fix plan target {} resolves into a .git or node_modules directory",
+                target.to_string_lossy().replace('\\', "/")
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Map of absolute file path to the xxh3 content hash captured during the
@@ -969,6 +981,37 @@ mod tests {
             "symlink must survive commit",
         );
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "rewritten");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn commit_rejects_symlink_target_in_the_git_dir_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::write(root.join(".git/config"), "[core]\n").unwrap();
+        std::fs::write(root.join("node_modules/pkg/index.js"), "store").unwrap();
+        let config_link = root.join("config.ts");
+        let package_link = root.join("pkg.ts");
+        std::os::unix::fs::symlink(root.join(".git/config"), &config_link).unwrap();
+        std::os::unix::fs::symlink(root.join("node_modules/pkg/index.js"), &package_link).unwrap();
+
+        for link in [&config_link, &package_link] {
+            let mut plan = FixPlan::for_root(&root).unwrap();
+            plan.stage(link.clone(), b"rewritten".to_vec());
+            let outcome = plan.commit();
+            assert!(outcome.written.is_empty());
+            assert_eq!(outcome.failed.len(), 1);
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join(".git/config")).unwrap(),
+            "[core]\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("node_modules/pkg/index.js")).unwrap(),
+            "store"
+        );
     }
 
     #[cfg(unix)]

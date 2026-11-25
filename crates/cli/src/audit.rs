@@ -542,7 +542,7 @@ impl AuditBackend for CliAuditBackend<'_> {
 
     fn save_cached_base(&self, key: &AuditBaseSnapshotCacheKey, snapshot: &AuditKeySnapshot) {
         if !self.type_aware.cli_enabled() {
-            save_cached_base_snapshot(self.opts, key, snapshot);
+            save_cached_base_snapshot(self.opts, self.host_root, key, snapshot);
         }
     }
 

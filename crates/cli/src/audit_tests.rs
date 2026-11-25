@@ -3010,7 +3010,7 @@ fn base_snapshot_save_bounds_the_cache_directory() {
         base_sha: "abc123".to_string(),
     };
 
-    save_cached_base_snapshot(&opts, &key, &AuditKeySnapshot::default());
+    save_cached_base_snapshot(&opts, opts.root, &key, &AuditKeySnapshot::default());
 
     let dir = audit_base_snapshot_cache_dir(&cache_root);
     let snapshots = fs::read_dir(&dir)
@@ -3025,6 +3025,110 @@ fn base_snapshot_save_bounds_the_cache_directory() {
     );
 }
 
+/// A staged audit analyzes a temporary worktree but keeps its cache in the
+/// checkout that the user runs in. The cache writes are checked from that
+/// checkout, so a link in it that leaves it is refused, also when the link
+/// stays in the same work tree.
+#[cfg(unix)]
+#[test]
+fn staged_base_snapshot_save_is_checked_from_the_host_checkout() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = tmp.path().join("repo");
+    let linked = repo.join(".git/worktrees/staged");
+    fs::create_dir_all(&linked).expect("git dir should be created");
+    fs::write(linked.join("commondir"), "../..\n").expect("commondir should be written");
+    let staged = tmp.path().join("staged");
+    fs::create_dir_all(&staged).expect("staged worktree should be created");
+    fs::write(
+        staged.join(".git"),
+        format!("gitdir: {}\n", linked.display()),
+    )
+    .expect("git file should be written");
+    let host = repo.join("packages/app");
+    let other = repo.join("packages/other");
+    fs::create_dir_all(&host).expect("host should be created");
+    fs::create_dir_all(&other).expect("other package should be created");
+    std::os::unix::fs::symlink("../other", host.join(".fallow")).expect("link should be created");
+    let config_path = None;
+    let cache_root = host.join(".fallow");
+    let opts = audit_review_benchmark_options(&staged, &config_path, &cache_root, 1);
+    let key = AuditBaseSnapshotCacheKey {
+        hash: 0xfeed_beef,
+        base_sha: "abc123".to_string(),
+    };
+
+    save_cached_base_snapshot(&opts, &host, &key, &AuditKeySnapshot::default());
+
+    assert_eq!(
+        fs::read_dir(&other)
+            .expect("other package should read")
+            .count(),
+        0,
+        "the save must not follow the link out of the host checkout"
+    );
+}
+
+/// A staged save checked from a host checkout that is not the analyzed
+/// root still writes when no link is on the path.
+#[test]
+fn staged_base_snapshot_save_writes_into_the_host_checkout() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let staged = tmp.path().join("staged");
+    let host = tmp.path().join("host");
+    fs::create_dir_all(&staged).expect("staged worktree should be created");
+    fs::create_dir_all(&host).expect("host should be created");
+    let config_path = None;
+    let cache_root = host.join(".fallow");
+    let opts = audit_review_benchmark_options(&staged, &config_path, &cache_root, 1);
+    let key = AuditBaseSnapshotCacheKey {
+        hash: 0xfeed_beef,
+        base_sha: "abc123".to_string(),
+    };
+
+    save_cached_base_snapshot(&opts, &host, &key, &AuditKeySnapshot::default());
+
+    assert!(audit_base_snapshot_cache_file(&cache_root, &key).exists());
+}
+
+/// A worktree of a bare repository lies inside the common Git directory. A
+/// link in it to another folder of the same worktree is not a link into Git
+/// metadata, so a staged save through it writes.
+#[cfg(unix)]
+#[test]
+fn staged_base_snapshot_save_writes_in_a_worktree_of_a_bare_repository() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let bare = tmp.path().join("proj.git");
+    for name in ["main", "staged"] {
+        let linked = bare.join("worktrees").join(name);
+        fs::create_dir_all(&linked).expect("git dir should be created");
+        fs::write(linked.join("commondir"), "../..\n").expect("commondir should be written");
+    }
+    let host = bare.join("main");
+    let staged = tmp.path().join("staged");
+    for (top, name) in [(&host, "main"), (&staged, "staged")] {
+        fs::create_dir_all(top).expect("worktree should be created");
+        fs::write(
+            top.join(".git"),
+            format!("gitdir: {}\n", bare.join("worktrees").join(name).display()),
+        )
+        .expect("git file should be written");
+    }
+    fs::create_dir_all(host.join("build/cache")).expect("cache folder should be created");
+    std::os::unix::fs::symlink("build/cache", host.join(".fallow"))
+        .expect("link should be created");
+    let config_path = None;
+    let cache_root = host.join(".fallow");
+    let opts = audit_review_benchmark_options(&staged, &config_path, &cache_root, 1);
+    let key = AuditBaseSnapshotCacheKey {
+        hash: 0xfeed_beef,
+        base_sha: "abc123".to_string(),
+    };
+
+    save_cached_base_snapshot(&opts, &host, &key, &AuditKeySnapshot::default());
+
+    assert!(audit_base_snapshot_cache_file(&host.join("build/cache"), &key).exists());
+}
+
 #[test]
 fn base_snapshot_cache_hit_refreshes_the_file_age() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
@@ -3035,7 +3139,7 @@ fn base_snapshot_cache_hit_refreshes_the_file_age() {
         hash: 0xfeed_beef,
         base_sha: "abc123".to_string(),
     };
-    save_cached_base_snapshot(&opts, &key, &AuditKeySnapshot::default());
+    save_cached_base_snapshot(&opts, opts.root, &key, &AuditKeySnapshot::default());
     let path = audit_base_snapshot_cache_file(&cache_root, &key);
     let old = std::time::SystemTime::now() - Duration::from_hours(20 * 24);
     fs::File::options()
@@ -3145,7 +3249,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         own_config_unused_code: None,
     };
 
-    save_cached_base_snapshot(&opts, &key, &snapshot);
+    save_cached_base_snapshot(&opts, opts.root, &key, &snapshot);
     assert!(
         audit_base_snapshot_cache_file(&cache_root, &key).exists(),
         "snapshot should be saved below the configured cache directory"
