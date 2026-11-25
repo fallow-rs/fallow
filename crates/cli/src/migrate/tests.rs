@@ -429,7 +429,7 @@ fn jsonc_comments_stripped() {
     )
     .unwrap();
 
-    let value = load_json_or_jsonc(&path).unwrap();
+    let value = load_json_or_jsonc(None, &path).unwrap();
     assert_eq!(value["entry"], serde_json::json!(["src/index.ts"]));
     assert_eq!(value["ignore"], serde_json::json!(["dist/**"]));
 }
@@ -559,7 +559,7 @@ fn string_or_array_reads_strings_and_string_arrays() {
 #[test]
 fn load_json_or_jsonc_file_not_found() {
     let path = std::path::PathBuf::from("/nonexistent/path/to/config.json");
-    let err = load_json_or_jsonc(&path).unwrap_err();
+    let err = load_json_or_jsonc(None, &path).unwrap_err();
     assert!(err.contains("failed to read"));
     assert!(err.contains("/nonexistent/path/to/config.json"));
 }
@@ -571,7 +571,7 @@ fn load_json_or_jsonc_invalid_json_and_invalid_jsonc() {
     let path = tmpdir.join("bad.json");
     std::fs::write(&path, "not { valid json at all !!!").unwrap();
 
-    let err = load_json_or_jsonc(&path).unwrap_err();
+    let err = load_json_or_jsonc(None, &path).unwrap_err();
     assert!(err.contains("failed to parse"));
 }
 
@@ -582,7 +582,7 @@ fn load_json_or_jsonc_rejects_malformed_leading_comma() {
     let path = tmpdir.join("knip.jsonc");
     std::fs::write(&path, "{,}").unwrap();
 
-    let err = load_json_or_jsonc(&path).unwrap_err();
+    let err = load_json_or_jsonc(None, &path).unwrap_err();
     assert!(err.contains("failed to parse"));
 }
 
@@ -605,7 +605,7 @@ fn load_json_or_jsonc_accepts_trailing_commas() {
     )
     .unwrap();
 
-    let value = load_json_or_jsonc(&path).expect("trailing commas should parse");
+    let value = load_json_or_jsonc(None, &path).expect("trailing commas should parse");
     assert_eq!(
         value,
         serde_json::json!({
@@ -630,7 +630,7 @@ fn load_json_or_jsonc_handles_comments_and_trailing_commas_together() {
     )
     .unwrap();
 
-    let value = load_json_or_jsonc(&path).expect("comments + trailing commas should parse");
+    let value = load_json_or_jsonc(None, &path).expect("comments + trailing commas should parse");
     assert_eq!(
         value.get("entry").unwrap(),
         &serde_json::json!(["src/index.ts"])
