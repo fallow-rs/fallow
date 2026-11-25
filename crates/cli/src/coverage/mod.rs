@@ -1843,19 +1843,22 @@ fn recipe_contents(context: &CoverageSetupContext) -> String {
     lines.join("\n")
 }
 
+/// The first coverage file or directory in a common location that resolves
+/// inside `root`.
 fn detect_coverage_artifact(root: &Path) -> Option<PathBuf> {
+    let inside = |path: &Path| fallow_types::read_guard::is_inside_root(root, path);
     for file in [
         root.join("coverage/coverage-final.json"),
         root.join(".nyc_output/coverage-final.json"),
     ] {
-        if file.is_file() {
+        if file.is_file() && inside(&file) {
             return Some(file);
         }
     }
 
     [root.join("coverage"), root.join(".nyc_output")]
         .into_iter()
-        .find(|dir| dir.is_dir() && directory_has_json(dir))
+        .find(|dir| dir.is_dir() && inside(dir) && directory_has_json(dir))
 }
 
 fn directory_has_json(path: &Path) -> bool {

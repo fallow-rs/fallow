@@ -1232,3 +1232,16 @@ fn setup_state_link_out_of_the_project_is_not_read() {
 
     assert!(state.completed_at.is_none());
 }
+
+#[test]
+#[cfg(unix)]
+fn detect_coverage_artifact_skips_links_out_of_the_project() {
+    let dir = tempdir().expect("tempdir should be created");
+    let outside = tempdir().expect("tempdir should be created");
+    std::fs::write(outside.path().join("coverage-final.json"), "{}")
+        .expect("outside coverage should be written");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("coverage"))
+        .expect("coverage link should be created");
+
+    assert_eq!(detect_coverage_artifact(dir.path()), None);
+}
