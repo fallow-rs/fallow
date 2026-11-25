@@ -858,6 +858,7 @@ mod tests {
         }
 
         /// Check `root` from `cwd`, with `pwd` as the `PWD` spelling of `cwd`.
+        #[cfg(unix)]
         fn check_with_pwd(
             &self,
             root: &Path,

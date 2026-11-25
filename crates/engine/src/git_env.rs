@@ -58,7 +58,7 @@ pub fn git_command(cwd: &Path) -> Command {
     command
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::git_fixture::{fixture_git, fixture_git_command};

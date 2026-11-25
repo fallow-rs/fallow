@@ -175,7 +175,6 @@ fn workspace_patterns(root: &Path, config: crate::runtime_support::ConfigFlags<'
 mod tests {
     use super::*;
     use crate::runtime_support::ConfigFlags;
-    use fallow_engine::git_fixture::fixture_git_capture as git;
 
     #[test]
     fn workspace_patterns_come_from_the_explicit_config() {
@@ -203,6 +202,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn staged_tree_refuses_a_root_that_a_staged_link_moves_outside_the_worktree() {
+        use fallow_engine::git_fixture::fixture_git_capture as git;
+
         let temp = tempfile::tempdir().expect("tempdir");
         let repo = temp.path().join("repo");
         let app = repo.join("apps").join("mobile");
