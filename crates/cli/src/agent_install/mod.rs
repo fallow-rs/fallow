@@ -408,11 +408,15 @@ struct Report {
 /// directory still writes `.mcp.json` and `AGENTS.md` where the harnesses
 /// read them.
 pub fn resolve_root(root: &Path, root_explicit: bool) -> PathBuf {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     if root_explicit {
-        return dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        return canonical;
     }
+    // The git top level must contain the directory itself. Any other answer
+    // names a path that git did not mean, so the directory stays the root.
     crate::base_worktree::git_toplevel(root)
-        .unwrap_or_else(|| dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()))
+        .filter(|top| canonical.starts_with(top))
+        .unwrap_or(canonical)
 }
 
 fn select_harnesses(
@@ -472,7 +476,7 @@ pub fn run_agent_install(
     let mcp_command = if skip(Step::Mcp) {
         None
     } else {
-        let command = mcp::resolve_command(&root);
+        let command = mcp::resolve_command(&root, ctx.user);
         steps.extend(mcp::install(
             &ctx,
             &harnesses,
@@ -483,14 +487,35 @@ pub fn run_agent_install(
     };
     if !skip(Step::Hooks) {
         steps.extend(hooks::install(&ctx, &harnesses));
+        if !ctx.user
+            && harnesses.contains(&Harness::Codex)
+            && mcp::is_nested_repository(&root, ctx.home.as_deref())
+        {
+            eprintln!("{}", mcp::NESTED_CODEX_GATE_WARNING);
+        }
     }
 
+    // `codex mcp add` writes a user-level entry, so the printed command uses
+    // the user-level launcher, also in a project-scope install.
+    let user_mcp_command = match &mcp_command {
+        Some(_) if !ctx.user && harnesses.contains(&Harness::Codex) => {
+            mcp::resolve_user_command(&root)
+        }
+        _ => None,
+    };
     let mut next_actions = next_actions(
         &ctx,
         FollowUp { opts, root: &root },
         &harnesses,
         detected,
-        mcp_command.as_ref(),
+        McpCommands {
+            entry: mcp_command.as_ref(),
+            user: if ctx.user {
+                mcp_command.as_ref()
+            } else {
+                user_mcp_command.as_ref()
+            },
+        },
         &steps,
     );
     if let Some(apply) = apply_dry_run_action(opts, &root, &harnesses, &steps) {
@@ -651,12 +676,20 @@ impl FollowUp<'_> {
     }
 }
 
+/// The MCP launchers of one install: the launcher of the written entries, and
+/// the user-level launcher for the printed user-scope commands.
+#[derive(Clone, Copy)]
+struct McpCommands<'a> {
+    entry: Option<&'a mcp::McpCommand>,
+    user: Option<&'a mcp::McpCommand>,
+}
+
 fn next_actions(
     ctx: &Ctx,
     follow_up: FollowUp<'_>,
     harnesses: &[Harness],
     detected: bool,
-    mcp_command: Option<&mcp::McpCommand>,
+    mcp: McpCommands<'_>,
     steps: &[StepReport],
 ) -> Vec<NextAction> {
     let mut next: Vec<NextAction> = Vec::new();
@@ -669,8 +702,11 @@ fn next_actions(
             mutating: true,
         });
     }
-    if let Some(command) = mcp_command {
-        if harnesses.contains(&Harness::Codex) && !ctx.user {
+    if mcp.entry.is_some() {
+        if let Some(command) = mcp.user
+            && harnesses.contains(&Harness::Codex)
+            && !ctx.user
+        {
             next.push(NextAction {
                 id: "codex-mcp-add",
                 command: format!("codex mcp add fallow -- {}", command.shell_words()),
@@ -679,7 +715,10 @@ fn next_actions(
                 mutating: true,
             });
         }
-        if harnesses.contains(&Harness::Claude) && ctx.user {
+        if let Some(command) = mcp.user
+            && harnesses.contains(&Harness::Claude)
+            && ctx.user
+        {
             next.push(NextAction {
                 id: "claude-mcp-add-user",
                 command: format!("claude mcp add --scope user fallow -- {}", command.shell_words()),

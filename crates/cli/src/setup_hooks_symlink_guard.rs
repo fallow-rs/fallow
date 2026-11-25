@@ -4,15 +4,16 @@
 //! file. A write, backup or delete through it could then reach a file outside
 //! the project. A link that resolves inside the project, such as
 //! `CLAUDE.md -> AGENTS.md`, is safe and stays allowed. Under `--user` the
-//! files live in the home directory, where dotfile managers link them on
-//! purpose, so the check does not apply there.
+//! harness files live in the home directory, where dotfile managers link them
+//! on purpose, so the check does not apply to them. The project `.gitignore`
+//! that `--gitignore-claude` edits gets the check in both scopes.
 
 use std::path::{Path, PathBuf};
 
 use super::{Mode, Plan, Report, SetupHooksOptions, display_rel};
 
 /// The shared middle of every refusal message, after the link path.
-pub const OUTSIDE_LINK: &str = "is a symlink that resolves outside the project root, and fallow does not write, back up or delete through it";
+pub const OUTSIDE_LINK: &str = "is a symlink that dangles or resolves outside the project root or into a .git or node_modules directory, and fallow does not write, back up or delete through it";
 
 /// The shared remedy of every refusal message.
 pub const OUTSIDE_LINK_REMEDY: &str = "replace it with a regular file or a link inside the project";
@@ -33,9 +34,9 @@ pub struct SymlinkedTarget {
     pub link: PathBuf,
 }
 
-/// In project scope, the first file that the agent-hook plan would write,
-/// back up or delete through a symlink that resolves outside the project
-/// root. Always `None` under `--user`.
+/// The first project file that the agent-hook plan would write, back up or
+/// delete through a symlink that resolves outside the project root. Under
+/// `--user` only the project `.gitignore` counts.
 pub fn symlinked_hook_target(
     opts: &SetupHooksOptions<'_>,
     mode: Mode,
@@ -63,16 +64,15 @@ impl Plan {
         opts: &SetupHooksOptions<'_>,
         mode: Mode,
     ) -> Option<SymlinkedTarget> {
-        if opts.user {
-            return None;
-        }
         let mut paths: Vec<&Path> = Vec::new();
-        if let Some(claude) = &self.claude {
-            paths.extend([claude.settings_path.as_path(), claude.script_path.as_path()]);
-        }
-        if let Some(codex) = &self.codex {
-            paths.extend([codex.hooks_path.as_path(), codex.script_path.as_path()]);
-            paths.extend(codex.agents_path.as_deref());
+        if !opts.user {
+            if let Some(claude) = &self.claude {
+                paths.extend([claude.settings_path.as_path(), claude.script_path.as_path()]);
+            }
+            if let Some(codex) = &self.codex {
+                paths.extend([codex.hooks_path.as_path(), codex.script_path.as_path()]);
+                paths.extend(codex.agents_path.as_deref());
+            }
         }
         let gitignore = opts.root.join(".gitignore");
         if mode == Mode::Install && self.claude.is_some() && opts.gitignore_claude {
@@ -139,6 +139,29 @@ mod tests {
         assert!(err.contains(".gitignore"), "{err}");
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
         assert!(!tmp.path().join(".claude").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_hooks_install_refuses_a_symlinked_gitignore_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("ignore");
+        std::fs::write(&target, "keep\n").unwrap();
+        std::os::unix::fs::symlink(&target, tmp.path().join(".gitignore")).unwrap();
+        let o = SetupHooksOptions {
+            gitignore_claude: true,
+            user: true,
+            home: Some(home.path()),
+            ..opts(tmp.path())
+        };
+
+        let err = execute_agent_hooks(&o, Mode::Install).unwrap_err();
+
+        assert!(err.contains(".gitignore"), "{err}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
+        assert!(!home.path().join(".claude").exists());
     }
 
     #[cfg(unix)]

@@ -119,8 +119,15 @@ fn native_gate_probe(
     if !text.contains("# Native JSON protocol: fallow-gate-json-v1") {
         return None;
     }
-    let trusted = crate::setup_hooks::rendered_gate_script();
-    if !gate_matches_template(&text, &trusted) {
+    // A user-scope gate records the path of its fallow. The comparison
+    // accepts any recorded path in the exact line that the install writes.
+    let user = crate::setup_hooks::is_user_scope_gate_script(&text);
+    let trusted = if user {
+        crate::setup_hooks::render_gate_script(true, None)
+    } else {
+        crate::setup_hooks::rendered_gate_script()
+    };
+    if !gate_matches_template(&text, &trusted, user) {
         return Some((status.path.clone(), NativeGateState::Modified));
     }
     Some((status.path.clone(), native_reader_inventory(root)))
@@ -133,14 +140,36 @@ const INSTALLER_VERSION_LINE: &str = "# Installer version: ";
 /// installer version comment changes with each fallow release, so it does not
 /// make a gate modified. Every other byte must match. CRLF line endings count
 /// as an edit, because bash cannot run a script with them.
-fn gate_matches_template(installed: &str, trusted: &str) -> bool {
-    normalized_gate_lines(installed).eq(normalized_gate_lines(trusted))
+/// The start of the line of a user-scope gate that records its fallow.
+const GATE_BIN_LINE: &str = "GATE_FALLOW_BIN=";
+
+fn gate_matches_template(installed: &str, trusted: &str, user: bool) -> bool {
+    normalized_gate_lines(installed, user).eq(normalized_gate_lines(trusted, user))
 }
 
-fn normalized_gate_lines(text: &str) -> impl Iterator<Item = &str> {
-    text.split('\n').map(|line| {
+/// True for the exact line that the install writes for a user-scope gate:
+/// `GATE_FALLOW_BIN='<path>'`, with an empty or absolute path (`/...` or
+/// `X:/...`) and no quote or line end in it.
+fn is_recorded_bin_line(line: &str) -> bool {
+    let Some(value) = line
+        .strip_prefix("GATE_FALLOW_BIN='")
+        .and_then(|rest| rest.strip_suffix('\''))
+    else {
+        return false;
+    };
+    let bytes = value.as_bytes();
+    let absolute = value.is_empty()
+        || value.starts_with('/')
+        || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && &bytes[1..3] == b":/");
+    absolute && !value.contains(['\'', '\n', '\r'])
+}
+
+fn normalized_gate_lines(text: &str, user: bool) -> impl Iterator<Item = &str> {
+    text.split('\n').map(move |line| {
         if line.starts_with(INSTALLER_VERSION_LINE) {
             INSTALLER_VERSION_LINE
+        } else if user && is_recorded_bin_line(line) {
+            GATE_BIN_LINE
         } else {
             line
         }
@@ -160,7 +189,9 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
             NativeGateState::Unverified
         }
     };
-    // The gate tries the project-local launcher before the fallow on PATH.
+    // The gate tries the launcher of its install root, then the fallow on
+    // PATH, then the package manager of the install root. It never uses a
+    // launcher of a parent directory.
     let local = root.join("node_modules/.bin/fallow");
     if is_executable_file(&local) {
         return candidate_state(&local);
@@ -169,20 +200,8 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
         return candidate_state(&path);
     }
     let package_runner = mcp::find_on_path("yarn").is_some() || mcp::find_on_path("npx").is_some();
-    for anchor in root.ancestors() {
-        let candidate = anchor.join("node_modules/.bin/fallow");
-        if candidate.is_file() {
-            return if anchor == root {
-                candidate_state(&candidate)
-            } else {
-                // An ancestor can supply JSON decoding without being a runner
-                // that the gate can find from this audit root.
-                NativeGateState::Unverified
-            };
-        }
-        if package_runner && anchor.join("package.json").is_file() {
-            return NativeGateState::Unverified;
-        }
+    if package_runner && root.join("package.json").is_file() {
+        return NativeGateState::Unverified;
     }
     NativeGateState::Missing
 }
@@ -286,6 +305,11 @@ pub fn run_agent_status(
     let root = resolve_root(root, root_explicit);
     let home = fallow_process::HostPaths::from_env().home;
     let surfaces = surfaces(&root, home.as_deref());
+    if root.join(".codex/hooks/fallow-gate.sh").is_file()
+        && mcp::is_nested_repository(&root, home.as_deref())
+    {
+        eprintln!("{}", mcp::NESTED_CODEX_GATE_WARNING);
+    }
     let root_arg = root_explicit.then(|| super::root_arg(&root));
     let next_actions = status_next_actions(&surfaces, root_arg.as_deref());
     let report = StatusReport {
@@ -352,15 +376,7 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
         &root.join(mcp::codex_file()),
     ));
     if let Some(home) = home {
-        let user_codex = home.join(mcp::codex_file());
-        if matches!(
-            mcp::registered_command(&user_codex, Harness::Codex),
-            Existing::Loaded(Some(_))
-        ) {
-            let mut row = mcp_row(root, Some(home), Harness::Codex, &user_codex);
-            row.user_scope = home != root;
-            rows.push(row);
-        }
+        rows.extend(user_mcp_rows(root, home));
     }
     rows.push(mcp_row(
         root,
@@ -369,12 +385,109 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
         &root.join(mcp::cursor_file()),
     ));
 
+    if let Some(home) = home.filter(|home| *home != root) {
+        rows.extend(user_gate_rows(root, home));
+    }
+
     let hooks = build_hooks_status(root);
     let runtime = GateRuntime::probe(root, &hooks);
     rows.push(hook_row(Some(Harness::Claude), &hooks.claude, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex_gate, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
     rows
+}
+
+/// Rows for the user-level MCP entries in `home`. An entry that starts a
+/// package runner runs the fallow-mcp of each project, so it is stale.
+fn user_mcp_rows(root: &Path, home: &Path) -> Vec<SurfaceStatus> {
+    let mut rows = Vec::new();
+    // `~/.claude.json` holds the user-level Claude servers. Status only reads
+    // it; fallow never edits it.
+    for (harness, file) in [
+        (Harness::Claude, ".claude.json"),
+        (Harness::Codex, mcp::codex_file()),
+        (Harness::Cursor, mcp::cursor_file()),
+    ] {
+        let path = home.join(file);
+        // The project row already covers a home directory that is the root.
+        if harness == Harness::Cursor && home == root {
+            continue;
+        }
+        let Existing::Loaded(Some(command)) = mcp::registered_command(&path, harness) else {
+            continue;
+        };
+        let mut row = mcp_row(root, Some(home), harness, &path);
+        row.user_scope = home != root;
+        if row.user_scope && row.state == SurfaceState::Installed && runs_a_package_runner(&command)
+        {
+            let fix = if harness == Harness::Claude {
+                "run the claude mcp add command that agent install --user prints"
+            } else {
+                "agent install --user writes an absolute launcher"
+            };
+            row.state = SurfaceState::Stale;
+            row.detail = Some(format!(
+                "{}: a user-level entry runs the fallow-mcp of each project it opens; {fix}",
+                command.shell_words()
+            ));
+        }
+        rows.push(row);
+    }
+    rows
+}
+
+/// True when an MCP entry starts a package runner that resolves `fallow-mcp`
+/// from the current project: `npx`, `bunx`, `pnpm dlx` or `yarn dlx`, also
+/// as a `.cmd` or `.exe` file and by path.
+fn runs_a_package_runner(command: &mcp::McpCommand) -> bool {
+    let name = command
+        .command
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = name
+        .strip_suffix(".cmd")
+        .or_else(|| name.strip_suffix(".exe"))
+        .unwrap_or(&name);
+    match name {
+        "npx" | "bunx" => true,
+        "pnpm" | "yarn" => command.args.first().is_some_and(|arg| arg == "dlx"),
+        _ => false,
+    }
+}
+
+/// Rows for the user-level gate scripts that fallow wrote in `home`. A script
+/// without the user scope comes from an older fallow and searches launchers in
+/// the session tree, so it is stale.
+fn user_gate_rows(root: &Path, home: &Path) -> Vec<SurfaceStatus> {
+    [(Harness::Claude, ".claude"), (Harness::Codex, ".codex")]
+        .into_iter()
+        .filter_map(|(harness, dir)| {
+            let path = home.join(dir).join("hooks").join("fallow-gate.sh");
+            let text = read_optional_text(&path).ok().flatten()?;
+            if !crate::setup_hooks::is_generated_gate_script(&text) {
+                return None;
+            }
+            let (state, detail) = if crate::setup_hooks::is_user_scope_gate_script(&text) {
+                (SurfaceState::Installed, "user-level gate script")
+            } else {
+                (
+                    SurfaceState::Stale,
+                    "user-level gate script from an older fallow; it runs a fallow launcher of the session directory",
+                )
+            };
+            Some(SurfaceStatus {
+                harness: Some(harness),
+                step: Step::Hooks,
+                state,
+                path: display_path(root, Some(home), &path),
+                detail: Some(detail.to_string()),
+                blocker: None,
+                user_scope: true,
+            })
+        })
+        .collect()
 }
 
 /// Every released skill directory under `base`, harness-neutral first.
@@ -537,7 +650,8 @@ fn hook_row(
         Some(_) if status.installed => runtime.blocker(&status.path),
         _ => None,
     };
-    let script_stale = script_version.is_some_and(|version| version != env!("CARGO_PKG_VERSION"));
+    let script_stale = script_version.is_some_and(|version| version != env!("CARGO_PKG_VERSION"))
+        || (status.installed && status.handler_stale);
     let state = if status.installed {
         if script_stale || blocker.is_some() {
             SurfaceState::Stale
@@ -550,6 +664,12 @@ fn hook_row(
         SurfaceState::Absent
     };
     let mut parts: Vec<String> = Vec::new();
+    if status.installed && status.handler_stale {
+        parts.push(
+            "the hook handler is not the one that this fallow writes for this root, so it may not run this gate"
+                .to_string(),
+        );
+    }
     if let Some(version) = script_version {
         parts.push(if script_stale {
             format!(
@@ -811,6 +931,7 @@ mod tests {
             path: ".claude/hooks/fallow-gate.sh".to_string(),
             script_version: script_version.map(str::to_string),
             min_version_floor: Some("2.85.0".to_string()),
+            handler_stale: false,
         }
     }
 
@@ -966,6 +1087,7 @@ mod tests {
             path: "AGENTS.md".to_string(),
             script_version: None,
             min_version_floor: None,
+            handler_stale: false,
         };
         let runtime = GateRuntime {
             jq_missing: true,
@@ -999,10 +1121,71 @@ mod tests {
 
     #[test]
     fn native_gate_from_an_older_installer_version_is_not_modified() {
-        let older = crate::setup_hooks::FALLOW_GATE_SCRIPT
-            .replace("@@FALLOW_INSTALLER_VERSION@@", "0.0.1-older");
+        let older = crate::setup_hooks::rendered_gate_script().replacen(
+            &format!("# Installer version: {}", env!("CARGO_PKG_VERSION")),
+            "# Installer version: 0.0.1-older",
+            1,
+        );
         assert_ne!(older, crate::setup_hooks::rendered_gate_script());
         assert_ne!(probe_installed_gate(&older), NativeGateState::Modified);
+    }
+
+    #[test]
+    fn a_package_runner_entry_counts_for_each_runner_form() {
+        let entry = |command: &str, args: &[&str]| mcp::McpCommand {
+            command: command.to_string(),
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            source: mcp::McpSource::Registered,
+        };
+        for (command, args) in [
+            ("npx", &["--no", "fallow-mcp"][..]),
+            ("npx.cmd", &["fallow-mcp"][..]),
+            ("C:/nodejs/NPX.CMD", &["fallow-mcp"][..]),
+            ("bunx", &["fallow-mcp"][..]),
+            ("pnpm", &["dlx", "fallow-mcp"][..]),
+            ("pnpm.cmd", &["dlx", "fallow-mcp"][..]),
+            ("yarn", &["dlx", "fallow-mcp"][..]),
+            ("yarn.cmd", &["dlx", "fallow-mcp"][..]),
+        ] {
+            assert!(runs_a_package_runner(&entry(command, args)), "{command}");
+        }
+        assert!(!runs_a_package_runner(&entry(
+            "/usr/local/bin/fallow-mcp",
+            &[]
+        )));
+        assert!(!runs_a_package_runner(&entry(
+            "pnpm",
+            &["exec", "fallow-mcp"]
+        )));
+        assert!(!runs_a_package_runner(&entry("yarn", &["fallow-mcp"])));
+    }
+
+    #[test]
+    fn user_scope_native_gate_matches_the_user_scope_template() {
+        let user = crate::setup_hooks::render_gate_script(true, Some("/opt/tools/bin/fallow"));
+        assert_ne!(probe_installed_gate(&user), NativeGateState::Modified);
+        let edited = user.replacen("exit 2", "exit 0", 1);
+        assert_eq!(probe_installed_gate(&edited), NativeGateState::Modified);
+        for line in [
+            "GATE_FALLOW_BIN='/opt/tools/bin/fallow'; touch /tmp/x",
+            "GATE_FALLOW_BIN='relative/fallow'",
+            "GATE_FALLOW_BIN=\"/opt/fallow\"",
+        ] {
+            let extra = user.replacen("GATE_FALLOW_BIN='/opt/tools/bin/fallow'", line, 1);
+            assert_eq!(
+                probe_installed_gate(&extra),
+                NativeGateState::Modified,
+                "{line}"
+            );
+        }
+        let windows = user.replacen("/opt/tools/bin/fallow", "C:/tools/fallow.exe", 1);
+        assert_ne!(probe_installed_gate(&windows), NativeGateState::Modified);
+        let project = crate::setup_hooks::rendered_gate_script().replacen(
+            "GATE_FALLOW_BIN=''",
+            "GATE_FALLOW_BIN='/opt/fallow'",
+            1,
+        );
+        assert_eq!(probe_installed_gate(&project), NativeGateState::Modified);
     }
 
     #[test]

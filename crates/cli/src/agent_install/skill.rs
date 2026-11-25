@@ -238,9 +238,11 @@ impl Source {
     /// has no usable `SKILL.md`. pnpm and `npm link` make the package directory
     /// a link, so the check resolves it first and then accepts only files whose
     /// real path stays inside it. A file that links out of the package could
-    /// otherwise copy any readable file into the working tree.
+    /// otherwise copy any readable file into the working tree. The resolved
+    /// directory must also be an installed fallow package, see
+    /// [`installed_package`].
     fn shipped(root: &Path, skill: &'static ReleasedSkill) -> Option<Self> {
-        let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
+        let package = installed_package(root)?;
         let shipped = root.join(skill.node_modules_dir());
         let PackageFile::Text(text) = read_package_file(&package, &shipped.join("SKILL.md")) else {
             return None;
@@ -300,6 +302,62 @@ impl Source {
                 .collect(),
         }
     }
+}
+
+/// The canonical `node_modules/fallow` of `root`, when it is an installed
+/// fallow package: a directory named `fallow` in a `node_modules` directory,
+/// with a `package.json` whose name is `fallow`. Inside the project or its
+/// git work tree, only a package below the `node_modules` of the project or
+/// of the work tree top counts (for example the pnpm store), not a directory
+/// elsewhere. Git must not track the `node_modules/fallow` entry or the
+/// package files: a package manager writes them, a commit does not. When git
+/// cannot answer, or a nested repository or submodule below the work tree top
+/// holds the package, the package does not count.
+fn installed_package(root: &Path) -> Option<PathBuf> {
+    let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
+    let project = dunce::canonicalize(root).ok()?;
+    let top = match super::mcp::git_top(&project) {
+        super::mcp::GitTop::Outside => None,
+        super::mcp::GitTop::Top(top) => Some(top),
+        super::mcp::GitTop::Unknown => return None,
+    };
+    let trees: Vec<&Path> = std::iter::once(project.as_path())
+        .chain(top.as_deref())
+        .collect();
+    let inside_tree = trees.iter().any(|tree| package.starts_with(tree));
+    let in_node_modules = trees
+        .iter()
+        .any(|tree| package.starts_with(tree.join("node_modules")));
+    if project.starts_with(&package)
+        || package.file_name()? != "fallow"
+        || package.parent()?.file_name()? != "node_modules"
+        || (inside_tree && !in_node_modules)
+    {
+        return None;
+    }
+    if let Some(top) = &top {
+        // Git lists no path inside a nested repository or submodule.
+        if package
+            .ancestors()
+            .take_while(|dir| dir != top)
+            .any(|dir| dir.join(".git").symlink_metadata().is_ok())
+        {
+            return None;
+        }
+        let mut tracked = vec![project.strip_prefix(top).ok()?.join(NODE_MODULES_PACKAGE)];
+        if let Ok(inside) = package.strip_prefix(top) {
+            tracked.push(inside.to_path_buf());
+        }
+        if super::mcp::git_tracks_any(top, &tracked)? {
+            return None;
+        }
+    }
+    let PackageFile::Text(manifest) = read_package_file(&package, &package.join("package.json"))
+    else {
+        return None;
+    };
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+    (manifest.get("name")?.as_str()? == "fallow").then_some(package)
 }
 
 enum PackageFile {

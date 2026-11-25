@@ -272,6 +272,11 @@ fn ship_skill(root: &Path) -> std::path::PathBuf {
     let shipped = root.join("node_modules/fallow/skills/fallow");
     std::fs::create_dir_all(shipped.join("agents")).unwrap();
     std::fs::write(
+        root.join("node_modules/fallow/package.json"),
+        r#"{"name":"fallow"}"#,
+    )
+    .unwrap();
+    std::fs::write(
         shipped.join("SKILL.md"),
         "---\nname: fallow\ndescription: shipped\n---\n# Fallow\n",
     )
@@ -327,6 +332,174 @@ fn skill_install_reads_a_package_that_a_link_places_elsewhere() {
         std::fs::read_to_string(installed.join("agents/openai.yaml")).unwrap(),
         "interface: {}\n"
     );
+}
+
+fn git_in(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn installed_flavor(root: &Path) -> String {
+    let _ = std::fs::remove_dir_all(root.join(".agents"));
+    let steps = skill::install(&ctx(root, Mode::Install), &[Harness::Codex]);
+    assert_eq!(
+        row(&steps, ".agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    std::fs::read_to_string(root.join(".agents/skills/fallow/SKILL.md")).unwrap()
+}
+
+/// A package manager writes `node_modules/fallow`; a commit does not. A link
+/// to a directory with the package shape counts only when git does not track
+/// the link, and inside the project only below the `node_modules` of the
+/// project.
+#[test]
+fn skill_install_ignores_a_committed_package_link_or_vendor_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let root = root.path();
+    ship_skill(outside.path());
+    ship_skill(&root.join("vendor"));
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    let link = root.join("node_modules/fallow");
+
+    symlink(root.join("vendor/node_modules/fallow"), &link).unwrap();
+    let text = installed_flavor(root);
+    assert!(text.contains("skill=embedded"), "vendor directory: {text}");
+
+    std::fs::remove_file(&link).unwrap();
+    symlink(outside.path().join("node_modules/fallow"), &link).unwrap();
+    assert!(installed_flavor(root).contains("skill=stub"));
+    git_in(root, &["init", "-q"]);
+    git_in(root, &["add", "-f", "node_modules/fallow"]);
+    let text = installed_flavor(root);
+    assert!(text.contains("skill=embedded"), "tracked link: {text}");
+}
+
+/// With `--root packages/app`, a committed `packages/app/node_modules` link
+/// can lead to a committed package elsewhere in the repository. Git does not
+/// look past the link, so the check asks git about the resolved package path.
+#[test]
+fn skill_install_ignores_a_committed_package_that_a_link_of_a_subproject_reaches() {
+    for (store, link) in [
+        ("vendor", "../../vendor/node_modules"),
+        ("", "../../node_modules"),
+    ] {
+        let top = tempfile::tempdir().unwrap();
+        let top = top.path();
+        ship_skill(&top.join(store));
+        let app = top.join("packages/app");
+        std::fs::create_dir_all(&app).unwrap();
+        symlink(link, app.join("node_modules")).unwrap();
+        git_in(top, &["init", "-q"]);
+        git_in(top, &["add", "-f", "."]);
+
+        let text = installed_flavor(&app);
+
+        assert!(text.contains("skill=embedded"), "{link}: {text}");
+    }
+}
+
+/// The pnpm workspace layout: the package of a subproject links into the
+/// store below the `node_modules` of the work tree top, and git tracks none
+/// of it.
+#[test]
+fn skill_install_reads_a_subproject_package_from_the_store_of_the_work_tree() {
+    let top = tempfile::tempdir().unwrap();
+    let top = top.path();
+    let store = top.join("node_modules/.pnpm/fallow@1.0.0");
+    ship_skill(&store);
+    let app = top.join("packages/app");
+    std::fs::create_dir_all(app.join("node_modules")).unwrap();
+    symlink(
+        store.join("node_modules/fallow"),
+        app.join("node_modules/fallow"),
+    )
+    .unwrap();
+    git_in(top, &["init", "-q"]);
+
+    assert!(installed_flavor(&app).contains("skill=stub"));
+}
+
+/// Git reads each path of the query as a literal path. A directory name that
+/// has the form of pathspec magic or of a glob does not change the query.
+#[test]
+fn skill_install_ignores_a_committed_package_below_a_directory_with_a_pathspec_name() {
+    for name in [":(attr:none)app", "a*p", "[x]app"] {
+        let top = tempfile::tempdir().unwrap();
+        let top = top.path();
+        let app = top.join(name);
+        ship_skill(&app);
+        git_in(top, &["init", "-q"]);
+        git_in(top, &["add", "-f", "--", &format!(":(literal){name}")]);
+
+        let text = installed_flavor(&app);
+
+        assert!(text.contains("skill=embedded"), "{name}: {text}");
+    }
+}
+
+/// `git ls-files` lists no path inside a nested repository or submodule, so a
+/// package below a `.git` entry under the work tree top counts as committed.
+#[test]
+fn skill_install_ignores_a_package_in_a_nested_repository_at_node_modules() {
+    let top = tempfile::tempdir().unwrap();
+    let top = top.path();
+    ship_skill(top);
+    let nested = top.join("node_modules");
+    git_in(&nested, &["init", "-q"]);
+    git_in(&nested, &["add", "-f", "."]);
+    git_in(
+        &nested,
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "vendor",
+        ],
+    );
+    git_in(top, &["init", "-q"]);
+    git_in(top, &["add", "-f", "node_modules"]);
+
+    let text = installed_flavor(top);
+
+    assert!(text.contains("skill=embedded"), "{text}");
+}
+
+/// When git cannot answer, the package counts as committed.
+#[test]
+fn skill_install_ignores_the_package_when_git_cannot_list_the_files() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let store = tempfile::tempdir().unwrap();
+    ship_skill(store.path());
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    symlink(
+        store.path().join("node_modules/fallow"),
+        root.join("node_modules/fallow"),
+    )
+    .unwrap();
+    git_in(root, &["init", "-q"]);
+    assert!(installed_flavor(root).contains("skill=stub"));
+    std::fs::write(root.join(".git/index"), "not an index").unwrap();
+
+    let text = installed_flavor(root);
+
+    assert!(text.contains("skill=embedded"), "{text}");
 }
 
 #[test]
@@ -387,4 +560,28 @@ fn guide_install_refuses_a_dangling_link() {
     assert!(!planted.exists());
     assert_symlink_skip(row(&steps, "AGENTS.md"));
     assert_detail_names(row(&steps, "AGENTS.md"), "AGENTS.md");
+}
+
+/// A user-level MCP entry needs a global install, so the skip names one.
+#[test]
+fn user_mcp_install_without_a_launcher_names_a_global_install() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let mut user = ctx(root.path(), Mode::Install);
+    user.user = true;
+    user.home = Some(home.path().to_path_buf());
+
+    let steps = mcp::install(&user, &[Harness::Codex], None, false);
+
+    let detail = steps[0].detail.clone().unwrap_or_default();
+    assert!(detail.contains("npm install -g fallow"), "{detail}");
+    assert!(detail.contains("cargo install fallow-mcp"), "{detail}");
+    let project = mcp::install(
+        &ctx(root.path(), Mode::Install),
+        &[Harness::Codex],
+        None,
+        false,
+    );
+    let detail = project[0].detail.clone().unwrap_or_default();
+    assert!(detail.contains("npm i -D fallow"), "{detail}");
 }

@@ -1031,7 +1031,7 @@ fn audit_repo_ref_orchestration_routes_through_engine() {
 const CLI_GIT_SPAWN_OWNERS: &[(&str, &str)] = &[
     (
         "crates/cli/src/agent_install/mcp.rs",
-        "whether an installed agent file is tracked",
+        "whether an installed agent file is tracked, and whether the install root is a nested repository",
     ),
     (
         "crates/cli/src/base_worktree.rs",

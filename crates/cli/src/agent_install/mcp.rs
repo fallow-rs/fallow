@@ -7,6 +7,12 @@
 //! first two are resolved on disk. A launcher that would only work on this machine is never
 //! written into a file the team commits.
 //!
+//! A user-level entry applies in every project. It never uses `npx`, which
+//! runs the `fallow-mcp` of the project that the harness opens. It uses the
+//! absolute path of the `fallow-mcp` on `PATH`, as found, or of the running
+//! binary when that binary serves MCP. A launcher of the current project
+//! never counts, see [`crate::setup_hooks::user_launcher`].
+//!
 //! JSON cannot carry a marker comment, so ownership of the `fallow` entry is
 //! recognized by shape: an entry whose command and args match one of the
 //! launchers fallow writes, with no extra keys, is fallow-managed. The one
@@ -37,6 +43,9 @@ const MCP_VERSION_PREFIX: &str = "fallow-mcp ";
 /// The version line is short; the probe reads no more than this many bytes.
 const PROBE_OUTPUT_LIMIT: u64 = 4096;
 const NO_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher found. Install fallow through npm (npm i -D fallow), or put fallow-mcp on PATH. cargo install fallow-mcp and the GitHub release archive both supply fallow-mcp";
+/// A user-level entry starts in every project, so it needs a launcher outside
+/// each project: a global install.
+const NO_USER_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher outside the project found. A user-level entry needs a global install: npm install -g fallow, or cargo install fallow-mcp";
 
 /// How the MCP server should be started.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -91,7 +100,12 @@ impl McpCommand {
     }
 }
 
-pub fn resolve_command(root: &Path) -> Option<McpCommand> {
+/// The launcher for a project-level entry (`user` false) or a user-level
+/// entry (`user` true).
+pub fn resolve_command(root: &Path, user: bool) -> Option<McpCommand> {
+    if user {
+        return resolve_user_command(root);
+    }
     resolve_command_with(
         node_modules_launcher_present(root),
         || find_on_path("fallow-mcp"),
@@ -141,6 +155,47 @@ pub fn resolve_command_with(
         args: vec!["mcp-server".to_string()],
         source: McpSource::SelfBinary,
     })
+}
+
+/// The launcher for a user-level entry and for a printed user-scope command
+/// of the project at `root`.
+pub fn resolve_user_command(root: &Path) -> Option<McpCommand> {
+    resolve_user_command_with(
+        crate::setup_hooks::user_launcher::search_dirs(),
+        &crate::setup_hooks::user_launcher::project_dirs(root),
+        || {
+            let exe = std::env::current_exe().ok()?;
+            serves_mcp(&exe).then_some(exe)
+        },
+    )
+}
+
+/// The user-level launcher: the first `fallow-mcp` in `search_dirs` that
+/// [`crate::setup_hooks::user_launcher::is_user_launcher`] accepts, as found, else the
+/// running binary when it serves MCP and is accepted too.
+pub fn resolve_user_command_with(
+    search_dirs: impl IntoIterator<Item = PathBuf>,
+    project_dirs: &[PathBuf],
+    self_probe: impl FnOnce() -> Option<PathBuf>,
+) -> Option<McpCommand> {
+    if let Some(found) = crate::setup_hooks::user_launcher::find_user_launcher(
+        "fallow-mcp",
+        search_dirs,
+        project_dirs,
+    ) {
+        return Some(McpCommand {
+            command: found.display().to_string(),
+            args: Vec::new(),
+            source: McpSource::Path,
+        });
+    }
+    self_probe()
+        .filter(|exe| crate::setup_hooks::user_launcher::is_user_launcher(exe, project_dirs))
+        .map(|exe| McpCommand {
+            command: exe.display().to_string(),
+            args: vec!["mcp-server".to_string()],
+            source: McpSource::SelfBinary,
+        })
 }
 
 /// Resolve a bare command name against `PATH`, the way the agent gate does.
@@ -315,7 +370,11 @@ fn install_for(
             StepReport::new(Some(harness), Step::Mcp, StepStatus::Skipped, ctx.scope())
                 .path(ctx, &path)
                 .reason(Reason::McpEntryUnavailable)
-                .detail(NO_LAUNCHER_DETAIL),
+                .detail(if ctx.user {
+                    NO_USER_LAUNCHER_DETAIL
+                } else {
+                    NO_LAUNCHER_DETAIL
+                }),
         ];
     };
     if harness == Harness::Claude && ctx.user {
@@ -1045,6 +1104,74 @@ pub fn merge_codex(
     }
     std::fs::write(path, after).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup))
+}
+
+/// The warning for a Codex project gate in a repository nested in another
+/// work tree. The Codex handler runs no gate there.
+pub(super) const NESTED_CODEX_GATE_WARNING: &str = "warning: the Codex gate does not run in a repository nested in another work tree; install in the outer repository";
+
+/// True when the git work tree of `root` lies inside the work tree of
+/// another repository (for example a submodule or a nested clone), and the
+/// outer repository does not list it as a linked worktree. A work tree at
+/// `home` does not count as the outer work tree.
+pub(super) fn is_nested_repository(root: &Path, home: Option<&Path>) -> bool {
+    let Some(top) = crate::base_worktree::git_toplevel(root) else {
+        return false;
+    };
+    let Some(outer) = top.parent().and_then(crate::base_worktree::git_toplevel) else {
+        return false;
+    };
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if home.is_some_and(|home| canonical(home) == outer) {
+        return false;
+    }
+    let listed = fallow_engine::changed_files::git_command_in(&outer)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| line.strip_prefix("worktree "))
+                .any(|path| canonical(Path::new(path)) == top)
+        });
+    !listed
+}
+
+/// Where `root` sits relative to git.
+pub(super) enum GitTop {
+    /// No directory at or above `root` holds a `.git` entry.
+    Outside,
+    /// The canonical work tree top level.
+    Top(PathBuf),
+    /// Git fails there (for example a `safe.directory` refusal) or prints a
+    /// path that is not UTF-8.
+    Unknown,
+}
+
+pub(super) fn git_top(root: &Path) -> GitTop {
+    if !root
+        .ancestors()
+        .any(|dir| dir.join(".git").symlink_metadata().is_ok())
+    {
+        return GitTop::Outside;
+    }
+    crate::base_worktree::git_toplevel(root).map_or(GitTop::Unknown, GitTop::Top)
+}
+
+/// `Some(true)` when git tracks one of `paths` (relative to `root`) or a file
+/// below it, `Some(false)` when it tracks none, `None` when git cannot run or
+/// exits with an error. A caller treats `None` as "tracked". Git reads each
+/// path as a literal path, without pathspec magic or globs.
+pub(super) fn git_tracks_any(root: &Path, paths: &[PathBuf]) -> Option<bool> {
+    let output = fallow_engine::changed_files::git_command_in(root)
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .args(["ls-files", "-z", "--"])
+        .args(paths)
+        .output()
+        .ok()?;
+    output.status.success().then_some(!output.stdout.is_empty())
 }
 
 fn is_git_tracked(root: &Path, relative: &str) -> bool {
