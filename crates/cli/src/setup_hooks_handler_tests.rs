@@ -285,6 +285,42 @@ fn codex_handler_runs_no_gate_in_an_unregistered_nested_checkout() {
     assert!(out.status.success());
 }
 
+/// A submodule is its own checkout of another repository. The Codex handler
+/// of the submodule runs its own gate script.
+#[test]
+fn codex_handler_runs_the_gate_of_a_submodule() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let inner = base.join("inner");
+    git(&inner, &["init", "-q"]);
+    commit_all(&inner);
+    let outer = base.join("outer");
+    git(&outer, &["init", "-q"]);
+    commit_all(&outer);
+    git(
+        &outer,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            inner.to_str().unwrap(),
+            "lib",
+        ],
+    );
+    let lib = outer.join("lib");
+
+    let out = run_handler_stub(&codex("."), ".codex", &lib, &lib.join("src"), &lib);
+
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        lib.to_string_lossy(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// A nested repository, submodule or vendored package below the project
 /// can commit its own `.claude/hooks/fallow-gate.sh`. The handler of the
 /// project must run only the script of the install root.

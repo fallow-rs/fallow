@@ -151,12 +151,12 @@ const CLAUDE_HOOK_MATCHER: &str = "Bash";
 /// git work tree the top level is the cwd. The handler runs only the gate script of that
 /// root, from that root, because the gate script and `fallow audit` resolve paths from the
 /// cwd. It exits 0 without a gate when the top level is inside another git work tree (not
-/// `$HOME`; a linked worktree that the outer repository lists in `git worktree list`
-/// keeps its gate), when no script is there, or when the walk from the cwd finds a `.git`
-/// entry before the install root.
+/// `$HOME`; a linked worktree in `git worktree list` of the outer repository and a
+/// submodule of it keep their gate), when no script is there, or when the walk from the
+/// cwd finds a `.git` entry before the install root.
 fn codex_project_handler_command(install_rel: &Path) -> String {
     format!(
-        "c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" || c=; t=\"$(cd -P \"./$c\" 2>/dev/null && pwd -P)\" || exit 0; o=\"$(cd -P \"$t/..\" 2>/dev/null && c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" && cd -P \"./$c\" 2>/dev/null && pwd -P)\" && [ \"$o\" != \"$(cd -P \"$HOME\" 2>/dev/null && pwd -P)\" ] && ! git -c safe.bareRepository=explicit -C \"$o\" worktree list --porcelain 2>/dev/null | {{ w=; while IFS= read -r l; do case \"$l\" in \"worktree \"*) [ \"$(cd -P \"${{l#worktree }}\" 2>/dev/null && pwd -P)\" = \"$t\" ] && w=1;; esac; done; [ -n \"$w\" ]; }} && exit 0; r=\"$(cd -P \"$t\"/{} 2>/dev/null && pwd -P)\" || exit 0; [ -f \"$r/.codex/hooks/fallow-gate.sh\" ] || exit 0; d=\"$(pwd -P)\"; until [ \"$d\" = \"$r\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; [ \"$d\" = \"$r\" ] || exit 0; cd -P \"$r\" && exec \"$r/.codex/hooks/fallow-gate.sh\"",
+        "c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" || c=; t=\"$(cd -P \"./$c\" 2>/dev/null && pwd -P)\" || exit 0; o=\"$(cd -P \"$t/..\" 2>/dev/null && c=\"$(git -c safe.bareRepository=explicit rev-parse --show-cdup 2>/dev/null)\" && cd -P \"./$c\" 2>/dev/null && pwd -P)\" && [ \"$o\" != \"$(cd -P \"$HOME\" 2>/dev/null && pwd -P)\" ] && ! {{ git -c safe.bareRepository=explicit -C \"$o\" worktree list --porcelain 2>/dev/null | {{ w=; while IFS= read -r l; do case \"$l\" in \"worktree \"*) [ \"$(cd -P \"${{l#worktree }}\" 2>/dev/null && pwd -P)\" = \"$t\" ] && w=1;; esac; done; [ -n \"$w\" ]; }} || {{ s=\"$(git -c safe.bareRepository=explicit -C \"$t\" rev-parse --show-superproject-working-tree 2>/dev/null)\" && [ -n \"$s\" ] && [ \"$(cd -P \"$s\" 2>/dev/null && pwd -P)\" = \"$o\" ]; }}; }} && exit 0; r=\"$(cd -P \"$t\"/{} 2>/dev/null && pwd -P)\" || exit 0; [ -f \"$r/.codex/hooks/fallow-gate.sh\" ] || exit 0; d=\"$(pwd -P)\"; until [ \"$d\" = \"$r\" ] || [ -e \"$d/.git\" ] || [ \"$d\" = / ]; do d=\"$(dirname \"$d\")\"; done; [ \"$d\" = \"$r\" ] || exit 0; cd -P \"$r\" && exec \"$r/.codex/hooks/fallow-gate.sh\"",
         posix_single_quote(&install_rel.to_string_lossy().replace('\\', "/"))
     )
 }
