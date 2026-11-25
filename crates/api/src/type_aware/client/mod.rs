@@ -4,6 +4,7 @@ mod call_evidence;
 mod empty;
 mod queries;
 mod reconcile;
+mod response_path;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -42,6 +43,7 @@ use queries::{build_dead_code_queries, query_supports_guarded_fix};
 use reconcile::apply_dead_code_response;
 #[cfg(test)]
 use reconcile::semantic_only_candidate_stays_hidden;
+use response_path::validate_semantic_response_path;
 
 const EVIDENCE_LIMIT: usize = 40;
 /// A type-coupling result is one project-wide report, not one symbol, so it
@@ -1719,18 +1721,6 @@ fn declaration_path_matches_package(path: &Path, package: &str) -> bool {
     format!("/{normalized}").contains(&marker)
 }
 
-fn validate_semantic_response_path(path: &Path, query_id: usize) -> Result<(), TypeAwareError> {
-    let relative = path
-        .components()
-        .all(|component| !matches!(component, Component::RootDir | Component::Prefix(_)));
-    if !relative {
-        return Err(TypeAwareError::from(format!(
-            "type-aware query {query_id} returned a non-project-relative path"
-        )));
-    }
-    Ok(())
-}
-
 fn validate_semantic_reference_paths(
     evidence: &SemanticReferenceData,
     query_id: usize,
@@ -2996,7 +2986,8 @@ mod tests {
         assert!(protocol_path(root, Path::new("../outside.ts")).is_err());
         assert!(protocol_path(root, &root.join("../outside.ts")).is_err());
         assert!(validate_semantic_response_path(Path::new("src/config.ts"), 0).is_ok());
-        assert!(validate_semantic_response_path(Path::new("../shared/consumer.ts"), 0).is_ok());
+        assert!(validate_semantic_response_path(Path::new("src/../shared/consumer.ts"), 0).is_ok());
+        assert!(validate_semantic_response_path(Path::new("../shared/consumer.ts"), 0).is_err());
         assert!(validate_semantic_response_path(&root.join("outside.ts"), 0).is_err());
         let unsafe_alias = SemanticReferenceData {
             path: PathBuf::from("src/config.ts"),
