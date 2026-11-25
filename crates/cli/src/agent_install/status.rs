@@ -437,8 +437,8 @@ fn user_mcp_rows(root: &Path, home: &Path) -> Vec<SurfaceStatus> {
 }
 
 /// True when an MCP entry starts a package runner that resolves `fallow-mcp`
-/// from the current project: `npx`, `bunx` or `pnpm dlx`, also as a `.cmd`
-/// or `.exe` file and by path.
+/// from the current project: `npx`, `bunx`, `pnpm dlx` or `yarn dlx`, also
+/// as a `.cmd` or `.exe` file and by path.
 fn runs_a_package_runner(command: &mcp::McpCommand) -> bool {
     let name = command
         .command
@@ -452,7 +452,7 @@ fn runs_a_package_runner(command: &mcp::McpCommand) -> bool {
         .unwrap_or(&name);
     match name {
         "npx" | "bunx" => true,
-        "pnpm" => command.args.first().is_some_and(|arg| arg == "dlx"),
+        "pnpm" | "yarn" => command.args.first().is_some_and(|arg| arg == "dlx"),
         _ => false,
     }
 }
@@ -1144,6 +1144,8 @@ mod tests {
             ("bunx", &["fallow-mcp"][..]),
             ("pnpm", &["dlx", "fallow-mcp"][..]),
             ("pnpm.cmd", &["dlx", "fallow-mcp"][..]),
+            ("yarn", &["dlx", "fallow-mcp"][..]),
+            ("yarn.cmd", &["dlx", "fallow-mcp"][..]),
         ] {
             assert!(runs_a_package_runner(&entry(command, args)), "{command}");
         }
@@ -1155,6 +1157,7 @@ mod tests {
             "pnpm",
             &["exec", "fallow-mcp"]
         )));
+        assert!(!runs_a_package_runner(&entry("yarn", &["fallow-mcp"])));
     }
 
     #[test]
