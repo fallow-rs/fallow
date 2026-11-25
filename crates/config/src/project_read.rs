@@ -274,20 +274,30 @@ pub fn base_as_given(
 }
 
 /// The state of a path whose walk reached the missing entry `missing`, with
-/// `rest` still to walk. The rest is taken by text.
+/// `rest` still to walk. The rest is taken by text until a `..` leads back
+/// to an entry that exists; from there the walk is on disk again.
 fn missing_rest(
     canonical_base: &Path,
     missing: PathBuf,
-    rest: std::path::Components<'_>,
+    mut rest: std::path::Components<'_>,
 ) -> ProjectEntry {
     let mut current = missing;
-    for component in rest {
+    while let Some(component) = rest.next() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
                 current.pop();
                 if !current.starts_with(canonical_base) {
                     return ProjectEntry::Outside;
+                }
+                if current.symlink_metadata().is_ok() {
+                    // A `..` led back to an entry that exists, so the rest
+                    // can pass a link again: walk it on disk from here.
+                    return project_entry_within(
+                        canonical_base,
+                        canonical_base,
+                        &current.join(rest.as_path()),
+                    );
                 }
             }
             Component::Normal(name) => current.push(name),
@@ -543,6 +553,29 @@ mod tests {
         assert_eq!(
             project_path_entry(base, base, base, Path::new("//host/share/CODEOWNERS")),
             ProjectEntry::Outside
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_link_after_a_dot_dot_out_of_a_missing_dir_is_walked_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dunce::canonicalize(dir.path()).unwrap();
+        let root = outer.join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(outer.join("elsewhere")).unwrap();
+        std::os::unix::fs::symlink(outer.join("elsewhere"), root.join("away")).unwrap();
+        for path in ["missing/../away/new.json", "a/b/../../away/new.json"] {
+            assert_eq!(
+                project_entry(&root, Path::new(path)),
+                ProjectEntry::Outside,
+                "{path}"
+            );
+        }
+        assert_eq!(
+            project_entry(&root, Path::new("missing/../new.json")),
+            ProjectEntry::Missing
         );
     }
 }
