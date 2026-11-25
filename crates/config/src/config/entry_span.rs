@@ -71,7 +71,11 @@ impl FallowConfig {
             if !sets_list {
                 continue;
             }
-            let content = std::fs::read_to_string(path).ok()?;
+            let content = fallow_types::read_guard::read_to_string_bounded(
+                path,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            )
+            .ok()?;
             let (start, end) = range_in(path, &content)?;
             return Some(ConfigEntrySpan {
                 path: path.to_path_buf(),

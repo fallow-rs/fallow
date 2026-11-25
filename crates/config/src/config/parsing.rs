@@ -1652,24 +1652,25 @@ impl FallowConfig {
     /// Check that each config key that names one file resolves inside
     /// `root`. A key whose path runs through a link that resolves outside
     /// `root` is refused. A path that does not exist yet passes, so a later
-    /// read can report it as missing. CLI flags and environment variables
-    /// that override these keys are not checked here.
+    /// read can report it as missing. When `root` does not resolve, each key
+    /// that is set is refused. CLI flags and environment variables that
+    /// override these keys are not checked here.
     ///
     /// # Errors
     ///
     /// Returns one message for each refused key. A message names the key and
     /// its value, never a resolved path outside `root`.
     pub fn check_file_path_keys_inside(&self, root: &Path) -> Result<(), Vec<String>> {
-        let Ok(canonical_root) = dunce::canonicalize(root) else {
-            return Ok(());
-        };
+        let canonical_root = dunce::canonicalize(root).ok();
         let errors: Vec<String> = self
             .file_path_keys()
             .into_iter()
             .filter_map(|(value, field)| value.map(|value| (value, field)))
             .filter(|(value, _)| {
-                crate::project_read::project_entry(&canonical_root, Path::new(value))
-                    == crate::project_read::ProjectEntry::Outside
+                canonical_root.as_deref().is_none_or(|canonical_root| {
+                    crate::project_read::project_entry(canonical_root, Path::new(value))
+                        == crate::project_read::ProjectEntry::Outside
+                })
             })
             .map(|(value, field)| {
                 format!("{field}: '{value}' resolves to a location outside the project root")

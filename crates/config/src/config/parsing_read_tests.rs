@@ -253,3 +253,21 @@ fn find_config_path_refuses_a_config_link_that_leaves_the_project() {
     std::fs::write(project.join("fallow.toml"), "").unwrap();
     assert_eq!(FallowConfig::find_config_path(&project), None);
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn file_path_keys_are_refused_when_the_root_does_not_resolve() {
+    let dir = tempfile::tempdir().unwrap();
+    let config: FallowConfig = serde_json::from_str(r#"{"codeowners": "CODEOWNERS"}"#).unwrap();
+    let errors = config
+        .check_file_path_keys_inside(&dir.path().join("missing-root"))
+        .unwrap_err();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].starts_with("codeowners"), "{errors:?}");
+    let empty: FallowConfig = serde_json::from_str("{}").unwrap();
+    assert!(
+        empty
+            .check_file_path_keys_inside(&dir.path().join("missing-root"))
+            .is_ok()
+    );
+}

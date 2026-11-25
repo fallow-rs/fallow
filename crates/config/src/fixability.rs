@@ -113,7 +113,10 @@ fn has_workspace_marker(dir: &Path) -> bool {
     if !pkg_path.exists() {
         return false;
     }
-    let Ok(content) = std::fs::read_to_string(&pkg_path) else {
+    let Ok(content) = fallow_types::read_guard::read_to_string_bounded(
+        &pkg_path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) else {
         return false;
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
@@ -169,5 +172,27 @@ mod tests {
         let sub = dir.path().join("packages/app");
         std::fs::create_dir_all(&sub).unwrap();
         assert!(!is_config_fixable(&sub, None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_pipe_as_a_parent_manifest_does_not_block_the_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new("mkfifo")
+            .arg(dir.path().join("package.json"))
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo must create the test pipe");
+        let sub = dir.path().join("packages/app");
+        std::fs::create_dir_all(&sub).unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(is_config_fixable(&sub, None));
+        });
+        let fixable = receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the check must not wait on a pipe");
+        assert!(fixable);
     }
 }
