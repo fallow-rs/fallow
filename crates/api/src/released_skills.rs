@@ -25,14 +25,14 @@ pub type Frontmatter = serde_json::Map<String, serde_json::Value>;
 
 /// Parse the YAML frontmatter at the start of a `SKILL.md`.
 ///
-/// A string value stays a string, and a boolean stays a boolean. Other
-/// scalars keep their source text as a string. A nested mapping or sequence
-/// is an error, because no released skill uses one.
+/// Each value keeps its YAML type: a string, a boolean, a number, a null, a
+/// sequence or a mapping. A plain scalar that is not a valid JSON number,
+/// such as `.inf`, keeps its source text as a string.
 ///
 /// # Errors
 ///
 /// Returns an error when the text has no frontmatter block, the block is not
-/// valid YAML, or a value is not a scalar. CRLF line ends are accepted.
+/// valid YAML, or a mapping key is not a scalar. CRLF line ends are accepted.
 pub fn parse_frontmatter(skill_md: &str) -> Result<Frontmatter, String> {
     let skill_md = skill_md.replace("\r\n", "\n");
     let block = skill_md
@@ -40,24 +40,40 @@ pub fn parse_frontmatter(skill_md: &str) -> Result<Frontmatter, String> {
         .and_then(|rest| rest.split_once("\n---\n").map(|(block, _)| block))
         .ok_or("SKILL.md has no frontmatter block")?;
     let document = fallow_config::yaml::parse(block).map_err(|e| e.to_string())?;
-    let mapping = document
-        .root()
-        .as_mapping()
-        .ok_or("SKILL.md frontmatter is not a mapping")?;
-    let mut fields = Frontmatter::new();
-    for (key, value) in mapping.iter() {
-        let key = key.scalar_text().ok_or("frontmatter key is not a scalar")?;
-        let value = if let Some(flag) = value.as_bool() {
-            serde_json::Value::Bool(flag)
-        } else {
-            let text = value
-                .scalar_text()
-                .ok_or_else(|| format!("frontmatter field `{key}` is not a scalar"))?;
-            serde_json::Value::String(text.to_string())
-        };
-        fields.insert(key.to_string(), value);
+    match yaml_to_json(document.root())? {
+        serde_json::Value::Object(fields) => Ok(fields),
+        _ => Err("SKILL.md frontmatter is not a mapping".to_string()),
     }
-    Ok(fields)
+}
+
+fn yaml_to_json(node: fallow_config::yaml::YamlNode<'_>) -> Result<serde_json::Value, String> {
+    use serde_json::Value;
+    if node.is_null() {
+        return Ok(Value::Null);
+    }
+    if let Some(flag) = node.as_bool() {
+        return Ok(Value::Bool(flag));
+    }
+    if let Some(text) = node.as_str() {
+        return Ok(Value::String(text.to_string()));
+    }
+    if let Some(mapping) = node.as_mapping() {
+        let mut fields = Frontmatter::new();
+        for (key, value) in mapping.iter() {
+            let key = key.scalar_text().ok_or("frontmatter key is not a scalar")?;
+            fields.insert(key.to_string(), yaml_to_json(value)?);
+        }
+        return Ok(Value::Object(fields));
+    }
+    if let Some(items) = node.as_sequence() {
+        return items
+            .map(yaml_to_json)
+            .collect::<Result<_, _>>()
+            .map(Value::Array);
+    }
+    let text = node.scalar_text().ok_or("unsupported frontmatter value")?;
+    Ok(serde_json::from_str::<serde_json::Number>(text)
+        .map_or_else(|_| Value::String(text.to_string()), Value::Number))
 }
 
 #[cfg(test)]
@@ -82,9 +98,30 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_rejects_missing_block_and_nested_values() {
+    fn frontmatter_keeps_value_types() {
+        let fields = parse_frontmatter(
+            "---\nname: demo\nversion: 1.10\ncount: 3\nempty: ~\nquoted: \"42\"\n\
+             allowed-tools: [Read, Grep]\nmetadata:\n  owner: fallow\n---\n",
+        )
+        .expect("valid frontmatter");
+        assert_eq!(
+            serde_json::Value::Object(fields),
+            serde_json::json!({
+                "name": "demo",
+                "version": 1.10,
+                "count": 3,
+                "empty": null,
+                "quoted": "42",
+                "allowed-tools": ["Read", "Grep"],
+                "metadata": { "owner": "fallow" },
+            })
+        );
+    }
+
+    #[test]
+    fn frontmatter_rejects_a_missing_block() {
         assert!(parse_frontmatter("# No frontmatter\n").is_err());
-        assert!(parse_frontmatter("---\nname: demo\nmetadata:\n  a: b\n---\n").is_err());
+        assert!(parse_frontmatter("---\n- a\n- b\n---\n").is_err());
     }
 
     #[test]

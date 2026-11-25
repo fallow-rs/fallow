@@ -3,4 +3,6 @@
 //! `syn` features equal between a package build and a workspace build.
 //! The released skills are embedded by the build script of `fallow-api`.
 
-fn main() {}
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+}

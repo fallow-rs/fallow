@@ -270,9 +270,19 @@ const SKILLS_EXTENSION: &str = "io.modelcontextprotocol/skills";
 const RELEASED_SKILLS: &[&str] = &["fallow", "fallow-setup"];
 
 fn released_skill_dir(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../npm/fallow/skills")
-        .join(name)
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../npm/fallow/skills")
+    .join(name)
+}
+
+/// A source build from crates.io has no skill trees, so it embeds and serves
+/// no skills. The skill tests have nothing to check there.
+fn skill_trees_present() -> bool {
+    RELEASED_SKILLS
+        .iter()
+        .all(|name| released_skill_dir(name).join("SKILL.md").is_file())
 }
 
 /// Every file below `dir`, as a path relative to `dir` with forward slashes.
@@ -296,6 +306,9 @@ fn files_below(dir: &std::path::Path) -> Vec<String> {
 
 #[test]
 fn released_skills_are_served_byte_for_byte() {
+    if !skill_trees_present() {
+        return;
+    }
     let mut server = McpServer::start_with("2025-11-25");
     let extensions = &server.initialize_result["capabilities"]["extensions"];
     assert!(
@@ -382,6 +395,9 @@ fn released_skills_are_served_byte_for_byte() {
 
 #[test]
 fn unknown_skill_uri_is_invalid_params() {
+    if !skill_trees_present() {
+        return;
+    }
     let mut server = McpServer::start_with("2025-11-25");
     let error = server.request(
         2,
@@ -394,11 +410,31 @@ fn unknown_skill_uri_is_invalid_params() {
         "resources/read",
         &serde_json::json!({ "uri": "skill://fallow/references/nope.md" }),
     );
-    assert!(missing["error"].is_object(), "{missing}");
+    assert_eq!(missing["error"]["code"], -32602, "{missing}");
+    assert_eq!(
+        missing["error"]["data"]["skill"], "skill://fallow/SKILL.md",
+        "{missing}"
+    );
+    let known = missing["error"]["data"]["known_uris"].as_array().unwrap();
+    assert!(
+        known
+            .iter()
+            .any(|uri| uri == "skill://fallow/references/gotchas.md"),
+        "the error lists the files of the named skill: {missing}"
+    );
+    assert!(
+        known
+            .iter()
+            .all(|uri| uri.as_str().unwrap().starts_with("skill://fallow/")),
+        "the error lists no fallow:// resources: {missing}"
+    );
 }
 
 #[test]
 fn skills_are_listed_with_modern_request_metadata() {
+    if !skill_trees_present() {
+        return;
+    }
     let mut server = McpServer::spawn();
     let listing = server.request(
         2,
@@ -412,8 +448,13 @@ fn skills_are_listed_with_modern_request_metadata() {
         }),
     );
     assert_eq!(listing["result"]["resultType"], "complete", "{listing}");
-    assert!(listing["result"]["ttlMs"].is_u64(), "{listing}");
-    assert!(listing["result"]["cacheScope"].is_string(), "{listing}");
+    assert!(
+        listing["result"]["ttlMs"]
+            .as_u64()
+            .is_some_and(|ttl| ttl > 0),
+        "compiled-in skills are cacheable: {listing}"
+    );
+    assert_eq!(listing["result"]["cacheScope"], "public", "{listing}");
     assert_eq!(
         listing["result"]["skills"].as_array().map(Vec::len),
         Some(2)

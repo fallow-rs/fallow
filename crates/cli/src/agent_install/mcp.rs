@@ -9,8 +9,10 @@
 //!
 //! JSON cannot carry a marker comment, so ownership of the `fallow` entry is
 //! recognized by shape: an entry whose command and args match one of the
-//! launchers fallow writes, with no extra keys, is fallow-managed. Anything
-//! else is foreign and is neither replaced nor removed without `--force`.
+//! launchers fallow writes, with no extra keys, is fallow-managed. The one
+//! extra key fallow writes is an `env` that holds only `FALLOW_MCP_SKILLS=off`.
+//! Anything else is foreign and is neither replaced nor removed without
+//! `--force`.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -21,6 +23,7 @@ use serde::Serialize;
 
 use super::{Ctx, Harness, Mode, Reason, Scope, Step, StepReport, StepStatus};
 use crate::state_file::{Existing, load_existing, read_optional_text};
+use fallow_types::mcp_manifest::{MCP_SKILLS_ENV, MCP_SKILLS_OFF};
 
 const SERVER_KEY: &str = "fallow";
 const CLAUDE_PROJECT_FILE: &str = ".mcp.json";
@@ -246,11 +249,26 @@ fn shared_safe(command: &McpCommand) -> Result<McpCommand, StepReport> {
         )))
 }
 
-pub fn install(ctx: &Ctx, harnesses: &[Harness], command: Option<&McpCommand>) -> Vec<StepReport> {
+/// Register the server with each harness.
+///
+/// With `skills_on_disk`, the same run also installs the released skills on
+/// disk. The entry then sets [`MCP_SKILLS_ENV`] to [`MCP_SKILLS_OFF`], so a
+/// client that loads skills from MCP servers does not show each skill twice.
+pub fn install(
+    ctx: &Ctx,
+    harnesses: &[Harness],
+    command: Option<&McpCommand>,
+    skills_on_disk: bool,
+) -> Vec<StepReport> {
     harnesses
         .iter()
-        .flat_map(|harness| install_for(ctx, *harness, command))
+        .flat_map(|harness| install_for(ctx, *harness, command, skills_on_disk))
         .collect()
+}
+
+/// The `env` object of a JSON entry that turns the server skills off.
+fn skills_off_env() -> serde_json::Value {
+    serde_json::json!({ MCP_SKILLS_ENV: MCP_SKILLS_OFF })
 }
 
 pub fn uninstall(ctx: &Ctx, harnesses: &[Harness]) -> Vec<StepReport> {
@@ -275,7 +293,12 @@ fn target_file(ctx: &Ctx, harness: Harness) -> Result<PathBuf, String> {
     }
 }
 
-fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec<StepReport> {
+fn install_for(
+    ctx: &Ctx,
+    harness: Harness,
+    command: Option<&McpCommand>,
+    skills_on_disk: bool,
+) -> Vec<StepReport> {
     let path = match target_file(ctx, harness) {
         Ok(path) => path,
         Err(message) => {
@@ -296,8 +319,13 @@ fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec
         ];
     };
     if harness == Harness::Claude && ctx.user {
+        let env = if skills_on_disk {
+            format!("-e {MCP_SKILLS_ENV}={MCP_SKILLS_OFF} ")
+        } else {
+            String::new()
+        };
         return vec![manual_claude_user_step(ctx, Mode::Install).detail(format!(
-            "fallow does not edit ~/.claude.json; run: claude mcp add --scope user {SERVER_KEY} -- {}",
+            "fallow does not edit ~/.claude.json; run: claude mcp add --scope user {env}{SERVER_KEY} -- {}",
             command.shell_words()
         ))];
     }
@@ -315,24 +343,30 @@ fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec
     };
     match harness {
         Harness::Claude => {
-            let entry = serde_json::json!({
+            let mut entry = serde_json::json!({
                 "type": "stdio",
                 "command": command.command,
                 "args": command.args,
             });
+            if skills_on_disk {
+                entry["env"] = skills_off_env();
+            }
             vec![
                 json_step(ctx, harness, &path, Scope::Shared, Some(&entry)),
                 approval_step(ctx, Mode::Install),
             ]
         }
         Harness::Cursor => {
-            let entry = serde_json::json!({
+            let mut entry = serde_json::json!({
                 "command": command.command,
                 "args": command.args,
             });
+            if skills_on_disk {
+                entry["env"] = skills_off_env();
+            }
             vec![json_step(ctx, harness, &path, ctx.scope(), Some(&entry))]
         }
-        Harness::Codex => vec![codex_step(ctx, &path, Some(&command))],
+        Harness::Codex => vec![codex_step(ctx, &path, Some(&command), skills_on_disk)],
     }
 }
 
@@ -359,7 +393,7 @@ fn uninstall_for(ctx: &Ctx, harness: Harness) -> Vec<StepReport> {
             ]
         }
         Harness::Cursor => vec![json_step(ctx, harness, &path, ctx.scope(), None)],
-        Harness::Codex => vec![codex_step(ctx, &path, None)],
+        Harness::Codex => vec![codex_step(ctx, &path, None, false)],
     }
 }
 
@@ -498,7 +532,12 @@ fn approval_step(ctx: &Ctx, mode: Mode) -> StepReport {
     }
 }
 
-fn codex_step(ctx: &Ctx, path: &Path, command: Option<&McpCommand>) -> StepReport {
+fn codex_step(
+    ctx: &Ctx,
+    path: &Path,
+    command: Option<&McpCommand>,
+    skills_on_disk: bool,
+) -> StepReport {
     let status = if command.is_some() {
         StepStatus::Written
     } else {
@@ -516,7 +555,7 @@ fn codex_step(ctx: &Ctx, path: &Path, command: Option<&McpCommand>) -> StepRepor
     if let Some(link) = ctx.symlink_on([path, backup_path(path).as_path()]) {
         return base.symlinked(ctx, &link);
     }
-    let outcome = merge_codex(path, command, ctx.dry_run, ctx.force);
+    let outcome = merge_codex(path, command, skills_on_disk, ctx.dry_run, ctx.force);
     outcome_report(base, outcome, ctx, path, Reason::InvalidToml)
 }
 
@@ -632,8 +671,14 @@ fn entry_is_fallow_shape(entry: &serde_json::Value, allow_type: bool) -> bool {
     let Some(object) = entry.as_object() else {
         return false;
     };
-    let known = ["command", "args", "type"];
+    let known = ["command", "args", "type", "env"];
     if object.keys().any(|key| !known.contains(&key.as_str())) {
+        return false;
+    }
+    if object
+        .get("env")
+        .is_some_and(|env| *env != skills_off_env())
+    {
         return false;
     }
     if let Some(kind) = object.get("type")
@@ -855,7 +900,12 @@ fn codex_entry_is_fallow_shape(entry: &toml_edit::Item) -> bool {
     };
     if table
         .iter()
-        .any(|(key, _)| key != "command" && key != "args")
+        .any(|(key, _)| key != "command" && key != "args" && key != "env")
+    {
+        return false;
+    }
+    if let Some(env) = table.get("env")
+        && !codex_env_is_skills_off(env)
     {
         return false;
     }
@@ -881,11 +931,21 @@ fn codex_entry_is_fallow_shape(entry: &toml_edit::Item) -> bool {
     .is_fallow_shape()
 }
 
+/// True when a Codex `env` table holds only the switch that turns the server
+/// skills off.
+fn codex_env_is_skills_off(env: &toml_edit::Item) -> bool {
+    env.as_table_like().is_some_and(|table| {
+        table.len() == 1
+            && table.get(MCP_SKILLS_ENV).and_then(toml_edit::Item::as_str) == Some(MCP_SKILLS_OFF)
+    })
+}
+
 /// Set or remove `[mcp_servers.fallow]` in a Codex `config.toml`, keeping
 /// formatting and comments of everything else.
 pub fn merge_codex(
     path: &Path,
     command: Option<&McpCommand>,
+    skills_on_disk: bool,
     dry_run: bool,
     force: bool,
 ) -> Result<FileOutcome, String> {
@@ -947,6 +1007,11 @@ pub fn merge_codex(
                 args.push(arg.as_str());
             }
             entry.insert("args", toml_edit::value(args));
+            if skills_on_disk {
+                let mut env = toml_edit::InlineTable::new();
+                env.insert(MCP_SKILLS_ENV, MCP_SKILLS_OFF.into());
+                entry.insert("env", toml_edit::value(env));
+            }
             servers.insert(SERVER_KEY, toml_edit::Item::Table(entry));
         }
         None => {

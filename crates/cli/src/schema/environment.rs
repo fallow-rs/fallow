@@ -405,6 +405,12 @@ pub(super) const ENVIRONMENT_VARIABLES: &[EnvironmentVariable] = &[
         "MCP server: set to 0, false, off or no to stop typed tool calls from keeping parsed modules in memory between calls (default on).",
     ),
     var(
+        "FALLOW_MCP_SKILLS",
+        MCP,
+        Some("on"),
+        "MCP server: set to 0, false, off or no to stop serving the fallow and fallow-setup skills through the MCP skills extension (default on). fallow agent install writes off into the MCP entry when it also installs the skills on disk.",
+    ),
+    var(
         "FALLOW_INTEGRATION_SURFACE",
         TELEMETRY,
         None,

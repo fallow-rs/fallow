@@ -18652,6 +18652,12 @@
       "description": "MCP server: set to 0, false, off or no to stop typed tool calls from keeping parsed modules in memory between calls (default on)."
     },
     {
+      "name": "FALLOW_MCP_SKILLS",
+      "group": "mcp",
+      "default": "on",
+      "description": "MCP server: set to 0, false, off or no to stop serving the fallow and fallow-setup skills through the MCP skills extension (default on). fallow agent install writes off into the MCP entry when it also installs the skills on disk."
+    },
+    {
       "name": "FALLOW_INTEGRATION_SURFACE",
       "group": "telemetry",
       "default": null,
