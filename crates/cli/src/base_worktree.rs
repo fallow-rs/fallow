@@ -1787,7 +1787,11 @@ pub fn git_toplevel(root: &Path) -> Option<PathBuf> {
     if !output.status.success() {
         return None;
     }
-    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let line = fallow_engine::changed_files::git_path_line(&output.stdout)?;
+    if line.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(line);
     Some(dunce::canonicalize(&path).unwrap_or(path))
 }
 
@@ -1827,6 +1831,37 @@ mod cleanup_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Git prints a top level that ends in a space as it is. Trimming the
+    /// space would name the sibling `web`, here a link to another project,
+    /// and canonicalizing would follow that link.
+    #[cfg(unix)]
+    #[test]
+    fn git_toplevel_keeps_trailing_blanks_of_the_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let repo = base.join("web ");
+        let other = base.join("other-project");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::os::unix::fs::symlink("other-project", base.join("web")).unwrap();
+        let init = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .status()
+            .unwrap();
+        assert!(init.success());
+
+        assert_eq!(git_toplevel(&repo), Some(repo.clone()));
+        assert_eq!(
+            crate::agent_install::resolve_root(&repo.join("."), false),
+            repo
+        );
+    }
 
     /// Many threads minting a non-reusable worktree path at the same instant
     /// must each get a distinct path. Before the monotonic counter, concurrent

@@ -166,6 +166,24 @@ pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
     Ok(s)
 }
 
+/// The one path that a `git rev-parse` path query prints, without the line
+/// end that git adds. Only one trailing `\n` (and a `\r` before it) goes, so
+/// a path that ends in a space or another blank stays the same path. Output
+/// that is not UTF-8 returns `None`: a lossy conversion would name another
+/// path.
+#[must_use]
+pub fn git_path_line(stdout: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(stdout).ok()?;
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    Some(text.strip_suffix('\r').unwrap_or(text))
+}
+
+fn non_utf8_output(query: &str) -> ChangedFilesError {
+    ChangedFilesError::GitFailed(format!(
+        "git rev-parse {query} printed a path that is not UTF-8"
+    ))
+}
+
 /// Resolve the canonical git toplevel for `cwd`.
 pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
     let output = spawn_output(&mut git_command(cwd, &["rev-parse", "--show-toplevel"]))
@@ -180,8 +198,8 @@ pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
         });
     }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let trimmed = raw.trim();
+    let trimmed =
+        git_path_line(&output.stdout).ok_or_else(|| non_utf8_output("--show-toplevel"))?;
     if trimmed.is_empty() {
         return Err(ChangedFilesError::GitFailed(
             "git rev-parse --show-toplevel returned empty output".to_owned(),
@@ -209,8 +227,8 @@ pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> 
         });
     }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let trimmed = raw.trim();
+    let trimmed =
+        git_path_line(&output.stdout).ok_or_else(|| non_utf8_output("--git-common-dir"))?;
     if trimmed.is_empty() {
         return Err(ChangedFilesError::GitFailed(
             "git rev-parse --git-common-dir returned empty output".to_owned(),
@@ -244,8 +262,8 @@ pub fn resolve_git_hooks_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
             ChangedFilesError::GitFailed(stderr.trim().to_owned())
         });
     }
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let trimmed = raw.trim();
+    let trimmed =
+        git_path_line(&output.stdout).ok_or_else(|| non_utf8_output("--git-path hooks"))?;
     if trimmed.is_empty() || trimmed.lines().count() != 1 {
         return Err(ChangedFilesError::GitFailed(format!(
             "git rev-parse --git-path hooks printed {trimmed:?}"
@@ -308,18 +326,22 @@ pub fn resolve_git_common_dir_and_toplevel(
         });
     }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let mut lines = raw.lines();
+    let raw =
+        std::str::from_utf8(&output.stdout).map_err(|_| non_utf8_output("--show-toplevel"))?;
+    let raw = raw.strip_suffix('\n').unwrap_or(raw);
+    let mut lines = raw
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line));
     let (Some(common), Some(toplevel), None) = (lines.next(), lines.next(), lines.next()) else {
         return Err(ChangedFilesError::GitFailed(
             "git rev-parse did not print one common dir and one toplevel".to_owned(),
         ));
     };
     let canonical = |line: &str| {
-        let path = PathBuf::from(line.trim());
+        let path = PathBuf::from(line);
         dunce::canonicalize(&path).unwrap_or(path)
     };
-    if common.trim().is_empty() || toplevel.trim().is_empty() {
+    if common.is_empty() || toplevel.is_empty() {
         return Err(ChangedFilesError::GitFailed(
             "git rev-parse returned an empty path".to_owned(),
         ));
@@ -915,6 +937,15 @@ pub(crate) fn filter_duplication_by_path_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_path_line_strips_only_the_line_end() {
+        assert_eq!(git_path_line(b"/work/web \n"), Some("/work/web "));
+        assert_eq!(git_path_line(b"/work/web\t\r\n"), Some("/work/web\t"));
+        assert_eq!(git_path_line(b" /work/web"), Some(" /work/web"));
+        assert_eq!(git_path_line(b"/work/web\n\n"), Some("/work/web\n"));
+        assert_eq!(git_path_line(b"/work/\xff\n"), None);
+    }
     use fallow_types::{
         duplicates::{CloneGroup, CloneInstance, DuplicationStats},
         output_dead_code::{
