@@ -1157,3 +1157,20 @@ fn resolve_drops_plugins_with_patterns_that_leave_the_root() {
         .collect();
     assert_eq!(names, vec!["ok".to_owned()]);
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn configured_plugin_diagnostics_report_an_oversize_file_as_unreadable() {
+    let dir = tempfile::tempdir().expect("temp root");
+    let file = std::fs::File::create(dir.path().join("huge.json")).expect("create plugin");
+    file.set_len(fallow_types::read_guard::DEFAULT_MAX_READ_BYTES + 1)
+        .expect("size plugin");
+
+    let diagnostics = diagnose_configured_external_plugins(dir.path(), &["huge.json".to_string()]);
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].kind,
+        ConfiguredPluginDiagnosticKind::Unreadable
+    );
+}
