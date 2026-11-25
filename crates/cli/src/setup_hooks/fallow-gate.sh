@@ -311,18 +311,37 @@ gate_which() {
   esac
 }
 
+# Returns 0 when directory $1 is a version-manager shim directory, in any
+# letter case: a directory named shims (this covers mise, asdf,
+# MISE_DATA_DIR/shims and ASDF_DATA_DIR/shims), .volta/bin, volta/bin (the
+# Windows form), or the bin directory of VOLTA_HOME.
+gate_shim_dir() {
+  local dir="${1%/}" hit=1 home="${VOLTA_HOME:-}"
+  shopt -s nocasematch
+  case "$dir" in
+    */shims | */.volta/bin | */volta/bin) hit=0 ;;
+  esac
+  if [ "$hit" -eq 1 ] && [ -n "$home" ]; then
+    case "$dir" in
+      "${home%/}/bin") hit=0 ;;
+    esac
+    if [ "$hit" -eq 1 ] && gate_resolve_dir "${home%/}/bin"; then
+      case "$dir" in
+        "$RESOLVED") hit=0 ;;
+      esac
+    fi
+  fi
+  shopt -u nocasematch
+  return "$hit"
+}
+
 # Returns 0 when the fallow at $1 is a version-manager shim, which runs the
-# fallow that the project selects: a file in a Volta, mise or asdf shim
-# directory (in any letter case, before or after links), or a link to
-# volta-shim. A link that the gate cannot follow counts as a shim.
+# fallow that the project selects: a file in a shim directory (see
+# gate_shim_dir), before or after links, or a link to volta-shim. A link that
+# the gate cannot follow counts as a shim.
 gate_is_shim() {
   local file="$1" link hops=0 hit=1
-  shopt -s nocasematch
-  case "${file%/*}" in
-    */.volta/bin | */mise/shims | */.asdf/shims) hit=0 ;;
-  esac
-  shopt -u nocasematch
-  [ "$hit" -eq 1 ] || return 0
+  gate_shim_dir "${file%/*}" && return 0
   while [ -L "$file" ]; do
     hops=$((hops + 1))
     [ "$hops" -le 40 ] || return 0
@@ -333,10 +352,8 @@ gate_is_shim() {
     esac
   done
   gate_resolve_dir "${file%/*}" || return 0
+  gate_shim_dir "$RESOLVED" && return 0
   shopt -s nocasematch
-  case "$RESOLVED" in
-    */.volta/bin | */mise/shims | */.asdf/shims) hit=0 ;;
-  esac
   case "${file##*/}" in
     volta-shim | volta-shim.exe) hit=0 ;;
   esac

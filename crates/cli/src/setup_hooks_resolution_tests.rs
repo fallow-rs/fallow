@@ -63,16 +63,18 @@ fn probe_gate_with_path_prefix(
         let _ = std::os::unix::fs::symlink(jq, extra_bin.join("jq"));
     }
     let path = format!("{path_prefix}{}:/usr/bin:/bin", extra_bin.display());
-    probe_gate_with_path(script, script_path, cwd, &path, input)
+    probe_gate_with_path(script, script_path, cwd, &path, input, &[])
 }
 
-/// Same as [`probe_gate`], with `path` as the whole `PATH`.
+/// Same as [`probe_gate`], with `path` as the whole `PATH` and `envs` added
+/// to the environment.
 fn probe_gate_with_path(
     script: &str,
     script_path: &Path,
     cwd: &Path,
     path: &str,
     input: &[u8],
+    envs: &[(&str, &Path)],
 ) -> std::process::Output {
     use std::io::Write;
 
@@ -83,6 +85,7 @@ fn probe_gate_with_path(
         .arg(script_path)
         .current_dir(cwd)
         .env("PATH", path)
+        .envs(envs.iter().copied())
         // An unreachable floor makes resolution observable: the block
         // message names the runner the script chose.
         .env("FALLOW_GATE_MIN_VERSION", "999.0.0")
@@ -866,6 +869,7 @@ fn gate_blocks_when_the_json_reader_lies_in_a_target_tree() {
         &session,
         &format!("{}:{}", base.join("bin").display(), sys.display()),
         input.to_string().as_bytes(),
+        &[],
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     let calls = calls(&log);
@@ -924,6 +928,55 @@ fn gate_skips_version_manager_shims() {
         String::from_utf8_lossy(&output.stderr)
     );
     for name in ["asdf", "volta", "mise", "vshim"] {
+        assert!(!calls.contains(name), "{name}: {calls}");
+    }
+}
+
+/// The wider shim forms: any directory named `shims` (as for
+/// `ASDF_DATA_DIR` and `MISE_DATA_DIR`), `volta/bin` without the dot, and
+/// the `bin` directory of `VOLTA_HOME`.
+#[test]
+fn gate_skips_each_shim_directory_form() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    let shims = [
+        ("asdf-data", base.join("asdf-data/shims")),
+        ("mise-data", base.join("mise-data/Shims")),
+        ("windows-volta", base.join("AppData/Volta/bin")),
+        ("volta-home", base.join("vh/bin")),
+    ];
+    for (name, dir) in &shims {
+        logging_stub(&dir.join("fallow"), name, &log);
+    }
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let mut dirs: Vec<PathBuf> = shims.iter().map(|(_, dir)| dir.clone()).collect();
+    dirs.extend([base.join("bin"), "/usr/bin".into(), "/bin".into()]);
+    let path = std::env::join_paths(dirs).unwrap();
+    let path = path.to_str().unwrap();
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        path,
+        &session_input(&session),
+        &[
+            ("VOLTA_HOME", &base.join("vh")),
+            ("ASDF_DATA_DIR", &base.join("asdf-data")),
+            ("MISE_DATA_DIR", &base.join("mise-data")),
+        ],
+    );
+    let calls = calls(&log);
+
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for (name, _) in &shims {
         assert!(!calls.contains(name), "{name}: {calls}");
     }
 }

@@ -7,8 +7,9 @@
 //! refused when the path as found has a `node_modules` component, or when the
 //! path or its target is inside the project root or the git work tree of the
 //! project. The search then goes on with the next `PATH` entry. A relative or
-//! empty `PATH` entry never counts. A version-manager shim (a Volta, mise or
-//! asdf shim directory, or a link to `volta-shim`) never counts either,
+//! empty `PATH` entry never counts. A version-manager shim (a file in a
+//! directory named `shims`, in `.volta/bin`, `volta/bin` or the `bin` of
+//! `VOLTA_HOME`, or a link to `volta-shim`) never counts either,
 //! because it runs the fallow that the project selects. On macOS and Windows, where the default
 //! file systems ignore letter case, the comparisons ignore letter case too.
 
@@ -71,26 +72,35 @@ pub fn project_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// The directory suffixes of version-manager shims, in lower case. A shim
-/// runs the fallow that the current project selects.
-const SHIM_DIRS: &[(&str, &str)] = &[(".volta", "bin"), ("mise", "shims"), (".asdf", "shims")];
+/// True when `dir` is a version-manager shim directory, in any letter case:
+/// a directory named `shims` (this covers mise, asdf, `MISE_DATA_DIR/shims`
+/// and `ASDF_DATA_DIR/shims`), `.volta/bin`, `volta/bin` (the Windows form),
+/// or `bin` of `volta_home`. A shim runs the fallow that the current project
+/// selects.
+fn is_shim_dir(dir: &Path, volta_home: Option<&Path>) -> bool {
+    let mut parts = dir
+        .components()
+        .rev()
+        .map(|part| part.as_os_str().to_string_lossy().to_lowercase());
+    let last = parts.next().unwrap_or_default();
+    let before = parts.next().unwrap_or_default();
+    let same = |left: &Path, right: &Path| {
+        left.to_string_lossy().to_lowercase() == right.to_string_lossy().to_lowercase()
+    };
+    last == "shims"
+        || (last == "bin" && (before == ".volta" || before == "volta"))
+        || volta_home.is_some_and(|home| {
+            let bin = home.join("bin");
+            same(dir, &bin) || dunce::canonicalize(&bin).is_ok_and(|real| same(dir, &real))
+        })
+}
 
-/// True when the directory of `file` is a known version-manager shim
-/// directory (in any letter case), or when `file` is a `volta-shim`.
-fn is_version_manager_shim(file: &Path) -> bool {
+/// True when the directory of `file` is a version-manager shim directory,
+/// as found or after links, or when `file` is a `volta-shim`.
+fn is_version_manager_shim(file: &Path, volta_home: Option<&Path>) -> bool {
     let in_shim_dir = |path: &Path| {
-        let mut parts = path
-            .parent()
-            .into_iter()
-            .flat_map(Path::components)
-            .rev()
-            .map(|part| part.as_os_str().to_string_lossy().to_lowercase());
-        let (Some(last), Some(before)) = (parts.next(), parts.next()) else {
-            return false;
-        };
-        SHIM_DIRS
-            .iter()
-            .any(|(dir, sub)| before == *dir && last == *sub)
+        path.parent()
+            .is_some_and(|dir| is_shim_dir(dir, volta_home))
     };
     let is_volta_shim = |path: &Path| {
         path.file_name()
@@ -103,7 +113,10 @@ fn is_version_manager_shim(file: &Path) -> bool {
 
 /// True when `candidate` can be a user-level launcher.
 pub fn is_user_launcher(candidate: &Path, project_dirs: &[PathBuf]) -> bool {
-    if !candidate.is_absolute() || has_node_modules(candidate) || is_version_manager_shim(candidate)
+    let volta_home = std::env::var_os("VOLTA_HOME").map(PathBuf::from);
+    if !candidate.is_absolute()
+        || has_node_modules(candidate)
+        || is_version_manager_shim(candidate, volta_home.as_deref())
     {
         return false;
     }
@@ -243,6 +256,27 @@ mod tests {
             &base.join(".asdf/shims/fallow"),
             &project_dirs(&project)
         ));
+    }
+
+    /// Each shim directory form, also one that `VOLTA_HOME` names.
+    #[test]
+    fn is_shim_dir_accepts_each_version_manager_form() {
+        let volta_home = Path::new("/opt/tools/vh");
+        for dir in [
+            "/home/u/.local/share/mise/shims",
+            "/data/asdf-data/shims",
+            "/data/mise-data/SHIMS",
+            "/home/u/.volta/bin",
+            "/c/Users/u/AppData/Local/Volta/bin",
+            "/opt/tools/vh/bin",
+            "/opt/tools/VH/Bin",
+        ] {
+            assert!(is_shim_dir(Path::new(dir), Some(volta_home)), "{dir}");
+        }
+        for dir in ["/usr/local/bin", "/opt/tools/vh/bin/x", "/home/u/shims/bin"] {
+            assert!(!is_shim_dir(Path::new(dir), Some(volta_home)), "{dir}");
+        }
+        assert!(!is_shim_dir(Path::new("/opt/tools/vh/bin"), None));
     }
 
     /// On macOS and Windows a `Node_Modules` directory or a project path in
