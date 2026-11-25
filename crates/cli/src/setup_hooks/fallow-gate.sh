@@ -467,9 +467,49 @@ gate_find_json_runner() {
   command -v npx >/dev/null 2>&1 && gate_try_json_runner "$anchor" npx --no-install fallow
 }
 
-# Decodes the JSON string escapes of $1 into GATE_STR. A `\u` escape or an
-# unknown escape returns 1.
+# Appends the UTF-8 bytes of the `\u` escape at the start of $1 (the text
+# after the `\u`) to GATE_STR and sets GATE_CP_LEN to the length of the
+# escape text. A surrogate pair is one character. A lone surrogate, a NUL or
+# a bad escape returns 1.
+GATE_CP_LEN=0
+gate_json_codepoint() {
+  local hex="${1:0:4}" cp low fmt="" oct b
+  local -a bytes=()
+  [[ "$hex" =~ ^[0-9A-Fa-f]{4}$ ]] || return 1
+  cp=$((16#$hex))
+  GATE_CP_LEN=4
+  if [ "$cp" -ge 55296 ] && [ "$cp" -le 56319 ]; then
+    [ "${1:4:2}" = '\u' ] || return 1
+    hex="${1:6:4}"
+    [[ "$hex" =~ ^[0-9A-Fa-f]{4}$ ]] || return 1
+    low=$((16#$hex))
+    [ "$low" -ge 56320 ] && [ "$low" -le 57343 ] || return 1
+    cp=$((65536 + ((cp - 55296) << 10) + (low - 56320)))
+    GATE_CP_LEN=10
+  elif [ "$cp" -ge 56320 ] && [ "$cp" -le 57343 ]; then
+    return 1
+  fi
+  [ "$cp" -ne 0 ] || return 1
+  if [ "$cp" -lt 128 ]; then
+    bytes=("$cp")
+  elif [ "$cp" -lt 2048 ]; then
+    bytes=($((192 | cp >> 6)) $((128 | (cp & 63))))
+  elif [ "$cp" -lt 65536 ]; then
+    bytes=($((224 | cp >> 12)) $((128 | ((cp >> 6) & 63))) $((128 | (cp & 63))))
+  else
+    bytes=($((240 | cp >> 18)) $((128 | ((cp >> 12) & 63))) $((128 | ((cp >> 6) & 63))) $((128 | (cp & 63))))
+  fi
+  for b in "${bytes[@]}"; do
+    printf -v oct '\\%03o' "$b"
+    fmt+="$oct"
+  done
+  # shellcheck disable=SC2059 # The format holds only octal escapes.
+  printf -v oct "$fmt"
+  GATE_STR+="$oct"
+}
 
+# Decodes the JSON string escapes of $1 into GATE_STR. An unknown escape
+# returns 1.
 GATE_STR=""
 gate_json_unescape() {
   local s="$1" c
@@ -486,6 +526,10 @@ gate_json_unescape() {
       n) GATE_STR+=$'\n' ;;
       r) GATE_STR+=$'\r' ;;
       t) GATE_STR+=$'\t' ;;
+      u)
+        gate_json_codepoint "$s" || return 1
+        s="${s:GATE_CP_LEN}"
+        ;;
       *) return 1 ;;
     esac
   done
@@ -494,8 +538,8 @@ gate_json_unescape() {
 
 # Reads `.tool_input.command` and `.cwd` from the hook input in INPUT into
 # CMD and SESSION_CWD without a helper program. Returns 1 for a hook input
-# that this small reader does not decode, for example one with a `\u` escape. The
-# caller then uses a JSON reader.
+# that this small reader does not decode, for example one with an unknown
+# escape. The caller then uses a JSON reader.
 gate_read_input() {
   local rest="$INPUT" depth=0 want_key=0 top
   local str_re='^"(([^"\\]|\\.)*)"' scalar_re='^(-?[0-9][0-9.eE+-]*|true|false|null)'
@@ -811,13 +855,32 @@ gate_loose_write() {
 # JSON reader of the install decodes the rest.
 CMD=""
 SESSION_CWD=""
+GATE_INPUT_READER=""
+GATE_CWD_RE='[{,][[:space:]]*"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
+GATE_SMALL_READ=0
 if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ] && gate_read_input; then
-  :
-elif command -v jq >/dev/null 2>&1; then
-  CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
-  SESSION_CWD="$(jq -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
+  GATE_SMALL_READ=1
 else
-  gate_find_json_runner || true
+  # The session tree leaves PATH before a reader runs. A plain `"cwd"` key
+  # after `{` or `,` cannot be text inside a JSON string, where each quote is
+  # escaped.
+  if [[ "$INPUT" =~ $GATE_CWD_RE ]] && [ -d "${BASH_REMATCH[1]}" ]; then
+    gate_exclude_tree "${BASH_REMATCH[1]}" "" self
+    GATE_PATH_FALLOW="$(gate_find_fallow || true)"
+  fi
+  # The trusted fallow of the install reads the input before jq.
+  if [ -n "$GATE_LOCAL_FALLOW" ]; then
+    gate_try_json_runner "$PWD" "$GATE_LOCAL_FALLOW" || true
+  fi
+fi
+if [ "$GATE_SMALL_READ" -eq 1 ]; then
+  :
+elif [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ] && GATE_INPUT_READER="$(gate_which jq)"; then
+  CMD="$("$GATE_INPUT_READER" -r '.tool_input.command // empty' <<<"$INPUT")"
+  SESSION_CWD="$("$GATE_INPUT_READER" -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
+else
+  [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || gate_find_json_runner || true
+  GATE_INPUT_READER="${GATE_JSON_RUNNER[0]:-}"
   if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then
     echo "fallow-gate: no native JSON reader or jq found, skipping audit. Upgrade fallow on PATH or install it in the project." >&2
     exit 0
@@ -834,12 +897,25 @@ else
   } <"$GATE_INPUT"
   rm -f "$GATE_INPUT"
 fi
-# The session tree is known now. A JSON reader of the hook input above ran
-# only from a PATH that the trees of the process directory and of the install
-# root do not supply.
+# The session tree is known now. A reader of the hook input above that lies
+# in that tree could have changed the command or the session directory, so
+# the gate blocks. The trusted fallow of the install stays trusted.
 if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
   gate_exclude_tree "$SESSION_CWD" "" self
   GATE_PATH_FALLOW="$(gate_find_fallow || true)"
+  case "$GATE_INPUT_READER" in
+    "$GATE_LOCAL_FALLOW" | "") ;;
+    /* | [A-Za-z]:[\\/]*)
+      if gate_excluded "${GATE_INPUT_READER%/*}" ||
+        { gate_resolve_dir "${GATE_INPUT_READER%/*}" && gate_excluded "$RESOLVED"; }; then
+        {
+          echo "fallow-gate: blocked: the reader of the hook input ($GATE_INPUT_READER) lies in the session tree."
+          echo "fallow-gate: install jq or fallow outside the project."
+        } >&2
+        exit 2
+      fi
+      ;;
+  esac
 fi
 
 set -f

@@ -830,21 +830,7 @@ fn gate_blocks_when_the_json_reader_lies_in_a_target_tree() {
     let tools = base.join("tools");
     let log = base.join("calls.log");
     std::fs::create_dir_all(&session).unwrap();
-    // The PATH of this probe holds the system tools but no jq.
-    let sys = base.join("sys");
-    std::fs::create_dir_all(&sys).unwrap();
-    for tool in [
-        "bash", "sh", "git", "cat", "mktemp", "sort", "head", "sed", "tr", "dirname", "basename",
-        "grep", "rm", "mkdir", "mv", "readlink", "env",
-    ] {
-        if let Some(found) = ["/usr/bin", "/bin"]
-            .iter()
-            .map(|dir| Path::new(dir).join(tool))
-            .find(|candidate| candidate.exists())
-        {
-            std::os::unix::fs::symlink(found, sys.join(tool)).unwrap();
-        }
-    }
+    let sys = system_bin_without_jq(&base);
     let command = format!(
         "git -C {} commit -m '{}'",
         tools.display(),
@@ -978,5 +964,158 @@ fn gate_skips_each_shim_directory_form() {
     );
     for (name, _) in &shims {
         assert!(!calls.contains(name), "{name}: {calls}");
+    }
+}
+
+/// Links the system tools that the gate needs, but not jq, into `base/sys`.
+fn system_bin_without_jq(base: &Path) -> PathBuf {
+    let sys = base.join("sys");
+    std::fs::create_dir_all(&sys).unwrap();
+    for tool in [
+        "bash", "sh", "git", "cat", "mktemp", "sort", "head", "sed", "tr", "dirname", "basename",
+        "grep", "rm", "mkdir", "mv", "readlink", "env",
+    ] {
+        if let Some(found) = ["/usr/bin", "/bin"]
+            .iter()
+            .map(|dir| Path::new(dir).join(tool))
+            .find(|candidate| candidate.exists())
+        {
+            std::os::unix::fs::symlink(found, sys.join(tool)).unwrap();
+        }
+    }
+    sys
+}
+
+/// Writes a stub fallow at `path` that logs each call as `name`, answers
+/// the JSON reader probe, prints `command` and `cwd` for the input request,
+/// and reports a version below the floor.
+fn reader_stub(path: &Path, name: &str, log: &Path, command: &str, cwd: &Path) {
+    write_stale_fallow(
+        path,
+        &format!(
+            "#!/bin/sh\necho \"{name} $*\" >> '{log}'\ncase \"$*\" in\n  'hooks gate-runtime probe') echo fallow-gate-json-v1 ;;\n  'hooks gate-runtime input') printf '%s\\0%s\\0' \"{command}\" '{cwd}' ;;\n  --version) echo 'fallow 2.30.0' ;;\nesac\n",
+            log = log.display(),
+            cwd = cwd.display(),
+        ),
+    );
+}
+
+/// The small reader decodes `\u` escapes, also a surrogate pair, so such a
+/// hook input needs no external reader for the input.
+#[test]
+fn gate_decodes_unicode_escapes_without_a_json_reader() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    let cwd = session.display().to_string().replace('/', "\\u002f");
+    let input = format!(
+        r#"{{"cwd":"{cwd}","tool_input":{{"command":"git commit -m \"caf\u00e9 \ud83d\ude00 \u4e2d\""}}}}"#
+    );
+    reader_stub(&base.join("bin/fallow"), "path", &log, "ls", &session);
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!("{}:{}", base.join("bin").display(), sys.display()),
+        input.as_bytes(),
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert!(!calls.contains("gate-runtime input"), "{calls}");
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains("is fallow 2.30.0, below required"),
+        "{stderr}"
+    );
+}
+
+/// For a hook input that the small reader cannot decode, the gate tries the
+/// fallow that the install recorded before jq.
+#[test]
+fn gate_reads_a_large_input_with_the_recorded_fallow_before_jq() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    let command = format!("git commit -m '{}'", "x".repeat(9000));
+    let recorded = base.join("tools/fallow");
+    reader_stub(&recorded, "recorded", &log, &command, &session);
+    logging_stub(&base.join("bin/jq"), "stub-jq", &log);
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, recorded.to_str()),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!("{}:/usr/bin:/bin", base.join("bin").display()),
+        input.to_string().as_bytes(),
+        &[],
+    );
+    let calls = calls(&log);
+
+    assert!(
+        calls.contains("recorded hooks gate-runtime input"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!calls.contains("stub-jq"), "{calls}");
+}
+
+/// A fallow reader in the session tree never reads the hook input: the gate
+/// drops the session tree from PATH before the reader runs. When the gate
+/// cannot read `cwd` before the reader runs, it blocks once the reader turns
+/// out to lie in the session tree.
+#[test]
+fn gate_never_trusts_a_hook_input_reader_of_the_session_tree() {
+    for escaped_cwd in [false, true] {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let session = base.join("clone");
+        std::fs::create_dir_all(&session).unwrap();
+        git_init(&session);
+        let sys = system_bin_without_jq(&base);
+        let process = base.join("process");
+        std::fs::create_dir_all(&process).unwrap();
+        let log = base.join("calls.log");
+        let command = format!("git commit -m '{}'", "x".repeat(9000));
+        reader_stub(
+            &session.join("bin/fallow"),
+            "session",
+            &log,
+            &command,
+            &session,
+        );
+        let cwd = if escaped_cwd {
+            session.display().to_string().replace('/', "\\/")
+        } else {
+            session.display().to_string()
+        };
+        let input = format!(r#"{{"cwd":"{cwd}","tool_input":{{"command":"{command}"}}}}"#);
+
+        let output = probe_gate_with_path(
+            &render_gate_script(true, None),
+            &base.join("home/.claude/hooks/fallow-gate.sh"),
+            &process,
+            &format!("{}:{}", session.join("bin").display(), sys.display()),
+            input.as_bytes(),
+            &[],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let calls = calls(&log);
+
+        if escaped_cwd {
+            assert_eq!(output.status.code(), Some(2), "{stderr}\n{calls}");
+            assert!(!calls.contains("session --version"), "{calls}");
+            assert!(!calls.contains("session audit"), "{calls}");
+        } else {
+            assert!(!calls.contains("session"), "{calls}\n{stderr}");
+        }
     }
 }
