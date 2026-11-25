@@ -1349,6 +1349,11 @@ impl FallowLspServer {
     /// the content differs from the last record.
     async fn record_disk_contents(&self, paths: Vec<PathBuf>) -> Vec<bool> {
         let count = paths.len();
+        let read_number = self
+            .disk_fingerprints
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .begin_read();
         // The reads run without the store lock, so an event handler that
         // takes the lock never waits for disk reads.
         let Ok(read) = tokio::task::spawn_blocking(move || {
@@ -1369,7 +1374,7 @@ impl FallowLspServer {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         read.into_iter()
-            .map(|(path, fingerprint)| store.update(&path, fingerprint))
+            .map(|(path, fingerprint)| store.update(&path, fingerprint, read_number))
             .collect()
     }
 
@@ -1384,22 +1389,32 @@ impl FallowLspServer {
                 .disk_fingerprints
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            for (index, event) in events.iter().enumerate() {
-                let Some(path) = event.uri.to_file_path() else {
-                    continue;
-                };
-                if compare && event.typ == FileChangeType::CHANGED {
-                    compared.push((index, path.into_owned()));
-                } else {
-                    store.forget(&path);
+            if compare {
+                for (index, event) in events.iter().enumerate() {
+                    let Some(path) = event.uri.to_file_path() else {
+                        continue;
+                    };
+                    // A created file always counts, and its content is the
+                    // record for the next changed event.
+                    if event.typ != FileChangeType::CHANGED {
+                        store.forget(&path);
+                    }
+                    if event.typ != FileChangeType::DELETED {
+                        compared.push((index, path.into_owned()));
+                    }
                 }
+            } else {
+                // A large batch, such as a branch switch, counts as a change.
+                store.clear();
             }
         }
         let (indexes, paths): (Vec<usize>, Vec<PathBuf>) = compared.into_iter().unzip();
         let unchanged_indexes: FxHashSet<usize> = indexes
             .into_iter()
             .zip(self.record_disk_contents(paths).await)
-            .filter_map(|(index, changed)| (!changed).then_some(index))
+            .filter_map(|(index, changed)| {
+                (!changed && events[index].typ == FileChangeType::CHANGED).then_some(index)
+            })
             .collect();
         let unchanged = unchanged_indexes.len();
         let kept: Vec<FileEvent> = events

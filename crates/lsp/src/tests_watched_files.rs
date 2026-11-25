@@ -181,6 +181,13 @@ async fn a_created_file_with_known_content_starts_a_run() {
     send_watched(backend, &uri, FileChangeType::CREATED).await;
     assert_eq!(epoch(backend), before + 1);
 
+    send_watched(backend, &uri, FileChangeType::CHANGED).await;
+    assert_eq!(
+        epoch(backend),
+        before + 1,
+        "the created event records the file"
+    );
+
     let src = Uri::from_file_path(dir.path().join("src")).expect("dir uri");
     send_watched(backend, &src, FileChangeType::DELETED).await;
     send_watched(backend, &uri, FileChangeType::CHANGED).await;

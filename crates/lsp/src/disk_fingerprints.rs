@@ -59,25 +59,36 @@ pub fn read_fingerprint(path: &Path) -> Option<Fingerprint> {
 /// The last known content of the reported files.
 #[derive(Debug, Default)]
 pub struct DiskFingerprints {
-    known: FxHashMap<PathBuf, Fingerprint>,
+    /// Each fingerprint with the number of the read that gave it.
+    known: FxHashMap<PathBuf, (Fingerprint, u64)>,
+    reads: u64,
 }
 
 impl DiskFingerprints {
-    /// Store the fingerprint that [`read_fingerprint`] read for `path`.
-    /// Returns whether the content differs from the last record, or whether
-    /// the store cannot tell.
-    pub fn update(&mut self, path: &Path, fingerprint: Option<Fingerprint>) -> bool {
+    /// Number a read that starts now. Two notifications can read the same
+    /// file at the same time, and the newer read must win.
+    pub fn begin_read(&mut self) -> u64 {
+        self.reads += 1;
+        self.reads
+    }
+
+    /// Store the fingerprint that read `read` gave for `path`. Returns
+    /// whether the content differs from the last record, or whether the
+    /// store cannot tell.
+    pub fn update(&mut self, path: &Path, fingerprint: Option<Fingerprint>, read: u64) -> bool {
         let Some(fingerprint) = fingerprint else {
             self.known.remove(path);
             return true;
         };
-        if self.known.get(path) == Some(&fingerprint) {
-            return false;
+        match self.known.get(path) {
+            Some((_, newer)) if *newer > read => return true,
+            Some((known, _)) if *known == fingerprint => return false,
+            _ => {}
         }
         if self.known.len() >= MAX_RECORDED_FILES && !self.known.contains_key(path) {
             self.known.clear();
         }
-        self.known.insert(path.to_path_buf(), fingerprint);
+        self.known.insert(path.to_path_buf(), (fingerprint, read));
         true
     }
 
@@ -85,6 +96,11 @@ impl DiskFingerprints {
     /// one event for a deleted directory and none for its files.
     pub fn forget(&mut self, path: &Path) {
         self.known.retain(|known, _| !known.starts_with(path));
+    }
+
+    /// Forget every record.
+    pub fn clear(&mut self) {
+        self.known.clear();
     }
 }
 
@@ -134,7 +150,25 @@ mod tests {
     }
 
     fn record(store: &mut DiskFingerprints, path: &Path) -> bool {
-        store.update(path, read_fingerprint(path))
+        let read = store.begin_read();
+        store.update(path, read_fingerprint(path), read)
+    }
+
+    #[test]
+    fn an_older_read_does_not_replace_a_newer_record() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("a.ts");
+        std::fs::write(&path, "export const a = 1;\n").expect("write");
+        let mut store = DiskFingerprints::default();
+        let older = store.begin_read();
+        let old_content = read_fingerprint(&path);
+        std::fs::write(&path, "export const a = 2;\n").expect("edit");
+        record(&mut store, &path);
+        assert!(
+            store.update(&path, old_content, older),
+            "the older read counts"
+        );
+        assert!(!record(&mut store, &path), "the newer record stays");
     }
 
     #[test]
