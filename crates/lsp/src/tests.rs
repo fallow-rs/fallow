@@ -6317,19 +6317,37 @@ async fn initialize_with_folder(
 }
 
 /// How many recorded messages have `method` and a text with `needle`.
+///
+/// The recorder task stores the messages on its own schedule, so this waits
+/// until at least `expected` messages match, up to a timeout. Then it lets
+/// the recorder take each message that is already sent, so a surplus
+/// message is in the count too.
 #[cfg(unix)]
 async fn count_messages(
     messages: &std::sync::Mutex<Vec<(String, String)>>,
     method: &str,
     needle: &str,
+    expected: usize,
 ) -> usize {
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    messages
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(name, params)| name == method && params.contains(needle))
-        .count()
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const POLL: Duration = Duration::from_millis(5);
+    const SETTLE_YIELDS: usize = 16;
+    let count = || {
+        messages
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, params)| name == method && params.contains(needle))
+            .count()
+    };
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while count() < expected && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(POLL).await;
+    }
+    for _ in 0..SETTLE_YIELDS {
+        tokio::task::yield_now().await;
+    }
+    count()
 }
 
 /// A folder that appears after initialize below a committed link that
@@ -6365,7 +6383,7 @@ async fn a_late_folder_refusal_is_shown_once_and_kept() {
     backend.run_analysis().await;
     backend.run_analysis().await;
 
-    let shown = count_messages(&messages, "window/showMessage", "outside the checkout").await;
+    let shown = count_messages(&messages, "window/showMessage", "outside the checkout", 1).await;
     assert_eq!(shown, 1);
 }
 
@@ -6390,7 +6408,7 @@ async fn a_moved_root_is_logged_once_per_change() {
     backend.run_analysis().await;
     backend.run_analysis().await;
     assert_eq!(
-        count_messages(&messages, "window/logMessage", "now resolves to").await,
+        count_messages(&messages, "window/logMessage", "now resolves to", 1).await,
         1
     );
 
@@ -6401,7 +6419,7 @@ async fn a_moved_root_is_logged_once_per_change() {
     std::os::unix::fs::symlink(&elsewhere, &root).expect("link root again");
     backend.run_analysis().await;
     assert_eq!(
-        count_messages(&messages, "window/logMessage", "now resolves to").await,
+        count_messages(&messages, "window/logMessage", "now resolves to", 2).await,
         2
     );
 }
