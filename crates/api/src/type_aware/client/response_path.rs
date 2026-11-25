@@ -4,7 +4,9 @@
 //! companion can read files above the root: the files of the read scope base
 //! (the Git work tree of the root) and the files in a real `node_modules`
 //! directory at or above the root, for example a hoisted
-//! `../../node_modules/@angular/core/index.d.ts`. A returned path, with its
+//! `../../node_modules/@angular/core/index.d.ts`. The companion also reads
+//! the library files of its compiler package, which can be installed outside
+//! the project (`npx`, `npm -g`). A returned path, with its
 //! `..` segments applied to the root, must stay inside one of those
 //! directories. The caller drops each entry with a path that does not.
 
@@ -19,9 +21,18 @@ pub(super) struct ResponseScope {
 }
 
 impl ResponseScope {
-    /// The scope of `root`: its read scope base and each real `node_modules`
-    /// directory at or above it. A `node_modules` link does not count.
+    /// The scope of `root`: its read scope base, each real `node_modules`
+    /// directory at or above it, and the compiler package directories of the
+    /// companion. A `node_modules` link does not count.
     pub(super) fn new(root: &Path) -> Self {
+        Self::with_compiler_dirs(
+            root,
+            crate::type_aware::transport::companion_compiler_dirs(root),
+        )
+    }
+
+    /// The scope of `root` with the given compiler package directories.
+    pub(super) fn with_compiler_dirs(root: &Path, compiler_dirs: Vec<PathBuf>) -> Self {
         let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let home = fallow_process::HostPaths::from_env().home;
         let mut allowed = vec![fallow_types::read_scope::read_scope_base(
@@ -36,6 +47,7 @@ impl ResponseScope {
                         .is_ok_and(|metadata| metadata.file_type().is_dir())
                 }),
         );
+        allowed.extend(compiler_dirs);
         Self { root, allowed }
     }
 
@@ -133,6 +145,35 @@ mod tests {
         for path in ["../../../outside.ts", "src/../../../../a.ts", "/abs/a.ts"] {
             assert!(!scope.allows(Path::new(path)), "{path}");
         }
+    }
+
+    /// A companion installed outside the project returns the library files
+    /// of its compiler package with a path above the root.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn library_files_of_a_compiler_outside_the_root_are_accepted() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outer = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = outer.join("project");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let modules = outer.join("global/lib/node_modules");
+        let companion = modules.join("fallow-type-aware/bin/fallow-type-aware");
+        std::fs::create_dir_all(companion.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&companion, "").expect("write");
+        std::fs::create_dir_all(modules.join("typescript")).expect("mkdir");
+        std::fs::write(modules.join("typescript/package.json"), "{}").expect("write");
+        std::fs::create_dir_all(modules.join("@typescript/typescript-darwin-arm64/lib"))
+            .expect("mkdir");
+        let dirs = crate::type_aware::transport::compiler_dirs_of(&companion, "typescript");
+        assert_eq!(dirs, vec![modules.join("typescript"), modules.clone()]);
+
+        let lib = "../global/lib/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.collection.d.ts";
+        assert!(!ResponseScope::with_compiler_dirs(&root, Vec::new()).allows(Path::new(lib)));
+        assert!(ResponseScope::with_compiler_dirs(&root, dirs).allows(Path::new(lib)));
+        assert!(
+            !ResponseScope::with_compiler_dirs(&root, vec![modules.join("typescript")])
+                .allows(Path::new("../global/lib/other.ts"))
+        );
     }
 
     #[test]

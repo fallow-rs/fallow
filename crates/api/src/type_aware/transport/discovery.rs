@@ -217,3 +217,37 @@ pub(super) fn binary_names(binary: &str) -> Vec<String> {
         vec![binary.to_owned()]
     }
 }
+/// The directories of the compiler package that the companion at `sidecar`
+/// loads, found the way Node resolves `package` from the companion: the
+/// first `node_modules/<package>` at or above the resolved companion path.
+/// The list holds the resolved package directory and its enclosing
+/// `node_modules` directories, the same set that the companion allows its
+/// checker to read. The list is empty when no package is found.
+pub(super) fn companion_compiler_dirs(sidecar: &Path, package: &str) -> Vec<PathBuf> {
+    let Some(start) = dunce::canonicalize(sidecar)
+        .ok()
+        .and_then(|real| real.parent().map(Path::to_path_buf))
+    else {
+        return Vec::new();
+    };
+    let Some(package_dir) = start.ancestors().find_map(|dir| {
+        let candidate = dir.join("node_modules").join(package);
+        candidate
+            .join("package.json")
+            .is_file()
+            .then(|| dunce::canonicalize(&candidate).ok())
+            .flatten()
+    }) else {
+        return Vec::new();
+    };
+    let mut dirs = vec![package_dir.clone()];
+    dirs.extend(
+        package_dir
+            .ancestors()
+            .skip(1)
+            .take(2)
+            .filter(|dir| dir.file_name() == Some(std::ffi::OsStr::new("node_modules")))
+            .map(Path::to_path_buf),
+    );
+    dirs
+}
