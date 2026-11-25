@@ -788,7 +788,10 @@ These are documented for the rare CI script that depended on the old behavior. N
     workspace, a temp directory or a device is refused. The same path
     without the link is still allowed.
   - A symlink outside the project may lead anywhere that the other rules
-    allow, but not into a `.git` or `node_modules` directory. For example,
+    allow, but not into a `.git` or `node_modules` directory, and not into
+    the Git directory or common Git directory of the root, also when that
+    directory is outside the work tree (`git init --separate-git-dir`, or a
+    worktree of a bare repository). For example,
     `--output-file /tmp/r.json` is refused when `/tmp/r.json` is a link to
     a file in `.git`.
   - A character device or named pipe stays allowed only when the path that
