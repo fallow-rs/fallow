@@ -24,6 +24,7 @@ import {
   waitForCommitRuns,
   waitForPullRequestChecks,
   withRateLimitWait,
+  commitSkillsSyncStep,
 } from "./ship-wait-checks.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
@@ -807,14 +808,22 @@ const withMinChecks = (args) =>
   args.includes("--min-checks") ? args : ["--min-checks", "1", ...args];
 
 const runWithFakeGh = (
-  { selected, rollups, runs = workflowRuns(), prRuns = [[]], files = [], target = ["--pr", "7"] },
+  {
+    selected,
+    rollups,
+    runs = workflowRuns(),
+    prRuns = [[]],
+    files = [],
+    syncPulls = [],
+    target = ["--pr", "7"],
+  },
   args = [],
 ) => {
   const root = mkdtempSync(join(tmpdir(), "ship-wait-checks-"));
   try {
     writeFileSync(
       join(root, "responses.json"),
-      JSON.stringify({ selected, rollups, runs, prRuns, files }),
+      JSON.stringify({ selected, rollups, runs, prRuns, files, syncPulls }),
     );
     writeFileSync(
       join(root, "gh"),
@@ -849,6 +858,9 @@ const runWithFakeGh = (
         "  const reply = responses.runs[args[1]];",
         '  if (!reply || reply.error) { process.stderr.write(reply?.error ?? "missing workflow run"); process.exit(1); }',
         "  process.stdout.write(JSON.stringify(reply));",
+        '} else if (args[0] === "pr" && args[1] === "list") {',
+        '  if (typeof responses.syncPulls === "string") { process.stderr.write(responses.syncPulls); process.exit(1); }',
+        "  process.stdout.write(JSON.stringify(responses.syncPulls));",
         '} else if (args[0] === "pr" && args[1] === "view") {',
         '  process.stdout.write(JSON.stringify({ mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED" }));',
         "} else {",
@@ -939,7 +951,7 @@ const runPassingPr = (fields, args) =>
   );
 
 const COMMIT_SHA = "b".repeat(40);
-const runCommit = (conclusion, files) =>
+const runCommit = (conclusion, files, syncPulls = []) =>
   runWithFakeGh({
     selected: [],
     rollups: [{ statusCheckRollup: [] }],
@@ -958,6 +970,7 @@ const runCommit = (conclusion, files) =>
     ],
     runs: {},
     files,
+    syncPulls,
     target: ["--commit", COMMIT_SHA],
   });
 
@@ -981,6 +994,77 @@ test("a merged commit that changes the skills names its own pin", fakeGhOptions,
   const result = runCommit("success", [SKILLS_FILE]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.ok(result.stdout.includes(`${SKILLS_SYNC_COMMAND} ${COMMIT_SHA}`), result.stdout);
+});
+
+const syncPull = (state, pin, number = 293, headRefName = "sync-fallow-skills") => ({
+  number,
+  url: `https://github.com/fallow-rs/fallow-skills/pull/${number}`,
+  state,
+  headRefName,
+  body: `Syncs the released Fallow skill from fallow-rs/fallow@${pin}.`,
+});
+
+test("a merged commit with an open sync PR names that PR, not a hand run", fakeGhOptions, () => {
+  const result = runCommit("success", [SKILLS_FILE], [syncPull("OPEN", COMMIT_SHA.slice(0, 9))]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Merge https:\/\/github\.com\/fallow-rs\/fallow-skills\/pull\/293/u);
+  assert.ok(!result.stdout.includes(SKILLS_SYNC_COMMAND), result.stdout);
+  const list = result.calls.find((args) => args[0] === "pr" && args[1] === "list");
+  assert.equal(list[list.indexOf("--repo") + 1], "fallow-rs/fallow-skills");
+});
+
+test("a failed read of the sync PRs names the error before the hand run", fakeGhOptions, () => {
+  const result = runCommit("success", [SKILLS_FILE], "HTTP 502");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /failed \(HTTP 502\)\. Check fallow-rs\/fallow-skills.*Only when/u);
+  assert.ok(result.stdout.includes(`${SKILLS_SYNC_COMMAND} ${COMMIT_SHA}`), result.stdout);
+});
+
+test("commitSkillsSyncStep names a PR only when its pin contains the commit", () => {
+  const commit = "c".repeat(40);
+  const later = "d".repeat(9);
+  const read = (data) => ({ ok: true, data });
+  const after = (_commit, pin) => pin === later;
+  const never = () => false;
+  assert.match(
+    commitSkillsSyncStep(read([syncPull("MERGED", commit.slice(0, 9))]), commit, never),
+    /already synced/u,
+  );
+  assert.match(
+    commitSkillsSyncStep(read([syncPull("MERGED", later)]), commit, after),
+    /already synced .*or a later one/u,
+    "a merged PR with a later pin contains the commit",
+  );
+  assert.match(
+    commitSkillsSyncStep(read([syncPull("OPEN", later, 300)]), commit, after),
+    /Merge .*pull\/300/u,
+    "an open PR with a later pin contains the commit",
+  );
+  const older = commitSkillsSyncStep(read([syncPull("OPEN", "e".repeat(9), 301)]), commit, never);
+  assert.match(older, /pull\/301 holds pin e{9}, which does not contain this commit/u);
+  assert.match(older, /workflow_dispatch/u);
+  assert.ok(older.includes(`${SKILLS_SYNC_COMMAND} ${commit}`), older);
+  assert.match(
+    commitSkillsSyncStep(
+      read([syncPull("OPEN", commit.slice(0, 9), 302, "docs/sync-fallow-ccccccccc")]),
+      commit,
+      never,
+    ),
+    /Merge .*pull\/302/u,
+    "the PR of a hand run counts too",
+  );
+  const closed = commitSkillsSyncStep(
+    read([syncPull("CLOSED", commit.slice(0, 9))]),
+    commit,
+    never,
+  );
+  assert.match(closed, /No sync pull request names this commit/u, "a closed PR synced nothing");
+  const other = commitSkillsSyncStep(
+    read([syncPull("OPEN", commit.slice(0, 9), 303, "feat/other")]),
+    commit,
+    never,
+  );
+  assert.match(other, /No sync pull request/u, "a PR on another branch is not a sync PR");
 });
 
 test("a failed merged commit still names the sync step", fakeGhOptions, () => {

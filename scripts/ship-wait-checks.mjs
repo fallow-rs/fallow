@@ -33,6 +33,9 @@ import { RELEASED_SKILLS_ROOT } from "./released-skills.mjs";
 const CHANGELOG_FRAGMENT_DIR = "changelog.d/";
 /** The repository of the public user documentation. */
 const PUBLIC_DOCS_REPO = "fallow-rs/docs";
+const SKILLS_COMPANION_REPO = "fallow-rs/fallow-skills";
+// The branch that `.github/workflows/skills-companion-sync.yml` pushes.
+const SKILLS_SYNC_BRANCH = "sync-fallow-skills";
 const PUBLIC_DOCS_STEP = `Check the pages of ${PUBLIC_DOCS_REPO} that describe the changed behavior, and open a docs pull request when a page is out of date or a new command, flag or field has no page.`;
 
 const GH_PENDING_EXIT = 8;
@@ -115,10 +118,13 @@ changes from commit to commit. The wait ends when all runs are complete and
 no run started or changed for ${COMMIT_SETTLE_MS / MINUTE} minutes. A read without runs never ends
 the wait.
 
-When the change touches ${RELEASED_SKILLS_ROOT.join("/")}/, the script prints the step for
-scripts/sync-skills-companion.mjs: after a pass with --pr, and on any result
-with --commit. When the change adds a changelog fragment, it prints a reminder
-to check the public user documentation in ${PUBLIC_DOCS_REPO}. A failed read of
+When the change touches ${RELEASED_SKILLS_ROOT.join("/")}/, the script prints the companion
+sync step: after a pass with --pr, and on any result with --commit. With
+--commit, it names the sync pull request in ${SKILLS_COMPANION_REPO} whose pin
+contains the commit. It gives the command of scripts/sync-skills-companion.mjs
+only when no such pull request exists. When the change adds a changelog
+fragment, it prints a reminder to check the public user documentation in
+${PUBLIC_DOCS_REPO}. A failed read of
 the changed files only prints a warning.
 
 Options:
@@ -1547,8 +1553,87 @@ const reportSkillsSync = (read, { label, step }, log = console.log, warn = conso
 const reportPrSkillsSync = ({ pr, repo, label }) =>
   reportSkillsSync(ghChangedPathsReader(repo, `pulls/${pr}/files`, ".[]")(), {
     label,
-    step: `After the merge, run ${SKILLS_SYNC_COMMAND} <merge commit> ${SKILLS_PUBLISH_STEP}`,
+    step: `After the merge, the Skills companion sync workflow opens a ${SKILLS_SYNC_BRANCH} pull request in ${SKILLS_COMPANION_REPO}. Merge that pull request. Only when none opens, run ${SKILLS_SYNC_COMMAND} <merge commit> ${SKILLS_PUBLISH_STEP}`,
   });
+
+const SYNC_PIN = /fallow-rs\/fallow@([0-9a-f]{7,40})/u;
+// A hand run of scripts/sync-skills-companion.mjs prints this branch prefix.
+const HAND_SYNC_BRANCH_PREFIX = "docs/sync-fallow-";
+
+/**
+ * Whether `pin` contains `commit`: `true`, `false`, or `null` when the local
+ * clone cannot answer (for example an unknown object before a fetch).
+ */
+const gitPinContains = (commit, pin) => {
+  const { status } = spawnSync("git", ["merge-base", "--is-ancestor", commit, pin], {
+    stdio: "ignore",
+  });
+  if (status === 0) {
+    return true;
+  }
+  return status === 1 ? false : null;
+};
+
+const isSyncPull = (pull) =>
+  pull.headRefName === SKILLS_SYNC_BRANCH ||
+  (pull.headRefName ?? "").startsWith(HAND_SYNC_BRANCH_PREFIX);
+
+/**
+ * The companion sync step for a merged commit, from the sync pull requests of
+ * the companion (`gh pr list --json url,state,body,headRefName`): the pull
+ * requests of the sync workflow and of a hand run. The workflow force-pushes
+ * one branch, so an open pull request can hold a later pin. A pin contains the
+ * commit when it is the commit or a later commit of `main`. A run of the sync
+ * script by hand next to such a pull request makes a second pull request with
+ * the same content.
+ */
+export const commitSkillsSyncStep = (read, commit, pinContains = gitPinContains) => {
+  const handRun = `run ${SKILLS_SYNC_COMMAND} ${commit} ${SKILLS_PUBLISH_STEP}`;
+  if (!read.ok || !Array.isArray(read.data)) {
+    const reason = read.ok ? "gh printed no list" : read.error;
+    return `The read of the sync pull requests failed (${reason}). Check ${SKILLS_COMPANION_REPO} for an open ${SKILLS_SYNC_BRANCH} pull request and merge it. Only when there is none, ${handRun}`;
+  }
+  const pulls = read.data.filter(isSyncPull).map((pull) => ({
+    ...pull,
+    pin: SYNC_PIN.exec(pull.body ?? "")?.[1],
+  }));
+  const contains = (pull) =>
+    pull.pin !== undefined &&
+    (commit.startsWith(pull.pin) || pinContains(commit, pull.pin) === true);
+  const merged = pulls.find((pull) => pull.state === "MERGED" && contains(pull));
+  if (merged !== undefined) {
+    return `${merged.url} already synced ${SKILLS_COMPANION_REPO} to this commit or a later one.`;
+  }
+  const open = pulls.find((pull) => pull.state === "OPEN" && contains(pull));
+  if (open !== undefined) {
+    return `Merge ${open.url}, the open sync pull request. Do not run the sync script by hand.`;
+  }
+  const older = pulls.find((pull) => pull.state === "OPEN");
+  if (older !== undefined) {
+    return `The open sync pull request ${older.url} holds pin ${older.pin ?? "unknown"}, which does not contain this commit. Start the Skills companion sync workflow again on main with workflow_dispatch. Only when it opens no pull request, ${handRun}`;
+  }
+  return `No sync pull request names this commit. When the Skills companion sync workflow opens none, ${handRun}`;
+};
+
+const readSkillsSyncPulls = () =>
+  parseGhApi(
+    spawnSync(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--repo",
+        SKILLS_COMPANION_REPO,
+        "--state",
+        "all",
+        "--limit",
+        "30",
+        "--json",
+        "number,url,state,body,headRefName",
+      ],
+      { encoding: "utf8" },
+    ),
+  );
 
 /**
  * The note for a pull request whose wait ended without a failure but that
@@ -1583,11 +1668,12 @@ const reportReviewRequired = ({ pr, repo }) => {
 
 // The merged commit needs the step on any result: the missing sync is itself
 // a reason for a failed contract job on main.
-const reportCommitSkillsSync = ({ commit, repo }) =>
-  reportSkillsSync(ghChangedPathsReader(repo, `commits/${commit}`, ".files[]")(), {
-    label: commitLabel(commit),
-    step: `Run ${SKILLS_SYNC_COMMAND} ${commit} ${SKILLS_PUBLISH_STEP}`,
-  });
+const reportCommitSkillsSync = ({ commit, repo }) => {
+  const read = ghChangedPathsReader(repo, `commits/${commit}`, ".files[]")();
+  const touchesSkills = !read.ok || read.paths.some((path) => path.startsWith(SKILLS_PATH_PREFIX));
+  const step = touchesSkills ? commitSkillsSyncStep(readSkillsSyncPulls(), commit) : "";
+  reportSkillsSync(read, { label: commitLabel(commit), step });
+};
 
 const main = async () => {
   let options;
