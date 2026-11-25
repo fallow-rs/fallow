@@ -1494,3 +1494,46 @@ fn gate_drops_a_json_reader_in_the_tree_of_a_later_audit_root() {
         assert!(line.ends_with("probe"), "{line}\n{calls}");
     }
 }
+
+/// A hook runner such as Node can give the gate a socket as stdin. On Linux,
+/// `/dev/stdin` cannot open a socket, so the gate reads file descriptor 0
+/// itself. The gate must read the hook input and reach the version floor.
+#[test]
+fn gate_reads_the_hook_input_from_a_socket() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let script = base.join("home/.claude/hooks/fallow-gate.sh");
+    std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+    std::fs::write(&script, render_gate_script(true, None)).unwrap();
+    let (mut writer, reader) = UnixStream::pair().unwrap();
+
+    let child = std::process::Command::new("bash")
+        .arg(&script)
+        .current_dir(&session)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", base.join("bin").display()),
+        )
+        .env("FALLOW_GATE_MIN_VERSION", "999.0.0")
+        .stdin(std::process::Stdio::from(std::os::fd::OwnedFd::from(
+            reader,
+        )))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn bash");
+    writer.write_all(&session_input(&session)).unwrap();
+    writer.shutdown(std::net::Shutdown::Write).unwrap();
+    let output = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(calls(&log).contains("path --version"), "{stderr}");
+}

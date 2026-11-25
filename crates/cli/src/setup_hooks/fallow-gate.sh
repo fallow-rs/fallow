@@ -83,9 +83,31 @@ gate_skip_not_git_write() {
 # the exact parse. A JSON `\u` escape can hide a word, so such a hook input
 # always goes there too. A hook input over GATE_SMALL_INPUT_LIMIT characters
 # also goes to the exact parse.
-# `$(<file)` reads the input in blocks without a program; the read builtin
-# reads a pipe one byte at a time.
-INPUT="$(</dev/stdin)" || INPUT=""
+# A hook runner can give a socket as stdin. On macOS, /dev/stdin opens a
+# socket, and `$(<file)` reads it in blocks without a program. On Linux,
+# /dev/stdin cannot open a socket, so the gate reads file descriptor 0 with
+# the read builtin: in blocks with bash 5 or later, else up to each NUL byte.
+# Each form drops a NUL byte and keeps the text after it.
+INPUT=""
+GATE_CHUNK=""
+case "${OSTYPE:-}" in
+  darwin*)
+    { INPUT="$(</dev/stdin)"; } 2>/dev/null || INPUT=""
+    ;;
+  *)
+    if [ "${BASH_VERSINFO[0]:-0}" -ge 5 ]; then
+      while IFS= read -r -N 65536 GATE_CHUNK 2>/dev/null || [ -n "$GATE_CHUNK" ]; do
+        INPUT+="$GATE_CHUNK"
+        GATE_CHUNK=""
+      done
+    else
+      while IFS= read -r -d '' GATE_CHUNK 2>/dev/null; do
+        INPUT+="$GATE_CHUNK"
+      done
+      INPUT+="$GATE_CHUNK"
+    fi
+    ;;
+esac
 if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ]; then
   case "$INPUT" in
     *'\u'*) ;;
