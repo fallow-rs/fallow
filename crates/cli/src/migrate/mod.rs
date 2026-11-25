@@ -556,8 +556,7 @@ fn migrate_unnamed_config_file(
 
 /// The read scope base of the project at `root`.
 fn read_scope_base(root: &Path) -> std::path::PathBuf {
-    let home = fallow_process::HostPaths::from_env().home;
-    fallow_types::read_scope::read_scope_base(root, home.as_deref())
+    fallow_config::project_scope_base(root)
 }
 
 /// Whether migrate can read the detected config file `path` under `root`. A

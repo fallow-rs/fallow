@@ -30,11 +30,7 @@ impl ResponseScope {
     /// The scope of `root` with the given compiler package directories.
     pub(super) fn with_compiler_dirs(root: &Path, compiler_dirs: Vec<PathBuf>) -> Self {
         let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        let home = fallow_process::HostPaths::from_env().home;
-        let mut allowed = vec![fallow_types::read_scope::read_scope_base(
-            &root,
-            home.as_deref(),
-        )];
+        let mut allowed = vec![fallow_config::project_scope_base(&root)];
         allowed.extend(compiler_dirs);
         Self { root, allowed }
     }

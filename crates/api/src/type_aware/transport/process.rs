@@ -155,8 +155,7 @@ fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
     let path = fallow_process::HostPaths::from_env()
         .search_path
         .and_then(|value| sanitize_search_path(root, &value));
-    let home = fallow_process::HostPaths::from_env().home;
-    let scope_root = fallow_types::read_scope::read_scope_base(root, home.as_deref());
+    let scope_root = fallow_config::project_scope_base(root);
     command.env_clear();
     command.envs(values);
     command.env(SCOPE_ROOT_ENV, scope_root);

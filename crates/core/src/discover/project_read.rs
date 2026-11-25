@@ -4,46 +4,19 @@
 //! A cloned repository can commit a symlink where one of these readers reads
 //! a file or lists a directory. Each read here goes through the bounded read
 //! helper, so a file that resolves outside the read scope of the project (see
-//! [`fallow_types::read_scope`]), is not a regular file or is too large counts
+//! [`fallow_config::project_scope_base`]), is not a regular file or is too large counts
 //! as a missing file. No message names its content.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 use fallow_config::PackageJson;
 use fallow_types::read_guard::{DEFAULT_MAX_READ_BYTES, is_inside_root, read_to_string_inside};
-use fallow_types::read_scope::read_scope_base;
-use rustc_hash::FxHashMap;
 
-/// The read scope bases of the current analysis run, one per root.
-fn scope_bases() -> &'static Mutex<FxHashMap<PathBuf, PathBuf>> {
-    static BASES: OnceLock<Mutex<FxHashMap<PathBuf, PathBuf>>> = OnceLock::new();
-    BASES.get_or_init(|| Mutex::new(FxHashMap::default()))
-}
-
-/// Start a new analysis run: drop the read scope bases of earlier runs. A
-/// long-lived process (the language server, watch mode) then sees a `.git`
-/// entry that appeared after an earlier run.
-pub fn begin_read_scope_run() {
-    scope_bases()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear();
-}
-
-/// The read scope base of `root`, computed once per root and run. A link
-/// below the root may point at a shared file anywhere inside this base, such
-/// as a config of the monorepo above a package root.
+/// The read scope base of `root` (see [`fallow_config::project_scope_base`]).
+/// A link below the root may point at a shared file anywhere inside this
+/// base, such as a config of the monorepo above a package root.
 fn scope_base(root: &Path) -> PathBuf {
-    let mut bases = scope_bases()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    bases
-        .entry(root.to_path_buf())
-        .or_insert_with(|| {
-            read_scope_base(root, fallow_process::HostPaths::from_env().home.as_deref())
-        })
-        .clone()
+    fallow_config::project_scope_base(root)
 }
 
 /// The text of the project file `path`, or `None` when it is missing or the
@@ -146,7 +119,7 @@ mod tests {
         assert!(read_project_file(&root, &root.join("jest.config.js")).is_none());
 
         std::fs::create_dir(top.join(".git")).expect("mkdir");
-        begin_read_scope_run();
+        fallow_config::clear_project_scope_bases();
         assert!(read_project_file(&root, &root.join("jest.config.js")).is_some());
     }
 

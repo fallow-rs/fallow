@@ -328,8 +328,7 @@ fn warning_value(warning: &CheckWarning) -> Value {
 /// An expansion that is absolute or has a `..` segment never matches, so the
 /// probe stays below `root`.
 fn entry_path_exists(root: &Path, entry: &str) -> bool {
-    let home = fallow_process::HostPaths::from_env().home;
-    let base = fallow_types::read_scope::read_scope_base(root, home.as_deref());
+    let base = fallow_config::project_scope_base(root);
     expand_braces(entry).iter().any(|pattern| {
         if fallow_config::glob_validation::validate_user_path(pattern, "entry").is_err() {
             return false;

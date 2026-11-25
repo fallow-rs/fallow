@@ -35,10 +35,9 @@ serde_json = { workspace = true }
 rustc-hash = { workspace = true }
 # Unique temp files for the atomic cache write in `atomic_file`.
 tempfile = { workspace = true }
-# Resolved paths without the Windows verbatim prefix in `read_scope`.
-dunce = { workspace = true }
 
-# The owner check of the work tree directory in `read_scope`.
+# The owner check of the scope base in `read_scope`, and the open of a file
+# that does not wait for a FIFO writer in `read_guard`.
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true }
 

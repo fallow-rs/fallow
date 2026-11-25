@@ -1240,7 +1240,6 @@ dependencies = [
  "fallow-config",
  "fallow-extract",
  "fallow-graph",
- "fallow-process",
  "fallow-security",
  "fallow-types",
  "fixedbitset",
@@ -1531,7 +1530,6 @@ name = "fallow-types"
 version = "3.48.0"
 dependencies = [
  "bitcode",
- "dunce",
  "oxc_span",
  "proptest",
  "rustc-hash",
