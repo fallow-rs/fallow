@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createApi, withReadScope } from "../src/backend.mjs";
-import { createReadScope, resolvesInside } from "../src/read-scope.mjs";
+import { createReadScope, isWithin, resolvesInside } from "../src/read-scope.mjs";
 import { parseRequest } from "../src/protocol.mjs";
 import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 
@@ -213,4 +213,12 @@ test("a project config outside the root drops only that project", () => {
       ["tsconfig.json"],
     );
   });
+});
+
+test("a path check ignores case only on Windows", () => {
+  const dir = path.join(path.sep, "Repo", "App");
+  const file = path.join(path.sep, "repo", "app", "src", "a.ts");
+  assert.equal(isWithin(dir, file, "win32"), true);
+  assert.equal(isWithin(dir, file, "linux"), false);
+  assert.equal(isWithin(dir, path.join(path.sep, "repo", "apps", "a.ts"), "win32"), false);
 });

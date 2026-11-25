@@ -16,7 +16,18 @@ const SCOPE_ROOT_ENV = "FALLOW_TYPE_AWARE_SCOPE_ROOT";
 
 const withSeparator = (dir) => (dir.endsWith(path.sep) ? dir : `${dir}${path.sep}`);
 
-const isWithin = (dir, file) => file === dir || file.startsWith(withSeparator(dir));
+/**
+ * True when `file` is `dir` or below it. Windows paths compare without case,
+ * because the file system of Windows ignores case.
+ */
+const lowerCase = (value) => value.toLowerCase();
+const sameCase = (value) => value;
+
+export const isWithin = (dir, file, platform = process.platform) => {
+  const fold = platform === "win32" ? lowerCase : sameCase;
+  const folded = fold(file);
+  return folded === fold(dir) || folded.startsWith(fold(withSeparator(dir)));
+};
 
 const lstatOrNull = (file) => {
   try {
