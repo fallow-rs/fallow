@@ -24,6 +24,10 @@ the same workflow on one commit are fine.
   commit that has a run, usually the last nightly run. The comparison then
   also holds the changes merged after that run. For a precise result, start a
   run on `main` first with `gh workflow run bench.yml`.
+- When a pull request gets the `ci:walltime` label, one run measures its
+  head commit with the walltime jobs only. The run does not need `ci:perf`,
+  and it skips the simulation jobs. A later push does not start the walltime
+  jobs again. To measure a new commit, remove the label and add it again.
 - `gh workflow run bench.yml --ref <branch>` measures a branch with the
   simulation jobs. Add `-f walltime=true` for the walltime jobs too. A plain
   dispatch never waits on a macro runner, so the dispatch of
@@ -123,8 +127,12 @@ so no other job uses walltime.
 
 The CodSpeed Hobby plan of the fallow-rs organization gives about 1,560 macro
 runner minutes per month. One run of the two jobs uses about 4 of these
-minutes. These jobs run in the nightly run, on the release commit, and in a
-dispatch with `-f walltime=true`. The release build runs on a free
+minutes. These jobs run in the nightly run, on the release commit, in a
+dispatch with `-f walltime=true`, and on the label event of `ci:walltime`.
+The label starts one run only, so a pull request with many pushes uses no
+more minutes. Only a maintainer can add a label, and a new push of a fork does
+not run on the macro runner until a maintainer adds the label again. The
+release build runs on a free
 `ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro runner
 image, and the macro runner job only measures. On the release commit, the
 walltime jobs usually end before the slowest simulation shard, so the release gate
