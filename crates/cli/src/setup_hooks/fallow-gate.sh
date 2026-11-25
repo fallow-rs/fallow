@@ -855,36 +855,58 @@ gate_loose_write() {
 # JSON reader of the install decodes the rest.
 CMD=""
 SESSION_CWD=""
+# A hook input that the shell reader cannot decode needs an external reader:
+# the trusted fallow of the install, then jq, then the fallow on PATH, each
+# by its absolute path. yarn and npx never read the hook input. Before that
+# reader runs, the gate removes the tree of each `cwd` value of the input
+# from PATH. A plain `"cwd"` key after `{` or `,` cannot be text inside a
+# JSON string, where each quote is escaped. A nested key can match too, and
+# its tree only adds an exclusion.
 GATE_INPUT_READER=""
 GATE_CWD_RE='[{,][[:space:]]*"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
 GATE_SMALL_READ=0
 if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ] && gate_read_input; then
   GATE_SMALL_READ=1
 else
-  # The session tree leaves PATH before a reader runs. A plain `"cwd"` key
-  # after `{` or `,` cannot be text inside a JSON string, where each quote is
-  # escaped.
-  if [[ "$INPUT" =~ $GATE_CWD_RE ]] && [ -d "${BASH_REMATCH[1]}" ]; then
-    gate_exclude_tree "${BASH_REMATCH[1]}" "" self
-    GATE_PATH_FALLOW="$(gate_find_fallow || true)"
-  fi
-  # The trusted fallow of the install reads the input before jq.
-  if [ -n "$GATE_LOCAL_FALLOW" ]; then
-    gate_try_json_runner "$PWD" "$GATE_LOCAL_FALLOW" || true
+  GATE_REST="$INPUT"
+  while [[ "$GATE_REST" =~ $GATE_CWD_RE ]]; do
+    [ ! -d "${BASH_REMATCH[1]}" ] || gate_exclude_tree "${BASH_REMATCH[1]}" "" self
+    GATE_REST="${GATE_REST#*"${BASH_REMATCH[0]}"}"
+  done
+  GATE_PATH_FALLOW="$(gate_find_fallow || true)"
+  if [ -n "$GATE_LOCAL_FALLOW" ] && gate_try_json_runner "$PWD" "$GATE_LOCAL_FALLOW"; then
+    GATE_INPUT_READER="$GATE_LOCAL_FALLOW"
+  elif GATE_INPUT_READER="$(gate_which jq)"; then
+    :
+  elif [ -n "$GATE_PATH_FALLOW" ] && gate_try_json_runner "$PWD" "$GATE_PATH_FALLOW"; then
+    GATE_INPUT_READER="$GATE_PATH_FALLOW"
+  else
+    GATE_INPUT_READER=""
+    case "$INPUT" in
+      *'\u'*) GATE_MAYBE_WRITE=1 ;;
+      *)
+        case "${INPUT//[\'\"\\]/}" in
+          *git*commit* | *git*push* | *git*'$'*) GATE_MAYBE_WRITE=1 ;;
+          *) GATE_MAYBE_WRITE=0 ;;
+        esac
+        ;;
+    esac
+    if [ "$GATE_MAYBE_WRITE" -eq 1 ]; then
+      {
+        echo "fallow-gate: blocked: the hook input needs jq or a fallow outside the project to read it, and the command can be a git commit or push."
+        echo "fallow-gate: install jq, or install fallow outside the project."
+      } >&2
+      exit 2
+    fi
+    gate_skip_not_git_write
   fi
 fi
 if [ "$GATE_SMALL_READ" -eq 1 ]; then
   :
-elif [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ] && GATE_INPUT_READER="$(gate_which jq)"; then
+elif [ "$GATE_INPUT_READER" != "${GATE_JSON_RUNNER[0]:-}" ]; then
   CMD="$("$GATE_INPUT_READER" -r '.tool_input.command // empty' <<<"$INPUT")"
   SESSION_CWD="$("$GATE_INPUT_READER" -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
 else
-  [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || gate_find_json_runner || true
-  GATE_INPUT_READER="${GATE_JSON_RUNNER[0]:-}"
-  if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then
-    echo "fallow-gate: no native JSON reader or jq found, skipping audit. Upgrade fallow on PATH or install it in the project." >&2
-    exit 0
-  fi
   GATE_INPUT="$(mktemp)"
   if ! gate_json input <<<"$INPUT" >"$GATE_INPUT"; then
     rm -f "$GATE_INPUT"

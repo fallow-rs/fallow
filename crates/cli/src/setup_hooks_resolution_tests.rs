@@ -1119,3 +1119,84 @@ fn gate_never_trusts_a_hook_input_reader_of_the_session_tree() {
         }
     }
 }
+
+/// yarn and npx never read the hook input. When a hook input needs an
+/// external reader and the gate trusts none, a possible git write blocks and
+/// any other command passes.
+#[test]
+fn gate_blocks_a_possible_write_when_no_trusted_reader_can_read_the_input() {
+    for (command, code) in [("git commit -m x", 2), ("ls", 0)] {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("package.json"), "{}").unwrap();
+        let sys = system_bin_without_jq(&base);
+        let log = base.join("calls.log");
+        logging_stub(&base.join("bin/yarn"), "stub-yarn", &log);
+        logging_stub(&base.join("bin/npx"), "stub-npx", &log);
+        let input = serde_json::json!({
+            "cwd": project,
+            "tool_input": { "command": format!("{command} # {}", "x".repeat(9000)) },
+        });
+
+        let output = probe_gate_with_path(
+            &rendered_gate_script(),
+            &project.join(".claude/hooks/fallow-gate.sh"),
+            &project,
+            &format!("{}:{}", base.join("bin").display(), sys.display()),
+            input.to_string().as_bytes(),
+            &[],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(output.status.code(), Some(code), "{command}: {stderr}");
+        assert!(!calls(&log).contains("stub-"), "{}", calls(&log));
+    }
+}
+
+/// A nested `cwd` key can come before the `cwd` of the session. The gate
+/// removes the tree of every `cwd` value from PATH before a reader runs.
+#[test]
+fn gate_excludes_every_cwd_tree_before_the_input_reader_runs() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let process = base.join("process");
+    let other = base.join("other");
+    for dir in [&session, &process, &other] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    git_init(&session);
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    let command = format!("git commit -m '{}'", "x".repeat(9000));
+    reader_stub(
+        &session.join("bin/fallow"),
+        "session",
+        &log,
+        &command,
+        &session,
+    );
+    let input = format!(
+        r#"{{"tool_input":{{"cwd":"{}","command":"{command}"}},"cwd":"{}"}}"#,
+        other.display(),
+        session.display()
+    );
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &process,
+        &format!("{}:{}", session.join("bin").display(), sys.display()),
+        input.as_bytes(),
+        &[],
+    );
+
+    assert!(
+        !calls(&log).contains("session"),
+        "{}\n{}",
+        calls(&log),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
