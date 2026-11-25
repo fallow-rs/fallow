@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "fallow",
-  "version": "3.48.0",
+  "version": "3.49.0",
   "about": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "usage": "fallow [OPTIONS] [PATH] [COMMAND]",
   "root_command": {

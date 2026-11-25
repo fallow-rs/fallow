@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The MCP server serves the fallow skills.** `fallow-mcp` now supports the MCP skills extension (`io.modelcontextprotocol/skills`). A client that supports the extension, such as Claude Code 2.1.331 or later, can load the `fallow` and `fallow-setup` skills from the server, at the same version as the tools. Each skill is at `skill://<name>/SKILL.md`, and its manifest lists every file with its SHA-256 digest and byte size. Set `FALLOW_MCP_SKILLS=off` to stop serving them. `fallow agent install` also installs the skills on disk, so it now writes `FALLOW_MCP_SKILLS=off` into the MCP entry that it registers, and a client shows each skill once. An older fallow version treats that entry as a user-edited entry and does not replace it without `--force`.
   (Closes [#5236](https://github.com/fallow-rs/fallow/issues/5236))
 
+- **A `test-only-export` rule.** It reports an exported value that production code does not use while a test, story, fixture, bench or test-helper file does. In the default mode the tests keep such an export alive, so `unused-export` does not report it. The finding lists up to five `test_importers` and sets `colocated_only` when each importer is next to the module. Its actions are `remove-export-and-tests` and `test-through-interface`, both manual, and `suppress-line`. The rule is `off` by default and runs only in a default-scope run; a `--production` run reports the same export as `unused-export`. Only values are checked in this version, not types. Turn it on with `rules: { "test-only-exports": "warn" }` or the `--test-only-exports` selector, and read `fallow explain test-only-export`.
+  (Closes [#5252](https://github.com/fallow-rs/fallow/issues/5252))
+
+### Changed
+
+- **The extraction cache version changes.** A cached file that has a `// fallow-ignore-next-line test-only-export` comment held the token as unknown, so the first run after the upgrade parses each file again.
+
 ### Fixed
 
 - **`fallow trace-error` keeps scoped package paths in Firefox and Safari frames.** An at-sign in a path such as `node_modules/@scope/lib/index.js` no longer splits the function name from the wrong part of the file location.
@@ -203,6 +210,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@effect/tsgo` provides the `@effect/language-service` tsconfig plugin.** A project that lists only `@effect/tsgo` no longer gets `@effect/language-service` as unlisted and `@effect/tsgo` as an unused devDependency.
   (Closes [#5163](https://github.com/fallow-rs/fallow/issues/5163))
+
+- **An `@expected-unused` export that only tests import is no longer a stale suppression.** A default-scope run gave a `stale-suppression` finding for it, although production code does not use the export. The tag stays stale when a production file uses the export.
+  (Closes [#5252](https://github.com/fallow-rs/fallow/issues/5252))
+
+- **The language server no longer runs again for a watched-file event that changes no content.** The server compares the content of the file with the content that it saw last. A file watcher can report events for a file that a scanner, a sync client or another tool touches, and each event started a new analysis, so the analysis never came to rest. One editor save also started two runs, because the watched-file event of the save cancelled the run of `didSave`. The Output channel now names the files that start a run, and it counts the skipped events.
+  (Closes [#5278](https://github.com/fallow-rs/fallow/issues/5278))
+- **The VS Code status bar count now agrees with the sidebar and the analysis notification.** The status bar now counts the same categories as the sidebar, and it leaves out the categories that `fallow.issueTypes` turns off. With a workspace scope, the status bar keeps the count of the scoped sidebar analysis. The `fallow/analysisComplete` notification now also sends the counts of policy violations, the React Server Components checks and the route checks.
+- **The language server no longer writes INFO progress lines to stderr.** VS Code labels each stderr line `[error]` in the Output channel. The server now writes only warnings and errors there. Set `RUST_LOG` (for example `RUST_LOG=fallow_core=info`) in the environment of the editor to see more detail.
 
 ### Security
 

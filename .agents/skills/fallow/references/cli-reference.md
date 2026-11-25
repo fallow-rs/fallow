@@ -576,7 +576,7 @@ Human output groups paths under "Shared with your team (commit these)" and "Loca
 {
   "kind": "agent-install",
   "schema_version": 1,
-  "fallow_version": "3.48.0",
+  "fallow_version": "3.49.0",
   "root": "/abs/path",
   "mode": "install",
   "dry_run": false,
@@ -789,7 +789,7 @@ fallow health --format json --quiet --trend
 {
   "kind": "health",
   "schema_version": 7,
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -1266,7 +1266,7 @@ fallow audit \
 {
   "kind": "audit",
   "schema_version": 7,
-  "version": "3.48.0",
+  "version": "3.49.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -1354,7 +1354,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 7,
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1456,7 +1456,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -1485,7 +1485,7 @@ fallow security --gate newly-reachable --changed-since origin/main
 {
   "kind": "security",
   "schema_version": "4",
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 42,
   "config": {
     "rules": {
@@ -2420,7 +2420,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 {
   "kind": "dead-code",
   "schema_version": 7,
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -2580,7 +2580,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 {
   "kind": "dupes",
   "schema_version": 7,
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -2624,11 +2624,11 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "kind": "combined",
   "schema_version": 7,
-  "version": "3.48.0",
+  "version": "3.49.0",
   "elapsed_ms": 159,
   "check": {
     "schema_version": 7,
-    "version": "3.48.0",
+    "version": "3.49.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],
