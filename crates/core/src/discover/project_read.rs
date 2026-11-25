@@ -142,4 +142,25 @@ mod tests {
         begin_read_scope_run();
         assert!(read_project_file(&root, &root.join("jest.config.js")).is_some());
     }
+
+    /// A sibling module of a config is read only when it is a regular file
+    /// inside the read scope of the config directory.
+    #[test]
+    #[cfg(unix)]
+    fn a_sibling_module_of_a_config_is_a_bounded_project_read() {
+        use crate::plugins::config_parser::resolve_sibling_module;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join("config")).expect("mkdir");
+        std::fs::create_dir_all(dir.path().join("outside")).expect("mkdir");
+        std::fs::write(dir.path().join("outside/x.js"), "export default 1;").expect("write");
+        std::fs::write(root.join("config/shared.js"), "export default 2;").expect("write");
+        std::os::unix::fs::symlink("/dev/zero", root.join("config/zero.js")).expect("link");
+        let config = root.join("config/vite.config.js");
+
+        assert!(resolve_sibling_module(&config, "./shared.js").is_some());
+        assert!(resolve_sibling_module(&config, "../../outside/x.js").is_none());
+        assert!(resolve_sibling_module(&config, "/dev/zero").is_none());
+        assert!(resolve_sibling_module(&config, "./zero.js").is_none());
+    }
 }

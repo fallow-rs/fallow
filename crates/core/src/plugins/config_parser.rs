@@ -2577,29 +2577,30 @@ pub(crate) fn is_relative_specifier(specifier: &str) -> bool {
     specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/')
 }
 
-/// Resolve a relative specifier against `config_path`'s directory to a readable
-/// sibling file, returning the resolved path and its source. Tries the path as
-/// written first (covers `./vite.shared.js`), then appends each known config
-/// extension (covers extensionless `./vite.shared` and dotted basenames where
-/// `Path::extension` would misread `.shared`), then an `index.*` directory file.
+/// Resolve a relative specifier against `config_path`'s directory to a sibling
+/// file that a project read from that directory accepts (a regular file in its
+/// read scope), with its source. Tries the path as written (`./vite.shared.js`),
+/// then each known config extension (extensionless `./vite.shared`, and dotted
+/// basenames that `Path::extension` misreads), then an `index.*` file.
 pub(crate) fn resolve_sibling_module(
     config_path: &Path,
     specifier: &str,
 ) -> Option<(PathBuf, String)> {
     let parent = config_path.parent().unwrap_or(config_path);
+    let read = |path: &Path| crate::discover::project_read::read_project_file(parent, path);
     let direct = parent.join(specifier);
-    if let Ok(source) = std::fs::read_to_string(&direct) {
+    if let Some(source) = read(&direct) {
         return Some((direct, source));
     }
     for ext in ALIAS_SIBLING_EXTS {
         let candidate = parent.join(format!("{specifier}.{ext}"));
-        if let Ok(source) = std::fs::read_to_string(&candidate) {
+        if let Some(source) = read(&candidate) {
             return Some((candidate, source));
         }
     }
     for ext in ALIAS_SIBLING_EXTS {
         let candidate = direct.join(format!("index.{ext}"));
-        if let Ok(source) = std::fs::read_to_string(&candidate) {
+        if let Some(source) = read(&candidate) {
             return Some((candidate, source));
         }
     }
@@ -2608,7 +2609,6 @@ pub(crate) fn resolve_sibling_module(
 
 pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
-
     for component in path.components() {
         match component {
             std::path::Component::CurDir => {}
