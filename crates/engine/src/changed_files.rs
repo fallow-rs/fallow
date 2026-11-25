@@ -937,15 +937,6 @@ pub(crate) fn filter_duplication_by_path_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn git_path_line_strips_only_the_line_end() {
-        assert_eq!(git_path_line(b"/work/web \n"), Some("/work/web "));
-        assert_eq!(git_path_line(b"/work/web\t\r\n"), Some("/work/web\t"));
-        assert_eq!(git_path_line(b" /work/web"), Some(" /work/web"));
-        assert_eq!(git_path_line(b"/work/web\n\n"), Some("/work/web\n"));
-        assert_eq!(git_path_line(b"/work/\xff\n"), None);
-    }
     use fallow_types::{
         duplicates::{CloneGroup, CloneInstance, DuplicationStats},
         output_dead_code::{
@@ -956,6 +947,15 @@ mod tests {
             DependencyLocation, EmptyCatalogGroup, UnusedDependency, UnusedExport, UnusedFile,
         },
     };
+
+    #[test]
+    fn git_path_line_strips_only_the_line_end() {
+        assert_eq!(git_path_line(b"/work/web \n"), Some("/work/web "));
+        assert_eq!(git_path_line(b"/work/web\t\r\n"), Some("/work/web\t"));
+        assert_eq!(git_path_line(b" /work/web"), Some(" /work/web"));
+        assert_eq!(git_path_line(b"/work/web\n\n"), Some("/work/web\n"));
+        assert_eq!(git_path_line(b"/work/\xff\n"), None);
+    }
 
     /// One reason token per cause, because each carries a different remedy and
     /// a consumer branches on the token rather than on the prose.
