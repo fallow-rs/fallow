@@ -57,8 +57,9 @@ impl StagedTree {
         let root = if relative_root.as_os_str().is_empty() {
             path.clone()
         } else {
-            path.join(relative_root)
+            path.join(&relative_root)
         };
+        let host_root_in_checkout = host_toplevel.join(&relative_root);
         let tree = Self {
             host_toplevel,
             path,
@@ -66,7 +67,7 @@ impl StagedTree {
         };
         // A drop of `tree` removes the worktree, so the check runs after its
         // construction and before the first read or write under the root.
-        tree.require_root_inside_worktree()?;
+        check_staged_root(&tree.path, &tree.root, &host_root_in_checkout)?;
         let patterns = workspace_patterns(&tree.root, config);
         fallow_engine::repo_refs::materialize_base_dependency_context(
             host_root, &tree.root, &patterns,
@@ -75,23 +76,6 @@ impl StagedTree {
         // are not changes of the commit.
         fallow_engine::changed_files::exclude_untracked_files();
         Ok(tree)
-    }
-
-    /// Refuse a root that a link in the staged index moves out of the
-    /// worktree. A root that the index does not contain stays allowed here.
-    fn require_root_inside_worktree(&self) -> Result<(), String> {
-        if std::fs::symlink_metadata(&self.root).is_err() {
-            return Ok(());
-        }
-        let inside =
-            dunce::canonicalize(&self.root).is_ok_and(|resolved| resolved.starts_with(&self.path));
-        if inside {
-            return Ok(());
-        }
-        Err(format!(
-            "--staged refuses the root '{}': a link in the staged index resolves it outside the staged worktree",
-            self.root.display()
-        ))
     }
 
     /// The analysis root inside the worktree. It maps onto the host root.
@@ -103,6 +87,28 @@ impl StagedTree {
 impl Drop for StagedTree {
     fn drop(&mut self) {
         fallow_engine::repo_refs::remove_staged_index_worktree(&self.host_toplevel, &self.path);
+    }
+}
+
+/// Refuse a `root` in the staged worktree at `worktree` that a link in the
+/// staged index moves out of the worktree. `host_root` is the same root in
+/// the checkout of the user, for the message. A root that the index does not
+/// hold stays allowed here.
+fn check_staged_root(worktree: &Path, root: &Path, host_root: &Path) -> Result<(), String> {
+    if std::fs::symlink_metadata(root).is_err() {
+        return Ok(());
+    }
+    match dunce::canonicalize(root) {
+        Ok(resolved) if resolved.starts_with(worktree) => Ok(()),
+        Ok(resolved) => Err(format!(
+            "--staged refuses the root '{}': a link in the staged index resolves it to '{}', outside the staged worktree",
+            host_root.display(),
+            resolved.display()
+        )),
+        Err(err) => Err(format!(
+            "--staged refuses the root '{}': a link in the staged index makes it a path that cannot be resolved: {err}",
+            host_root.display()
+        )),
     }
 }
 
@@ -227,5 +233,33 @@ mod tests {
             .err()
             .expect("the staged tree refuses the root");
         assert!(err.contains("outside the staged worktree"), "got: {err}");
+        let host_root = format!("'{}'", dunce::canonicalize(&app).unwrap().display());
+        assert!(err.contains(&host_root), "the host root: {err}");
+        let target = dunce::canonicalize(outside.join("mobile")).unwrap();
+        assert!(
+            err.contains(&format!("'{}'", target.display())),
+            "the real target: {err}"
+        );
+    }
+
+    /// A staged link with no target leaves the root without a real path.
+    #[cfg(unix)]
+    #[test]
+    fn staged_root_check_names_a_root_that_cannot_be_resolved() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let worktree = temp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+        std::os::unix::fs::symlink("/nonexistent-fallow-target", worktree.join("apps"))
+            .expect("link");
+        let host_root = Path::new("/host/repo/apps");
+
+        let err = check_staged_root(&worktree, &worktree.join("apps"), host_root).unwrap_err();
+        assert!(err.contains("'/host/repo/apps'"), "got: {err}");
+        assert!(err.contains("cannot be resolved"), "got: {err}");
+        assert_eq!(
+            check_staged_root(&worktree, &worktree.join("absent"), host_root),
+            Ok(()),
+            "a root that the index does not hold"
+        );
     }
 }
