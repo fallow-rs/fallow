@@ -173,6 +173,12 @@ pub fn discover_files_and_config_candidates(
     (discovered.files, discovered.config_candidates)
 }
 
+/// Start a new analysis run of the project readers, so they compute the
+/// read scope base of each root again.
+pub fn begin_read_scope_run() {
+    fallow_core::discover::begin_read_scope_run();
+}
+
 /// Source files, config candidates, and the source-discovery diagnostics of
 /// one walk, re-exported so engine modules never name the core type directly.
 pub use fallow_core::discover::DiscoveredSources;
