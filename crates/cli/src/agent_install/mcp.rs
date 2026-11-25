@@ -7,6 +7,12 @@
 //! first two are resolved on disk. A launcher that would only work on this machine is never
 //! written into a file the team commits.
 //!
+//! A user-level entry applies in every project. It never uses `npx`, which
+//! runs the `fallow-mcp` of the project that the harness opens. It uses the
+//! absolute path of the `fallow-mcp` on `PATH`, as found, or of the running
+//! binary when that binary serves MCP. A launcher of the current project
+//! never counts, see [`crate::user_launcher`].
+//!
 //! JSON cannot carry a marker comment, so ownership of the `fallow` entry is
 //! recognized by shape: an entry whose command and args match one of the
 //! launchers fallow writes, with no extra keys, is fallow-managed. The one
@@ -91,7 +97,12 @@ impl McpCommand {
     }
 }
 
-pub fn resolve_command(root: &Path) -> Option<McpCommand> {
+/// The launcher for a project-level entry (`user` false) or a user-level
+/// entry (`user` true).
+pub fn resolve_command(root: &Path, user: bool) -> Option<McpCommand> {
+    if user {
+        return resolve_user_command(root);
+    }
     resolve_command_with(
         node_modules_launcher_present(root),
         || find_on_path("fallow-mcp"),
@@ -141,6 +152,47 @@ pub fn resolve_command_with(
         args: vec!["mcp-server".to_string()],
         source: McpSource::SelfBinary,
     })
+}
+
+/// The launcher for a user-level entry and for a printed user-scope command
+/// of the project at `root`.
+pub fn resolve_user_command(root: &Path) -> Option<McpCommand> {
+    resolve_user_command_with(
+        crate::setup_hooks::user_launcher::search_dirs(),
+        &crate::setup_hooks::user_launcher::project_dirs(root),
+        || {
+            let exe = std::env::current_exe().ok()?;
+            serves_mcp(&exe).then_some(exe)
+        },
+    )
+}
+
+/// The user-level launcher: the first `fallow-mcp` in `search_dirs` that
+/// [`crate::setup_hooks::user_launcher::is_user_launcher`] accepts, as found, else the
+/// running binary when it serves MCP and is accepted too.
+pub fn resolve_user_command_with(
+    search_dirs: impl IntoIterator<Item = PathBuf>,
+    project_dirs: &[PathBuf],
+    self_probe: impl FnOnce() -> Option<PathBuf>,
+) -> Option<McpCommand> {
+    if let Some(found) = crate::setup_hooks::user_launcher::find_user_launcher(
+        "fallow-mcp",
+        search_dirs,
+        project_dirs,
+    ) {
+        return Some(McpCommand {
+            command: found.display().to_string(),
+            args: Vec::new(),
+            source: McpSource::Path,
+        });
+    }
+    self_probe()
+        .filter(|exe| crate::setup_hooks::user_launcher::is_user_launcher(exe, project_dirs))
+        .map(|exe| McpCommand {
+            command: exe.display().to_string(),
+            args: vec!["mcp-server".to_string()],
+            source: McpSource::SelfBinary,
+        })
 }
 
 /// Resolve a bare command name against `PATH`, the way the agent gate does.
@@ -1045,6 +1097,18 @@ pub fn merge_codex(
     }
     std::fs::write(path, after).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(backup.map_or(FileOutcome::Changed, FileOutcome::ChangedAfterBackup))
+}
+
+/// `Some(true)` when git tracks one of `paths` (relative to `root`) or a file
+/// below it, `Some(false)` when it tracks none or `root` is not in a git work
+/// tree, `None` when git cannot run.
+pub(super) fn git_tracks_any(root: &Path, paths: &[PathBuf]) -> Option<bool> {
+    let output = fallow_engine::changed_files::git_command_in(root)
+        .args(["ls-files", "-z", "--"])
+        .args(paths)
+        .output()
+        .ok()?;
+    Some(output.status.success() && !output.stdout.is_empty())
 }
 
 fn is_git_tracked(root: &Path, relative: &str) -> bool {

@@ -238,9 +238,11 @@ impl Source {
     /// has no usable `SKILL.md`. pnpm and `npm link` make the package directory
     /// a link, so the check resolves it first and then accepts only files whose
     /// real path stays inside it. A file that links out of the package could
-    /// otherwise copy any readable file into the working tree.
+    /// otherwise copy any readable file into the working tree. The resolved
+    /// directory must also be an installed fallow package, see
+    /// [`installed_package`].
     fn shipped(root: &Path, skill: &'static ReleasedSkill) -> Option<Self> {
-        let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
+        let package = installed_package(root)?;
         let shipped = root.join(skill.node_modules_dir());
         let PackageFile::Text(text) = read_package_file(&package, &shipped.join("SKILL.md")) else {
             return None;
@@ -300,6 +302,38 @@ impl Source {
                 .collect(),
         }
     }
+}
+
+/// The canonical `node_modules/fallow` of `root`, when it is an installed
+/// fallow package: a directory named `fallow` in a `node_modules` directory,
+/// with a `package.json` whose name is `fallow`. Inside the project, only a
+/// package below the `node_modules` of the project counts (for example the
+/// pnpm store), not a directory elsewhere in the project. Git must not track
+/// the `node_modules/fallow` entry or the package files: a package manager
+/// writes them, a commit does not.
+fn installed_package(root: &Path) -> Option<PathBuf> {
+    let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
+    let project = dunce::canonicalize(root).ok()?;
+    if project.starts_with(&package)
+        || package.file_name()? != "fallow"
+        || package.parent()?.file_name()? != "node_modules"
+        || (package.starts_with(&project) && !package.starts_with(project.join("node_modules")))
+    {
+        return None;
+    }
+    let mut tracked = vec![PathBuf::from(NODE_MODULES_PACKAGE)];
+    if let Ok(inside) = package.strip_prefix(&project) {
+        tracked.push(inside.to_path_buf());
+    }
+    if super::mcp::git_tracks_any(&project, &tracked)? {
+        return None;
+    }
+    let PackageFile::Text(manifest) = read_package_file(&package, &package.join("package.json"))
+    else {
+        return None;
+    };
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+    (manifest.get("name")?.as_str()? == "fallow").then_some(package)
 }
 
 enum PackageFile {

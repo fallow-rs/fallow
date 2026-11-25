@@ -272,6 +272,11 @@ fn ship_skill(root: &Path) -> std::path::PathBuf {
     let shipped = root.join("node_modules/fallow/skills/fallow");
     std::fs::create_dir_all(shipped.join("agents")).unwrap();
     std::fs::write(
+        root.join("node_modules/fallow/package.json"),
+        r#"{"name":"fallow"}"#,
+    )
+    .unwrap();
+    std::fs::write(
         shipped.join("SKILL.md"),
         "---\nname: fallow\ndescription: shipped\n---\n# Fallow\n",
     )
@@ -327,6 +332,57 @@ fn skill_install_reads_a_package_that_a_link_places_elsewhere() {
         std::fs::read_to_string(installed.join("agents/openai.yaml")).unwrap(),
         "interface: {}\n"
     );
+}
+
+fn git_in(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn installed_flavor(root: &Path) -> String {
+    let _ = std::fs::remove_dir_all(root.join(".agents"));
+    let steps = skill::install(&ctx(root, Mode::Install), &[Harness::Codex]);
+    assert_eq!(
+        row(&steps, ".agents/skills/fallow").status,
+        StepStatus::Written
+    );
+    std::fs::read_to_string(root.join(".agents/skills/fallow/SKILL.md")).unwrap()
+}
+
+/// A package manager writes `node_modules/fallow`; a commit does not. A link
+/// to a directory with the package shape counts only when git does not track
+/// the link, and inside the project only below the `node_modules` of the
+/// project.
+#[test]
+fn skill_install_ignores_a_committed_package_link_or_vendor_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let root = root.path();
+    ship_skill(outside.path());
+    ship_skill(&root.join("vendor"));
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    let link = root.join("node_modules/fallow");
+
+    symlink(root.join("vendor/node_modules/fallow"), &link).unwrap();
+    let text = installed_flavor(root);
+    assert!(text.contains("skill=embedded"), "vendor directory: {text}");
+
+    std::fs::remove_file(&link).unwrap();
+    symlink(outside.path().join("node_modules/fallow"), &link).unwrap();
+    assert!(installed_flavor(root).contains("skill=stub"));
+    git_in(root, &["init", "-q"]);
+    git_in(root, &["add", "-f", "node_modules/fallow"]);
+    let text = installed_flavor(root);
+    assert!(text.contains("skill=embedded"), "tracked link: {text}");
 }
 
 #[test]

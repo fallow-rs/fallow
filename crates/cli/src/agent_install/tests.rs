@@ -163,6 +163,11 @@ fn ship_skill(root: &Path, name: &str) {
     let shipped = root.join("node_modules/fallow/skills").join(name);
     std::fs::create_dir_all(shipped.join("agents")).unwrap();
     std::fs::write(
+        root.join("node_modules/fallow/package.json"),
+        r#"{"name":"fallow"}"#,
+    )
+    .unwrap();
+    std::fs::write(
         shipped.join("SKILL.md"),
         format!("---\nname: {name}\ndescription: Shipped description.\nlicense: MIT\n---\n\n# Full skill\n"),
     )
@@ -387,6 +392,78 @@ fn mcp_command_prefers_node_modules_then_path_then_self() {
     let own = mcp::resolve_command_with(false, || None, || Some("/opt/fallow".into())).unwrap();
     assert_eq!(own.args, vec!["mcp-server"]);
     assert!(mcp::resolve_command_with(false, || None, || None).is_none());
+}
+
+/// A user-level entry applies in every project, so it must not use `npx`,
+/// which runs the `fallow-mcp` of the project that the harness opens, or a
+/// launcher of the project that `npm exec` puts first on `PATH`.
+#[test]
+fn user_mcp_entries_use_an_absolute_launcher_outside_the_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = dunce::canonicalize(tmp.path()).unwrap();
+    let project = base.join("app");
+    let home = base.join("home");
+    let global = base.join("global/bin");
+    for dir in [
+        project.join("node_modules/.bin"),
+        global.clone(),
+        home.clone(),
+    ] {
+        std::fs::create_dir_all(&dir).unwrap();
+    }
+    std::fs::write(project.join("node_modules/.bin/fallow-mcp"), "#!/bin/sh\n").unwrap();
+    std::fs::write(global.join("fallow-mcp"), "#!/bin/sh\n").unwrap();
+    let project_dirs = crate::setup_hooks::user_launcher::project_dirs(&project);
+    let search = vec![project.join("node_modules/.bin"), global.clone()];
+
+    let command = mcp::resolve_user_command_with(search.clone(), &project_dirs, || None).unwrap();
+    let launcher = global.join("fallow-mcp").display().to_string();
+    assert_eq!(command.command, launcher);
+    assert!(command.args.is_empty());
+    assert!(command.is_fallow_shape());
+    // The running binary counts only when it is outside the project.
+    let own = mcp::resolve_user_command_with(search[..1].to_vec(), &project_dirs, || {
+        Some(project.join("node_modules/.bin/fallow-mcp"))
+    });
+    assert!(own.is_none(), "{own:?}");
+    let own = mcp::resolve_user_command_with(Vec::new(), &project_dirs, || {
+        Some(PathBuf::from("/opt/fallow"))
+    })
+    .unwrap();
+    assert_eq!(
+        (own.command.as_str(), own.args.as_slice()),
+        ("/opt/fallow", &["mcp-server".to_string()][..])
+    );
+
+    let ctx = Ctx {
+        root: project,
+        home: Some(home.clone()),
+        user: true,
+        dry_run: false,
+        force: false,
+        approve: false,
+        gitignore_claude: false,
+        mode: Mode::Install,
+    };
+    let steps = mcp::install(&ctx, &[Harness::Cursor, Harness::Claude], Some(&command));
+
+    let cursor: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(".cursor/mcp.json")).unwrap())
+            .unwrap();
+    assert_eq!(cursor["mcpServers"]["fallow"]["command"], launcher.as_str());
+    let claude = steps
+        .iter()
+        .find(|step| step.harness == Some(Harness::Claude))
+        .unwrap();
+    let detail = claude.detail.as_deref().unwrap_or_default();
+    assert!(
+        detail.contains(&format!(
+            "claude mcp add --scope user fallow -- {}",
+            command.shell_words()
+        )),
+        "{detail}"
+    );
+    assert!(!detail.contains("npx"), "{detail}");
 }
 
 #[test]
