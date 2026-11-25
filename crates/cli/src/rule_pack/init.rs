@@ -177,12 +177,17 @@ enum ConfigUpdateResult {
 
 fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResult {
     // `guard_root` is the directory that the config must not link out of.
-    // An absolute `--config` is the caller's choice and has none. Discovery
-    // can stop at a config above the root, up to the repository root, so a
-    // discovered config is checked against its own directory.
+    // An absolute `--config` inside the root or its Git work tree is checked
+    // from that directory. An absolute `--config` elsewhere is the caller's
+    // choice and has none. Discovery can stop at a config above the root, up
+    // to the repository root, so a discovered config is checked against its
+    // own directory.
     let (config_path, guard_root) = if let Some(config_path) = ctx.config_path {
         if config_path.is_absolute() {
-            (config_path.clone(), None)
+            (
+                config_path.clone(),
+                absolute_config_guard_root(ctx.root, config_path),
+            )
         } else {
             (ctx.root.join(config_path), Some(ctx.root.to_path_buf()))
         }
@@ -219,6 +224,36 @@ fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResul
             reason: err.to_string(),
         },
     }
+}
+
+/// The directory that an absolute `config_path` is checked from: the
+/// ancestor of `config_path`, as written, that resolves to the project root,
+/// or else to the top of the Git work tree that contains the root. `None`
+/// when the config is in neither, or when the root cannot be resolved and no
+/// ancestor matches it by text.
+fn absolute_config_guard_root(
+    root: &std::path::Path,
+    config_path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let canonical_root = dunce::canonicalize(root).ok();
+    let checkout = canonical_root.as_deref().and_then(|canonical| {
+        canonical
+            .ancestors()
+            .find(|dir| dir.join(".git").symlink_metadata().is_ok())
+            .map(std::path::Path::to_path_buf)
+    });
+    let ancestors: Vec<&std::path::Path> = config_path.ancestors().skip(1).collect();
+    let matching = |wanted: &std::path::Path| {
+        ancestors
+            .iter()
+            .find(|dir| dunce::canonicalize(dir).is_ok_and(|real| real == wanted))
+            .map(|dir| dir.to_path_buf())
+    };
+    canonical_root
+        .as_deref()
+        .and_then(matching)
+        .or_else(|| checkout.as_deref().and_then(matching))
+        .or_else(|| config_path.starts_with(root).then(|| root.to_path_buf()))
 }
 
 fn emit_result(ctx: &RulePackContext<'_>, result: &InitResult) -> ExitCode {

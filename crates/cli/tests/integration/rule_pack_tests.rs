@@ -466,3 +466,74 @@ fn rule_pack_init_does_not_edit_a_linked_repo_config_above_the_root() {
 
     assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
 }
+
+/// An absolute `--config` that names a linked config file inside the project
+/// gets the same check as a relative one.
+#[cfg(unix)]
+#[test]
+fn rule_pack_init_does_not_edit_a_linked_config_named_by_an_absolute_path() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let outside = tempfile::tempdir().expect("create outside dir");
+    std::fs::write(dir.path().join("package.json"), "{\"name\":\"t\"}\n")
+        .expect("write package.json");
+    let target = outside.path().join("shared.json");
+    let original = "{\n  \"rules\": {}\n}\n";
+    std::fs::write(&target, original).expect("write outside config");
+    let link = dir.path().join(".fallowrc.json");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+    let mut cmd = crate::common::fallow_command();
+    cmd.arg("rule-pack")
+        .arg("--root")
+        .arg(dir.path())
+        .arg("--config")
+        .arg(&link)
+        .arg("init");
+    let output = CommandOutput::from_process(cmd.output().expect("run fallow"));
+
+    // The pack is written and the config edit falls back to the manual
+    // snippet, as for a relative `--config`.
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output.stdout.contains("Could not update ")
+            && output
+                .stdout
+                .contains(".fallowrc.json is a symlink that resolves outside the project root"),
+        "stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("\"rulePacks\""),
+        "stdout: {}",
+        output.stdout
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
+}
+
+/// An absolute `--config` outside the project is the choice of the caller,
+/// so it is still edited.
+#[test]
+fn rule_pack_init_edits_an_absolute_config_outside_the_project() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let outside = tempfile::tempdir().expect("create outside dir");
+    std::fs::write(dir.path().join("package.json"), "{\"name\":\"t\"}\n")
+        .expect("write package.json");
+    let config = outside.path().join("shared.json");
+    std::fs::write(&config, "{\n  \"rules\": {}\n}\n").expect("write outside config");
+
+    let mut cmd = crate::common::fallow_command();
+    cmd.arg("rule-pack")
+        .arg("--root")
+        .arg(dir.path())
+        .arg("--config")
+        .arg(&config)
+        .arg("init");
+    let output = cmd.output().expect("run fallow");
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .contains("rulePacks")
+    );
+}
