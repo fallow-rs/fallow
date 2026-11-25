@@ -149,6 +149,38 @@ gets the skill of the same version as the tools, with no separate install.
     to a file, and the agent reads that file. A lower default refuses
     results that such a host keeps intact, so the default stays at the Code
     Mode value.
+  - A tool whose result can pass 50,000 characters declares
+    `_meta["anthropic/maxResultSizeChars"]` in `tools/list`, with the value
+    `LARGE_RESULT_MAX_CHARS` (200,000) from `server/mod.rs`. Claude Code then
+    keeps a result up to that size in the conversation (its ceiling is
+    500,000). A larger result goes to a file, and a result over the server
+    cap is refused. The limits apply in this order: 50,000 characters, then
+    the declared value, then the server cap in bytes. The value keeps a
+    filtered or small report inline. A whole report of a mid-size project is
+    often larger, and it still goes to a file that the agent can filter.
+    - The set of tools comes from a measurement on two public projects
+      (excalidraw and cal.com). These tools passed 50,000 characters:
+      `analyze`, `audit`, `check_architecture`, `check_changed`,
+      `check_health`, `code_execute`, `find_dupes`, `fix_preview`,
+      `get_token_blast_radius`, `impact_all`, `project_info`,
+      `security_candidates` and `trace_file`.
+    - These tools stayed below it: `trace_dependency`, `trace_export`,
+      `trace_clone`, `trace_import_path`, `feature_flags`, `list_boundaries`,
+      `list_suppressions`, `decision_surface`, `recommend` and
+      `mutation_plan`.
+    - The runtime-coverage tools (`check_runtime_coverage`, `get_hot_paths`,
+      `get_blast_radius`, `get_importance`, `get_cleanup_candidates`) need a
+      coverage input, and the measurement did not run them.
+    - `crates/mcp/src/server/tests/tool_meta.rs` pins the set. Measure a tool
+      on a large public project before you add it.
+  - No tool declares `_meta["anthropic/alwaysLoad"]`. An upfront tool puts
+    its description and its input schema into every session, and Claude
+    Code cuts that description at 4,096 characters. The server instructions
+    already name the entry points, so an agent finds them through tool
+    search. Claude Code also cuts the server instructions at 4,096
+    characters. `crates/mcp/src/server/tests/tool_descriptions.rs` checks
+    `INSTRUCTIONS` plus
+    `SKILLS_INSTRUCTION` against that cut.
   - The over-limit body carries `narrow`: the parameters of the refused tool
     that make its output smaller. `tools/narrow.rs` owns the table. A drift
     test checks each name against the input schema of its tool. A tool
@@ -197,6 +229,26 @@ gets the skill of the same version as the tools, with no separate install.
   tool declares an `output_schema` for one to validate against, and a
   verdict-only block would be a second shape with no manifest row and no drift
   test.
+- No tool declares `outputSchema` or returns `structuredContent`. There are
+  three reasons:
+  - The `tools/list` cost is too high. The closure of `docs/output-schema.json`
+    for one envelope is 345,072 bytes for the dead-code envelope, 367,970
+    bytes for health and 593,707 bytes for audit. `tools/list` carries each
+    `outputSchema`. The input schemas of all tools together are about 101,500
+    bytes (`RECORDED_TOTAL_SCHEMA_BYTES` in
+    `crates/mcp/src/server/tests/tool_descriptions.rs`).
+  - The agent gets no new data. Claude Code shows the model the
+    `structuredContent` and drops the text blocks when a result has both. The
+    text block is already that JSON, so the wire size doubles for the same
+    content.
+  - No test checks the MCP result against the CLI schema. The MCP envelope
+    adds keys that the CLI schema does not list (the root `warnings` array),
+    and the MCP error bodies have their own shape (`ok`, `truncated`,
+    `result_bytes`). A client that validates a result against a declared
+    schema can reject such a result.
+  Reopen this decision only with a per-tool schema small enough for the
+  `tools/list` budget and a drift test that validates the MCP result of
+  every route against it.
 - Keep parameter names, defaults, license metadata, read-only status, and tool
   descriptions synchronized with the shared manifest.
 - Every dead-code finding carries a `finding_id` (`dc1:<rule>:<hash>`).

@@ -395,6 +395,28 @@ fn server_instruction_budget_keeps_no_stale_headroom() {
     );
 }
 
+/// Claude Code cuts server instructions at this many characters, and the
+/// agent sees only the text before the cut.
+const HOST_INSTRUCTION_CHAR_LIMIT: usize = 4_096;
+
+/// Counts both parts, because a build that serves skills appends
+/// [`SKILLS_INSTRUCTION`](super::super::SKILLS_INSTRUCTION) and a test build
+/// may not serve them.
+#[test]
+fn server_instructions_fit_the_host_cut() {
+    let chars = super::super::INSTRUCTIONS.chars().count()
+        + super::super::SKILLS_INSTRUCTION.chars().count();
+    assert!(
+        chars <= HOST_INSTRUCTION_CHAR_LIMIT,
+        "server instructions with the skills sentence carry {chars} characters; \
+         Claude Code cuts them at {HOST_INSTRUCTION_CHAR_LIMIT}"
+    );
+}
+
+/// A character takes at least one byte, so a byte budget at or below the cut
+/// keeps the ratchet from allowing a text that the host cuts.
+const _: () = assert!(MAX_INSTRUCTION_BYTES <= HOST_INSTRUCTION_CHAR_LIMIT);
+
 /// The catalogue resource is the terse channel and the wire description is the
 /// long one. `crates/mcp/src/tool_guides.rs` says a drift test holds that
 /// ordering; this is that test.

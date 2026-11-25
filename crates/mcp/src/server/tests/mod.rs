@@ -11,3 +11,4 @@ mod run;
 mod rust_route;
 mod server_info;
 mod tool_descriptions;
+mod tool_meta;

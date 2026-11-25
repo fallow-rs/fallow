@@ -1,0 +1,4 @@
+### Added
+
+- **MCP tools with large results keep them in the conversation.** Claude Code saves a tool result over 50,000 characters to a file, and the agent must read that file again. Thirteen tools returned more on large public projects: `analyze`, `audit`, `check_architecture`, `check_changed`, `check_health`, `code_execute`, `find_dupes`, `fix_preview`, `get_token_blast_radius`, `impact_all`, `project_info`, `security_candidates` and `trace_file`. These tools now declare `_meta["anthropic/maxResultSizeChars"]` of 200,000 in `tools/list`, so Claude Code keeps a result up to that size inline. A larger result still goes to a file. The server cap (`FALLOW_MCP_MAX_OUTPUT_BYTES`, default 1,000,000 bytes) and the `max_output_bytes` parameter do not change. Other clients ignore the field.
+  (Closes [#5239](https://github.com/fallow-rs/fallow/issues/5239))
