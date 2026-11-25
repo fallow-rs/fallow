@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -31,14 +31,6 @@ const realOrResolved = (file) => {
   }
 };
 
-/** The Git work tree that contains `root`, or `root` when there is none. */
-const workTree = (root) => {
-  for (let dir = root; ; dir = path.dirname(dir)) {
-    if (existsSync(path.join(dir, ".git"))) return dir;
-    if (path.dirname(dir) === dir) return root;
-  }
-};
-
 /** Each `node_modules` directory at `dir` or above it. */
 const nodeModulesAbove = (dir) => {
   const found = [];
@@ -49,12 +41,13 @@ const nodeModulesAbove = (dir) => {
 };
 
 /**
- * The directory that the read scope of `root` starts from: the Git work tree
- * of the root, or the root itself when there is none.
+ * The directory that the read scope of `root` starts from: the resolved
+ * analysis root that fallow sends. The scope never widens to a parent
+ * directory, also when that directory is a Git work tree.
  *
  * @param {string} root
  */
-const readScopeBase = (root) => workTree(realOrResolved(root));
+const readScopeBase = (root) => realOrResolved(root);
 
 /**
  * A test of whether the checker may read a file for the project at `root`.

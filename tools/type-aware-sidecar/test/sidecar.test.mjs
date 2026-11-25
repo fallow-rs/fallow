@@ -4077,16 +4077,16 @@ test("unknown external framework package provenance abstains", () => {
   const monorepo = makeProject();
   const root = path.join(monorepo, "packages", "app");
   try {
-    // The monorepo is a Git work tree, so its root tsconfig is in the read scope.
-    write(monorepo, ".git/HEAD", "ref: refs/heads/main\n");
     write(
-      monorepo,
+      root,
       "tsconfig.json",
       JSON.stringify({
         compilerOptions: { strict: true, module: "nodenext", moduleResolution: "nodenext" },
-        include: ["packages/**/*.ts"],
+        include: ["src/**/*.ts"],
       }),
     );
+    // The declaration is outside the root, so the checker does not read it
+    // and its provenance is unknown.
     write(monorepo, "packages/framework/lit.d.ts", "export declare class LitElement {}\n");
     const source = [
       'import { LitElement } from "../../framework/lit.js";',
@@ -4127,7 +4127,7 @@ test("unknown external framework package provenance abstains", () => {
               ],
             },
           ],
-          { projects: ["../../tsconfig.json"] },
+          { projects: ["tsconfig.json"] },
         ),
       ),
     );

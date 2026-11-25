@@ -66,3 +66,14 @@ test("a project path must resolve inside the root", () => {
     assert.equal(resolvesInside(root, path.join(root, "linked-dir", "tsconfig.json")), false);
   });
 });
+
+test("a Git work tree above the root does not widen the read scope", () => {
+  withLayout(({ base, root }) => {
+    rmSync(path.join(root, ".git"), { recursive: true, force: true });
+    mkdirSync(path.join(base, ".git"), { recursive: true });
+    writeFileSync(path.join(base, "parent.ts"), OUTSIDE_TEXT);
+    const inScope = createReadScope(root);
+    assert.equal(inScope(path.join(base, "parent.ts")), false);
+    assert.equal(resolvesInside(root, path.join(base, "tsconfig.json")), false);
+  });
+});

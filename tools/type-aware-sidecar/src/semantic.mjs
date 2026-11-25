@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { accessorPairExists, countsAsAccessorUse } from "./accessor-direction.mjs";
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
+import { declarationIsProjectLocal, isUnresolvedContractHeritage } from "./heritage-provenance.mjs";
 
 import { canonicalFileIdentity, resetFileIdentityCache } from "./file-identity.mjs";
 import { packagePathTargets, projectPackage, wildcardPattern } from "./project-package.mjs";
@@ -907,11 +908,6 @@ const packageNameForDeclaration = (declaration) => {
   return segments[0] || undefined;
 };
 
-const declarationIsProjectLocal = (root, declaration) => {
-  const relative = path.relative(root, declaration.getSourceFile().fileName);
-  return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`));
-};
-
 const frameworkContractRelationsFor = (root, project, declaration, contracts, memberName) => {
   const owner = ownerDeclaration(declaration);
   if (!owner || (!isClassDeclaration(owner) && !isClassExpression(owner))) {
@@ -930,6 +926,10 @@ const frameworkContractRelationsFor = (root, project, declaration, contracts, me
         project.checker.getTypeAtLocation(heritageType).aliasSymbol ??
         project.checker.getTypeAtLocation(heritageType).symbol;
       const symbol = resolveAlias(project.checker, rawSymbol);
+      provenanceUnknown ||= isUnresolvedContractHeritage(heritageType, project, symbol, {
+        contracts: matchingContracts,
+        relation: clauseRelation,
+      });
       for (const heritageDeclaration of declarationsForSymbol(project, symbol)) {
         const declarationPackage = packageNameForDeclaration(heritageDeclaration);
         for (const contract of matchingContracts) {
