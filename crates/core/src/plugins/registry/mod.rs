@@ -17,8 +17,11 @@ use super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, ProvidedDepend
 pub(crate) mod builtin;
 mod helpers;
 mod tooling_evidence;
+mod virtual_module;
 
 pub(crate) use tooling_evidence::find_config_file;
+pub(crate) use virtual_module::module_specifiers;
+pub use virtual_module::{VirtualModuleMatch, VirtualModuleProviderRule};
 
 /// Names of every built-in framework plugin, in registry order.
 ///
@@ -494,6 +497,11 @@ pub struct AggregatedPluginResult {
     /// Import prefixes for build-time generated type-only relative imports.
     /// Unresolved type-only imports starting with these prefixes are suppressed.
     pub generated_type_import_prefixes: Vec<String>,
+    /// Import-specifier rules crediting the package that provides a plugin's
+    /// virtual or generated modules, from the plugins that declare
+    /// [`Plugin::virtual_module_package`]. The unused-dependency analysis
+    /// credits the package of each rule an import specifier matches.
+    pub virtual_module_providers: Vec<VirtualModuleProviderRule>,
     /// Path alias mappings from active plugins (prefix → replacement directory).
     /// Used by the resolver to substitute import prefixes before re-resolving.
     pub path_aliases: Vec<(String, String)>,
@@ -645,6 +653,9 @@ impl AggregatedPluginResult {
         for (_, scope) in &mut self.active_plugin_scopes {
             *scope = ws_prefix.to_string();
         }
+        for rule in &mut self.virtual_module_providers {
+            rule.scope = ws_prefix.to_string();
+        }
         for rule in &mut self.config_export_credits {
             *rule = rule.prefixed(ws_prefix);
         }
@@ -709,6 +720,7 @@ impl AggregatedPluginResult {
             virtual_package_suffixes,
             generated_import_patterns,
             generated_type_import_prefixes,
+            virtual_module_providers,
             path_aliases,
             scoped_path_aliases,
             checked_alias_prefixes,
@@ -761,6 +773,7 @@ impl AggregatedPluginResult {
             &mut self.generated_type_import_prefixes,
             generated_type_import_prefixes,
         );
+        push_missing(&mut self.virtual_module_providers, virtual_module_providers);
         self.path_aliases.extend(path_aliases);
         self.scoped_path_aliases.extend(scoped_path_aliases);
         push_missing(&mut self.checked_alias_prefixes, checked_alias_prefixes);

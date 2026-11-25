@@ -766,6 +766,10 @@ fn describe_tooling_credit(credit: &fallow_types::trace::ToolingCredit) -> Strin
             "Credited as an own peer: {} lists it in peerDependencies and devDependencies.",
             manifest.display()
         ),
+        ("virtual-module-import", Some(file), Some(specifier)) => format!(
+            "Credited as the package behind the {plugin} virtual module {specifier}, which {} imports.",
+            file.display()
+        ),
         (reason, _, _) => format!("Credited as tooling ({reason})."),
     }
 }
@@ -1331,6 +1335,35 @@ mod tests {
         assert!(rendered.contains("Peer dependency of:"));
         assert!(rendered.contains("-> host"));
         assert!(!rendered.contains("Imported by:"));
+    }
+
+    #[test]
+    fn dependency_trace_explains_a_virtual_module_import_credit() {
+        let mut trace = DependencyTrace {
+            package_name: "@sveltejs/kit".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: false,
+            import_count: 0,
+            peer_of: Vec::new(),
+            sources: Vec::new(),
+            tooling_credit: None,
+            unused_in: Vec::new(),
+            usage: None,
+        };
+        trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
+            reason: "virtual-module-import".to_string(),
+            plugin: Some("sveltekit".to_string()),
+            config: Some(PathBuf::from("src/routes/+page.svelte")),
+            reference: Some("$app/state".to_string()),
+        }));
+
+        let rendered = plain(&build_dependency_trace_human_lines(&trace));
+
+        assert!(rendered.contains(
+            "Credited as the package behind the sveltekit virtual module $app/state, which src/routes/+page.svelte imports."
+        ));
     }
 
     #[test]

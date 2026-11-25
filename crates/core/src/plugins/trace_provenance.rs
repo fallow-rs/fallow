@@ -4,11 +4,11 @@
 use std::path::Path;
 
 use fallow_types::extract::ExportName;
-use fallow_types::trace::{PluginExportCredit, TraceProvenance};
+use fallow_types::trace::{PluginExportCredit, ToolingCredit, TraceProvenance};
 
 use super::{
     AggregatedPluginResult, CONFIG_ONLY_EXPORT_NAMES, PathRuleIndex, PluginUsedExportRule,
-    federation_trace_provenance, push_tooling_trace_credits,
+    federation_trace_provenance, module_specifiers, push_tooling_trace_credits,
 };
 use crate::discover::DiscoveredFile;
 use crate::extract::ModuleInfo;
@@ -54,6 +54,7 @@ pub fn build_trace_provenance(
     let mut provenance =
         federation_trace_provenance(root, files, &plugin_result.federation_sources, modules);
     push_tooling_trace_credits(&mut provenance, root, workspaces, plugin_result);
+    push_virtual_module_trace_credits(&mut provenance, root, files, modules, plugin_result);
     push_config_export_provenance(&mut provenance, root, files, modules, plugin_result);
     if let ExportCredits::Collect {
         include_entry_exports,
@@ -69,6 +70,52 @@ pub fn build_trace_provenance(
         );
     }
     provenance.with_peer_seeds(crate::analyze::peer_closure_seeds(plugin_result))
+}
+
+/// Record, for each package behind a virtual module of a plugin, the first
+/// file in path order that imports one of its modules, and the first such
+/// specifier of that file. The analysis
+/// credits the package for the same import, through the same
+/// [`VirtualModuleProviderRule::matches`].
+///
+/// [`VirtualModuleProviderRule::matches`]: super::VirtualModuleProviderRule::matches
+fn push_virtual_module_trace_credits(
+    provenance: &mut TraceProvenance,
+    root: &Path,
+    files: &[DiscoveredFile],
+    modules: &[ModuleInfo],
+    plugin_result: &AggregatedPluginResult,
+) {
+    if plugin_result.virtual_module_providers.is_empty() {
+        return;
+    }
+    let mut paths: Vec<(&Path, &ModuleInfo)> = modules
+        .iter()
+        .filter_map(|module| {
+            let file = files.get(module.file_id.0 as usize)?;
+            Some((file.path.as_path(), module))
+        })
+        .collect();
+    paths.sort_unstable_by_key(|(path, _)| *path);
+    // The first credit of a package wins, so the path order decides.
+    for (path, module) in paths {
+        for specifier in module_specifiers(module) {
+            for rule in &plugin_result.virtual_module_providers {
+                if !rule.matches(root, path, specifier) {
+                    continue;
+                }
+                provenance.push_tooling_credit(
+                    rule.package.clone(),
+                    ToolingCredit {
+                        reason: "virtual-module-import".to_owned(),
+                        plugin: Some(rule.plugin.clone()),
+                        config: Some(path.strip_prefix(root).unwrap_or(path).to_path_buf()),
+                        reference: Some(specifier.to_owned()),
+                    },
+                );
+            }
+        }
+    }
 }
 
 /// Record each export that a plugin rule marks as used.

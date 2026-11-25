@@ -278,3 +278,43 @@ fn the_type_aware_backend_packages_are_credited_as_tooling() {
     }
     assert_trace_agrees_with_report(TYPE_AWARE_FIXTURE);
 }
+
+/// The issue fixture has no SvelteKit config, so only the `$app` and
+/// `./$types` imports keep `@sveltejs/kit` (issue #5019).
+#[test]
+fn the_trace_agrees_with_the_report_for_virtual_module_imports() {
+    assert_trace_agrees_with_report("sveltekit-project");
+}
+
+/// The credit names the first importing file in path order, whichever kind
+/// of virtual module it imports.
+#[test]
+fn a_virtual_module_import_credit_takes_the_first_file_in_path_order() {
+    let kit = trace_in("sveltekit-project", "@sveltejs/kit");
+    assert_eq!(
+        kit["tooling_credit"],
+        json!({
+            "reason": "virtual-module-import",
+            "plugin": "sveltekit",
+            "config": "src/routes/(app)/(admin)/+layout.server.ts",
+            "reference": "./$types"
+        }),
+        "{kit:#}"
+    );
+}
+
+#[test]
+fn a_virtual_module_import_credit_names_the_importing_file() {
+    let kit = trace_in("sveltekit-virtual-module-credit", "@sveltejs/kit");
+    assert_eq!(kit["is_used"], true, "{kit:#}");
+    assert_eq!(
+        kit["tooling_credit"],
+        json!({
+            "reason": "virtual-module-import",
+            "plugin": "sveltekit",
+            "config": "packages/app/src/routes/+page.svelte",
+            "reference": "$app/state"
+        }),
+        "{kit:#}"
+    );
+}

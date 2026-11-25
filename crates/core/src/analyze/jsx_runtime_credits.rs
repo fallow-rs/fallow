@@ -1,4 +1,5 @@
-//! Dependency credit for the package of the automatic JSX runtime.
+//! Dependency credit for packages used through framework-controlled module
+//! generation.
 //!
 //! The automatic JSX transform imports `<source>/jsx-runtime` (or
 //! `jsx-dev-runtime`) into each file with JSX. No import statement shows
@@ -16,10 +17,16 @@
 //!
 //! A tsconfig `jsxImportSource` credits its package in the TypeScript plugin.
 //!
+//! A framework can also serve imports that name no npm package: SvelteKit
+//! generates `$app/state`, `$env/static/public` and the `./$types` of each
+//! route directory inside its build. Those specifiers credit the provider
+//! package a plugin declares through `Plugin::virtual_module_package`.
+//!
 //! The credit goes to one manifest only, as for an import: the nearest
 //! manifest in the chain of the file (its workspace, the ancestor workspaces,
-//! then the root) that declares the package. Thus a JSX file in one
-//! workspace does not hide an unused `react` in a different workspace.
+//! then the root) that declares the package. Thus a JSX file or virtual-module
+//! import in one workspace does not hide an unused package in a different
+//! workspace.
 
 use std::path::{Path, PathBuf};
 
@@ -29,7 +36,7 @@ use fallow_config::{PackageJson, WorkspaceInfo};
 
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
-use crate::plugins::AggregatedPluginResult;
+use crate::plugins::{AggregatedPluginResult, module_specifiers};
 
 /// Extensions of the files that Vite transforms with the tsconfig JSX
 /// settings.
@@ -46,8 +53,8 @@ const DEFAULT_JSX_IMPORT_SOURCE: &str = "react";
 const AUTOMATIC_JSX_FRAMEWORK_PLUGINS: &[&str] = &["nextjs"];
 
 /// The `(package.json path, package)` credits of the automatic JSX runtime
-/// for the modules with `jsx_runtime_from_config` set. The result is sorted.
-pub(super) fn collect_jsx_runtime_package_credits<'a>(
+/// and the plugin virtual/generated module providers. The result is sorted.
+pub(super) fn collect_implicit_package_credits<'a>(
     plugin_result: Option<&AggregatedPluginResult>,
     modules: impl IntoIterator<Item = &'a ModuleInfo>,
     graph: &ModuleGraph,
@@ -58,9 +65,11 @@ pub(super) fn collect_jsx_runtime_package_credits<'a>(
         return Vec::new();
     };
     let framework_dirs = automatic_jsx_framework_dirs(plugin_result, root);
+    let has_virtual_module_providers = !plugin_result.virtual_module_providers.is_empty();
     if plugin_result.jsx_package_credits.is_empty()
         && plugin_result.tsconfig_jsx_dirs.is_empty()
         && framework_dirs.is_empty()
+        && !has_virtual_module_providers
     {
         return Vec::new();
     }
@@ -69,25 +78,40 @@ pub(super) fn collect_jsx_runtime_package_credits<'a>(
     let mut credited: FxHashSet<(PathBuf, String)> = FxHashSet::default();
     for module in modules
         .into_iter()
-        .filter(|module| module.jsx_runtime_from_config)
+        .filter(|module| module.jsx_runtime_from_config || has_virtual_module_providers)
     {
         let Some(node) = graph.module(module.file_id) else {
             continue;
         };
         let path = node.path.as_path();
-        let mut packages: Vec<&str> = Vec::new();
-        if uses_default_runtime(plugin_result, &framework_dirs, path) {
-            packages.push(DEFAULT_JSX_IMPORT_SOURCE);
+        let mut packages: FxHashSet<&str> = FxHashSet::default();
+        if module.jsx_runtime_from_config {
+            if uses_default_runtime(plugin_result, &framework_dirs, path) {
+                packages.insert(DEFAULT_JSX_IMPORT_SOURCE);
+            }
+            // A tsconfig JSX setting replaces the default runtime of a bundler
+            // config for the TypeScript files below that tsconfig.
+            if !(is_typescript(path)
+                && nearest_tsconfig_depth(plugin_result, path, false).is_some())
+            {
+                packages.extend(
+                    rules
+                        .iter()
+                        .filter(|rule| rule.matches(path))
+                        .map(|rule| rule.rule().source.as_str()),
+                );
+            }
         }
-        // A tsconfig JSX setting replaces the default runtime of a bundler
-        // config for the TypeScript files below that tsconfig.
-        if !(is_typescript(path) && nearest_tsconfig_depth(plugin_result, path, false).is_some()) {
-            packages.extend(
-                rules
-                    .iter()
-                    .filter(|rule| rule.matches(path))
-                    .map(|rule| rule.rule().source.as_str()),
-            );
+        if has_virtual_module_providers {
+            for specifier in module_specifiers(module) {
+                packages.extend(
+                    plugin_result
+                        .virtual_module_providers
+                        .iter()
+                        .filter(|rule| rule.matches(root, path, specifier))
+                        .map(|rule| rule.package.as_str()),
+                );
+            }
         }
         for package in packages {
             let manifest = manifests.credited_manifest(path, package);

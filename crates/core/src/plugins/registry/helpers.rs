@@ -14,7 +14,10 @@ use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection, UsedClassMe
 use crate::discover::SOURCE_EXTENSIONS;
 
 use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
-use super::{AggregatedPluginResult, PluginRegexValidationError, PluginRegexValidationErrorInput};
+use super::{
+    AggregatedPluginResult, PluginRegexValidationError, PluginRegexValidationErrorInput,
+    VirtualModuleMatch, VirtualModuleProviderRule,
+};
 
 /// True when a config pattern names a source-extension config file living
 /// directly in some directory (no path separator, no leading dot, all expanded
@@ -176,6 +179,27 @@ fn collect_static_plugin_metadata(
         result
             .generated_type_import_prefixes
             .push((*prefix).to_string());
+    }
+    if let Some(package) = plugin.virtual_module_package() {
+        result.virtual_module_providers.extend(
+            plugin
+                .virtual_module_prefixes()
+                .iter()
+                .map(|prefix| VirtualModuleProviderRule {
+                    plugin: plugin.name().to_string(),
+                    scope: String::new(),
+                    matcher: VirtualModuleMatch::Prefix((*prefix).to_string()),
+                    package: package.to_string(),
+                })
+                .chain(plugin.generated_import_patterns().iter().map(|pattern| {
+                    VirtualModuleProviderRule {
+                        plugin: plugin.name().to_string(),
+                        scope: String::new(),
+                        matcher: VirtualModuleMatch::Generated((*pattern).to_string()),
+                        package: package.to_string(),
+                    }
+                })),
+        );
     }
     for (prefix, replacement) in plugin.path_aliases(root) {
         result.path_aliases.push((prefix.to_string(), replacement));
