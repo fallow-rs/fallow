@@ -6,7 +6,17 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 
 # Ship
 
-1. Confirm the branch and diff exactly match the reviewed scope. Then run
+1. Search for a competing pull request before the merge. A contributor can
+   open one for a new issue within an hour, also while your branch is in
+   review. Run
+   `gh pr list --state open --search "<issue number> OR <key terms>"`,
+   with the key terms of the change, because a pull request can have no
+   link to the issue. When a pull request of another author makes the same
+   change, do not merge yours. Report both pull requests to the maintainer
+   with a recommendation. A pull request that came first gets the credit:
+   recommend to review it and build on it. A pull request of this
+   objective does not count.
+   Confirm the branch and diff exactly match the reviewed scope. Then run
    `node scripts/ship-rebase.mjs --pr <number> --if-needed --push`, also
    for one pull request. Do not rebase by hand. The required checks of
    `main` do not require an up-to-date branch, so a rebase is only
