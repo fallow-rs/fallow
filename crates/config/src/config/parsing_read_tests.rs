@@ -298,6 +298,7 @@ fn file_path_keys_are_refused_when_the_root_does_not_resolve() {
 fn package_config_path_keys_may_name_files_up_to_the_git_top_level() {
     let dir = tempfile::tempdir().unwrap();
     let outer = dunce::canonicalize(dir.path()).unwrap();
+    crate::project_read::set_test_ceiling(&outer);
     let top = outer.join("repo");
     let package = top.join("packages/app");
     std::fs::create_dir_all(&package).unwrap();
@@ -344,26 +345,10 @@ fn git(dir: &std::path::Path, args: &[&str]) {
 }
 
 #[cfg(unix)]
-fn test_tracked_link_probe(path: &std::path::Path) -> Option<bool> {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(path.parent()?)
-        .args(["--literal-pathspecs", "ls-files", "-z", "--"])
-        .arg(path.file_name()?)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    output.status.success().then_some(!output.stdout.is_empty())
-}
-
-#[cfg(unix)]
 #[test]
 #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
 fn an_untracked_config_link_out_of_the_checkout_loads() {
-    crate::set_tracked_link_probe(test_tracked_link_probe);
+    crate::set_tracked_link_probe(super::super::outside_root::test_tracked_link_probe);
     let dir = tempfile::tempdir().unwrap();
     let outer = dunce::canonicalize(dir.path()).unwrap();
     let project = outer.join("project");
@@ -483,7 +468,7 @@ fn file_path_key_check_omits_a_value_of_a_file_outside_the_project() {
 #[test]
 #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
 fn a_config_link_target_outside_the_project_counts_as_outside() {
-    crate::set_tracked_link_probe(test_tracked_link_probe);
+    crate::set_tracked_link_probe(super::super::outside_root::test_tracked_link_probe);
     let dir = tempfile::tempdir().unwrap();
     let outer = dunce::canonicalize(dir.path()).unwrap();
     let project = outer.join("project");

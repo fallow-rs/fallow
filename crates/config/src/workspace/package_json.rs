@@ -899,6 +899,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn a_dependency_link_to_another_node_modules_dir_is_refused() {
         let dir = tempfile::tempdir().unwrap();
+        crate::project_read::set_test_ceiling(&dunce::canonicalize(dir.path()).unwrap());
         let other = dir.path().join("other/node_modules/pkg");
         std::fs::create_dir_all(&other).unwrap();
         std::fs::write(other.join("package.json"), r#"{"name": "pkg"}"#).unwrap();
@@ -913,6 +914,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn a_package_dir_link_out_of_its_parent_is_refused() {
         let dir = tempfile::tempdir().unwrap();
+        crate::project_read::set_test_ceiling(&dunce::canonicalize(dir.path()).unwrap());
         let outside = dir.path().join("outside");
         std::fs::create_dir(&outside).unwrap();
         std::fs::write(outside.join("package.json"), r#"{"name": "x"}"#).unwrap();
@@ -1126,6 +1128,7 @@ mod tests {
     fn workspace_without_git(manifest: (&str, &str)) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(dir.path()).unwrap();
+        crate::project_read::set_test_ceiling(&root);
         std::fs::create_dir_all(root.join("packages/a/node_modules")).unwrap();
         std::fs::write(root.join(manifest.0), manifest.1).unwrap();
         (dir, root)

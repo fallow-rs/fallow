@@ -815,7 +815,7 @@ mod tests {
     #[test]
     fn each_brace_expansion_must_stay_inside_the_root() {
         for pattern in [
-            "{..,x}/outside/id_*",
+            "{..,x}/outside/notes_*",
             "{/abs/name,x}",
             ".{.,x}/y",
             "a/{b,{c,..}}/d",

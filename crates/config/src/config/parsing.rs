@@ -1782,10 +1782,10 @@ impl FallowConfig {
 
     /// Find the config file path without loading it.
     /// Searches the same locations as `find_and_load`.
-    #[must_use]
     ///
     /// A config link that `find_and_load` refuses gives `None`, and the
     /// search stops there, as the load stops there with an error.
+    #[must_use]
     pub fn find_config_path(start: &Path) -> Option<PathBuf> {
         let mut dir = start;
         loop {

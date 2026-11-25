@@ -1476,7 +1476,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
-    fn rejects_a_pack_link_to_a_device() {
+    fn rejects_a_pack_link_to_a_device_outside_the_root() {
         let dir = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink("/dev/null", dir.path().join("policy.json")).unwrap();
         let errors = load_rule_packs(dir.path(), &["policy.json".to_owned()]).unwrap_err();
