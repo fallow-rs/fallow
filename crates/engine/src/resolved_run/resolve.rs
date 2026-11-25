@@ -450,7 +450,12 @@ fn resolve_root(inputs: &RunInputs) -> Result<Sourced<PathBuf>, ResolveError> {
             ),
         )
     })?;
-    let canonical = crate::validate::validate_root(&path)
+    let validated = if inputs.root.is_some() {
+        crate::validate::validate_root(&path)
+    } else {
+        crate::validate::validate_current_dir_root(&path)
+    };
+    let canonical = validated
         .map_err(|message| ResolveError::input(InputField::Root, InputProblem::Invalid, message))?;
     Ok(candidate.map(|_| canonical))
 }

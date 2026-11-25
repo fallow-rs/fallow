@@ -18,19 +18,33 @@ pub fn validate_git_ref(s: &str) -> Result<&str, String> {
 /// outside the repository, and the analysis would then use that directory
 /// as the project. See [`check_root_links`] for the rules.
 ///
-/// When the root is the current directory, or relative to it, the check
-/// also covers the spelling of the root from the `PWD` variable. The
-/// current directory that the process gets is already resolved, so a shell
-/// that changed into a linked directory leaves the link only in `PWD`.
-///
 /// # Errors
 ///
 /// Returns a message when the path cannot be canonicalized, is not a
 /// directory, or passes through such a link.
 pub fn validate_root(root: &Path) -> Result<PathBuf, String> {
+    validate_root_spelled(root, None)
+}
+
+/// Validate the current directory `cwd` as the project root, for a run
+/// with no root argument.
+///
+/// This applies [`validate_root`], and also checks the spelling of the
+/// current directory from the `PWD` variable. The current directory that
+/// the process gets is already resolved, so a shell that changed into a
+/// linked directory leaves the link only in `PWD`.
+///
+/// # Errors
+///
+/// Returns a message as [`validate_root`] does.
+pub fn validate_current_dir_root(cwd: &Path) -> Result<PathBuf, String> {
+    let pwd = std::env::var_os("PWD").map(PathBuf::from);
+    validate_root_spelled(cwd, pwd.as_deref())
+}
+
+fn validate_root_spelled(root: &Path, pwd: Option<&Path>) -> Result<PathBuf, String> {
     let invalid = |err: std::io::Error| format!("invalid root path '{}': {err}", root.display());
     let cwd = std::env::current_dir().map_err(invalid)?;
-    let pwd = std::env::var_os("PWD").map(PathBuf::from);
     let home = fallow_process::HostPaths::from_env()
         .home
         .filter(|home| home.is_absolute())
@@ -40,7 +54,7 @@ pub fn validate_root(root: &Path) -> Result<PathBuf, String> {
         ceiling: None,
         home: home.as_deref(),
     };
-    check_root_spellings(root, &probe, pwd.as_deref())?;
+    check_root_spellings(root, &probe, pwd)?;
     let canonical = dunce::canonicalize(root).map_err(invalid)?;
     if !canonical.is_dir() {
         return Err(format!("root path '{}' is not a directory", root.display()));
@@ -104,24 +118,17 @@ fn holds_git_entry(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
-/// Check `root`, and its spelling from `pwd` when `pwd` names the current
-/// directory and the root is the current directory or relative to it.
+/// Check `root`, and also the spelling `pwd` of the current directory when
+/// `root` is the current directory and `pwd` names the same directory.
 fn check_root_spellings(root: &Path, probe: &Probe<'_>, pwd: Option<&Path>) -> Result<(), String> {
     check_root_links(root, probe)?;
-    let Some(pwd) = pwd.filter(|pwd| pwd.is_absolute()) else {
-        return Ok(());
-    };
-    let spelled = if root.is_relative() {
-        pwd.join(root)
-    } else if root == probe.cwd {
-        pwd.to_path_buf()
-    } else {
+    let Some(pwd) = pwd.filter(|pwd| pwd.is_absolute() && root == probe.cwd) else {
         return Ok(());
     };
     // A stale `PWD` names another directory; only the spelling of the same
     // directory is checked.
     match (dunce::canonicalize(pwd), dunce::canonicalize(probe.cwd)) {
-        (Ok(pwd), Ok(cwd)) if pwd == cwd => check_root_links(&spelled, probe),
+        (Ok(resolved), Ok(cwd)) if resolved == cwd => check_root_links(pwd, probe),
         _ => Ok(()),
     }
 }
@@ -214,7 +221,7 @@ struct Link<'a> {
 impl Link<'_> {
     fn refusal(&self, area: &str, area_path: &Path) -> String {
         format!(
-            "root path '{}' passes through the link '{}', which resolves to '{}' outside the {area} '{}'; pass the resolved path as the root if this is the project you want",
+            "root path '{}' passes through the link '{}', which resolves to '{}' outside the {area} '{}'; if this is the project you want, run fallow from the resolved path, or pass it with --root from another directory",
             self.root.display(),
             self.path.display(),
             self.target.display(),
@@ -1369,10 +1376,12 @@ mod tests {
 
     /// A shell that changed into `repo/packages/app` through a committed
     /// link reports the resolved current directory, and keeps the link in
-    /// `PWD`.
+    /// `PWD`. With no `--root`, the check also covers the `PWD` spelling.
+    /// With `--root`, it covers only the spelling of the argument, so the
+    /// hint of the refusal works from the linked directory.
     #[cfg(unix)]
     #[test]
-    fn refuses_a_current_directory_reached_through_a_link() {
+    fn refuses_a_current_directory_reached_through_a_link_when_no_root_is_given() {
         let fixture = Fixture::new();
         let (repo, outside) = committed_outside_link(&fixture);
         let cwd = outside.join("app");
@@ -1380,13 +1389,17 @@ mod tests {
 
         let err = fixture.check_with_pwd(&cwd, &cwd, Some(&pwd)).unwrap_err();
         assert!(err.contains("outside the checkout"), "got: {err}");
-        let err = fixture
-            .check_with_pwd(Path::new("."), &cwd, Some(&pwd))
-            .unwrap_err();
-        assert!(err.contains("outside the checkout"), "got: {err}");
+        assert!(
+            err.contains(
+                "run fallow from the resolved path, or pass it with --root from another directory"
+            ),
+            "got: {err}"
+        );
         // A `PWD` that names another directory is not a spelling of the root.
         assert_eq!(fixture.check_with_pwd(&cwd, &cwd, Some(&repo)), Ok(()));
+        // `--root` with the resolved path, from the linked directory.
         assert_eq!(fixture.check_with_pwd(&cwd, &cwd, None), Ok(()));
+        assert_eq!(fixture.check_with_pwd(Path::new("."), &cwd, None), Ok(()));
     }
 
     #[test]

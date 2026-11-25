@@ -135,6 +135,7 @@ fn validate_analysis_option_shape(options: &AnalysisOptions) -> ProgrammaticResu
 }
 
 pub fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
+    let given = root.is_some();
     let root = match root {
         Some(root) => root.to_path_buf(),
         None => std::env::current_dir().map_err(|err| {
@@ -146,7 +147,12 @@ pub fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf>
             .with_context("analysis.root")
         })?,
     };
-    fallow_engine::validate::validate_root(&root).map_err(|err| {
+    let validated = if given {
+        fallow_engine::validate::validate_root(&root)
+    } else {
+        fallow_engine::validate::validate_current_dir_root(&root)
+    };
+    validated.map_err(|err| {
         ProgrammaticError::new(err, 2)
             .with_code("FALLOW_INVALID_ROOT")
             .with_context("analysis.root")
