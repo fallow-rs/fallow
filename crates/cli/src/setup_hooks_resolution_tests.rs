@@ -1200,3 +1200,77 @@ fn gate_excludes_every_cwd_tree_before_the_input_reader_runs() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// A dotfiles repository at HOME is a target of `git -C ~ commit`. That
+/// target excludes only HOME itself from PATH, so the user tools below HOME
+/// stay in use.
+#[test]
+fn gate_keeps_the_user_tools_for_a_write_to_a_dotfiles_repository_at_home() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let home = base.join("home");
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&home.join(".local/bin/fallow"), "path", &log);
+    git_init(&home);
+    git_init(&session);
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", home.display()) },
+    });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &home.join(".claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!("{}:/usr/bin:/bin", home.join(".local/bin").display()),
+        input.to_string().as_bytes(),
+        &[("HOME", &home)],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!stderr.contains("git write targets"), "{stderr}");
+    assert!(
+        calls(&log).contains("path --version"),
+        "{}\n{stderr}",
+        calls(&log)
+    );
+}
+
+/// When the fallow that the install recorded lies outside every target tree,
+/// the loss of the fallow on PATH does not block: the gate runs the recorded
+/// fallow.
+#[test]
+fn gate_runs_the_recorded_fallow_when_a_target_holds_the_path_fallow() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&target.join("bin/fallow"), "target", &log);
+    let recorded = base.join("tools/fallow");
+    logging_stub(&recorded, "recorded", &log);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", target.display()) },
+    });
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, recorded.to_str()),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+        &format!("{}:", target.join("bin").display()),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert!(calls.contains("recorded --version"), "{calls}\n{stderr}");
+    assert!(!calls.contains("target"), "{calls}");
+}

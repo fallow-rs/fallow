@@ -149,7 +149,8 @@ gate_filter_path() {
 # `/`, for a directory below it, becomes that directory, so a git repository
 # of the home folder keeps the user tools below HOME in use. A tree that is
 # `/`, or HOME without a .git entry, for that same directory, excludes only
-# that one directory.
+# that one directory. With `target` as $4, HOME for HOME itself excludes only
+# HOME too, so a write to a dotfiles repository keeps the user tools.
 gate_exclude_tree() {
   local dir="$1" tree home=""
   local -a found=()
@@ -177,7 +178,7 @@ gate_exclude_tree() {
     if [ "$tree" = / ] || { [ -n "$home" ] && gate_inside "$tree" "$home" && gate_inside "$home" "$tree"; }; then
       if ! gate_inside "$tree" "$dir"; then
         tree="$dir"
-      elif [ "$tree" = / ] || [ ! -e "$home/.git" ]; then
+      elif [ "$tree" = / ] || [ ! -e "$home/.git" ] || [ "${4:-}" = target ]; then
         tree="=$dir"
       fi
     fi
@@ -220,7 +221,7 @@ GATE_TARGETS=()
 gate_exclude_target() {
   local n="${#GATE_EXCLUDED[@]}" i
   GATE_TARGETS+=("$1")
-  gate_exclude_tree "$1" ""
+  gate_exclude_tree "$1" "" "" target
   for ((i = n; i < ${#GATE_EXCLUDED[@]}; i++)); do
     GATE_TARGET_EXCLUDED+=("${GATE_EXCLUDED[$i]}")
   done
@@ -280,9 +281,9 @@ gate_block_target() {
 }
 
 # Blocks the command when the trees of the targets hold the fallow that the
-# install recorded, or the fallow or the git that the gate finds on PATH
-# without them. The audit cannot then run with a program that the gate
-# trusts.
+# install recorded, or the git that the gate finds on PATH without them, or,
+# with no recorded fallow, the fallow on PATH. The audit cannot then run with
+# a program that the gate trusts.
 gate_check_targets() {
   local tool before after
   local -a saved=(${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"})
@@ -290,6 +291,8 @@ gate_check_targets() {
     gate_block_target fallow "$GATE_LOCAL_FALLOW"
   fi
   for tool in fallow git; do
+    # The recorded fallow runs before the fallow on PATH.
+    [ "$tool" != fallow ] || [ -z "$GATE_LOCAL_FALLOW" ] || continue
     GATE_TARGET_EXCLUDED=()
     gate_filter_path
     before="$(gate_find_tool "$tool" || true)"
