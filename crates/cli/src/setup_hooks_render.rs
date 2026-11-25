@@ -87,11 +87,38 @@ pub(super) fn user_fallow_bin(root: &Path) -> Option<String> {
     found
         .to_str()
         .filter(|path| is_recordable_path(path))
-        .map(str::to_owned)
+        .map(|path| gate_path_text(path, cfg!(windows)))
+}
+
+/// The text of a recorded path for the gate script. The gate splits a path
+/// only on `/`, so on Windows each `\` becomes `/` (`C:/tools/fallow.exe`).
+fn gate_path_text(path: &str, windows: bool) -> String {
+    if windows {
+        path.replace('\\', "/")
+    } else {
+        path.to_owned()
+    }
 }
 
 /// A POSIX shell word for `text`: single quotes, with an inner `'` written
 /// as `'\''`.
 pub(super) fn posix_single_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod gate_path_tests {
+    use super::gate_path_text;
+
+    #[test]
+    fn a_windows_path_uses_forward_slashes_in_the_gate() {
+        assert_eq!(
+            gate_path_text("C:\\Users\\u\\.cargo\\bin\\fallow.exe", true),
+            "C:/Users/u/.cargo/bin/fallow.exe"
+        );
+        assert_eq!(
+            gate_path_text("/usr/local/bin/fallow", false),
+            "/usr/local/bin/fallow"
+        );
+    }
 }
