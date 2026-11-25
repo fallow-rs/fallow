@@ -1117,21 +1117,7 @@ pub(super) fn git_top(root: &Path) -> GitTop {
     {
         return GitTop::Outside;
     }
-    let Ok(output) = fallow_engine::changed_files::git_command_in(root)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-    else {
-        return GitTop::Unknown;
-    };
-    if !output.status.success() {
-        return GitTop::Unknown;
-    }
-    match fallow_engine::changed_files::git_path_line(&output.stdout) {
-        Some(line) if !line.is_empty() => {
-            dunce::canonicalize(line).map_or(GitTop::Unknown, GitTop::Top)
-        }
-        _ => GitTop::Unknown,
-    }
+    crate::base_worktree::git_toplevel(root).map_or(GitTop::Unknown, GitTop::Top)
 }
 
 /// `Some(true)` when git tracks one of `paths` (relative to `root`) or a file
