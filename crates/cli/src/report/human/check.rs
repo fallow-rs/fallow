@@ -33,6 +33,9 @@ use crate::report::{
     split_dir_filename,
 };
 
+#[path = "check_final_status.rs"]
+mod final_status;
+use final_status::emit_grouped_final_status;
 #[path = "check_members.rs"]
 mod members;
 use members::build_unused_member_sections;
@@ -1052,7 +1055,8 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         || !input.results.unused_store_members.is_empty()
         || !input.results.unused_namespace_members.is_empty()
         || !input.results.unused_protected_class_members.is_empty()
-        || !input.results.namespace_escapes.is_empty();
+        || !input.results.namespace_escapes.is_empty()
+        || !input.results.test_only_exports.is_empty();
     if !has_unused_code {
         return;
     }
@@ -3211,6 +3215,9 @@ fn collect_dead_code_rules(
     for e in &results.namespace_escapes {
         insert_matching_rule(rules, &e.escape.path, root, resolver);
     }
+    for t in &results.test_only_exports {
+        insert_matching_rule(rules, &t.export.path, root, resolver);
+    }
     for p in &results.constant_parameters {
         insert_matching_rule(rules, &p.parameter.path, root, resolver);
     }
@@ -3551,32 +3558,6 @@ fn grouped_lines(
     })
 }
 
-fn emit_grouped_final_status(
-    groups: &[crate::report::grouping::ResultGroup],
-    grand_total: usize,
-    elapsed: Duration,
-    run_fails: bool,
-    failed_parse_files: usize,
-) {
-    if grand_total == 0 {
-        eprintln!("{}", clean_status_line(elapsed, failed_parse_files));
-    } else {
-        let non_empty_groups = groups
-            .iter()
-            .filter(|g| g.results.total_issues() > 0)
-            .count();
-        super::print_check_status_line(
-            &format!(
-                "{grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
-                plural(grand_total),
-                plural(non_empty_groups),
-                elapsed.as_secs_f64()
-            ),
-            run_fails,
-        );
-    }
-}
-
 pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>) {
     let groups = input.groups;
     let root = input.root;
@@ -3896,6 +3877,11 @@ fn check_summary_member_categories(
             "Namespace escapes",
             results.namespace_escapes.len(),
             severity_to_level(rules.namespace_escapes),
+        ),
+        (
+            "Test-only exports",
+            results.test_only_exports.len(),
+            severity_to_level(rules.test_only_exports),
         ),
         (
             "Unresolved imports",

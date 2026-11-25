@@ -44,7 +44,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dead code",
         name: "Unused Exports",
         short: "Export is never imported",
-        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`.",
+        full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`. A test import keeps an export alive in the default mode; turn on `test-only-export` to report the exports that only test-side files use.",
         docs_path: "rules/unused-export",
     },
     RuleDef {
@@ -158,6 +158,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         short: "Namespace binding is used as a whole value, so its exports are not checked",
         full: "A namespace import (`import * as Ns`) that the code uses as a whole value: a cast, an assignment, a call argument, a spread, a computed member read, a reflective call such as `Object.keys(Ns)`, or a re-export with `export { Ns }`. Fallow cannot see which members such a use reads, so it credits every export of the target module and of the modules that the target re-exports from. These exports are then not checked by `unused-exports` and `unused-types`. The finding is on the import and gives the count of exports that the credit hides. A binding that hides no export is not reported. Defaults to off.",
         docs_path: "rules/namespace-escape",
+    },
+    RuleDef {
+        id: "fallow/test-only-export",
+        category: "Dead code",
+        name: "Test-Only Exports",
+        short: "Export is used only by test-side files",
+        full: "An exported value that production code does not use, while a test-side file does. Test-side files are the files that `--production` leaves out: test, story, fixture and bench files and the `production.ignore` globs, plus the files that only tests reach, such as a test helper. A file that a runtime or support entry reaches, such as a source file that a bundler config names, is production code. In the default mode the tests keep such an export alive, so `unused-export` does not report it. In `--production` mode the same export is an `unused-export` finding, and this rule does not run. One export is never in both kinds in one run. Only values are checked in this version, not types. Entry exports, `keepExportTags`, `ignoreExports` and plugin rules keep an export, as for `unused-export`. The `colocated_only` field is true when each test-side importer is next to the module, which can mean a deliberate internal seam. A test-only use does not make an `@expected-unused` tag stale. Defaults to off.",
+        docs_path: "rules/test-only-export",
     },
     RuleDef {
         id: "fallow/unused-namespace-member",
@@ -902,6 +910,10 @@ fn member_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/namespace-escape" => RuleGuide {
             example: "src/index.ts has import * as formats from \"./formats\" and spreads formats into an object, so formatDate and formatPrice are not checked.",
             how_to_fix: "Read the members by name (formats.formatDate) or import them by name, so fallow can check the other exports. When the whole object is the intent, add // fallow-ignore-next-line namespace-escape above the import.",
+        },
+        "fallow/test-only-export" => RuleGuide {
+            example: "src/price.ts exports legacyFormat. Only src/price.test.ts imports it, and no production file calls it.",
+            how_to_fix: "When the export is dead code that its tests keep alive, remove the export and those tests. When it is a seam for tests only, test the behavior through the public functions of the module and make the item internal. When the export is deliberate, add // fallow-ignore-next-line test-only-export above it. See also unused-export.",
         },
         "fallow/unused-namespace-member" => RuleGuide {
             example: "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",

@@ -954,6 +954,9 @@ fn activate_explicit_dead_code_opt_ins(
     if filters.namespace_escapes && rules.namespace_escapes == fallow_config::Severity::Off {
         rules.namespace_escapes = fallow_config::Severity::Warn;
     }
+    if filters.test_only_exports && rules.test_only_exports == fallow_config::Severity::Off {
+        rules.test_only_exports = fallow_config::Severity::Warn;
+    }
 }
 
 fn apply_dead_code_scope(
@@ -1022,6 +1025,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unused_namespace_members
         || filters.unused_protected_class_members
         || filters.namespace_escapes
+        || filters.test_only_exports
         || filters.unused_store_members
         || filters.unprovided_injects
         || filters.unrendered_components
@@ -1092,6 +1096,9 @@ fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut Analysi
     }
     if !filters.namespace_escapes {
         results.namespace_escapes.clear();
+    }
+    if !filters.test_only_exports {
+        results.test_only_exports.clear();
     }
     if !filters.unlisted_deps {
         results.unlisted_dependencies.clear();

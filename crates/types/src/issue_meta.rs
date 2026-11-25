@@ -12,6 +12,9 @@ use derived::{
 
 #[path = "issue_meta_kind_methods.rs"]
 mod kind_methods;
+#[path = "issue_meta_ts_alias.rs"]
+mod ts_alias;
+pub use ts_alias::ISSUE_TS_ALIAS_META;
 
 /// Shared contract facts for issue-like diagnostics.
 ///
@@ -215,6 +218,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         filter_flag: Some("--namespace-escapes"),
         mcp_issue_type: Some("namespace-escapes"),
         suppress_token: Some("namespace-escape"),
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "source",
+    },
+    IssueKindMeta {
+        kind: Some(IssueKind::TestOnlyExport),
+        code: "test-only-export",
+        aliases: &["test-only-exports"],
+        label: "Test-Only Exports",
+        config_key: Some("test-only-exports"),
+        filter_flag: Some("--test-only-exports"),
+        mcp_issue_type: Some("test-only-exports"),
+        suppress_token: Some("test-only-export"),
         suppress_file_level: false,
         lsp: true,
         docs_category: "source",
@@ -1081,220 +1097,6 @@ pub struct IssueTsAliasMeta {
     pub alias: TsAliasMeta,
 }
 
-/// Published TypeScript backwards-compat aliases.
-pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
-    IssueTsAliasMeta {
-        code: "unused-file",
-        alias: TsAliasMeta {
-            name: "UnusedFile",
-            parent: "UnusedFileFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-export",
-        alias: TsAliasMeta {
-            name: "UnusedExport",
-            parent: "UnusedExportFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "private-type-leak",
-        alias: TsAliasMeta {
-            name: "PrivateTypeLeak",
-            parent: "PrivateTypeLeakFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "deprecated-export-in-use",
-        alias: TsAliasMeta {
-            name: "DeprecatedExportInUse",
-            parent: "DeprecatedExportInUseFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-dependency",
-        alias: TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-dev-dependency",
-        alias: TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedDevDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-optional-dependency",
-        alias: TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedOptionalDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-enum-member",
-        alias: TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedEnumMemberFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-class-member",
-        alias: TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedClassMemberFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-protected-class-member",
-        alias: TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedProtectedClassMemberFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "namespace-escape",
-        alias: TsAliasMeta {
-            name: "NamespaceEscape",
-            parent: "NamespaceEscapeFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-namespace-member",
-        alias: TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedNamespaceMemberFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-store-member",
-        alias: TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedStoreMemberFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unresolved-import",
-        alias: TsAliasMeta {
-            name: "UnresolvedImport",
-            parent: "UnresolvedImportFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unlisted-dependency",
-        alias: TsAliasMeta {
-            name: "UnlistedDependency",
-            parent: "UnlistedDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unlisted-binary",
-        alias: TsAliasMeta {
-            name: "UnlistedBinary",
-            parent: "UnlistedBinaryFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "duplicate-export",
-        alias: TsAliasMeta {
-            name: "DuplicateExport",
-            parent: "DuplicateExportFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "duplicate-export-alias",
-        alias: TsAliasMeta {
-            name: "DuplicateExportAlias",
-            parent: "DuplicateExportAliasFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "type-only-dependency",
-        alias: TsAliasMeta {
-            name: "TypeOnlyDependency",
-            parent: "TypeOnlyDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "test-only-dependency",
-        alias: TsAliasMeta {
-            name: "TestOnlyDependency",
-            parent: "TestOnlyDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "dev-dependency-in-production",
-        alias: TsAliasMeta {
-            name: "DevDependencyInProduction",
-            parent: "DevDependencyInProductionFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "circular-dependency",
-        alias: TsAliasMeta {
-            name: "CircularDependency",
-            parent: "CircularDependencyFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "re-export-cycle",
-        alias: TsAliasMeta {
-            name: "ReExportCycle",
-            parent: "ReExportCycleFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "package-cycle",
-        alias: TsAliasMeta {
-            name: "PackageCycle",
-            parent: "PackageCycleFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "boundary-violation",
-        alias: TsAliasMeta {
-            name: "BoundaryViolation",
-            parent: "BoundaryViolationFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-catalog-entry",
-        alias: TsAliasMeta {
-            name: "UnusedCatalogEntry",
-            parent: "UnusedCatalogEntryFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "empty-catalog-group",
-        alias: TsAliasMeta {
-            name: "EmptyCatalogGroup",
-            parent: "EmptyCatalogGroupFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unresolved-catalog-reference",
-        alias: TsAliasMeta {
-            name: "UnresolvedCatalogReference",
-            parent: "UnresolvedCatalogReferenceFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "unused-dependency-override",
-        alias: TsAliasMeta {
-            name: "UnusedDependencyOverride",
-            parent: "UnusedDependencyOverrideFinding",
-        },
-    },
-    IssueTsAliasMeta {
-        code: "misconfigured-dependency-override",
-        alias: TsAliasMeta {
-            name: "MisconfiguredDependencyOverride",
-            parent: "MisconfiguredDependencyOverrideFinding",
-        },
-    },
-];
-
 /// All shared issue-to-result metadata rows.
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
@@ -1427,6 +1229,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Namespace escapes",
         docs_anchor: "namespace-escapes",
         result_key: "namespace_escapes",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "test-only-export",
+        sarif_description: "Export is used only by test-side files",
+        meta_description: "Exported values that only test-side files use: test, story, fixture and bench files, production.ignore files, and test helpers. Production code does not use them.",
+        meta_docs_path: "rules/test-only-export",
+        meta_name: "Test-Only Exports",
+        summary_label: "Test-only exports",
+        docs_anchor: "test-only-exports",
+        result_key: "test_only_exports",
         counts_in_total: true,
     },
     IssueResultMeta {

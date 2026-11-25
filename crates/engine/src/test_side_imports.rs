@@ -18,80 +18,15 @@ use fallow_config::ResolvedConfig;
 use fallow_graph::graph::{ExportNamespace, ModuleGraph, ModuleNode};
 use fallow_types::output_dead_code::TestImporters;
 use fallow_types::results::AnalysisResults;
-use globset::GlobSet;
 use rustc_hash::FxHashMap;
 
 use crate::EngineResult;
-use crate::core_backend::PRODUCTION_EXCLUDE_PATTERNS;
+use crate::core_backend::TestSideMatcher;
 use crate::session::AnalysisSession;
 use crate::thread_pool::{WORKER_STACK_SIZE, register_thread_stack};
 
 /// The subfolder of the cache directory that the scan uses.
 const SCAN_CACHE_DIR: &str = "test-side-scan";
-
-/// Decides which files of a graph without production mode are test-side.
-///
-/// A file is test-side when an entry point reaches it and one of these is
-/// true:
-///
-/// - a production exclude pattern or a `production.ignore` glob matches its
-///   root-relative path (test, story, fixture, bench and config files);
-/// - no runtime entry point reaches it, as for a test helper below `src/`
-///   that only tests import, or a file that only a support entry seeds.
-///
-/// An unreachable file is never test-side: an unused test helper is not an
-/// importer.
-pub struct TestSideMatcher {
-    root: PathBuf,
-    excludes: Option<GlobSet>,
-}
-
-impl TestSideMatcher {
-    /// Build the matcher for the project of `config`, in any mode.
-    #[must_use]
-    pub fn new(config: &ResolvedConfig) -> Self {
-        Self {
-            root: config.root.clone(),
-            excludes: production_exclude_globs(config),
-        }
-    }
-
-    /// Whether `node` is a test-side file. See [`TestSideMatcher`].
-    #[must_use]
-    fn is_test_side(&self, node: &ModuleNode) -> bool {
-        if !node.is_reachable() {
-            return false;
-        }
-        if !node.is_runtime_reachable() {
-            return true;
-        }
-        let relative = node.path.strip_prefix(&self.root).unwrap_or(&node.path);
-        self.excludes
-            .as_ref()
-            .is_some_and(|excludes| excludes.is_match(relative))
-    }
-}
-
-/// The built-in production exclude patterns plus the `production.ignore`
-/// globs, in any mode. The set matches root-relative paths. A pattern that
-/// does not compile is left out, as production discovery does.
-fn production_exclude_globs(config: &ResolvedConfig) -> Option<GlobSet> {
-    let mut builder = globset::GlobSetBuilder::new();
-    let user_patterns = config.production_ignore.iter().map(String::as_str);
-    for pattern in PRODUCTION_EXCLUDE_PATTERNS
-        .iter()
-        .copied()
-        .chain(user_patterns)
-    {
-        if let Ok(glob) = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
-            builder.add(glob);
-        }
-    }
-    builder.build().ok()
-}
 
 /// One test-side file that references an export.
 #[derive(Debug, Clone, PartialEq, Eq)]

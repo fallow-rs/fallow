@@ -56,7 +56,9 @@ fn reports_values_that_only_the_test_side_uses() {
             "helperOnly",
             "storyOnly",
             "testOnly",
-            "testOnlyFar"
+            "testOnlyFar",
+            "toolSeam",
+            "viaBarrel"
         ],
         "a production use, a package entry, an unused-file importer, a kept \
          tag, @expected-unused and a type export must stay silent"
@@ -76,32 +78,50 @@ fn lists_test_importers_and_colocation() {
     assert_eq!(colocated["path"], "src/lib.ts");
     assert_eq!(colocated["line"], 3);
     assert_eq!(
-        colocated["test_importers"],
+        colocated["test_importers"]["files"],
         serde_json::json!(["src/lib.test.ts"])
     );
     assert_eq!(colocated["colocated_only"], true);
 
     let far = finding(&json, "testOnlyFar");
     assert_eq!(
-        far["test_importers"],
+        far["test_importers"]["files"],
         serde_json::json!(["tests/lib.test.ts"])
     );
     assert_eq!(far["colocated_only"], false);
 
     let helper = finding(&json, "helperOnly");
     assert_eq!(
-        helper["test_importers"],
+        helper["test_importers"]["files"],
         serde_json::json!(["src/testing/helpers.ts"]),
         "a test helper is a test-side importer"
     );
 
     let fixture = finding(&json, "fixtureOnly");
     assert_eq!(
-        fixture["test_importers"],
+        fixture["test_importers"]["files"],
         serde_json::json!(["src/__fixtures__/sample.ts"])
     );
 
     assert_eq!(finding(&json, "storyOnly")["colocated_only"], true);
+}
+
+#[test]
+fn barrel_import_reports_the_declaration_only() {
+    let dir = copy_fixture(FIXTURE);
+    let json = dead_code(dir.path(), &[]);
+    let paths: Vec<&str> = json["test_only_exports"]
+        .as_array()
+        .expect("test_only_exports array")
+        .iter()
+        .filter(|finding| finding["export_name"] == "viaBarrel")
+        .map(|finding| finding["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        paths,
+        ["src/barrel/impl.ts"],
+        "a test that imports through a barrel gets one finding, on the declaration"
+    );
 }
 
 #[test]

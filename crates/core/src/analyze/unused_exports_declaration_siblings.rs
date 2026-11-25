@@ -22,7 +22,7 @@ use fallow_types::extract::{ImportedName, ModuleInfo};
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 
-use super::{export_has_reachable_reference, export_name_str};
+use super::{ReferenceView, export_has_reachable_reference, export_name_str};
 
 /// Each declaration suffix with the extension of the JS module it types.
 const DECLARATION_RUNTIME_PAIRS: &[(&str, &str)] =
@@ -124,7 +124,9 @@ fn used_names_of(
             module
                 .exports
                 .iter()
-                .filter(|export| export_has_reachable_reference(graph, module, export))
+                .filter(|export| {
+                    export_has_reachable_reference(graph, module, export, ReferenceView::All)
+                })
                 .map(|export| export_name_str(&export.name).to_string()),
         );
     }

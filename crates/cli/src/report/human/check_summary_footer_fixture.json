@@ -12,6 +12,7 @@
   "unused_namespace_members": {"path": "/f.ts", "parent_name": "N", "member_name": "a", "kind": "namespace_member", "line": 7, "col": 0, "actions": []},
   "unused_protected_class_members": {"path": "/f.ts", "parent_name": "P", "member_name": "h", "kind": "class_method", "line": 7, "col": 0, "actions": []},
   "namespace_escapes": {"path": "/f.ts", "line": 7, "col": 0, "local_name": "Ns", "module": "/g.ts", "hidden_exports": 2, "reason": "whole-object-use", "actions": []},
+  "test_only_exports": {"path": "/f.ts", "export_name": "seam", "line": 7, "col": 0, "test_importers": {"files": ["/f.test.ts"], "remaining": 0}, "colocated_only": true, "actions": []},
   "unused_store_members": {"path": "/f.ts", "parent_name": "S", "member_name": "a", "kind": "store_member", "line": 7, "col": 0, "actions": []},
   "unresolved_imports": {"path": "/f.ts", "specifier": "./gone", "line": 8, "col": 0, "specifier_col": 10, "actions": []},
   "unlisted_dependencies": {"package_name": "unlisted", "imported_from": [], "actions": []},

@@ -3,6 +3,7 @@ mod constant_parameters;
 mod namespace_escapes;
 mod quick_fix;
 mod suppress;
+mod test_only_exports;
 #[cfg(test)]
 #[path = "quick_fix_unicode_span_oracle.rs"]
 mod unicode_span_oracle;
@@ -17,6 +18,7 @@ pub use constant_parameters::*;
 pub use namespace_escapes::*;
 pub use quick_fix::*;
 pub use suppress::*;
+pub use test_only_exports::*;
 
 /// The text of the document of a code action request, as one string and as
 /// its lines.
@@ -116,6 +118,9 @@ pub fn build_code_action_response(input: CodeActionInput<'_>) -> Option<CodeActi
                 results, root, file_path, uri, range, source,
             ));
         }
+        actions.extend(build_suppress_test_only_export_actions(
+            results, file_path, uri, range, source,
+        ));
     }
 
     actions.extend(build_suppress_security_actions(

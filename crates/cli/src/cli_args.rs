@@ -80,6 +80,10 @@ pub enum Command {
         #[arg(long, help_heading = "Issue types")]
         namespace_escapes: bool,
 
+        /// Only report exported values that only test-side files use (enables this rule)
+        #[arg(long, help_heading = "Issue types")]
+        test_only_exports: bool,
+
         /// Only report unprovided injects
         #[arg(long, help_heading = "Issue types")]
         unprovided_injects: bool,

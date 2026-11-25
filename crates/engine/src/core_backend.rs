@@ -39,6 +39,7 @@ pub use fallow_core::plugins::types_package_target;
 pub use fallow_core::discover::ALLOWED_HIDDEN_DIRS;
 pub use fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS;
 pub use fallow_core::discover::SOURCE_EXTENSIONS;
+pub use fallow_core::test_side::TestSideMatcher;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMetrics {

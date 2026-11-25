@@ -1212,6 +1212,47 @@ Preserve these properties:
   `source_never_analyzed` kind, so no finding gets a caveat and `fallow fix`
   keeps its actions.
 
+## Test-side files and test-only exports
+
+`fallow_core::test_side::TestSideMatcher` is the one definition of a
+test-side file. A file is test-side when an entry point reaches it and a
+production exclude pattern or a `production.ignore` glob matches its path, or
+when no runtime entry point reaches it (a test helper, a support-only file).
+An unreachable file is never test-side. Two features use the matcher: the
+test importers of a production `unused-export` finding, and the
+`test-only-export` rule.
+
+The `test-only-export` rule uses `TestSideMatcher::with_support_reach`. It
+narrows the second rule to the files that no support entry reaches either.
+Production mode analyzes a file that a support entry reaches, for example a
+source file that a bundler config or a package script names, so the rule
+treats it as production code. The test importers of a production finding keep
+the wider rule: their export is unused in production mode, so a file that
+production mode analyzes cannot import it, and a file that only a user
+`supportEntry` seeds must stay test-side there.
+
+The `test-only-export` rule runs in a default-scope run only. The graph of
+that run has the test edges, so it needs no second scan.
+`analyze/unused_exports_test_only.rs` asks each value export of a reachable,
+non-test-side file that a test-side file references as a value. It runs the
+unused-export rules again with `ReferenceView::Without(test_side)`, so the
+references from test-side files do not count. An export that this run
+reports is test-only. Each other rule of the unused-export pass applies
+unchanged, so entry exports, `keepExportTags`, `ignoreExports` and plugin
+`usedExports` rules keep the export.
+
+Preserve these properties:
+
+- The second run uses an empty suppression context. A check of the
+  `unused-export` markers there would mark them as consumed and change the
+  `stale-suppression` output. The detector checks only the
+  `test-only-export` markers.
+- An `@expected-unused` export that only test-side files use is still
+  unused, so its tag is not stale in a default-scope run.
+- A production-scope run never reports the kind, so one export is never a
+  `test-only-export` and an `unused-export` finding in one run.
+- Type exports are not checked in this version.
+
 ## The plugin stage as a diagnostic stage
 
 Framework plugins are the fifth stage that writes `workspace_diagnostics[]`,

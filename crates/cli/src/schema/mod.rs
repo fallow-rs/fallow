@@ -437,6 +437,11 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         "namespace-escape" => {
             m.note = Some("Opt-in coverage check of unused exports; the rule defaults to off");
         }
+        "test-only-export" => {
+            m.note = Some(
+                "Opt-in check for default-scope runs; the rule defaults to off. No automatic fix, because a removal breaks the test-side importers.",
+            );
+        }
         "unused-export"
         | "unused-enum-member"
         | "unused-file"
@@ -1613,6 +1618,11 @@ mod tests {
             "namespace-escape".to_string(),
             "NamespaceEscape".to_string(),
             "NamespaceEscapeFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "test-only-export".to_string(),
+            "TestOnlyExport".to_string(),
+            "TestOnlyExportFinding".to_string()
         )));
         assert_eq!(
             expected, aliases,

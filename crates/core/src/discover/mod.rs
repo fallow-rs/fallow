@@ -30,6 +30,7 @@ pub(crate) use orphan_declarations::find_orphan_module_declaration_files;
 pub(crate) use output_entry_source::output_entry_source_file;
 pub(crate) use parse_scripts::CommandRefContext;
 pub use production_excludes::PRODUCTION_EXCLUDE_PATTERNS;
+pub(crate) use production_excludes::production_exclude_globs;
 pub(crate) use walk::discover_files_with_additional_hidden_dirs;
 pub use walk::{
     DiscoveredSources, HiddenDirMatch, HiddenDirScope, SOURCE_EXTENSIONS, discover_files,

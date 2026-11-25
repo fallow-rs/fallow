@@ -639,6 +639,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unused-class-member",
             "unused-protected-class-member",
             "namespace-escape",
+            "test-only-export",
             "unused-namespace-member",
             "unused-store-member",
             "unresolved-import",

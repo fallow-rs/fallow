@@ -160,6 +160,11 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         detail: r#"Select issue_types: ["namespace-escapes"] to enable this default-off rule. Each finding carries the binding, the target module, the count of hidden exports and the reason (whole-object-use, re-exported-binding or no-member-read). Fallow credits every export of the target module while the binding escapes, so it does not check those exports. Read the members by name or import them by name. When the whole object is the intent, add // fallow-ignore-next-line namespace-escape above the import. Its actions are not auto-fixable."#,
     },
     ToolGuideSection {
+        topic: "test_only_exports",
+        summary: "Exported values that only test-side files use.",
+        detail: r#"Select issue_types: ["test-only-exports"] to enable this default-off rule. It runs in the default scope only; with production=true the same export is an unused-exports finding. Each finding carries the export, test_importers (at most 5 files, plus a remaining count) and colocated_only. Remove the export together with its tests, or test through the public interface of the module and make the item internal. A removal of the export alone breaks the test-side importers, so its actions are not auto-fixable."#,
+    },
+    ToolGuideSection {
         topic: "boundary_violations",
         summary: "The alias that limits a run to architecture boundary violations.",
         detail: r#"Set boundary_violations=true to check only architecture boundary violations. It is a convenience alias for issue_types: ["boundary-violations"]. The response is the same structured JSON as a full run, with all issues found of that one type."#,

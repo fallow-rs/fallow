@@ -47,6 +47,37 @@ pub(super) fn namespace_escape_results(root: &Path) -> AnalysisResults {
     results
 }
 
+pub(super) fn test_only_export_results(root: &Path) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results.test_only_exports.push(
+        fallow_types::output_dead_code::TestOnlyExportFinding::with_actions(
+            fallow_types::results::TestOnlyExport {
+                path: root.join("src/price.ts"),
+                export_name: "legacyFormat".to_string(),
+                line: 5,
+                col: 0,
+                test_importers: fallow_types::output_dead_code::TestImporters::from_files(vec![
+                    root.join("src/price.test.ts"),
+                ])
+                .expect("one importer"),
+                colocated_only: true,
+            },
+        ),
+    );
+    results
+}
+
+#[test]
+fn dead_code_keys_cover_test_only_export() {
+    let root = root();
+    let keys = dead_code_keys(&test_only_export_results(&root), &root);
+    assert!(
+        keys.iter()
+            .any(|key| key.starts_with("test-only-export:src/price.ts:")),
+        "{keys:?}"
+    );
+}
+
 #[test]
 fn dead_code_keys_cover_namespace_escape() {
     let root = root();

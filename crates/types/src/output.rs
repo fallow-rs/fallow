@@ -281,6 +281,13 @@ pub enum FixActionType {
     /// segments at the conflicting position to a single consistent slug name
     /// (manual).
     ResolveDynamicSegmentNameConflict,
+    /// Remove an export that only test-side files use, together with the
+    /// tests that use it (manual; used by test-only-export findings).
+    RemoveExportAndTests,
+    /// Test the behavior through the public interface of the module instead
+    /// of through the export, then make the export internal (manual; used by
+    /// test-only-export findings).
+    TestThroughInterface,
     /// Add a human-authored reason to a suppression that requires one.
     AddSuppressionReason,
     /// Remove or update a suppression that no longer matches a finding.

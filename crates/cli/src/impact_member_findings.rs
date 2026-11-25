@@ -71,4 +71,11 @@ pub(super) fn collect_member_findings(
             Some(f.escape.local_name.clone()),
         );
     }
+    for f in &results.test_only_exports {
+        push(
+            &f.export.path,
+            "test-only-export",
+            Some(f.export.export_name.clone()),
+        );
+    }
 }

@@ -113,6 +113,7 @@ fn empty_rules_object_preserves_non_error_defaults() {
     assert_eq!(rules.unused_namespace_members, Severity::Warn);
     assert_eq!(rules.unused_protected_class_members, Severity::Off);
     assert_eq!(rules.namespace_escapes, Severity::Off);
+    assert_eq!(rules.test_only_exports, Severity::Off);
     assert_eq!(rules.unused_store_members, Severity::Warn);
     assert_eq!(rules.unprovided_injects, Severity::Warn);
     assert_eq!(rules.unrendered_components, Severity::Warn);
@@ -421,6 +422,7 @@ fn apply_partial_all_fields_set() {
         unused_namespace_members: Some(Severity::Off),
         unused_protected_class_members: Some(Severity::Off),
         namespace_escapes: Some(Severity::Off),
+        test_only_exports: Some(Severity::Off),
         unused_store_members: Some(Severity::Off),
         unprovided_injects: Some(Severity::Off),
         unrendered_components: Some(Severity::Off),
@@ -556,7 +558,7 @@ fn severity_from_str_invalid_returns_error() {
 /// more. See the note on [`KNOWN_RULE_NAMES`].
 #[test]
 fn known_rule_names_list_length_is_pinned() {
-    assert_eq!(KNOWN_RULE_NAMES.len(), 137);
+    assert_eq!(KNOWN_RULE_NAMES.len(), 139);
 }
 
 /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -624,8 +626,8 @@ fn known_rule_names_covers_every_serde_alias_in_source() {
 
     assert_eq!(
         aliases_found.len(),
-        140,
-        "expected 140 source-level alias attrs (70 per struct); got {}: {:?}",
+        142,
+        "expected 142 source-level alias attrs (71 per struct); got {}: {:?}",
         aliases_found.len(),
         aliases_found
     );

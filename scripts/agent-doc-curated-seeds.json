@@ -904,6 +904,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--test-only-exports",
+      "column": "Issue Type",
+      "seed": "Export is used only by test-side files"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--unlisted-binaries",
       "column": "Issue Type",
       "seed": "Binary used but provided by no installed package"
@@ -2479,6 +2485,12 @@
       "row": "test-only-dependency",
       "column": "Description",
       "seed": "Production dependency only imported by test files; Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds"
+    },
+    {
+      "section": "issue-types",
+      "row": "test-only-export",
+      "column": "Description",
+      "seed": "Export is used only by test-side files; Opt-in check for default-scope runs; the rule defaults to off. No automatic fix, because a removal breaks the test-side importers."
     },
     {
       "section": "issue-types",

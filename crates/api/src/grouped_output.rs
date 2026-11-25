@@ -188,6 +188,11 @@ where
                 .namespace_escapes
                 .push(item.clone());
         }
+        for item in &results.test_only_exports {
+            self.entry_for_path(&item.export.path)
+                .test_only_exports
+                .push(item.clone());
+        }
         for item in &results.unresolved_imports {
             self.entry_for_path(&item.import.path)
                 .unresolved_imports

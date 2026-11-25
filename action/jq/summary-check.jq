@@ -56,6 +56,7 @@ else
     table_row("Unused namespace members"; "unused_namespace_members"; "unused-namespace-members"),
     table_row("Unused protected class members"; "unused_protected_class_members"; "unused-protected-class-members"),
     table_row("Namespace escapes"; "namespace_escapes"; "namespace-escapes"),
+    table_row("Test-only exports"; "test_only_exports"; "test-only-exports"),
     table_row("Unused store members"; "unused_store_members"; "unused-store-members"),
     table_row("Unresolved imports"; "unresolved_imports"; "unresolved-imports"),
     table_row("Unlisted dependencies"; "unlisted_dependencies"; "unlisted-dependencies"),
@@ -132,6 +133,9 @@ else
   section("Namespace escapes"; "namespace_escapes";
     "Namespace imports used as a whole value, so fallow does not check the exports of the module.\n\n| File | Line | Binding | Module | Hidden exports |\n|------|-----:|---------|--------|---------------:|\n";
     "| `\(.path)` | \(.line) | `\(.local_name)` | `\(.module)` | \(.hidden_exports) |") +
+  section("Test-only exports"; "test_only_exports";
+    "Exported values that only test-side files use. Production code does not use them.\n\n| File | Line | Export | Colocated |\n|------|-----:|--------|-----------|\n";
+    "| `\(.path)` | \(.line) | `\(.export_name)` | \(if .colocated_only then "yes" else "no" end) |") +
   section("Unused store members"; "unused_store_members";
     "Pinia store members (state, getter, action) never accessed by any consumer.\n\n| File | Line | Store | Member |\n|------|-----:|-------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +

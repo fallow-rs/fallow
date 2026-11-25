@@ -182,6 +182,7 @@ issuekind_json_key_fallback() {
     unused-namespace-member) echo "unused_namespace_members" ;;
     unused-protected-class-member) echo "unused_protected_class_members" ;;
     namespace-escape) echo "namespace_escapes" ;;
+    test-only-export) echo "test_only_exports" ;;
     unused-store-member) echo "unused_store_members" ;;
     unresolved-import) echo "unresolved_imports" ;;
     unlisted-dependency) echo "unlisted_dependencies" ;;

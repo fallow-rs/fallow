@@ -1473,6 +1473,10 @@ OUT_NSE_MANY=$(jq '.namespace_escapes = [{"path": "src/app.ts", "line": 3, "col"
 assert_contains "$OUT_NSE_MANY" "namespace Formats is re-exported as a whole object; 2 exports of src/formats.ts are not checked." "namespace escape: re-exported binding text"
 assert_contains "$OUT_NSE_MANY" "namespace Lib has no member read by name; 3 exports of src/lib.ts are not checked." "namespace escape: no member read text"
 
+OUT_TOE=$(jq '.test_only_exports = [{"path": "src/lib.ts", "line": 3, "col": 13, "export_name": "seam", "test_importers": {"files": ["src/lib.test.ts"], "remaining": 0}, "colocated_only": true, "actions": []}, {"path": "src/b.ts", "line": 1, "col": 13, "export_name": "helper", "test_importers": {"files": ["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts", "e.test.ts"], "remaining": 2}, "colocated_only": false, "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_TOE" "::warning file=src/lib.ts,line=3,col=14,title=Test-only export::export seam is used only by 1 test-side file." "test-only export: singular text for one importer"
+assert_contains "$OUT_TOE" "export helper is used only by 7 test-side files." "test-only export: count includes the importers past the cap"
+
 OUT_ICE_FILTERED=$(jq '.invalid_client_exports = [{"path": "src/app.ts", "line": 5, "col": 0, "export_name": "metadata", "directive": "use client", "actions": []}, {"path": "src/other.ts", "line": 3, "col": 0, "export_name": "generateMetadata", "directive": "use client", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/app.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_ICE_FILTERED" '.invalid_client_exports | length' "1" "ice: filter-changed keeps only changed-file findings"
 

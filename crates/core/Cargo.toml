@@ -39,6 +39,7 @@ rayon = { workspace = true }
 dunce = { workspace = true }
 ignore = { workspace = true }
 glob = { workspace = true }
+fixedbitset = { workspace = true }
 globset = { workspace = true }
 regex = { workspace = true }
 

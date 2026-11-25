@@ -2063,13 +2063,14 @@ fn audit_ledger_errors_match_the_exit_code_rule_for_every_collection() {
         absent_component_prop_results(&root),
     ]
     .into_iter()
-    .chain([
+    .chain(vec![
         server_action_load_data_and_route_results(&root),
         angular_input_output_and_policy_results(&root),
         unused_store_member_results(&root),
         unused_namespace_member_results(&root),
         unused_protected_class_member_results(&root),
         namespace_escape_results(&root),
+        test_only_export_results(&root),
         production_and_directive_results(&root),
         AnalysisResults {
             prop_drilling_chains: vec![PropDrillingChainFinding::with_actions(PropDrillingChain {
@@ -2399,4 +2400,6 @@ fn a_renamed_cycle_member_sorts_like_the_head_key() {
 
 #[path = "audit_keys_member_tests.rs"]
 mod member_fixtures;
-use member_fixtures::{namespace_escape_results, unused_protected_class_member_results};
+use member_fixtures::{
+    namespace_escape_results, test_only_export_results, unused_protected_class_member_results,
+};

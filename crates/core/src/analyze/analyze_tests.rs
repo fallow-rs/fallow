@@ -173,6 +173,7 @@ mod orchestration {
         unused_namespace_members: Severity::Off,
         unused_protected_class_members: Severity::Off,
         namespace_escapes: Severity::Off,
+        test_only_exports: Severity::Off,
         unused_store_members: Severity::Off,
         unprovided_injects: Severity::Off,
         unrendered_components: Severity::Off,

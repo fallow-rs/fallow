@@ -19,7 +19,7 @@ use crate::output_dead_code::{
     MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, NamespaceEscapeFinding, PackageCycleFinding,
     PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, TestOnlyExportFinding, ThinWrapperFinding,
     TypeOnlyDependencyFinding, UnlistedBinaryFinding, UnlistedDependencyFinding,
     UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
     UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
@@ -44,6 +44,12 @@ pub use cycles::{
 #[path = "results_namespace_escape.rs"]
 mod namespace_escape;
 pub use namespace_escape::{NamespaceEscape, NamespaceEscapeReason};
+#[path = "results_security_finding.rs"]
+mod security_finding;
+pub use security_finding::SecurityFinding;
+#[path = "results_test_only_export.rs"]
+mod test_only_export;
+pub use test_only_export::TestOnlyExport;
 #[path = "results_trace_hop.rs"]
 mod trace_hop;
 pub use trace_hop::{TraceHop, TraceHopRole, TraceSecretRead};
@@ -340,6 +346,12 @@ pub struct AnalysisResults {
     /// is `off` by default, so this array is empty unless a config turns it on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub namespace_escapes: Vec<NamespaceEscapeFinding>,
+    /// Exported values that only test-side files use. Default-scope runs
+    /// only: a production run reports such an export as an unused export.
+    /// The rule is `off` by default, so this array is empty unless a config
+    /// turns it on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_only_exports: Vec<TestOnlyExportFinding>,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -787,6 +799,7 @@ struct AnalysisResultsCoreMergeParts {
     unused_namespace_members: Vec<UnusedNamespaceMemberFinding>,
     unused_protected_class_members: Vec<UnusedProtectedClassMemberFinding>,
     namespace_escapes: Vec<NamespaceEscapeFinding>,
+    test_only_exports: Vec<TestOnlyExportFinding>,
     unused_store_members: Vec<UnusedStoreMemberFinding>,
     unresolved_imports: Vec<UnresolvedImportFinding>,
     boundary_violations: Vec<BoundaryViolationFinding>,
@@ -885,6 +898,7 @@ macro_rules! counted_analysis_result_fields {
             unused_namespace_members => "unused_namespace_members",
             unused_protected_class_members => "unused_protected_class_members",
             namespace_escapes => "namespace_escapes",
+            test_only_exports => "test_only_exports",
             unused_store_members => "unused_store_members",
             unresolved_imports => "unresolved_imports",
             unlisted_dependencies => "unlisted_dependencies",
@@ -960,6 +974,7 @@ impl_single_source_dead_code! {
     UnusedNamespaceMemberFinding => member.path,
     UnusedProtectedClassMemberFinding => member.path,
     NamespaceEscapeFinding => escape.path,
+    TestOnlyExportFinding => export.path,
     UnusedStoreMemberFinding => member.path,
     UnresolvedImportFinding => import.path,
     UnprovidedInjectFinding => inject.path,
@@ -1264,6 +1279,7 @@ impl AnalysisResults {
         self.unused_protected_class_members
             .extend(parts.unused_protected_class_members);
         self.namespace_escapes.extend(parts.namespace_escapes);
+        self.test_only_exports.extend(parts.test_only_exports);
         self.unused_store_members.extend(parts.unused_store_members);
         self.unresolved_imports.extend(parts.unresolved_imports);
         self.boundary_violations.extend(parts.boundary_violations);
@@ -1466,6 +1482,21 @@ impl AnalysisResults {
                     b.escape.line,
                     b.escape.col,
                     &b.escape.local_name,
+                ))
+        });
+
+        self.test_only_exports.sort_by(|a, b| {
+            (
+                &a.export.path,
+                a.export.line,
+                a.export.col,
+                &a.export.export_name,
+            )
+                .cmp(&(
+                    &b.export.path,
+                    b.export.line,
+                    b.export.col,
+                    &b.export.export_name,
                 ))
         });
 
@@ -3278,108 +3309,6 @@ pub struct SecurityAttackSurfaceEntry {
     pub path: Vec<TraceHop>,
     /// Defensive-boundary context detected on this path.
     pub defensive_boundary: SecurityDefensiveBoundary,
-}
-
-/// A local security candidate for downstream agent verification, not a verified
-/// vulnerability. Emitted only by `fallow security`, never under bare `fallow`
-/// or the `audit` gate. There is deliberately no `confidence` or
-/// `signal_strength` field: fallow does not prove exploitability, so the trace
-/// (its hops and length) is the only honest signal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityFinding {
-    /// Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it.
-    pub finding_id: String,
-    /// Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stable_finding_id: Option<String>,
-    /// The rule that produced this candidate.
-    pub kind: SecurityFindingKind,
-    /// The catalogue category id (e.g. `"dangerous-html"`). `Some` for
-    /// `TaintedSink`. For `ClientServerLeak` it is `"client-server-leak"` for the
-    /// secret leak (older releases omit it) or `"server-only-import"` when a
-    /// `"use client"` cone reaches server-only code.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    /// The CWE number declared by the matched catalogue entry. `None` for
-    /// `ClientServerLeak`; never fabricated beyond the catalogue's value.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwe: Option<u32>,
-    /// File the finding is anchored on (the client boundary). Absolute
-    /// internally; JSON strips the project root via `serde_path::serialize`.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub path: PathBuf,
-    /// 1-based line number of the anchor.
-    pub line: u32,
-    /// 0-based byte column offset of the anchor.
-    pub col: u32,
-    /// Agent/human-readable evidence (e.g. the named env var the chain reaches).
-    pub evidence: String,
-    /// Whether the sink argument was associated with a known untrusted source by
-    /// the intra-module source-to-sink back-trace (issue #859): a local binding
-    /// referenced in the argument was sourced from a catalogue source path
-    /// (`req.query`, `process.argv`, message-event `data`, etc.). `true` ranks
-    /// the candidate higher and annotates the evidence; `false` does NOT
-    /// suppress the finding (the association is conservative, never a proof, and
-    /// fallow prefers false-negatives over false-positives). Always `false` for
-    /// `ClientServerLeak`. Skipped from JSON when `false` for output stability.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub source_backed: bool,
-    /// Internal cross-pass carrier (NEVER serialized): the (1-based line, 0-based
-    /// col) of the arg-level source read, resolved by the detector when
-    /// `source_backed` is true and a concrete read span was captured. The ranking
-    /// pass uses it to anchor the taint trace's source node at the real read
-    /// instead of the module import line. `None` for module-level findings and
-    /// for arg-level findings with no concrete read span (synthetic
-    /// framework-param / helper-return sources), where the trace falls back to
-    /// the sink site.
-    #[serde(skip)]
-    pub source_read: Option<(u32, u32)>,
-    /// Verification-priority tier derived from existing reachability, boundary,
-    /// source-backed, and runtime signals. Candidate-only: this does not prove
-    /// exploitability and does not change gates.
-    pub severity: SecuritySeverity,
-    /// Structural import-hop trace from the client boundary to the secret source.
-    /// The hop count is the uncalibrated signal; fallow does not prove the path
-    /// is exploitable.
-    pub trace: Vec<TraceHop>,
-    /// Machine-actionable next steps. Always emitted (possibly empty for
-    /// forward-compat). For security candidates this is a single file-level
-    /// suppress hint (`auto_fixable: false`); there is no auto-fix because
-    /// verification is the agent's job, not fallow's.
-    pub actions: Vec<IssueAction>,
-    /// Dead-code cross-link when the same sink candidate sits in code fallow also
-    /// reports as removable. Agents should verify the dead-code finding and delete
-    /// the code instead of hardening the sink when deletion is safe.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dead_code: Option<SecurityDeadCodeContext>,
-    /// Graph-derived reachability ranking signal (issues #860 and #885). `None`
-    /// until the post-detection ranking pass fills it; additive on the wire
-    /// (skipped when absent). Drives the order findings are emitted in:
-    /// runtime-reachable candidates sort first, followed by source-backed and
-    /// source-reachable candidates, then wider blast radius.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reachability: Option<SecurityReachability>,
-    /// Agent-actionable candidate record: the untrusted input kind, the sink, and the boundary
-    /// the flow crosses. fallow fills these three slots; the exploitability verdict is the
-    /// agent's job and is not a field here. Always present.
-    pub candidate: SecurityCandidate,
-    /// Source-to-sink taint-flow triple, present only when an untrusted source
-    /// is import-reachable to this sink. Absent (skipped) otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub taint_flow: Option<SecurityTaintFlow>,
-    /// Production runtime coverage context for the function enclosing this
-    /// security sink. Present only when `fallow security --runtime-coverage`
-    /// runs and the candidate is a `tainted-sink`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<SecurityRuntimeContext>,
-    /// Internal projection used by `fallow security --surface`. The CLI strips this from
-    /// per-finding JSON and promotes it to the top-level `attack_surface` field only when requested.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attack_surface: Option<SecurityAttackSurfaceEntry>,
-    /// Internal input of `stable_finding_id`. Never serialized; `None` after a JSON round trip.
-    #[serde(skip)]
-    pub stable_id_input: Option<crate::security_stable_id::SecurityStableIdInput>,
 }
 
 /// A package manager catalog entry that no workspace package references via

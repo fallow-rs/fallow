@@ -41,7 +41,7 @@ use crate::output_dead_code::{
     InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, NamespaceEscapeFinding, PackageCycleFinding,
     PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+    RouteCollisionFinding, TestOnlyDependencyFinding, TestOnlyExportFinding, ThinWrapperFinding,
     TypeOnlyDependencyFinding, UnlistedBinaryFinding, UnlistedDependencyFinding,
     UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding,
     UnresolvedImportFinding, UnusedCatalogEntryFinding, UnusedClassMemberFinding,
@@ -457,6 +457,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unused_namespace_members,
         unused_protected_class_members,
         namespace_escapes,
+        test_only_exports,
         unused_store_members,
         unresolved_imports,
         unlisted_dependencies,
@@ -539,6 +540,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unused_namespace_members);
     visitor.visit(unused_protected_class_members);
     visitor.visit(namespace_escapes);
+    visitor.visit(test_only_exports);
     visitor.visit(unused_store_members);
     visitor.visit(unresolved_imports);
     visitor.visit(unlisted_dependencies);
@@ -818,6 +820,13 @@ identified!(
         p.key(&f.escape.module),
     ],
     position: |g| (g.escape.line, g.escape.col, 0),
+);
+
+identified!(
+    TestOnlyExportFinding,
+    token: |_t| "test-only-export",
+    parts: |f, p| vec![p.key(&f.export.path), f.export.export_name.clone()],
+    position: |g| (g.export.line, g.export.col, 0),
 );
 
 identified!(

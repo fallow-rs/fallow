@@ -659,6 +659,7 @@ mod tests {
             unused_namespace_members: 0,
             unused_protected_class_members: 0,
             namespace_escapes: 0,
+            test_only_exports: 0,
             unused_store_members: 0,
             unprovided_injects: 0,
             unrendered_components: 0,

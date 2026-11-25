@@ -554,6 +554,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.namespace_escapes {
             $visit(&finding.escape.path, finding.escape.line, &finding.actions);
         }
+        for finding in &results.test_only_exports {
+            $visit(&finding.export.path, finding.export.line, &finding.actions);
+        }
         for finding in &results.unresolved_imports {
             $visit(&finding.import.path, finding.import.line, &finding.actions);
         }
@@ -800,6 +803,13 @@ macro_rules! visit_suppress_line_findings_mut {
             $visit(
                 &finding.escape.path,
                 finding.escape.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.test_only_exports {
+            $visit(
+                &finding.export.path,
+                finding.export.line,
                 &mut finding.actions,
             );
         }
@@ -1301,6 +1311,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unused_namespace_members: results.unused_namespace_members.len(),
         unused_protected_class_members: results.unused_protected_class_members.len(),
         namespace_escapes: results.namespace_escapes.len(),
+        test_only_exports: results.test_only_exports.len(),
         unused_store_members: results.unused_store_members.len(),
         unresolved_imports: results.unresolved_imports.len(),
         unlisted_dependencies: results.unlisted_dependencies.len(),

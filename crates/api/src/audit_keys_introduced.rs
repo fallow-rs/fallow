@@ -18,6 +18,7 @@ pub(super) fn classify_introduced_dead_code_fields(
         unused_namespace_members: _unused_namespace_members,
         unused_protected_class_members: _unused_protected_class_members,
         namespace_escapes: _namespace_escapes,
+        test_only_exports: _test_only_exports,
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,

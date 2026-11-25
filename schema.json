@@ -267,6 +267,7 @@
         "unused-namespace-members": "warn",
         "unused-protected-class-members": "off",
         "namespace-escapes": "off",
+        "test-only-exports": "off",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
@@ -1903,6 +1904,11 @@
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
+        "test-only-exports": {
+          "description": "An exported value that only test-side files use: test, story,\nfixture and bench files, `production.ignore` files, and test helpers.\nReported in default-scope runs only. Defaults to `off`, so the\ndefault output and the `--ci` gate do not change.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-store-members": {
           "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an open declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
           "$ref": "#/$defs/Severity",
@@ -2852,6 +2858,17 @@
         },
         "namespace-escapes": {
           "description": "Severity of the `namespace-escapes` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "test-only-exports": {
+          "description": "Severity of the `test-only-exports` rule for the files that this override matches. Unset keeps the severity that the top-level `rules` give.",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

@@ -1,4 +1,5 @@
-//! Human sections for unused members and namespace escapes.
+//! Human sections for unused members, namespace escapes and test-only
+//! exports.
 
 use super::*;
 
@@ -102,6 +103,33 @@ pub(super) fn build_unused_member_sections(
                 "{} {}",
                 format!(":{}", escape.line).dimmed(),
                 escape.message(&module)
+            )
+        },
+    });
+    build_test_only_export_section(lines, results, root, rules, max_grouped_files);
+}
+
+fn build_test_only_export_section(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    max_grouped_files: usize,
+) {
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.test_only_exports,
+        title: "Test-only exports",
+        level: severity_to_level(rules.test_only_exports),
+        root,
+        max_files: max_grouped_files,
+        get_path: |t| t.export.path.as_path(),
+        format_detail: &|t: &TestOnlyExportFinding| {
+            let export = &t.export;
+            format!(
+                "{} {}",
+                format!(":{}", export.line).dimmed(),
+                export.message()
             )
         },
     });

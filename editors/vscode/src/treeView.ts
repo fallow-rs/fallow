@@ -33,6 +33,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-namespace-member": "symbol-namespace",
   "unused-protected-class-member": "symbol-field",
   "namespace-escape": "symbol-namespace",
+  "test-only-export": "beaker",
   "unused-store-member": "symbol-field",
   "unused-server-action": "symbol-method",
   "unused-load-data-keys": "symbol-property",
@@ -368,6 +369,14 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         "namespace-escape",
         this.result.namespace_escapes.map(
           (e) => new IssueItem(e.local_name, e.path, e.line, e.col, "namespace-escape"),
+        ),
+      );
+    }
+    if (this.result.test_only_exports) {
+      addCategory(
+        "test-only-export",
+        this.result.test_only_exports.map(
+          (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "test-only-export"),
         ),
       );
     }

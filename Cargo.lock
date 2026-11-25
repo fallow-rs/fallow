@@ -1242,6 +1242,7 @@ dependencies = [
  "fallow-graph",
  "fallow-security",
  "fallow-types",
+ "fixedbitset",
  "glob",
  "globset",
  "ignore",

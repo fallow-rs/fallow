@@ -32,7 +32,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "Export is never imported"
               },
               "fullDescription": {
-                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`."
+                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file. An export with a JSDoc tag that `keepExportTags` lists is not reported; the default list is `public`, `internal`, `alpha` and `beta`. A test import keeps an export alive in the default mode; turn on `test-only-export` to report the exports that only test-side files use."
               },
               "helpUri": "https://fallow.tools/docs/rules/unused-export/",
               "defaultConfiguration": {
@@ -165,6 +165,19 @@ expression: redact_sarif_version(&json_str)
                 "text": "A namespace import (`import * as Ns`) that the code uses as a whole value: a cast, an assignment, a call argument, a spread, a computed member read, a reflective call such as `Object.keys(Ns)`, or a re-export with `export { Ns }`. Fallow cannot see which members such a use reads, so it credits every export of the target module and of the modules that the target re-exports from. These exports are then not checked by `unused-exports` and `unused-types`. The finding is on the import and gives the count of exports that the credit hides. A binding that hides no export is not reported. Defaults to off."
               },
               "helpUri": "https://fallow.tools/docs/rules/namespace-escape/",
+              "defaultConfiguration": {
+                "level": "none"
+              }
+            },
+            {
+              "id": "fallow/test-only-export",
+              "shortDescription": {
+                "text": "Export is used only by test-side files"
+              },
+              "fullDescription": {
+                "text": "An exported value that production code does not use, while a test-side file does. Test-side files are the files that `--production` leaves out: test, story, fixture and bench files and the `production.ignore` globs, plus the files that only tests reach, such as a test helper. A file that a runtime or support entry reaches, such as a source file that a bundler config names, is production code. In the default mode the tests keep such an export alive, so `unused-export` does not report it. In `--production` mode the same export is an `unused-export` finding, and this rule does not run. One export is never in both kinds in one run. Only values are checked in this version, not types. Entry exports, `keepExportTags`, `ignoreExports` and plugin rules keep an export, as for `unused-export`. The `colocated_only` field is true when each test-side importer is next to the module, which can mean a deliberate internal seam. A test-only use does not make an `@expected-unused` tag stale. Defaults to off."
+              },
+              "helpUri": "https://fallow.tools/docs/rules/test-only-export/",
               "defaultConfiguration": {
                 "level": "none"
               }

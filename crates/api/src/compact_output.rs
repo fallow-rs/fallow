@@ -389,6 +389,15 @@ impl<'a> CompactLineBuilder<'a> {
                 escape.local_name
             ));
         }
+        for finding in &self.results.test_only_exports {
+            let export = &finding.export;
+            self.lines.push(format!(
+                "test-only-export:{}:{}:{}",
+                self.rel(&export.path),
+                export.line,
+                export.export_name
+            ));
+        }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
                 "unresolved-import:{}:{}:{}",

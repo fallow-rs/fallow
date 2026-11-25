@@ -303,7 +303,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "review-constant-parameter" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "review-constant-parameter" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "remove-export-and-tests" | "test-through-interface" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -3469,6 +3469,13 @@ unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
  */
 namespace_escapes?: NamespaceEscapeFinding[]
 /**
+ * Exported values that only test-side files use. Default-scope runs
+ * only: a production run reports such an export as an unused export.
+ * The rule is `off` by default, so this array is empty unless a config
+ * turns it on.
+ */
+test_only_exports?: TestOnlyExportFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -4006,6 +4013,11 @@ unused_protected_class_members?: number
  * zero, because the rule is `off` by default.
  */
 namespace_escapes?: number
+/**
+ * Exported values that only test-side files use. Omitted when zero,
+ * because the rule is `off` by default.
+ */
+test_only_exports?: number
 /**
  * Unused store members.
  */
@@ -5365,6 +5377,64 @@ module: string
  */
 hidden_exports: number
 reason: NamespaceEscapeReason
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for a [`TestOnlyExport`] finding under the
+ * `test_only_exports` key.
+ *
+ * Both fix actions are manual. A removal of the export also breaks the
+ * test-side files that import it, so `fallow fix` never applies one.
+ */
+export interface TestOnlyExportFinding {
+/**
+ * File that declares the export.
+ */
+path: string
+/**
+ * Name of the export.
+ */
+export_name: string
+/**
+ * 1-based line number of the export.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+test_importers: TestImporters
+/**
+ * True when each test-side importer is in the directory of the
+ * declaring file or in a `__tests__` directory directly below it. A
+ * colocated test can use the export on purpose as an internal seam of
+ * the module.
+ */
+colocated_only: boolean
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
@@ -16751,6 +16821,13 @@ unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
  */
 namespace_escapes?: NamespaceEscapeFinding[]
 /**
+ * Exported values that only test-side files use. Default-scope runs
+ * only: a production run reports such an export as an unused export.
+ * The rule is `off` by default, so this array is empty unless a config
+ * turns it on.
+ */
+test_only_exports?: TestOnlyExportFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -18574,6 +18651,13 @@ unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
  * is `off` by default, so this array is empty unless a config turns it on.
  */
 namespace_escapes?: NamespaceEscapeFinding[]
+/**
+ * Exported values that only test-side files use. Default-scope runs
+ * only: a production run reports such an export as an unused export.
+ * The rule is `off` by default, so this array is empty unless a config
+ * turns it on.
+ */
+test_only_exports?: TestOnlyExportFinding[]
 /**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
@@ -24172,6 +24256,16 @@ export type ReExportCycle = ReExportCycleFinding;
  * this alias; new code should prefer `TestOnlyDependencyFinding`.
  */
 export type TestOnlyDependency = TestOnlyDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `TestOnlyExport` name.
+ * The wire shape is byte-identical: `TestOnlyExportFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `TestOnlyExport` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `TestOnlyExportFinding`.
+ */
+export type TestOnlyExport = TestOnlyExportFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `TypeOnlyDependency` name.

@@ -76,6 +76,7 @@ fn push_summary_member_parts(parts: &mut Vec<String>, results: &AnalysisResults)
         "protected class members",
     );
     push_summary_part(parts, results.namespace_escapes.len(), "namespace escapes");
+    push_summary_part(parts, results.test_only_exports.len(), "test-only exports");
     push_summary_part(parts, results.unused_store_members.len(), "store members");
 }
 

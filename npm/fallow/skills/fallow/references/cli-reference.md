@@ -139,6 +139,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-namespace-members` | Namespace member is never referenced |
 | `--unused-protected-class-members` | Protected class member is never referenced |
 | `--namespace-escapes` | Namespace binding is used as a whole value, so its exports are not checked |
+| `--test-only-exports` | Export is used only by test-side files |
 | `--unprovided-injects` | inject() / getContext() reads a key that no provide() / setContext() supplies |
 | `--unrendered-components` | A Vue / Svelte component is reachable through a barrel but rendered nowhere |
 | `--unused-component-props` | A Vue defineProps prop or React component prop is referenced nowhere in its own component |
