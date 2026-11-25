@@ -116,8 +116,8 @@ where
     if let Some(score) = value
         && (!score.is_finite() || !(0.0..=100.0).contains(&score))
     {
-        return Err(serde::de::Error::custom(format!(
-            "mutation.minScore must be between 0 and 100 (got {score})"
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
+            format!("mutation.minScore must be between 0 and 100 (got {score})"),
         )));
     }
     Ok(value)
@@ -129,9 +129,9 @@ where
 {
     let value = Option::<usize>::deserialize(deserializer)?;
     if value == Some(0) {
-        return Err(serde::de::Error::custom(
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
             "mutation.concurrency must be at least 1",
-        ));
+        )));
     }
     Ok(value)
 }
@@ -142,9 +142,9 @@ where
 {
     let value = Option::<usize>::deserialize(deserializer)?;
     if value == Some(0) {
-        return Err(serde::de::Error::custom(
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
             "mutation.mutantsPerLine must be at least 1",
-        ));
+        )));
     }
     Ok(value)
 }

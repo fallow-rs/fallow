@@ -370,7 +370,8 @@ pub struct HealthConfig {
 
     /// Path to Istanbul coverage data (coverage-final.json) or raw V8 coverage
     /// (a `NODE_V8_COVERAGE` directory or one V8 JSON file) for accurate
-    /// per-function CRAP scores. Relative paths resolve against the project root. The CLI
+    /// per-function CRAP scores. The path is relative to the project root and
+    /// has no `..` segment; use the CLI flag for a file outside the project. The CLI
     /// `--coverage` flag and `FALLOW_COVERAGE` environment variable override
     /// this value. Consulted by `fallow health`, bare `fallow`, `fallow audit`,
     /// `fallow viz`, and the MCP `audit` / `check_health` tools.

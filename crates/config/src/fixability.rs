@@ -41,6 +41,11 @@ pub fn classify_config_fix_plan(
         };
     }
     let target = root.join(".fallowrc.json");
+    // An entry at the target that discovery refused, such as a link out of
+    // the root, must not be replaced by a new config file.
+    if target.symlink_metadata().is_ok() {
+        return ConfigFixPlan::BlockedNoCreate { target };
+    }
     if let Some(workspace_root) = find_workspace_root_above(root) {
         return ConfigFixPlan::BlockedMonorepo { workspace_root };
     }
@@ -122,6 +127,23 @@ fn has_workspace_marker(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_config_link_out_of_the_root_is_neither_edited_nor_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(dir.path().join("outside.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("outside.json"), root.join(".fallowrc.json"))
+            .unwrap();
+        let plan = classify_config_fix_plan(&root, None, false);
+        assert!(
+            matches!(plan, ConfigFixPlan::BlockedNoCreate { .. }),
+            "{plan:?}"
+        );
+    }
 
     #[test]
     fn config_fixable_true_when_config_exists() {

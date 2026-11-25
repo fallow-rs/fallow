@@ -103,30 +103,81 @@ fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
 }
 
 pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, miette::Report> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
+    // An `extends` target can be outside the project by design, so the read
+    // has no root check. It still refuses devices and very large files, and
+    // the parse errors below name a position but never quote the file.
+    let content = fallow_types::read_guard::read_to_string_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .map_err(|e| miette::miette!("Failed to read config file: {e}"))?;
     let content = content.trim_start_matches('\u{FEFF}');
 
     match ConfigFormat::from_path(path) {
         ConfigFormat::Toml => {
             let toml_value: toml::Value = crate::toml_input::from_str(content).map_err(|e| {
-                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
+                miette::miette!(
+                    "Failed to parse config file {}: {}",
+                    path.display(),
+                    crate::parse_error::describe_toml(&e, content)
+                )
             })?;
             serde_json::to_value(toml_value).map_err(|e| {
                 miette::miette!(
                     "Failed to convert TOML to JSON for {}: {}",
                     path.display(),
-                    e
+                    crate::parse_error::describe_json(&e)
                 )
             })
         }
-        ConfigFormat::Json => crate::jsonc::parse_to_value(content)
-            .map_err(|e| miette::miette!("Failed to parse config file {}: {}", path.display(), e)),
+        ConfigFormat::Json => crate::jsonc::parse_to_value(content).map_err(|e| {
+            miette::miette!(
+                "Failed to parse config file {}: {}",
+                path.display(),
+                crate::parse_error::describe_jsonc(&e)
+            )
+        }),
     }
 }
 
+/// True when `dir` holds a `.git`, `.hg` or `.svn` entry. A link counts by
+/// its own presence, not by its target.
 fn is_repo_root(dir: &Path) -> bool {
-    dir.join(".git").exists() || dir.join(".hg").exists() || dir.join(".svn").exists()
+    [".git", ".hg", ".svn"]
+        .iter()
+        .any(|marker| entry_present(&dir.join(marker)))
+}
+
+/// True when `path` names an entry, also a dangling link. The check reads
+/// the entry itself and does not follow a link.
+fn entry_present(path: &Path) -> bool {
+    path.symlink_metadata().is_ok()
+}
+
+/// The directory that a discovered config file in `dir` must resolve in:
+/// the nearest repository root at or above `dir`, else `dir` itself.
+fn discovery_base(dir: &Path) -> &Path {
+    dir.ancestors()
+        .find(|ancestor| is_repo_root(ancestor))
+        .unwrap_or(dir)
+}
+
+/// Refuse a discovered config file that is a link which does not resolve
+/// inside its [`discovery_base`]. The message names only the link, and it is
+/// the same for a dangling link and a link to a file that exists.
+fn check_discovered_config(dir: &Path, candidate: &Path) -> Result<(), String> {
+    let is_link = candidate
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink());
+    let base = discovery_base(dir);
+    if !is_link || fallow_types::read_guard::is_inside_root(base, candidate) {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to load {}: it is a symbolic link that does not resolve to a file inside {}",
+        candidate.display(),
+        base.display()
+    ))
 }
 
 fn resolve_confined(
@@ -1179,7 +1230,7 @@ fn shadowed_config_names(dir: &Path, chosen_index: usize) -> Vec<&'static str> {
     CONFIG_NAMES
         .iter()
         .skip(chosen_index + 1)
-        .filter(|name| dir.join(name).exists())
+        .filter(|name| entry_present(&dir.join(name)))
         .copied()
         .collect()
 }
@@ -1401,7 +1452,7 @@ impl FallowConfig {
                 rules.contains_key("private-type-leaks") || rules.contains_key("private-type-leak")
             });
         let mut config: Self = serde_json::from_value(merged).map_err(|e| {
-            let reason = e.to_string();
+            let reason = crate::parse_error::describe_json(&e);
             // Unknown fields on overrides/ignoreExports entries are usually
             // inline annotations; point at JSONC comments as the fix.
             let hint = if matches!(ConfigFormat::from_path(path), ConfigFormat::Json)
@@ -1503,6 +1554,7 @@ impl FallowConfig {
         self.validate_ignore_rule_globs(&mut errors);
         self.validate_boundary_globs(&mut errors);
         self.validate_workspace_baseline_keys(&mut errors);
+        self.validate_file_path_keys(&mut errors);
 
         for plugin in &self.framework {
             if let Err(mut plugin_errors) = plugin.validate_user_globs() {
@@ -1510,6 +1562,75 @@ impl FallowConfig {
             }
         }
 
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validate the config keys that name one file to read: each must be a
+    /// relative path with no `..` segment, the same rule as a zone root. The
+    /// CLI flags that override these keys come from the user and keep their
+    /// own rules.
+    fn validate_file_path_keys(
+        &self,
+        errors: &mut Vec<super::glob_validation::GlobValidationError>,
+    ) {
+        for (value, field) in self.file_path_keys() {
+            if let Some(value) = value
+                && let Err(error) = super::glob_validation::validate_user_path(&value, field)
+            {
+                errors.push(error);
+            }
+        }
+    }
+
+    /// The config keys that name one file, with their values.
+    fn file_path_keys(&self) -> [(Option<String>, &'static str); 5] {
+        let coverage = self
+            .health
+            .coverage
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
+        [
+            (self.codeowners.clone(), "codeowners"),
+            (coverage, "health.coverage"),
+            (
+                self.audit.dead_code_baseline.clone(),
+                "audit.deadCodeBaseline",
+            ),
+            (self.audit.health_baseline.clone(), "audit.healthBaseline"),
+            (self.audit.dupes_baseline.clone(), "audit.dupesBaseline"),
+        ]
+    }
+
+    /// Check that each config key that names one file resolves inside
+    /// `root`. A key whose path runs through a link that resolves outside
+    /// `root` is refused. A path that does not exist yet passes, so a later
+    /// read can report it as missing. CLI flags and environment variables
+    /// that override these keys are not checked here.
+    ///
+    /// # Errors
+    ///
+    /// Returns one message for each refused key. A message names the key and
+    /// its value, never a resolved path outside `root`.
+    pub fn check_file_path_keys_inside(&self, root: &Path) -> Result<(), Vec<String>> {
+        let Ok(canonical_root) = dunce::canonicalize(root) else {
+            return Ok(());
+        };
+        let errors: Vec<String> = self
+            .file_path_keys()
+            .into_iter()
+            .filter_map(|(value, field)| value.map(|value| (value, field)))
+            .filter(|(value, _)| {
+                crate::project_read::project_entry(&canonical_root, Path::new(value))
+                    == crate::project_read::ProjectEntry::Outside
+            })
+            .map(|(value, field)| {
+                format!("{field}: '{value}' resolves to a location outside the project root")
+            })
+            .collect();
         if errors.is_empty() {
             Ok(())
         } else {
@@ -1654,13 +1775,18 @@ impl FallowConfig {
     /// Find the config file path without loading it.
     /// Searches the same locations as `find_and_load`.
     #[must_use]
+    ///
+    /// A config link that `find_and_load` refuses gives `None`, and the
+    /// search stops there, as the load stops there with an error.
     pub fn find_config_path(start: &Path) -> Option<PathBuf> {
         let mut dir = start;
         loop {
             for name in CONFIG_NAMES {
                 let candidate = dir.join(name);
-                if candidate.exists() {
-                    return Some(candidate);
+                if entry_present(&candidate) {
+                    return check_discovered_config(dir, &candidate)
+                        .is_ok()
+                        .then_some(candidate);
                 }
             }
             if is_repo_root(dir) {
@@ -1694,7 +1820,8 @@ impl FallowConfig {
         loop {
             for (idx, name) in CONFIG_NAMES.iter().enumerate() {
                 let candidate = dir.join(name);
-                if candidate.exists() {
+                if entry_present(&candidate) {
+                    check_discovered_config(dir, &candidate)?;
                     warn_on_coexisting_configs(&candidate, &shadowed_config_names(dir, idx));
                     match Self::load_with_options(&candidate, options) {
                         Ok(config) => return Ok(Some((config, candidate))),
@@ -1801,3 +1928,7 @@ impl FallowConfig {
 #[cfg(test)]
 #[path = "parsing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "parsing_read_tests.rs"]
+mod read_tests;

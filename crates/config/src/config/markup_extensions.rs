@@ -36,7 +36,9 @@ where
     if errors.is_empty() {
         Ok(values)
     } else {
-        Err(serde::de::Error::custom(errors.join("; ")))
+        Err(serde::de::Error::custom(crate::parse_error::own_message(
+            errors.join("; "),
+        )))
     }
 }
 

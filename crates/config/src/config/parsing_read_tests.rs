@@ -1,0 +1,219 @@
+//! Config reads: parse errors without file content, regular files only, and
+//! discovered config links that stay inside the project.
+
+use super::*;
+
+const MARKER: &str = "marker-7531";
+
+/// A project directory below a temp dir, with a file next to the project.
+fn project_with_outside_file(outside_name: &str, outside_content: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("project")).unwrap();
+    std::fs::create_dir(dir.path().join("project/.git")).unwrap();
+    std::fs::write(dir.path().join(outside_name), outside_content).unwrap();
+    dir
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn toml_parse_error_of_an_extended_file_names_the_position_only() {
+    let dir = project_with_outside_file("outside.txt", &format!("a = 1\nkey={MARKER}\n"));
+    let config = dir.path().join("project/.fallowrc.json");
+    std::fs::write(&config, r#"{"extends": ["../outside.txt"]}"#).unwrap();
+
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(!message.contains(MARKER), "{message}");
+    assert!(message.contains("outside.txt"), "{message}");
+    assert!(message.contains("line 2"), "{message}");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn type_error_of_an_extended_file_omits_the_value() {
+    let dir = project_with_outside_file("outside.json", &format!(r#"{{"entry": "{MARKER}"}}"#));
+    let config = dir.path().join("project/.fallowrc.json");
+    std::fs::write(&config, r#"{"extends": ["../outside.json"]}"#).unwrap();
+
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(!message.contains(MARKER), "{message}");
+    assert!(message.contains("invalid type"), "{message}");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn toml_syntax_error_of_the_project_config_omits_the_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("fallow.toml");
+    std::fs::write(&config, format!("entry = [\"a\"]\nkey={MARKER}\n")).unwrap();
+
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(!message.contains(MARKER), "{message}");
+    assert!(message.contains("line 2"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "file system access is blocked by Miri isolation")]
+fn extends_of_a_device_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join(".fallowrc.json");
+    let ups = "../".repeat(dir.path().components().count() + 1);
+    std::fs::write(&config, format!(r#"{{"extends": ["{ups}dev/null"]}}"#)).unwrap();
+
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(message.contains("not a regular file"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn discovery_refuses_a_config_link_that_leaves_the_project() {
+    let dir = project_with_outside_file("outside.json", r#"{"entry": ["src/a.ts"]}"#);
+    let project = dir.path().join("project");
+    std::os::unix::fs::symlink(
+        dir.path().join("outside.json"),
+        project.join(".fallowrc.json"),
+    )
+    .unwrap();
+
+    let message = FallowConfig::find_and_load(&project).unwrap_err();
+    assert!(message.contains(".fallowrc.json"), "{message}");
+    assert!(!message.contains("outside.json"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn discovery_gives_one_message_for_dangling_and_existing_outside_links() {
+    let dir = project_with_outside_file("outside.json", "{}");
+    let project = dir.path().join("project");
+    let link = project.join(".fallowrc.json");
+    std::os::unix::fs::symlink(dir.path().join("outside.json"), &link).unwrap();
+    let existing = FallowConfig::find_and_load(&project).unwrap_err();
+
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("missing.json"), &link).unwrap();
+    let dangling = FallowConfig::find_and_load(&project).unwrap_err();
+    assert_eq!(existing, dangling);
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn discovery_loads_a_config_link_inside_the_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    std::fs::create_dir(repo.join(".git")).unwrap();
+    std::fs::create_dir_all(repo.join("packages/app")).unwrap();
+    std::fs::write(repo.join("shared.json"), r#"{"entry": ["src/a.ts"]}"#).unwrap();
+    std::os::unix::fs::symlink(
+        "../../shared.json",
+        repo.join("packages/app/.fallowrc.json"),
+    )
+    .unwrap();
+
+    let (config, _) = FallowConfig::find_and_load(&repo.join("packages/app"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.entry, vec!["src/a.ts".to_owned()]);
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn shadowed_names_count_links_without_their_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink("/nonexistent/fallow/x", dir.path().join(".fallowrc.jsonc"))
+        .unwrap();
+    assert_eq!(
+        shadowed_config_names(dir.path(), 0),
+        vec![".fallowrc.jsonc"]
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn config_path_keys_must_stay_inside_the_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join(".fallowrc.json");
+    for (body, field) in [
+        (r#"{"codeowners": "../CODEOWNERS"}"#, "codeowners"),
+        (r#"{"codeowners": "/abs/CODEOWNERS"}"#, "codeowners"),
+        (
+            r#"{"health": {"coverage": "/tmp/coverage.json"}}"#,
+            "health.coverage",
+        ),
+        (
+            r#"{"audit": {"deadCodeBaseline": "../a.json"}}"#,
+            "audit.deadCodeBaseline",
+        ),
+        (
+            r#"{"audit": {"healthBaseline": "/a.json"}}"#,
+            "audit.healthBaseline",
+        ),
+        (
+            r#"{"audit": {"dupesBaseline": "x/../../a.json"}}"#,
+            "audit.dupesBaseline",
+        ),
+    ] {
+        std::fs::write(&config, body).unwrap();
+        let message = FallowConfig::load(&config).unwrap_err().to_string();
+        assert!(message.contains(field), "{body}: {message}");
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn relative_config_path_keys_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join(".fallowrc.json");
+    std::fs::write(
+        &config,
+        r#"{"codeowners": ".github/CODEOWNERS",
+            "health": {"coverage": "coverage/coverage-final.json"},
+            "audit": {"deadCodeBaseline": "baselines/dead.json"}}"#,
+    )
+    .unwrap();
+    FallowConfig::load(&config).unwrap();
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn zone_paths_are_checked_after_normalization() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join(".fallowrc.json");
+    for (body, field) in [
+        (
+            r#"{"boundaries": {"zones": [{"name": "a", "root": ".//home", "patterns": ["**"]}]}}"#,
+            "boundaries.zones[].root",
+        ),
+        (
+            r#"{"boundaries": {"zones": [{"name": "a", "root": "././/home", "patterns": ["**"]}]}}"#,
+            "boundaries.zones[].root",
+        ),
+        (
+            r#"{"boundaries": {"zones": [{"name": "a", "autoDiscover": [".//home"]}]}}"#,
+            "boundaries.zones[].autoDiscover",
+        ),
+        (r#"{"codeowners": ".//abs/CODEOWNERS"}"#, "codeowners"),
+    ] {
+        std::fs::write(&config, body).unwrap();
+        let message = FallowConfig::load(&config).unwrap_err().to_string();
+        assert!(message.contains(field), "{body}: {message}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn find_config_path_refuses_a_config_link_that_leaves_the_project() {
+    let dir = project_with_outside_file("outside.json", "{}");
+    let project = dir.path().join("project");
+    std::os::unix::fs::symlink(
+        dir.path().join("outside.json"),
+        project.join(".fallowrc.json"),
+    )
+    .unwrap();
+    std::fs::write(project.join("fallow.toml"), "").unwrap();
+    assert_eq!(FallowConfig::find_config_path(&project), None);
+}

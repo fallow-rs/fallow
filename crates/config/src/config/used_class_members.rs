@@ -74,7 +74,7 @@ impl<'de> Deserialize<'de> for ScopedUsedClassMemberRule {
     {
         ScopedUsedClassMemberRuleDef::deserialize(deserializer)?
             .try_into()
-            .map_err(serde::de::Error::custom)
+            .map_err(|e| serde::de::Error::custom(crate::parse_error::own_message(e)))
     }
 }
 
