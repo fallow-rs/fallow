@@ -41,9 +41,13 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    companion change into the default branch of its repository (for example
    fallow-docs `main`). A pushed feature branch is not enough: the release
    then must merge it. When the merged change touches `npm/fallow/skills`,
-   run `node scripts/sync-skills-companion.mjs --pin <merge commit>` right
-   after the merge. Publish its commit with the commands that it prints.
-   `ship-wait-checks.mjs` prints this step for such a change.
+   the Skills companion sync workflow opens a `sync-fallow-skills` pull
+   request in fallow-skills a few minutes after the merge. Merge that pull
+   request. Run `node scripts/sync-skills-companion.mjs --pin <merge commit>`
+   by hand only when no such pull request opens, because a hand run next to
+   it makes a second pull request with the same content.
+   `ship-wait-checks.mjs --commit` names the sync pull request, or gives the
+   hand-run command when it finds none.
 4. Create signed conventional commits only.
 5. Merge with pinned auto-merge after steps 1 to 4. Arm it before any CI
    wait, except in a serial merge (see "Serial merge of many pull
