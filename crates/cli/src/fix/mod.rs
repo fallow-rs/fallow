@@ -365,6 +365,10 @@ fn finalize_fix_run(
                 fixes,
                 plan::SkipReason::SharedDeclarationInUse,
             ),
+            test_importer_count: count_withheld_export_fixes(
+                fixes,
+                plan::SkipReason::TestImporters,
+            ),
         })
     {
         return code;
@@ -483,6 +487,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             skipped_low_confidence_members: 0,
             skipped_kept_re_exports: 0,
             skipped_shared_declarations: 0,
+            skipped_test_importers: 0,
         }) {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
@@ -524,7 +529,22 @@ fn apply_unused_export_fixes(
 ) {
     let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_types::results::UnusedExport>> =
         FxHashMap::default();
-    for finding in &input.results.unused_exports {
+    let (test_imported, fixable): (Vec<_>, Vec<_>) = input
+        .results
+        .unused_exports
+        .iter()
+        .partition(|finding| finding.test_importers.is_some());
+    exports::withhold_test_imported_exports(
+        &mut exports::WithheldEntrySink {
+            root: input.root,
+            plan: input.plan,
+            output: input.output,
+            dry_run: input.dry_run,
+            fixes: input.fixes,
+        },
+        &test_imported,
+    );
+    for finding in fixable {
         exports_by_file
             .entry(finding.export.path.clone())
             .or_default()
@@ -671,6 +691,7 @@ struct FixOutputInput<'a> {
     low_confidence_member_count: usize,
     kept_re_export_count: usize,
     shared_declaration_count: usize,
+    test_importer_count: usize,
 }
 
 struct CatalogFixTotals {
@@ -828,6 +849,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             skipped_low_confidence_members: input.low_confidence_member_count,
             skipped_kept_re_exports: input.kept_re_export_count,
             skipped_shared_declarations: input.shared_declaration_count,
+            skipped_test_importers: input.test_importer_count,
         }) {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
@@ -862,6 +884,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             low_confidence_member_count: input.low_confidence_member_count,
             kept_re_export_count: input.kept_re_export_count,
             shared_declaration_count: input.shared_declaration_count,
+            test_importer_count: input.test_importer_count,
         });
     }
     Ok(())
@@ -974,6 +997,7 @@ struct HumanSummaryInput<'a> {
     low_confidence_member_count: usize,
     kept_re_export_count: usize,
     shared_declaration_count: usize,
+    test_importer_count: usize,
 }
 
 /// Emit the human fix summary, split by what `--quiet` may drop.
@@ -1090,7 +1114,7 @@ impl SkipWarning {
     }
 }
 
-fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 8] {
+fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 9] {
     [
         SkipWarning {
             count: input.catalog_skipped,
@@ -1147,6 +1171,13 @@ fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 8] {
             singular: "unused export",
             plural: "unused exports",
             suffix: " whose `export` keyword also exports a name that is in use, as in `export const { a, b } = x;`. Move each unused name to a declaration without `export` by hand (run with --format json for each entry).",
+        },
+        SkipWarning {
+            count: input.test_importer_count,
+            prefix: "Kept ",
+            singular: "unused export",
+            plural: "unused exports",
+            suffix: " that a test, story, fixture or other file outside the production scope imports. Removing them would break that import. Change or remove the import first (run with --format json for each entry), then re-run `fallow fix --production`.",
         },
     ]
 }

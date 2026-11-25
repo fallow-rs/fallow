@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
-use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{ModuleInfo, SourceParseDegradation, SourceReadFailure};
 #[cfg(test)]
@@ -36,16 +35,16 @@ use crate::{
 /// its own partial orchestration.
 #[derive(Debug)]
 pub struct AnalysisSession {
-    config: ResolvedConfig,
+    pub(crate) config: ResolvedConfig,
     config_path: Option<PathBuf>,
     config_inputs: fallow_config::ConfigInputs,
     config_inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
-    discovery: crate::discover::AnalysisDiscovery,
+    pub(crate) discovery: crate::discover::AnalysisDiscovery,
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     parsed_cache: Mutex<Option<ParsedModuleCache>>,
     styling_cache: Mutex<Option<Arc<crate::health::StylingAnalysisArtifacts>>>,
-    cancellation: Option<Arc<AtomicBool>>,
+    pub(crate) cancellation: Option<Arc<AtomicBool>>,
     warm_parse: Option<Arc<WarmParseStore>>,
     /// Config load already resolved the workspaces, so a discovery refresh
     /// keeps them.
@@ -383,7 +382,7 @@ impl AnalysisSession {
             .is_some_and(|cancelled| cancelled.load(Ordering::SeqCst))
     }
 
-    fn ensure_not_cancelled(&self, stage: &str) -> EngineResult<()> {
+    pub(crate) fn ensure_not_cancelled(&self, stage: &str) -> EngineResult<()> {
         if self.is_cancelled() {
             return Err(crate::EngineError::cancelled(stage));
         }
@@ -834,7 +833,7 @@ impl AnalysisSession {
     /// `cancellation` is threaded through to the per-file parse loop, so a set
     /// token truncates the returned modules. Only callers that convert a set
     /// token into an error may pass one.
-    fn parse_modules(
+    pub(crate) fn parse_modules(
         &self,
         need_complexity: bool,
         cancellation: Option<&AtomicBool>,
@@ -1150,9 +1149,9 @@ struct ParsedModules {
     parse_degradations: Vec<SourceParseDegradation>,
 }
 
-struct SharedParsedModules {
-    modules: Arc<[ModuleInfo]>,
-    metrics: core_backend::ParseMetrics,
+pub(crate) struct SharedParsedModules {
+    pub(crate) modules: Arc<[ModuleInfo]>,
+    pub(crate) metrics: core_backend::ParseMetrics,
 }
 
 /// Modules from [`AnalysisSession::warm_parse`]. They always have complexity.
@@ -1338,7 +1337,7 @@ fn run_engine_owned_dead_code_pipeline(
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
     stopped("import resolution and graph construction")?;
     let (resolved, graph, graph_cache_rejection) =
-        resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
+        crate::session_graph::resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
     stopped("the dead-code detectors")?;
 
     let mut detector = core_backend::run_dead_code_detectors(
@@ -1365,6 +1364,10 @@ fn run_engine_owned_dead_code_pipeline(
     // Security ids too, so every surface reads the id this pipeline set.
     crate::security::stamp_security_finding_ids(&mut detector.results, &config.root);
     crate::dead_code::filter_configured_ignored_findings(&mut detector.results, config);
+    if config.production {
+        stopped("the test-side import scan")?;
+        crate::test_side_imports::attach_test_importers(&mut detector.results, config)?;
+    }
     // The detectors are the longest uninterruptible stage. Without this a
     // token set inside them yields a complete report, so the same request
     // would be answered with results or with `cancelled` depending only on
@@ -1400,34 +1403,6 @@ fn run_engine_owned_dead_code_pipeline(
         trace_provenance,
         file_hashes,
     })
-}
-
-/// Reuse the persisted module graph, or rebuild it and carry the reason the
-/// persisted one was refused.
-///
-/// The reason is the third element rather than a discarded `Option`: a warm run
-/// that paid for a multi-megabyte decode and reused none of it is the case the
-/// perf table exists to explain, and every engine-backed command reaches the
-/// pipeline through here.
-fn resolve_or_build_dead_code_graph(
-    prelude: &core_backend::DeadCodeBackendPrelude,
-    entry_points: &core_backend::DeadCodeEntryPoints,
-    modules: &[ModuleInfo],
-) -> (
-    core_backend::DeadCodeResolvedModules,
-    core_backend::DeadCodeGraphRun,
-    Option<CacheRejection>,
-) {
-    let rejection =
-        match core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules) {
-            Ok((resolved, graph)) => return (resolved, graph, None),
-            Err(rejection) => rejection,
-        };
-
-    let mut resolved = core_backend::resolve_dead_code_imports(prelude, modules);
-    let graph =
-        core_backend::build_dead_code_graph(prelude, &mut resolved.project, entry_points, modules);
-    (resolved, graph, rejection)
 }
 
 fn collect_file_hashes(
@@ -1475,6 +1450,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use fallow_types::cache_rejection::CacheRejection;
 
     fn session_with_source(source: &str) -> (tempfile::TempDir, AnalysisSession) {
         let project = tempfile::tempdir().expect("project");

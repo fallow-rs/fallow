@@ -107,6 +107,7 @@ pub mod source;
 pub mod source_edits;
 mod suppress;
 pub mod test_paths;
+pub mod test_side_imports;
 pub mod thread_pool;
 pub mod trace;
 pub mod trace_chain;
@@ -262,13 +263,14 @@ mod tests {
 
     #[test]
     fn engine_session_owns_dead_code_pipeline_sequence() {
-        let session_source = fs::read_to_string(
-            std::path::PathBuf::from(
-                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
-            )
-            .join("src/session.rs"),
+        // The session splits its dead-code pipeline across these two files.
+        let src = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
         )
-        .expect("read engine session");
+        .join("src");
+        let session_source = ["session.rs", "session_graph.rs"]
+            .map(|file| fs::read_to_string(src.join(file)).expect("read engine session"))
+            .concat();
         assert!(
             !session_source.contains("analyze_with_owned_parse_result_from_discovery"),
             "engine session must not delegate dead-code orchestration to the old core monolith"

@@ -11147,6 +11147,17 @@
             "$ref": "#/definitions/ReachabilityCaveat"
           },
           "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty. Never gates\nthe finding or the `remove-export` action, though `fallow fix` does\nwithhold the removal of a caveated export as low confidence."
+        },
+        "test_importers": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TestImporters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Production mode only: the test-side files that import this export. A\nfile is test-side when an entry point reaches it and a production\nexclude pattern or a `production.ignore` glob matches it (test, story,\nfixture and bench files), or when no runtime entry point reaches it (a\nfile that only a support entry seeds). When present,\nthe `remove-export` action is not auto-fixable, because the removal\nbreaks these imports. Absent when no such file imports the export."
         }
       },
       "required": [
@@ -11256,6 +11267,17 @@
             "$ref": "#/definitions/ReachabilityCaveat"
           },
           "description": "Advisory caveats on the reachability verdict behind this finding.\nA type export rests on exactly the reachability test an\n`unused_exports[]` entry does, and the LSP offers the same\nremove-the-`export`-keyword quick fix for both, so the two must render\nwith the same confidence. Sorted, deduplicated, omitted when empty."
+        },
+        "test_importers": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TestImporters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Production mode only: the test-side files that import this type. The\nsame rule as [`UnusedExportFinding::test_importers`] applies, and the\n`remove-export` action is not auto-fixable when the field is present."
         }
       },
       "required": [
@@ -40643,6 +40665,27 @@
         }
       ],
       "description": "The kind of a shallow directory action."
+    },
+    "TestImporters": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The importing files, sorted by path, at most 5."
+        },
+        "remaining": {
+          "type": "integer",
+          "description": "The number of importing files that `files` does not list."
+        }
+      },
+      "required": [
+        "files",
+        "remaining"
+      ],
+      "description": "The reachable files outside the production scope that import an export."
     }
   }
 }

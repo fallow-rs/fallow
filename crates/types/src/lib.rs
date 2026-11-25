@@ -37,6 +37,9 @@ pub mod command_surfaces;
 pub mod complexity_contribution;
 /// The config file names that discovery reads and the near-miss names.
 pub mod config_file_names;
+/// A per-thread scope that keeps the diagnostics of a second analysis out
+/// of the report.
+pub mod diagnostic_scope;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
 /// Shared duplicate-code output contracts.

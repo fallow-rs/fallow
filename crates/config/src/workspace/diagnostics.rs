@@ -266,6 +266,9 @@ fn per_instance_warning(canonical: &Path, diag: &WorkspaceDiagnostic) -> Planned
 /// only the stderr surface is bounded, so structured JSON consumers still see
 /// every diagnostic.
 pub(super) fn emit_diagnostics(root: &Path, diagnostics: &[WorkspaceDiagnostic]) {
+    if scratch_run() {
+        return;
+    }
     #[cfg(test)]
     for diag in diagnostics {
         capture_diag(diag);
@@ -415,6 +418,17 @@ pub fn capture_workspace_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<Works
 static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDiagnostic>>>> =
     OnceLock::new();
 
+/// Whether the current thread runs inside
+/// [`fallow_types::diagnostic_scope::with_scratch_diagnostics`].
+fn scratch_run() -> bool {
+    fallow_types::diagnostic_scope::is_scratch_run()
+}
+
+/// The registry for a write, or `None` inside a scratch run.
+fn writable_registry() -> Option<&'static Mutex<FxHashMap<PathBuf, Vec<WorkspaceDiagnostic>>>> {
+    (!scratch_run()).then(|| WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default())))
+}
+
 /// Replace the workspace-discovery diagnostics for `root` with `diagnostics`,
 /// PRESERVING any source-discovery diagnostics (see
 /// [`WorkspaceDiagnosticKind::is_source_discovery`]) and analysis-stage
@@ -450,8 +464,9 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 /// the standalone envelopes read this registry verbatim (issue #2366).
 pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagnostic>) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
-    if let Ok(mut map) = registry.lock() {
+    if let Some(registry) = writable_registry()
+        && let Ok(mut map) = registry.lock()
+    {
         let preserved = map.get(&canonical).map_or_else(Vec::new, |existing| {
             existing
                 .iter()
@@ -491,8 +506,9 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
         return;
     }
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
-    if let Ok(mut map) = registry.lock() {
+    if let Some(registry) = writable_registry()
+        && let Ok(mut map) = registry.lock()
+    {
         let existing = map.entry(canonical).or_default();
         let mut seen: FxHashSet<(String, String, String)> = existing
             .iter()
@@ -559,8 +575,9 @@ pub fn record_plugin_config_diagnostics(
 ) -> Vec<WorkspaceDiagnostic> {
     let diagnostics = fallow_types::workspace::dedupe_workspace_diagnostics(diagnostics);
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
-    if let Ok(mut map) = registry.lock() {
+    if let Some(registry) = writable_registry()
+        && let Ok(mut map) = registry.lock()
+    {
         let existing = map.entry(canonical).or_default();
         existing.retain(|diagnostic| !diagnostic.kind.is_plugin_stage());
         existing.extend(diagnostics.iter().cloned());
@@ -593,8 +610,9 @@ pub fn record_source_read_failures(
         })
         .collect();
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
-    if let Ok(mut map) = registry.lock() {
+    if let Some(registry) = writable_registry()
+        && let Ok(mut map) = registry.lock()
+    {
         let existing = map.entry(canonical).or_default();
         existing.retain(|diagnostic| {
             !matches!(
@@ -682,8 +700,9 @@ pub fn record_source_parse_degradations(
         })
         .collect();
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
-    if let Ok(mut map) = registry.lock() {
+    if let Some(registry) = writable_registry()
+        && let Ok(mut map) = registry.lock()
+    {
         let existing = map.entry(canonical).or_default();
         existing.retain(|diagnostic| {
             !matches!(
@@ -734,8 +753,9 @@ pub fn replace_source_discovery_diagnostics(
     diagnostics: Vec<WorkspaceDiagnostic>,
 ) -> Vec<WorkspaceDiagnostic> {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
-    if let Ok(mut map) = registry.lock() {
+    if let Some(registry) = writable_registry()
+        && let Ok(mut map) = registry.lock()
+    {
         let existing = map.entry(canonical).or_default();
         existing.retain(|d| !d.kind.is_source_discovery());
         existing.extend(diagnostics.iter().cloned());
@@ -756,6 +776,9 @@ pub fn replace_source_discovery_diagnostics(
 /// [`stash_workspace_diagnostics`] (issue #2366).
 pub fn clear_analysis_stage_diagnostics(root: &Path) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if scratch_run() {
+        return;
+    }
     let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
         return;
     };
@@ -778,6 +801,9 @@ pub fn clear_analysis_stage_diagnostics(root: &Path) {
 /// [`stash_workspace_diagnostics`] (issue #2689).
 pub fn clear_health_stage_diagnostics(root: &Path) {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if scratch_run() {
+        return;
+    }
     let Some(registry) = WORKSPACE_DIAGNOSTICS.get() else {
         return;
     };

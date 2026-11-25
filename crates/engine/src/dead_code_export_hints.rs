@@ -8,7 +8,12 @@
 //!   files are copied as complete sets, and many projects keep each named
 //!   part before it has a consumer.
 //!
-//! Each such finding gets an `add-to-config` action with the `ignoreExports`
+//! - An export that a test-side file imports (production mode, issue
+//!   #5251): the `remove-export` action is not auto-fixable, because the
+//!   removal breaks that import. No config action is added: the export is
+//!   unused in production, and the finding stays correct.
+//!
+//! Each generated or shadcn/ui finding gets an `add-to-config` action with the `ignoreExports`
 //! rule that hides it. The findings stay in the report. The human report
 //! prints one hint per group from these actions.
 
@@ -20,7 +25,7 @@ use fallow_types::output::{
     AddToConfigAction, AddToConfigKind, AddToConfigValue, GENERATED_FILE_EXPORTS_HINT,
     IgnoreExportsRule, IssueAction, UI_FOLDER_EXPORTS_HINT,
 };
-use fallow_types::output_dead_code::IGNORE_EXPORTS_VALUE_SCHEMA;
+use fallow_types::output_dead_code::{IGNORE_EXPORTS_VALUE_SCHEMA, TEST_IMPORTERS_NOTE};
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashMap;
 use serde_json::Value;
@@ -50,6 +55,9 @@ pub fn add_unused_export_config_actions(results: &mut AnalysisResults, config: &
         ui_folders: FxHashMap::default(),
     };
     for finding in &mut results.unused_exports {
+        if finding.test_importers.is_some() {
+            mark_test_imported(&mut finding.actions);
+        }
         let path = finding.export.path.clone();
         if files.is_generated(&path) {
             mark_generated(&mut finding.actions, &files.relative(&path));
@@ -63,6 +71,9 @@ pub fn add_unused_export_config_actions(results: &mut AnalysisResults, config: &
         }
     }
     for finding in &mut results.unused_types {
+        if finding.test_importers.is_some() {
+            mark_test_imported(&mut finding.actions);
+        }
         let path = finding.export.path.clone();
         if files.is_generated(&path) {
             mark_generated(&mut finding.actions, &files.relative(&path));
@@ -119,6 +130,17 @@ fn mark_generated(actions: &mut Vec<IssueAction>, file: &str) {
             GENERATED_FILE_EXPORTS_HINT,
             file.to_string(),
         ));
+    }
+}
+
+/// Make the code fix of an export that a test-side file imports not
+/// auto-fixable, with the reason in its note. The removal breaks that import.
+fn mark_test_imported(actions: &mut [IssueAction]) {
+    for action in actions.iter_mut() {
+        if let IssueAction::Fix(fix) = action {
+            fix.auto_fixable = false;
+            fix.note = Some(TEST_IMPORTERS_NOTE.to_string());
+        }
     }
 }
 

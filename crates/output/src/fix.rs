@@ -28,6 +28,9 @@ pub struct FixJsonOutputInput<'a> {
     /// Export removals withheld because the same `export` keyword also
     /// exports a name that the run keeps.
     pub skipped_shared_declarations: usize,
+    /// Export removals withheld in production mode because a file outside
+    /// the production scope imports the export.
+    pub skipped_test_importers: usize,
 }
 
 /// JSON root emitted by `fallow fix --format json`.
@@ -74,6 +77,12 @@ pub struct FixJsonOutput<'a> {
     /// with `skip_reason: "shared_declaration_in_use"`, so this counts
     /// exports, not files. Intentional and exit-code-neutral.
     pub skipped_shared_declarations: usize,
+    /// Export removals withheld in production mode because a reachable test,
+    /// story, fixture or other file outside the production scope imports the
+    /// export: the removal would break that import. Each withheld export is a
+    /// `remove_export` entry with `skip_reason: "test_importers"`, so this
+    /// counts exports, not files. Intentional and exit-code-neutral.
+    pub skipped_test_importers: usize,
 }
 
 /// Count fix entries whose `applied` flag is true.
@@ -104,6 +113,7 @@ pub fn count_reported_fix_skips(fixes: &[Value]) -> usize {
                         | "kept_re_export"
                         | "shared_declaration_in_use"
                         | "generated_source"
+                        | "test_importers"
                 )
             );
             is_skipped && !is_plan_skip
@@ -126,6 +136,7 @@ pub fn build_fix_json_output(input: FixJsonOutputInput<'_>) -> FixJsonOutput<'_>
         skipped_low_confidence_members: input.skipped_low_confidence_members,
         skipped_kept_re_exports: input.skipped_kept_re_exports,
         skipped_shared_declarations: input.skipped_shared_declarations,
+        skipped_test_importers: input.skipped_test_importers,
     }
 }
 
@@ -186,6 +197,7 @@ mod tests {
             skipped_low_confidence_members: 5,
             skipped_kept_re_exports: 6,
             skipped_shared_declarations: 7,
+            skipped_test_importers: 3,
         });
 
         assert!(output.dry_run);
@@ -214,6 +226,7 @@ mod tests {
             "an export held back by its shared declaration belongs to its own counter"
         );
         assert_eq!(output.skipped_shared_declarations, 7);
+        assert_eq!(output.skipped_test_importers, 3);
     }
 
     #[test]
@@ -229,6 +242,7 @@ mod tests {
             skipped_low_confidence_members: 0,
             skipped_kept_re_exports: 0,
             skipped_shared_declarations: 0,
+            skipped_test_importers: 0,
         })
         .expect("fix output serializes");
 
@@ -237,6 +251,7 @@ mod tests {
         assert_eq!(value["skipped"], 0);
         assert_eq!(value["skipped_kept_re_exports"], 0);
         assert_eq!(value["skipped_shared_declarations"], 0);
+        assert_eq!(value["skipped_test_importers"], 0);
         assert_eq!(value["fixes"][0]["type"], "unused-export");
     }
 }
