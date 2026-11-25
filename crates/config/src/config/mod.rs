@@ -652,7 +652,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 
-    /// A project-root-relative path to a CODEOWNERS file, used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
+    /// A path to a CODEOWNERS file, relative to the project root or absolute, that must resolve inside the project scope base (the git top level of the root), used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codeowners: Option<String>,
 

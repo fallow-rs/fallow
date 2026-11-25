@@ -1556,7 +1556,6 @@ impl FallowConfig {
         self.validate_ignore_rule_globs(&mut errors);
         self.validate_boundary_globs(&mut errors);
         self.validate_workspace_baseline_keys(&mut errors);
-        self.validate_file_path_keys(&mut errors);
 
         for plugin in &self.framework {
             if let Err(mut plugin_errors) = plugin.validate_user_globs() {
@@ -1568,23 +1567,6 @@ impl FallowConfig {
             Ok(())
         } else {
             Err(errors)
-        }
-    }
-
-    /// Validate the config keys that name one file to read: each must be a
-    /// relative path. [`Self::check_file_path_keys_inside`] checks on disk
-    /// that a `..` stays inside the project scope base. The CLI flags that
-    /// override these keys come from the user and keep their own rules.
-    fn validate_file_path_keys(
-        &self,
-        errors: &mut Vec<super::glob_validation::GlobValidationError>,
-    ) {
-        for (value, field) in self.file_path_keys() {
-            if let Some(value) = value
-                && let Err(error) = super::glob_validation::validate_user_file_path(&value, field)
-            {
-                errors.push(error);
-            }
         }
     }
 
@@ -1607,14 +1589,15 @@ impl FallowConfig {
         ]
     }
 
-    /// Check that each config key that names one file, taken relative to
-    /// `root`, resolves inside the project scope base of `root` (see
-    /// [`crate::project_scope_base`]). A config of a monorepo package can
-    /// thus name `../../.github/CODEOWNERS`. A key whose path leaves the
-    /// scope base, by text or through a link, is refused. A path that does not exist yet passes, so a later
-    /// read can report it as missing. When `root` does not resolve, each key
-    /// that is set is refused. CLI flags and environment variables that
-    /// override these keys are not checked here.
+    /// Check that each config key that names one file resolves inside the
+    /// project scope base of `root` (see [`crate::project_scope_base`]). A
+    /// relative path is taken from `root`, so a config of a monorepo package
+    /// can name `../../.github/CODEOWNERS`. An absolute path is allowed too.
+    /// A key whose path leaves the scope base, by text or through a link,
+    /// is refused. A path that does not exist yet passes, so a later read
+    /// can report it as missing. When `root` does not resolve, each key that
+    /// is set is refused. CLI flags and environment variables that override
+    /// these keys are not checked here.
     ///
     /// # Errors
     ///
@@ -1629,23 +1612,22 @@ impl FallowConfig {
             .filter_map(|(value, field)| value.map(|value| (value, field)))
             .filter(|(value, _)| {
                 canonical_root.as_deref().is_none_or(|canonical_root| {
-                    crate::project_read::project_entry_within(
-                        &base,
-                        canonical_root,
-                        Path::new(value),
-                    ) == crate::project_read::ProjectEntry::Outside
+                    crate::project_read::project_path_entry(&base, canonical_root, Path::new(value))
+                        == crate::project_read::ProjectEntry::Outside
                 })
             })
             .map(|(value, field)| {
                 if self.outside_keys.covers(field) {
                     format!(
                         "{field}: a value from a config file outside the project ({}) resolves \
-                         to a location outside the project root. The text of a file outside \
-                         the project is not shown",
+                         to a location outside the project scope base. The text of a file \
+                         outside the project is not shown",
                         self.outside_keys.file_list()
                     )
                 } else {
-                    format!("{field}: '{value}' resolves to a location outside the project root")
+                    format!(
+                        "{field}: '{value}' resolves to a location outside the project scope base"
+                    )
                 }
             })
             .collect();

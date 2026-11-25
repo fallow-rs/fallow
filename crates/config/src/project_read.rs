@@ -186,6 +186,30 @@ pub fn project_entry_within(
     ProjectEntry::Inside
 }
 
+/// [`project_entry_within`] for a `path` that can also be absolute. An
+/// absolute path does not need the canonical spelling of the base: its
+/// longest part that exists resolves first, and the walk checks the rest.
+pub fn project_path_entry(
+    canonical_base: &Path,
+    canonical_root: &Path,
+    path: &Path,
+) -> ProjectEntry {
+    if !path.is_absolute() {
+        return project_entry_within(canonical_base, canonical_root, path);
+    }
+    let Some((existing, resolved)) = path.ancestors().find_map(|dir| {
+        dunce::canonicalize(dir)
+            .ok()
+            .map(|resolved| (dir, resolved))
+    }) else {
+        return ProjectEntry::Outside;
+    };
+    let Ok(rest) = path.strip_prefix(existing) else {
+        return ProjectEntry::Outside;
+    };
+    project_entry_within(canonical_base, canonical_base, &resolved.join(rest))
+}
+
 /// The state of a path whose walk reached the missing entry `missing`, with
 /// `rest` still to walk. The rest is taken by text.
 fn missing_rest(

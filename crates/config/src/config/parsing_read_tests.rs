@@ -171,7 +171,10 @@ fn shadowed_names_count_links_without_their_targets() {
 #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
 fn config_path_keys_must_stay_inside_the_project() {
     let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join(".fallowrc.json");
+    let outer = dunce::canonicalize(dir.path()).unwrap();
+    let root = outer.join("project");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let config = root.join(".fallowrc.json");
     for (body, field) in [
         (r#"{"codeowners": "/abs/CODEOWNERS"}"#, "codeowners"),
         (
@@ -184,9 +187,37 @@ fn config_path_keys_must_stay_inside_the_project() {
         ),
     ] {
         std::fs::write(&config, body).unwrap();
-        let message = FallowConfig::load(&config).unwrap_err().to_string();
+        let loaded = FallowConfig::load(&config).unwrap();
+        let message = loaded
+            .check_file_path_keys_inside(&root)
+            .unwrap_err()
+            .join("\n");
         assert!(message.contains(field), "{body}: {message}");
+        assert!(message.contains("scope base"), "{body}: {message}");
     }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn absolute_config_path_keys_inside_the_scope_base_load() {
+    let dir = tempfile::tempdir().unwrap();
+    // The temp dir path itself can pass through a link, as `/tmp` does on
+    // macOS, so the absolute values keep that spelling.
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::create_dir_all(root.join(".github")).unwrap();
+    std::fs::write(root.join(".github/CODEOWNERS"), "* @owner\n").unwrap();
+    let codeowners = root.join(".github/CODEOWNERS");
+    let coverage = root.join("coverage/missing.json");
+    let body = serde_json::json!({
+        "codeowners": codeowners,
+        "health": {"coverage": coverage},
+        "audit": {"deadCodeBaseline": root.join("sub/../baselines/dead.json")},
+    });
+    let config = root.join(".fallowrc.json");
+    std::fs::write(&config, body.to_string()).unwrap();
+    let loaded = FallowConfig::load(&config).unwrap();
+    assert_eq!(loaded.check_file_path_keys_inside(&root), Ok(()));
 }
 
 #[test]
@@ -222,7 +253,6 @@ fn zone_paths_are_checked_after_normalization() {
             r#"{"boundaries": {"zones": [{"name": "a", "autoDiscover": [".//home"]}]}}"#,
             "boundaries.zones[].autoDiscover",
         ),
-        (r#"{"codeowners": ".//abs/CODEOWNERS"}"#, "codeowners"),
     ] {
         std::fs::write(&config, body).unwrap();
         let message = FallowConfig::load(&config).unwrap_err().to_string();
