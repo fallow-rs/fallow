@@ -445,7 +445,12 @@ fn user_mcp_entries_use_an_absolute_launcher_outside_the_project() {
         gitignore_claude: false,
         mode: Mode::Install,
     };
-    let steps = mcp::install(&ctx, &[Harness::Cursor, Harness::Claude], Some(&command));
+    let steps = mcp::install(
+        &ctx,
+        &[Harness::Cursor, Harness::Claude],
+        Some(&command),
+        false,
+    );
 
     let cursor: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(home.join(".cursor/mcp.json")).unwrap())

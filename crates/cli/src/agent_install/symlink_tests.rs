@@ -571,12 +571,17 @@ fn user_mcp_install_without_a_launcher_names_a_global_install() {
     user.user = true;
     user.home = Some(home.path().to_path_buf());
 
-    let steps = mcp::install(&user, &[Harness::Codex], None);
+    let steps = mcp::install(&user, &[Harness::Codex], None, false);
 
     let detail = steps[0].detail.clone().unwrap_or_default();
     assert!(detail.contains("npm install -g fallow"), "{detail}");
     assert!(detail.contains("cargo install fallow-mcp"), "{detail}");
-    let project = mcp::install(&ctx(root.path(), Mode::Install), &[Harness::Codex], None);
+    let project = mcp::install(
+        &ctx(root.path(), Mode::Install),
+        &[Harness::Codex],
+        None,
+        false,
+    );
     let detail = project[0].detail.clone().unwrap_or_default();
     assert!(detail.contains("npm i -D fallow"), "{detail}");
 }
