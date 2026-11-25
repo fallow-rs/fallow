@@ -426,13 +426,15 @@ fn user_mcp_entries_use_an_absolute_launcher_outside_the_project() {
         Some(project.join("node_modules/.bin/fallow-mcp"))
     });
     assert!(own.is_none(), "{own:?}");
-    let own = mcp::resolve_user_command_with(Vec::new(), &project_dirs, || {
-        Some(PathBuf::from("/opt/fallow"))
-    })
-    .unwrap();
+    let outside = base.join("opt/fallow");
+    let own = mcp::resolve_user_command_with(Vec::new(), &project_dirs, || Some(outside.clone()))
+        .unwrap();
     assert_eq!(
         (own.command.as_str(), own.args.as_slice()),
-        ("/opt/fallow", &["mcp-server".to_string()][..])
+        (
+            outside.display().to_string().as_str(),
+            &["mcp-server".to_string()][..]
+        )
     );
 
     let ctx = Ctx {
