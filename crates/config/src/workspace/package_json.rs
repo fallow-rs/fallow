@@ -70,7 +70,7 @@ where
 /// The text of a manifest such as `package.json` or `deno.json`. The file
 /// must be a regular file with a size limit, at a location that
 /// [`manifest_location_allowed`] accepts.
-pub(super) fn read_manifest(path: &std::path::Path) -> Result<String, String> {
+fn read_manifest(path: &std::path::Path) -> Result<String, String> {
     read_manifest_in(None, path)
 }
 

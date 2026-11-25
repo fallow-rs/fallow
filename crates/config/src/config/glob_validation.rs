@@ -364,7 +364,7 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
     })
 }
 
-/// The most expansions that [`brace_expansions`] builds for one pattern.
+/// The most expansions that the brace expansion of one pattern builds.
 /// Real config globs have a few. A pattern over the limit is refused.
 pub const MAX_BRACE_EXPANSIONS: usize = 1024;
 

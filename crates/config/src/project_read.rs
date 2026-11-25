@@ -22,8 +22,7 @@ pub enum ProjectEntry {
 /// The directory that project files of the analysis root `root` may
 /// resolve in.
 ///
-/// - In a git checkout, it is the git top level of the root, see
-///   [`project_checkout_top`].
+/// - In a git checkout, it is the git top level of the root.
 /// - Else it is the nearest workspace root above the root that lists the
 ///   root as a member: a directory with a `pnpm-workspace.yaml`, or with a
 ///   `package.json` that has `workspaces`. The search stops below the home

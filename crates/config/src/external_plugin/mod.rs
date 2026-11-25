@@ -1173,11 +1173,7 @@ fn is_file_or_link(path: &Path) -> bool {
 
 /// Check if a path resolves within the canonical root (follows symlinks).
 /// A path that does not resolve counts as outside.
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "this module is glob re-exported from lib.rs, so `pub` would leak this helper into the public API; pub(crate) is the minimal widening for the rule-pack loader"
-)]
-pub(crate) fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
+fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
     dunce::canonicalize(path).is_ok_and(|canonical| canonical.starts_with(canonical_root))
 }
 
