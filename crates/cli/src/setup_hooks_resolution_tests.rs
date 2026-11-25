@@ -883,3 +883,47 @@ fn gate_blocks_when_the_json_reader_lies_in_a_target_tree() {
         );
     }
 }
+
+/// A version-manager shim runs the fallow that the project selects. The gate
+/// skips a recorded fallow or a fallow on PATH in a shim directory (in any
+/// letter case) or one that links to `volta-shim`, and runs the next one.
+#[test]
+fn gate_skips_version_manager_shims() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join(".asdf/shims/fallow"), "asdf", &log);
+    logging_stub(&base.join(".volta/bin/fallow"), "volta", &log);
+    logging_stub(&base.join("x/MISE/Shims/fallow"), "mise", &log);
+    logging_stub(&base.join("volta/volta-shim"), "vshim", &log);
+    std::fs::create_dir_all(base.join("links")).unwrap();
+    std::os::unix::fs::symlink(base.join("volta/volta-shim"), base.join("links/fallow")).unwrap();
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let prefix = format!(
+        "{}:{}:{}:",
+        base.join(".volta/bin").display(),
+        base.join("x/MISE/Shims").display(),
+        base.join("links").display()
+    );
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, base.join(".asdf/shims/fallow").to_str()),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+        &prefix,
+    );
+    let calls = calls(&log);
+
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in ["asdf", "volta", "mise", "vshim"] {
+        assert!(!calls.contains(name), "{name}: {calls}");
+    }
+}

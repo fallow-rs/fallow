@@ -292,10 +292,10 @@ gate_check_targets() {
   for tool in fallow git; do
     GATE_TARGET_EXCLUDED=()
     gate_filter_path
-    before="$(gate_which "$tool" || true)"
+    before="$(gate_find_tool "$tool" || true)"
     GATE_TARGET_EXCLUDED=(${saved[@]+"${saved[@]}"})
     gate_filter_path
-    after="$(gate_which "$tool" || true)"
+    after="$(gate_find_tool "$tool" || true)"
     [ -n "$before" ] && [ "$after" != "$before" ] || continue
     gate_block_target "$tool" "$before"
   done
@@ -309,6 +309,64 @@ gate_which() {
     /* | [A-Za-z]:[\\/]*) printf '%s\n' "$found" ;;
     *) return 1 ;;
   esac
+}
+
+# Returns 0 when the fallow at $1 is a version-manager shim, which runs the
+# fallow that the project selects: a file in a Volta, mise or asdf shim
+# directory (in any letter case, before or after links), or a link to
+# volta-shim. A link that the gate cannot follow counts as a shim.
+gate_is_shim() {
+  local file="$1" link hops=0 hit=1
+  shopt -s nocasematch
+  case "${file%/*}" in
+    */.volta/bin | */mise/shims | */.asdf/shims) hit=0 ;;
+  esac
+  shopt -u nocasematch
+  [ "$hit" -eq 1 ] || return 0
+  while [ -L "$file" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 0
+    link="$(readlink -- "$file" 2>/dev/null)" || return 0
+    case "$link" in
+      /*) file="$link" ;;
+      *) file="${file%/*}/$link" ;;
+    esac
+  done
+  gate_resolve_dir "${file%/*}" || return 0
+  shopt -s nocasematch
+  case "$RESOLVED" in
+    */.volta/bin | */mise/shims | */.asdf/shims) hit=0 ;;
+  esac
+  case "${file##*/}" in
+    volta-shim | volta-shim.exe) hit=0 ;;
+  esac
+  shopt -u nocasematch
+  return "$hit"
+}
+
+# Prints the path of the first fallow on PATH that is not a version-manager
+# shim, or returns 1.
+gate_find_fallow() {
+  local entry
+  local -a entries=()
+  IFS=: read -r -a entries <<<"$PATH"
+  for entry in ${entries[@]+"${entries[@]}"}; do
+    case "$entry" in
+      /* | [A-Za-z]:[\\/]*) ;;
+      *) continue ;;
+    esac
+    [ -f "$entry/fallow" ] && [ -x "$entry/fallow" ] || continue
+    gate_is_shim "$entry/fallow" && continue
+    printf '%s\n' "$entry/fallow"
+    return 0
+  done
+  return 1
+}
+
+# Prints the path of the program $1 that the gate runs: gate_find_fallow for
+# fallow, else the program on PATH.
+gate_find_tool() {
+  if [ "$1" = fallow ]; then gate_find_fallow; else gate_which "$1"; fi
 }
 
 # The install scope and the fallow of this gate. Fallow writes both values
@@ -338,7 +396,11 @@ if [ "$GATE_SCOPE" = project ]; then
   fi
 else
   case "$GATE_FALLOW_BIN" in
-    /* | [A-Za-z]:[\\/]*) [ -x "$GATE_FALLOW_BIN" ] && GATE_LOCAL_FALLOW="$GATE_FALLOW_BIN" ;;
+    /* | [A-Za-z]:[\\/]*)
+      if [ -x "$GATE_FALLOW_BIN" ] && ! gate_is_shim "$GATE_FALLOW_BIN"; then
+        GATE_LOCAL_FALLOW="$GATE_FALLOW_BIN"
+      fi
+      ;;
   esac
 fi
 
@@ -349,7 +411,7 @@ gate_git() {
   git -c safe.bareRepository=explicit "$@"
 }
 
-GATE_PATH_FALLOW="$(gate_which fallow || true)"
+GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 
 GATE_JSON_RUNNER=()
 GATE_JSON_DIR=""
@@ -760,7 +822,7 @@ fi
 # root do not supply.
 if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
   gate_exclude_tree "$SESSION_CWD" "" self
-  GATE_PATH_FALLOW="$(gate_which fallow || true)"
+  GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 fi
 
 set -f
@@ -783,7 +845,7 @@ done
 # A JSON reader that the gate found before the targets were known can lie in
 # a target tree. The check runs before the next reader probe.
 gate_check_targets
-GATE_PATH_FALLOW="$(gate_which fallow || true)"
+GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 if [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] && gate_runner_excluded "${GATE_JSON_RUNNER[0]}"; then
   GATE_JSON_RUNNER=()
   GATE_JSON_DIR=""
@@ -1202,7 +1264,7 @@ else
   fi
 fi
 gate_check_targets
-GATE_PATH_FALLOW="$(gate_which fallow || true)"
+GATE_PATH_FALLOW="$(gate_find_fallow || true)"
 
 # Lists the findings that caused a fail verdict, one line each, from the
 # `fallow audit --format json` report on stdin. A finding is an object with an

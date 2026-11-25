@@ -7,7 +7,9 @@
 //! refused when the path as found has a `node_modules` component, or when the
 //! path or its target is inside the project root or the git work tree of the
 //! project. The search then goes on with the next `PATH` entry. A relative or
-//! empty `PATH` entry never counts. On macOS and Windows, where the default
+//! empty `PATH` entry never counts. A version-manager shim (a Volta, mise or
+//! asdf shim directory, or a link to `volta-shim`) never counts either,
+//! because it runs the fallow that the project selects. On macOS and Windows, where the default
 //! file systems ignore letter case, the comparisons ignore letter case too.
 
 use std::path::{Path, PathBuf};
@@ -69,9 +71,40 @@ pub fn project_dirs(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+/// The directory suffixes of version-manager shims, in lower case. A shim
+/// runs the fallow that the current project selects.
+const SHIM_DIRS: &[(&str, &str)] = &[(".volta", "bin"), ("mise", "shims"), (".asdf", "shims")];
+
+/// True when the directory of `file` is a known version-manager shim
+/// directory (in any letter case), or when `file` is a `volta-shim`.
+fn is_version_manager_shim(file: &Path) -> bool {
+    let in_shim_dir = |path: &Path| {
+        let mut parts = path
+            .parent()
+            .into_iter()
+            .flat_map(Path::components)
+            .rev()
+            .map(|part| part.as_os_str().to_string_lossy().to_lowercase());
+        let (Some(last), Some(before)) = (parts.next(), parts.next()) else {
+            return false;
+        };
+        SHIM_DIRS
+            .iter()
+            .any(|(dir, sub)| before == *dir && last == *sub)
+    };
+    let is_volta_shim = |path: &Path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .is_some_and(|name| name == "volta-shim" || name == "volta-shim.exe")
+    };
+    in_shim_dir(file)
+        || dunce::canonicalize(file).is_ok_and(|real| in_shim_dir(&real) || is_volta_shim(&real))
+}
+
 /// True when `candidate` can be a user-level launcher.
 pub fn is_user_launcher(candidate: &Path, project_dirs: &[PathBuf]) -> bool {
-    if !candidate.is_absolute() || has_node_modules(candidate) {
+    if !candidate.is_absolute() || has_node_modules(candidate) || is_version_manager_shim(candidate)
+    {
         return false;
     }
     let canonical = dunce::canonicalize(candidate).ok();
@@ -172,6 +205,44 @@ mod tests {
             find_user_launcher("fallow", vec![base.join("bin")], &dirs),
             Some(base.join("bin/fallow"))
         );
+    }
+
+    /// A version-manager shim picks the fallow of the project that it runs
+    /// in, so the search skips a shim directory (in any letter case) and a
+    /// link to `volta-shim`.
+    #[cfg(unix)]
+    #[test]
+    fn find_user_launcher_skips_version_manager_shims() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let project = base.join("work/app");
+        let shim_dirs = [
+            base.join(".volta/bin"),
+            base.join(".local/share/mise/shims"),
+            base.join("mise/shims"),
+            base.join(".asdf/shims"),
+            base.join(".Volta/Bin"),
+        ];
+        for dir in &shim_dirs {
+            touch(&dir.join("fallow"));
+        }
+        touch(&base.join("volta/volta-shim"));
+        std::fs::create_dir_all(base.join("links")).unwrap();
+        std::os::unix::fs::symlink(base.join("volta/volta-shim"), base.join("links/fallow"))
+            .unwrap();
+        let global = base.join("global/bin");
+        touch(&global.join("fallow"));
+        let mut dirs = shim_dirs.to_vec();
+        dirs.push(base.join("links"));
+        dirs.push(global.clone());
+
+        let found = find_user_launcher("fallow", dirs, &project_dirs(&project));
+
+        assert_eq!(found, Some(global.join("fallow")));
+        assert!(!is_user_launcher(
+            &base.join(".asdf/shims/fallow"),
+            &project_dirs(&project)
+        ));
     }
 
     /// On macOS and Windows a `Node_Modules` directory or a project path in
