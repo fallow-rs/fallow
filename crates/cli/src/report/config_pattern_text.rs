@@ -3,8 +3,9 @@
 //! `circularDependencies.allow`, `ignoreExports`, `duplicates.ignore`,
 //! `health.ignore`), the
 //! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
-//! `overrides` rules that cannot change a result, and the requested checks that
-//! did not run because their rule is off.
+//! `overrides` rules that cannot change a result, the `overrides[].files`
+//! globs that matched no file, and the requested checks that did not run
+//! because their rule is off.
 //!
 //! Every output reads the same `workspace_diagnostics[]` entries, and each
 //! format carries them in exactly one place:
@@ -112,7 +113,8 @@ pub fn print_section_stderr_notes(
 /// `ignoreFindings`, `ignoreDependencies`, `circularDependencies.allow`, then one note line per config
 /// setting with redundant entries, in the order `entry`,
 /// `ignoreDependencies`, `ignorePatterns`, then one note line per `overrides`
-/// rule that had no effect, then one note line per requested rule that is off.
+/// rule that had no effect, then one note line per `overrides[].files` glob
+/// that matched no file, then one note line per requested rule that is off.
 #[must_use]
 pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
     let patterns_of = |kind: &str| -> Vec<String> {
@@ -201,6 +203,20 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             "Note: override rule had no effect: {rule} for [{globs}] ({hint})."
         ))
     });
+    let override_glob_notes =
+        override_glob_groups(diagnostics)
+            .into_iter()
+            .map(|(hint, patterns)| {
+                let noun = if patterns.len() == 1 { "glob" } else { "globs" };
+                let patterns = patterns
+                    .iter()
+                    .map(|pattern| single_line(pattern))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "Note: overrides[].files {noun} matched no file this run: {patterns} ({hint})."
+                )
+            });
     let requested_notes = diagnostics.iter().filter_map(|diagnostic| {
         let (rule, flag) = diagnostic.kind.requested_rule_off()?;
         Some(format!(
@@ -228,8 +244,32 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             ))
         })
         .chain(override_notes)
+        .chain(override_glob_notes)
         .chain(requested_notes)
         .collect()
+}
+
+/// The `overrides[].files` globs that matched no file, grouped by their hint
+/// in the order of the first glob of each group.
+fn override_glob_groups(diagnostics: &[WorkspaceDiagnostic]) -> Vec<(&'static str, Vec<&str>)> {
+    let mut groups: Vec<(&'static str, Vec<&str>)> = Vec::new();
+    for diagnostic in diagnostics {
+        let Some((pattern, _, _, _)) = diagnostic.kind.unmatched_override_glob() else {
+            continue;
+        };
+        let Some(hint) = diagnostic.kind.unmatched_override_glob_hint() else {
+            continue;
+        };
+        match groups.iter_mut().find(|(known, _)| *known == hint) {
+            Some((_, patterns)) => {
+                if !patterns.contains(&pattern) {
+                    patterns.push(pattern);
+                }
+            }
+            None => groups.push((hint, vec![pattern])),
+        }
+    }
+    groups
 }
 
 /// The Markdown sections that list the unmatched patterns, the redundant
@@ -305,6 +345,21 @@ pub fn markdown_section(diagnostics: &[WorkspaceDiagnostic]) -> Option<String> {
             overrides.join("\n")
         ));
     }
+    let override_globs: Vec<String> = diagnostics
+        .iter()
+        .filter_map(|diagnostic| {
+            let (pattern, _, _, _) = diagnostic.kind.unmatched_override_glob()?;
+            let hint = diagnostic.kind.unmatched_override_glob_hint()?;
+            Some(format!("- {}: {hint}", markdown_value(pattern)))
+        })
+        .collect();
+    if !override_globs.is_empty() {
+        sections.push(format!(
+            "\n## Override globs that match no file\n\nThese `overrides[].files` globs \
+             matched no project file, so their override has no effect for them.\n\n{}",
+            override_globs.join("\n")
+        ));
+    }
     (!sections.is_empty()).then(|| sections.join("\n"))
 }
 
@@ -330,6 +385,7 @@ pub fn envelope_diagnostics(envelope: &serde_json::Value) -> Vec<WorkspaceDiagno
             .filter(|diagnostic| {
                 diagnostic.kind.unmatched_config_pattern().is_some()
                     || diagnostic.kind.ineffective_override().is_some()
+                    || diagnostic.kind.unmatched_override_glob().is_some()
                     || diagnostic.kind.requested_rule_off().is_some()
             });
         for diagnostic in entries {

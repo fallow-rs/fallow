@@ -1,0 +1,4 @@
+### Added
+
+- **A note for an `overrides[].files` glob that matches no file.** An override glob that matches no project file has no effect, and fallow said nothing. A common cause is a glob that names an import target, a package or a binary, not the file that has the finding. `fallow dead-code` now adds an `override-files-unmatched` entry to `workspace_diagnostics` for each such glob, with `pattern`, `files`, `rules` and `reason`. The message names the key that works: `ignoreUnresolvedImports`, `ignoreDependencies`, `ignoreBinaries`, or the glob of the file that has the finding. Human output prints a `Note:` line, Markdown output has a section, SARIF has a configuration notification, and the editor marks the glob in the config file. The check reads every project file, so `--changed-since`, `--workspace` and `--production` give the same answer.
+  (Refs [#5227](https://github.com/fallow-rs/fallow/issues/5227))

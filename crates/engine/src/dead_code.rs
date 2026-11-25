@@ -22,6 +22,8 @@ pub use crate::effective_severity::{
 
 #[path = "dead_code_config_patterns.rs"]
 mod config_patterns;
+#[path = "dead_code_override_globs.rs"]
+mod override_globs;
 pub use config_patterns::config_pattern_diagnostics;
 
 use crate::result_scope::{

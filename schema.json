@@ -2697,7 +2697,7 @@
       "type": "object",
       "properties": {
         "files": {
-          "description": "Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `[\"src/generated/**\", \"**/*.test.ts\"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories.",
+          "description": "Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `[\"src/generated/**\", \"**/*.test.ts\"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories. A glob must match the file that has the finding: for unresolved-imports, the importing file, not the import target. Package and binary names are not file globs; use `ignoreDependencies` and `ignoreBinaries` for them. Fallow reports each glob that matches no project file as an `override-files-unmatched` diagnostic.",
           "type": "array",
           "items": {
             "type": "string"

@@ -949,6 +949,25 @@ kind: "health-ignore-unmatched"
  */
 pattern: string
 } | {
+kind: "override-files-unmatched"
+/**
+ * The glob, as written in the config.
+ */
+pattern: string
+/**
+ * The `files` globs of the override, as written in the config.
+ */
+files: string[]
+/**
+ * The canonical names of the rules of the override that apply per
+ * file, also when the config uses an alias.
+ */
+rules: string[]
+/**
+ * Why the glob matched no file, as a kebab-case token.
+ */
+reason: string
+} | {
 kind: "circular-dependencies-allow-unmatched"
 /**
  * The entry as one line: the files joined by `, ` in brackets.

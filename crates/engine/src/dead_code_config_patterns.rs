@@ -21,7 +21,8 @@ use fallow_config::{
 /// - each `ignoreExports` file glob that matched no file, and each
 ///   `ignoreExports` name that no file of its glob declares;
 /// - each `duplicates.ignore` and `health.ignore` glob that matched no file;
-/// - each `overrides` rule that cannot change a result of this config.
+/// - each `overrides` rule that cannot change a result of this config;
+/// - each `overrides[].files` glob that matched no project file.
 ///
 /// The `ignoreDependencies` entries need `reports_dependencies`. A surface
 /// passes `reports_dependencies = false` when its run does not report
@@ -37,7 +38,10 @@ use fallow_config::{
 /// finding to that run.
 ///
 /// An `overrides` rule reports also in a `--production` run, because its cause
-/// does not depend on the files of the run. The `reports_dependencies` gate
+/// does not depend on the files of the run. The same is true for an
+/// `overrides[].files` glob: its check reads every project file, so the
+/// answer does not depend on `--production`, `--changed-since` or
+/// `--workspace` (issue #5227). The `reports_dependencies` gate
 /// removes the dependency rules (issue #4065). Read `config` after CLI flags
 /// changed its rules, because a flag can start a detector.
 ///
@@ -88,6 +92,7 @@ pub fn config_pattern_diagnostics(
         .ineffective_override_rules()
         .into_iter()
         .filter(|entry| reports_dependencies || !entry.dependency_rule);
+    let unmatched_override_globs = super::override_globs::unmatched_override_globs(config);
     let kinds = finding_patterns
         .into_iter()
         .map(
@@ -128,7 +133,8 @@ pub fn config_pattern_diagnostics(
                 files: entry.files,
                 reason: entry.reason.to_owned(),
             }
-        }));
+        }))
+        .chain(unmatched_override_globs);
     kinds
         .map(|kind| {
             WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)

@@ -1,5 +1,6 @@
-//! Which entries of `ignoreExports`, `duplicates.ignore` and `health.ignore`
-//! matched a file or an export in the latest dead-code pass (issue #5167).
+//! Which entries of `ignoreExports`, `duplicates.ignore`, `health.ignore`
+//! and `overrides[].files` matched a file or an export in the latest
+//! dead-code pass (issues #5167 and #5227).
 
 use std::path::Path;
 
@@ -24,6 +25,18 @@ pub struct IgnoreListEffect {
     pub duplicates_ignore: EntryEffectRecord,
     /// One flag per `health.ignore` glob: it matched a file.
     pub health_ignore: EntryEffectRecord,
+    /// One flag per glob of [`ResolvedConfig::override_globs`]: it matched a
+    /// file.
+    pub override_files: EntryEffectRecord,
+}
+
+/// One glob of an `overrides[].files` list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OverrideGlob<'a> {
+    /// The index of the override in `overrides`.
+    pub entry: usize,
+    /// The glob, as written in the config.
+    pub pattern: &'a str,
 }
 
 /// An export name of an `ignoreExports` rule, with the `file` glob of the
@@ -57,6 +70,23 @@ impl ResolvedConfig {
                         file: entry.file.as_str(),
                         export: export.as_str(),
                     })
+            })
+            .collect()
+    }
+
+    /// The `files` globs of every `overrides` entry, in config order.
+    /// [`IgnoreListEffect::override_files`] has one flag per entry of this
+    /// list.
+    #[must_use]
+    pub fn override_globs(&self) -> Vec<OverrideGlob<'_>> {
+        self.overrides
+            .iter()
+            .enumerate()
+            .flat_map(|(entry, resolved)| {
+                resolved.files.iter().map(move |pattern| OverrideGlob {
+                    entry,
+                    pattern: pattern.as_str(),
+                })
             })
             .collect()
     }

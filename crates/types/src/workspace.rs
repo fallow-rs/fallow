@@ -28,6 +28,8 @@ mod health_text;
 mod kind_class;
 #[path = "workspace_merge.rs"]
 mod merge;
+#[path = "workspace_override_glob_text.rs"]
+mod override_glob_text;
 #[path = "workspace_plugin_text.rs"]
 mod plugin_text;
 #[path = "workspace_production_text.rs"]
@@ -37,6 +39,10 @@ mod run_notices;
 
 pub use config_entry::{OVERRIDE_REASON_BASE_RULE_OFF, OVERRIDE_REASON_PROJECT_LEVEL};
 pub use merge::{dedupe_workspace_diagnostics, merge_workspace_diagnostics};
+pub use override_glob_text::{
+    OVERRIDE_GLOB_REASON_DIRECTORY, OVERRIDE_GLOB_REASON_GLOB_UNMATCHED,
+    OVERRIDE_GLOB_REASON_NOT_A_PATH, OVERRIDE_GLOB_REASON_PATH_NOT_FOUND,
+};
 
 /// Why the declared pnpm version ignores the `overrides` section of
 /// `pnpm-workspace.yaml`.
@@ -729,6 +735,25 @@ pub enum WorkspaceDiagnosticKind {
         /// The glob, as written in the config.
         pattern: String,
     },
+    /// A glob of an `overrides[].files` list that matched no project file
+    /// (issue #5227), so the override has no effect for it. The check reads
+    /// the analyzed files and the other project files, so the answer does not
+    /// depend on `--changed-since`, `--workspace` or `--production`. An
+    /// override whose every rule has a `project-level`
+    /// `override-rule-ineffective` entry gets no entry of this kind. `reason`
+    /// is `glob-unmatched`, `directory`, `path-not-found` or `not-a-path`.
+    /// The token set is open. `path` is the root. Not degraded.
+    OverrideFilesUnmatched {
+        /// The glob, as written in the config.
+        pattern: String,
+        /// The `files` globs of the override, as written in the config.
+        files: Vec<String>,
+        /// The canonical names of the rules of the override that apply per
+        /// file, also when the config uses an alias.
+        rules: Vec<String>,
+        /// Why the glob matched no file, as a kebab-case token.
+        reason: String,
+    },
     /// A `circularDependencies.allow` entry matched no cycle of the run
     /// (issue #4623): no cycle has exactly these files in this order, from
     /// any start file. The usual cause is a cycle that the code no longer
@@ -1401,6 +1426,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         | WorkspaceDiagnosticKind::IgnoreExportsNameUnmatched { .. }
         | WorkspaceDiagnosticKind::DuplicatesIgnoreUnmatched { .. }
         | WorkspaceDiagnosticKind::HealthIgnoreUnmatched { .. }
+        | WorkspaceDiagnosticKind::OverrideFilesUnmatched { .. }
         | WorkspaceDiagnosticKind::CircularDependenciesAllowUnmatched { .. }
         | WorkspaceDiagnosticKind::OverrideRuleIneffective { .. }
         | WorkspaceDiagnosticKind::RequestedRuleOff { .. } => {
