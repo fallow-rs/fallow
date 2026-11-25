@@ -18,7 +18,7 @@ use fallow_v8_coverage::ScriptCoverage;
 /// The size limit for one coverage file. V8 dumps of large test suites reach
 /// hundreds of MiB, so this limit is above the default limit for project
 /// files.
-pub(super) const MAX_COVERAGE_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_COVERAGE_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Fail when `path` is below `root` and resolves outside it.
 pub(super) fn check_input(root: &Path, path: &Path) -> Result<(), String> {
@@ -35,7 +35,7 @@ pub(super) fn check_input(root: &Path, path: &Path) -> Result<(), String> {
 /// relative `path` is taken relative to the working directory, as the read
 /// takes it. When the working directory cannot be read, the path counts as
 /// outside.
-pub(super) fn is_outside_link(root: &Path, path: &Path) -> bool {
+fn is_outside_link(root: &Path, path: &Path) -> bool {
     let Ok(path) = std::path::absolute(path) else {
         return true;
     };
@@ -82,6 +82,41 @@ pub(super) fn generated_source(root: &Path, script: &ScriptCoverage) -> Option<S
 /// file inside `root`.
 pub(super) fn read_script_source(root: &Path, path: &Path) -> Option<String> {
     read_to_string_inside(root, path, MAX_COVERAGE_FILE_BYTES).ok()
+}
+
+/// The files that replace a V8 dump for the companion: the remapped
+/// Istanbul file and the residual V8 file, each when it has content.
+pub(super) type PreparedDump = (Option<PathBuf>, Option<PathBuf>);
+
+/// The scripts of a V8 dump that the companion may read, and the count of
+/// the other scripts. A script with a local path (a `file://` URL or an
+/// absolute path) must resolve inside `root`. A missing file must lie below
+/// `root` by its path. A script with another URL, such as `node:fs`, stays.
+pub(super) fn scripts_inside_root(
+    root: &Path,
+    scripts: Vec<ScriptCoverage>,
+) -> (Vec<ScriptCoverage>, usize) {
+    let (kept, dropped): (Vec<ScriptCoverage>, Vec<ScriptCoverage>) =
+        scripts.into_iter().partition(|script| {
+            file_url_to_path(&script.url).is_none_or(|path| script_inside_root(root, &path))
+        });
+    if !dropped.is_empty() {
+        tracing::debug!(
+            dropped = dropped.len(),
+            "dropped V8 coverage scripts outside the project root"
+        );
+    }
+    (kept, dropped.len())
+}
+
+fn script_inside_root(root: &Path, path: &Path) -> bool {
+    if path.symlink_metadata().is_ok() {
+        return is_inside_root(root, path);
+    }
+    let parent_free = path
+        .components()
+        .all(|component| component != std::path::Component::ParentDir);
+    parent_free && lies_below(root, path)
 }
 
 /// Read one coverage file that [`check_input`] or [`coverage_json_files`]
@@ -163,6 +198,76 @@ mod tests {
         assert!(dir_fallback(&root.join("coverage"), refused).is_empty());
         let (_, refused) = coverage_json_files(&root, &root.join("plain")).expect("list");
         assert_eq!(dir_fallback(&root.join("plain"), refused).len(), 1);
+    }
+
+    /// The companion gets only the scripts of a V8 dump inside the root.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn v8_scripts_outside_the_root_do_not_reach_the_companion() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let base = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = base.join("project");
+        std::fs::create_dir_all(root.join("dist")).expect("mkdir");
+        std::fs::write(root.join("dist/app.js"), "").expect("write");
+        std::fs::write(base.join("other.js"), "").expect("write");
+        let url = |path: &Path| {
+            url::Url::from_file_path(path)
+                .expect("file url")
+                .to_string()
+        };
+        let script = |url: String| {
+            serde_json::json!({
+                "scriptId": "1",
+                "url": url,
+                "functions": [{
+                    "functionName": "f",
+                    "ranges": [{"startOffset": 0, "endOffset": 1, "count": 1}],
+                    "isBlockCoverage": false
+                }]
+            })
+        };
+        let dump = root.join("coverage.json");
+        let json = serde_json::json!({
+            "result": [script(url(&root.join("dist/app.js"))), script(url(&base.join("other.js")))]
+        });
+        std::fs::write(&dump, json.to_string()).expect("write");
+
+        let prepared =
+            super::super::coverage::prepare_coverage_sources(&root, &dump).expect("prepare");
+        let mut urls = Vec::new();
+        for source in &prepared.sources {
+            if let CoverageSource::V8 { path } = source {
+                assert_ne!(Path::new(path), dump, "the raw dump is not handed over");
+                let text = std::fs::read_to_string(path).expect("read");
+                let value: serde_json::Value = serde_json::from_str(&text).expect("parse");
+                for entry in value["result"].as_array().expect("result") {
+                    urls.push(entry["url"].as_str().expect("url").to_owned());
+                }
+            }
+        }
+        assert_eq!(urls, vec![url(&root.join("dist/app.js"))]);
+    }
+
+    #[test]
+    fn script_filter_keeps_missing_files_below_the_root_and_other_urls() {
+        let root = Path::new("/project");
+        let script = |url: &str| ScriptCoverage {
+            script_id: "1".to_owned(),
+            url: url.to_owned(),
+            functions: Vec::new(),
+        };
+        let (kept, dropped) = scripts_inside_root(
+            root,
+            vec![
+                script("file:///project/dist/missing.js"),
+                script("node:fs"),
+                script("file:///project/../elsewhere/a.js"),
+                script("/elsewhere/b.js"),
+            ],
+        );
+        let urls: Vec<&str> = kept.iter().map(|script| script.url.as_str()).collect();
+        assert_eq!(urls, ["file:///project/dist/missing.js", "node:fs"]);
+        assert_eq!(dropped, 2);
     }
 
     #[test]

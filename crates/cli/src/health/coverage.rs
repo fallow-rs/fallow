@@ -84,8 +84,8 @@ compile_error!(
 
 type FunctionLocations = FxHashMap<(String, String), Option<u32>>;
 
-struct PreparedCoverageSources {
-    sources: Vec<CoverageSource>,
+pub(super) struct PreparedCoverageSources {
+    pub(super) sources: Vec<CoverageSource>,
     inner_iterations: InnerIterationIndex,
     _temp_dir: Option<TempDir>,
 }
@@ -810,7 +810,10 @@ fn mark_ambiguous_function_line(
     }
 }
 
-fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverageSources, String> {
+pub(super) fn prepare_coverage_sources(
+    root: &Path,
+    path: &Path,
+) -> Result<PreparedCoverageSources, String> {
     coverage_inputs::check_input(root, path)?;
     let mut temp_dir = None;
     let mut inner_iterations = InnerIterationIndex::for_root(root);
@@ -832,7 +835,6 @@ fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverage
     }
 
     let (json_files, refused) = coverage_inputs::coverage_json_files(root, path)?;
-
     if json_files.is_empty() {
         return Ok(PreparedCoverageSources {
             sources: coverage_inputs::dir_fallback(path, refused),
@@ -874,7 +876,6 @@ fn prepare_single_coverage_source(
         });
         return Ok(());
     }
-
     let Some((remapped_path, residual_path)) =
         preprocess_v8_coverage_file(root, path, temp_dir, inner_iterations, index)?
     else {
@@ -883,16 +884,14 @@ fn prepare_single_coverage_source(
         });
         return Ok(());
     };
-
-    sources.push(CoverageSource::Istanbul {
-        path: remapped_path.to_string_lossy().into_owned(),
-    });
+    sources.extend(remapped_path.map(|path| CoverageSource::Istanbul {
+        path: path.to_string_lossy().into_owned(),
+    }));
     if let Some(residual_path) = residual_path {
         sources.push(CoverageSource::V8 {
             path: residual_path.to_string_lossy().into_owned(),
         });
     }
-
     Ok(())
 }
 
@@ -902,7 +901,7 @@ fn preprocess_v8_coverage_file(
     temp_dir: &mut Option<TempDir>,
     inner_iterations: &mut InnerIterationIndex,
     index: usize,
-) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
+) -> Result<Option<coverage_inputs::PreparedDump>, String> {
     let json = coverage_inputs::read_coverage_file(path)?;
     let dump: V8CoverageDump = serde_json::from_str(&json)
         .map_err(|err| coverage_inputs::parse_error("v8", path, &err))?;
@@ -912,20 +911,21 @@ fn preprocess_v8_coverage_file(
         .map(parse_source_map_cache)
         .unwrap_or_default();
 
+    let (scripts, dropped) = coverage_inputs::scripts_inside_root(root, dump.result);
     let (remapped_files, residual_scripts) =
-        remap_dump_scripts(root, dump.result, &cache, inner_iterations);
+        remap_dump_scripts(root, scripts, &cache, inner_iterations);
     record_raw_scripts(inner_iterations, &residual_scripts);
-
-    if remapped_files.is_empty() {
+    if remapped_files.is_empty() && dropped == 0 {
         return Ok(None);
     }
 
     let temp_root = ensure_temp_dir(temp_dir)?;
-    let remapped_path = temp_root.join(format!("coverage-remapped-{index}.json"));
-    write_istanbul_coverage_file(&remapped_path, &remapped_files)?;
-
+    let remapped_path = (!remapped_files.is_empty())
+        .then(|| temp_root.join(format!("coverage-remapped-{index}.json")));
+    if let Some(remapped_path) = &remapped_path {
+        write_istanbul_coverage_file(remapped_path, &remapped_files)?;
+    }
     let residual_path = write_residual_coverage(temp_root, index, residual_scripts)?;
-
     Ok(Some((remapped_path, residual_path)))
 }
 
