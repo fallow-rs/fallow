@@ -637,8 +637,8 @@ impl<'a> AnalysisSession<'a> {
 /// Run the shared prelude: progress setup, node_modules check, workspace and
 /// root-package discovery, hidden-dir scoping, and file discovery.
 fn run_analysis_setup(config: &ResolvedConfig) -> Result<AnalysisSetup, FallowError> {
+    discover::begin_read_scope_run();
     let progress = new_analysis_progress(config);
-
     let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config)?;
     let root_pkg = fallow_config::load_dir_package_json(&config.root);
     let discovery_hidden_dir_scopes =

@@ -15,13 +15,27 @@ use fallow_types::read_guard::{DEFAULT_MAX_READ_BYTES, is_inside_root, read_to_s
 use fallow_types::read_scope::read_scope_base;
 use rustc_hash::FxHashMap;
 
-/// The read scope base of `root`, computed once per root. A link below the
-/// root may point at a shared file anywhere inside this base, such as a
-/// config of the monorepo above a package root.
-fn scope_base(root: &Path) -> PathBuf {
+/// The read scope bases of the current analysis run, one per root.
+fn scope_bases() -> &'static Mutex<FxHashMap<PathBuf, PathBuf>> {
     static BASES: OnceLock<Mutex<FxHashMap<PathBuf, PathBuf>>> = OnceLock::new();
-    let bases = BASES.get_or_init(|| Mutex::new(FxHashMap::default()));
-    let mut bases = bases
+    BASES.get_or_init(|| Mutex::new(FxHashMap::default()))
+}
+
+/// Start a new analysis run: drop the read scope bases of earlier runs. A
+/// long-lived process (the language server, watch mode) then sees a `.git`
+/// entry that appeared after an earlier run.
+pub fn begin_read_scope_run() {
+    scope_bases()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+}
+
+/// The read scope base of `root`, computed once per root and run. A link
+/// below the root may point at a shared file anywhere inside this base, such
+/// as a config of the monorepo above a package root.
+fn scope_base(root: &Path) -> PathBuf {
+    let mut bases = scope_bases()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     bases
@@ -108,5 +122,24 @@ mod tests {
 
         assert!(read_project_file(&root, &root.join("jest.config.js")).is_some());
         assert!(read_project_file(&root, &root.join("other.config.js")).is_none());
+    }
+
+    /// A `.git` entry that appears after a run widens the read scope of the
+    /// next run.
+    #[test]
+    #[cfg(unix)]
+    fn a_new_run_sees_a_work_tree_that_appeared_later() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dir.path().join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::write(top.join("jest.base.js"), "module.exports = {};").expect("write");
+        std::os::unix::fs::symlink("../../jest.base.js", root.join("jest.config.js"))
+            .expect("link");
+        assert!(read_project_file(&root, &root.join("jest.config.js")).is_none());
+
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        begin_read_scope_run();
+        assert!(read_project_file(&root, &root.join("jest.config.js")).is_some());
     }
 }

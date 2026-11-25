@@ -7,6 +7,8 @@ mod output_entry_source;
 mod parse_scripts;
 mod production_excludes;
 pub(crate) mod project_read;
+
+pub use project_read::begin_read_scope_run;
 mod walk;
 
 use std::path::{Component, Path, PathBuf};
