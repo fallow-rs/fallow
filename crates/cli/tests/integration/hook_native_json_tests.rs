@@ -5,7 +5,14 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-const GATE: &str = include_str!("../../src/setup_hooks/fallow-gate.sh");
+const GATE_TEMPLATE: &str = include_str!("../../src/setup_hooks/fallow-gate.sh");
+
+/// The gate script as a project-scope install writes it.
+fn project_gate() -> String {
+    GATE_TEMPLATE
+        .replace("@@FALLOW_GATE_SCOPE@@", "project")
+        .replace("@@FALLOW_GATE_BIN@@", "")
+}
 
 fn write_executable(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
@@ -62,7 +69,7 @@ fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     let hooks = root.join(".codex/hooks");
     std::fs::create_dir_all(&hooks).unwrap();
     let script = hooks.join("fallow-gate.sh");
-    std::fs::write(&script, GATE).unwrap();
+    std::fs::write(&script, project_gate()).unwrap();
     let bin = temp.path().join("bin");
     no_jq_tools(&bin);
     write_executable(
@@ -497,8 +504,14 @@ fn native_json_status_does_not_certify_a_reader_outside_the_audit_root() {
         &bin,
         &payload,
     );
+    // The gate never runs a launcher of a parent directory, so it finds no
+    // reader and no audit runner.
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("fallow binary not found"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("no native JSON reader or jq found"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let result = Command::new(crate::common::fallow_bin())
         .args(["agent", "status", "--root"])
         .arg(&app)
@@ -521,7 +534,7 @@ fn native_json_status_does_not_certify_a_reader_outside_the_audit_root() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|action| action["id"] == "gate-reader-unverified"),
+            .any(|action| action["id"] == "gate-json-reader"),
         "{status}"
     );
 }

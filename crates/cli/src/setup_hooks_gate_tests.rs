@@ -1252,7 +1252,8 @@ fn gate_audits_the_session_tree_for_other_git_writes() {
         (
             "cd -",
             "cd ../../wt-c && cd - && git commit".to_owned(),
-            vec![a],
+            // Each `cd` target is a candidate, so the first `cd` adds an audit.
+            vec![a, c],
         ),
         (
             "cd ..",
@@ -2108,4 +2109,215 @@ fn gate_never_audits_less_than_main_below_the_git_root() {
     assert_never_less_than_main(&gate, &app, &app, &root.join("home"), &commands);
     // The same with the hook process in the repository root.
     assert_never_less_than_main(&gate, &repo, &app, &root.join("home"), &commands);
+}
+
+/// A directory of the session tree can have the shape of a bare repository
+/// with a `core.worktree` that names another checkout. The gate runs git with
+/// `safe.bareRepository=explicit`, so git does not use that directory, and
+/// the user-scope gate audits only the session tree.
+#[test]
+fn gate_ignores_a_bare_repository_shape_in_the_session_tree() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = root.join("home/.claude/hooks/fallow-gate.sh");
+    std::fs::create_dir_all(gate.parent().unwrap()).unwrap();
+    std::fs::write(&gate, super::render_gate_script(true, None)).unwrap();
+    let other = root.join("other");
+    init_repo(&other);
+    std::fs::write(other.join(STUB_FAIL_MARKER), "").unwrap();
+    let shaped = repo.join("fixtures/shaped");
+    std::fs::create_dir_all(shaped.join("objects")).unwrap();
+    std::fs::create_dir_all(shaped.join("refs/heads")).unwrap();
+    std::fs::write(shaped.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(
+        shaped.join("config"),
+        format!(
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = {}\n",
+            other.display()
+        ),
+    )
+    .unwrap();
+
+    for command in [
+        "cd fixtures/shaped && git commit -m test",
+        "git -C fixtures/shaped commit -m test",
+    ] {
+        let run = run_gate(
+            &gate,
+            &repo,
+            &root.join("home"),
+            &command_payload(&repo, command),
+        );
+        assert_audited_in(&run, &repo, command);
+    }
+}
+
+/// Each `cd` target stays an audit candidate, also in a subshell. A `)` only
+/// changes the directory of the later commands: an unmatched `)`, a quoted
+/// `)` and a `)` in ANSI-C quotes keep it.
+#[test]
+fn gate_keeps_every_cd_target_as_an_audit_candidate() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    let nested = repo.join("packages/app");
+    init_repo(&nested);
+    std::fs::write(nested.join(STUB_FAIL_MARKER), "").unwrap();
+
+    let run = run_gate(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &command_payload(&repo, "(cd packages/app && ls) && git commit -m test"),
+    );
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "subshell cd: stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+    for command in [
+        "cd packages && echo ok ) && git -C app commit -m test",
+        "cd packages && echo $'it\\'s )' && git -C app commit -m test",
+    ] {
+        let run = run_gate(
+            &gate,
+            &repo,
+            &root.join("home"),
+            &command_payload(&repo, command),
+        );
+        assert_eq!(
+            run.output.status.code(),
+            Some(2),
+            "{command}: stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+    }
+
+    // A parenthesis inside quotes is text, not a subshell.
+    let run = run_gate(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &command_payload(
+            &repo,
+            "cd packages/app && echo \"a)\" ')' && git commit -m test",
+        ),
+    );
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+
+    // A `cd` before the subshell still counts after it.
+    let run = run_gate(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &command_payload(&repo, "cd packages/app && (ls) && git commit -m test"),
+    );
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+}
+
+/// An absolute FALLOW_GATE_REPORT inside the audited tree gets the same link
+/// check as a relative one: a committed directory link must not move the
+/// report write outside the tree.
+#[test]
+fn gate_does_not_write_an_absolute_report_through_a_link_in_the_tree() {
+    use std::os::unix::fs::symlink;
+
+    if skip_without_tools() {
+        return;
+    }
+    let report = new_only_fail_report();
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    std::fs::write(repo.join(STUB_REPORT_FILE), report.to_string()).unwrap();
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, repo.join("reports")).unwrap();
+    let absolute = repo.join("reports/sub/gate.json");
+
+    let run = run_gate_with_env(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &commit_payload(&repo),
+        &[("FALLOW_GATE_REPORT", absolute.to_str().unwrap())],
+    );
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert_eq!(run.output.status.code(), Some(2), "stderr={stderr}");
+    let named = named_report_path(&stderr);
+    assert!(!named.starts_with(&root), "stderr={stderr}");
+    std::fs::remove_file(&named).unwrap();
+    assert_eq!(
+        std::fs::read_dir(&outside).unwrap().count(),
+        0,
+        "nothing may land outside the tree"
+    );
+
+    // An absolute path outside the tree stays the choice of the operator.
+    let elsewhere = root.join("reports-elsewhere/gate.json");
+    let run = run_gate_with_env(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &commit_payload(&repo),
+        &[("FALLOW_GATE_REPORT", elsewhere.to_str().unwrap())],
+    );
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert_eq!(run.output.status.code(), Some(2), "stderr={stderr}");
+    assert_eq!(named_report_path(&stderr), elsewhere);
+    assert!(elsewhere.is_file());
+}
+
+/// A command over the size limit of the quote-aware scan treats each
+/// parenthesis only as a separator. A quoted `(` and `)` then do not restore
+/// an older directory, and the `cd` target stays an audit candidate.
+#[test]
+fn gate_keeps_the_cd_target_of_a_long_command() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let gate = install_gate(&repo, ".claude");
+    let nested = repo.join("packages/app");
+    init_repo(&nested);
+    std::fs::write(nested.join(STUB_FAIL_MARKER), "").unwrap();
+    let padding = "x".repeat(9000);
+    let command = format!(
+        "echo {padding} && cd packages && echo \"(\" && cd app && echo \")\" && git commit -m test"
+    );
+
+    let run = run_gate(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &command_payload(&repo, &command),
+    );
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
 }

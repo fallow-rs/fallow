@@ -4,18 +4,50 @@
 //! launchers. A stub below the version floor makes the lookup visible: the
 //! block message names the install that the script selected.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::tempdir;
 
-use super::rendered_gate_script;
+use super::{render_gate_script, rendered_gate_script};
 
-/// Runs the rendered gate from inside `project`, with `PATH` reduced to
+/// Runs the rendered project-scope gate from inside `project`, installed at
+/// `project/.claude/hooks/fallow-gate.sh`, with `PATH` reduced to
 /// `extra_bin` plus the system directories, so no globally installed fallow
 /// can satisfy the resolution the test is probing. A fake fallow below the
 /// version floor makes resolution observable: reaching the floor check at
 /// all proves the binary was found.
 fn probe_gate_resolution(project: &Path, extra_bin: &Path) -> std::process::Output {
+    let script_path = project.join(".claude/hooks/fallow-gate.sh");
+    probe_gate(
+        &rendered_gate_script(),
+        &script_path,
+        project,
+        extra_bin,
+        br#"{"tool_input":{"command":"git commit -m test"}}"#,
+    )
+}
+
+/// Writes `script` to `script_path` and runs it from `cwd` with `input` on
+/// stdin. See [`probe_gate_resolution`] for the reduced `PATH`.
+fn probe_gate(
+    script: &str,
+    script_path: &Path,
+    cwd: &Path,
+    extra_bin: &Path,
+    input: &[u8],
+) -> std::process::Output {
+    probe_gate_with_path_prefix(script, script_path, cwd, extra_bin, input, "")
+}
+
+/// Same as [`probe_gate`], with `path_prefix` put before the `PATH` entries.
+fn probe_gate_with_path_prefix(
+    script: &str,
+    script_path: &Path,
+    cwd: &Path,
+    extra_bin: &Path,
+    input: &[u8],
+    path_prefix: &str,
+) -> std::process::Output {
     use std::io::Write;
 
     // jq is linked INTO the probe directory rather than having its own
@@ -32,14 +64,14 @@ fn probe_gate_resolution(project: &Path, extra_bin: &Path) -> std::process::Outp
     {
         let _ = std::os::unix::fs::symlink(jq, extra_bin.join("jq"));
     }
-    let path = format!("{}:/usr/bin:/bin", extra_bin.display());
+    let path = format!("{path_prefix}{}:/usr/bin:/bin", extra_bin.display());
 
-    let script_path = project.join("fallow-gate.sh");
-    std::fs::write(&script_path, rendered_gate_script()).unwrap();
+    std::fs::create_dir_all(script_path.parent().unwrap()).unwrap();
+    std::fs::write(script_path, script).unwrap();
 
     let mut child = std::process::Command::new("bash")
-        .arg(&script_path)
-        .current_dir(project)
+        .arg(script_path)
+        .current_dir(cwd)
         .env("PATH", &path)
         // An unreachable floor makes resolution observable: the block
         // message names the runner the script chose.
@@ -49,12 +81,7 @@ fn probe_gate_resolution(project: &Path, extra_bin: &Path) -> std::process::Outp
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("spawn bash");
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(br#"{"tool_input":{"command":"git commit -m test"}}"#)
-        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(input).unwrap();
     child.wait_with_output().expect("wait")
 }
 
@@ -85,7 +112,7 @@ fn gate_resolves_a_project_local_launcher_absent_from_path() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        stderr.contains("./node_modules/.bin/fallow is fallow 2.30.0"),
+        stderr.contains("/node_modules/.bin/fallow is fallow 2.30.0"),
         "the project-local launcher must be the runner the script chose: {stderr}"
     );
 }
@@ -135,7 +162,7 @@ fn gate_skips_a_path_launcher_that_cannot_run() {
 
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(
-        stderr.contains("./node_modules/.bin/fallow is fallow 2.30.0"),
+        stderr.contains("/node_modules/.bin/fallow is fallow 2.30.0"),
         "the working local install must be the runner the script chose: {stderr}"
     );
 }
@@ -160,7 +187,7 @@ fn gate_blocks_when_the_only_launcher_cannot_run() {
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(
         stderr.contains(
-            "./node_modules/.bin/fallow cannot print its fallow version (Error: Cannot find module '@fallow-cli/darwin-arm64')"
+            "/node_modules/.bin/fallow cannot print its fallow version (Error: Cannot find module '@fallow-cli/darwin-arm64')"
         ),
         "the gate must name the broken launcher and its first error line: {stderr}"
     );
@@ -169,7 +196,7 @@ fn gate_blocks_when_the_only_launcher_cannot_run() {
 }
 
 /// The gate reports the first launcher that failed, not a later one. The
-/// project-local launcher comes before the one on PATH.
+/// launcher of the install root comes before the one on PATH.
 #[test]
 fn gate_names_the_first_broken_launcher() {
     let tmp = tempdir().unwrap();
@@ -190,7 +217,7 @@ fn gate_names_the_first_broken_launcher() {
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(stderr.contains("(local launcher broken)"), "{stderr}");
     assert!(
-        stderr.contains("./node_modules/.bin/fallow cannot print"),
+        stderr.contains("/node_modules/.bin/fallow cannot print"),
         "{stderr}"
     );
 }
@@ -217,7 +244,7 @@ fn gate_prefers_the_project_local_launcher_over_path() {
 
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(
-        stderr.contains("./node_modules/.bin/fallow is fallow 2.30.0"),
+        stderr.contains("/node_modules/.bin/fallow is fallow 2.30.0"),
         "the project-local launcher must be the runner the script chose: {stderr}"
     );
 }
@@ -268,8 +295,9 @@ fn gate_floor_message_names_the_fix_for_the_chosen_runner() {
     assert!(!stderr.contains("devDependency"), "{stderr}");
 }
 
-/// The JSON reader uses the same order as the audit runner: the
-/// project-local launcher before the fallow on PATH.
+/// The JSON reader uses the same order as the audit runner: the launcher of
+/// the install root before the fallow on PATH. A hook input that the gate reads
+/// without help still needs the reader for the audit report.
 #[test]
 fn gate_json_reader_prefers_the_project_local_launcher_over_path() {
     let tmp = tempdir().unwrap();
@@ -293,4 +321,304 @@ fn gate_json_reader_prefers_the_project_local_launcher_over_path() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!calls.contains("path hooks gate-runtime"), "{calls}");
+}
+
+/// Writes a stub fallow at `path` that adds `name` to `log` on each call and
+/// reports a version below the floor of the probe.
+fn logging_stub(path: &Path, name: &str, log: &Path) {
+    write_stale_fallow(
+        path,
+        &format!(
+            "#!/bin/sh\necho \"{name} $*\" >> '{}'\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 2.30.0'; exit 0; fi\nexit 1\n",
+            log.display()
+        ),
+    );
+}
+
+fn calls(log: &Path) -> String {
+    std::fs::read_to_string(log).unwrap_or_default()
+}
+
+fn session_input(cwd: &Path) -> Vec<u8> {
+    serde_json::json!({
+        "cwd": cwd,
+        "tool_input": { "command": "git commit -m test" },
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// A user-scope gate applies in every repository, also in a fresh clone. It
+/// must never run a launcher from the session directory or its parents; it
+/// runs the fallow on PATH.
+#[test]
+fn user_scope_gate_never_runs_a_launcher_of_the_session_tree() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let home = base.join("home");
+    let clone = base.join("parent/clone");
+    let session = clone.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::write(clone.join("package.json"), "{}").unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&session.join("node_modules/.bin/fallow"), "session", &log);
+    logging_stub(&clone.join("node_modules/.bin/fallow"), "clone", &log);
+    logging_stub(
+        &base.join("parent/node_modules/.bin/fallow"),
+        "parent",
+        &log,
+    );
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+
+    let output = probe_gate(
+        &render_gate_script(true, None),
+        &home.join(".claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert!(calls.contains("path --version"), "{calls}\n{stderr}");
+    for name in ["session", "clone", "parent"] {
+        assert!(!calls.contains(name), "{name} ran: {calls}\n{stderr}");
+    }
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+}
+
+/// A user-scope gate runs the fallow that installed it before the fallow on
+/// PATH.
+#[test]
+fn user_scope_gate_runs_the_recorded_fallow_first() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    let recorded: PathBuf = base.join("tools/fallow");
+    logging_stub(&recorded, "recorded", &log);
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    logging_stub(&session.join("node_modules/.bin/fallow"), "session", &log);
+
+    let output = probe_gate(
+        &render_gate_script(true, recorded.to_str()),
+        &base.join("home/.codex/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert!(
+        stderr.contains(&format!("{} is fallow 2.30.0", recorded.display())),
+        "{stderr}"
+    );
+    assert!(!calls.contains("path --version"), "{calls}");
+    assert!(!calls.contains("session"), "{calls}");
+}
+
+/// A project-scope gate runs only the launcher of its install root. A nested
+/// package or repository below the install root does not supply the program.
+#[test]
+fn project_scope_gate_never_runs_a_launcher_below_the_install_root() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path().canonicalize().unwrap();
+    let nested = project.join("vendor/pkg");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(nested.join("package.json"), "{}").unwrap();
+    let log = project.join("calls.log");
+    logging_stub(&nested.join("node_modules/.bin/fallow"), "nested", &log);
+    logging_stub(&project.join("node_modules/.bin/fallow"), "root", &log);
+    std::fs::create_dir_all(project.join("empty-bin")).unwrap();
+
+    let output = probe_gate(
+        &rendered_gate_script(),
+        &project.join(".claude/hooks/fallow-gate.sh"),
+        &nested,
+        &project.join("empty-bin"),
+        &session_input(&nested),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert!(calls.contains("root --version"), "{calls}\n{stderr}");
+    assert!(!calls.contains("nested"), "{calls}\n{stderr}");
+}
+
+/// The gate reads the command before it starts any fallow. A hook input whose
+/// command is not a git write, but whose other fields name one, runs nothing.
+#[test]
+fn gate_runs_no_fallow_for_a_command_that_is_not_a_git_write() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path().canonicalize().unwrap();
+    let log = project.join("calls.log");
+    logging_stub(&project.join("bin/fallow"), "path", &log);
+    logging_stub(&project.join("node_modules/.bin/fallow"), "root", &log);
+    let input = serde_json::json!({
+        "cwd": project,
+        "tool_input": {
+            "command": "ls -la",
+            "description": "list files before git commit and git push"
+        },
+    })
+    .to_string();
+
+    let output = probe_gate(
+        &rendered_gate_script(),
+        &project.join(".claude/hooks/fallow-gate.sh"),
+        &project,
+        &project.join("bin"),
+        input.as_bytes(),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        calls(&log),
+        "",
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The small hook input reader decodes JSON string escapes, so a command with
+/// escaped quotes or a new line still reaches the exact check.
+#[test]
+fn gate_reads_an_escaped_command_without_a_json_reader() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path().canonicalize().unwrap();
+    let log = project.join("calls.log");
+    logging_stub(&project.join("bin/fallow"), "path", &log);
+    let input = serde_json::json!({
+        "session_id": "x",
+        "cwd": project,
+        "tool_input": { "command": "echo \"a\\tb\"\ngit commit -m \"fix: x\"", "timeout": 5 },
+        "nested": [{ "command": "ls" }, null, true, 1.5e3],
+    })
+    .to_string();
+
+    let output = probe_gate(
+        &rendered_gate_script(),
+        &project.join(".claude/hooks/fallow-gate.sh"),
+        &project,
+        &project.join("bin"),
+        input.as_bytes(),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains("is fallow 2.30.0, below required"),
+        "{stderr}"
+    );
+}
+
+/// A relative or empty `PATH` entry names a directory below the working
+/// directory, which is the session tree. The gate skips such entries.
+#[test]
+fn gate_skips_relative_and_empty_path_entries() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&session.join("node_modules/.bin/fallow"), "relative", &log);
+    logging_stub(&session.join("fallow"), "empty", &log);
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+        "node_modules/.bin::.:",
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert!(calls.contains("path --version"), "{calls}\n{stderr}");
+    assert!(!calls.contains("relative"), "{calls}");
+    assert!(!calls.contains("empty"), "{calls}");
+}
+
+/// A large hook input with many escapes goes to a JSON reader instead of the
+/// small reader, so the gate stays fast.
+#[test]
+fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path().canonicalize().unwrap();
+    let log = project.join("calls.log");
+    logging_stub(&project.join("bin/fallow"), "path", &log);
+    let message = "a\"b\\".repeat(25_000);
+    let input = serde_json::json!({
+        "cwd": project,
+        "tool_input": { "command": format!("git commit -m '{message}'") },
+    })
+    .to_string();
+    assert!(input.len() > 100_000);
+
+    let started = std::time::Instant::now();
+    let output = probe_gate(
+        &rendered_gate_script(),
+        &project.join(".claude/hooks/fallow-gate.sh"),
+        &project,
+        &project.join("bin"),
+        input.as_bytes(),
+    );
+    let elapsed = started.elapsed();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
+    if stderr.contains("no native JSON reader or jq found") {
+        return;
+    }
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+}
+
+/// Every program of the gate (git, jq, cat and the others) resolves only
+/// through absolute `PATH` entries without a `node_modules` component, in any
+/// letter case. A package manager puts the `node_modules/.bin` of the project
+/// first on `PATH`.
+#[test]
+fn gate_runs_no_helper_from_a_package_or_relative_path_entry() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    let helpers = ["git", "jq", "cat", "sed", "mktemp", "dirname", "fallow"];
+    for dir in [
+        session.join("node_modules/.bin"),
+        session.join("NODE_MODULES/.bin"),
+        session.join("rel"),
+    ] {
+        for helper in helpers {
+            logging_stub(&dir.join(helper), &format!("planted-{helper}"), &log);
+        }
+    }
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let prefix = format!(
+        "{}:{}:rel:",
+        session.join("node_modules/.bin").display(),
+        session.join("NODE_MODULES/.bin").display()
+    );
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+        &prefix,
+    );
+    let calls = calls(&log);
+
+    assert!(!calls.contains("planted"), "{calls}");
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
