@@ -376,39 +376,7 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
         &root.join(mcp::codex_file()),
     ));
     if let Some(home) = home {
-        // `~/.claude.json` holds the user-level Claude servers. Status only
-        // reads it; fallow never edits it.
-        for (harness, file) in [
-            (Harness::Claude, ".claude.json"),
-            (Harness::Codex, mcp::codex_file()),
-            (Harness::Cursor, mcp::cursor_file()),
-        ] {
-            let path = home.join(file);
-            // The project row already covers a home directory that is the root.
-            if harness == Harness::Cursor && home == root {
-                continue;
-            }
-            if let Existing::Loaded(Some(command)) = mcp::registered_command(&path, harness) {
-                let mut row = mcp_row(root, Some(home), harness, &path);
-                row.user_scope = home != root;
-                if row.user_scope
-                    && row.state == SurfaceState::Installed
-                    && runs_a_package_runner(&command)
-                {
-                    let fix = if harness == Harness::Claude {
-                        "run the claude mcp add command that agent install --user prints"
-                    } else {
-                        "agent install --user writes an absolute launcher"
-                    };
-                    row.state = SurfaceState::Stale;
-                    row.detail = Some(format!(
-                        "{}: a user-level entry runs the fallow-mcp of each project it opens; {fix}",
-                        command.shell_words()
-                    ));
-                }
-                rows.push(row);
-            }
-        }
+        rows.extend(user_mcp_rows(root, home));
     }
     rows.push(mcp_row(
         root,
@@ -426,6 +394,45 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     rows.push(hook_row(Some(Harness::Claude), &hooks.claude, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex_gate, &runtime));
     rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
+    rows
+}
+
+/// Rows for the user-level MCP entries in `home`. An entry that starts a
+/// package runner runs the fallow-mcp of each project, so it is stale.
+fn user_mcp_rows(root: &Path, home: &Path) -> Vec<SurfaceStatus> {
+    let mut rows = Vec::new();
+    // `~/.claude.json` holds the user-level Claude servers. Status only reads
+    // it; fallow never edits it.
+    for (harness, file) in [
+        (Harness::Claude, ".claude.json"),
+        (Harness::Codex, mcp::codex_file()),
+        (Harness::Cursor, mcp::cursor_file()),
+    ] {
+        let path = home.join(file);
+        // The project row already covers a home directory that is the root.
+        if harness == Harness::Cursor && home == root {
+            continue;
+        }
+        let Existing::Loaded(Some(command)) = mcp::registered_command(&path, harness) else {
+            continue;
+        };
+        let mut row = mcp_row(root, Some(home), harness, &path);
+        row.user_scope = home != root;
+        if row.user_scope && row.state == SurfaceState::Installed && runs_a_package_runner(&command)
+        {
+            let fix = if harness == Harness::Claude {
+                "run the claude mcp add command that agent install --user prints"
+            } else {
+                "agent install --user writes an absolute launcher"
+            };
+            row.state = SurfaceState::Stale;
+            row.detail = Some(format!(
+                "{}: a user-level entry runs the fallow-mcp of each project it opens; {fix}",
+                command.shell_words()
+            ));
+        }
+        rows.push(row);
+    }
     rows
 }
 
