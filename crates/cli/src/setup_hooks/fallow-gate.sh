@@ -231,12 +231,64 @@ gate_exclude_target() {
   fi
 }
 
-# Blocks the command when the trees of the targets hold the fallow or the git
-# that the gate finds without them. The audit cannot then run with a program
-# that the gate trusts.
+# Returns 0 when directory $1 is below a target tree and not below a tree
+# that the gate excluded without the targets.
+gate_target_only() {
+  local -a base=(${GATE_EXCLUDED[@]+"${GATE_EXCLUDED[@]}"})
+  local -a targets=(${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"})
+  local hit=1
+  GATE_EXCLUDED=()
+  gate_excluded "$1" && hit=0
+  GATE_EXCLUDED=(${base[@]+"${base[@]}"})
+  GATE_TARGET_EXCLUDED=()
+  [ "$hit" -eq 1 ] || ! gate_excluded "$1" || hit=1
+  GATE_TARGET_EXCLUDED=(${targets[@]+"${targets[@]}"})
+  return "$hit"
+}
+
+# Returns 0 when the program $1 of a JSON reader is gone: an absolute path in
+# the directory of a target tree, or a name that PATH no longer finds.
+gate_runner_excluded() {
+  case "$1" in
+    /* | [A-Za-z]:[\\/]*)
+      gate_target_only "${1%/*}" && return 0
+      gate_resolve_dir "${1%/*}" || return 0
+      gate_target_only "$RESOLVED"
+      ;;
+    *) ! gate_which "$1" >/dev/null ;;
+  esac
+}
+
+# Prints the block message for the program $1 at path $2 below a target tree,
+# then exits 2.
+gate_block_target() {
+  local program="$2" target name=""
+  if gate_resolve_dir "${program%/*}"; then
+    program="$RESOLVED/${program##*/}"
+    for target in ${GATE_TARGETS[@]+"${GATE_TARGETS[@]}"}; do
+      if gate_resolve_dir "$target" && gate_inside "${program%/*}" "$RESOLVED"; then
+        name="$target"
+        break
+      fi
+    done
+  fi
+  {
+    echo "fallow-gate: blocked: the git write targets ${name:-a tree} that holds the $1 of the gate ($program)."
+    echo "fallow-gate: the gate does not run a program from a tree that it audits, so the audit cannot run."
+  } >&2
+  exit 2
+}
+
+# Blocks the command when the trees of the targets hold the fallow that the
+# install recorded, or the fallow or the git that the gate finds on PATH
+# without them. The audit cannot then run with a program that the gate
+# trusts.
 gate_check_targets() {
-  local tool before after target name
+  local tool before after
   local -a saved=(${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"})
+  if [ -n "$GATE_LOCAL_FALLOW" ] && gate_runner_excluded "$GATE_LOCAL_FALLOW"; then
+    gate_block_target fallow "$GATE_LOCAL_FALLOW"
+  fi
   for tool in fallow git; do
     GATE_TARGET_EXCLUDED=()
     gate_filter_path
@@ -245,21 +297,7 @@ gate_check_targets() {
     gate_filter_path
     after="$(gate_which "$tool" || true)"
     [ -n "$before" ] && [ "$after" != "$before" ] || continue
-    name=""
-    if gate_resolve_dir "${before%/*}"; then
-      before="$RESOLVED/${before##*/}"
-      for target in ${GATE_TARGETS[@]+"${GATE_TARGETS[@]}"}; do
-        if gate_resolve_dir "$target" && gate_inside "${before%/*}" "$RESOLVED"; then
-          name="$target"
-          break
-        fi
-      done
-    fi
-    {
-      echo "fallow-gate: blocked: the git write targets ${name:-a tree} that holds the $tool on PATH ($before)."
-      echo "fallow-gate: the gate does not run a program from a tree that it audits, so the audit cannot run."
-    } >&2
-    exit 2
+    gate_block_target "$tool" "$before"
   done
 }
 
@@ -323,6 +361,7 @@ gate_json() {
 gate_try_json_runner() {
   local anchor="$1" probe
   shift
+  ! gate_runner_excluded "$1" || return 1
   # A probe never gets the hook stdin, so a launcher cannot read the payload.
   probe="$(CDPATH='' cd -P "$anchor" && "$@" hooks gate-runtime probe </dev/null 2>/dev/null)" || return 1
   [ "$probe" = fallow-gate-json-v1 ] || return 1
@@ -741,6 +780,14 @@ fi
 for GATE_CANDIDATE in ${GIT_WRITE_CANDIDATES[@]+"${GIT_WRITE_CANDIDATES[@]}"}; do
   gate_exclude_target "$(gate_join "$GATE_CANDIDATE_BASE" "$GATE_CANDIDATE")"
 done
+# A JSON reader that the gate found before the targets were known can lie in
+# a target tree. The check runs before the next reader probe.
+gate_check_targets
+GATE_PATH_FALLOW="$(gate_which fallow || true)"
+if [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] && gate_runner_excluded "${GATE_JSON_RUNNER[0]}"; then
+  GATE_JSON_RUNNER=()
+  GATE_JSON_DIR=""
+fi
 
 # The block message reads the audit report with the same reader.
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then

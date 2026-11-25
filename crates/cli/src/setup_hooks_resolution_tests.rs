@@ -48,8 +48,6 @@ fn probe_gate_with_path_prefix(
     input: &[u8],
     path_prefix: &str,
 ) -> std::process::Output {
-    use std::io::Write;
-
     // jq is linked INTO the probe directory rather than having its own
     // directory added to PATH: on a developer machine that directory also
     // holds the globally installed fallow, which would satisfy the very
@@ -65,6 +63,18 @@ fn probe_gate_with_path_prefix(
         let _ = std::os::unix::fs::symlink(jq, extra_bin.join("jq"));
     }
     let path = format!("{path_prefix}{}:/usr/bin:/bin", extra_bin.display());
+    probe_gate_with_path(script, script_path, cwd, &path, input)
+}
+
+/// Same as [`probe_gate`], with `path` as the whole `PATH`.
+fn probe_gate_with_path(
+    script: &str,
+    script_path: &Path,
+    cwd: &Path,
+    path: &str,
+    input: &[u8],
+) -> std::process::Output {
+    use std::io::Write;
 
     std::fs::create_dir_all(script_path.parent().unwrap()).unwrap();
     std::fs::write(script_path, script).unwrap();
@@ -72,7 +82,7 @@ fn probe_gate_with_path_prefix(
     let mut child = std::process::Command::new("bash")
         .arg(script_path)
         .current_dir(cwd)
-        .env("PATH", &path)
+        .env("PATH", path)
         // An unreachable floor makes resolution observable: the block
         // message names the runner the script chose.
         .env("FALLOW_GATE_MIN_VERSION", "999.0.0")
@@ -804,4 +814,72 @@ fn gate_runs_no_helper_from_the_tree_of_another_audit_root() {
         "{calls}\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Without jq, a large hook input goes to the JSON reader of fallow before the
+/// gate knows the targets. When that reader lies in a target tree, the gate
+/// blocks before it runs the reader again or starts an audit.
+#[test]
+fn gate_blocks_when_the_json_reader_lies_in_a_target_tree() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let tools = base.join("tools");
+    let log = base.join("calls.log");
+    std::fs::create_dir_all(&session).unwrap();
+    // The PATH of this probe holds the system tools but no jq.
+    let sys = base.join("sys");
+    std::fs::create_dir_all(&sys).unwrap();
+    for tool in [
+        "bash", "sh", "git", "cat", "mktemp", "sort", "head", "sed", "tr", "dirname", "basename",
+        "grep", "rm", "mkdir", "mv", "readlink", "env",
+    ] {
+        if let Some(found) = ["/usr/bin", "/bin"]
+            .iter()
+            .map(|dir| Path::new(dir).join(tool))
+            .find(|candidate| candidate.exists())
+        {
+            std::os::unix::fs::symlink(found, sys.join(tool)).unwrap();
+        }
+    }
+    let command = format!(
+        "git -C {} commit -m '{}'",
+        tools.display(),
+        "x".repeat(9000)
+    );
+    write_stale_fallow(
+        &tools.join("bin/fallow"),
+        &format!(
+            "#!/bin/sh\necho \"tools $*\" >> '{log}'\ncase \"$*\" in\n  'hooks gate-runtime probe') echo fallow-gate-json-v1 ;;\n  'hooks gate-runtime input') printf '%s\\0%s\\0' \"{command}\" '{session}' ;;\n  --version) echo 'fallow 2.30.0' ;;\nesac\n",
+            log = log.display(),
+            session = session.display(),
+        ),
+    );
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    git_init(&session);
+    git_init(&tools);
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, tools.join("bin/fallow").to_str()),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!("{}:{}", base.join("bin").display(), sys.display()),
+        input.to_string().as_bytes(),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}\n{calls}");
+    assert!(stderr.contains(&tools.display().to_string()), "{stderr}");
+    assert!(
+        calls.contains("tools hooks gate-runtime input"),
+        "{calls}\n{stderr}"
+    );
+    for line in calls.lines().filter(|line| line.starts_with("tools")) {
+        assert!(
+            line.ends_with("probe") || line.ends_with("input"),
+            "{line}\n{calls}"
+        );
+    }
 }
