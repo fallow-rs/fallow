@@ -77,7 +77,7 @@ pub(super) fn read_manifest(path: &std::path::Path) -> Result<String, String> {
 /// [`read_manifest`] with the project scope base `scope` (see
 /// [`crate::project_scope_base`]). `None` takes the scope base from the
 /// location of the manifest.
-fn read_manifest_in(
+pub(super) fn read_manifest_in(
     scope: Option<&std::path::Path>,
     path: &std::path::Path,
 ) -> Result<String, String> {
@@ -1078,6 +1078,14 @@ mod tests {
         assert_eq!(pkg.name.as_deref(), Some("@x/pkg"));
         std::fs::create_dir(root.join(".git")).unwrap();
         assert!(PackageJson::load(&manifest).is_ok());
+    }
+
+    #[test]
+    fn a_relative_manifest_path_loads() {
+        // A unit test runs in the directory of its crate, two levels below
+        // the `package.json` of the repository.
+        let pkg = PackageJson::load(std::path::Path::new("../../package.json")).unwrap();
+        assert!(pkg.name.is_some());
     }
 
     #[cfg(unix)]

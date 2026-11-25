@@ -47,8 +47,8 @@ impl DenoJson {
     /// # Errors
     ///
     /// Returns an error string when the file cannot be read or parsed.
-    fn load(path: &Path) -> Result<Self, String> {
-        let content = super::package_json::read_manifest(path)?;
+    fn load(scope: Option<&Path>, path: &Path) -> Result<Self, String> {
+        let content = super::package_json::read_manifest_in(scope, path)?;
         let content = content.trim_start_matches('\u{FEFF}');
         crate::jsonc::parse_deno_to_value(content).map_err(|e| {
             format!(
@@ -61,10 +61,19 @@ impl DenoJson {
 
     /// Load the first existing Deno config in `dir` (`deno.json`, then `deno.jsonc`).
     fn load_from_dir(dir: &Path) -> Result<Option<(PathBuf, Self)>, (PathBuf, String)> {
+        Self::load_from_dir_in(None, dir)
+    }
+
+    /// [`Self::load_from_dir`] with the project scope base `scope`. A
+    /// dangling link is skipped with a warning.
+    fn load_from_dir_in(
+        scope: Option<&Path>,
+        dir: &Path,
+    ) -> Result<Option<(PathBuf, Self)>, (PathBuf, String)> {
         for name in DENO_JSON_NAMES {
             let path = dir.join(name);
-            if path.symlink_metadata().is_ok() {
-                let deno = Self::load(&path).map_err(|error| (path.clone(), error))?;
+            if path.symlink_metadata().is_ok() && !skip_dangling_link(&path) {
+                let deno = Self::load(scope, &path).map_err(|error| (path.clone(), error))?;
                 return Ok(Some((path, deno)));
             }
         }
@@ -149,19 +158,50 @@ pub(super) fn manifest_declares_package(dir: &Path) -> bool {
 pub fn load_member_package_manifest(
     dir: &Path,
 ) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
-    manifest_from_probe(dir, DenoJson::load_from_dir(dir))
+    load_member_package_manifest_in(None, dir)
+}
+
+/// [`load_member_package_manifest`] with the project scope base `scope` of
+/// workspace discovery, so a member directory that links to another
+/// directory inside the project loads.
+pub(super) fn load_member_package_manifest_in(
+    scope: Option<&Path>,
+    dir: &Path,
+) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
+    manifest_from_probe(scope, dir, DenoJson::load_from_dir_in(scope, dir))
+}
+
+/// True when `path` is a link that does not resolve. The caller then
+/// treats the manifest as absent, and this function logs a warning that
+/// names the path only.
+fn skip_dangling_link(path: &Path) -> bool {
+    let dangling = path
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink())
+        && std::fs::metadata(path).is_err();
+    if dangling {
+        tracing::warn!(
+            "skipping {}: it is a link that does not resolve",
+            path.display()
+        );
+    }
+    dangling
 }
 
 /// Project a pre-loaded Deno probe plus `package.json` into the
 /// [`load_member_package_manifest`] result shape. Shared so combined probes
 /// pay the `deno.json` / `deno.jsonc` filesystem probe only once.
 fn manifest_from_probe(
+    scope: Option<&Path>,
     dir: &Path,
     deno: Result<Option<(PathBuf, DenoJson)>, (PathBuf, String)>,
 ) -> Result<Option<(String, PackageJson, Vec<String>)>, String> {
     let pkg_path = dir.join("package.json");
-    if pkg_path.symlink_metadata().is_ok() {
-        let pkg = PackageJson::load(&pkg_path)?;
+    if pkg_path.symlink_metadata().is_ok() && !skip_dangling_link(&pkg_path) {
+        let pkg = match scope {
+            Some(scope) => PackageJson::load_in_scope(scope, &pkg_path)?,
+            None => PackageJson::load(&pkg_path)?,
+        };
         deno.map_err(|(_path, error)| error)?;
         let deps = pkg.all_dependency_names();
         let name = pkg.name.clone().unwrap_or_else(|| dir_name_fallback(dir));
@@ -203,7 +243,7 @@ pub fn probe_dir_manifest(dir: &Path) -> DirManifestProbe {
         Ok(Some((path, config))) => Some((path.clone(), config.import_map_entries())),
         _ => None,
     };
-    let manifest = manifest_from_probe(dir, deno);
+    let manifest = manifest_from_probe(None, dir, deno);
     DirManifestProbe {
         manifest,
         deno_import_map,

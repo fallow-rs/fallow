@@ -661,3 +661,52 @@ fn a_dangling_and_an_outside_root_manifest_link_get_one_message() {
     };
     assert_eq!(message("other.json"), message("missing.json"));
 }
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn dangling_member_and_deno_manifest_links_are_skipped() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    write_package(
+        &root,
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    );
+    std::os::unix::fs::symlink("missing-deno.json", root.join("deno.json")).unwrap();
+    write_package(&root.join("packages/ok"), r#"{"name":"ok"}"#);
+    std::fs::create_dir_all(root.join("packages/broken")).unwrap();
+    std::os::unix::fs::symlink(
+        "missing-package.json",
+        root.join("packages/broken/package.json"),
+    )
+    .unwrap();
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty()).unwrap();
+    let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    assert_eq!(names, vec!["ok"], "{diagnostics:?}");
+    assert!(
+        diagnostics_of_kind(&diagnostics, "malformed-package-json").is_empty(),
+        "{diagnostics:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_member_dir_link_to_another_dir_inside_the_root_loads() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    write_package(
+        &root,
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    );
+    write_package(&root.join("shared/x"), r#"{"name":"x"}"#);
+    std::fs::create_dir_all(root.join("packages")).unwrap();
+    std::os::unix::fs::symlink("../shared/x", root.join("packages/x")).unwrap();
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty()).unwrap();
+    let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    assert_eq!(names, vec!["x"], "{diagnostics:?}");
+}
