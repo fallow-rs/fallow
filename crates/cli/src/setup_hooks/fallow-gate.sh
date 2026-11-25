@@ -40,6 +40,7 @@ set -euo pipefail
 # reader of fallow, because the time of those shell scans grows faster than
 # the length.
 GATE_SMALL_INPUT_LIMIT=8192
+GATE_NL=$'\n'
 
 gate_skip_not_git_write() {
   if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
@@ -86,6 +87,7 @@ fi
 # starts with `=` excludes only that one directory, not the directories
 # below it.
 GATE_EXCLUDED=()
+GATE_TARGET_EXCLUDED=()
 GATE_PATH_ENTRIES=()
 GATE_PATH_REAL=()
 
@@ -118,7 +120,7 @@ gate_inside() {
 # Returns 0 when directory $1 is excluded.
 gate_excluded() {
   local tree
-  for tree in ${GATE_EXCLUDED[@]+"${GATE_EXCLUDED[@]}"}; do
+  for tree in ${GATE_EXCLUDED[@]+"${GATE_EXCLUDED[@]}"} ${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"}; do
     case "$tree" in
       /) ;;
       =*) ! { gate_inside "$1" "${tree#=}" && gate_inside "${tree#=}" "$1"; } || return 0 ;;
@@ -210,6 +212,56 @@ gate_read_path() {
 }
 gate_read_path
 export PATH
+
+# The trees of the git write targets and of the audit roots leave PATH too,
+# in GATE_TARGET_EXCLUDED. GATE_TARGETS keeps each such directory for the
+# block message of gate_check_targets.
+GATE_TARGETS=()
+gate_exclude_target() {
+  local n="${#GATE_EXCLUDED[@]}" i
+  GATE_TARGETS+=("$1")
+  gate_exclude_tree "$1" ""
+  for ((i = n; i < ${#GATE_EXCLUDED[@]}; i++)); do
+    GATE_TARGET_EXCLUDED+=("${GATE_EXCLUDED[$i]}")
+  done
+  if [ "$n" -eq 0 ]; then
+    GATE_EXCLUDED=()
+  else
+    GATE_EXCLUDED=("${GATE_EXCLUDED[@]:0:n}")
+  fi
+}
+
+# Blocks the command when the trees of the targets hold the fallow or the git
+# that the gate finds without them. The audit cannot then run with a program
+# that the gate trusts.
+gate_check_targets() {
+  local tool before after target name
+  local -a saved=(${GATE_TARGET_EXCLUDED[@]+"${GATE_TARGET_EXCLUDED[@]}"})
+  for tool in fallow git; do
+    GATE_TARGET_EXCLUDED=()
+    gate_filter_path
+    before="$(gate_which "$tool" || true)"
+    GATE_TARGET_EXCLUDED=(${saved[@]+"${saved[@]}"})
+    gate_filter_path
+    after="$(gate_which "$tool" || true)"
+    [ -n "$before" ] && [ "$after" != "$before" ] || continue
+    name=""
+    if gate_resolve_dir "${before%/*}"; then
+      before="$RESOLVED/${before##*/}"
+      for target in ${GATE_TARGETS[@]+"${GATE_TARGETS[@]}"}; do
+        if gate_resolve_dir "$target" && gate_inside "${before%/*}" "$RESOLVED"; then
+          name="$target"
+          break
+        fi
+      done
+    fi
+    {
+      echo "fallow-gate: blocked: the git write targets ${name:-a tree} that holds the $tool on PATH ($before)."
+      echo "fallow-gate: the gate does not run a program from a tree that it audits, so the audit cannot run."
+    } >&2
+    exit 2
+  done
+}
 
 # Prints the absolute path of the program $1 on PATH, or returns 1.
 gate_which() {
@@ -418,6 +470,17 @@ gate_unquote() {
   printf '%s\n' "$word"
 }
 
+# Prints the parent directory of path $1, as dirname does for a path without
+# a trailing slash.
+gate_parent() {
+  case "$1" in
+    /*/*) printf '%s\n' "${1%/*}" ;;
+    /*) printf '/\n' ;;
+    */*) printf '%s\n' "${1%/*}" ;;
+    *) printf '.\n' ;;
+  esac
+}
+
 gate_join() {
   case "$2" in
     /*) printf '%s\n' "$2" ;;
@@ -496,7 +559,6 @@ is_git_write_command() {
     separators=';|&()'
   fi
   # Control operators separate simple commands; each becomes its own line.
-  # shellcheck disable=SC2020 # Each operator character becomes a new line.
   while IFS= read -r segment; do
     if [ "$segment" = "$open_mark" ]; then
       saved_dirs+=("$cd_dir")
@@ -527,7 +589,7 @@ is_git_write_command() {
             value="$(gate_unquote "${1#*=}")"
             value="${value%/}"
             if [ "${value##*/}" = .git ]; then
-              GIT_WRITE_CANDIDATES+=("$(gate_join "$cd_dir" "$(dirname "$value")")")
+              GIT_WRITE_CANDIDATES+=("$(gate_join "$cd_dir" "$(gate_parent "$value")")")
             fi
             ;;
         esac
@@ -574,7 +636,7 @@ is_git_write_command() {
           --git-dir)
             value="${value%/}"
             if [ "${value##*/}" = .git ]; then
-              GIT_WRITE_CANDIDATES+=("$(gate_join "$dir" "$(dirname "$value")")")
+              GIT_WRITE_CANDIDATES+=("$(gate_join "$dir" "$(gate_parent "$value")")")
             fi
             ;;
         esac
@@ -583,7 +645,7 @@ is_git_write_command() {
       done
       [ "$#" -gt 0 ] && shift
     done
-  done < <(printf '%s\n' "$cmd" | tr "$separators" '\n\n\n\n\n')
+  done <<<"${cmd//[$separators]/$GATE_NL}"
   return "$found"
 }
 
@@ -601,7 +663,9 @@ gate_loose_write() {
     *) return 1 ;;
   esac
   text="${text//"$line_join"/ }"
-  # shellcheck disable=SC2020 # Each operator character becomes a new line.
+  text="${text//[\'\"\\]/}"
+  text="${text//[;|&\`]/$GATE_NL}"
+  text="${text//[()]/ }"
   while IFS= read -r segment; do
     seen_git=0
     # Intentional word splitting; globbing is disabled below.
@@ -618,7 +682,7 @@ gate_loose_write() {
         return 0
       fi
     done
-  done < <(printf '%s\n' "$text" | tr -d "'\"\\\\" | tr ';|&`()' '\n\n\n\n  ')
+  done <<<"$text"
   return 1
 }
 
@@ -670,6 +734,13 @@ set +f
 if [ "$GIT_WRITE" -eq 0 ]; then
   gate_skip_not_git_write
 fi
+GATE_CANDIDATE_BASE="$PWD"
+if [ -n "$SESSION_CWD" ] && gate_resolve_dir "$SESSION_CWD"; then
+  GATE_CANDIDATE_BASE="$RESOLVED"
+fi
+for GATE_CANDIDATE in ${GIT_WRITE_CANDIDATES[@]+"${GIT_WRITE_CANDIDATES[@]}"}; do
+  gate_exclude_target "$(gate_join "$GATE_CANDIDATE_BASE" "$GATE_CANDIDATE")"
+done
 
 # The block message reads the audit report with the same reader.
 if [ "${#GATE_JSON_RUNNER[@]}" -eq 0 ]; then
@@ -769,7 +840,6 @@ LOGICAL_BASE="$PROCESS_DIR"
 if [ -n "$SESSION_DIR" ]; then
   LOGICAL_BASE="$SESSION_CWD"
 fi
-GATE_NL=$'\n'
 
 # Prints three lines for a directory, as git finds them: the work tree top
 # level, the git directory and the common git directory. Linked worktrees of
@@ -1037,6 +1107,7 @@ add_audit_root() {
     fi
   fi
   AUDIT_ROOTS+=("$root")
+  gate_exclude_target "${root:-$PROCESS_DIR}"
 }
 
 # A strict command audits its target alone only when git reports another work
@@ -1056,6 +1127,7 @@ if STRICT="$(gate_allowlisted_target "$CMD")"; then
     done <<<"${STRICT_REST#*"$GATE_NL"}"
   fi
 fi
+[ -z "$TARGET_DIR" ] || gate_exclude_target "$TARGET_DIR"
 # The session audit stays on until every check for the target passes.
 AUDIT_SESSION=1
 if [ -n "$TARGET_DIR" ] && gate_other_work_tree "$TARGET_DIR" "$STRICT_SUBCOMMAND"; then
@@ -1074,13 +1146,16 @@ else
   if [ "${#GIT_WRITE_CANDIDATES[@]}" -gt 0 ]; then
     for CANDIDATE in "${GIT_WRITE_CANDIDATES[@]}"; do
       CANDIDATE="$(gate_join "$BASE_DIR" "$CANDIDATE")"
-      if CANDIDATE_DIR="$(CDPATH='' cd -P "$CANDIDATE" 2>/dev/null && pwd -P)" &&
-        gate_other_work_tree "$CANDIDATE_DIR"; then
+      CANDIDATE_DIR="$(CDPATH='' cd -P "$CANDIDATE" 2>/dev/null && pwd -P)" || continue
+      gate_exclude_target "$CANDIDATE_DIR"
+      if gate_other_work_tree "$CANDIDATE_DIR"; then
         add_audit_root "$CANDIDATE_DIR"
       fi
     done
   fi
 fi
+gate_check_targets
+GATE_PATH_FALLOW="$(gate_which fallow || true)"
 
 # Lists the findings that caused a fail verdict, one line each, from the
 # `fallow audit --format json` report on stdin. A finding is an object with an
@@ -1391,30 +1466,11 @@ run_audit() {
 # local to that audit root. Each root gets the same block rule as a single
 # audit: exit 2 blocks. Any other failure of one root does not stop the
 # audits of the other roots, and the gate exits with it at the end.
-# Each audit also drops the PATH entries below its own audit root, in its
-# subshell. When that removes the fallow or the git that the gate found
-# before, the audit cannot run with the programs that the gate trusts, so the
-# gate blocks and names the target. The fallow that the install recorded is
-# not a PATH entry, so it stays.
-GATE_PATH_FALLOW="$(gate_which fallow || true)"
-GATE_PATH_GIT="$(gate_which git || true)"
 FINAL_STATUS=0
 for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
   set +e
   (
     set -e
-    gate_exclude_tree "${AUDIT_ROOT:-$PROCESS_DIR}" ""
-    for GATE_TOOL in fallow git; do
-      if [ "$GATE_TOOL" = fallow ]; then GATE_BEFORE="$GATE_PATH_FALLOW"; else GATE_BEFORE="$GATE_PATH_GIT"; fi
-      GATE_AFTER="$(gate_which "$GATE_TOOL" || true)"
-      if [ -n "$GATE_BEFORE" ] && [ "$GATE_AFTER" != "$GATE_BEFORE" ]; then
-        {
-          echo "fallow-gate: blocked: the git write targets ${AUDIT_ROOT:-$PROCESS_DIR}, which holds the $GATE_TOOL on PATH ($GATE_BEFORE)."
-          echo "fallow-gate: the gate does not run a program from the tree that it audits, so the audit cannot run."
-        } >&2
-        exit 2
-      fi
-    done
     if [ -n "$AUDIT_ROOT" ] && ! CDPATH='' cd -P "$AUDIT_ROOT" 2>/dev/null; then
       echo "fallow-gate: cannot enter $AUDIT_ROOT, auditing $(pwd) instead." >&2
     fi

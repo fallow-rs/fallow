@@ -756,3 +756,52 @@ fn gate_blocks_a_write_to_the_tree_of_the_only_trusted_fallow() {
     assert!(stderr.contains(&tools.display().to_string()), "{stderr}");
     assert!(!calls(&log).contains("tools audit"), "{}", calls(&log));
 }
+
+/// A git write with two targets audits both trees. A helper below the tree of
+/// one target never runs, also not in the audit of the other target.
+#[test]
+fn gate_runs_no_helper_from_the_tree_of_another_audit_root() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let first = base.join("first");
+    let second = base.join("second");
+    let log = base.join("calls.log");
+    for dir in [&session, &first, &second] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    for helper in ["jq", "cat", "sed", "tr", "mktemp", "head", "sort", "grep"] {
+        logging_stub(
+            &second.join("bin").join(helper),
+            &format!("stub-{helper}"),
+            &log,
+        );
+    }
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    for dir in [&session, &first, &second] {
+        git_init(dir);
+    }
+    let command = format!(
+        "git -C {} commit -m x; git -C {} commit -m x",
+        first.display(),
+        second.display()
+    );
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+        &format!("{}:", second.join("bin").display()),
+    );
+    let calls = calls(&log);
+
+    assert!(!calls.contains("stub-"), "{calls}");
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
