@@ -5,32 +5,33 @@
 Precision is the share of real findings among real and noise verdicts, from a seeded
 random sample of each rule's findings. Each project counts with its share of the
 findings, so a project with many findings weighs more than its sample. `unsure`
-verdicts are not in the ratio. The range is a 95 percent interval on that estimate.
+verdicts are not in the ratio. The range weights the exact 95 percent interval of
+each project, corrected for the count of projects.
 See `docs/rule-precision.md` for the method.
 Reviews is the count of independent reviews; the percentage is how often the first two agree.
 
 | Command | Rule | Findings | Sampled | Real | Noise | Unsure | Precision | Reviews | Measured on |
 |---|---|---|---|---|---|---|---|---|---|
-| `dead-code` | `circular-dependency` | 182 | 88 | 73 | 15 | 0 | 85% (74 to 88) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `duplicate-export` | 20 | 20 | 17 | 3 | 0 | 85% (53 to 91) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `duplicate-export-alias` | 69 | 50 | 50 | 0 | 0 | 100% (84 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `package-cycle` | 20 | 20 | 18 | 2 | 0 | 90% (67 to 100) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `test-only-dependency` | 2 | 2 | 2 | 0 | 0 | 100% (1 to 100) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unlisted-binary` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 100) | 3 (0% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unlisted-dependency` | 94 | 46 | 31 | 15 | 0 | 84% (73 to 88) | 3 (83% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unresolved-import` | 14 | 14 | 0 | 14 | 0 | 0% (0 to 45) | 3 (43% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-catalog-entry` | 16 | 16 | 16 | 0 | 0 | 100% (75 to 100) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-class-member` | 358 | 70 | 30 | 40 | 0 | 57% (43 to 69) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-component-prop` | 18 | 18 | 18 | 0 | 0 | 100% (78 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-dependency` | 32 | 32 | 29 | 3 | 0 | 91% (70 to 94) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-dependency-override` | 7 | 7 | 7 | 0 | 0 | 100% (53 to 100) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-dev-dependency` | 19 | 19 | 14 | 5 | 0 | 74% (46 to 87) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-enum-member` | 385 | 60 | 29 | 31 | 0 | 40% (34 to 47) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-export` | 670 | 91 | 85 | 6 | 0 | 94% (82 to 97) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-file` | 381 | 120 | 66 | 54 | 0 | 57% (50 to 62) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-load-data-key` | 5 | 5 | 2 | 3 | 0 | 40% (0 to 85) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-tagged-error` | 1 | 1 | 1 | 0 | 0 | 100% (0 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-type` | 579 | 91 | 90 | 1 | 0 | 100% (87 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `circular-dependency` | 182 | 88 | 73 | 15 | 0 | 85% (67 to 93) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `duplicate-export` | 20 | 20 | 17 | 3 | 0 | 85% (36 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `duplicate-export-alias` | 69 | 50 | 50 | 0 | 0 | 100% (76 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `package-cycle` | 20 | 20 | 18 | 2 | 0 | 90% (68 to 99) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `test-only-dependency` | 2 | 2 | 2 | 0 | 0 | 100% (16 to 100) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unlisted-binary` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 3 (0% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unlisted-dependency` | 94 | 46 | 31 | 15 | 0 | 84% (71 to 88) | 3 (83% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unresolved-import` | 14 | 14 | 0 | 14 | 0 | 0% (0 to 65) | 3 (43% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-catalog-entry` | 16 | 16 | 16 | 0 | 0 | 100% (79 to 100) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-class-member` | 358 | 70 | 30 | 40 | 0 | 57% (36 to 76) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-component-prop` | 18 | 18 | 18 | 0 | 0 | 100% (81 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-dependency` | 32 | 32 | 29 | 3 | 0 | 91% (58 to 99) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-dependency-override` | 7 | 7 | 7 | 0 | 0 | 100% (59 to 100) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-dev-dependency` | 19 | 19 | 14 | 5 | 0 | 74% (28 to 99) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-enum-member` | 385 | 60 | 29 | 31 | 0 | 40% (33 to 49) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-export` | 670 | 91 | 85 | 6 | 0 | 94% (75 to 99) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-file` | 381 | 120 | 66 | 54 | 0 | 57% (42 to 70) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-load-data-key` | 5 | 5 | 2 | 3 | 0 | 40% (1 to 88) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-tagged-error` | 1 | 1 | 1 | 0 | 0 | 100% (2 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-type` | 579 | 91 | 90 | 1 | 0 | 100% (84 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 
 ## Noise classes
 

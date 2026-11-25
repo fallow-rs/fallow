@@ -9,9 +9,12 @@ Precision is the share of real findings among the real and noise verdicts of
 a seeded random sample of the findings of a rule. The sample takes the same
 number of findings from each project, so a project with few findings gets a
 larger share of its findings sampled. The estimate therefore weights the
-precision of each project by its count of findings. The range is a 95 percent
-interval on the stratified variance. The range describes the rule on code in
-general, so even a rule whose findings were all reviewed keeps a range. A high precision means that a user can act on a finding
+precision of each project by its count of findings. The range weights the
+exact (Clopper-Pearson) interval of each project at the Bonferroni level
+`0.05 / projects`, so it holds with at least 95 percent probability. The range
+describes the rule on code in general, so even a rule whose findings were all
+reviewed keeps a range. When a project has findings but no real or noise
+verdict, the summary shows `n/a` and names the project. A high precision means that a user can act on a finding
 without a second look. The ledger does not measure recall: a rule that reports
 nothing has no row.
 

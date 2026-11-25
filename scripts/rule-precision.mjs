@@ -16,6 +16,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -96,8 +97,8 @@ const ensureCheckout = (dir, project) => {
     gitOrFail(dir, ["fetch", "-q", "--depth", "1", "origin", project.commit]);
     gitOrFail(dir, ["checkout", "-q", "--detach", project.commit]);
   }
-  if (gitOrFail(dir, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
-    fail(`${dir} has local changes to tracked files; reset the checkout first`);
+  if (gitOrFail(dir, ["status", "--porcelain"]) !== "") {
+    fail(`${dir} has local changes or untracked files; reset the checkout first`);
   }
   installDependencies(dir, project.commit);
 };
@@ -117,6 +118,9 @@ const INSTALLERS = [
 const installDependencies = (dir, commit) => {
   const marker = join(dir, gitOrFail(dir, ["rev-parse", "--git-dir"]), INSTALL_MARKER);
   if (existsSync(marker) && readFileSync(marker, "utf8").trim() === commit) return;
+  // An install that fails halfway leaves node_modules in an unknown state, so
+  // no earlier marker may survive it.
+  rmSync(marker, { force: true });
   const installer = INSTALLERS.find(([lockfile]) => existsSync(join(dir, lockfile)));
   if (installer) {
     const [, bin, args] = installer;
@@ -270,6 +274,7 @@ const record = (values) => {
 const check = () => {
   const ledger = readJson(LEDGER);
   const errors = ledgerErrors(ledger);
+  if (errors.length > 0) fail(errors.join("\n  "));
   const summary = existsSync(SUMMARY) ? readFileSync(SUMMARY, "utf8") : "";
   if (summary !== renderSummary(ledger)) {
     errors.push(
@@ -304,7 +309,12 @@ const { positionals, values } = parseCli();
 const subcommands = {
   sample: () => sample(values),
   record: () => record(values),
-  summary: () => writeSummary(readJson(LEDGER)),
+  summary: () => {
+    const ledger = readJson(LEDGER);
+    const errors = ledgerErrors(ledger);
+    if (errors.length > 0) fail(errors.join("\n  "));
+    writeSummary(ledger);
+  },
   check,
 };
 const run = subcommands[positionals[0]];

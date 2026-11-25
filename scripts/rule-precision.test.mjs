@@ -14,6 +14,7 @@ import {
   renderSummary,
   ruleIdFromKey,
   seededSample,
+  clopperPearson,
   stratifiedPrecision,
   upsertRow,
 } from "./rule-precision/ledger.mjs";
@@ -124,28 +125,80 @@ const stratum = (project, findings, sampled, real, noise) => ({
 });
 
 test("the estimate weights each project by its count of findings", () => {
-  const result = stratifiedPrecision([
+  const { result } = stratifiedPrecision([
     stratum("small", 30, 30, 30, 0),
     stratum("large", 3000, 30, 0, 30),
   ]);
-  assert.deepEqual(result, { estimate: 1, low: 0, high: 15 });
+  assert.deepEqual(result, { estimate: 1, low: 1, high: 14 });
+});
+
+test("the exact interval matches its reference values", () => {
+  const seven = clopperPearson(7, 10, 0.05);
+  assert.equal(seven.low.toFixed(4), "0.3475");
+  assert.equal(seven.high.toFixed(4), "0.9333");
+  assert.deepEqual(clopperPearson(0, 10, 0.05).low, 0);
+  assert.deepEqual(clopperPearson(10, 10, 0.05).high, 1);
 });
 
 test("a small or fully reviewed sample still has a range", () => {
-  assert.deepEqual(stratifiedPrecision([stratum("a", 10, 10, 7, 3)]), {
+  assert.deepEqual(stratifiedPrecision([stratum("a", 10, 10, 7, 3)]).result, {
     estimate: 70,
     low: 35,
-    high: 94,
+    high: 93,
   });
-  assert.deepEqual(stratifiedPrecision([stratum("a", 40, 30, 20, 8)]), {
+  assert.deepEqual(stratifiedPrecision([stratum("a", 40, 30, 20, 8)]).result, {
     estimate: 71,
-    low: 52,
-    high: 86,
+    low: 51,
+    high: 87,
   });
-  assert.equal(stratifiedPrecision([stratum("a", 5, 5, 0, 0)]), null);
   const allReal = stratifiedPrecision([stratum("a", 600, 30, 30, 0), stratum("b", 70, 30, 30, 0)]);
-  assert.equal(allReal.estimate, 100);
-  assert.equal(allReal.high, 100);
+  assert.equal(allReal.result.estimate, 100);
+  assert.equal(allReal.result.high, 100);
+});
+
+// Sums the probability of every outcome whose range contains the true
+// precision, for `projects` equal projects with `n` verdicts each.
+const exactCoverage = (n, projects, truth) => {
+  const pmf = (x) => {
+    let ways = 1;
+    for (let i = 0; i < x; i += 1) ways = (ways * (n - i)) / (i + 1);
+    return ways * truth ** x * (1 - truth) ** (n - x);
+  };
+  const walk = (reals, weight) => {
+    if (reals.length === projects) {
+      const { result } = stratifiedPrecision(
+        reals.map((x, i) => stratum(`p${i}`, 100, n, x, n - x)),
+      );
+      return result.low <= truth * 100 && result.high >= truth * 100 ? weight : 0;
+    }
+    let sum = 0;
+    for (let x = 0; x <= n; x += 1) sum += walk([...reals, x], weight * pmf(x));
+    return sum;
+  };
+  return walk([], 1);
+};
+
+test("the range covers the true precision in at least 95 percent of samples", () => {
+  for (const truth of [0.5, 0.7, 0.95]) {
+    const one = exactCoverage(30, 1, truth);
+    assert.ok(one >= 0.95, `one project at ${truth}: ${one}`);
+  }
+  const four = exactCoverage(3, 4, 0.95);
+  assert.ok(four >= 0.95, `four projects: ${four}`);
+});
+
+test("a project with findings but no verdict makes the estimate unavailable", () => {
+  const value = stratifiedPrecision([
+    stratum("small", 30, 30, 30, 0),
+    stratum("large", 3000, 30, 0, 0),
+  ]);
+  assert.deepEqual(value, { result: null, unjudged: ["large"] });
+  const text = renderSummary({
+    schema_version: 1,
+    corpus,
+    rows: [row([counts({ real: 0, noise: 0, unsure: 30 })])],
+  });
+  assert.match(text, /\| n\/a \(no verdict in app\) \|/);
 });
 
 const sample = {
@@ -238,6 +291,9 @@ test("a row measured at another commit than the corpus pin is an error", () => {
   assert.deepEqual(ledgerErrors({ schema_version: 1 }), [
     "the ledger needs a corpus object and a rows array",
   ]);
+  assert.deepEqual(ledgerErrors({ schema_version: 1, corpus: {}, rows: [] }), [
+    "the corpus needs at least one project",
+  ]);
 });
 
 test("ledger validation catches bad counts and unknown projects", () => {
@@ -260,7 +316,7 @@ test("the summary shows precision with its interval and leaves unsure out", () =
   const text = renderSummary({ schema_version: 1, corpus, rows: [row([counts()])] });
   assert.match(
     text,
-    /\| `dead-code` \| `unused-export` \| 40 \| 30 \| 20 \| 8 \| 2 \| 71% \(52 to 86\) \| 1 \|/,
+    /\| `dead-code` \| `unused-export` \| 40 \| 30 \| 20 \| 8 \| 2 \| 71% \(51 to 87\) \| 1 \|/,
   );
   const twice = renderSummary({
     schema_version: 1,
@@ -515,6 +571,11 @@ test("sample refuses a checkout with local changes and a bad sample size", () =>
     const corpusDir = join(fixture.root, "corpus");
     const base = ["sample", "--fallow-bin", fixture.fake, "--corpus-dir", corpusDir];
     assert.equal(cli([...base, "--out", join(fixture.root, "o1")]).status, 0);
+    writeFileSync(join(corpusDir, "app", "src", "scratch.ts"), "export const s = 1;\n");
+    const untracked = cli([...base, "--out", join(fixture.root, "o2a")]);
+    assert.equal(untracked.status, 2);
+    assert.match(untracked.stderr, /untracked files/);
+    rmSync(join(corpusDir, "app", "src", "scratch.ts"));
     writeFileSync(join(corpusDir, "app", "src", "a.ts"), "export const a = 2;\n");
     const dirty = cli([...base, "--out", join(fixture.root, "o2")]);
     assert.equal(dirty.status, 2);
@@ -554,6 +615,51 @@ test("an unknown option is an error with exit code 2", () => {
   const result = run(["summary", "--no-such-option"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no-such-option/);
+});
+
+test("a failed install removes an earlier install marker", () => {
+  const fixture = makeFixture();
+  try {
+    const cli = withLedger(fixture);
+    const corpusDir = join(fixture.root, "corpus");
+    const base = ["sample", "--fallow-bin", fixture.fake, "--corpus-dir", corpusDir];
+    assert.equal(cli([...base, "--out", join(fixture.root, "o1")]).status, 0);
+    const marker = join(corpusDir, "app", ".git", "rule-precision-installed");
+    assert.equal(readFileSync(marker, "utf8").trim(), fixture.commit);
+    // A lockfile makes the next run install. The stand-in installer fails.
+    writeFileSync(marker, "0".repeat(40));
+    const bin = join(fixture.root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "pnpm"), "#!/bin/sh\nexit 9\n");
+    chmodSync(join(bin, "pnpm"), 0o755);
+    const lockRepo = join(corpusDir, "app");
+    writeFileSync(join(lockRepo, ".git", "info", "exclude"), "pnpm-lock.yaml\n");
+    writeFileSync(join(lockRepo, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+    const failed = cli([...base, "--out", join(fixture.root, "o2")], {
+      PATH: `${bin}:${process.env.PATH}`,
+    });
+    assert.equal(failed.status, 2);
+    assert.match(failed.stderr, /pnpm install .* exited with 9/);
+    assert.equal(spawnSync("test", ["-e", marker]).status, 1);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("check refuses a ledger without corpus and rows, with exit code 2", () => {
+  const fixture = makeFixture();
+  try {
+    const cli = withLedger(fixture);
+    writeFileSync(
+      join(fixture.root, "repo", "benchmarks", "rule-precision.json"),
+      '{"schema_version":1}',
+    );
+    const result = cli(["check"]);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /needs a corpus object and a rows array/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test("record reports a missing verdict file with exit code 2", () => {
