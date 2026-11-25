@@ -1833,6 +1833,7 @@ fn duplicate_export_package_with_config_link(
 }
 
 /// The `add_ignore_exports` entry of a `fallow fix --yes` JSON run.
+#[cfg(unix)]
 fn config_fix_entry(root: &std::path::Path) -> serde_json::Value {
     let output = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
     let json = parse_json(&output);
