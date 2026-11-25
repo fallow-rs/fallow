@@ -2059,11 +2059,9 @@ mod tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&fallow_path, perms).unwrap();
 
-        let script_path = tmp.path().join("fallow-gate.sh");
+        let script_path = tmp.path().join("project/.claude/hooks/fallow-gate.sh");
+        std::fs::create_dir_all(script_path.parent().unwrap()).unwrap();
         std::fs::write(&script_path, rendered_gate_script()).unwrap();
-        let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script_path, perms).unwrap();
 
         let existing_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{existing_path}", fake_bin.display());
@@ -2122,7 +2120,8 @@ mod tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&fallow_path, perms).unwrap();
 
-        let script_path = tmp.path().join("fallow-gate.sh");
+        let script_path = tmp.path().join("project/.claude/hooks/fallow-gate.sh");
+        std::fs::create_dir_all(script_path.parent().unwrap()).unwrap();
         std::fs::write(&script_path, rendered_gate_script()).unwrap();
 
         let existing_path = std::env::var("PATH").unwrap_or_default();

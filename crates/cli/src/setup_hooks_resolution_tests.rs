@@ -122,8 +122,9 @@ fn gate_resolves_a_project_local_launcher_absent_from_path() {
 #[test]
 fn gate_resolves_a_yarn_plug_n_play_install() {
     let tmp = tempdir().unwrap();
-    let project = tmp.path();
-    let bin = project.join("bin");
+    let project = &tmp.path().join("project");
+    std::fs::create_dir_all(project).unwrap();
+    let bin = tmp.path().join("bin");
     write_stale_fallow(
         &bin.join("yarn"),
         "#!/bin/sh\ncase \"$1 $2\" in\n  'bin fallow') echo \"$PWD/.yarn/fallow\"; exit 0 ;;\nesac\nif [ \"$1\" = exec ]; then\n  shift 3\n  if [ \"$1\" = \"--version\" ]; then echo 'fallow 2.30.0'; exit 0; fi\n  exit 0\nfi\nexit 1\n",
@@ -287,9 +288,10 @@ fn gate_floor_message_names_the_fix_for_the_chosen_runner() {
     assert!(!stderr.contains("upgrade the fallow on PATH"), "{stderr}");
 
     let tmp = tempdir().unwrap();
-    let project = tmp.path();
-    write_stale_fallow(&project.join("bin/fallow"), version);
-    let output = probe_gate_resolution(project, &project.join("bin"));
+    let project = &tmp.path().join("project");
+    std::fs::create_dir_all(project).unwrap();
+    write_stale_fallow(&tmp.path().join("bin/fallow"), version);
+    let output = probe_gate_resolution(project, &tmp.path().join("bin"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("upgrade the fallow on PATH"), "{stderr}");
     assert!(!stderr.contains("devDependency"), "{stderr}");
@@ -487,9 +489,11 @@ fn gate_runs_no_fallow_for_a_command_that_is_not_a_git_write() {
 #[test]
 fn gate_reads_an_escaped_command_without_a_json_reader() {
     let tmp = tempdir().unwrap();
-    let project = tmp.path().canonicalize().unwrap();
-    let log = project.join("calls.log");
-    logging_stub(&project.join("bin/fallow"), "path", &log);
+    let base = tmp.path().canonicalize().unwrap();
+    let project = base.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("bin/fallow"), "path", &log);
     let input = serde_json::json!({
         "session_id": "x",
         "cwd": project,
@@ -502,7 +506,7 @@ fn gate_reads_an_escaped_command_without_a_json_reader() {
         &rendered_gate_script(),
         &project.join(".claude/hooks/fallow-gate.sh"),
         &project,
-        &project.join("bin"),
+        &base.join("bin"),
         input.as_bytes(),
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -548,9 +552,11 @@ fn gate_skips_relative_and_empty_path_entries() {
 #[test]
 fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
     let tmp = tempdir().unwrap();
-    let project = tmp.path().canonicalize().unwrap();
-    let log = project.join("calls.log");
-    logging_stub(&project.join("bin/fallow"), "path", &log);
+    let base = tmp.path().canonicalize().unwrap();
+    let project = base.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("bin/fallow"), "path", &log);
     let message = "a\"b\\".repeat(25_000);
     let input = serde_json::json!({
         "cwd": project,
@@ -564,7 +570,7 @@ fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
         &rendered_gate_script(),
         &project.join(".claude/hooks/fallow-gate.sh"),
         &project,
-        &project.join("bin"),
+        &base.join("bin"),
         input.as_bytes(),
     );
     let elapsed = started.elapsed();
@@ -595,7 +601,7 @@ fn gate_runs_no_helper_from_a_package_or_relative_path_entry() {
         session.join("rel"),
     ] {
         for helper in helpers {
-            logging_stub(&dir.join(helper), &format!("planted-{helper}"), &log);
+            logging_stub(&dir.join(helper), &format!("stub-{helper}"), &log);
         }
     }
     logging_stub(&base.join("bin/fallow"), "path", &log);
@@ -615,7 +621,99 @@ fn gate_runs_no_helper_from_a_package_or_relative_path_entry() {
     );
     let calls = calls(&log);
 
-    assert!(!calls.contains("planted"), "{calls}");
+    assert!(!calls.contains("stub-"), "{calls}");
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_init(dir: &Path) {
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+/// Writes a logging stub for each helper of the gate into `dir`.
+fn helper_stubs(dir: &Path, log: &Path) {
+    for helper in ["git", "jq", "cat", "sed", "tr", "mktemp", "fallow"] {
+        logging_stub(&dir.join(helper), &format!("stub-{helper}"), log);
+    }
+}
+
+/// A tool such as direnv puts a directory of the project on PATH as an
+/// absolute entry. The gate drops each PATH entry below the git top level of
+/// the session, also one above the session directory.
+#[test]
+fn gate_runs_no_helper_from_a_path_entry_below_the_session_git_top() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let clone = base.join("clone");
+    let session = clone.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    git_init(&clone);
+    let log = base.join("calls.log");
+    helper_stubs(&clone.join(".venv/bin"), &log);
+    helper_stubs(&session.join("bin"), &log);
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let prefix = format!(
+        "{}:{}:",
+        clone.join(".venv/bin").display(),
+        session.join("bin").display()
+    );
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+        &prefix,
+    );
+    let calls = calls(&log);
+
+    assert!(!calls.contains("stub-"), "{calls}");
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A project-scope gate also drops each PATH entry below its install root,
+/// when the session directory is in another tree.
+#[test]
+fn project_scope_gate_runs_no_helper_from_a_path_entry_below_the_install_root() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let project = base.join("project");
+    let session = base.join("elsewhere");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    helper_stubs(&project.join("tools/bin"), &log);
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let prefix = format!("{}:", project.join("tools/bin").display());
+
+    let output = probe_gate_with_path_prefix(
+        &rendered_gate_script(),
+        &project.join(".claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+        &prefix,
+    );
+    let calls = calls(&log);
+
+    assert!(!calls.contains("stub-"), "{calls}");
     assert!(
         calls.contains("path --version"),
         "{calls}\n{}",

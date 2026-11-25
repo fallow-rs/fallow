@@ -72,26 +72,143 @@ if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ]; then
   esac
 fi
 
-# The gate looks up every program, also cat, git and jq, only in absolute
-# PATH entries without a node_modules component (in any letter case). An
-# empty or relative entry names a directory below the working directory, and
-# a package manager puts the node_modules/.bin of the project on PATH. The
-# gate removes those entries before it runs the first program.
-gate_absolute_path() {
-  local entry out=""
+# PATH rules. The gate looks up every program, also cat, git and jq, only in
+# an absolute PATH entry. The entry has no node_modules component (in any
+# letter case), before or after links, and it is not below an excluded tree:
+# the tree of the process directory, of the install root (project scope), of
+# the session directory, the git top level of the session, and the tree of
+# each audit root. An empty or relative entry names a directory below the
+# working directory, and a package manager or a tool such as direnv puts a
+# directory of the project on PATH. The tree of a directory is the union of
+# the nearest directory with a .git entry and its git top level. The
+# functions use shell builtins and no subshell, so the gate filters PATH
+# before each new tree can run a program. An entry of GATE_EXCLUDED that
+# starts with `=` excludes only that one directory, not the directories
+# below it.
+GATE_EXCLUDED=()
+GATE_PATH_ENTRIES=()
+GATE_PATH_REAL=()
+
+# Sets RESOLVED to the physical path of directory $1. Returns 1 when $1 is
+# empty or is not a directory.
+gate_resolve_dir() {
+  local back="$PWD"
+  RESOLVED=""
+  [ -n "$1" ] || return 1
+  CDPATH='' cd -P -- "$1" 2>/dev/null || return 1
+  RESOLVED="$PWD"
+  if ! CDPATH='' cd -- "$back" 2>/dev/null; then
+    echo "fallow-gate: cannot return to $back, skipping audit." >&2
+    exit 0
+  fi
+}
+
+# Returns 0 when path $1 is directory $2 or a path below it, in any letter
+# case.
+gate_inside() {
+  local dir="${1%/}/" tree="${2%/}/" found=1
+  shopt -s nocasematch
+  case "$dir" in
+    "$tree"*) found=0 ;;
+  esac
+  shopt -u nocasematch
+  return "$found"
+}
+
+# Returns 0 when directory $1 is excluded.
+gate_excluded() {
+  local tree
+  for tree in ${GATE_EXCLUDED[@]+"${GATE_EXCLUDED[@]}"}; do
+    case "$tree" in
+      /) ;;
+      =*) ! { gate_inside "$1" "${tree#=}" && gate_inside "${tree#=}" "$1"; } || return 0 ;;
+      *) ! gate_inside "$1" "$tree" || return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Sets PATH to the entries that the rules keep. When no entry stays, PATH
+# names a directory with no programs, because an empty PATH searches the
+# current directory.
+gate_filter_path() {
+  local i out=""
+  for i in ${GATE_PATH_ENTRIES[@]+"${!GATE_PATH_ENTRIES[@]}"}; do
+    gate_excluded "${GATE_PATH_REAL[$i]}" && continue
+    gate_excluded "${GATE_PATH_ENTRIES[$i]}" && continue
+    out="${out:+$out:}${GATE_PATH_ENTRIES[$i]}"
+  done
+  PATH="${out:-/var/empty}"
+}
+
+# Adds the trees of directory $1 to GATE_EXCLUDED and filters PATH again. $2
+# is the git top level when the caller knows it. Without a .git entry at or
+# above $1, the tree is $1 itself when $3 is `self`. A tree that is HOME or
+# `/`, for a directory below it, becomes that directory, so a git repository
+# of the home folder keeps the user tools below HOME in use. A tree that is
+# `/`, or HOME without a .git entry, for that same directory, excludes only
+# that one directory.
+gate_exclude_tree() {
+  local dir="$1" tree home=""
+  local -a found=()
+  [ -n "$dir" ] || return 0
+  ! gate_resolve_dir "$dir" || dir="$RESOLVED"
+  tree="$dir"
+  while [ ! -e "$tree/.git" ]; do
+    if [ -z "$tree" ] || [ "$tree" = / ]; then
+      tree=""
+      break
+    fi
+    tree="${tree%/*}"
+    [ -n "$tree" ] || tree=/
+  done
+  if [ -n "$tree" ]; then
+    found+=("$tree")
+  elif [ "${3:-}" = self ]; then
+    found+=("$dir")
+  fi
+  if [ -n "${2:-}" ]; then
+    if gate_resolve_dir "$2"; then found+=("$RESOLVED"); else found+=("$2"); fi
+  fi
+  ! gate_resolve_dir "${HOME:-}" || home="$RESOLVED"
+  for tree in ${found[@]+"${found[@]}"}; do
+    if [ "$tree" = / ] || { [ -n "$home" ] && gate_inside "$tree" "$home" && gate_inside "$home" "$tree"; }; then
+      if ! gate_inside "$tree" "$dir"; then
+        tree="$dir"
+      elif [ "$tree" = / ] || [ ! -e "$home/.git" ]; then
+        tree="=$dir"
+      fi
+    fi
+    GATE_EXCLUDED+=("$tree")
+  done
+  gate_filter_path
+}
+
+# Reads the absolute PATH entries without a node_modules component once, with
+# the physical directory of each.
+gate_read_path() {
+  local entry
   local -a entries=()
   IFS=: read -r -a entries <<<"${PATH:-}"
   shopt -s nocasematch
   for entry in ${entries[@]+"${entries[@]}"}; do
     case "$entry" in
       node_modules | node_modules/* | */node_modules | */node_modules/*) continue ;;
-      /* | [A-Za-z]:[\\/]*) out="${out:+$out:}$entry" ;;
+      /* | [A-Za-z]:[\\/]*) ;;
+      *) continue ;;
     esac
+    shopt -u nocasematch
+    gate_resolve_dir "$entry" || { shopt -s nocasematch; continue; }
+    shopt -s nocasematch
+    case "/$RESOLVED/" in
+      */node_modules/*) continue ;;
+    esac
+    GATE_PATH_ENTRIES+=("$entry")
+    GATE_PATH_REAL+=("$RESOLVED")
   done
   shopt -u nocasematch
-  PATH="$out"
 }
-gate_absolute_path
+gate_read_path
 export PATH
 
 # Prints the absolute path of the program $1 on PATH, or returns 1.
@@ -117,9 +234,15 @@ GATE_FALLOW_BIN='@@FALLOW_GATE_BIN@@'
 
 GATE_INSTALL_ROOT=""
 GATE_LOCAL_FALLOW=""
+GATE_SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+[ "$GATE_SCRIPT_DIR" != "${BASH_SOURCE[0]}" ] || GATE_SCRIPT_DIR=.
+if [ "$GATE_SCOPE" = project ] && gate_resolve_dir "$GATE_SCRIPT_DIR/../.."; then
+  GATE_INSTALL_ROOT="$RESOLVED"
+fi
+# No program runs before this filter.
+gate_exclude_tree "$PWD" "" self
+gate_exclude_tree "$GATE_INSTALL_ROOT" "" self
 if [ "$GATE_SCOPE" = project ]; then
-  GATE_INSTALL_ROOT="$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P)" ||
-    GATE_INSTALL_ROOT=""
   if [ -n "$GATE_INSTALL_ROOT" ] && [ -x "$GATE_INSTALL_ROOT/node_modules/.bin/fallow" ]; then
     GATE_LOCAL_FALLOW="$GATE_INSTALL_ROOT/node_modules/.bin/fallow"
   fi
@@ -529,6 +652,13 @@ else
   } <"$GATE_INPUT"
   rm -f "$GATE_INPUT"
 fi
+# The session tree is known now. A JSON reader of the hook input above ran
+# only from a PATH that the trees of the process directory and of the install
+# root do not supply.
+if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
+  gate_exclude_tree "$SESSION_CWD" "" self
+  GATE_PATH_FALLOW="$(gate_which fallow || true)"
+fi
 
 set -f
 if is_git_write_command "$CMD" || gate_loose_write "$CMD"; then
@@ -664,6 +794,9 @@ gate_git_identity() {
   printf '%s\n%s\n%s\n' "$top" "$git_dir" "$common"
 }
 SESSION_IDENTITY="$(gate_git_identity "$BASE_DIR" || true)"
+if [ -n "$SESSION_IDENTITY" ]; then
+  gate_exclude_tree "$BASE_DIR" "${SESSION_IDENTITY%%"$GATE_NL"*}"
+fi
 
 # Returns 0 only when the strict push in STRICT_ARGS, run in the linked
 # worktree $1, cannot send the branch of the session. All of these must hold:
@@ -904,6 +1037,7 @@ add_audit_root() {
     fi
   fi
   AUDIT_ROOTS+=("$root")
+  gate_exclude_tree "${root:-$PROCESS_DIR}" ""
 }
 
 # A strict command audits its target alone only when git reports another work
@@ -1258,6 +1392,7 @@ run_audit() {
 # local to that audit root. Each root gets the same block rule as a single
 # audit: exit 2 blocks. Any other failure of one root does not stop the
 # audits of the other roots, and the gate exits with it at the end.
+GATE_PATH_FALLOW="$(gate_which fallow || true)"
 FINAL_STATUS=0
 for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
   set +e
