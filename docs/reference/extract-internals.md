@@ -290,7 +290,8 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   one member is a whole-object use, so the graph credits every export of the
   target instead of narrowing to the dotted accesses
   (`record_bare_namespace_reference` in
-  `crates/extract/src/visitor/visit_impl.rs`). The resolved positions are the
+  `crates/extract/src/visitor/visit_impl_namespace_references.rs`).
+  The resolved positions are the
   exclusions: the object of a static access or of a computed access whose key
   names members (see the computed member access rule), the root of a
   JSX member tag, the left side of a dotted type name, a destructure
