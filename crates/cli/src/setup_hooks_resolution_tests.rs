@@ -720,3 +720,39 @@ fn project_scope_gate_runs_no_helper_from_a_path_entry_below_the_install_root() 
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// A git write can target the tree that holds the only trusted fallow, for
+/// example `git -C /opt/homebrew commit`. The audit of that tree cannot use
+/// the fallow below it, so the gate blocks and names the target.
+#[test]
+fn gate_blocks_a_write_to_the_tree_of_the_only_trusted_fallow() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let tools = base.join("tools");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&tools.join("bin/fallow"), "tools", &log);
+    git_init(&session);
+    git_init(&tools);
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", tools.display()) },
+    })
+    .to_string();
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        input.as_bytes(),
+        &format!("{}:", tools.join("bin").display()),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains(&tools.display().to_string()), "{stderr}");
+    assert!(!calls(&log).contains("tools audit"), "{}", calls(&log));
+}

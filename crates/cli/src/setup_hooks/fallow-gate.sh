@@ -1037,7 +1037,6 @@ add_audit_root() {
     fi
   fi
   AUDIT_ROOTS+=("$root")
-  gate_exclude_tree "${root:-$PROCESS_DIR}" ""
 }
 
 # A strict command audits its target alone only when git reports another work
@@ -1392,12 +1391,30 @@ run_audit() {
 # local to that audit root. Each root gets the same block rule as a single
 # audit: exit 2 blocks. Any other failure of one root does not stop the
 # audits of the other roots, and the gate exits with it at the end.
+# Each audit also drops the PATH entries below its own audit root, in its
+# subshell. When that removes the fallow or the git that the gate found
+# before, the audit cannot run with the programs that the gate trusts, so the
+# gate blocks and names the target. The fallow that the install recorded is
+# not a PATH entry, so it stays.
 GATE_PATH_FALLOW="$(gate_which fallow || true)"
+GATE_PATH_GIT="$(gate_which git || true)"
 FINAL_STATUS=0
 for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
   set +e
   (
     set -e
+    gate_exclude_tree "${AUDIT_ROOT:-$PROCESS_DIR}" ""
+    for GATE_TOOL in fallow git; do
+      if [ "$GATE_TOOL" = fallow ]; then GATE_BEFORE="$GATE_PATH_FALLOW"; else GATE_BEFORE="$GATE_PATH_GIT"; fi
+      GATE_AFTER="$(gate_which "$GATE_TOOL" || true)"
+      if [ -n "$GATE_BEFORE" ] && [ "$GATE_AFTER" != "$GATE_BEFORE" ]; then
+        {
+          echo "fallow-gate: blocked: the git write targets ${AUDIT_ROOT:-$PROCESS_DIR}, which holds the $GATE_TOOL on PATH ($GATE_BEFORE)."
+          echo "fallow-gate: the gate does not run a program from the tree that it audits, so the audit cannot run."
+        } >&2
+        exit 2
+      fi
+    done
     if [ -n "$AUDIT_ROOT" ] && ! CDPATH='' cd -P "$AUDIT_ROOT" 2>/dev/null; then
       echo "fallow-gate: cannot enter $AUDIT_ROOT, auditing $(pwd) instead." >&2
     fi
