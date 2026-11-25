@@ -1,5 +1,6 @@
-//! The member access facts and the fixture, binding and mock facts that the
-//! extractor records for the analysis.
+//! The member access facts, the fixture, binding and mock facts, and the
+//! `this` spread, dynamic custom element and misplaced directive facts that
+//! the extractor records for the analysis.
 
 /// A member name referenced from an Angular template surface.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
@@ -316,7 +317,7 @@ impl VitestModuleMockAction {
 
 /// Ordered Vitest module-mock operation with a static source target.
 ///
-/// The declaring [`ModuleInfo::file_id`] owns the test-root provenance. The
+/// The declaring [`ModuleInfo::file_id`](crate::extract::ModuleInfo::file_id) owns the test-root provenance. The
 /// resolver consumes `source` through its canonical specifier pipeline; this
 /// fact deliberately carries no resolved path or duplicate diagnostic span.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]

@@ -105,7 +105,7 @@ impl FlagSiteFacts {
         Self::set(self, Self::EMPTY_BRANCH, value)
     }
 
-    pub(super) const fn set(self, bit: u8, value: bool) -> Self {
+    const fn set(self, bit: u8, value: bool) -> Self {
         if value {
             Self(self.0 | bit)
         } else {
