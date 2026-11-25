@@ -34,13 +34,13 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `dead-code` | `unused-type` | 579 | 91 | 90 | 1 | 0 | 100% (84 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dupes` | `code-duplication` | 2020 | 120 | 117 | 3 | 0 | 96% (78 to 100) | 3 (84% agree) | 3.48.0, 2026-11-25 |
 | `dupes` | `mirrored-directory` | 8 | 8 | 0 | 8 | 0 | 0% (0 to 74) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `health` | `css-dead-surface` | 54 | 41 | 19 | 22 | 0 | 48% (26 to 72) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `health` | `css-duplicate-block` | 6 | 6 | 6 | 0 | 0 | 100% (13 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `health` | `css-selector-complexity` | 115 | 39 | 36 | 3 | 0 | 91% (68 to 99) | 3 (90% agree) | 3.48.0, 2026-11-25 |
-| `health` | `css-token-drift` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 3 (0% agree) | 3.48.0, 2026-11-25 |
-| `health` | `shallow-directory` | 8 | 8 | 8 | 0 | 0 | 100% (23 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `health` | `untested-export` | 5830 | 120 | 99 | 21 | 0 | 95% (77 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
-| `health` | `untested-file` | 3962 | 120 | 90 | 30 | 0 | 99% (83 to 99) | 3 (61% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-dead-surface` | 54 | 41 | 19 | 22 | 0 | 48% (26 to 72) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-duplicate-block` | 6 | 6 | 6 | 0 | 0 | 100% (13 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-selector-complexity` | 115 | 39 | 36 | 3 | 0 | 91% (68 to 99) | 3 (90% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `css-token-drift` | 1 | 1 | 0 | 1 | 0 | 0% (0 to 98) | 3 (0% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `shallow-directory` | 8 | 8 | 8 | 0 | 0 | 100% (23 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `untested-export` | 5830 | 120 | 99 | 21 | 0 | 95% (77 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `health --coverage-gaps --shallow-directories --css` | `untested-file` | 3962 | 120 | 90 | 30 | 0 | 99% (83 to 99) | 3 (61% agree) | 3.48.0, 2026-11-25 |
 
 ## Noise classes
 

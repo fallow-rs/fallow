@@ -61,7 +61,9 @@ row on the other projects, or add a new held-out project.
    - `sample.json`: the sampled finding IDs and the finding counts;
    - `review.json`: each sampled finding with its file, line and a code excerpt;
    - `contract.txt`: the `fallow explain <rule>` text, which states the claim
-     of the rule;
+     of the rule. A rule without explain text gets a `NO CONTRACT` line and a
+     warning: write its claim there, for example from the JSON output schema,
+     before the review;
    - `all-findings.json`: the file and line of every finding of the rule, not
      only the sample.
 3. Give these files to a reviewer who did not write or tune the rule.

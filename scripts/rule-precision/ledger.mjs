@@ -34,10 +34,6 @@ const ruleOf = (finding, key) => {
   return parts.length >= 3 && parts[1] ? parts[1] : ruleIdFromKey(key);
 };
 
-/**
- * Groups the findings of one JSON report by rule id. Each object with a
- * `finding_id` in a top-level array is a finding. Other keys are metadata.
- */
 // `health` and `dupes` findings have no finding ID. Each entry names where
 // one kind of finding sits in the report, its rule, and the fields that
 // identify one finding across runs of the same commit.
@@ -93,6 +89,12 @@ const namedFindings = (report) => {
   return named;
 };
 
+/**
+ * Groups the findings of one JSON report by rule id. An object with a
+ * `finding_id` in a top-level array is a finding. The sections in
+ * `UNNAMED_FINDINGS` are findings too, with an ID from their identifying
+ * fields. Other keys are metadata.
+ */
 export const findingsByRule = (report) => {
   const out = new Map();
   const add = (rule, finding) => out.set(rule, [...(out.get(rule) ?? []), finding]);
@@ -344,6 +346,7 @@ export const buildRow = ({ sample, verdicts, reviews = 1, agreement = null }) =>
     row: {
       rule: sample.rule,
       command: sample.command,
+      args: Array.isArray(sample.args) ? sample.args : [],
       fallow_version: sample.fallow_version,
       reviewed_on: verdicts.reviewed_on,
       sample_size: sample.sample_size,
@@ -465,6 +468,10 @@ const rowFieldErrors = (row, label) => {
     [/^\d{4}-\d{2}-\d{2}$/.test(row.reviewed_on ?? ""), "bad reviewed_on"],
     [/^\d+\.\d+\.\d+/.test(row.fallow_version ?? ""), "bad fallow_version"],
     [Number.isInteger(row.reviews) && row.reviews >= 1, "reviews must be 1 or more"],
+    [
+      Array.isArray(row.args) && row.args.every((a) => typeof a === "string"),
+      "args must be a list of fallow flags",
+    ],
     [agreementIsValid(row), "agreement_percent must be null for one review, else 0 to 100"],
   ];
   return checks.filter(([ok]) => !ok).map(([, message]) => `${label}: ${message}`);
@@ -537,7 +544,7 @@ export const renderSummary = (ledger) => {
     const precision = precisionText(row.projects);
     const reviews = row.reviews === 1 ? "1" : `${row.reviews} (${row.agreement_percent}% agree)`;
     lines.push(
-      `| \`${row.command}\` | \`${row.rule}\` | ${t.findings} | ${t.sampled} | ${t.real} | ${t.noise} | ${t.unsure} | ${precision} | ${reviews} | ${row.fallow_version}, ${row.reviewed_on} |`,
+      `| \`${[row.command, ...row.args].join(" ")}\` | \`${row.rule}\` | ${t.findings} | ${t.sampled} | ${t.real} | ${t.noise} | ${t.unsure} | ${precision} | ${reviews} | ${row.fallow_version}, ${row.reviewed_on} |`,
     );
   }
   const withNoise = ledger.rows.filter((row) => row.noise_classes.length > 0);

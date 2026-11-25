@@ -29,6 +29,7 @@ const row = (projects) => ({
   fallow_version: "3.48.0",
   reviewed_on: "2026-11-25",
   sample_size: 30,
+  args: [],
   reviews: 1,
   agreement_percent: null,
   projects,
@@ -108,9 +109,27 @@ test("health and dupes findings get stable IDs from their identifying fields", (
   assert.equal(ids.length, 2);
   assert.notEqual(ids[0], ids[1]);
   assert.match(ids[1], /^rp1:css-dead-surface:[0-9a-f]+~1$/);
-  assert.deepEqual(
-    findingsByRule(report).get("untested-file")[0].finding_id,
-    rules.get("untested-file")[0].finding_id,
+  const reversed = {
+    ...report,
+    clone_groups: [{ fingerprint: "def", instances: [] }, ...report.clone_groups].toReversed(),
+    coverage_gaps: {
+      ...report.coverage_gaps,
+      files: [{ path: "src/c.ts" }, ...report.coverage_gaps.files].toReversed(),
+    },
+  };
+  const again = findingsByRule(reversed);
+  const idOf = (map, rule, pick) => map.get(rule).find(pick).finding_id;
+  assert.equal(
+    idOf(again, "code-duplication", (f) => f.fingerprint === "abc"),
+    idOf(rules, "code-duplication", () => true),
+  );
+  assert.equal(
+    idOf(again, "untested-file", (f) => f.path === "src/b.ts"),
+    idOf(rules, "untested-file", () => true),
+  );
+  assert.notEqual(
+    idOf(again, "untested-file", (f) => f.path === "src/c.ts"),
+    idOf(again, "untested-file", (f) => f.path === "src/b.ts"),
   );
   assert.deepEqual(findingAnchor(rules.get("code-duplication")[0]), { path: "src/a.ts", line: 4 });
   assert.deepEqual(findingAnchor(rules.get("shallow-directory")[0]), {
@@ -366,6 +385,12 @@ test("the summary shows precision with its interval and leaves unsure out", () =
     rows: [{ ...row([counts()]), reviews: 3, agreement_percent: 83 }],
   });
   assert.match(twice, /\| 3 \(83% agree\) \|/);
+  const withArgs = renderSummary({
+    schema_version: 1,
+    corpus,
+    rows: [{ ...row([counts()]), command: "health", args: ["--css"] }],
+  });
+  assert.match(withArgs, /\| `health --css` \| `unused-export` \|/);
   assert.match(text, /\| app \| owner\/app \| `aaaaaaaaaaaa` \|/);
 });
 
@@ -510,7 +535,7 @@ const makeFixture = () => {
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[0] === "--version") console.log("fallow 9.9.9");
-else if (args[0] === "explain") console.log("Unused exports");
+else if (args[0] === "explain") { if (process.env.FAKE_NO_EXPLAIN) process.exit(2); console.log("Unused exports"); }
 else if (process.env.FAKE_BAD_JSON) console.log("not json");
 else if (process.env.FAKE_DIR_FINDING) {
   if (!args.includes("--css")) process.exit(2);
@@ -733,6 +758,44 @@ test("check refuses a ledger without corpus and rows, with exit code 2", () => {
     const result = cli(["check"]);
     assert.equal(result.status, 2);
     assert.match(result.stderr, /needs a corpus object and a rows array/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a rule without explain text gets a warning, and record refuses it", () => {
+  const fixture = makeFixture();
+  try {
+    const cli = withLedger(fixture);
+    const out = join(fixture.root, "out");
+    const sampled = cli(
+      [
+        "sample",
+        "--fallow-bin",
+        fixture.fake,
+        "--corpus-dir",
+        join(fixture.root, "c"),
+        "--out",
+        out,
+        "--args=--css",
+      ],
+      { FAKE_DIR_FINDING: "1", FAKE_NO_EXPLAIN: "1" },
+    );
+    assert.equal(sampled.status, 0, sampled.stderr);
+    assert.match(sampled.stderr, /warning: fallow explain mirrored-directory has no text/);
+    const ruleDir = join(out, "mirrored-directory");
+    const [item] = JSON.parse(readFileSync(join(ruleDir, "review.json"), "utf8"));
+    const verdicts = join(fixture.root, "v.json");
+    writeFileSync(
+      verdicts,
+      JSON.stringify({
+        reviewed_on: "2026-11-25",
+        verdicts: [{ project: "app", id: item.id, verdict: "real" }],
+      }),
+    );
+    const refused = cli(["record", "--in", ruleDir, "--verdicts", verdicts]);
+    assert.equal(refused.status, 2);
+    assert.match(refused.stderr, /has no claim of the rule/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

@@ -165,9 +165,15 @@ const runFallow = (bin, cwd, command, extraArgs) => {
 
 // The reviewer judges a finding against the rule's own claim, so the sample
 // carries the `fallow explain` text of the rule.
+const NO_CONTRACT = "NO CONTRACT";
+
 const explainRule = (bin, rule) => {
   const run = spawnSync(bin, ["explain", rule], { env: { ...process.env, NO_COLOR: "1" } });
-  return run.status === 0 ? run.stdout.toString() : `fallow explain ${rule} gave no text.\n`;
+  if (run.status === 0) return run.stdout.toString();
+  console.error(
+    `rule-precision: warning: fallow explain ${rule} has no text; write the claim to ${rule}/contract.txt before the review`,
+  );
+  return `${NO_CONTRACT}: fallow explain ${rule} has no text. Write the claim of the rule here before the review.\n`;
 };
 
 const fallowVersion = (bin) =>
@@ -257,6 +263,10 @@ const writeSummary = (ledger) => writeFileSync(SUMMARY, renderSummary(ledger));
 const record = (values) => {
   const ruleDir = values.in ?? fail("record needs --in <rule sample dir>");
   const verdictPaths = values.verdicts ?? fail("record needs --verdicts (once per review)");
+  const contract = join(ruleDir, "contract.txt");
+  if (existsSync(contract) && readFileSync(contract, "utf8").startsWith(NO_CONTRACT)) {
+    fail(`${contract} has no claim of the rule; write it, and review the sample with it`);
+  }
   const combined = combineReviews(verdictPaths.map(readJson));
   if (!combined.ok) fail(`the reviews do not combine:\n  ${combined.errors.join("\n  ")}`);
   const result = buildRow({

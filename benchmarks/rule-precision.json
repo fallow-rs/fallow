@@ -26,6 +26,7 @@
     {
       "rule": "circular-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -83,6 +84,7 @@
     {
       "rule": "duplicate-export",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -127,6 +129,7 @@
     {
       "rule": "duplicate-export-alias",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -175,6 +178,7 @@
     {
       "rule": "package-cycle",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -201,6 +205,7 @@
     {
       "rule": "test-only-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -222,6 +227,7 @@
     {
       "rule": "unlisted-binary",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -248,6 +254,7 @@
     {
       "rule": "unlisted-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -296,6 +303,7 @@
     {
       "rule": "unresolved-import",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -361,6 +369,7 @@
     {
       "rule": "unused-catalog-entry",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -382,6 +391,7 @@
     {
       "rule": "unused-class-member",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -454,6 +464,7 @@
     {
       "rule": "unused-component-prop",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -475,6 +486,7 @@
     {
       "rule": "unused-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -532,6 +544,7 @@
     {
       "rule": "unused-dependency-override",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -553,6 +566,7 @@
     {
       "rule": "unused-dev-dependency",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -610,6 +624,7 @@
     {
       "rule": "unused-enum-member",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -649,6 +664,7 @@
     {
       "rule": "unused-export",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -706,6 +722,7 @@
     {
       "rule": "unused-file",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -791,6 +808,7 @@
     {
       "rule": "unused-load-data-key",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -826,6 +844,7 @@
     {
       "rule": "unused-tagged-error",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -847,6 +866,7 @@
     {
       "rule": "unused-type",
       "command": "dead-code",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -900,6 +920,7 @@
     {
       "rule": "code-duplication",
       "command": "dupes",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -957,6 +978,7 @@
     {
       "rule": "mirrored-directory",
       "command": "dupes",
+      "args": [],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1001,6 +1023,11 @@
     {
       "rule": "css-dead-surface",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1057,6 +1084,11 @@
     {
       "rule": "css-duplicate-block",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1096,6 +1128,11 @@
     {
       "rule": "css-selector-complexity",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1140,6 +1177,11 @@
     {
       "rule": "css-token-drift",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1166,6 +1208,11 @@
     {
       "rule": "shallow-directory",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1205,6 +1252,11 @@
     {
       "rule": "untested-export",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
@@ -1278,6 +1330,11 @@
     {
       "rule": "untested-file",
       "command": "health",
+      "args": [
+        "--coverage-gaps",
+        "--shallow-directories",
+        "--css"
+      ],
       "fallow_version": "3.48.0",
       "reviewed_on": "2026-11-25",
       "sample_size": 30,
