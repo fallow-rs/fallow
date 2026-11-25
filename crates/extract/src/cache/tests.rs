@@ -2786,3 +2786,205 @@ fn a_run_without_call_facts_keeps_the_stored_facts() {
     assert!(entry.complexity_extracted);
     assert_eq!(entry.call_facts, blob);
 }
+
+#[derive(Clone, Default)]
+struct WarnLogCollector(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl tracing::Subscriber for WarnLogCollector {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        metadata.level() <= &tracing::Level::WARN
+    }
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        struct MessageVisitor<'a>(&'a mut String);
+        impl tracing::field::Visit for MessageVisitor<'_> {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    use std::fmt::Write as _;
+                    let _ = write!(self.0, "{value:?}");
+                }
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                if field.name() == "message" {
+                    self.0.push_str(value);
+                }
+            }
+        }
+        let mut msg = String::new();
+        event.record(&mut MessageVisitor(&mut msg));
+        if !msg.is_empty() {
+            if let Ok(mut logs) = self.0.lock() {
+                logs.push(msg);
+            }
+        }
+    }
+    fn enter(&self, _span: &tracing::span::Id) {}
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+#[test]
+fn working_set_eviction_tracks_and_warns_when_working_set_exceeds_cap() {
+    let dir = test_cache_dir("working_set_exceeds_cap");
+    let mut store = CacheStore::new(Path::new(""));
+    let latest_seen = 1_000_000;
+    let files: Vec<String> = (0..50u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&files) {
+        store.insert(Path::new(path), synthetic_module(i, latest_seen, 1));
+    }
+
+    let cap = 32 * 1024;
+    CacheStore::reset_last_working_set_evicted_count();
+    store.save(at(&dir), 1, cap).expect("save with eviction");
+
+    let evicted_ws = CacheStore::last_working_set_evicted_count();
+    assert!(
+        evicted_ws > 0,
+        "working set exceeds cap, so working-set entries must be evicted"
+    );
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
+    assert_eq!(
+        loaded.len(),
+        files.len() - evicted_ws,
+        "store must retain exactly the non-evicted entries"
+    );
+    assert!(loaded.len() > 0, "at least one entry remains in the cache");
+}
+
+#[test]
+fn stale_eviction_alone_does_not_track_working_set_eviction() {
+    let dir = test_cache_dir("stale_eviction_only");
+    let mut store = CacheStore::new(Path::new(""));
+    let stale: Vec<String> = (0..40u64).map(|i| format!("stale{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&stale) {
+        store.insert(Path::new(path), synthetic_module(i, 1 + i, 1));
+    }
+    let latest_seen = 1_000_000;
+    let working_set: Vec<String> = (0..20u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&working_set) {
+        store.insert(
+            Path::new(path),
+            synthetic_module(100 + i, latest_seen, 1),
+        );
+    }
+
+    let cap = 64 * 1024;
+    CacheStore::reset_last_working_set_evicted_count();
+    store.save(at(&dir), 1, cap).expect("save with eviction");
+
+    assert_eq!(
+        CacheStore::last_working_set_evicted_count(),
+        0,
+        "only stale entries should be evicted when working set fits cap"
+    );
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
+    assert!(
+        loaded.len() < stale.len() + working_set.len(),
+        "stale eviction must prune entries to stay under target"
+    );
+    let kept_working_set = working_set
+        .iter()
+        .filter(|path| loaded.get_by_path_only(Path::new(path)).is_some())
+        .count();
+    assert_eq!(
+        kept_working_set,
+        working_set.len(),
+        "all working set entries must survive"
+    );
+}
+
+#[test]
+fn working_set_within_cap_does_not_evict_or_warn() {
+    let dir = test_cache_dir("within_cap_no_eviction");
+    let mut store = CacheStore::new(Path::new(""));
+    let latest_seen = 1_000_000;
+    let working_set: Vec<String> = (0..10u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&working_set) {
+        store.insert(Path::new(path), synthetic_module(i, latest_seen, 1));
+    }
+
+    let cap = 64 * 1024;
+    CacheStore::reset_last_working_set_evicted_count();
+    store.save(at(&dir), 1, cap).expect("save succeeds");
+
+    assert_eq!(
+        CacheStore::last_working_set_evicted_count(),
+        0,
+        "no eviction when well under cap threshold"
+    );
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 1, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load succeeds");
+    assert_eq!(loaded.len(), 10, "all 10 entries preserved");
+}
+
+#[test]
+fn working_set_eviction_emits_warn_log() {
+    let dir = test_cache_dir("working_set_warn_log");
+    let mut store = CacheStore::new(Path::new(""));
+    let latest_seen = 1_000_000;
+    for i in 0..50u64 {
+        store.insert(
+            Path::new(&format!("live{i:02}.ts")),
+            synthetic_module(i, latest_seen, 1),
+        );
+    }
+    let cap = 32 * 1024;
+
+    let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let subscriber = WarnLogCollector(Arc::clone(&logs));
+    tracing::subscriber::with_default(subscriber, || {
+        store.save(at(&dir), 1, cap).expect("save succeeds");
+    });
+
+    let messages = logs.lock().expect("lock logs").clone();
+    assert!(
+        messages.iter().any(|msg| {
+            msg.contains("Repository working set exceeds cache cap")
+                && msg.contains("FALLOW_CACHE_MAX_SIZE")
+                && msg.contains("cache.maxSizeMb")
+        }),
+        "warning log must be emitted when working-set entries are evicted: {messages:?}"
+    );
+}
+
+#[test]
+fn stale_eviction_alone_does_not_emit_warn_log() {
+    let dir = test_cache_dir("stale_no_warn_log");
+    let mut store = CacheStore::new(Path::new(""));
+    for i in 0..40u64 {
+        store.insert(
+            Path::new(&format!("stale{i:02}.ts")),
+            synthetic_module(i, 1 + i, 1),
+        );
+    }
+    let latest_seen = 1_000_000;
+    for i in 0..20u64 {
+        store.insert(
+            Path::new(&format!("live{i:02}.ts")),
+            synthetic_module(100 + i, latest_seen, 1),
+        );
+    }
+    let cap = 64 * 1024;
+
+    let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let subscriber = WarnLogCollector(Arc::clone(&logs));
+    tracing::subscriber::with_default(subscriber, || {
+        store.save(at(&dir), 1, cap).expect("save succeeds");
+    });
+
+    let messages = logs.lock().expect("lock logs").clone();
+    assert!(
+        !messages
+            .iter()
+            .any(|msg| msg.contains("Repository working set exceeds cache cap")),
+        "stale-only eviction must not emit the working-set warning: {messages:?}"
+    );
+}

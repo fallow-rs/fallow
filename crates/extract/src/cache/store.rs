@@ -20,6 +20,7 @@ use super::types::{
 #[cfg(test)]
 thread_local! {
     static FULL_STORE_ENCODE_COUNT: Cell<usize> = const { Cell::new(0) };
+    static LAST_WORKING_SET_EVICTED_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Cached module information stored on disk.
@@ -192,6 +193,9 @@ impl CacheStore {
         let initial_entries = self.entries.len();
         let mut encoded = self.encode();
 
+        #[cfg(test)]
+        LAST_WORKING_SET_EVICTED_COUNT.with(|count| count.set(0));
+
         let trigger = (max_size_bytes / 10_000).saturating_mul(EVICTION_TRIGGER_BPS);
         if encoded.len().saturating_add(CACHE_HEADER_LEN) > trigger {
             // The cap is a promise about the file, and the file carries the
@@ -201,27 +205,48 @@ impl CacheStore {
                 .saturating_sub(CACHE_HEADER_LEN);
             // The working set of the latest run may fill the whole cap.
             let working_set = max_size_bytes.saturating_sub(CACHE_HEADER_LEN);
-            encoded = self.evict_lru_to_target(target, working_set, encoded);
+            let (new_encoded, working_set_evicted) =
+                self.evict_lru_to_target(target, working_set, encoded);
+            encoded = new_encoded;
+
+            #[cfg(test)]
+            LAST_WORKING_SET_EVICTED_COUNT.with(|count| count.set(working_set_evicted));
+
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
-            let significant_evicted =
-                initial_entries.saturating_mul(EVICTION_SIGNIFICANT_BPS) / 10_000;
-            if evicted >= significant_evicted && initial_entries > 0 {
-                tracing::info!(
-                    evicted_entries = evicted,
+            if working_set_evicted > 0 {
+                let cap_desc = if max_size_bytes >= 1024 * 1024 {
+                    format!("{} MiB", max_size_bytes / (1024 * 1024))
+                } else {
+                    format!("{} KiB", max_size_bytes / 1024)
+                };
+                tracing::warn!(
+                    working_set_evicted,
                     remaining_entries = self.entries.len(),
-                    final_size_kb = final_size / 1024,
-                    max_size_kb = max_size_bytes / 1024,
-                    "Cache eviction: removed oldest entries to stay under cap"
+                    "Repository working set exceeds cache cap ({cap_desc}); {working_set_evicted} files \
+                     were evicted and may need to be re-parsed on subsequent runs. Increase FALLOW_CACHE_MAX_SIZE or \
+                     cache.maxSizeMb to cache the full repository"
                 );
             } else {
-                tracing::debug!(
-                    evicted_entries = evicted,
-                    remaining_entries = self.entries.len(),
-                    final_size_kb = final_size / 1024,
-                    max_size_kb = max_size_bytes / 1024,
-                    "Cache eviction"
-                );
+                let significant_evicted =
+                    initial_entries.saturating_mul(EVICTION_SIGNIFICANT_BPS) / 10_000;
+                if evicted >= significant_evicted && initial_entries > 0 {
+                    tracing::info!(
+                        evicted_entries = evicted,
+                        remaining_entries = self.entries.len(),
+                        final_size_kb = final_size / 1024,
+                        max_size_kb = max_size_bytes / 1024,
+                        "Cache eviction: removed oldest entries to stay under cap"
+                    );
+                } else {
+                    tracing::debug!(
+                        evicted_entries = evicted,
+                        remaining_entries = self.entries.len(),
+                        final_size_kb = final_size / 1024,
+                        max_size_kb = max_size_bytes / 1024,
+                        "Cache eviction"
+                    );
+                }
             }
         }
 
@@ -247,7 +272,7 @@ impl CacheStore {
         target_bytes: usize,
         working_set_bytes: usize,
         encoded: Vec<u8>,
-    ) -> Vec<u8> {
+    ) -> (Vec<u8>, usize) {
         let mut order: Vec<(u64, String, usize)> = self
             .entries
             .iter()
@@ -284,8 +309,10 @@ impl CacheStore {
             );
         }
         let working_set_target = target_bytes.max(working_set_bytes);
+        let mut working_set_evicted = 0;
         if encoded.len() > working_set_target {
             let keep_newest_from = order.len().saturating_sub(1);
+            let before_ws_idx = cursor.idx;
             encoded = self.evict_order_range(
                 &order,
                 &mut cursor,
@@ -293,6 +320,7 @@ impl CacheStore {
                 working_set_target,
                 encoded,
             );
+            working_set_evicted = cursor.idx.saturating_sub(before_ws_idx);
         }
 
         if encoded.len() > working_set_target && self.entries.len() == 1 {
@@ -302,7 +330,7 @@ impl CacheStore {
                 "Single cache entry exceeds configured max; cache will overshoot the cap"
             );
         }
-        encoded
+        (encoded, working_set_evicted)
     }
 
     /// Remove entries in `order` from `cursor.idx` up to (not including)
@@ -380,6 +408,16 @@ impl CacheStore {
     #[cfg(test)]
     pub(super) fn full_store_encode_count() -> usize {
         FULL_STORE_ENCODE_COUNT.with(Cell::get)
+    }
+
+    #[cfg(test)]
+    pub(super) fn reset_last_working_set_evicted_count() {
+        LAST_WORKING_SET_EVICTED_COUNT.with(|count| count.set(0));
+    }
+
+    #[cfg(test)]
+    pub(super) fn last_working_set_evicted_count() -> usize {
+        LAST_WORKING_SET_EVICTED_COUNT.with(Cell::get)
     }
 
     /// Key `path` the way entries are stored: root-relative where possible,
