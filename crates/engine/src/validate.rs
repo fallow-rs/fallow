@@ -542,7 +542,7 @@ fn file_id(path: &Path) -> std::io::Result<FileId> {
 
 #[cfg(not(unix))]
 fn file_id(path: &Path) -> std::io::Result<FileId> {
-    Ok(path.to_path_buf())
+    Ok(path_identity(&dunce::canonicalize(path)?, cfg!(windows)))
 }
 
 /// The identity of the link itself, not of its target.
@@ -553,10 +553,37 @@ fn link_id_of(path: &Path) -> std::io::Result<FileId> {
     Ok((metadata.dev(), metadata.ino()))
 }
 
+/// The identity of the link itself: the real path of its parent and the
+/// name of the link.
 #[cfg(not(unix))]
 fn link_id_of(path: &Path) -> std::io::Result<FileId> {
     std::fs::symlink_metadata(path)?;
-    Ok(path.to_path_buf())
+    let no_name = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "the link has no name");
+    let name = path.file_name().ok_or_else(no_name)?;
+    let parent = path.parent().ok_or_else(no_name)?;
+    Ok(link_identity(
+        &dunce::canonicalize(parent)?,
+        name,
+        cfg!(windows),
+    ))
+}
+
+/// The identity of a real path on a platform with no file identity. On a
+/// file system that ignores case, the identity is in lower case.
+#[cfg(any(not(unix), test))]
+fn path_identity(real: &Path, ignore_case: bool) -> PathBuf {
+    if ignore_case {
+        PathBuf::from(real.to_string_lossy().to_lowercase())
+    } else {
+        real.to_path_buf()
+    }
+}
+
+/// The identity of the link `name` in the directory with the real path
+/// `real_parent`, on a platform with no file identity.
+#[cfg(any(not(unix), test))]
+fn link_identity(real_parent: &Path, name: &std::ffi::OsStr, ignore_case: bool) -> PathBuf {
+    path_identity(&real_parent.join(name), ignore_case)
 }
 
 /// Reject strings containing control characters (bytes < 0x20) except
@@ -972,6 +999,25 @@ mod tests {
         let elsewhere = fixture.dir("elsewhere");
 
         assert_eq!(fixture.check(&linked, &elsewhere), Ok(()));
+    }
+
+    /// Without a file identity, the identity is the real path, in lower case
+    /// when the file system ignores case. A link keeps its own name below
+    /// the real path of its parent.
+    #[test]
+    fn path_identity_compares_real_paths_without_case_when_the_platform_ignores_case() {
+        let upper = Path::new("/r/Apps").join("Packages");
+        let lower = Path::new("/r/apps").join("packages");
+        assert_eq!(path_identity(&upper, true), path_identity(&lower, true));
+        assert_ne!(path_identity(&upper, false), path_identity(&lower, false));
+        assert_eq!(
+            link_identity(Path::new("/r/Apps"), std::ffi::OsStr::new("Packages"), true),
+            path_identity(&lower, true)
+        );
+        assert_ne!(
+            link_identity(Path::new("/r/apps"), std::ffi::OsStr::new("other"), true),
+            path_identity(&lower, true)
+        );
     }
 
     /// The index entries of a directory are matched with a link by file
