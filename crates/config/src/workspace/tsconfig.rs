@@ -386,7 +386,10 @@ pub(super) fn malformed_extends_parents(
         if depth > MAX_EXTENDS_DEPTH || !visited.insert(path.clone()) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        let Ok(content) = fallow_types::read_guard::read_to_string_bounded(
+            &path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) else {
             continue;
         };
         match crate::jsonc::parse_to_value::<serde_json::Value>(
@@ -420,7 +423,10 @@ pub fn tsconfig_linked_files(config_path: &Path) -> Vec<PathBuf> {
         if depth >= MAX_EXTENDS_DEPTH {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        let Ok(content) = fallow_types::read_guard::read_to_string_bounded(
+            &path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) else {
             continue;
         };
         let Ok(value) = crate::jsonc::parse_to_value::<serde_json::Value>(

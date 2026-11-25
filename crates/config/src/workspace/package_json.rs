@@ -67,6 +67,71 @@ where
     }
 }
 
+/// The text of a manifest such as `package.json` or `deno.json`. The file
+/// must be a regular file with a size limit, at a location that
+/// [`manifest_location_allowed`] accepts.
+pub(super) fn read_manifest(path: &std::path::Path) -> Result<String, String> {
+    if path.symlink_metadata().is_ok() && !manifest_location_allowed(path) {
+        return Err(format!(
+            "refusing to read {}: it resolves to a location outside its package",
+            path.display()
+        ));
+    }
+    fallow_types::read_guard::read_to_string_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Whether the manifest at `path` resolves to an allowed place.
+///
+/// - Below a `node_modules` directory, the resolved file must be inside the
+///   resolved `node_modules` directory of the first such segment of `path`.
+///   That covers the linked packages and the `.pnpm` store of pnpm, which
+///   sit in the `node_modules` directory of the project. A store outside
+///   the project, such as a global pnpm store, is refused.
+/// - Elsewhere, the resolved file must be in the resolved directory of
+///   `path`. When that directory is a link, it must resolve inside the
+///   directory that holds the link.
+fn manifest_location_allowed(path: &std::path::Path) -> bool {
+    use std::path::Component;
+    let Ok(target) = dunce::canonicalize(path) else {
+        return false;
+    };
+    let lexical = fallow_types::path_guard::lexically_normalized(path);
+    let mut prefix = std::path::PathBuf::new();
+    for component in lexical.components() {
+        if matches!(component, Component::Normal(name) if name == "node_modules") {
+            let base = if prefix.as_os_str().is_empty() {
+                std::path::Path::new(".")
+            } else {
+                prefix.as_path()
+            };
+            return dunce::canonicalize(base)
+                .is_ok_and(|base| target.starts_with(base.join("node_modules")));
+        }
+        prefix.push(component);
+    }
+    let Some(dir) = lexical.parent() else {
+        return false;
+    };
+    let Ok(canonical_dir) = dunce::canonicalize(dir) else {
+        return false;
+    };
+    let dir_is_link = dir
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink());
+    let container = if dir_is_link {
+        dir.parent()
+            .and_then(|holder| dunce::canonicalize(holder).ok())
+    } else {
+        Some(canonical_dir.clone())
+    };
+    target.parent() == Some(canonical_dir.as_path())
+        && container.is_some_and(|container| target.starts_with(container))
+}
+
 /// The `package.json` keys that hold the inline config of a built-in plugin
 /// ([`PackageJson::inline_tool_config`]).
 pub const INLINE_TOOL_CONFIG_KEYS: &[&str] = &[
@@ -341,21 +406,62 @@ impl PackageJson {
     /// # Errors
     ///
     /// Returns an error string when the file cannot be read or parsed as JSON.
+    ///
+    /// The file must be a regular file of at most
+    /// [`fallow_types::read_guard::DEFAULT_MAX_READ_BYTES`]. A `package.json`
+    /// that is a link must resolve to a file in its own directory or in a
+    /// `node_modules` directory. The parse error names the position, not the
+    /// bad value.
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        Self::parse(&content).map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+        let content = read_manifest(path)?;
+        Self::parse_named(path, &content)
+    }
+
+    /// [`Self::load`] for a manifest of the project, for example the root
+    /// `package.json` or the one of a workspace member: the file must
+    /// resolve inside `root`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the file resolves outside `root`, cannot
+    /// be read, or does not parse.
+    pub fn load_inside(root: &std::path::Path, path: &std::path::Path) -> Result<Self, String> {
+        let content = fallow_types::read_guard::read_to_string_inside(
+            root,
+            path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        )
+        .map_err(|e| e.to_string())?;
+        Self::parse_named(path, &content)
+    }
+
+    fn parse_named(path: &std::path::Path, content: &str) -> Result<Self, String> {
+        Self::parse(content).map_err(|e| {
+            format!(
+                "Failed to parse {}: {}",
+                path.display(),
+                crate::parse_error::describe_json(&e)
+            )
+        })
     }
 
     /// Read the text of a package.json file without a leading UTF-8 byte
     /// order mark, for a parser that reads the raw JSON. The mark sits on
-    /// line 1, so line numbers do not change.
+    /// line 1, so line numbers do not change. The read has the same file
+    /// checks as [`Self::load`].
     ///
     /// # Errors
     ///
-    /// Returns the I/O error when the file cannot be read as UTF-8 text.
+    /// Returns the I/O error when the file cannot be read as UTF-8 text, or
+    /// a `PermissionDenied` error when a check refuses the file.
     pub fn read_source(path: &std::path::Path) -> std::io::Result<String> {
-        let mut source = std::fs::read_to_string(path)?;
+        let mut source = read_manifest(path).map_err(|message| {
+            if path.symlink_metadata().is_err() {
+                std::io::Error::new(std::io::ErrorKind::NotFound, message)
+            } else {
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, message)
+            }
+        })?;
         if source.starts_with('\u{FEFF}') {
             source.drain(..'\u{FEFF}'.len_utf8());
         }
@@ -465,8 +571,13 @@ impl PackageJson {
         }
 
         if let Some(browser) = &self.browser {
+            // Like `exports`, a `browser` path with a `..` segment is never
+            // followed out of the package.
             push_string_values(&mut entries, PackageEntryField::Browser, browser, |path| {
-                path.starts_with("./") || path.starts_with("../")
+                path.starts_with("./")
+            });
+            entries.retain(|(field, path)| {
+                *field != PackageEntryField::Browser || !has_dot_dot_segment(path)
             });
         }
 
@@ -652,6 +763,24 @@ fn valid_package_name(name: &str) -> Option<&str> {
     is_package_name.then_some(name)
 }
 
+/// True when `name` is exactly one normal path component on every platform.
+fn is_plain_dir_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['\\', ':'])
+        && matches!(
+            std::path::Path::new(name)
+                .components()
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [std::path::Component::Normal(_)]
+        )
+}
+
+/// True when a `/` or `\\` separated path has a `..` segment.
+fn has_dot_dot_segment(path: &str) -> bool {
+    path.split(['/', '\\']).any(|segment| segment == "..")
+}
+
 fn extract_exports_subdirectories(exports: &serde_json::Value) -> Vec<String> {
     let Some(map) = exports.as_object() else {
         return Vec::new();
@@ -660,11 +789,14 @@ fn extract_exports_subdirectories(exports: &serde_json::Value) -> Vec<String> {
     let skip_dirs = ["dist", "build", "out", "esm", "cjs", "lib", "node_modules"];
     let mut dirs = rustc_hash::FxHashSet::default();
 
-    for key in map.keys() {
-        let stripped = key.strip_prefix("./").unwrap_or(key);
+    for key in map.keys().filter(|key| !has_dot_dot_segment(key)) {
+        // A subpath key starts with `./`. The first segment must be one plain
+        // directory name: no `\`, no `:`, and not empty.
+        let Some(stripped) = key.strip_prefix("./") else {
+            continue;
+        };
         if let Some(first_segment) = stripped.split('/').next()
-            && !first_segment.is_empty()
-            && first_segment != "."
+            && is_plain_dir_name(first_segment)
             && first_segment != "package.json"
             && !skip_dirs.contains(&first_segment)
         {
@@ -676,14 +808,21 @@ fn extract_exports_subdirectories(exports: &serde_json::Value) -> Vec<String> {
 }
 
 /// Recursively extract file paths from package.json exports field.
+///
+/// Node.js accepts only `./` targets without a `..` segment, so a target
+/// that is `../x` or has a `..` segment is skipped, and so is the value of a
+/// key with a `..` segment. Such a path is never followed out of the
+/// package.
 fn extract_exports_entries(value: &serde_json::Value, entries: &mut Vec<String>) {
     match value {
-        serde_json::Value::String(s) if s.starts_with("./") || s.starts_with("../") => {
+        serde_json::Value::String(s) if s.starts_with("./") && !has_dot_dot_segment(s) => {
             entries.push(s.clone());
         }
         serde_json::Value::Object(map) => {
-            for v in map.values() {
-                extract_exports_entries(v, entries);
+            for (key, v) in map {
+                if !has_dot_dot_segment(key) {
+                    extract_exports_entries(v, entries);
+                }
             }
         }
         serde_json::Value::Array(arr) => {
@@ -698,6 +837,152 @@ fn extract_exports_entries(value: &serde_json::Value, entries: &mut Vec<String>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_dependency_link_to_another_node_modules_dir_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = dir.path().join("other/node_modules/pkg");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("package.json"), r#"{"name": "pkg"}"#).unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        std::os::unix::fs::symlink(&other, project.join("node_modules/pkg")).unwrap();
+        assert!(PackageJson::load(&project.join("node_modules/pkg/package.json")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_package_dir_link_out_of_its_parent_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("package.json"), r#"{"name": "x"}"#).unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(project.join("packages")).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("packages/x")).unwrap();
+        assert!(PackageJson::load(&project.join("packages/x/package.json")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_manifest_link_in_its_own_dir_and_a_plain_manifest_load() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.base.json"), r#"{"name": "a"}"#).unwrap();
+        std::os::unix::fs::symlink("package.base.json", dir.path().join("package.json")).unwrap();
+        assert!(PackageJson::load(&dir.path().join("package.json")).is_ok());
+        std::fs::create_dir(dir.path().join("b")).unwrap();
+        std::fs::write(dir.path().join("b/package.json"), r#"{"name": "b"}"#).unwrap();
+        assert!(PackageJson::load(&dir.path().join("b/package.json")).is_ok());
+    }
+
+    #[test]
+    fn exports_subdirectories_take_one_plain_first_segment() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"exports": {
+                "./ok/x": "./ok/x.js",
+                "plain/x": "./plain.js",
+                "./back\\slash/x": "./b.js",
+                "./c:d/x": "./c.js",
+                ".//abs/x": "./e.js",
+                "./": "./f.js",
+                "./g": "./g.js"
+            }}"#,
+        )
+        .unwrap();
+        let mut dirs = pkg.exports_subdirectories();
+        dirs.sort();
+        assert_eq!(dirs, vec!["g", "ok"]);
+    }
+
+    #[test]
+    fn browser_paths_with_dot_dot_segments_are_not_followed() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"browser": {
+                "./a.js": "./a.browser.js",
+                "./b.js": "../outside/b.js",
+                "./c.js": "./x/../../c.js"
+            }}"#,
+        )
+        .unwrap();
+        let entries: Vec<String> = pkg
+            .entry_points_by_field()
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect();
+        assert_eq!(entries, vec!["./a.browser.js"]);
+    }
+
+    #[test]
+    fn exports_with_dot_dot_segments_are_not_followed() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"exports": {
+                ".": "./src/index.ts",
+                "./../outside": "./src/a.ts",
+                "./a": "../outside/a.ts",
+                "./b": "./src/../../outside/b.ts",
+                "./c": { "import": "./src/c.ts", "default": "./x/../../y.ts" }
+            }}"#,
+        )
+        .unwrap();
+        let entries: Vec<String> = pkg
+            .entry_points_by_field()
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect();
+        assert_eq!(entries, vec!["./src/index.ts", "./src/c.ts"]);
+        let mut dirs = pkg.exports_subdirectories();
+        dirs.sort();
+        assert_eq!(dirs, vec!["a", "b", "c"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_manifest_link_out_of_its_package_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(dir.path().join("outside.json"), r#"{"name": "outside"}"#).unwrap();
+        std::os::unix::fs::symlink(
+            dir.path().join("outside.json"),
+            project.join("package.json"),
+        )
+        .unwrap();
+        assert!(PackageJson::load(&project.join("package.json")).is_err());
+        assert!(PackageJson::read_source(&project.join("package.json")).is_err());
+        assert!(PackageJson::load_inside(&project, &project.join("package.json")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_dependency_manifest_in_a_node_modules_store_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir
+            .path()
+            .join("node_modules/.pnpm/pkg@1.0.0/node_modules/pkg");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join("package.json"), r#"{"name": "pkg"}"#).unwrap();
+        let linked = dir.path().join("node_modules/pkg");
+        std::os::unix::fs::symlink(&store, &linked).unwrap();
+        let pkg = PackageJson::load(&linked.join("package.json")).unwrap();
+        assert_eq!(pkg.name.as_deref(), Some("pkg"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn manifest_parse_errors_name_the_position_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        std::fs::write(&path, "{\n  \"dependencies\": {\"a\": 7654321}\n}").unwrap();
+        let err = PackageJson::load(&path).unwrap_err();
+        assert!(!err.contains("7654321"), "{err}");
+        assert!(err.contains("line 2"), "{err}");
+    }
 
     #[test]
     fn inline_tool_config_keeps_the_last_value_of_a_repeated_key() {

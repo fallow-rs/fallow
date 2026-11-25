@@ -311,7 +311,7 @@ pub fn link_only_workspace_dependencies(
     workspaces: &[WorkspaceInfo],
     extra_patterns: &[String],
 ) -> rustc_hash::FxHashSet<String> {
-    let Ok(root_pkg) = PackageJson::load(&root.join("package.json")) else {
+    let Ok(root_pkg) = PackageJson::load_inside(root, &root.join("package.json")) else {
         return rustc_hash::FxHashSet::default();
     };
     let links = root_pkg.local_link_dependencies();
@@ -407,7 +407,7 @@ fn collect_declared_patterns(
 
     let pkg_path = root.join("package.json");
     if pkg_path.exists() {
-        match PackageJson::load(&pkg_path) {
+        match PackageJson::load_inside(root, &pkg_path) {
             Ok(pkg) => push_all(&pkg_path, pkg.workspace_patterns()),
             Err(error) => {
                 return Err(WorkspaceLoadError::MalformedRootPackageJson {
