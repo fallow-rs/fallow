@@ -438,6 +438,52 @@ gets the skill of the same version as the tools, with no separate install.
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.
 
+## Fix confirmation
+
+`fix_apply` asks the user to confirm before it writes when the client
+declares form elicitation (`elicitation.form`, or a bare `elicitation: {}`).
+A client with only `elicitation.url`, or with no elicitation, gets the
+unconfirmed apply. `crates/mcp/src/tools/fix_confirm.rs` holds the logic, and
+`crates/mcp/src/server/tests/fix_confirmation.rs` drives both routes over
+JSON-RPC.
+
+- The server runs the dry run first. An empty plan applies without a
+  question. The form message names the fix count, the file count, the count
+  per fix type and the count of skipped fixes. The form has one boolean
+  field, `apply`, default `true`.
+- A dry run that exits 2 for a `content_changed` or `mixed_line_endings`
+  skip still holds the full plan, so the form shows it. A dry run that fails
+  with no fix envelope, such as a config error, returns that error.
+- Protocol `2026-07-28` forbids server-to-client requests. On that revision
+  the call returns `InputRequiredResult` with the form under the key
+  `confirm_fix_apply`. The client calls again with `inputResponses` and the
+  echoed `requestState`.
+- `requestState` holds a digest of the planned fixes. The retry runs the dry
+  run again. When the digest differs, the server sends a new form, so the
+  user confirms the plan that runs. The digest detects a stale plan. It is
+  not a credential.
+- Earlier revisions get an `elicitation/create` request inside the call. The
+  server waits at most 10 minutes (`CONFIRM_TIMEOUT`). This wait is outside
+  `FALLOW_TIMEOUT_SECS`, which bounds each subprocess. A cancel of the tool
+  call ends the wait and sends `notifications/cancelled` for the form, so the
+  client closes it. After an accept, the server runs the dry run again and
+  writes only when the plan is the confirmed plan.
+- A confirmed call runs the fix analysis two times on the earlier revisions
+  (dry run and apply, plus the check after an accept) and three times on
+  `2026-07-28` (dry run, dry run on the retry, apply).
+- An accept is a yes only when `apply` is `true` or absent. A decline, a
+  cancel, any other `apply` value, a timeout, a failed request or a changed
+  plan returns a non-error result with `applied: false`, `confirmation`
+  (`declined`, `cancelled`, `timed_out`, `failed` or `plan_changed`),
+  `planned_fixes`, `planned_files` and `message`. No file changes. The
+  messages tell the agent not to apply the fixes in another way.
+- A `claude -p` or Agent SDK session cancels the form, unless an
+  `Elicitation` hook answers it. Claude Code 2.1.332 returned
+  `confirmation: "cancelled"` at once on both routes.
+- Code Mode refuses `fix_apply`, so no route writes without the form.
+- A confirmation as the `input_required` state of a task is not in this
+  version.
+
 ## Dependency usage parameters
 
 - `trace_dependency` accepts `usage`, `specifiers`, `sites`, `limit`, `cursor`
