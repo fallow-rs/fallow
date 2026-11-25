@@ -28,12 +28,13 @@ const withLayout = (callback) => {
 
 test("the read scope refuses files outside the work tree, also through links", () => {
   withLayout(({ root, outside }) => {
-    const inScope = createReadScope(root);
-    assert.equal(inScope(path.join(root, "src", "own.ts")), true);
-    assert.equal(inScope(path.join(root, "src", "linked.ts")), false);
-    assert.equal(inScope(path.join(outside, "other.ts")), false);
-    assert.equal(inScope(path.join(root, "src")), false, "a directory is not a regular file");
-    assert.equal(inScope("bundled:///libs/lib.d.ts"), true);
+    const scope = createReadScope(root);
+    assert.equal(scope.readable(path.join(root, "src", "own.ts")), true);
+    assert.equal(scope.readable(path.join(root, "src", "linked.ts")), false);
+    assert.equal(scope.readable(path.join(outside, "other.ts")), false);
+    assert.equal(scope.readable(path.join(root, "src")), false, "a directory is not a file");
+    assert.equal(scope.inScope(path.join(root, "src")), true);
+    assert.equal(scope.readable("bundled:///libs/lib.d.ts"), true);
   });
 });
 
@@ -67,13 +68,83 @@ test("a project path must resolve inside the root", () => {
   });
 });
 
-test("a Git work tree above the root does not widen the read scope", () => {
+test("a Git work tree above the root widens the scope only when fallow names it", () => {
   withLayout(({ base, root }) => {
     rmSync(path.join(root, ".git"), { recursive: true, force: true });
     mkdirSync(path.join(base, ".git"), { recursive: true });
     writeFileSync(path.join(base, "parent.ts"), OUTSIDE_TEXT);
-    const inScope = createReadScope(root);
-    assert.equal(inScope(path.join(base, "parent.ts")), false);
-    assert.equal(resolvesInside(root, path.join(base, "tsconfig.json")), false);
+    assert.equal(createReadScope(root, [], "").readable(path.join(base, "parent.ts")), false);
+    assert.equal(createReadScope(root, [], base).readable(path.join(base, "parent.ts")), true);
+    const elsewhere = path.join(root, "src");
+    assert.equal(
+      createReadScope(root, [], elsewhere).readable(path.join(base, "parent.ts")),
+      false,
+      "a scope root below the root is ignored",
+    );
+  });
+});
+
+test("a node_modules link does not open its target", () => {
+  withLayout(({ root, outside }) => {
+    symlinkSync(outside, path.join(root, "node_modules"));
+    const scope = createReadScope(root, [], "");
+    assert.equal(scope.readable(path.join(root, "node_modules", "other.ts")), false);
+    assert.equal(scope.readable(path.join(outside, "other.ts")), false);
+  });
+});
+
+test("the existence callbacks stay inside the read scope", () => {
+  withLayout(({ root, outside }) => {
+    const scope = createReadScope(root, [], "");
+    assert.equal(scope.inScope(outside), false);
+    assert.equal(scope.inScope(path.join(root, "src", "linked.ts")), false);
+    assert.equal(scope.inScope(path.join(root, "src", "own.ts")), true);
+  });
+});
+
+test("a subpackage reads the shared tsconfig and a workspace package of its work tree", () => {
+  withLayout(({ base }) => {
+    const top = path.join(base, "repo");
+    const app = path.join(top, "packages", "app");
+    const lib = path.join(top, "packages", "lib");
+    mkdirSync(path.join(top, ".git"), { recursive: true });
+    mkdirSync(path.join(app, "src"), { recursive: true });
+    mkdirSync(lib, { recursive: true });
+    mkdirSync(path.join(top, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(lib, path.join(top, "node_modules", "@scope", "lib"));
+    writeFileSync(
+      path.join(top, "tsconfig.base.json"),
+      JSON.stringify({
+        compilerOptions: { strict: true, moduleResolution: "bundler", module: "esnext" },
+      }),
+    );
+    writeFileSync(
+      path.join(app, "tsconfig.json"),
+      JSON.stringify({ extends: "../../tsconfig.base.json", include: ["src/**/*.ts"] }),
+    );
+    writeFileSync(
+      path.join(lib, "package.json"),
+      JSON.stringify({ name: "@scope/lib", types: "index.d.ts" }),
+    );
+    writeFileSync(path.join(lib, "index.d.ts"), "export declare const shared: number;\n");
+    writeFileSync(
+      path.join(app, "src", "main.ts"),
+      'import { shared } from "@scope/lib";\nexport const value: number = shared;\n',
+    );
+    const api = createApi({ cwd: app, scopeRoot: top });
+    const config = path.join(app, "tsconfig.json");
+    const snapshot = api.updateSnapshot({ openProjects: [config] });
+    try {
+      const program = snapshot.getProject(config).program;
+      assert.equal(program.getCompilerOptions().strict, true, "the shared tsconfig applies");
+      const files = program.getSourceFileNames();
+      assert.ok(
+        files.some((file) => file.endsWith("lib/index.d.ts")),
+        `the workspace package loads: ${files.filter((f) => !f.includes("lib.")).join(", ")}`,
+      );
+    } finally {
+      snapshot.dispose();
+      api.close();
+    }
   });
 });

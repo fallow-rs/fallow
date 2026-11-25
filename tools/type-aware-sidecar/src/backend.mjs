@@ -153,25 +153,46 @@ const COMPILER_DIRS = (() => {
 })();
 
 /**
- * Give `fs` a `readFile` callback that refuses a file outside the read scope
- * of `root` (see {@link createReadScope}). A refused file reads as missing.
+ * The answer of each file system callback for a path outside the read scope:
+ * the path does not exist, and a link resolves to itself.
  */
-const withReadScope = (root, fs = {}) => {
-  const inScope = createReadScope(root, COMPILER_DIRS);
+const REFUSED = {
+  fileExists: () => false,
+  directoryExists: () => false,
+  getAccessibleEntries: () => ({ files: [], directories: [] }),
+  realpath: (fileName) => fileName,
+  stat: () => undefined,
+};
+
+/**
+ * Give `fs` callbacks that keep the checker inside the read scope of `root`
+ * (see {@link createReadScope}). A refused file reads as missing. A path in
+ * scope goes to the callback of the caller, or to the file system.
+ */
+const withReadScope = (root, scopeRoot, fs = {}) => {
+  const scope = createReadScope(root, COMPILER_DIRS, scopeRoot);
+  const scoped = { ...fs };
   const readFile = fs.readFile ?? (() => READ_FROM_DISK);
-  return { ...fs, readFile: (fileName) => (inScope(fileName) ? readFile(fileName) : null) };
+  scoped.readFile = (fileName) => (scope.readable(fileName) ? readFile(fileName) : null);
+  for (const [name, refused] of Object.entries(REFUSED)) {
+    const inner = fs[name] ?? (() => FS_CALLBACK_DEFAULTS[name]);
+    scoped[name] = (fileName) => (scope.inScope(fileName) ? inner(fileName) : refused(fileName));
+  }
+  return scoped;
 };
 
 /**
  * Create a backend API with the TypeScript 7.0 snapshot contract. With a
- * `cwd`, the checker reads only the files in the read scope of that root.
+ * `cwd`, the checker touches only the paths in the read scope of that root.
+ * `scopeRoot` overrides the scope root that fallow sets in the environment.
  *
- * @param {{ cwd?: string, fs?: Record<string, unknown> }} options
+ * @param {{ cwd?: string, scopeRoot?: string, fs?: Record<string, unknown> }} options
  */
 export const createApi = (options = {}) => {
-  const scoped = options.cwd ? withReadScope(options.cwd, options.fs) : options.fs;
+  const { scopeRoot, ...apiOptions } = options;
+  const scoped = options.cwd ? withReadScope(options.cwd, scopeRoot, options.fs) : options.fs;
   const fs = scoped ? { ...FS_CALLBACK_DEFAULTS, ...scoped } : undefined;
-  const api = new sync.API({ ...options, ...(fs ? { fs } : {}) });
+  const api = new sync.API({ ...apiOptions, ...(fs ? { fs } : {}) });
   return typeof api.createSnapshot === "function" ? withLinearSnapshots(api) : api;
 };
 

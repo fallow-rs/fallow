@@ -4076,17 +4076,19 @@ test("framework contract requires the exact package declaration", () => {
 test("unknown external framework package provenance abstains", () => {
   const monorepo = makeProject();
   const root = path.join(monorepo, "packages", "app");
+  // fallow names the work tree of the monorepo as the read scope root, so
+  // the checker reads the root tsconfig and the framework package.
+  const previousScopeRoot = process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT;
+  process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT = monorepo;
   try {
     write(
-      root,
+      monorepo,
       "tsconfig.json",
       JSON.stringify({
         compilerOptions: { strict: true, module: "nodenext", moduleResolution: "nodenext" },
-        include: ["src/**/*.ts"],
+        include: ["packages/**/*.ts"],
       }),
     );
-    // The declaration is outside the root, so the checker does not read it
-    // and its provenance is unknown.
     write(monorepo, "packages/framework/lit.d.ts", "export declare class LitElement {}\n");
     const source = [
       'import { LitElement } from "../../framework/lit.js";',
@@ -4127,7 +4129,7 @@ test("unknown external framework package provenance abstains", () => {
               ],
             },
           ],
-          { projects: ["tsconfig.json"] },
+          { projects: ["../../tsconfig.json"] },
         ),
       ),
     );
@@ -4136,6 +4138,8 @@ test("unknown external framework package provenance abstains", () => {
     assert.equal(response.results[0].reasonCode, "framework-contract-provenance");
     assert.equal(response.results[0].data.closed_world_eligible, false);
   } finally {
+    if (previousScopeRoot === undefined) delete process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT;
+    else process.env.FALLOW_TYPE_AWARE_SCOPE_ROOT = previousScopeRoot;
     rmSync(monorepo, { recursive: true, force: true });
   }
 });

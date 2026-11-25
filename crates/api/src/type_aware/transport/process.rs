@@ -132,6 +132,10 @@ pub(super) fn sidecar_command_with_script(
     Ok(command)
 }
 
+/// The environment variable that names the read scope base of the checker.
+/// The companion accepts it only when it is the root or a directory above it.
+pub(super) const SCOPE_ROOT_ENV: &str = "FALLOW_TYPE_AWARE_SCOPE_ROOT";
+
 fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
     const ALLOWED_ENV: &[&str] = &[
         "HOME",
@@ -151,8 +155,11 @@ fn restrict_sidecar_environment(command: &mut Command, root: &Path) {
     let path = fallow_process::HostPaths::from_env()
         .search_path
         .and_then(|value| sanitize_search_path(root, &value));
+    let home = fallow_process::HostPaths::from_env().home;
+    let scope_root = fallow_types::read_scope::read_scope_base(root, home.as_deref());
     command.env_clear();
     command.envs(values);
+    command.env(SCOPE_ROOT_ENV, scope_root);
     if let Ok(backend) = selected_backend() {
         command.env(BACKEND_ENV, backend.family);
     }
@@ -294,4 +301,30 @@ pub(super) fn bounded_text(bytes: &[u8], max_chars: usize) -> String {
         .collect::<String>()
         .trim()
         .to_owned()
+}
+
+#[cfg(test)]
+mod scope_root_tests {
+    use super::*;
+
+    /// The companion gets the Git work tree of the root as its read scope
+    /// base, so a package root can read the shared configs of the work tree.
+    #[test]
+    fn the_sidecar_command_names_the_work_tree_as_the_scope_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dunce::canonicalize(dir.path()).expect("canonical");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let sidecar = top.join("install/fallow-type-aware.mjs");
+
+        let command = sidecar_command(&sidecar, &root).expect("configure sidecar command");
+        let scope_root = command
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new(SCOPE_ROOT_ENV))
+            .and_then(|(_, value)| value)
+            .map(PathBuf::from);
+
+        assert_eq!(scope_root, Some(top));
+    }
 }
