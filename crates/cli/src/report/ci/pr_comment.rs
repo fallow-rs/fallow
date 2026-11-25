@@ -34,7 +34,7 @@ static WORKSPACE_MARKER: OnceLock<String> = OnceLock::new();
 /// list, prefixed with `w-`. Sort + join is deterministic so the same
 /// selection produces the same suffix across runs; two jobs with disjoint
 /// selections get distinct markers and don't race.
-pub fn set_workspace_marker_from_list(values: &[String]) {
+pub(crate) fn set_workspace_marker_from_list(values: &[String]) {
     let trimmed: Vec<&str> = values
         .iter()
         .map(|value| value.trim())
@@ -261,7 +261,7 @@ pub(crate) fn docs_url_for_rule(rule_id: &str) -> Option<String> {
     crate::explain::rule_by_id(rule_id).map(crate::explain::rule_docs_url)
 }
 
-pub(crate) fn max_comments() -> usize {
+fn max_comments() -> usize {
     std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -269,7 +269,7 @@ pub(crate) fn max_comments() -> usize {
 }
 
 #[must_use]
-pub(crate) fn pr_comment_layout_from_env() -> PrCommentLayout {
+fn pr_comment_layout_from_env() -> PrCommentLayout {
     match std::env::var("FALLOW_PR_COMMENT_LAYOUT").as_deref() {
         Ok("compact") => PrCommentLayout::Compact,
         Ok("gate-only") => PrCommentLayout::GateOnly,
@@ -290,7 +290,7 @@ pub(crate) fn pr_comment_layout_from_env() -> PrCommentLayout {
 /// run fallow scoped to one workspace package and post their own sticky.
 /// Without a per-workspace suffix every job edits the same marker, racing
 /// each other's bodies on every CI re-run.
-pub(crate) fn sticky_marker_id() -> String {
+fn sticky_marker_id() -> String {
     if let Ok(value) = std::env::var("FALLOW_COMMENT_ID")
         && !value.trim().is_empty()
     {
@@ -549,7 +549,7 @@ fn decision_summary_markdown(
 }
 
 #[must_use]
-pub(crate) fn build_pr_details_artifact(command: &str, issues: &[CiIssue]) -> PrDetailsArtifact {
+fn build_pr_details_artifact(command: &str, issues: &[CiIssue]) -> PrDetailsArtifact {
     PrDetailsArtifact {
         schema: PR_DETAILS_SCHEMA.to_owned(),
         title: format!("Fallow {}", command_title(command)),
@@ -572,7 +572,7 @@ fn pr_details_row_from_issue(issue: &CiIssue) -> PrDetailsRow {
 }
 
 #[must_use]
-pub(crate) fn decision_annotation_from_issue(issue: &CiIssue) -> PrDecisionAnnotation {
+fn decision_annotation_from_issue(issue: &CiIssue) -> PrDecisionAnnotation {
     PrDecisionAnnotation {
         path: issue.path.clone(),
         line: u32::try_from(issue.line).unwrap_or(u32::MAX),
@@ -596,7 +596,7 @@ fn count_label(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {noun}")
 }
 
-pub(crate) fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
+fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
     let Ok(path) = std::env::var("FALLOW_PR_COMMENT_ENVELOPE_FILE") else {
         return;
     };
@@ -612,7 +612,7 @@ pub(crate) fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
     }
 }
 
-pub(crate) fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
+fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
     let Ok(path) = std::env::var("FALLOW_PR_DECISION_FILE") else {
         return;
     };
@@ -628,7 +628,7 @@ pub(crate) fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
     }
 }
 
-pub(crate) fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
+fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
     let Ok(path) = std::env::var("FALLOW_PR_DETAILS_FILE") else {
         return;
     };

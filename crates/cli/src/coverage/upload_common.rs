@@ -18,7 +18,7 @@ use crate::coverage::{
     COVERAGE_UPLOAD_VALIDATION_EXIT_CODE as EXIT_VALIDATION,
 };
 
-pub(super) const GIT_SHA_MAX_LEN: usize = 64;
+const GIT_SHA_MAX_LEN: usize = 64;
 
 /// Outcome of a git-SHA keyed upload (`upload-inventory` and
 /// `upload-static-findings`). Each variant carries its exit code class, and
@@ -213,7 +213,7 @@ pub(super) fn resolve_project_id(
 /// bare (`fallow-cloud-api`) or slash-scoped (`acme/widgets`). Keep validation
 /// minimal: reject only what the server or filesystem would reject (empty,
 /// `..`, and a lone `.`, which URL normalization collapses to another route).
-pub(super) fn validate_project_id(id: &str) -> Result<&str, String> {
+fn validate_project_id(id: &str) -> Result<&str, String> {
     if id.is_empty() {
         return Err("project id is empty".to_owned());
     }
@@ -432,7 +432,7 @@ pub(super) fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, String
 
 /// The resolved config of a unit test, without a resolved run.
 #[cfg(test)]
-pub(super) fn load_resolved_config_with_options(
+fn load_resolved_config_with_options(
     root: &Path,
     input: crate::runtime_support::ConfigFlags<'_>,
 ) -> Result<ResolvedConfig, String> {

@@ -18,7 +18,7 @@ use super::{
 /// and tens of thousands of them make each audit pay seconds of IO. The
 /// requested root's own entry is swept on every audit; the scans run at most
 /// once per interval. `fallow audit-cache prune` always scans.
-pub(super) const FULL_SWEEP_INTERVAL: Duration = Duration::from_hours(1);
+const FULL_SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 
 /// Which candidates a cache sweep visits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

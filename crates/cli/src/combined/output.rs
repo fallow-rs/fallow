@@ -1436,7 +1436,7 @@ fn build_combined_codeclimate_issues(
 
 /// Convert an ExitCode to u8 for comparison.
 /// ExitCode doesn't implement Ord, so we use this workaround.
-pub(super) fn exit_code_to_u8(code: ExitCode) -> u8 {
+fn exit_code_to_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
 }
 

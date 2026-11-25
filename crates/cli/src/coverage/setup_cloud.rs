@@ -212,7 +212,7 @@ fn detect_project_id(explicit: Option<&str>, root: &Path) -> Result<Option<Strin
 /// The repo rule of the Fallow Cloud API: segments of `[A-Za-z0-9@._-]`
 /// joined by `/`, no `..`, and no leading `-` (a value that starts with `-`
 /// would read as a flag in the emitted commands).
-pub(super) fn is_valid_project_id(id: &str) -> bool {
+fn is_valid_project_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 255
         && !id.contains("..")

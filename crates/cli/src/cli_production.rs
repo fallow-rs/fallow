@@ -50,10 +50,7 @@ impl crate::DispatchContext<'_> {
 
     /// The run of `pending`. The first call applies the side effects of the
     /// config load, or prints the error that [`Self::begin_run`] kept.
-    pub(crate) fn finish_run<'run>(
-        &self,
-        pending: &'run PendingRun,
-    ) -> Result<&'run ResolvedRun, ExitCode> {
+    fn finish_run<'run>(&self, pending: &'run PendingRun) -> Result<&'run ResolvedRun, ExitCode> {
         match &pending.result {
             Ok(run) => {
                 if !pending.finished.replace(true) {

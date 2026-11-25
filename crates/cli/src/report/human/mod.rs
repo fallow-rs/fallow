@@ -31,7 +31,7 @@ use fallow_types::suppress::{IssueKind, issue_kind_to_kebab};
 use super::{Level, format_display_path, plural, relative_path, split_dir_filename};
 
 /// Maximum items shown per flat section (unused files, deps, etc.).
-pub(super) const MAX_FLAT_ITEMS: usize = 10;
+const MAX_FLAT_ITEMS: usize = 10;
 
 /// Format a path with dimmed directory and bold filename.
 pub fn format_path(path_str: &str) -> String {
@@ -40,7 +40,7 @@ pub fn format_path(path_str: &str) -> String {
 }
 
 /// Format a number with thousands separators (e.g., 5433 → "5,433").
-pub(super) fn thousands(n: usize) -> String {
+fn thousands(n: usize) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {
@@ -52,7 +52,7 @@ pub(super) fn thousands(n: usize) -> String {
     result
 }
 
-pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
+fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
     if has_findings
         && !quiet
         && std::io::stdout().is_terminal()
@@ -485,7 +485,7 @@ const FOOTER_INDENT: &str = "  ";
 ///
 /// A URL cannot break, so a line that holds only a long URL can be wider than
 /// `FOOTER_LINE_WIDTH`. Every other footer line fits.
-pub(super) fn push_docs_footer(lines: &mut Vec<String>, description: &str, url: &str) {
+fn push_docs_footer(lines: &mut Vec<String>, description: &str, url: &str) {
     let budget = FOOTER_LINE_WIDTH - FOOTER_INDENT.len();
     let mut footer: Vec<String> = wrap_words(description, budget)
         .into_iter()
@@ -519,15 +519,11 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
 ///
 /// The `item_count` controls whether the suppress hint is shown (only for sections
 /// with 3+ items, to reduce noise for power users scanning many small sections).
-pub(super) fn push_section_footer_with_count(
-    lines: &mut Vec<String>,
-    title: &str,
-    item_count: usize,
-) {
+fn push_section_footer_with_count(lines: &mut Vec<String>, title: &str, item_count: usize) {
     push_section_footer_impl(lines, title, item_count, false, None);
 }
 
-pub(super) fn push_section_footer_with_fixability(
+fn push_section_footer_with_fixability(
     lines: &mut Vec<String>,
     title: &str,
     item_count: usize,
@@ -543,7 +539,7 @@ pub(super) fn push_section_footer_with_fixability(
 }
 
 /// Push section footer for directory-rollup sections (suggests ignorePatterns config).
-pub(super) fn push_section_footer_rollup(lines: &mut Vec<String>, title: &str, item_count: usize) {
+fn push_section_footer_rollup(lines: &mut Vec<String>, title: &str, item_count: usize) {
     push_section_footer_impl(lines, title, item_count, true, None);
 }
 
@@ -582,7 +578,7 @@ fn push_section_footer_impl(
 }
 
 /// Build items grouped by file path, sorted by count descending, with truncation.
-pub(super) struct GroupedByFileInput<'out, 'items, T, P, F>
+struct GroupedByFileInput<'out, 'items, T, P, F>
 where
     P: Fn(&'items T) -> &'items Path,
     F: Fn(&T) -> String,
@@ -596,9 +592,8 @@ where
     max_items_per_file: usize,
 }
 
-pub(super) fn build_grouped_by_file<'out, 'items, T, P, F>(
-    input: GroupedByFileInput<'out, 'items, T, P, F>,
-) where
+fn build_grouped_by_file<'out, 'items, T, P, F>(input: GroupedByFileInput<'out, 'items, T, P, F>)
+where
     P: Fn(&'items T) -> &'items Path,
     F: Fn(&T) -> String,
 {
@@ -708,7 +703,7 @@ fn push_grouped_file_lines<T, F>(
 
 /// Strip ANSI escape sequences from a string, leaving only the printable text.
 #[cfg(test)]
-pub(super) fn strip_ansi(s: &str) -> String {
+fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
@@ -739,7 +734,7 @@ pub(super) fn plain(lines: &[String]) -> String {
 /// the description wrapped inside `FOOTER_LINE_WIDTH` without an em-dash,
 /// then the URL on its own line.
 #[cfg(test)]
-pub(super) fn assert_docs_footer_layout(lines: &[String], url: &str) {
+fn assert_docs_footer_layout(lines: &[String], url: &str) {
     let entry = lines
         .iter()
         .map(|line| strip_ansi(line))

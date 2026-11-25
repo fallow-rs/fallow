@@ -21,7 +21,7 @@
 //! code and the Fallow Cloud upload helper must both pass.
 
 /// The source map field.
-pub(super) const LINE_STARTS_FIELD: &str = "x_fallow_line_starts";
+const LINE_STARTS_FIELD: &str = "x_fallow_line_starts";
 
 /// The cloud reads at most this many line starts.
 const MAX_LINES: usize = 1_000_000;
@@ -38,7 +38,7 @@ const CHUNK_ID_LEN: usize = 36;
 
 /// The served offset of column 0 of each generated line, or `None` for an
 /// unknown layout or a script with more lines than the cloud reads.
-pub(super) fn served_line_starts(served: &str) -> Option<Vec<u64>> {
+fn served_line_starts(served: &str) -> Option<Vec<u64>> {
     let text = served.strip_prefix(BYTE_ORDER_MARK).unwrap_or(served);
     let prefix = injected_prefix_len(text)?;
     let mut starts = vec![utf16_len(&text[..prefix])];

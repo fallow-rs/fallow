@@ -25,7 +25,11 @@ use super::relative_path;
 /// Iterates a `BTreeMap` so iteration order is alphabetical. The first key
 /// to reach the running maximum wins, which means equal counts resolve to the
 /// alphabetically-smallest key.
-pub fn largest_owner(group: &CloneGroup, root: &Path, resolver: &OwnershipResolver) -> String {
+pub(crate) fn largest_owner(
+    group: &CloneGroup,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> String {
     fallow_api::largest_clone_group_owner_with(group, |path| {
         resolver.resolve(relative_path(path, root))
     })

@@ -656,7 +656,7 @@ fn saved_dead_code_results(
 }
 
 /// Whether `report --from` finds a config for the rules it falls back to.
-pub(super) fn saved_report_config_found(root: &Path, report_config: ConfigFlags<'_>) -> bool {
+fn saved_report_config_found(root: &Path, report_config: ConfigFlags<'_>) -> bool {
     report_config.explicit(root).is_some() || report_config.discovered(root).is_some()
 }
 

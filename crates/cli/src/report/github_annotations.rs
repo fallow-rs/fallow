@@ -55,7 +55,7 @@ pub enum EnvelopeKind {
 impl EnvelopeKind {
     /// Whether the envelope has the dead-code body at its root:
     /// `dead-code` or `architecture`.
-    pub const fn is_dead_code_family(self) -> bool {
+    pub(crate) const fn is_dead_code_family(self) -> bool {
         matches!(self, Self::DeadCode | Self::Architecture)
     }
 }
