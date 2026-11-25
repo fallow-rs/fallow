@@ -71,7 +71,11 @@ impl FallowConfig {
             if !sets_list {
                 continue;
             }
-            let content = std::fs::read_to_string(path).ok()?;
+            let content = fallow_types::read_guard::read_to_string_bounded(
+                path,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            )
+            .ok()?;
             let (start, end) = range_in(path, &content)?;
             return Some(ConfigEntrySpan {
                 path: path.to_path_buf(),
@@ -487,6 +491,27 @@ mod tests {
         );
         assert_eq!(
             FallowConfig::locate_list_entry(&path, "ignoreDependencies", "a/**"),
+            None
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_oversize_source_gives_no_span() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().join("base.json");
+        let file = std::fs::File::create(&base).expect("create base");
+        file.set_len(fallow_types::read_guard::DEFAULT_MAX_READ_BYTES + 1)
+            .expect("size base");
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(
+            &path,
+            r#"{"extends": "./base.json", "ignoreDependencies": ["a"]}"#,
+        )
+        .expect("write config");
+
+        assert_eq!(
+            FallowConfig::locate_list_entry(&path, "ignoreDependencies", "a"),
             None
         );
     }

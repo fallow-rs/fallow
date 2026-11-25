@@ -630,6 +630,12 @@ pub fn config_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     {
         return root.join(relative);
     }
+    if let Some(files) = super::outside_value_files(root, "cache.dir", &configured) {
+        tracing::warn!(
+            "ignoring cache.dir from a config file outside the project ({files}): it must be a directory inside the project; set {CACHE_DIR_ENV} to put the cache outside the project. The text of a file outside the project is not shown"
+        );
+        return default;
+    }
     tracing::warn!(
         "ignoring cache.dir `{}` from the config file: it must be a directory inside the project; set {CACHE_DIR_ENV} to put the cache outside the project",
         configured.display()

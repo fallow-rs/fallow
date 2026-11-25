@@ -458,12 +458,34 @@ fn write_outcome(outcome: &mut FileOutcome, root: &Path) {
     let Some(content) = outcome.content.take() else {
         return;
     };
-    if let Err(error) = write_atomically(&outcome.path, content.as_bytes()) {
+    let written = check_write_inside_root(&outcome.path, root)
+        .and_then(|()| write_atomically(&outcome.path, content.as_bytes()));
+    if let Err(error) = written {
         outcome.status = Status::Error;
         outcome.reason = Some(format!(
             "failed to write {}: {error}",
             display_path(&outcome.path, root)
         ));
+    }
+}
+
+/// A baseline path below `root`, such as the value of a config key, must have
+/// a parent directory that resolves inside `root`, so the temporary file and
+/// the rename stay inside the project. A path outside `root` comes from a CLI
+/// flag, and the user chose it, so it is not checked.
+fn check_write_inside_root(path: &Path, root: &Path) -> Result<(), String> {
+    let normalized = fallow_types::path_guard::lexically_normalized(path);
+    let normalized_root = fallow_types::path_guard::lexically_normalized(root);
+    if !normalized.starts_with(&normalized_root) {
+        return Ok(());
+    }
+    let parent = normalized
+        .parent()
+        .ok_or_else(|| "the path has no parent directory".to_owned())?;
+    if fallow_types::read_guard::is_inside_root(root, parent) {
+        Ok(())
+    } else {
+        Err("its directory resolves to a location outside the project root".to_owned())
     }
 }
 
@@ -778,4 +800,61 @@ fn print_removed(removed: &[PrunedEntry]) {
 
 const fn entry_noun(count: usize) -> &'static str {
     if count == 1 { "entry" } else { "entries" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pruned(path: PathBuf) -> FileOutcome {
+        FileOutcome {
+            kind: BaselineKind::Dupes,
+            path,
+            status: Status::Pruned,
+            entries_before: 1,
+            entries_after: 0,
+            removed: Vec::new(),
+            content: Some("{}".to_owned()),
+            reason: None,
+            reason_code: None,
+            mismatch: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_prune_write_through_a_directory_link_out_of_the_root_is_refused() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("dupes.json"), "old").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("baselines")).unwrap();
+
+        let mut outcome = pruned(root.join("baselines/dupes.json"));
+        write_outcome(&mut outcome, &root);
+        assert_eq!(outcome.status, Status::Error);
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("dupes.json")).unwrap(),
+            "old"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_prune_write_inside_the_root_and_a_flag_path_outside_it_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir(root.join("baselines")).unwrap();
+        std::fs::write(root.join("baselines/dupes.json"), "old").unwrap();
+        let mut outcome = pruned(root.join("baselines/dupes.json"));
+        write_outcome(&mut outcome, &root);
+        assert_eq!(outcome.status, Status::Pruned);
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("dupes.json"), "old").unwrap();
+        let mut outcome = pruned(outside.path().join("dupes.json"));
+        write_outcome(&mut outcome, &root);
+        assert_eq!(outcome.status, Status::Pruned);
+    }
 }

@@ -706,10 +706,13 @@ impl ExtendsWalk<'_> {
         }
         let source = match self.loader {
             Some(load) => load(config_path),
-            None => std::fs::read_to_string(config_path)
-                .ok()
-                .and_then(|content| parse_source(&content))
-                .map(Arc::new),
+            None => fallow_types::read_guard::read_to_string_bounded(
+                config_path,
+                fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+            )
+            .ok()
+            .and_then(|content| parse_source(&content))
+            .map(Arc::new),
         };
         self.sources
             .insert(config_path.to_path_buf(), source.clone());

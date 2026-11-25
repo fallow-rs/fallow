@@ -74,7 +74,7 @@ impl ConfigChainSnapshot {
             .into_iter()
             .flat_map(FallowConfig::local_source_files)
             .map(|file| {
-                let bytes = std::fs::read(&file).ok();
+                let bytes = read_chain_file(&file);
                 (file, bytes)
             })
             .collect();
@@ -101,8 +101,18 @@ impl ConfigChainSnapshot {
             || self
                 .files
                 .iter()
-                .any(|(path, bytes)| std::fs::read(path).ok() != *bytes)
+                .any(|(path, bytes)| read_chain_file(path) != *bytes)
     }
+}
+
+/// The bytes of a file of the `extends` chain: a regular file within the
+/// size limit of the config read, else `None`.
+fn read_chain_file(path: &Path) -> Option<Vec<u8>> {
+    fallow_types::read_guard::read_bytes_bounded(
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
 }
 
 /// The error of [`load_config_file`].
@@ -152,7 +162,28 @@ impl From<ConfigLoadError> for EngineError {
 /// config file, or that writes to the config file, calls this function.
 #[must_use]
 pub fn find_config_file(root: &Path) -> Option<PathBuf> {
+    register_tracked_link_probe();
     FallowConfig::find_config_path(root)
+}
+
+/// Give config discovery the git probe for a config file link out of the
+/// project: discovery allows such a link when git does not track it. A
+/// host calls it at startup, so that each config discovery, also one
+/// outside the project load, gets the same answer.
+pub fn register_tracked_link_probe() {
+    fallow_config::set_tracked_link_probe(git_tracks_entry);
+}
+
+/// Whether git tracks the entry at `path`. See
+/// [`fallow_config::TrackedLinkProbe`].
+fn git_tracks_entry(path: &Path) -> Option<bool> {
+    let output = crate::git_env::git_command(path.parent()?)
+        .args(["--literal-pathspecs", "ls-files", "-z", "--"])
+        .arg(path.file_name()?)
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(!output.stdout.is_empty())
 }
 
 /// Load the config file of a project: the file at `config_path`, else the
@@ -170,8 +201,27 @@ pub fn load_config_file(
 ) -> Result<ConfigFile, ConfigLoadError> {
     #[cfg(any(test, feature = "testing"))]
     load_count::record(root);
+    register_tracked_link_probe();
     let load_options = ConfigLoadOptions::new(options.allow_remote_extends)
         .with_extends_timeout(options.extends_timeout);
+    let file = load_config_file_unchecked(root, config_path, load_options)?;
+    file.config.record_outside_values(root);
+    if let Err(errors) = file.config.check_file_path_keys_inside(root) {
+        let message = format!("invalid config:\n  - {}", errors.join("\n  - "));
+        return Err(ConfigLoadError::Parse {
+            path: file.path,
+            chain: message.clone(),
+            message,
+        });
+    }
+    Ok(file)
+}
+
+fn load_config_file_unchecked(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+) -> Result<ConfigFile, ConfigLoadError> {
     if let Some(path) = config_path {
         let before = ConfigChainSnapshot::read(Some(path));
         return FallowConfig::load_with_options(path, load_options)
@@ -266,6 +316,38 @@ mod tests {
         assert_eq!(load_count::config_loads(dir.path()), 2);
     }
 
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn an_untracked_config_link_out_of_the_checkout_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outer = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = outer.join("project");
+        std::fs::create_dir(&root).expect("project");
+        let git = |args: &[&str]| {
+            let status = crate::git_fixture::fixture_git_command(&root)
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(outer.join("dotfiles.json"), r#"{ "entry": ["src/a.ts"] }"#)
+            .expect("config");
+        std::os::unix::fs::symlink(outer.join("dotfiles.json"), root.join(".fallowrc.json"))
+            .expect("link");
+
+        let file = load_config_file(&root, None, ConfigFileOptions::default()).expect("loads");
+        assert_eq!(file.config.entry, vec!["src/a.ts".to_owned()]);
+        assert!(find_config_file(&root).is_some());
+
+        git(&["add", ".fallowrc.json"]);
+        assert!(load_config_file(&root, None, ConfigFileOptions::default()).is_err());
+        assert!(find_config_file(&root).is_none());
+    }
+
     /// No server listens on port 1, so the fetch fails at once and offline.
     const UNREACHABLE_REMOTE_EXTENDS: &str = r#"{ "extends": "https://127.0.0.1:1/fallow.json" }"#;
 
@@ -275,6 +357,26 @@ mod tests {
         std::fs::create_dir(root.join(".git")).expect("git marker");
         std::fs::write(root.join(".fallowrc.json"), config).expect("config");
         (dir, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn config_path_keys_through_a_link_out_of_the_root_are_refused() {
+        let outside = tempfile::tempdir().expect("tempdir");
+        for config in [
+            r#"{ "codeowners": "linked/CODEOWNERS" }"#,
+            r#"{ "health": { "coverage": "linked/coverage-final.json" } }"#,
+            r#"{ "audit": { "dupesBaseline": "linked/dupes.json" } }"#,
+        ] {
+            let (_dir, root) = project(config);
+            std::os::unix::fs::symlink(outside.path(), root.join("linked")).expect("link");
+            let err =
+                load_config_file(&root, None, ConfigFileOptions::default()).expect_err(config);
+            assert!(err.chain().contains("outside"), "{config}: {}", err.chain());
+        }
+        let (_dir, root) = project(r#"{ "codeowners": "missing/CODEOWNERS" }"#);
+        load_config_file(&root, None, ConfigFileOptions::default()).expect("a missing file loads");
     }
 
     #[test]
@@ -413,5 +515,79 @@ mod tests {
             file.config.production,
             fallow_config::ProductionConfig::default()
         );
+    }
+
+    /// Run `load_config_file` for `root` on a thread: `Some(true)` when the
+    /// load fails within a few seconds, `None` when it does not return.
+    #[cfg(unix)]
+    fn load_fails_in_time(root: &Path) -> Option<bool> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let root = root.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = sender.send(load_config_file(&root, None, ConfigFileOptions::default()));
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .ok()
+            .map(|result| result.is_err())
+    }
+
+    /// A project with a `.git` entry whose config extends `entry`.
+    #[cfg(unix)]
+    fn project_extending(entry: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dunce::canonicalize(dir.path()).expect("canonical");
+        std::fs::create_dir(root.join(".git")).expect("git marker");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            format!(r#"{{ "extends": "{entry}" }}"#),
+        )
+        .expect("config");
+        (dir, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_pipe_in_the_extends_chain_is_refused_without_a_wait() {
+        let (_dir, root) = project_extending("./pipe.json");
+        let status = std::process::Command::new("mkfifo")
+            .arg(root.join("pipe.json"))
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo must create the test pipe");
+
+        assert_eq!(load_fails_in_time(&root), Some(true));
+        let files = FallowConfig::local_source_files(&root.join(".fallowrc.json"));
+        assert!(
+            !files.iter().any(|file| file.ends_with("pipe.json")),
+            "{files:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_device_in_the_extends_chain_is_refused() {
+        for device in ["null", "zero"] {
+            let probe = tempfile::tempdir().expect("tempdir");
+            let depth = dunce::canonicalize(probe.path())
+                .expect("canonical")
+                .components()
+                .count();
+            // The project is another temp dir with the same parent, so it has
+            // `depth` components with the file system root. Its `depth - 1`
+            // parents lead to the file system root, and one more `..`
+            // stays there.
+            let up = "../".repeat(depth);
+            let (_dir, root) = project_extending(&format!("{up}dev/{device}"));
+
+            let files = FallowConfig::local_source_files(&root.join(".fallowrc.json"));
+            assert!(
+                !files.iter().any(|file| file.starts_with("/dev")),
+                "{device}: {files:?}"
+            );
+            assert_eq!(load_fails_in_time(&root), Some(true), "{device}");
+        }
     }
 }

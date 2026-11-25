@@ -73,6 +73,7 @@ fn create_boundary_config_with_entry(
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
@@ -426,6 +427,7 @@ fn no_violations_when_rule_is_off() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
@@ -501,6 +503,7 @@ fn preset_detects_boundary_violation() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -618,6 +621,7 @@ fn root_field_classifies_per_subtree() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -738,6 +742,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root.clone(), OutputFormat::Human, 4, true, true, None);
     let flat_results = fallow_core::analyze(&flat_config).expect("analysis should succeed");
@@ -827,6 +832,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
     let scoped_results = fallow_core::analyze(&scoped_config).expect("analysis should succeed");

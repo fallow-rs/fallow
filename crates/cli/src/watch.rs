@@ -1525,6 +1525,7 @@ mod tests {
             auto_imports: false,
             fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
+            outside_keys: fallow_config::OutsideKeys::default(),
         }
         .resolve(root.to_path_buf(), output, threads, false, quiet, None)
     }

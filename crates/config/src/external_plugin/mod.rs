@@ -364,7 +364,7 @@ impl<'de> Deserialize<'de> for ManifestFieldPath {
         D: Deserializer<'de>,
     {
         let raw = String::deserialize(deserializer)?;
-        Self::parse(raw).map_err(D::Error::custom)
+        Self::parse(raw).map_err(|e| D::Error::custom(crate::parse_error::own_message(e)))
     }
 }
 
@@ -470,7 +470,7 @@ impl<'de> Deserialize<'de> for ManifestPathTemplate {
         D: Deserializer<'de>,
     {
         let raw = String::deserialize(deserializer)?;
-        Self::parse(raw).map_err(D::Error::custom)
+        Self::parse(raw).map_err(|e| D::Error::custom(crate::parse_error::own_message(e)))
     }
 }
 
@@ -751,28 +751,24 @@ fn is_plugin_file(path: &Path) -> bool {
 
 /// Parse a plugin definition from file content based on format.
 fn parse_plugin(content: &str, format: &PluginFormat, path: &Path) -> Option<ExternalPluginDef> {
+    match plugin_parse_error(content, format) {
+        Ok(plugin) => Some(plugin),
+        Err(e) => {
+            tracing::warn!("failed to parse external plugin {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// The plugin definition in `content`, or the text of the parse error.
+fn plugin_parse_error(content: &str, format: &PluginFormat) -> Result<ExternalPluginDef, String> {
     match format {
-        PluginFormat::Toml => match crate::toml_input::from_str::<ExternalPluginDef>(content) {
-            Ok(plugin) => Some(plugin),
-            Err(e) => {
-                tracing::warn!("failed to parse external plugin {}: {e}", path.display());
-                None
-            }
-        },
-        PluginFormat::Json => match serde_json::from_str::<ExternalPluginDef>(content) {
-            Ok(plugin) => Some(plugin),
-            Err(e) => {
-                tracing::warn!("failed to parse external plugin {}: {e}", path.display());
-                None
-            }
-        },
-        PluginFormat::Jsonc => match crate::jsonc::parse_to_value::<ExternalPluginDef>(content) {
-            Ok(plugin) => Some(plugin),
-            Err(e) => {
-                tracing::warn!("failed to parse external plugin {}: {e}", path.display());
-                None
-            }
-        },
+        PluginFormat::Toml => crate::toml_input::from_str::<ExternalPluginDef>(content)
+            .map_err(|e| crate::parse_error::describe_toml(&e, content)),
+        PluginFormat::Json => serde_json::from_str::<ExternalPluginDef>(content)
+            .map_err(|e| crate::parse_error::describe_json(&e)),
+        PluginFormat::Jsonc => crate::jsonc::parse_to_value::<ExternalPluginDef>(content)
+            .map_err(|e| crate::parse_error::describe_jsonc(&e)),
     }
 }
 
@@ -820,6 +816,13 @@ pub fn diagnose_configured_external_plugins(
 
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
+        if !plugin_path_text_allowed(root, &canonical_root, &path) {
+            diagnostics.push(ConfiguredPluginDiagnostic {
+                kind: ConfiguredPluginDiagnosticKind::OutsideProjectRoot,
+                path,
+            });
+            continue;
+        }
         let metadata = match std::fs::metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) => {
@@ -910,7 +913,11 @@ fn diagnose_configured_plugin_file(
     let kind = if !is_within_root(path, canonical_root) {
         Some(ConfiguredPluginDiagnosticKind::OutsideProjectRoot)
     } else if let Some(format) = PluginFormat::from_path(path) {
-        match std::fs::read_to_string(path) {
+        match fallow_types::read_guard::read_to_string_inside(
+            canonical_root,
+            path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) {
             Ok(content) => match parse_plugin(&content, &format, path) {
                 Some(plugin) if !plugin.name.is_empty() => None,
                 Some(_) | None => Some(ConfiguredPluginDiagnosticKind::InvalidDefinition),
@@ -937,6 +944,17 @@ pub fn resolve_external_plugins(
 ) -> Vec<ExternalPluginDef> {
     let mut plugins = discover_external_plugins(root, config_plugin_paths);
     plugins.extend(framework);
+    // A caller that skipped the validation of the config load still never
+    // gets a plugin whose globs are absolute or have a `..` segment.
+    plugins.retain(|plugin| match plugin.validate_user_globs() {
+        Ok(()) => true,
+        Err(errors) => {
+            for error in errors {
+                tracing::warn!("skipping external plugin '{}': {error}", plugin.name);
+            }
+            false
+        }
+    });
     warn_on_plugins_that_never_activate(&plugins);
     plugins
 }
@@ -1001,9 +1019,13 @@ fn load_configured_plugin_paths(
 ) {
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
-        if !is_within_root(&path, canonical_root) {
-            tracing::warn!("plugin path '{path_str}' resolves outside project root, skipping");
-            continue;
+        match crate::project_read::project_entry(canonical_root, Path::new(path_str)) {
+            crate::project_read::ProjectEntry::Missing => continue,
+            crate::project_read::ProjectEntry::Outside => {
+                tracing::warn!("plugin path '{path_str}' resolves outside project root, skipping");
+                continue;
+            }
+            crate::project_read::ProjectEntry::Inside => {}
         }
         if path.is_dir() {
             load_plugins_from_dir(&path, canonical_root, plugins, seen_names);
@@ -1045,7 +1067,7 @@ fn root_plugin_files(root: &Path) -> Vec<PathBuf> {
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| {
-            p.is_file()
+            is_file_or_link(p)
                 && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
                     n.starts_with(ROOT_PLUGIN_FILE_PREFIX) && is_plugin_file(Path::new(n))
                 })
@@ -1063,7 +1085,7 @@ fn plugin_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     let mut plugin_files: Vec<PathBuf> = entries
         .filter_map(Result::ok)
         .map(|e| e.path())
-        .filter(|p| p.is_file() && is_plugin_file(p))
+        .filter(|p| is_file_or_link(p) && is_plugin_file(p))
         .collect();
     plugin_files.sort();
     plugin_files
@@ -1100,8 +1122,12 @@ pub fn is_default_external_plugin_file(path: &Path) -> bool {
 #[must_use]
 pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String]) -> Vec<PathBuf> {
     let mut files = Vec::new();
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     for path_str in config_plugin_paths {
         let path = root.join(path_str);
+        if !plugin_path_text_allowed(root, &canonical_root, &path) {
+            continue;
+        }
         if path.is_dir() {
             files.extend(plugin_files_in_dir(&path));
         } else {
@@ -1115,14 +1141,40 @@ pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String])
     files
 }
 
+/// Whether the configured plugin path `path`, joined to `root`, may reach a
+/// file system call. An absolute path must name a place below the root by
+/// its text, see [`crate::project_read::absolute_path_text_inside`].
+fn plugin_path_text_allowed(root: &Path, canonical_root: &Path, path: &Path) -> bool {
+    // A Windows prefix without a root, such as `Z:x`, names a place relative
+    // to the current directory of that drive: refuse it.
+    let has_prefix = matches!(
+        path.components().next(),
+        Some(std::path::Component::Prefix(_))
+    );
+    if has_prefix && !path.is_absolute() {
+        return false;
+    }
+    !path.is_absolute()
+        || crate::project_read::absolute_path_text_inside(path, canonical_root, root)
+}
+
+/// True when `path` is a regular file, or a link that does not resolve to
+/// something other than a regular file. A dangling link and a link to a
+/// file outside the root both reach the root check of the loader and get
+/// the same warning. A link to a directory, a pipe or a device is not a
+/// plugin file.
+fn is_file_or_link(path: &Path) -> bool {
+    path.symlink_metadata().is_ok_and(|meta| {
+        meta.is_file()
+            || (meta.file_type().is_symlink()
+                && std::fs::metadata(path).map_or(true, |target| target.is_file()))
+    })
+}
+
 /// Check if a path resolves within the canonical root (follows symlinks).
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "this module is glob re-exported from lib.rs, so `pub` would leak this helper into the public API; pub(crate) is the minimal widening for the rule-pack loader"
-)]
-pub(crate) fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
-    let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    canonical.starts_with(canonical_root)
+/// A path that does not resolve counts as outside.
+fn is_within_root(path: &Path, canonical_root: &Path) -> bool {
+    dunce::canonicalize(path).is_ok_and(|canonical| canonical.starts_with(canonical_root))
 }
 
 fn load_plugins_from_dir(
@@ -1158,7 +1210,7 @@ fn load_plugin_file(
         return;
     };
 
-    let Some(content) = read_plugin_file(path) else {
+    let Some(content) = read_plugin_file(path, canonical_root) else {
         return;
     };
 
@@ -1167,14 +1219,15 @@ fn load_plugin_file(
     }
 }
 
-fn read_plugin_file(path: &Path) -> Option<String> {
-    match std::fs::read_to_string(path) {
+fn read_plugin_file(path: &Path, canonical_root: &Path) -> Option<String> {
+    match fallow_types::read_guard::read_to_string_inside(
+        canonical_root,
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) {
         Ok(content) => Some(content),
         Err(e) => {
-            tracing::warn!(
-                "failed to read external plugin file {}: {e}",
-                path.display()
-            );
+            tracing::warn!("failed to read external plugin file: {e}");
             None
         }
     }

@@ -799,7 +799,7 @@ impl<'a> RootImporters<'a> {
                 .extend(manifest.runtime_hosts.iter().map(String::as_str));
         }
         let mut peers = FxHashSet::default();
-        let mut resolver = PeerDependencyResolver::new();
+        let mut resolver = PeerDependencyResolver::new(&config.root);
         for (owner, seeds) in seeds_by_owner {
             let package_root = owner
                 .and_then(|index| self.manifests.get(index))
@@ -1371,7 +1371,7 @@ fn collect_dependency_usage_indices<'a>(
             .iter()
             .flat_map(|manifest| manifest.declared.iter()),
     );
-    let root_peer_used = PeerDependencyResolver::new().peer_dependency_closure(
+    let root_peer_used = PeerDependencyResolver::new(&config.root).peer_dependency_closure(
         &config.root,
         used_packages.iter().copied().chain(root_peer_seeds.iter()),
         &closure_listed,
@@ -1565,7 +1565,7 @@ fn collect_workspace_unused_dependencies<'a>(
         .flatten()
         .copied()
         .collect();
-    let ws_peer_used = PeerDependencyResolver::new().peer_dependency_closure(
+    let ws_peer_used = PeerDependencyResolver::new(&inputs.config.root).peer_dependency_closure(
         ws_root,
         ws_used_packages.iter().copied().chain(ws_peer_seeds.iter()),
         inputs.closure_listed,

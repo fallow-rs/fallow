@@ -14,6 +14,12 @@ mod keep_export_tags;
 mod legacy_glob;
 mod markup_extensions;
 mod mutation;
+mod outside_root;
+mod outside_values;
+#[cfg(all(test, unix))]
+pub use outside_root::test_tracked_link_probe;
+pub use outside_root::{OutsideKeys, TrackedLinkProbe, set_tracked_link_probe};
+pub use outside_values::{outside_value_error, outside_value_files};
 mod override_effect;
 mod parsing;
 mod resolution;
@@ -650,7 +656,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 
-    /// A project-root-relative path to a CODEOWNERS file, used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
+    /// A path to a CODEOWNERS file, relative to the project root or absolute, that must resolve inside the project scope base (the git top level of the root), used by `--group-by owner` and `--group-by section` to group findings, and by `fallow health --hotspots --ownership` to attribute declared owners and compute unowned/drifting ownership state; setting it overrides the default probe order (CODEOWNERS, .github/CODEOWNERS, .gitlab/CODEOWNERS, docs/CODEOWNERS). String, defaults to null (auto-probe the standard locations); set it only when the CODEOWNERS file lives at a non-standard location.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codeowners: Option<String>,
 
@@ -689,6 +695,14 @@ pub struct FallowConfig {
     /// Overrides the location and size ceiling of fallow's persistent extraction cache (default `.fallow/cache.bin` under the project root). Set to relocate the cache or cap its footprint; the object holds `dir` (cache directory, relative paths resolve from the project root) and `maxSizeMb` (extraction-cache size limit in megabytes). The `FALLOW_CACHE_MAX_SIZE` environment variable overrides `maxSizeMb`.
     #[serde(default, skip_serializing_if = "CacheConfig::is_default")]
     pub cache: CacheConfig,
+
+    /// The keys whose value can come from a local config file outside the
+    /// project, set by the load. Checks after the load name these keys
+    /// without their values. It is not part of the config file format.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[doc(hidden)]
+    pub outside_keys: OutsideKeys,
 }
 
 /// Scopes `fallow security` catalogue behavior. An absent category block admits

@@ -101,6 +101,9 @@ pub mod path_guard;
 pub mod path_util;
 /// The `--performance` span tree and the process-level clock.
 pub mod pipeline_spans;
+/// Bounded reads of project files: no link out of the root, regular files
+/// only, and a size limit.
+pub mod read_guard;
 /// Analysis result types: unused files, exports, dependencies, and members.
 pub mod results;
 /// The `Next:` step of a `client-server-leak` candidate, shared by the CLI

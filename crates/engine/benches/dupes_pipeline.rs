@@ -78,6 +78,7 @@ fn make_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(
         root,

@@ -98,6 +98,10 @@ pub(super) fn apply_config_fixes(input: ConfigFixInput<'_>) -> bool {
             emit_blocked_no_create(root, &target, write.output, write.fixes);
             false
         }
+        ResolvedConfigPlan::BlockedConfigLink { config_path } => {
+            emit_blocked_config_link(root, &config_path, write.output, write.fixes);
+            false
+        }
     }
 }
 
@@ -152,8 +156,14 @@ fn apply_edit(
     if write.dry_run {
         preview_edit(&config_file, &current, &proposed, &added, write);
     } else {
-        write.plan.stage_existing(
+        // The config plan allows a config file link into the project scope
+        // base, so the write may resolve there too.
+        // The plan compares `std::fs::canonicalize` forms.
+        let scope = fallow_config::project_scope_base(root);
+        let scope = std::fs::canonicalize(&scope).unwrap_or(scope);
+        write.plan.stage_existing_within(
             config_path.to_path_buf(),
+            scope,
             current.as_bytes(),
             proposed.into_bytes(),
         );
@@ -359,6 +369,32 @@ fn emit_blocked_no_create(
         "skipped": true,
         "skip_reason": "no_create_config",
         "description": "Skipped: --no-create-config was passed and no fallow config file exists.",
+    }));
+}
+
+/// The skip entry for a config file that is a link out of the project
+/// scope base. The fix does not write through the link.
+fn emit_blocked_config_link(
+    root: &Path,
+    config_path: &Path,
+    output: OutputFormat,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let file = display_relative(root, config_path);
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Skipped duplicate-export config fix: the config file {file} is a symbolic link \
+             that resolves outside the project, so fallow does not write through it. Add the \
+             ignoreExports rules to the target file by hand, or replace the link with a file."
+        );
+    }
+    fixes.push(serde_json::json!({
+        "type": "add_ignore_exports",
+        "config_key": "ignoreExports",
+        "file": file,
+        "skipped": true,
+        "skip_reason": "config_link_outside_scope",
+        "description": "Skipped: the config file is a symbolic link that resolves outside the project scope base.",
     }));
 }
 

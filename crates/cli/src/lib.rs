@@ -392,7 +392,7 @@ fn run_command() -> ExitCode {
     install_signal_handlers();
     signal::install_panic_drain();
     install_spawn_hooks();
-
+    fallow_engine::project_config::register_tracked_link_probe();
     if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some() {
         return signal_test_helper();
     }

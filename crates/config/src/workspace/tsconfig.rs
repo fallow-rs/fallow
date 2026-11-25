@@ -386,7 +386,10 @@ pub(super) fn malformed_extends_parents(
         if depth > MAX_EXTENDS_DEPTH || !visited.insert(path.clone()) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        let Ok(content) = fallow_types::read_guard::read_to_string_bounded(
+            &path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) else {
             continue;
         };
         match crate::jsonc::parse_to_value::<serde_json::Value>(
@@ -420,7 +423,10 @@ pub fn tsconfig_linked_files(config_path: &Path) -> Vec<PathBuf> {
         if depth >= MAX_EXTENDS_DEPTH {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        let Ok(content) = fallow_types::read_guard::read_to_string_bounded(
+            &path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) else {
             continue;
         };
         let Ok(value) = crate::jsonc::parse_to_value::<serde_json::Value>(
@@ -517,15 +523,16 @@ fn resolve_extends_path(config_path: &Path, extends: &str) -> Option<PathBuf> {
 
 fn resolve_package_extends(config_dir: &Path, extends: &str) -> Option<PathBuf> {
     let (package_name, subpath) = package_extends_parts(extends)?;
+    let scope = crate::project_scope_base(config_dir);
     let mut directory = config_dir.to_path_buf();
 
     for _ in 0..MAX_EXTENDS_DEPTH {
         let package_root = directory.join("node_modules").join(&package_name);
         if package_root.is_dir() {
             if let Some(subpath) = subpath.as_deref() {
-                return package_subpath_tsconfig(&package_root, subpath);
+                return package_subpath_tsconfig(&scope, &package_root, subpath);
             }
-            return package_root_tsconfig(&package_root);
+            return package_root_tsconfig(&scope, &package_root);
         }
         if !directory.pop() {
             break;
@@ -534,10 +541,15 @@ fn resolve_package_extends(config_dir: &Path, extends: &str) -> Option<PathBuf> 
     None
 }
 
-fn package_subpath_tsconfig(package_root: &Path, subpath: &str) -> Option<PathBuf> {
+fn package_subpath_tsconfig(scope: &Path, package_root: &Path, subpath: &str) -> Option<PathBuf> {
     let package_json_path = package_root.join("package.json");
-    if package_json_path.is_file() {
-        let package_json = std::fs::read_to_string(package_json_path).ok()?;
+    // The manifest read is bounded, and a manifest that resolves outside the
+    // project scope base `scope` is not read, as for other installed
+    // manifests.
+    if package_json_path.is_file()
+        && let Ok(package_json) =
+            crate::PackageJson::read_source_in_scope(scope, &package_json_path)
+    {
         let package_json: serde_json::Value = serde_json::from_str(&package_json).ok()?;
         if let Some(exports) = package_json.get("exports") {
             let serde_json::Value::Object(exports) = exports else {
@@ -588,10 +600,15 @@ fn package_extends_parts(extends: &str) -> Option<(PathBuf, Option<String>)> {
     Some((PathBuf::from(package), subpath))
 }
 
-fn package_root_tsconfig(package_root: &Path) -> Option<PathBuf> {
+fn package_root_tsconfig(scope: &Path, package_root: &Path) -> Option<PathBuf> {
     let package_json_path = package_root.join("package.json");
-    if package_json_path.is_file() {
-        let package_json = std::fs::read_to_string(package_json_path).ok()?;
+    // The manifest read is bounded, and a manifest that resolves outside the
+    // project scope base `scope` is not read, as for other installed
+    // manifests.
+    if package_json_path.is_file()
+        && let Ok(package_json) =
+            crate::PackageJson::read_source_in_scope(scope, &package_json_path)
+    {
         let package_json: serde_json::Value = serde_json::from_str(&package_json).ok()?;
         if let Some(exports) = package_json.get("exports") {
             let target = match exports {

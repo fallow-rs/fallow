@@ -41,7 +41,7 @@ pub(super) fn collect_link_dependency_workspaces(
     manifest_cache: &mut ManifestCache,
 ) -> Vec<(WorkspaceInfo, Vec<String>)> {
     let mut link_targets: Vec<PathBuf> = Vec::new();
-    if let Ok(root_pkg) = PackageJson::load(&root.join("package.json")) {
+    if let Ok(root_pkg) = PackageJson::load_inside(root, &root.join("package.json")) {
         link_targets.extend(
             root_pkg
                 .local_link_dependencies()

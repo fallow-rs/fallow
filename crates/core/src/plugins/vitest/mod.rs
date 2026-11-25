@@ -587,16 +587,19 @@ fn vitest_inherits_by_default(config_path: &Path, root: &Path) -> bool {
         .skip(1)
         .take_while(|dir| dir.starts_with(root))
         .collect();
+    let scope = fallow_config::project_scope_base(root);
     let major = dirs
         .iter()
-        .find_map(|dir| installed_vitest_major(dir))
+        .find_map(|dir| installed_vitest_major(&scope, dir))
         .or_else(|| dirs.iter().find_map(|dir| declared_vitest_major(dir)));
     major.is_none_or(|major| major >= VITEST_INHERIT_BY_DEFAULT_MAJOR)
 }
 
-fn installed_vitest_major(dir: &Path) -> Option<u64> {
+/// The major of the Vitest that is installed below `dir`. The manifest read
+/// is bounded and must resolve inside the project scope base `scope`.
+fn installed_vitest_major(scope: &Path, dir: &Path) -> Option<u64> {
     let manifest = dir.join("node_modules/vitest/package.json");
-    let source = std::fs::read_to_string(manifest).ok()?;
+    let source = fallow_config::PackageJson::read_source_in_scope(scope, &manifest).ok()?;
     let value: serde_json::Value = serde_json::from_str(&source).ok()?;
     leading_major(value.get("version")?.as_str()?)
 }

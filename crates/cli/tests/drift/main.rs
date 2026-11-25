@@ -1378,10 +1378,13 @@ fn i5_audit_config_section_agrees_across_surfaces() {
     let unbaselined = audit_config_project("{}");
     let baseline = unbaselined.scratch.join("dead-code-baseline.json");
     cli_save_baseline(Analysis::DeadCode, &unbaselined.root, &baseline);
-    let project = audit_config_project(&format!(
-        r#"{{ "audit": {{ "deadCodeBaseline": {} }} }}"#,
-        Value::String(baseline.display().to_string())
-    ));
+    // The baseline file is part of the project: a config path key must
+    // resolve inside the project scope base.
+    let baseline = std::fs::read_to_string(&baseline).expect("read the saved baseline");
+    let project = audit_config_project_with_file(
+        r#"{ "audit": { "deadCodeBaseline": "dead-code-baseline.json" } }"#,
+        ("dead-code-baseline.json", &baseline),
+    );
     let err = fallow_api::run_audit(&fallow_api::AuditOptions {
         analysis: fallow_api::AnalysisOptions {
             root: Some(project.root.clone()),
@@ -1470,9 +1473,16 @@ fn audit_controls_see_each_stale_suppression() {
 /// The [`audit_control_model`] project with `config` as `.fallowrc.json` on
 /// the base and the head commit.
 fn audit_config_project(config: &str) -> Project {
+    audit_config_project_with_file(config, (".fallowrc.json", config))
+}
+
+/// [`audit_config_project`] with one more file `(path, content)` in the
+/// base and in the head commit.
+fn audit_config_project_with_file(config: &str, extra: (&str, &str)) -> Project {
     let mut files = audit_control_model(true).materialize(true);
     for side in [&mut files.base, &mut files.head] {
         side.insert(".fallowrc.json".to_string(), config.to_string());
+        side.insert(extra.0.to_string(), extra.1.to_string());
     }
     Project::from_files(files)
 }

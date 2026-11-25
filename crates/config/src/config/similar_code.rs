@@ -15,8 +15,8 @@ where
 {
     let value = f64::deserialize(deserializer)?;
     if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-        return Err(serde::de::Error::custom(format!(
-            "similarCode.threshold must be finite and between 0 and 1 (got {value})"
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
+            format!("similarCode.threshold must be finite and between 0 and 1 (got {value})"),
         )));
     }
     Ok(value)
@@ -28,9 +28,9 @@ where
 {
     let value = usize::deserialize(deserializer)?;
     if value == 0 {
-        return Err(serde::de::Error::custom(
+        return Err(serde::de::Error::custom(crate::parse_error::own_message(
             "similarCode.minLines must be at least 1",
-        ));
+        )));
     }
     Ok(value)
 }

@@ -96,6 +96,15 @@ pub enum GlobValidationError {
         /// The first characters of the pattern, as written in the config.
         start: String,
     },
+    /// The brace groups of a pattern cannot be checked: a group is not
+    /// closed, or the groups expand to more than [`MAX_BRACE_EXPANSIONS`]
+    /// texts.
+    UncheckableBraces {
+        /// Config field the pattern came from, named in the error.
+        field: &'static str,
+        /// The offending pattern as written in the config.
+        pattern: String,
+    },
     /// Individually valid patterns cannot be compiled into one matcher.
     PatternSetCompilation {
         /// Config field whose pattern set failed to build, named in the error.
@@ -169,6 +178,11 @@ impl fmt::Display for GlobValidationError {
                 f,
                 "{field}: '{start}...' is longer than {MAX_GLOB_BYTES} bytes; shorten the pattern"
             ),
+            Self::UncheckableBraces { field, pattern } => write!(
+                f,
+                "{field}: the brace groups of '{pattern}' are not closed or expand to more \
+                 than {MAX_BRACE_EXPANSIONS} patterns; split the pattern into simpler patterns"
+            ),
             Self::PatternSetCompilation { field, source } => write!(
                 f,
                 "{field}: glob patterns cannot be compiled together: {source}; simplify the pattern set"
@@ -189,7 +203,8 @@ impl std::error::Error for GlobValidationError {
             | Self::UnliftableNegation { .. }
             | Self::InexactWorkspaceRoot { .. }
             | Self::UnmatchablePrefix { .. }
-            | Self::TooLong { .. } => None,
+            | Self::TooLong { .. }
+            | Self::UncheckableBraces { .. } => None,
         }
     }
 }
@@ -316,23 +331,96 @@ pub fn literal_dir_glob(dir: &str, tail: &str) -> String {
 /// - `TooLong` if the pattern is longer than [`MAX_GLOB_BYTES`]
 pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, GlobValidationError> {
     check_glob_length(pattern, field)?;
-    if is_absolute_pattern(pattern) {
-        return Err(GlobValidationError::AbsolutePath {
+    // A brace group such as `{..,x}` can expand to a `..` or `/` segment
+    // that the raw text does not show, so each expansion is checked too.
+    let Some(expansions) = brace_expansions(pattern) else {
+        return Err(GlobValidationError::UncheckableBraces {
             field,
             pattern: pattern.to_owned(),
         });
-    }
-    if has_traversal_segment(pattern) {
-        return Err(GlobValidationError::TraversalSegment {
-            field,
-            pattern: pattern.to_owned(),
-        });
+    };
+    let texts = expansions
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(pattern));
+    for text in texts {
+        if is_absolute_pattern(text) {
+            return Err(GlobValidationError::AbsolutePath {
+                field,
+                pattern: pattern.to_owned(),
+            });
+        }
+        if has_traversal_segment(text) {
+            return Err(GlobValidationError::TraversalSegment {
+                field,
+                pattern: pattern.to_owned(),
+            });
+        }
     }
     compile_path_glob(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
         field,
         pattern: pattern.to_owned(),
         source,
     })
+}
+
+/// The most expansions that the brace expansion of one pattern builds.
+/// Real config globs have a few. A pattern over the limit is refused.
+pub const MAX_BRACE_EXPANSIONS: usize = 1024;
+
+/// The texts that the `{a,b}` groups of `pattern` expand to, with nested
+/// groups expanded too. A pattern without a group gives no text. A pattern
+/// with an unclosed group, or with more than [`MAX_BRACE_EXPANSIONS`]
+/// expansions, gives `None`, because its expansions cannot be checked.
+fn brace_expansions(pattern: &str) -> Option<Vec<String>> {
+    if !pattern.contains('{') {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    expand_into(pattern, &mut out).then_some(out)
+}
+
+/// Push the expansions of `pattern` to `out`. Returns `false` when a group
+/// is not closed or the expansions pass [`MAX_BRACE_EXPANSIONS`].
+fn expand_into(pattern: &str, out: &mut Vec<String>) -> bool {
+    let Some(open) = pattern.find('{') else {
+        if out.len() >= MAX_BRACE_EXPANSIONS {
+            return false;
+        }
+        out.push(pattern.to_owned());
+        return true;
+    };
+    let mut depth = 0usize;
+    let mut close = None;
+    let mut splits = Vec::new();
+    for (offset, ch) in pattern[open..].char_indices() {
+        let index = open + offset;
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(index);
+                    break;
+                }
+            }
+            ',' if depth == 1 => splits.push(index),
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return false;
+    };
+    let (prefix, suffix) = (&pattern[..open], &pattern[close + 1..]);
+    let mut start = open + 1;
+    for end in splits.into_iter().chain(std::iter::once(close)) {
+        let option = &pattern[start..end];
+        if !expand_into(&format!("{prefix}{option}{suffix}"), out) {
+            return false;
+        }
+        start = end + 1;
+    }
+    true
 }
 
 fn check_glob_length(pattern: &str, field: &'static str) -> Result<(), GlobValidationError> {
@@ -512,12 +600,19 @@ pub fn validate_user_finding_ignore_globs(
 /// `boundaries.zones[].autoDiscover` that name a directory subtree rather
 /// than a match pattern.
 ///
+/// The checks also run on the text with `\` folded to `/` and each leading
+/// `./` removed, because the loaders read that text.
+///
 /// # Errors
 ///
 /// Returns `AbsolutePath` or `TraversalSegment` for the same shapes
 /// `compile_user_glob` rejects. Never returns `InvalidSyntax`.
 pub fn validate_user_path(path: &str, field: &'static str) -> Result<(), GlobValidationError> {
-    if is_absolute_pattern(path) {
+    // The loaders fold `\` to `/` and strip each leading `./`, so `.//home`
+    // becomes `/home`. The check also runs on that folded text.
+    let folded = path.replace('\\', "/");
+    let stripped = folded.trim_start_matches("./");
+    if is_absolute_pattern(path) || is_absolute_pattern(stripped) {
         return Err(GlobValidationError::AbsolutePath {
             field,
             pattern: path.to_owned(),
@@ -569,18 +664,51 @@ pub fn disk_glob_pattern(pattern: &str) -> Cow<'_, str> {
 /// literally. It rewrites the pattern with [`disk_glob_pattern`], so no match
 /// is in the parent of the root. Returns `None` for an absolute pattern or a
 /// pattern with a Windows drive prefix, because such a pattern names a path
-/// outside the root, and for a pattern that is not valid glob syntax.
+/// outside the root, for a `..` segment or a brace expansion that can lead
+/// out of the root, and for a pattern that is not valid glob syntax.
 #[must_use]
 #[expect(
     clippy::disallowed_methods,
     reason = "the one wrapper that calls glob::glob, after the root escape and the dot rewrite"
 )]
 pub fn expand_disk_glob(root: &Path, pattern: &str) -> Option<glob::Paths> {
+    let pattern = pattern_below_root(pattern)?;
+    let full = format!("{}/{}", escaped_root(root), disk_glob_pattern(&pattern));
+    glob::glob(&full).ok()
+}
+
+/// `pattern` with each `..` segment applied to the literal segment before
+/// it, so `packages/../libs/*` gives `libs/*`. Returns `None` for an absolute
+/// pattern, for a `..` that would leave the root or that follows a wildcard
+/// segment, and for a brace expansion that is absolute or has a `..`
+/// segment. The `glob` crate does not expand braces, but a later caller can.
+fn pattern_below_root(pattern: &str) -> Option<String> {
     if is_absolute_pattern(pattern) {
         return None;
     }
-    let full = format!("{}/{}", escaped_root(root), disk_glob_pattern(pattern));
-    glob::glob(&full).ok()
+    let expansions = brace_expansions(pattern)?;
+    if expansions
+        .iter()
+        .any(|text| is_absolute_pattern(text) || has_traversal_segment(text))
+    {
+        return None;
+    }
+    if !has_traversal_segment(pattern) {
+        return Some(pattern.to_owned());
+    }
+    let mut kept: Vec<&str> = Vec::new();
+    for segment in pattern.split(['/', '\\']) {
+        if segment == ".." {
+            let previous = kept.pop()?;
+            if previous.contains(['*', '?', '[', '{']) || previous == "." || previous.is_empty() {
+                return None;
+            }
+        } else {
+            kept.push(segment);
+        }
+    }
+    let normalized = kept.join("/");
+    (!normalized.is_empty() && !has_traversal_segment(&normalized)).then_some(normalized)
 }
 
 /// Escapes the glob characters of `root` after its Windows path prefix. The
@@ -646,6 +774,66 @@ pub fn validate_user_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn disk_expansion_refuses_patterns_that_leave_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("outside.json"), "").unwrap();
+        for pattern in [
+            "../outside.json",
+            "../*.json",
+            "src/../../outside.json",
+            "{..,x}/*.json",
+        ] {
+            assert!(expand_disk_glob(&root, pattern).is_none(), "{pattern}");
+        }
+        std::fs::write(root.join("a.json"), "").unwrap();
+        let hits = expand_disk_glob(&root, "*.json")
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(hits, 1);
+        std::fs::create_dir(root.join("libs")).unwrap();
+        std::fs::write(root.join("libs/b.json"), "").unwrap();
+        let hits: Vec<_> = expand_disk_glob(&root, "packages/../libs/*.json")
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(hits, vec![root.join("libs/b.json")]);
+    }
+
+    #[test]
+    fn a_pattern_whose_braces_cannot_be_checked_is_refused() {
+        let many = "{a,b,c,d}".repeat(6);
+        assert!(compile_user_glob(&many, "entry").is_err(), "4^6 expansions");
+        assert!(compile_user_glob("{..,x", "entry").is_err());
+    }
+
+    #[test]
+    fn each_brace_expansion_must_stay_inside_the_root() {
+        for pattern in [
+            "{..,x}/outside/notes_*",
+            "{/abs/name,x}",
+            ".{.,x}/y",
+            "a/{b,{c,..}}/d",
+            "{.,x}{.,y}/z",
+        ] {
+            assert!(
+                compile_user_glob(pattern, "entry").is_err(),
+                "{pattern} must be refused"
+            );
+        }
+        for pattern in [
+            "src/{a,b}/*.ts",
+            "index.{ts,tsx}",
+            "{src,lib}/**/{a,b{c,d}}.js",
+        ] {
+            assert!(compile_user_glob(pattern, "entry").is_ok(), "{pattern}");
+        }
+    }
 
     #[test]
     fn disk_glob_pattern_rewrites_only_leading_dot_wildcard_segments() {
