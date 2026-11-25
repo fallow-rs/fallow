@@ -20,6 +20,7 @@ mod tooling_evidence;
 mod virtual_module;
 
 pub(crate) use tooling_evidence::find_config_file;
+pub(crate) use virtual_module::module_specifiers;
 pub use virtual_module::{VirtualModuleMatch, VirtualModuleProviderRule};
 
 /// Names of every built-in framework plugin, in registry order.

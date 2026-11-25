@@ -14242,8 +14242,10 @@ export interface ToolingCredit {
  * file, such as a tsconfig `types` entry, names the type package,
  * `known-tooling` for a library from the tooling catalogue,
  * `known-tooling-config` when a command-line tool from the catalogue has
- * its own config file, and `own-peer` when the same manifest lists the
- * devDependency in `peerDependencies`. The set is open.
+ * its own config file, `own-peer` when the same manifest lists the
+ * devDependency in `peerDependencies`, and `virtual-module-import` when
+ * a source file imports a virtual module that the package provides, such
+ * as the SvelteKit `$app/state`. The set is open.
  */
 reason: string
 /**
@@ -14254,13 +14256,15 @@ plugin?: (string | null)
  * The config file found, relative to the project root, for
  * `plugin-config` and `known-tooling-config`. A `package.json` path when
  * the config is a package.json key. For `own-peer`, the manifest that
- * lists the dependency.
+ * lists the dependency. For `virtual-module-import`, the first source
+ * file in path order that imports one of the virtual modules.
  */
 config?: (string | null)
 /**
  * The package that a script, CI workflow or git hook runs, for
  * `plugin-reference`, or the package that a `@types/` package types,
- * for `types-target`.
+ * for `types-target`. For `virtual-module-import`, the imported
+ * specifier.
  */
 reference?: (string | null)
 }

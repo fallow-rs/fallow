@@ -34,10 +34,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{PackageJson, WorkspaceInfo};
 
-use super::unused_deps::matches_virtual_prefix;
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
-use crate::plugins::{AggregatedPluginResult, VirtualModuleMatch, VirtualModuleProviderRule};
+use crate::plugins::{AggregatedPluginResult, module_specifiers};
 
 /// Extensions of the files that Vite transforms with the tsconfig JSX
 /// settings.
@@ -109,7 +108,7 @@ pub(super) fn collect_implicit_package_credits<'a>(
                     plugin_result
                         .virtual_module_providers
                         .iter()
-                        .filter(|rule| virtual_module_rule_matches(rule, root, path, specifier))
+                        .filter(|rule| rule.matches(root, path, specifier))
                         .map(|rule| rule.package.as_str()),
                 );
             }
@@ -122,55 +121,6 @@ pub(super) fn collect_implicit_package_credits<'a>(
     let mut credits: Vec<(PathBuf, String)> = credited.into_iter().collect();
     credits.sort_unstable();
     credits
-}
-
-/// Every literal specifier of the module: static imports, re-exports,
-/// literal dynamic imports and `require()` calls. Resolved or not, each is
-/// evidence that the file uses the framework module it names.
-fn module_specifiers(module: &ModuleInfo) -> impl Iterator<Item = &str> {
-    module
-        .imports
-        .iter()
-        .map(|import| import.source.as_str())
-        .chain(
-            module
-                .re_exports
-                .iter()
-                .map(|re_export| re_export.source.as_str()),
-        )
-        .chain(
-            module
-                .dynamic_imports
-                .iter()
-                .map(|import| import.source.as_str()),
-        )
-        .chain(module.require_calls.iter().map(|call| call.source.as_str()))
-}
-
-/// Whether `rule` covers `specifier` written in the file at `path`.
-///
-/// A rule applies only to the files under the package root where its plugin
-/// is active, so a virtual-module import in another workspace credits no
-/// package.
-fn virtual_module_rule_matches(
-    rule: &VirtualModuleProviderRule,
-    root: &Path,
-    path: &Path,
-    specifier: &str,
-) -> bool {
-    if !rule.scope.is_empty() && !path.starts_with(root.join(&rule.scope)) {
-        return false;
-    }
-    match &rule.matcher {
-        VirtualModuleMatch::Prefix(prefix) => matches_virtual_prefix(prefix, specifier),
-        VirtualModuleMatch::Generated(pattern) => {
-            let bare = specifier
-                .strip_suffix(".js")
-                .or_else(|| specifier.strip_suffix(".ts"))
-                .unwrap_or(specifier);
-            (bare.starts_with("./") || bare.starts_with("../")) && bare.ends_with(pattern.as_str())
-        }
-    }
 }
 
 /// The absolute roots of the packages where a framework with the automatic

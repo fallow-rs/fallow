@@ -186,12 +186,14 @@ fn collect_static_plugin_metadata(
                 .virtual_module_prefixes()
                 .iter()
                 .map(|prefix| VirtualModuleProviderRule {
+                    plugin: plugin.name().to_string(),
                     scope: String::new(),
                     matcher: VirtualModuleMatch::Prefix((*prefix).to_string()),
                     package: package.to_string(),
                 })
                 .chain(plugin.generated_import_patterns().iter().map(|pattern| {
                     VirtualModuleProviderRule {
+                        plugin: plugin.name().to_string(),
                         scope: String::new(),
                         matcher: VirtualModuleMatch::Generated((*pattern).to_string()),
                         package: package.to_string(),

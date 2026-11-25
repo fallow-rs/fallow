@@ -31503,7 +31503,7 @@
       "properties": {
         "reason": {
           "type": "string",
-          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, `types-config` when a config\nfile, such as a tsconfig `types` entry, names the type package,\n`known-tooling` for a library from the tooling catalogue,\n`known-tooling-config` when a command-line tool from the catalogue has\nits own config file, and `own-peer` when the same manifest lists the\ndevDependency in `peerDependencies`. The set is open."
+          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, `types-config` when a config\nfile, such as a tsconfig `types` entry, names the type package,\n`known-tooling` for a library from the tooling catalogue,\n`known-tooling-config` when a command-line tool from the catalogue has\nits own config file, `own-peer` when the same manifest lists the\ndevDependency in `peerDependencies`, and `virtual-module-import` when\na source file imports a virtual module that the package provides, such\nas the SvelteKit `$app/state`. The set is open."
         },
         "plugin": {
           "type": [
@@ -31517,14 +31517,14 @@
             "string",
             "null"
           ],
-          "description": "The config file found, relative to the project root, for\n`plugin-config` and `known-tooling-config`. A `package.json` path when\nthe config is a package.json key. For `own-peer`, the manifest that\nlists the dependency."
+          "description": "The config file found, relative to the project root, for\n`plugin-config` and `known-tooling-config`. A `package.json` path when\nthe config is a package.json key. For `own-peer`, the manifest that\nlists the dependency. For `virtual-module-import`, the first source\nfile in path order that imports one of the virtual modules."
         },
         "reference": {
           "type": [
             "string",
             "null"
           ],
-          "description": "The package that a script, CI workflow or git hook runs, for\n`plugin-reference`, or the package that a `@types/` package types,\nfor `types-target`."
+          "description": "The package that a script, CI workflow or git hook runs, for\n`plugin-reference`, or the package that a `@types/` package types,\nfor `types-target`. For `virtual-module-import`, the imported\nspecifier."
         }
       },
       "required": [

@@ -40,6 +40,18 @@ package activates the plugin. The unlisted-dependency and
 `dev-dependencies-in-production` checks still read every declared tooling
 dependency, and so do production dependencies.
 
+An import of a virtual module or a generated module is a use of the package
+whose build provides it. A plugin names that package with
+`Plugin::virtual_module_package`. For SvelteKit, an import of `$app/*`,
+`$env/*`, `$service-worker` or a relative `./$types` credits `@sveltejs/kit`,
+also when the project has no `svelte.config.js`. The credit applies only in
+the package where the plugin is active, and it goes to the nearest manifest of
+the importing file that declares the package, as for a real import. A match
+hides an unused package, so `VirtualModuleProviderRule::matches` is narrower
+than the unresolved-import filter. `--trace-dependency` reports the credit
+with the `virtual-module-import` reason, the first importing file in path
+order and the imported specifier.
+
 Framework-specific AST interpretation belongs in a built-in plugin. Portable
 declarative behavior belongs in the external plugin contract.
 

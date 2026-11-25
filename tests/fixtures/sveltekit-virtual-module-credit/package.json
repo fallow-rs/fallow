@@ -1,0 +1,5 @@
+{
+  "name": "sveltekit-virtual-module-credit",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

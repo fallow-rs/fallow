@@ -846,6 +846,8 @@ mod issue_4850_inferred_signature_backing;
 mod issue_4986_entry_star_exports;
 #[path = "integration_test/issue_4990_entry_file_members.rs"]
 mod issue_4990_entry_file_members;
+#[path = "integration_test/issue_5019_sveltekit_virtual_module_credit.rs"]
+mod issue_5019_sveltekit_virtual_module_credit;
 #[path = "integration_test/issue_5053_entry_namespace_reexport.rs"]
 mod issue_5053_entry_namespace_reexport;
 #[path = "integration_test/issue_609_velite.rs"]

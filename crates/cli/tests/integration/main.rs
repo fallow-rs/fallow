@@ -112,6 +112,7 @@ mod fix_multiline_reexport_tests;
 mod fix_program_meaning_tests;
 mod fix_shared_declaration_tests;
 mod fix_snapshot_tests;
+mod fix_sveltekit_virtual_module_tests;
 mod fix_tests;
 mod flags_tests;
 mod gate_outcome_tests;

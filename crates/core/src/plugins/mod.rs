@@ -1805,6 +1805,7 @@ pub use config_dependencies::RequiredDependency;
 use config_dependencies::add_import_referenced_dependencies;
 pub use federation_source::{FederationSource, FederationSourceTarget};
 pub(crate) use module_federation::runtime_remotes;
+pub(crate) use registry::module_specifiers;
 pub use registry::{
     AggregatedPluginResult, CheckedAliasPrefix, PluginRegistry, PluginToolingDependencies,
     PluginToolingEvidence, VirtualModuleMatch, VirtualModuleProviderRule,
