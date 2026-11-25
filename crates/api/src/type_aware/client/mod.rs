@@ -1722,7 +1722,7 @@ fn declaration_path_matches_package(path: &Path, package: &str) -> bool {
 fn validate_semantic_response_path(path: &Path, query_id: usize) -> Result<(), TypeAwareError> {
     let relative = path
         .components()
-        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+        .all(|component| !matches!(component, Component::RootDir | Component::Prefix(_)));
     if !relative {
         return Err(TypeAwareError::from(format!(
             "type-aware query {query_id} returned a non-project-relative path"
