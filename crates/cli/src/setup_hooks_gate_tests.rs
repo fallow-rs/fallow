@@ -152,6 +152,18 @@ fn run_gate_with_env(
     payload: &serde_json::Value,
     env: &[(&str, &str)],
 ) -> GateRun {
+    run_gate_with_shell("bash", script, process_dir, home, payload, env)
+}
+
+/// Same as `run_gate_with_env`, with the bash program `shell`.
+fn run_gate_with_shell(
+    shell: &str,
+    script: &Path,
+    process_dir: &Path,
+    home: &Path,
+    payload: &serde_json::Value,
+    env: &[(&str, &str)],
+) -> GateRun {
     use std::os::unix::fs::PermissionsExt;
 
     let stub = tempdir().unwrap();
@@ -167,7 +179,7 @@ fn run_gate_with_env(
         bin.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let mut cmd = Command::new("bash");
+    let mut cmd = Command::new(shell);
     cmd.arg(script)
         .current_dir(process_dir)
         .env("PATH", path)
@@ -2337,4 +2349,48 @@ fn gate_keeps_the_cd_target_of_a_long_command() {
         "stderr={}",
         String::from_utf8_lossy(&run.output.stderr)
     );
+}
+
+/// A `cd` in a subshell does not move the later commands, also in a command
+/// over 1024 bytes, which bash 3.2 reads with an external reader. The gate
+/// audits the target of a relative `git -C` after the subshell.
+#[test]
+fn gate_keeps_the_subshell_directory_rule_for_a_long_command() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    std::fs::create_dir_all(repo.join("sub")).unwrap();
+    let gate = install_gate(&repo, ".claude");
+    let other = root.join("other");
+    init_repo(&other);
+    std::fs::write(other.join(STUB_FAIL_MARKER), "").unwrap();
+    let command = format!(
+        "(cd sub && true) ; git -C ../other commit -m \"{}\"",
+        "a".repeat(1100)
+    );
+    let shells: Vec<&str> = ["bash", "/bin/bash"]
+        .into_iter()
+        .filter(|shell| !shell.starts_with('/') || Path::new(shell).exists())
+        .collect();
+
+    for shell in shells {
+        let run = run_gate_with_shell(
+            shell,
+            &gate,
+            &repo,
+            &root.join("home"),
+            &command_payload(&repo, &command),
+            &[],
+        );
+
+        assert_eq!(
+            run.output.status.code(),
+            Some(2),
+            "{shell}: stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+    }
 }

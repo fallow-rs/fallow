@@ -35,14 +35,16 @@ set -euo pipefail
 # diverge on prereleases (BSD sorts `2.48.0-alpha.1` ABOVE `2.48.0`, GNU below).
 # If you set a prerelease floor explicitly, verify the behavior on the target OS.
 
-# The longest hook input, in characters, for the small reader and for the
-# quote-aware subshell scan below. A longer input goes to jq or to the JSON
-# reader of fallow, because the time of those shell scans grows faster than
-# the length.
+# The longest hook input, in characters, for the small reader. A longer
+# input goes to jq or to the JSON reader of fallow, because the time of the
+# small reader grows faster than the length.
 GATE_SMALL_INPUT_LIMIT=8192
-# Bash below version 4 copies a string for each step of these scans, so
+# Bash below version 4 copies a string for each step of the small reader, so
 # there the limit is lower.
 [ "${BASH_VERSINFO[0]}" -ge 4 ] || GATE_SMALL_INPUT_LIMIT=1024
+# The longest command, in characters, for the quote-aware subshell scan. The
+# scan reads one character at a time, so its time grows only with the length.
+GATE_TRACK_LIMIT=8192
 GATE_NL=$'\n'
 
 # Sets GATE_OUT to $1 with each match of the pattern $2 replaced by $3. Bash
@@ -746,10 +748,10 @@ is_git_write_command() {
   # Each `cd` target is an audit candidate, also a `cd` in a subshell. A `cd`
   # in a subshell does not change the directory of the later commands, so `(`
   # saves the directory and `)` restores it. An unmatched `)` keeps it. A
-  # command over GATE_SMALL_INPUT_LIMIT characters, or one with ANSI-C quotes,
+  # command over GATE_TRACK_LIMIT characters, or one with ANSI-C quotes,
   # a `#`, a `case` or a here-document, has no quote-aware scan: there each
   # parenthesis is only a separator, and the directory stays.
-  [ "${#cmd}" -le "$GATE_SMALL_INPUT_LIMIT" ] || track=0
+  [ "${#cmd}" -le "$GATE_TRACK_LIMIT" ] || track=0
   case "$cmd" in
     *"\$'"* | *'#'* | *case* | *'<<'*) track=0 ;;
   esac
