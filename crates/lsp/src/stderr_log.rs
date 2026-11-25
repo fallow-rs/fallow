@@ -35,13 +35,13 @@ mod tests {
     use super::*;
     use tracing::Level;
 
-    const PLUGIN_TARGET: &str = "fallow_core::plugins::registry";
+    const PLUGIN_TARGET: &str = "fallow_extract::cache";
 
     #[test]
     fn default_filter_drops_info_progress_lines() {
         let filter = stderr_log_filter(None);
         assert!(!filter.would_enable(PLUGIN_TARGET, &Level::INFO));
-        assert!(!filter.would_enable("fallow_engine::discover", &Level::INFO));
+        assert!(!filter.would_enable("fallow_graph::resolve", &Level::INFO));
     }
 
     #[test]
@@ -59,9 +59,9 @@ mod tests {
 
     #[test]
     fn rust_log_selects_more_detail() {
-        let filter = stderr_log_filter(Some("fallow_core=info"));
+        let filter = stderr_log_filter(Some("fallow_extract=info"));
         assert!(filter.would_enable(PLUGIN_TARGET, &Level::INFO));
-        assert!(!filter.would_enable("fallow_engine::discover", &Level::INFO));
+        assert!(!filter.would_enable("fallow_graph::resolve", &Level::INFO));
     }
 
     #[test]
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn unreadable_directive_keeps_the_readable_ones() {
-        let filter = stderr_log_filter(Some("fallow_core[span{a=1}]=debug,fallow_engine=info"));
-        assert!(filter.would_enable("fallow_engine::discover", &Level::INFO));
+        let filter = stderr_log_filter(Some("fallow_extract[span{a=1}]=debug,fallow_graph=info"));
+        assert!(filter.would_enable("fallow_graph::resolve", &Level::INFO));
     }
 }
