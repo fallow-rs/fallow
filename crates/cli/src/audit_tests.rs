@@ -1789,7 +1789,7 @@ fn cache_removal_does_not_follow_untrusted_gitdir_outside_repo_admin() {
     .expect("untrusted gitdir pointer should be written");
 
     assert!(
-        unregister_worktree(&repo, &cache_path).is_err(),
+        fallow_engine::repo_refs::deregister_base_worktree(&repo, &cache_path).is_err(),
         "direct deregistration must reject the unverified pointer",
     );
     assert!(
@@ -1994,10 +1994,9 @@ fn base_snapshot_discovery_honors_gitignore_via_stub_git() {
     cleanup_reusable_worktree(&root, &cache_path);
 }
 
-/// `unregister_worktree` targets only the admin entry its own gitfile points
-/// at, so a user's unrelated worktree is never collaterally deregistered.
+/// A deregister changes only the admin entry of its own gitfile, never another.
 #[test]
-fn unregister_worktree_targets_only_its_own_admin_entry() {
+fn deregister_base_worktree_targets_only_its_own_admin_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-unregister-targeted");
     let fallow_path = reusable_audit_worktree_path(&repo);
@@ -2017,7 +2016,8 @@ fn unregister_worktree_targets_only_its_own_admin_entry() {
     assert!(worktree_is_registered_with_git(&repo, &fallow_path));
     assert!(git_worktree_list_contains(&repo, &user_path));
 
-    unregister_worktree(&repo, &fallow_path).expect("fallow worktree should deregister");
+    fallow_engine::repo_refs::deregister_base_worktree(&repo, &fallow_path)
+        .expect("fallow worktree should deregister");
 
     assert!(
         !worktree_is_registered_with_git(&repo, &fallow_path),

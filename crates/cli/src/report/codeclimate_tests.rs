@@ -867,7 +867,7 @@ fn codeclimate_dep_with_zero_line_omits_line_number() {
 /// The CodeClimate helpers must check that slice before they map its severity.
 /// `Severity::Off` has no CodeClimate equivalent.
 #[test]
-fn api_codeclimate_issues_with_off_severity_and_empty_findings_does_not_panic() {
+fn build_codeclimate_with_off_severity_and_empty_findings_does_not_panic() {
     let root = PathBuf::from("/project");
     let results = AnalysisResults::default();
     let rules = RulesConfig {

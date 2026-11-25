@@ -84,7 +84,7 @@ impl BaseWorktree {
         // worktree admin entry behind (issue #1815). No early return runs
         // between here and the struct binding, so defusing the guard next is
         // safe: the entry is already unregistered.
-        if let Err(error) = unregister_worktree(repo_root, guard.path()) {
+        if let Err(error) = deregister_base_worktree(repo_root, guard.path()) {
             tracing::debug!(
                 path = %guard.path().display(),
                 error = %error,
@@ -159,7 +159,7 @@ impl BaseWorktree {
         // full base SHA through the `.sha` sidecar. Publication happens only
         // after successful materialization and deregistration under the lock,
         // so a torn snapshot is never advertised as ready to the next run.
-        if let Err(error) = unregister_worktree(repo_root, guard.path()) {
+        if let Err(error) = deregister_base_worktree(repo_root, guard.path()) {
             tracing::debug!(
                 path = %guard.path().display(),
                 error = %error,
@@ -1554,7 +1554,7 @@ fn try_migrate_registered_current_cache(repo_root: &Path, path: &Path, base_sha:
     {
         return false;
     }
-    if unregister_worktree(repo_root, path).is_err() {
+    if deregister_base_worktree(repo_root, path).is_err() {
         return false;
     }
     write_reusable_sha(path, &legacy_snapshot_identity(base_sha)).is_ok()
@@ -1644,7 +1644,7 @@ fn remove_reusable_cache_entry_locked(repo_root: &Path, path: &Path) -> std::io:
     let existed = reusable_cache_entry_exists(path);
     ensure_cache_entry_is_owned(path)?;
     if trusted_base_worktree_admin_dir(repo_root, path).is_some() {
-        unregister_worktree(repo_root, path)?;
+        deregister_base_worktree(repo_root, path)?;
     }
     remove_dir_if_exists(path)?;
     remove_file_if_exists(&reusable_worktree_sha_path(path))?;
@@ -1721,16 +1721,9 @@ fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Deregister a freshly-added audit worktree from git while KEEPING its
-/// directory on disk (issue #1815). The engine owns this lifecycle step, so
-/// the programmatic base snapshot uses the same code (issue #3885).
-pub fn unregister_worktree(repo_root: &Path, path: &Path) -> std::io::Result<()> {
-    deregister_base_worktree(repo_root, path)
-}
-
 fn unregister_legacy_worktree_checked(repo_root: &Path, path: &Path) -> std::io::Result<()> {
     if path.try_exists()? {
-        return unregister_worktree(repo_root, path);
+        return deregister_base_worktree(repo_root, path);
     }
     // Without a checkout gitfile, Git's own registry identifies the owned entry.
     remove_audit_worktree(repo_root, path);
