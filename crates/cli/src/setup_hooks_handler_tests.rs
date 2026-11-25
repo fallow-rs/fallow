@@ -258,6 +258,33 @@ fn codex_handler_runs_the_gate_of_a_linked_worktree_inside_the_main_checkout() {
     );
 }
 
+/// A `.git` file in a nested directory can name the git directory of the
+/// outer repository without a worktree that git registered. That directory is
+/// not a linked worktree, so the Codex handler runs no gate there.
+#[test]
+fn codex_handler_runs_no_gate_in_an_unregistered_nested_checkout() {
+    let tmp = tempdir().unwrap();
+    let repo = tmp.path().canonicalize().unwrap();
+    git(&repo, &["init", "-q"]);
+    commit_all(&repo);
+    let nested = repo.join("vendor/pkg");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(
+        nested.join(".git"),
+        format!("gitdir: {}\n", repo.join(".git").display()),
+    )
+    .unwrap();
+
+    let out = run_handler_stub(&codex("."), ".codex", &nested, &nested.join("src"), &nested);
+
+    assert!(
+        out.stdout.is_empty(),
+        "the handler ran the nested gate: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(out.status.success());
+}
+
 /// A nested repository, submodule or vendored package below the project
 /// can commit its own `.claude/hooks/fallow-gate.sh`. The handler of the
 /// project must run only the script of the install root.
