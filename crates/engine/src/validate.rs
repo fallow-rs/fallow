@@ -31,9 +31,14 @@ pub fn validate_root(root: &Path) -> Result<PathBuf, String> {
     let invalid = |err: std::io::Error| format!("invalid root path '{}': {err}", root.display());
     let cwd = std::env::current_dir().map_err(invalid)?;
     let pwd = std::env::var_os("PWD").map(PathBuf::from);
+    let home = fallow_process::HostPaths::from_env()
+        .home
+        .filter(|home| home.is_absolute())
+        .and_then(|home| dunce::canonicalize(home).ok());
     let probe = Probe {
         cwd: &cwd,
         ceiling: None,
+        home: home.as_deref(),
     };
     check_root_spellings(root, &probe, pwd.as_deref())?;
     let canonical = dunce::canonicalize(root).map_err(invalid)?;
@@ -51,6 +56,10 @@ struct Probe<'a> {
     /// with `GIT_CEILING_DIRECTORIES`. Tests set it, so that a temporary
     /// directory inside a checkout does not change the result.
     ceiling: Option<&'a Path>,
+    /// The real path of the home directory. The search for a project stops
+    /// below it, so a stray manifest in the home directory does not make the
+    /// whole home directory one project.
+    home: Option<&'a Path>,
 }
 
 impl Probe<'_> {
@@ -79,9 +88,13 @@ impl Probe<'_> {
     }
 
     /// The nearest directory, `dir` or an ancestor below the ceiling, that
-    /// holds a project manifest.
+    /// holds a project manifest. The home directory, the directories above
+    /// it, and the file system root are never a project.
     fn nearest_project(&self, dir: &Path) -> Option<PathBuf> {
+        let home = self.home;
         self.ancestors(dir)
+            .take_while(move |ancestor| home.is_none_or(|home| *ancestor != home))
+            .filter(|ancestor| ancestor.parent().is_some())
             .find(|ancestor| holds_project_manifest(ancestor))
             .map(Path::to_path_buf)
     }
@@ -762,9 +775,20 @@ mod tests {
             cwd: &Path,
             pwd: Option<&Path>,
         ) -> Result<(), String> {
+            self.check_with_home(root, cwd, pwd, None)
+        }
+
+        fn check_with_home(
+            &self,
+            root: &Path,
+            cwd: &Path,
+            pwd: Option<&Path>,
+            home: Option<&Path>,
+        ) -> Result<(), String> {
             let probe = Probe {
                 cwd,
                 ceiling: Some(&self.base),
+                home,
             };
             check_root_spellings(root, &probe, pwd)
         }
@@ -880,6 +904,7 @@ mod tests {
         let probe = Probe {
             cwd: &elsewhere,
             ceiling: Some(&fixture.base),
+            home: None,
         };
         assert_eq!(trusted_top(&repo, &probe), Ok(Some(repo.clone())));
 
@@ -1230,6 +1255,31 @@ mod tests {
             fixture.check(&package.join("lib").join("src"), &repo),
             Ok(())
         );
+    }
+
+    /// A manifest in the home directory does not make the home directory a
+    /// project, so a personal link under it that leaves it stays allowed. A
+    /// manifest in a project below the home directory still counts.
+    #[cfg(unix)]
+    #[test]
+    fn allows_a_link_under_a_home_directory_that_holds_a_manifest() {
+        let fixture = Fixture::new();
+        let home = fixture.dir("home");
+        std::fs::write(home.join("package.json"), "{}").expect("home manifest");
+        let volume = fixture
+            .dir("volume/dev/app")
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let notes = fixture.dir("home/notes");
+        symlink(&volume, notes.join("dev")).expect("link");
+        let root = notes.join("dev").join("app");
+        let check = |cwd: &Path| fixture.check_with_home(&root, cwd, None, Some(&home));
+
+        assert_eq!(check(&home), Ok(()));
+        std::fs::write(notes.join("package.json"), "{}").expect("project manifest");
+        let err = check(&home).unwrap_err();
+        assert!(err.contains("outside the project directory"), "got: {err}");
     }
 
     /// A personal link in a directory with no project manifest, such as a
