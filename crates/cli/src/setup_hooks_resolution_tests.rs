@@ -561,15 +561,40 @@ fn gate_skips_relative_and_empty_path_entries() {
 }
 
 /// A large hook input with many escapes goes to a JSON reader instead of the
-/// small reader, so the gate stays fast.
+/// small reader, so the gate stays fast. The time limit is a multiple of the
+/// time of the same gate for a short input, so a loaded host does not fail
+/// the test.
 #[test]
 fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
     let tmp = tempdir().unwrap();
     let base = tmp.path().canonicalize().unwrap();
     let project = base.join("project");
     std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
     let log = base.join("calls.log");
-    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let recorded = base.join("tools/fallow");
+    reader_stub(&recorded, "recorded", &log, "git commit -m x", &project);
+    let script = render_gate_script(true, recorded.to_str());
+    let run = |input: &str| {
+        let started = std::time::Instant::now();
+        let output = probe_gate(
+            &script,
+            &base.join("home/.claude/hooks/fallow-gate.sh"),
+            &project,
+            &base.join("bin"),
+            input.as_bytes(),
+        );
+        (started.elapsed(), output)
+    };
+    let short = serde_json::json!({
+        "cwd": project,
+        "tool_input": { "command": "git commit -m x" },
+    })
+    .to_string();
+    let baseline = std::iter::repeat_with(|| run(&short).0)
+        .take(3)
+        .min()
+        .unwrap();
     let message = "a\"b\\".repeat(25_000);
     let input = serde_json::json!({
         "cwd": project,
@@ -578,21 +603,18 @@ fn gate_reads_a_large_escaped_hook_input_in_bounded_time() {
     .to_string();
     assert!(input.len() > 100_000);
 
-    let started = std::time::Instant::now();
-    let output = probe_gate(
-        &rendered_gate_script(),
-        &project.join(".claude/hooks/fallow-gate.sh"),
-        &project,
-        &base.join("bin"),
-        input.as_bytes(),
-    );
-    let elapsed = started.elapsed();
+    let (elapsed, output) = run(&input);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
-    if stderr.contains("no native JSON reader or jq found") {
-        return;
-    }
+    let limit = std::cmp::max(baseline * 5, std::time::Duration::from_secs(1));
+    assert!(
+        elapsed <= limit,
+        "{elapsed:?} for a baseline of {baseline:?}"
+    );
+    assert!(
+        calls(&log).contains("recorded hooks gate-runtime input"),
+        "{stderr}"
+    );
     assert_eq!(output.status.code(), Some(2), "{stderr}");
 }
 

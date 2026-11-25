@@ -58,9 +58,9 @@ gate_skip_not_git_write() {
 # the exact parse. A JSON `\u` escape can hide a word, so such a hook input
 # always goes there too. A hook input over GATE_SMALL_INPUT_LIMIT characters
 # also goes to the exact parse.
-INPUT=""
-IFS= read -r -d '' INPUT || true
-INPUT="${INPUT%$'\n'}"
+# `$(<file)` reads the input in blocks without a program; the read builtin
+# reads a pipe one byte at a time.
+INPUT="$(</dev/stdin)" || INPUT=""
 if [ "${#INPUT}" -le "$GATE_SMALL_INPUT_LIMIT" ]; then
   case "$INPUT" in
     *'\u'*) ;;
