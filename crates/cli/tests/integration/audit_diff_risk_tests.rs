@@ -1058,3 +1058,30 @@ fn narrower_entries_in_other_ignore_keys_do_not_report() {
     let (_, json) = audit_json(dir, &[]);
     assert!(config_findings(&json).is_empty(), "{json}");
 }
+
+/// A changed file that is a link to a file outside the project is not read,
+/// so no text of the outside file goes into a finding.
+#[test]
+#[cfg(unix)]
+fn a_changed_link_out_of_the_root_is_not_read() {
+    let tmp = fixture(None);
+    let dir = tmp.path();
+    let elsewhere = TempDir::new().expect("temp dir");
+    let target = elsewhere.path().join("other.ts");
+    fs::write(
+        &target,
+        "// @ts-ignore\nexport const price = (n: number): number => n * 2;\n",
+    )
+    .unwrap();
+    fs::remove_file(dir.join("src/index.ts")).unwrap();
+    std::os::unix::fs::symlink(&target, dir.join("src/index.ts")).unwrap();
+
+    let (_, json) = audit_json(dir, &[]);
+    let lines = rule_lines(&json);
+    assert!(
+        !lines
+            .iter()
+            .any(|(rule, _, path, _)| rule == "added-suppression" && path == "src/index.ts"),
+        "{json}"
+    );
+}
