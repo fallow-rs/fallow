@@ -6,6 +6,8 @@ import test from "node:test";
 
 import { createApi, withReadScope } from "../src/backend.mjs";
 import { createReadScope, resolvesInside } from "../src/read-scope.mjs";
+import { parseRequest } from "../src/protocol.mjs";
+import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 
 const OUTSIDE_TEXT = 'export const value = "text-of-the-other-file";\n';
 
@@ -191,5 +193,24 @@ test("a reset drops the resolved directories of an earlier snapshot", () => {
     symlinkSync(outside, swapped);
     scope.reset();
     assert.equal(scope.readable(path.join(swapped, "other.ts")), false);
+  });
+});
+
+test("a project config outside the root drops only that project", () => {
+  withLayout(({ root, outside }) => {
+    writeFileSync(path.join(outside, "tsconfig.json"), "{}");
+    symlinkSync(path.join(outside, "tsconfig.json"), path.join(root, "linked.json"));
+    const request = parseRequest({
+      protocol_version: WIRE_PROTOCOL_VERSION,
+      operation: ANALYSIS_OPERATION,
+      root,
+      projects: ["tsconfig.json", "linked.json", "../elsewhere/tsconfig.json"],
+      evidence_limit: 1,
+      queries: [],
+    });
+    assert.deepEqual(
+      request.projects.map((project) => project.path),
+      ["tsconfig.json"],
+    );
   });
 });

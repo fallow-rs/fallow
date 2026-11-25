@@ -352,15 +352,17 @@ const requireUniqueProjects = (projects) => {
   }
 };
 
+/**
+ * The projects of a request. A project config that resolves outside the read
+ * scope of the root is dropped, and the other projects stay.
+ */
 const parseProjects = (value, root) => {
-  const projects = requireBoundedArray(value, "projects", MAX_PROJECTS).map((project, index) => {
-    const projectPath = requireString(project, `projects[${index}]`);
-    const absolutePath = path.resolve(root, projectPath);
-    if (!resolvesInside(root, absolutePath)) {
-      throw new Error(`projects[${index}] resolves outside the root`);
-    }
-    return { path: projectPath, absolutePath };
-  });
+  const projects = requireBoundedArray(value, "projects", MAX_PROJECTS)
+    .map((project, index) => {
+      const projectPath = requireString(project, `projects[${index}]`);
+      return { path: projectPath, absolutePath: path.resolve(root, projectPath) };
+    })
+    .filter((project) => resolvesInside(root, project.absolutePath));
   requireUniqueProjects(projects);
   return projects;
 };
