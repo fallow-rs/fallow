@@ -28,6 +28,7 @@ import {
   stableSymbolIdentity,
   symbolForDeclaration,
 } from "./semantic-identity.mjs";
+import { recordDeclarationEmitUses } from "./declaration-emit-uses.mjs";
 import { analyzeSymbolImpact } from "./symbol-impact.mjs";
 import { isJavaScriptFile, referenceNames } from "./reference-names.mjs";
 import { recordComputedMemberAccess } from "./computed-member-access.mjs";
@@ -718,6 +719,7 @@ const batchSymbolUseEvidence = (root, resolvedQueries, scanProjects, evidenceLim
   resolvedQueries.forEach((entry) => registerSymbolTargets(root, state, entry));
   const names = referenceNames(scanProjects, [...state.candidateNames, ...state.targetNames]);
   const sourceScanCount = scanSymbolUseProjects(root, state, scanProjects, names);
+  recordDeclarationEmitUses(root, scanProjects, state, resolvedQueries, location);
   return {
     evidenceByQuery: state.evidenceByQuery,
     totalByQuery: state.totalByQuery,
