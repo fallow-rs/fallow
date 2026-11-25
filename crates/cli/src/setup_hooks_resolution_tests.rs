@@ -85,10 +85,10 @@ fn probe_gate_with_path(
         .arg(script_path)
         .current_dir(cwd)
         .env("PATH", path)
-        .envs(envs.iter().copied())
         // An unreachable floor makes resolution observable: the block
         // message names the runner the script chose.
         .env("FALLOW_GATE_MIN_VERSION", "999.0.0")
+        .envs(envs.iter().copied())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1434,4 +1434,63 @@ fn gate_uses_the_shell_reader_up_to_the_limit_of_the_bash_version() {
         "bash {major}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// A repository can set `core.worktree` to a directory in another tree, so
+/// its audit root adds a tree that the first target check did not know. A
+/// JSON reader that lies in that tree reads no audit report.
+#[test]
+fn gate_drops_a_json_reader_in_the_tree_of_a_later_audit_root() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("x");
+    let outer = base.join("outer");
+    let elsewhere = outer.join("elsewhere");
+    for dir in [&session, &target, &elsewhere] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    let log = base.join("calls.log");
+    reader_stub(&elsewhere.join("bin/fallow"), "outer", &log, "ls", &session);
+    let recorded = base.join("tools/fallow");
+    logging_stub(&recorded, "recorded", &log);
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    git_init(&session);
+    git_init(&outer);
+    git_init(&target);
+    let status = std::process::Command::new("git")
+        .args(["config", "core.worktree", elsewhere.to_str().unwrap()])
+        .current_dir(&target)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", target.display()) },
+    });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, recorded.to_str()),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!(
+            "{}:{}:/usr/bin:/bin",
+            elsewhere.join("bin").display(),
+            base.join("bin").display()
+        ),
+        input.to_string().as_bytes(),
+        &[("FALLOW_GATE_MIN_VERSION", Path::new(""))],
+    );
+    let calls = calls(&log);
+
+    assert!(
+        calls.contains("recorded audit"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for line in calls.lines().filter(|line| line.starts_with("outer")) {
+        assert!(line.ends_with("probe"), "{line}\n{calls}");
+    }
 }
