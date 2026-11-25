@@ -37,7 +37,8 @@ pub(super) enum EncodingError {
 ///
 /// Returns:
 /// - `Ok(Some((content_post_bom, metadata)))` on success.
-/// - `Ok(None)` when the path is outside the project root or unreadable
+/// - `Ok(None)` when the path is outside the project root, resolves into a
+///   `.git` or `node_modules` directory below it, or is unreadable
 ///   (existing skip-with-warn semantics preserved).
 /// - `Err(EncodingError::MixedLineEndings { .. })` when the file mixes CRLF
 ///   and bare-LF line endings; the caller translates this into a per-file
@@ -55,6 +56,13 @@ pub(super) fn read_source(
     };
     if !canonical_path.starts_with(&canonical_root) {
         tracing::warn!(path = %path.display(), "Skipping fix for path outside project root");
+        return Ok(None);
+    }
+    if fallow_types::path_guard::is_protected_link_target(&canonical_root, &canonical_path) {
+        tracing::warn!(
+            path = %path.display(),
+            "Skipping fix for path that resolves into a .git or node_modules directory"
+        );
         return Ok(None);
     }
     let Ok(raw) = std::fs::read_to_string(canonical_path) else {
@@ -194,6 +202,20 @@ mod tests {
         let link = root.join("link.ts");
         std::fs::write(&outside, "private content").unwrap();
         std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        let result = read_source(&root, &link).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_source_returns_none_for_symlink_target_in_the_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let link = root.join("head.ts");
+        std::os::unix::fs::symlink(root.join(".git/HEAD"), &link).unwrap();
 
         let result = read_source(&root, &link).unwrap();
         assert!(result.is_none());
