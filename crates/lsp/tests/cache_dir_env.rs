@@ -90,6 +90,8 @@ fn run_editor_session(root: &Path, opened: &Path, cache_dir: &Path) -> String {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fallow-lsp"))
         .current_dir(root)
         .env("FALLOW_CACHE_DIR", cache_dir)
+        // The server writes INFO lines to stderr only on request.
+        .env("RUST_LOG", "fallow_extract=info")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

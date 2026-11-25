@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyIssueTypeFilter,
   buildAnalysisSummaryLines,
   buildParamsFromCli,
   formatChangedSinceRefForStatusBar,
@@ -8,6 +9,7 @@ import {
 } from "../src/statusBar-utils.js";
 import type { AnalysisCompleteParams } from "../src/statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
+import { ISSUE_TYPE_DEFAULTS } from "../src/generated/issue-types.js";
 
 const baseParams = (
   overrides: Partial<AnalysisCompleteParams> = {}
@@ -510,5 +512,43 @@ describe("buildParamsFromCli", () => {
     expect(params.circularDependencies).toBe(0);
     expect(params.boundaryViolations).toBe(0);
     expect(params.staleSuppressions).toBe(0);
+  });
+});
+
+describe("applyIssueTypeFilter", () => {
+  // The LSP total counts every category. The sidebar and the CLI count hide
+  // the categories that `fallow.issueTypes` turns off (#5278).
+  it("removes the categories that fallow.issueTypes turns off", () => {
+    const params = baseParams({ totalIssues: 250, circularDependencies: 72, unusedFiles: 35 });
+    const filtered = applyIssueTypeFilter(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "circular-dependencies": false,
+    });
+    expect(filtered.totalIssues).toBe(178);
+    expect(filtered.circularDependencies).toBe(0);
+    expect(filtered.unusedFiles).toBe(35);
+  });
+
+  it("counts a category the LSP sends outside the typed fields", () => {
+    const params = { ...baseParams({ totalIssues: 10 }), unusedNamespaceMembers: 4 };
+    const filtered = applyIssueTypeFilter(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "unused-namespace-members": false,
+    });
+    expect(filtered.totalIssues).toBe(6);
+  });
+
+  it("removes the boundary count once for the three boundary arrays", () => {
+    const params = baseParams({ totalIssues: 9, boundaryViolations: 5 });
+    const filtered = applyIssueTypeFilter(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "boundary-violation": false,
+    });
+    expect(filtered.totalIssues).toBe(4);
+  });
+
+  it("keeps the params when every issue type is on", () => {
+    const params = baseParams({ totalIssues: 7, unusedExports: 7 });
+    expect(applyIssueTypeFilter(params, ISSUE_TYPE_DEFAULTS)).toEqual(params);
   });
 });

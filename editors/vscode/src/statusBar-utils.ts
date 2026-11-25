@@ -1,7 +1,12 @@
-import { countCheckIssues } from "./analysis-utils.js";
+import { countCheckIssues, ISSUE_TYPE_FILTERS } from "./analysis-utils.js";
 import type { PackageBaselineStatus } from "./generated/output-contract.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
-import type { FallowAnalysisScope, FallowCheckResult, FallowDupesResult } from "./types.js";
+import type {
+  FallowAnalysisScope,
+  FallowCheckResult,
+  FallowDupesResult,
+  IssueTypeConfig,
+} from "./types.js";
 
 export type { PackageBaselineStatus } from "./generated/output-contract.js";
 
@@ -105,6 +110,46 @@ export const buildParamsFromCli = (
   changedSinceScope: changedSinceScopeFromCli(scope),
   packageBaselines: scope?.package_baselines,
 });
+
+const toParamsField = (key: string): string =>
+  key.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
+
+/**
+ * Remove the categories that `fallow.issueTypes` turns off from LSP params.
+ *
+ * The LSP total counts every category. The sidebar and the CLI count leave out
+ * the disabled ones, so without this filter each LSP run sets the status bar to
+ * a higher count than the sidebar shows (#5278). The LSP sends one
+ * `boundaryViolations` count for the three boundary arrays, so the filter
+ * removes each params field once.
+ */
+export const applyIssueTypeFilter = (
+  params: AnalysisCompleteParams,
+  issueTypes: IssueTypeConfig,
+): AnalysisCompleteParams => {
+  const counts: Record<string, unknown> = { ...params };
+  const cleared = new Set<string>();
+  let removed = 0;
+  for (const [key, type] of ISSUE_TYPE_FILTERS) {
+    const field = toParamsField(key);
+    if (issueTypes[type] || cleared.has(field)) {
+      continue;
+    }
+    const value = counts[field];
+    if (typeof value === "number") {
+      removed += value;
+      counts[field] = 0;
+      cleared.add(field);
+    }
+  }
+  if (cleared.size === 0) {
+    return params;
+  }
+  return {
+    ...(counts as unknown as AnalysisCompleteParams),
+    totalIssues: Math.max(0, params.totalIssues - removed),
+  };
+};
 
 interface BreakdownLine {
   readonly count: keyof AnalysisCompleteParams;

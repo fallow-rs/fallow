@@ -39,6 +39,8 @@ proptest = { workspace = true }
 # The runtime stack probe drives the global Rayon pool that analysis uses.
 rayon = { workspace = true }
 tempfile = { workspace = true }
+# The stderr filter tests ask the filter about tracing levels.
+tracing = { workspace = true }
 # `io-util` (duplex pipes, BufReader, AsyncRead/WriteExt) is test-only: the
 # `Server::serve` integration test drives the LSP over framed duplex streams.
 # The production bin keeps the slimmer workspace tokio feature set.

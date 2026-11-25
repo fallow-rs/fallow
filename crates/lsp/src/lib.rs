@@ -15,6 +15,7 @@ mod code_lens;
 mod config_patterns;
 mod diagnostic_filter;
 mod diagnostics;
+mod disk_fingerprints;
 mod document_state;
 mod hover;
 mod initialization;
@@ -28,6 +29,7 @@ mod runtime;
 mod schedule;
 mod server_capabilities;
 mod session_store;
+mod stderr_log;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
@@ -369,6 +371,9 @@ struct FallowLspServer {
     /// `initializationOptions.prewarm`: parse the project at `initialized`.
     prewarm: Arc<AtomicBool>,
     pending_type_aware_changes: Arc<StdMutex<fallow_api::TypeAwareFileChanges>>,
+    /// The last known content of saved and watched files. See
+    /// `disk_fingerprints.rs`.
+    disk_fingerprints: Arc<StdMutex<disk_fingerprints::DiskFingerprints>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -607,6 +612,9 @@ impl LanguageServer for FallowLspServer {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.mark_document_saved(&params.text_document.uri).await;
         if let Some(path) = params.text_document.uri.to_file_path() {
+            // A save always starts a run. The record lets the watched-file
+            // event of the same save start none.
+            self.record_disk_contents(vec![path.to_path_buf()]).await;
             if session_input_file(&path) {
                 self.lock_sessions().mark_stale();
             }
@@ -633,21 +641,25 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        self.mark_documents_changed_on_disk(params.changes.iter().map(|change| &change.uri))
+        let changes = self.changed_content_events(params.changes).await;
+        if changes.is_empty() {
+            return;
+        }
+        self.mark_documents_changed_on_disk(changes.iter().map(|change| &change.uri))
             .await;
         {
-            let mut changes = self
+            let mut pending = self
                 .pending_type_aware_changes
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            for change in params.changes {
+            for change in changes {
                 let Some(path) = change.uri.to_file_path() else {
                     continue;
                 };
                 if session_input_file(&path) {
                     self.lock_sessions().mark_stale();
                 }
-                record_type_aware_file_change(&mut changes, path.into_owned(), change.typ);
+                record_type_aware_file_change(&mut pending, path.into_owned(), change.typ);
             }
         }
         self.note_workspace_event();
@@ -817,6 +829,7 @@ impl FallowLspServer {
             pending_type_aware_changes: Arc::new(StdMutex::new(
                 fallow_api::TypeAwareFileChanges::default(),
             )),
+            disk_fingerprints: Arc::default(),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(DiagnosticCache::default())),
             client_pulls: Arc::new(AtomicBool::new(false)),
@@ -1329,6 +1342,116 @@ impl FallowLspServer {
         drop(documents);
     }
 
+    /// Record the current content of `paths`. Returns for each path whether
+    /// the content differs from the last record.
+    async fn record_disk_contents(&self, paths: Vec<PathBuf>) -> Vec<bool> {
+        let store = Arc::clone(&self.disk_fingerprints);
+        let count = paths.len();
+        tokio::task::spawn_blocking(move || {
+            let mut store = store.lock().unwrap_or_else(|error| error.into_inner());
+            paths.iter().map(|path| store.record(path)).collect()
+        })
+        .await
+        .unwrap_or_else(|_| vec![true; count])
+    }
+
+    /// Keep the watched-file events that change the content of a file. A
+    /// deleted file and a file that the server cannot read always count.
+    async fn changed_content_events(&self, events: Vec<FileEvent>) -> Vec<FileEvent> {
+        if events.len() > disk_fingerprints::MAX_COMPARED_EVENTS {
+            {
+                let mut store = self
+                    .disk_fingerprints
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                for path in events.iter().filter_map(|event| event.uri.to_file_path()) {
+                    store.forget(&path);
+                }
+            }
+            self.log_watched_events(&events, 0).await;
+            return events;
+        }
+        let paths: Vec<Option<PathBuf>> = events
+            .iter()
+            .map(|event| {
+                (event.typ != FileChangeType::DELETED)
+                    .then(|| event.uri.to_file_path().map(std::borrow::Cow::into_owned))
+                    .flatten()
+            })
+            .collect();
+        {
+            let mut store = self
+                .disk_fingerprints
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            for event in events
+                .iter()
+                .filter(|event| event.typ == FileChangeType::DELETED)
+            {
+                if let Some(path) = event.uri.to_file_path() {
+                    store.forget(&path);
+                }
+            }
+        }
+        let readable: Vec<PathBuf> = paths.iter().flatten().cloned().collect();
+        let mut changed = self.record_disk_contents(readable).await.into_iter();
+        let mut kept = Vec::with_capacity(events.len());
+        let mut unchanged = 0;
+        for (event, path) in events.into_iter().zip(paths) {
+            if path.is_none() || changed.next().unwrap_or(true) {
+                kept.push(event);
+            } else {
+                unchanged += 1;
+            }
+        }
+        self.log_watched_events(&kept, unchanged).await;
+        kept
+    }
+
+    /// Name the files whose events start a run, so a trace shows the source
+    /// of a run.
+    async fn log_watched_events(&self, changed: &[FileEvent], unchanged: usize) {
+        const NAMED_FILES: usize = 3;
+        let root = self.root.read().await.clone();
+        let names: Vec<String> = changed
+            .iter()
+            .take(NAMED_FILES)
+            .map(|event| match event.uri.to_file_path() {
+                Some(path) => root
+                    .as_deref()
+                    .and_then(|root| path.strip_prefix(root).ok())
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string(),
+                None => event.uri.as_str().to_string(),
+            })
+            .collect();
+        let mut parts = Vec::new();
+        if !names.is_empty() {
+            let more = changed.len().saturating_sub(NAMED_FILES);
+            let suffix = if more > 0 {
+                format!(" (+{more} more)")
+            } else {
+                String::new()
+            };
+            parts.push(format!(
+                "Files changed on disk: {}{suffix}",
+                names.join(", ")
+            ));
+        }
+        if unchanged > 0 {
+            parts.push(format!(
+                "Skipped {unchanged} watched-file event(s) without a content change"
+            ));
+        }
+        let message = parts.join(". ");
+        if !message.is_empty() {
+            // The event handler does not wait for the client to read the log.
+            let client = self.client.clone();
+            tokio::spawn(async move { client.log_message(MessageType::LOG, message).await });
+        }
+    }
+
     /// The client saved `uri`, so its buffer equals the file on disk.
     async fn mark_document_saved(&self, uri: &Uri) {
         if let Some(state) = self.documents.write().await.get_mut(uri) {
@@ -1606,10 +1729,9 @@ async fn serve_stdio() {
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .finish()
-        .with(
-            tracing_subscriber::filter::Targets::new()
-                .with_target("fallow", tracing_subscriber::filter::LevelFilter::INFO),
-        )
+        .with(stderr_log::stderr_log_filter(
+            std::env::var("RUST_LOG").ok().as_deref(),
+        ))
         .init();
 
     let stdin = tokio::io::stdin();

@@ -96,6 +96,11 @@ Do not duplicate the full setting list in durable prose.
   bar item. The item reads `fallow.health.statusBar`,
   `fallow.audit.statusBar.enabled`, `fallow.license.showStatusBar` and
   `fallow.changedSince` on each render.
+- The status bar count must equal the sidebar count. The LSP total of
+  `fallow/analysisComplete` counts every category of the whole project.
+  `applyIssueTypeFilter` removes the categories that `fallow.issueTypes` turns
+  off. With a workspace scope, an LSP notification does not change the count,
+  and the count comes from the scoped CLI run.
 - A click on the item runs `fallow.showStatusMenu`. Each menu row runs an
   existing command (`fallow.analyze`, `fallow.toggleAllDiagnostics`,
   `fallow.audit`, `fallow.selectWorkspace`, the license commands and

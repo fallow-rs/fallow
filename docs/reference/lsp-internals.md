@@ -29,6 +29,17 @@ lifecycle behavior.
   default 2 MiB stack overflows on deeply nested sources. Cargo pins
   `RUST_MIN_STACK` for tests, so a stack test must remove it in a child
   process.
+- A watched-file event starts a run only when the content of the file
+  changed. `disk_fingerprints.rs` keeps the length and a hash of the last
+  content that a save or an event reported. An event for the same content
+  starts no run, also the event of a save that `didSave` reported before. A
+  file watcher reports timestamp and attribute changes too, and a steady
+  stream of them otherwise starts a run each `MAX_WAIT` (#5278). A deleted
+  file, an unreadable file, a file over 8 MiB, and a batch of more than
+  `MAX_COMPARED_EVENTS` events always count. The server logs the files of
+  each counted batch and the number of skipped events.
+- The server writes only WARN and ERROR tracing lines to stderr, because
+  editors show stderr as error output. `RUST_LOG` selects more detail.
 - Convert paths through the LSP path helpers. Never construct document URIs by
   string concatenation.
 - Publish only results that still match the current document version.
