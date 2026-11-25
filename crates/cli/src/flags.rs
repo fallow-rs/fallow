@@ -1198,7 +1198,7 @@ fn print_flags_sarif(
         .iter()
         .map(|f| {
             let column = sources.start_column(&f.path, f.line, f.col);
-            let path = crate::report::normalize_uri(&relative_path(f, &config.root));
+            let path = fallow_output::normalize_uri(&relative_path(f, &config.root));
             let mut msg = format!("Feature flag '{}' ({})", f.flag_name, kind_label(f));
             if !f.guarded_dead_exports.is_empty() {
                 use std::fmt::Write;
@@ -1333,7 +1333,7 @@ fn print_flags_codeclimate(
     let mut issues: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
-            let path = crate::report::normalize_uri(&relative_path(f, &config.root));
+            let path = fallow_output::normalize_uri(&relative_path(f, &config.root));
             let mut description = format!(
                 "Feature flag '{}' detected ({})",
                 f.flag_name,

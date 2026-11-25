@@ -33,7 +33,7 @@ use super::token_visitor::TokenExtractor;
 /// require binding blocks.
 #[must_use]
 pub fn tokenize_file(path: &Path, source: &str, skip_imports: bool) -> FileTokens {
-    tokenize_file_inner(path, source, false, skip_imports)
+    tokenize_file_cross_language(path, source, false, skip_imports)
 }
 
 /// Tokenize a fragment that the parser cannot read on its own.
@@ -49,15 +49,6 @@ pub(crate) fn tokenize_unparsed_fragment(fragment: &str) -> Vec<SourceToken> {
 /// Tokenize a source file with optional type stripping for cross-language detection.
 #[must_use]
 pub(crate) fn tokenize_file_cross_language(
-    path: &Path,
-    source: &str,
-    strip_types: bool,
-    skip_imports: bool,
-) -> FileTokens {
-    tokenize_file_inner(path, source, strip_types, skip_imports)
-}
-
-fn tokenize_file_inner(
     path: &Path,
     source: &str,
     strip_types: bool,

@@ -122,7 +122,7 @@ pub fn sarif_results(
                 "message": { "text": message },
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": { "uri": crate::report::normalize_uri(path) },
+                        "artifactLocation": { "uri": fallow_output::normalize_uri(path) },
                         "region": { "startLine": line.max(1), "startColumn": column },
                     }
                 }],
@@ -173,7 +173,7 @@ pub fn codeclimate_issues(report: &FlagRetirementReport) -> Vec<serde_json::Valu
                 "severity": "info",
                 "fingerprint": fingerprint,
                 "location": {
-                    "path": crate::report::normalize_uri(path),
+                    "path": fallow_output::normalize_uri(path),
                     "lines": { "begin": line.max(1) },
                 }
             }));

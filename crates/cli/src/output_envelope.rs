@@ -7,7 +7,7 @@ use fallow_output::CombinedMeta;
 
 #[cfg(test)]
 fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = fallow_output::serialize_json_root_output(output)?;
+    let mut value = serde_json::to_value(output)?;
     fallow_output::attach_telemetry_meta(
         &mut value,
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),

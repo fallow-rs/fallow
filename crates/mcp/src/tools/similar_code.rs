@@ -86,11 +86,6 @@ pub async fn run_inspect_similar_code(
     }
 }
 
-/// Build CLI arguments for `find_similar_code`.
-pub fn build_find_similar_code_args(params: &FindSimilarCodeParams) -> Result<Vec<String>, String> {
-    build_args(params)
-}
-
 /// Deserialize the open `snapshot` object into the typed candidate handoff.
 ///
 /// # Errors
@@ -149,7 +144,8 @@ pub fn build_inspect_similar_code_args(
     Ok(args)
 }
 
-fn build_args(params: &FindSimilarCodeParams) -> Result<Vec<String>, String> {
+/// Build CLI arguments for `find_similar_code`.
+pub fn build_find_similar_code_args(params: &FindSimilarCodeParams) -> Result<Vec<String>, String> {
     if has_value(params.workspace.as_deref()) && has_value(params.changed_workspaces.as_deref()) {
         return Err(validation_error_body(
             "workspace and changed_workspaces are mutually exclusive for similar-code tools",

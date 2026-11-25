@@ -104,7 +104,7 @@ fn collect_cva_file_token_drifts(
     config: &fallow_config::ResolvedConfig,
 ) {
     for (variant_classes, line) in collect_cva_class_blocks(source) {
-        for arbitrary in crate::css::scan_tailwind_arbitrary_values(&variant_classes, config) {
+        for arbitrary in scan_tailwind_arbitrary_values(&variant_classes, config) {
             let Some((namespace, value, metric)) = cva_arbitrary_value_metric(&arbitrary.value)
             else {
                 continue;

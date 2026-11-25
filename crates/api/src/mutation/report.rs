@@ -9,7 +9,7 @@ use fallow_output::{
     MutantEquivalenceHint, MutantLocation, MutantResult, MutantStatus, MutantTestReach,
     MutationBaselineFailure, MutationCompletion, MutationFunctionResult, MutationIncompleteReason,
     MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
-    MutationReport, MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
+    MutationReport, MutationRunIssue, MutationSkippedFile, MutationStatusCounts,
     SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
@@ -238,11 +238,6 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             _,
         ) => base,
     }
-}
-
-/// The totals of `results`.
-pub fn summary(results: &[MutantResult]) -> MutationSummary {
-    MutationSummary::from_results(results)
 }
 
 /// A function group: the file, then the first line and span of the function.
@@ -695,7 +690,7 @@ mod tests {
                 MutantStatus::NoCoverage,
             ]
         );
-        let summary = summary(&results);
+        let summary = fallow_output::MutationSummary::from_results(&results);
         assert_eq!(summary.coverage, Some(2.0 / 3.0));
     }
 
@@ -713,7 +708,7 @@ mod tests {
         assert_eq!(results[0].prune_reason, None);
         assert_eq!(results[1].status, MutantStatus::Pruned);
         assert_eq!(results[1].prune_reason.as_deref(), Some(NO_TARGET_COVERAGE));
-        let summary = summary(&results);
+        let summary = fallow_output::MutationSummary::from_results(&results);
         assert_eq!(summary.score, Some(1.0));
         assert_eq!(summary.coverage, Some(1.0));
     }
@@ -881,7 +876,7 @@ mod tests {
             "only the retried survivor carries the flag"
         );
 
-        let summary = summary(&results);
+        let summary = fallow_output::MutationSummary::from_results(&results);
         assert_eq!(summary.counts.total, 6);
         assert_eq!(
             summary.score,
@@ -963,7 +958,7 @@ mod tests {
         assert_eq!(results[1].status, MutantStatus::Pending);
         assert_eq!(results[1].pending_reason.as_deref(), Some("sampled-out"));
         assert_eq!(results[0].pending_reason, None);
-        let summary = summary(&results);
+        let summary = fallow_output::MutationSummary::from_results(&results);
         assert_eq!(summary.counts.pending, 1);
         assert_eq!(summary.sampled_out, 1);
         let counts = plan_counts(&plan);
@@ -1258,7 +1253,10 @@ mod tests {
         let results = mutant_results(&plan, Some(&outcome));
         assert!(results[0].cached);
         assert!(!results[1].cached);
-        assert_eq!(summary(&results).score, Some(0.5));
+        assert_eq!(
+            fallow_output::MutationSummary::from_results(&results).score,
+            Some(0.5)
+        );
     }
 
     #[test]

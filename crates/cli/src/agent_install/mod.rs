@@ -375,7 +375,7 @@ impl Ctx {
         }
         paths
             .into_iter()
-            .find_map(|path| crate::setup_hooks::symlinked_component(&self.root, path))
+            .find_map(|path| fallow_types::path_guard::outside_link(&self.root, path))
     }
 
     pub const fn scope(&self) -> Scope {

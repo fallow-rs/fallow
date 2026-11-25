@@ -1768,7 +1768,7 @@ fn recipe_path(root: &Path) -> PathBuf {
 /// symlink that resolves outside `root`. A cloned repository can commit such
 /// a link to make setup write a file outside the project.
 fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), String> {
-    match crate::setup_hooks::symlinked_component(root, path) {
+    match fallow_types::path_guard::outside_link(root, path) {
         Some(link) => Err(crate::setup_hooks::symlink_guard::refusal_message(
             &display_relative(root, path),
             &display_relative(root, &link),

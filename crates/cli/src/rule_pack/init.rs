@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::{InitArgs, RulePackContext};
 use crate::error::emit_input_error;
-use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
+use crate::setup_hooks::symlink_guard::refusal_message;
 
 pub fn run(args: &InitArgs, ctx: &RulePackContext<'_>) -> ExitCode {
     let selected = match select_template(args, ctx.output) {
@@ -103,7 +103,7 @@ fn available_pack_path(
             ctx.output,
         ));
     }
-    if let Some(link) = symlinked_component(ctx.root, &abs_path) {
+    if let Some(link) = fallow_types::path_guard::outside_link(ctx.root, &abs_path) {
         let link = link.strip_prefix(ctx.root).unwrap_or(&link);
         return Err(emit_input_error(
             &refusal_message(&rel_path.display().to_string(), &link.display().to_string()),
@@ -200,7 +200,7 @@ fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResul
     };
     let config_display = root_relative(ctx.root, &config_path);
     if let Some(guard_root) = guard_root
-        && let Some(link) = symlinked_component(&guard_root, &config_path)
+        && let Some(link) = fallow_types::path_guard::outside_link(&guard_root, &config_path)
     {
         let link = link.strip_prefix(&guard_root).unwrap_or(&link);
         let reason = refusal_message(&config_display, &link.display().to_string());

@@ -26,7 +26,7 @@ use serde::Serialize;
 
 #[path = "setup_hooks_symlink_guard.rs"]
 pub mod symlink_guard;
-pub use symlink_guard::{execute_agent_hooks, symlinked_component, symlinked_hook_target};
+pub use symlink_guard::{execute_agent_hooks, symlinked_hook_target};
 
 #[path = "setup_hooks_gitignore.rs"]
 mod gitignore;

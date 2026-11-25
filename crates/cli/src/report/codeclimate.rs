@@ -230,13 +230,13 @@ fn saved_native_codeclimate_issues(
             // analyzer's canonical order before building any presentation surface
             // so owner/section grouping cannot reorder otherwise identical findings.
             results.sort();
-            let mut issues = api_codeclimate_issues(&results, root, &rules);
+            let mut issues = fallow_api::build_codeclimate(&results, root, &rules);
             annotate_dead_code_owner(&mut issues, resolver);
             Ok(issues)
         }
         EnvelopeKind::Dupes => {
             let report = parse_saved_section::<DuplicationReport>(envelope, "dupes envelope")?;
-            let mut issues = api_duplication_codeclimate_issues(&report, root);
+            let mut issues = fallow_api::build_duplication_codeclimate(&report, root);
             annotate_duplication_groups(&mut issues, &report, root, resolver);
             Ok(issues)
         }
@@ -245,7 +245,7 @@ fn saved_native_codeclimate_issues(
                 fallow_output::health_report_from_saved_value(envelope).ok_or_else(|| {
                     "saved health envelope is incompatible with this Fallow version".to_owned()
                 })?;
-            let mut issues = api_health_codeclimate_issues(&report, root);
+            let mut issues = fallow_api::build_health_codeclimate(&report, root);
             annotate_health_groups(&mut issues, resolver);
             Ok(issues)
         }
@@ -701,12 +701,12 @@ fn saved_multi_analysis_codeclimate(
 
     let mut issues = Vec::new();
     if let Some(results) = dead_code {
-        let mut dead_code_issues = api_codeclimate_issues(&results, root, rules);
+        let mut dead_code_issues = fallow_api::build_codeclimate(&results, root, rules);
         annotate_saved_dead_code(&mut dead_code_issues, envelope, dead_code_pointer, resolver);
         issues.extend(dead_code_issues);
     }
     if let Some(report) = duplication {
-        let mut duplication_issues = api_duplication_codeclimate_issues(&report, root);
+        let mut duplication_issues = fallow_api::build_duplication_codeclimate(&report, root);
         if let Some(introduced) = saved_clone_group_flags(envelope, duplication_pointer) {
             fallow_api::set_duplication_audit_attribution(
                 &mut duplication_issues,
@@ -718,7 +718,7 @@ fn saved_multi_analysis_codeclimate(
         issues.extend(duplication_issues);
     }
     if let Some(report) = health {
-        let mut health_issues = api_health_codeclimate_issues(&report, root);
+        let mut health_issues = fallow_api::build_health_codeclimate(&report, root);
         annotate_health_groups(&mut health_issues, resolver);
         issues.extend(health_issues);
     }
@@ -802,33 +802,18 @@ fn first_quoted_subject(message: &str) -> Option<&str> {
     (!subject.is_empty()).then_some(subject)
 }
 
-/// Fetch CodeClimate issues from the API-owned dead-code output builder.
-///
-/// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
-/// shape convert via [`fallow_output::codeclimate_issues_to_value`]. The schema
-/// drift gate locks the per-issue shape against
-/// [`fallow_output::CodeClimateOutput`].
-#[must_use]
-pub(super) fn api_codeclimate_issues(
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-) -> Vec<CodeClimateIssue> {
-    fallow_api::build_codeclimate(results, root, rules)
-}
-
 /// Print dead-code analysis results in CodeClimate format.
 pub(super) fn print_codeclimate(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
 ) -> ExitCode {
-    emit_codeclimate(api_codeclimate_issues(results, root, rules))
+    emit_codeclimate(fallow_api::build_codeclimate(results, root, rules))
 }
 
 /// Print CodeClimate output with owner properties added to each issue.
 ///
-/// Calls `api_codeclimate_issues` to produce the standard CodeClimate issues, then
+/// Calls `fallow_api::build_codeclimate` to produce the standard CodeClimate issues, then
 /// annotates each entry with `"owner": "@team"` by resolving the
 /// issue's location path through the `OwnershipResolver`.
 pub(super) fn print_grouped_codeclimate(
@@ -837,23 +822,14 @@ pub(super) fn print_grouped_codeclimate(
     rules: &RulesConfig,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut issues = api_codeclimate_issues(results, root, rules);
+    let mut issues = fallow_api::build_codeclimate(results, root, rules);
     annotate_dead_code_owner(&mut issues, Some(resolver));
     emit_codeclimate(issues)
 }
 
-/// Fetch CodeClimate issues from the API-owned health output builder.
-#[must_use]
-pub(super) fn api_health_codeclimate_issues(
-    report: &HealthReport,
-    root: &Path,
-) -> Vec<CodeClimateIssue> {
-    fallow_api::build_health_codeclimate(report, root)
-}
-
 /// Print health analysis results in CodeClimate format.
 pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> ExitCode {
-    emit_codeclimate(api_health_codeclimate_issues(report, root))
+    emit_codeclimate(fallow_api::build_health_codeclimate(report, root))
 }
 
 /// Print health CodeClimate output with a per-issue `group` field.
@@ -869,23 +845,14 @@ pub(super) fn print_grouped_health_codeclimate(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut issues = api_health_codeclimate_issues(report, root);
+    let mut issues = fallow_api::build_health_codeclimate(report, root);
     annotate_health_groups(&mut issues, Some(resolver));
     emit_codeclimate(issues)
 }
 
-/// Fetch CodeClimate issues from the API-owned duplication output builder.
-#[must_use]
-pub(super) fn api_duplication_codeclimate_issues(
-    report: &DuplicationReport,
-    root: &Path,
-) -> Vec<CodeClimateIssue> {
-    fallow_api::build_duplication_codeclimate(report, root)
-}
-
 /// Print duplication analysis results in CodeClimate format.
 pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &Path) -> ExitCode {
-    emit_codeclimate(api_duplication_codeclimate_issues(report, root))
+    emit_codeclimate(fallow_api::build_duplication_codeclimate(report, root))
 }
 
 /// Print duplication CodeClimate output with a per-issue `group` field.
@@ -901,7 +868,7 @@ pub(super) fn print_grouped_duplication_codeclimate(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut issues = api_duplication_codeclimate_issues(report, root);
+    let mut issues = fallow_api::build_duplication_codeclimate(report, root);
     annotate_duplication_groups(&mut issues, report, root, Some(resolver));
     emit_codeclimate(issues)
 }

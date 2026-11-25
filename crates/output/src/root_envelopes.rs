@@ -33,18 +33,6 @@ struct AuditSchemaVersion(u32);
 #[schemars(extend("const" = COMBINED_SCHEMA_VERSION))]
 struct CombinedSchemaVersion(u32);
 
-/// Serialize a typed fallow root envelope.
-///
-/// # Errors
-///
-/// Returns a serde error when the provided envelope cannot be converted to a
-/// JSON value.
-pub fn serialize_json_root_output<T: Serialize>(
-    output: T,
-) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::to_value(output)
-}
-
 /// Serialize an output envelope and apply an explicit root discriminator.
 ///
 /// Use this for command surfaces whose runtime shape is already a typed

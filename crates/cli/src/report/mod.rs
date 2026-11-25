@@ -31,6 +31,8 @@ use std::time::Duration;
 
 use fallow_api::DuplicationGrouping;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
+#[cfg(test)]
+use fallow_output::normalize_uri;
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 use fallow_types::semantic::SemanticSymbolImpact;
@@ -385,15 +387,6 @@ fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
 
-/// Normalize a path string to a valid URI: forward slashes and percent-encoded brackets.
-///
-/// Brackets (`[`, `]`) are not valid in URI path segments per RFC 3986 and cause
-/// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
-#[must_use]
-pub(crate) fn normalize_uri(path_str: &str) -> String {
-    fallow_output::normalize_uri(path_str)
-}
-
 /// Severity level for human-readable output.
 #[derive(Clone, Copy, Debug)]
 pub enum Level {
@@ -685,7 +678,7 @@ fn print_results_ci_comment(
     // Analysis-root-relative on purpose: the review renderer applies the
     // presentation prefix after its diff lookups, and rebasing here would
     // prefix twice and key the filter in the wrong namespace.
-    let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
+    let issues = fallow_api::build_codeclimate(results, ctx.root, ctx.rules);
     let incomplete = ci::required_type_aware_incomplete(ctx.type_aware);
     let conclusion = incomplete.then_some(fallow_output::PrDecisionConclusion::Failure);
     let advisory =
@@ -911,7 +904,7 @@ fn print_duplication_ci_comment(
     ctx: &ReportContext<'_>,
     grouping_dropped: Option<&str>,
 ) -> ExitCode {
-    let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
+    let issues = fallow_api::build_duplication_codeclimate(report, root);
     let advisory =
         baseline_advisory_text::advisory_line_for_staleness(ctx.baseline_staleness.as_ref());
     let requests = crate::requests::request_outcomes();
@@ -1289,7 +1282,7 @@ fn print_health_ci_comment(
     ctx: &ReportContext<'_>,
     grouping_dropped: Option<&str>,
 ) -> ExitCode {
-    let issues = codeclimate::api_health_codeclimate_issues(report, root);
+    let issues = fallow_api::build_health_codeclimate(report, root);
     // Health's own summary is the carrier on the envelope, and the report in
     // hand is the same object, so read it from there rather than from the
     // context: a grouped render rebuilds the report but not the context.

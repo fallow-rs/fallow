@@ -46,7 +46,6 @@ pub mod code_routes;
 pub mod codeowners;
 mod core_backend;
 pub mod cross_reference;
-mod css;
 pub mod dead_code;
 mod dead_code_export_hints;
 pub mod diff_scope;

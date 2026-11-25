@@ -208,6 +208,7 @@ mod gate_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::ci::diff_filter::DiffIndex;
     use fallow_engine::changed_files::filter_results_by_changed_files as filter_changed_files;
     use fallow_types::extract::MemberKind;
     use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
@@ -1406,13 +1407,9 @@ mod tests {
         }
     }
 
-    pub(super) fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
-        crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
-    }
-
     #[test]
     fn filter_by_diff_drops_unused_export_not_on_added_line() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -1459,7 +1456,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_scopes_unresolved_callee_diagnostics_to_added_lines() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -1484,7 +1481,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_project_level_deps_even_when_diff_misses_package_json() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -1531,7 +1528,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_security_finding_when_secret_source_changed() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/server.ts b/src/server.ts\n\
              --- a/src/server.ts\n\
              +++ b/src/server.ts\n\
@@ -1572,7 +1569,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_security_finding_when_untrusted_source_trace_changed() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/route.ts b/src/route.ts\n\
              --- a/src/route.ts\n\
              +++ b/src/route.ts\n\
@@ -1620,7 +1617,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_drops_duplicate_export_when_no_location_in_diff() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/other.ts b/src/other.ts\n\
              --- a/src/other.ts\n\
              +++ b/src/other.ts\n\
@@ -1652,7 +1649,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_duplicate_export_when_both_locations_in_diff() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -1690,7 +1687,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_duplicate_export_when_pr_adds_one_against_off_diff_existing() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -1739,7 +1736,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_keeps_unlisted_dep_only_when_at_least_one_import_site_in_diff() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\
@@ -1778,7 +1775,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_drops_unlisted_dep_when_no_import_sites_in_diff() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/elsewhere.ts b/src/elsewhere.ts\n\
              --- a/src/elsewhere.ts\n\
              +++ b/src/elsewhere.ts\n\
@@ -1805,7 +1802,7 @@ mod tests {
 
     #[test]
     fn filter_by_diff_unused_files_use_file_level_membership() {
-        let diff = build_diff(
+        let diff = DiffIndex::from_unified_diff(
             "diff --git a/src/a.ts b/src/a.ts\n\
              --- a/src/a.ts\n\
              +++ b/src/a.ts\n\

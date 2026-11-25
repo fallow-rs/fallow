@@ -434,7 +434,7 @@ pub use root_envelopes::{
     AUDIT_SCHEMA_VERSION, AuditCommand, AuditOutput, COMBINED_SCHEMA_VERSION, CombinedMeta,
     CombinedOutput, FallowOutput, SkipReasonName, SkippedAnalysis, SkippedAnalysisName,
     attach_telemetry_meta, serialize_audit_json_output, serialize_combined_json_output,
-    serialize_json_root_output, serialize_named_json_output,
+    serialize_named_json_output,
 };
 pub use sarif::{
     GHAS_SARIF_FINGERPRINT_KEY, SARIF_CATEGORY_AUDIT_DEAD_CODE, SARIF_CATEGORY_AUDIT_DIFF_RISK,
