@@ -57,6 +57,8 @@ import {
   isSupportedSemanticQuery,
   semanticOpenFiles,
   semanticOpenProjects,
+  projectsNamed,
+  graphProjects,
 } from "./semantic-input.mjs";
 
 const { SignatureKind, SymbolFlags } = sync;
@@ -1551,11 +1553,6 @@ const publicApiGraph = (root, project, entryPoints, includeEntries = false) => {
   return { exports, entries, edges, leaks };
 };
 
-const graphProjects = (snapshot, explicitProjects) =>
-  (explicitProjects.length > 0 ? explicitProjects : snapshot.getProjects()).filter(
-    (project) => project.program.getSourceFileNames().length > 0,
-  );
-
 const readyProjectStates = (query, states) => {
   const ready = states.filter((state) => state.status === "complete");
   if (ready.length > 0) return { ready };
@@ -1942,6 +1939,8 @@ const semanticProjectSelection = (snapshot, openProjects, openFiles, allowDefaul
   const explicitProjects = openProjects
     .map((project) => snapshot.getProject(project))
     .filter(Boolean);
+  if (!allowDefaultFallback && explicitProjects.length === 0)
+    return { explicitProjects, selectedProjects: [] };
   const symbolProjects = openFiles
     .map((file) => selectProjectForSymbol(snapshot, explicitProjects, file, allowDefaultFallback))
     .filter(Boolean);
@@ -1982,7 +1981,7 @@ const semanticSetup = (root, projects, queries, api, sessionState) => {
     sessionState.openProjects = openProjectSet;
     previousSnapshot?.dispose();
   }
-  const allowDefaultFallback = projects.length === 0;
+  const allowDefaultFallback = !projectsNamed(projects);
   return {
     snapshot,
     openFiles,

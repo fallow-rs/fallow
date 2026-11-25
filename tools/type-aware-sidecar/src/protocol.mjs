@@ -354,17 +354,19 @@ const requireUniqueProjects = (projects) => {
 
 /**
  * The projects of a request. A project config that resolves outside the read
- * scope of the root is dropped, and the other projects stay.
+ * scope of the root is dropped, and the other projects stay. The list records
+ * in `named` whether the request named projects (see `projectsNamed`).
  */
 const parseProjects = (value, root) => {
-  const projects = requireBoundedArray(value, "projects", MAX_PROJECTS)
+  const named = requireBoundedArray(value, "projects", MAX_PROJECTS);
+  const projects = named
     .map((project, index) => {
       const projectPath = requireString(project, `projects[${index}]`);
       return { path: projectPath, absolutePath: path.resolve(root, projectPath) };
     })
     .filter((project) => resolvesInside(root, project.absolutePath));
   requireUniqueProjects(projects);
-  return projects;
+  return Object.assign(projects, { named: named.length > 0 });
 };
 
 const validateGraphQueryCount = (queries) => {

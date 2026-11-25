@@ -7,6 +7,7 @@ import test from "node:test";
 import { createApi, withReadScope } from "../src/backend.mjs";
 import { createReadScope, isWithin, resolvesInside } from "../src/read-scope.mjs";
 import { parseRequest } from "../src/protocol.mjs";
+import { analyzeSemanticQueries } from "../src/semantic.mjs";
 import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 
 const OUTSIDE_TEXT = 'export const value = "text-of-the-other-file";\n';
@@ -230,5 +231,43 @@ test("a node_modules directory above the scope base stays out of scope", () => {
     writeFileSync(path.join(above, "index.d.ts"), OUTSIDE_TEXT);
     const scope = createReadScope(root, [], "");
     assert.equal(scope.readable(path.join(above, "index.d.ts")), false);
+  });
+});
+
+test("a request whose named projects all leave the root opens no project", () => {
+  withLayout(({ root, outside }) => {
+    writeFileSync(path.join(outside, "tsconfig.json"), "{}");
+    writeFileSync(path.join(root, "tsconfig.json"), JSON.stringify({ include: ["src"] }));
+    writeFileSync(
+      path.join(root, "src", "use.ts"),
+      'import { own } from "./own";\nexport const v = own;\n',
+    );
+    const request = parseRequest({
+      protocol_version: WIRE_PROTOCOL_VERSION,
+      operation: ANALYSIS_OPERATION,
+      root,
+      projects: ["../elsewhere/tsconfig.json"],
+      evidence_limit: 5,
+      queries: [
+        {
+          id: 0,
+          operation: "symbol-use",
+          symbol: {
+            path: "src/own.ts",
+            namespace: "value",
+            declaration_kind: "export",
+            exported_name: "own",
+            local_name: "own",
+            line: 1,
+            col: 13,
+          },
+          framework_contracts: [],
+        },
+      ],
+    });
+    const result = analyzeSemanticQueries(request);
+    assert.deepEqual(result.selectedTsconfigs, []);
+    assert.equal(result.results[0].status, "unavailable");
+    assert.equal(result.results[0].evidence.length, 0);
   });
 });

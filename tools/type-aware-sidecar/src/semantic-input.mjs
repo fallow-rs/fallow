@@ -24,9 +24,21 @@ export const semanticOpenFiles = (queries) =>
     .filter((query) => query.symbol && isSupportedSemanticQuery(query))
     .map((query) => query.symbol.absolutePath);
 
+/**
+ * True when the request named projects. Such a request gets only the named
+ * projects that are left, and no fallback to another project.
+ */
+export const projectsNamed = (projects) => projects.named ?? projects.length > 0;
+
 /** Resolve explicit projects or the conventional root project. */
 export const semanticOpenProjects = (root, projects) => {
-  if (projects.length > 0) return projects.map((project) => project.absolutePath);
+  if (projectsNamed(projects)) return projects.map((project) => project.absolutePath);
   const conventionalProject = path.join(root, "tsconfig.json");
   return existsSync(conventionalProject) ? [conventionalProject] : [];
 };
+
+/** The projects of the graph queries: the explicit ones, else each project with files. */
+export const graphProjects = (snapshot, explicitProjects) =>
+  (explicitProjects.length > 0 ? explicitProjects : snapshot.getProjects()).filter(
+    (project) => project.program.getSourceFileNames().length > 0,
+  );
