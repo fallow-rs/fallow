@@ -43,6 +43,9 @@ const MCP_VERSION_PREFIX: &str = "fallow-mcp ";
 /// The version line is short; the probe reads no more than this many bytes.
 const PROBE_OUTPUT_LIMIT: u64 = 4096;
 const NO_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher found. Install fallow through npm (npm i -D fallow), or put fallow-mcp on PATH. cargo install fallow-mcp and the GitHub release archive both supply fallow-mcp";
+/// A user-level entry starts in every project, so it needs a launcher outside
+/// each project: a global install.
+const NO_USER_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher outside the project found. A user-level entry needs a global install: npm install -g fallow, or cargo install fallow-cli";
 
 /// How the MCP server should be started.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -367,7 +370,11 @@ fn install_for(
             StepReport::new(Some(harness), Step::Mcp, StepStatus::Skipped, ctx.scope())
                 .path(ctx, &path)
                 .reason(Reason::McpEntryUnavailable)
-                .detail(NO_LAUNCHER_DETAIL),
+                .detail(if ctx.user {
+                    NO_USER_LAUNCHER_DETAIL
+                } else {
+                    NO_LAUNCHER_DETAIL
+                }),
         ];
     };
     if harness == Harness::Claude && ctx.user {

@@ -561,3 +561,22 @@ fn guide_install_refuses_a_dangling_link() {
     assert_symlink_skip(row(&steps, "AGENTS.md"));
     assert_detail_names(row(&steps, "AGENTS.md"), "AGENTS.md");
 }
+
+/// A user-level MCP entry needs a global install, so the skip names one.
+#[test]
+fn user_mcp_install_without_a_launcher_names_a_global_install() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let mut user = ctx(root.path(), Mode::Install);
+    user.user = true;
+    user.home = Some(home.path().to_path_buf());
+
+    let steps = mcp::install(&user, &[Harness::Codex], None);
+
+    let detail = steps[0].detail.clone().unwrap_or_default();
+    assert!(detail.contains("npm install -g fallow"), "{detail}");
+    assert!(detail.contains("cargo install fallow-cli"), "{detail}");
+    let project = mcp::install(&ctx(root.path(), Mode::Install), &[Harness::Codex], None);
+    let detail = project[0].detail.clone().unwrap_or_default();
+    assert!(detail.contains("npm i -D fallow"), "{detail}");
+}
