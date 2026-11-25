@@ -1,7 +1,8 @@
 # Rule precision
 
 `benchmarks/rule-precision.json` records the measured precision of each rule.
-`benchmarks/rule-precision-summary.md` shows the same data as a table. The
+The [summary](../benchmarks/rule-precision-summary.md) shows the same data as a
+table. The
 script `scripts/rule-precision.mjs` writes the summary from the JSON file. Do
 not edit the summary by hand.
 
