@@ -492,20 +492,53 @@ enum Token {
     Other,
 }
 
+/// The cargo feature that only `[dev-dependencies]` enable. Code behind it
+/// compiles only for tests and benches.
+const TEST_SUPPORT_FEATURE: &str = "testing";
+
+/// Whether a `cfg` attribute in `attrs` lets the item compile only in a test
+/// build. Such an item is test code for the source guards.
 pub(super) fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let syn::Meta::List(list) = &attr.meta else {
-            return false;
-        };
-        let text = list.tokens.to_string();
-        let words: Vec<&str> = text
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .collect();
-        words.contains(&"test") && !words.contains(&"not")
+        attr.path().is_ident("cfg")
+            && attr
+                .parse_args::<syn::Meta>()
+                .is_ok_and(|predicate| needs_test_build(&predicate))
     })
+}
+
+/// Whether the `cfg` predicate is false in each build without `test` and
+/// without the test-support feature.
+///
+/// A `not(..)` gives `false`, because the guards must scan code that can
+/// compile outside a test build. An unknown or unparsable form gives `false`
+/// for the same reason.
+fn needs_test_build(predicate: &syn::Meta) -> bool {
+    match predicate {
+        syn::Meta::Path(path) => path.is_ident("test"),
+        syn::Meta::List(list) => {
+            let Ok(operands) = list.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            ) else {
+                return false;
+            };
+            if list.path.is_ident("all") {
+                operands.iter().any(needs_test_build)
+            } else if list.path.is_ident("any") {
+                !operands.is_empty() && operands.iter().all(needs_test_build)
+            } else {
+                false
+            }
+        }
+        syn::Meta::NameValue(pair) => {
+            pair.path.is_ident("feature")
+                && matches!(
+                    &pair.value,
+                    syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(name), .. })
+                        if name.value() == TEST_SUPPORT_FEATURE
+                )
+        }
+    }
 }
 
 const fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
@@ -829,6 +862,7 @@ fn guard_skips_each_file_that_a_cfg_test_module_declares() {
         "crates/core/src/analyze/unused_deps_tests/helpers.rs",
         "crates/cli/src/selection_key_guard_tests.rs",
         "crates/cli/tests/integration/main.rs",
+        "crates/extract/src/cache/tests.rs",
     ] {
         assert!(test_sources.contains(path), "{path} is a test source");
     }
@@ -838,5 +872,50 @@ fn guard_skips_each_file_that_a_cfg_test_module_declares() {
         "crates/graph/src/graph/re_exports/propagate.rs",
     ] {
         assert!(!test_sources.contains(path), "{path} is production code");
+    }
+}
+
+/// The attributes of an empty module that has `attrs` above it.
+fn attrs_of(attrs: &str) -> Vec<syn::Attribute> {
+    let file = syn::parse_file(&format!("{attrs}\nmod m {{}}\n")).expect("item parses");
+    match file.items.into_iter().next() {
+        Some(syn::Item::Mod(module)) => module.attrs,
+        _ => panic!("one module item"),
+    }
+}
+
+/// A `cfg` is a test gate when the item compiles only in a test build. A
+/// `not(..)` beside `test` does not make the item compile outside a test
+/// build, and an `any(..)` with another branch does. The `testing` feature
+/// counts as a test build, because only `[dev-dependencies]` enable it.
+#[test]
+fn a_cfg_is_a_test_gate_when_the_item_needs_a_test_build() {
+    for attrs in [
+        "#[cfg(test)]",
+        "#[cfg(all(test, not(miri)))]",
+        "#[cfg(all(test, feature = \"x\"))]",
+        "#[cfg(all(unix, all(test, not(miri))))]",
+        "#[cfg(any(test, all(test, unix)))]",
+        "#[cfg(any(test, feature = \"testing\"))]",
+        "#[cfg(feature = \"testing\")]",
+        "#[cfg(unix)]\n#[cfg(test)]",
+        "#[doc = \"x\"]\n#[cfg(test)]",
+    ] {
+        assert!(is_cfg_test(&attrs_of(attrs)), "{attrs} is a test gate");
+    }
+    for attrs in [
+        "#[cfg(not(test))]",
+        "#[cfg(any(test, feature = \"x\"))]",
+        "#[cfg(not(any(test, miri)))]",
+        "#[cfg(unix)]",
+        "#[cfg(any())]",
+        "#[cfg(all())]",
+        "#[cfg(all(test, 1))]",
+        "#[cfg(feature = \"other\")]",
+        "#[cfg(not(feature = \"testing\"))]",
+        "#[cfg_attr(test, allow(dead_code))]",
+        "#[doc = \"test\"]",
+    ] {
+        assert!(!is_cfg_test(&attrs_of(attrs)), "{attrs} is no test gate");
     }
 }
