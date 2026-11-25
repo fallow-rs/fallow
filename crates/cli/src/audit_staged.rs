@@ -64,6 +64,9 @@ impl StagedTree {
             path,
             root,
         };
+        // A drop of `tree` removes the worktree, so the check runs after its
+        // construction and before the first read or write under the root.
+        tree.require_root_inside_worktree()?;
         let patterns = workspace_patterns(&tree.root, config);
         fallow_engine::repo_refs::materialize_base_dependency_context(
             host_root, &tree.root, &patterns,
@@ -72,6 +75,23 @@ impl StagedTree {
         // are not changes of the commit.
         fallow_engine::changed_files::exclude_untracked_files();
         Ok(tree)
+    }
+
+    /// Refuse a root that a link in the staged index moves out of the
+    /// worktree. A root that the index does not contain stays allowed here.
+    fn require_root_inside_worktree(&self) -> Result<(), String> {
+        if std::fs::symlink_metadata(&self.root).is_err() {
+            return Ok(());
+        }
+        let inside =
+            dunce::canonicalize(&self.root).is_ok_and(|resolved| resolved.starts_with(&self.path));
+        if inside {
+            return Ok(());
+        }
+        Err(format!(
+            "--staged refuses the root '{}': a link in the staged index resolves it outside the staged worktree",
+            self.root.display()
+        ))
     }
 
     /// The analysis root inside the worktree. It maps onto the host root.
@@ -149,6 +169,7 @@ fn workspace_patterns(root: &Path, config: crate::runtime_support::ConfigFlags<'
 mod tests {
     use super::*;
     use crate::runtime_support::ConfigFlags;
+    use fallow_engine::git_fixture::fixture_git_capture as git;
 
     #[test]
     fn workspace_patterns_come_from_the_explicit_config() {
@@ -169,5 +190,42 @@ mod tests {
             ..ConfigFlags::default()
         };
         assert_eq!(workspace_patterns(root, flags), ["packages/*"]);
+    }
+
+    /// The index can hold a link where the checkout has a directory. A root
+    /// below that link must not move the staged audit out of its worktree.
+    #[cfg(unix)]
+    #[test]
+    fn staged_tree_refuses_a_root_that_a_staged_link_moves_outside_the_worktree() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo = temp.path().join("repo");
+        let app = repo.join("apps").join("mobile");
+        std::fs::create_dir_all(&app).expect("app dir");
+        std::fs::write(app.join("index.ts"), "export const a = 1;\n").expect("source");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(outside.join("mobile")).expect("outside dir");
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["rm", "-q", "-r", "--cached", "apps"]);
+        let link_blob = {
+            let path = temp.path().join("link-target");
+            std::fs::write(&path, outside.display().to_string()).expect("link target");
+            git(&repo, &["hash-object", "-w", path.to_str().expect("utf-8")])
+        };
+        git(
+            &repo,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{link_blob},apps"),
+            ],
+        );
+
+        let err = StagedTree::create(&app, ConfigFlags::default())
+            .err()
+            .expect("the staged tree refuses the root");
+        assert!(err.contains("outside the staged worktree"), "got: {err}");
     }
 }
