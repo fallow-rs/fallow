@@ -575,8 +575,10 @@ mod tests {
                 .expect("canonical")
                 .components()
                 .count();
-            // The project is one level below the temp dir, and the first
-            // component is the file system root.
+            // The project is another temp dir with the same parent, so it has
+            // `depth` components with the file system root. Its `depth - 1`
+            // parents lead to the file system root, and one more `..`
+            // stays there.
             let up = "../".repeat(depth);
             let (_dir, root) = project_extending(&format!("{up}dev/{device}"));
 

@@ -1145,6 +1145,15 @@ pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String])
 /// file system call. An absolute path must name a place below the root by
 /// its text, see [`crate::project_read::absolute_path_text_inside`].
 fn plugin_path_text_allowed(root: &Path, canonical_root: &Path, path: &Path) -> bool {
+    // A Windows prefix without a root, such as `Z:x`, names a place relative
+    // to the current directory of that drive: refuse it.
+    let has_prefix = matches!(
+        path.components().next(),
+        Some(std::path::Component::Prefix(_))
+    );
+    if has_prefix && !path.is_absolute() {
+        return false;
+    }
     !path.is_absolute()
         || crate::project_read::absolute_path_text_inside(path, canonical_root, root)
 }

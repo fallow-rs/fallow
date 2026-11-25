@@ -1193,3 +1193,17 @@ fn configured_plugin_diagnostics_refuse_a_share_path_by_text() {
             .all(|file| !file.starts_with("//host"))
     );
 }
+
+#[cfg(windows)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn configured_plugin_diagnostics_refuse_a_drive_path_without_a_root() {
+    let dir = tempfile::tempdir().expect("temp root");
+    let diagnostics =
+        diagnose_configured_external_plugins(dir.path(), &["Z:plugin.json".to_string()]);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].kind,
+        ConfiguredPluginDiagnosticKind::OutsideProjectRoot
+    );
+}

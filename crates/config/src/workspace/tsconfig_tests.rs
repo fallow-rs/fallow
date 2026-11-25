@@ -1133,11 +1133,11 @@ fn a_package_manifest_link_out_of_the_scope_is_not_read_for_extends() {
 
     // The linked manifest is not read, so its `tsconfig` field does not apply.
     assert_eq!(
-        package_root_tsconfig(&package),
+        package_root_tsconfig(&root, &package),
         Some(package.join("tsconfig.json"))
     );
     assert_eq!(
-        package_subpath_tsconfig(&package, "tsconfig.json"),
+        package_subpath_tsconfig(&root, &package, "tsconfig.json"),
         Some(package.join("tsconfig.json"))
     );
 }
