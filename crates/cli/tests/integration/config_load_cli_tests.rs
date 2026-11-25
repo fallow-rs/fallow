@@ -1096,3 +1096,49 @@ fn production_cases_of_config(config: (Option<&'static str>, [bool; 3])) -> Vec<
     }
     failures
 }
+
+/// A config link in a project below a git checkout `home`, with no git
+/// checkout of its own: `home/code/project/.fallowrc.json` links to
+/// `home/code/outside.json`, and git does not track the link.
+#[cfg(unix)]
+fn project_below_a_home_checkout() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dunce::canonicalize(dir.path()).unwrap().join("home");
+    let project = home.join("code/project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("package.json"), r#"{"name":"linked-config"}"#).unwrap();
+    std::fs::write(project.join("src/index.ts"), "export const ok = 1;\n").unwrap();
+    std::fs::write(home.join("code/outside.json"), "{}").unwrap();
+    std::os::unix::fs::symlink("../outside.json", project.join(".fallowrc.json")).unwrap();
+    git(&home, &["init", "-q"]);
+    (dir, home, project)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_config_link_in_a_checkout_at_the_home_directory_is_refused() {
+    let (dir, home, project) = project_below_a_home_checkout();
+    let home_text = home.to_str().unwrap();
+    let refused = run(&project, &["dead-code", "--quiet"], &[("HOME", home_text)]);
+    assert_eq!(refused.code, 2, "{}", refused.stderr);
+    assert!(
+        refused.stderr.contains("symbolic link"),
+        "{}",
+        refused.stderr
+    );
+
+    // The same checkout below another home directory holds the project.
+    let other_home = dunce::canonicalize(dir.path()).unwrap().join("other-home");
+    std::fs::create_dir(&other_home).unwrap();
+    let loaded = run(
+        &project,
+        &["dead-code", "--quiet"],
+        &[("HOME", other_home.to_str().unwrap())],
+    );
+    assert!(
+        !loaded.stderr.contains("symbolic link"),
+        "{}",
+        loaded.stderr
+    );
+    assert_ne!(loaded.code, 2, "{}", loaded.stderr);
+}

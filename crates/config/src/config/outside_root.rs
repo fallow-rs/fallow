@@ -198,6 +198,13 @@ pub fn set_tracked_link_probe(probe: TrackedLinkProbe) {
 
 /// What the probe of [`set_tracked_link_probe`] tells about `path`, or
 /// `None` when no probe is set.
+///
+/// A git checkout whose top level is above the directory of `path` and is
+/// the home directory, an ancestor of it, or the file system root does not
+/// count, the same as for [`crate::project_scope_base`]. Such a checkout
+/// holds dotfiles, not the project, so the answer is then `None`.
 pub(super) fn git_tracks(path: &Path) -> Option<bool> {
+    let dir = dunce::canonicalize(path.parent()?).ok()?;
+    crate::project_read::project_checkout_top(&dir)?;
     TRACKED_LINK_PROBE.get().and_then(|probe| probe(path))
 }

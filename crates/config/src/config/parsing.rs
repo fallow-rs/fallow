@@ -172,10 +172,17 @@ fn entry_present(path: &Path) -> bool {
 }
 
 /// The directory that a discovered config file in `dir` must resolve in:
-/// the nearest repository root at or above `dir`, else `dir` itself.
+/// the nearest repository root at or above `dir`, else `dir` itself. A
+/// repository root above `dir` at the home directory or above it holds
+/// dotfiles, not the project, so it does not count.
 fn discovery_base(dir: &Path) -> &Path {
     dir.ancestors()
         .find(|ancestor| is_repo_root(ancestor))
+        .filter(|top| {
+            *top == dir
+                || dunce::canonicalize(top)
+                    .is_ok_and(|top| !crate::project_read::is_home_or_above(&top))
+        })
         .unwrap_or(dir)
 }
 
@@ -615,7 +622,8 @@ struct ExtendsResolver<'a, Fetcher> {
     merge_order: MergeOrder,
     record_merge_order: bool,
     /// The directory that the files of the walk count as inside, set from
-    /// the first local file. See [`crate::project_scope_base`].
+    /// the directory that holds the first local file, before a link
+    /// resolves. See [`crate::project_scope_base`].
     scope: Option<PathBuf>,
     /// Each local file of the walk with its own value, and whether it is
     /// inside `scope`.
@@ -726,8 +734,12 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             )
         })?;
         let identity = ConfigResourceId::Local(canonical.clone());
+        // The first file is the config of the project, and it can be a link
+        // to a file elsewhere. The scope comes from the directory that holds
+        // the config entry, not from the link target.
         let scope = self.scope.get_or_insert_with(|| {
-            crate::project_scope_base(canonical.parent().unwrap_or(&canonical))
+            let entry = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+            crate::project_scope_base(entry.parent().unwrap_or(&canonical))
         });
         let inside = canonical.starts_with(scope);
         if let Some(value) = self.reuse_resolved(&identity) {

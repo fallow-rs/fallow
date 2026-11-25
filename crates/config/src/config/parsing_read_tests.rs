@@ -447,3 +447,25 @@ fn file_path_key_check_omits_a_value_of_a_file_outside_the_project() {
         .join("\n");
     assert!(message.contains(MARKER), "{message}");
 }
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_config_link_target_outside_the_project_counts_as_outside() {
+    crate::set_tracked_link_probe(test_tracked_link_probe);
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dunce::canonicalize(dir.path()).unwrap();
+    let project = outer.join("project");
+    std::fs::create_dir(&project).unwrap();
+    git(&project, &["init", "-q"]);
+    std::fs::write(
+        outer.join("outside.json"),
+        format!(r#"{{"entry": ["/{MARKER}/a.ts"]}}"#),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("../outside.json", project.join(".fallowrc.json")).unwrap();
+
+    let message = FallowConfig::find_and_load(&project).unwrap_err();
+    assert!(!message.contains(MARKER), "{message}");
+    assert!(message.contains("entry"), "{message}");
+}
