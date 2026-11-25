@@ -52,7 +52,7 @@ pub(crate) fn moved_root_reason(root: &Path) -> Option<String> {
         return None;
     }
     match dunce::canonicalize(root) {
-        Ok(resolved) if resolved == root => None,
+        Ok(resolved) if resolved == dunce::simplified(root) => None,
         Ok(resolved) => Some(format!(
             "the workspace root '{}' now resolves to '{}'; fallow skips the analysis, restart the server to analyze the new location",
             root.display(),
@@ -62,6 +62,20 @@ pub(crate) fn moved_root_reason(root: &Path) -> Option<String> {
             "the workspace root '{}' cannot be resolved: {err}; fallow skips the analysis",
             root.display()
         )),
+    }
+}
+
+#[cfg(test)]
+mod spelling_tests {
+    use super::*;
+
+    /// On Windows `std::fs::canonicalize` gives a `\\?\` path. The same
+    /// directory in that spelling has not moved.
+    #[test]
+    fn a_root_in_the_verbatim_spelling_has_not_moved() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        assert_eq!(moved_root_reason(&root), None);
     }
 }
 

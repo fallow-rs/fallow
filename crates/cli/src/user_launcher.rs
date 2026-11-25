@@ -85,9 +85,14 @@ fn is_shim_dir(dir: &Path, volta_home: Option<&Path>) -> bool {
         .map(|part| part.as_os_str().to_string_lossy().to_lowercase());
     let last = parts.next().unwrap_or_default();
     let before = parts.next().unwrap_or_default();
-    let same = |left: &Path, right: &Path| {
-        left.to_string_lossy().to_lowercase() == right.to_string_lossy().to_lowercase()
+    // Compare by component, so `vh/bin` and `vh\bin` are the same directory
+    // on Windows.
+    let lowered = |path: &Path| -> Vec<String> {
+        path.components()
+            .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
     };
+    let same = |left: &Path, right: &Path| lowered(left) == lowered(right);
     last == "shims"
         || (last == "bin" && (before == ".volta" || before == "volta"))
         || volta_home.is_some_and(|home| {
