@@ -4,7 +4,6 @@
 //! point at a custom JavaScript config module through a static `configFile`
 //! option passed to `@wuchale/vite-plugin`.
 
-use std::fs;
 use std::path::Path;
 
 use fallow_extract::JsText;
@@ -74,7 +73,9 @@ impl Plugin for WuchalePlugin {
         for custom_config in extract_vite_custom_config_files(source, config_path, root) {
             result.always_used_files.push(custom_config.clone());
             let custom_path = root.join(&custom_config);
-            if let Ok(custom_source) = fs::read_to_string(&custom_path) {
+            if let Some(custom_source) =
+                crate::discover::project_read::read_project_file(root, &custom_path)
+            {
                 credit_config_imports(&mut result, &custom_source, &custom_path);
             }
         }
@@ -300,6 +301,41 @@ fn push_unique(items: &mut Vec<String>, value: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A custom config file that links out of the project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn a_custom_config_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(
+            outside.join("custom.js"),
+            "import \"@acme/outside-adapter\";\nexport default {};\n",
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("custom.js"), root.join("custom.config.js"))
+            .expect("link");
+        let source = r#"
+            import { defineConfig } from "vite";
+            import { wuchale } from "@wuchale/vite-plugin";
+            export default defineConfig({
+                plugins: [wuchale({ configFile: "./custom.config.js" })],
+            });
+        "#;
+        let result = WuchalePlugin.resolve_config(&root.join("vite.config.ts"), source, &root);
+        assert_eq!(
+            result.always_used_files,
+            vec!["custom.config.js".to_string()]
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"@acme/outside-adapter".to_string())
+        );
+    }
 
     #[test]
     fn always_used_includes_documented_js_config_only() {

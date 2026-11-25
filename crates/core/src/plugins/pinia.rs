@@ -7,6 +7,7 @@ use fallow_types::discover::FileId;
 use fallow_types::extract::ExportName;
 
 use super::Plugin;
+use crate::discover::project_read;
 
 const ENABLERS: &[&str] = &["@pinia/nuxt"];
 const STORE_DIRS: &[&str] = &["stores", "app/stores"];
@@ -28,15 +29,15 @@ impl Plugin for PiniaPlugin {
         for dir in STORE_DIRS {
             let base = root.join(dir);
             if base.is_dir() {
-                collect_store_auto_imports(&base, &mut rules);
+                collect_store_auto_imports(root, &base, &mut rules);
             }
         }
         rules
     }
 }
 
-fn collect_store_auto_imports(dir: &Path, rules: &mut Vec<AutoImportRule>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn collect_store_auto_imports(root: &Path, dir: &Path, rules: &mut Vec<AutoImportRule>) {
+    let Some(entries) = project_read::read_project_dir(root, dir) else {
         return;
     };
     for entry in entries.flatten() {
@@ -47,7 +48,7 @@ fn collect_store_auto_imports(dir: &Path, rules: &mut Vec<AutoImportRule>) {
         if file_type.is_dir() || !has_store_extension(&path) {
             continue;
         }
-        let Ok(source) = std::fs::read_to_string(&path) else {
+        let Some(source) = project_read::read_project_file(root, &path) else {
             continue;
         };
         let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
@@ -146,6 +147,28 @@ mod tests {
             !has_rule(&rules, "unusedStoreHelper", "stores/user.ts", root),
             "non-store exports must not become Pinia auto-import providers"
         );
+    }
+
+    /// A store file or a store directory that links out of the project is
+    /// not read.
+    #[test]
+    #[cfg(unix)]
+    fn auto_imports_do_not_read_stores_that_link_out_of_the_project() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("elsewhere");
+        write_file(
+            &outside,
+            "user.ts",
+            r#"export const useUserStore = defineStore("user", () => ({}));"#,
+        );
+        std::fs::create_dir_all(root.join("stores")).expect("create stores dir");
+        std::fs::create_dir_all(root.join("app")).expect("create app dir");
+        std::os::unix::fs::symlink(outside.join("user.ts"), root.join("stores/user.ts"))
+            .expect("link");
+        std::os::unix::fs::symlink(&outside, root.join("app/stores")).expect("link");
+
+        assert!(PiniaPlugin.auto_imports(&root).is_empty());
     }
 
     #[test]

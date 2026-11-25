@@ -149,7 +149,9 @@ fn follow_extends(
     walk: &mut ExtendsWalk<'_>,
     depth: usize,
 ) {
-    if let Ok(source) = std::fs::read_to_string(path) {
+    if let Some(source) =
+        crate::discover::project_read::read_project_file(walk.project_root(), path)
+    {
         credit_config(result, path, &source, root, walk, depth + 1);
     }
 }

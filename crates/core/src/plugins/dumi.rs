@@ -126,7 +126,7 @@ impl Plugin for DumiPlugin {
 fn demo_patterns(root: &Path) -> Vec<String> {
     let mut patterns = Vec::new();
     for markdown in markdown_files(root) {
-        let Ok(text) = std::fs::read_to_string(&markdown) else {
+        let Some(text) = crate::discover::project_read::read_project_file(root, &markdown) else {
             continue;
         };
         let Some(dir) = markdown.parent() else {
@@ -205,6 +205,24 @@ fn push_demo_patterns(patterns: &mut Vec<String>, relative: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Markdown file that links out of the project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn a_markdown_file_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(
+            outside.join("doc.md"),
+            "<code src=\"./demo/a.tsx\"></code>\n",
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("doc.md"), root.join("doc.md")).expect("link");
+        assert!(demo_patterns(&root).is_empty());
+    }
 
     fn srcs(text: &str) -> Vec<String> {
         CODE_SRC_RE

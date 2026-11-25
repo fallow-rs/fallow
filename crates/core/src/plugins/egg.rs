@@ -22,6 +22,7 @@ use oxc_ast::ast::{Expression, ObjectProperty, PropertyKey};
 use oxc_ast_visit::{Visit, walk};
 
 use super::{PathRule, Plugin, PluginResult, config_parser};
+use crate::discover::project_read;
 
 const SOURCE_EXTENSION_LIST: &[&str] = &["js", "cjs", "mjs", "ts", "cts", "mts"];
 
@@ -188,7 +189,7 @@ fn resolve_load_unit(unit_dir: &Path, root: &Path, result: &mut PluginResult) {
     let Some(unit) = relative_dir(unit_dir, root) else {
         return;
     };
-    let egg = read_manifest(&unit_dir.join(PACKAGE_JSON))
+    let egg = read_manifest(root, &unit_dir.join(PACKAGE_JSON))
         .and_then(|manifest| manifest.get("egg").cloned());
     // The static entry patterns cover the unit at the package root, and the
     // package.json hooks credit its `egg` block and seed its modules.
@@ -196,7 +197,7 @@ fn resolve_load_unit(unit_dir: &Path, root: &Path, result: &mut PluginResult) {
         Vec::new()
     } else {
         let mut files = Vec::new();
-        collect_unit_files(unit_dir, &mut files);
+        collect_unit_files(unit_dir, root, &mut files);
         push_file_entries(&files, root, result);
         egg.as_ref().map(egg_block_packages).unwrap_or_default()
     };
@@ -219,12 +220,12 @@ fn resolve_load_unit(unit_dir: &Path, root: &Path, result: &mut PluginResult) {
 /// files with an `eggModule` key (`ModuleConfigUtil.readModuleReference`).
 fn resolve_unit_modules(unit_dir: &Path, root: &Path, result: &mut PluginResult) {
     let config_dir = unit_dir.join("config");
-    if let Some(modules) = read_manifest(&config_dir.join("module.json")) {
+    if let Some(modules) = read_manifest(root, &config_dir.join("module.json")) {
         resolve_module_json(&modules, &config_dir, unit_dir, root, result);
         return;
     }
     let mut module_dirs = Vec::new();
-    scan_module_dirs(unit_dir, 0, &mut module_dirs);
+    scan_module_dirs(unit_dir, root, 0, &mut module_dirs);
     for dir in module_dirs {
         push_module_files(&dir, root, result);
     }
@@ -265,18 +266,18 @@ fn resolve_module_json(
 /// `eggModule` object. The scan skips the directories that tegg skips
 /// (`node_modules`, hidden directories, `coverage`) and `test` directories,
 /// whose fixture apps are load units of their own.
-fn scan_module_dirs(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+fn scan_module_dirs(dir: &Path, root: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     if depth > MODULE_SCAN_DEPTH {
         return;
     }
-    if read_manifest(&dir.join(PACKAGE_JSON)).is_some_and(|manifest| {
+    if read_manifest(root, &dir.join(PACKAGE_JSON)).is_some_and(|manifest| {
         manifest
             .get("eggModule")
             .is_some_and(serde_json::Value::is_object)
     }) {
         found.push(dir.to_path_buf());
     }
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Some(entries) = project_read::read_project_dir(root, dir) else {
         return;
     };
     for entry in entries.flatten() {
@@ -293,7 +294,7 @@ fn scan_module_dirs(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
         if name.starts_with('.') || matches!(name, "node_modules" | "coverage" | "test") {
             continue;
         }
-        scan_module_dirs(&entry.path(), depth + 1, found);
+        scan_module_dirs(&entry.path(), root, depth + 1, found);
     }
 }
 
@@ -303,7 +304,7 @@ fn scan_module_dirs(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
 /// `test` and `coverage` directories.
 fn push_module_files(dir: &Path, root: &Path, result: &mut PluginResult) {
     let mut files = Vec::new();
-    walk_source_files(dir, 0, true, &mut files);
+    walk_source_files(dir, root, 0, true, &mut files);
     files.retain(|file| {
         file.file_name()
             .and_then(OsStr::to_str)
@@ -329,7 +330,7 @@ fn push_file_entries(files: &[PathBuf], root: &Path, result: &mut PluginResult) 
 
 /// Collect the files that the Egg loader loads from the load unit at
 /// `unit_dir`.
-fn collect_unit_files(unit_dir: &Path, files: &mut Vec<PathBuf>) {
+fn collect_unit_files(unit_dir: &Path, root: &Path, files: &mut Vec<PathBuf>) {
     let app_dir = unit_dir.join("app");
     let config_dir = unit_dir.join("config");
     let stems: [(&Path, &[&str]); 3] = [
@@ -338,7 +339,7 @@ fn collect_unit_files(unit_dir: &Path, files: &mut Vec<PathBuf>) {
         (&config_dir, &["config", "plugin"]),
     ];
     for (dir, allowed) in stems {
-        files.extend(list_source_files(dir).into_iter().filter(|file| {
+        files.extend(list_source_files(dir, root).into_iter().filter(|file| {
             file.file_name()
                 .and_then(OsStr::to_str)
                 .and_then(|name| name.split('.').next())
@@ -346,19 +347,19 @@ fn collect_unit_files(unit_dir: &Path, files: &mut Vec<PathBuf>) {
         }));
     }
     files.extend(
-        list_source_files(&app_dir.join("router"))
+        list_source_files(&app_dir.join("router"), root)
             .into_iter()
             .filter(|file| file.file_stem().is_some_and(|stem| stem == "index")),
     );
-    files.extend(list_source_files(&app_dir.join("extend")));
+    files.extend(list_source_files(&app_dir.join("extend"), root));
     for name in RECURSIVE_APP_DIRS {
-        walk_source_files(&app_dir.join(name), 0, false, files);
+        walk_source_files(&app_dir.join(name), root, 0, false, files);
     }
 }
 
 /// The source files directly inside `dir`, without declaration files.
-fn list_source_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn list_source_files(dir: &Path, root: &Path) -> Vec<PathBuf> {
+    let Some(entries) = project_read::read_project_dir(root, dir) else {
         return Vec::new();
     };
     let mut files: Vec<PathBuf> = entries
@@ -374,12 +375,18 @@ fn list_source_files(dir: &Path) -> Vec<PathBuf> {
 /// Collect the source files below `dir`. The walk skips hidden directories
 /// and `node_modules`, and with `skip_tests` also `test` and `coverage`, as
 /// the tegg loader does.
-fn walk_source_files(dir: &Path, depth: usize, skip_tests: bool, files: &mut Vec<PathBuf>) {
+fn walk_source_files(
+    dir: &Path,
+    root: &Path,
+    depth: usize,
+    skip_tests: bool,
+    files: &mut Vec<PathBuf>,
+) {
     if depth > WALK_DEPTH {
         return;
     }
-    files.extend(list_source_files(dir));
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    files.extend(list_source_files(dir, root));
+    let Some(entries) = project_read::read_project_dir(root, dir) else {
         return;
     };
     let mut dirs: Vec<PathBuf> = entries
@@ -396,7 +403,7 @@ fn walk_source_files(dir: &Path, depth: usize, skip_tests: bool, files: &mut Vec
         .collect();
     dirs.sort();
     for child in dirs {
-        walk_source_files(&child, depth + 1, skip_tests, files);
+        walk_source_files(&child, root, depth + 1, skip_tests, files);
     }
 }
 
@@ -456,7 +463,7 @@ fn owning_manifest(start_dir: &Path, root: &Path) -> PathBuf {
         }
         let manifest_path = dir.join(PACKAGE_JSON);
         if !is_in_fixture_dir(dir, root)
-            && let Some(manifest) = read_manifest(&manifest_path)
+            && let Some(manifest) = read_manifest(root, &manifest_path)
             && DEPENDENCY_SECTIONS
                 .iter()
                 .any(|section| manifest.get(*section).is_some())
@@ -481,8 +488,10 @@ fn is_in_fixture_dir(dir: &Path, root: &Path) -> bool {
     })
 }
 
-fn read_manifest(path: &Path) -> Option<serde_json::Value> {
-    let source = std::fs::read_to_string(path).ok()?;
+/// The JSON of the project file `path`, or `None` when it is missing, does
+/// not parse, or resolves outside the read scope of `root`.
+fn read_manifest(root: &Path, path: &Path) -> Option<serde_json::Value> {
+    let source = project_read::read_project_file(root, path)?;
     serde_json::from_str(&source).ok()
 }
 
@@ -715,6 +724,30 @@ mod tests {
                 .resolve_package_json(&pkg, plain.path())
                 .is_empty()
         );
+    }
+
+    /// A module manifest that links out of the project is not read, so its
+    /// directory seeds no module files.
+    #[test]
+    #[cfg(unix)]
+    fn a_module_manifest_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        let raw = r#"{"name":"standalone","dependencies":{"@eggjs/tegg":"4"}}"#;
+        write(&root.join("package.json"), raw);
+        write(
+            &root.join("app/HelloService.ts"),
+            "export class HelloService {}",
+        );
+        write(
+            &outside.join("package.json"),
+            r#"{"eggModule":{"name":"app"}}"#,
+        );
+        std::os::unix::fs::symlink(outside.join("package.json"), root.join("app/package.json"))
+            .expect("link");
+        let pkg: fallow_config::PackageJson = serde_json::from_str(raw).expect("package json");
+        assert!(EggPlugin.resolve_package_json(&pkg, &root).is_empty());
     }
 
     #[test]

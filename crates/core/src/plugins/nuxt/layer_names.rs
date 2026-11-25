@@ -23,7 +23,7 @@ pub(super) fn layer_name(root: &Path, layer: &str, auto_registered: bool) -> Opt
     let dir = root.join(layer);
     let meta_name = LAYER_CONFIG_FILES.iter().find_map(|file| {
         let path = dir.join(file);
-        let source = std::fs::read_to_string(&path).ok()?;
+        let source = crate::discover::project_read::read_project_file(root, &path)?;
         config_parser::extract_config_string(&source, &path, &["$meta", "name"])
     });
     meta_name

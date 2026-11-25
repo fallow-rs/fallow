@@ -22,7 +22,7 @@ pub(super) fn has_matching_manifest_json(
             None => true,
         })
         .any(|path| {
-            let Ok(source) = std::fs::read_to_string(path) else {
+            let Some(source) = crate::discover::project_read::read_project_file(root, &path) else {
                 return false;
             };
             parse_manifest_json(&source).is_some_and(|manifest| matches_manifest(&manifest))
@@ -69,6 +69,21 @@ fn push_manifest_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `manifest.json` that links out of the project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn a_manifest_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(outside.join("manifest.json"), r#"{"manifest_version":3}"#).expect("write");
+        std::os::unix::fs::symlink(outside.join("manifest.json"), root.join("manifest.json"))
+            .expect("link");
+        assert!(!has_matching_manifest_json(&root, &[], None, |_| true));
+    }
 
     #[test]
     fn manifest_probe_skips_directories_outside_source_ancestors() {

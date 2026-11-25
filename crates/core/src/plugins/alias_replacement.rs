@@ -114,13 +114,16 @@ struct TsconfigModuleOptions {
 /// `references`. A root config of a monorepo often has no tsconfig of its own,
 /// and a solution-style tsconfig keeps `paths` in a referenced file.
 fn tsconfig_maps_elsewhere(find: &str, replacement: &Path, config_path: &Path) -> bool {
+    let root = crate::discover::project_read::config_project_root(
+        config_path.parent().unwrap_or(config_path),
+    );
     let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
     [replacement.parent(), config_path.parent()]
         .into_iter()
         .flatten()
         .filter_map(nearest_tsconfig)
         .flat_map(|tsconfig| {
-            let references = referenced_tsconfigs(&tsconfig);
+            let references = referenced_tsconfigs(&root, &tsconfig);
             std::iter::once(tsconfig).chain(references)
         })
         .filter(|tsconfig| seen.insert(tsconfig.clone()))
@@ -140,8 +143,8 @@ fn nearest_tsconfig(dir: &Path) -> Option<PathBuf> {
 
 /// The tsconfig files that the `references` array of `tsconfig` names. A
 /// reference to a directory names the `tsconfig.json` in that directory.
-fn referenced_tsconfigs(tsconfig: &Path) -> Vec<PathBuf> {
-    let Some(json) = read_jsonc(tsconfig) else {
+fn referenced_tsconfigs(root: &Path, tsconfig: &Path) -> Vec<PathBuf> {
+    let Some(json) = read_jsonc(root, tsconfig) else {
         return Vec::new();
     };
     let dir = tsconfig.parent().unwrap_or(tsconfig);
@@ -177,9 +180,10 @@ fn read_tsconfig_module_options(tsconfig: &Path) -> TsconfigModuleOptions {
     }
 }
 
-/// Read a JSONC file, such as a tsconfig.
-fn read_jsonc(path: &Path) -> Option<serde_json::Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+/// Read a JSONC project file, such as a tsconfig, in the read scope of
+/// `root`.
+fn read_jsonc(root: &Path, path: &Path) -> Option<serde_json::Value> {
+    let content = crate::discover::project_read::read_project_file(root, path)?;
     fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
 }
 
@@ -255,6 +259,28 @@ fn same_file(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tsconfig that links out of the project is not read for its
+    /// `references`.
+    #[test]
+    #[cfg(unix)]
+    fn a_tsconfig_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(
+            outside.join("tsconfig.json"),
+            r#"{"references":[{"path":"./app"}]}"#,
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("tsconfig.json"), root.join("tsconfig.json"))
+            .expect("link");
+        std::fs::create_dir_all(root.join("app")).expect("create app");
+        std::fs::write(root.join("app/tsconfig.json"), "{}").expect("write");
+        assert!(referenced_tsconfigs(&root, &root.join("tsconfig.json")).is_empty());
+    }
 
     fn write(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {

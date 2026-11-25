@@ -25,6 +25,7 @@ use fallow_types::extract::ExportName;
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, PropertyKey, PropertyKind};
 
 use super::{Plugin, PluginResult, config_parser, has_glob_syntax};
+use crate::discover::project_read;
 
 mod dirs;
 mod layer_names;
@@ -309,12 +310,12 @@ impl Plugin for NuxtPlugin {
     /// every plugin (issue #2752).
     fn auto_imports(&self, root: &Path) -> Vec<AutoImportRule> {
         let mut rules = Vec::new();
-        collect_convention_auto_imports(root, &mut rules);
+        collect_convention_auto_imports(root, root, &mut rules);
         for layer in local_layer_roots(root)
             .into_iter()
             .chain(outside_layer_roots(root))
         {
-            collect_convention_auto_imports(&layer, &mut rules);
+            collect_convention_auto_imports(root, &layer, &mut rules);
         }
         rules
     }
@@ -446,10 +447,10 @@ fn resolve_nuxt_main_config(
     let content_module_active = content_module_registered
         || layers
             .iter()
-            .any(|layer| layer_registers_content_module(&root.join(layer)))
+            .any(|layer| layer_registers_content_module(root, &root.join(layer)))
         || package_extends
             .iter()
-            .any(|entry| package_layer_registers_content_module(entry, config_path));
+            .any(|entry| package_layer_registers_content_module(entry, config_path, root));
     if content_module_active && let Some(pattern) = content_config_entry_pattern(config_path, root)
     {
         add_default_used_export(result, &pattern);
@@ -479,10 +480,10 @@ fn extract_nuxt_modules(source: &str, config_path: &Path) -> Vec<String> {
 /// Whether the Nuxt config of a local layer registers `@nuxt/content`. Nuxt
 /// merges the `modules` of every layer, so a layer that registers the module
 /// activates it for the whole project.
-fn layer_registers_content_module(dir: &Path) -> bool {
+fn layer_registers_content_module(root: &Path, dir: &Path) -> bool {
     NUXT_CONFIG_FILES.iter().any(|file| {
         let path = dir.join(file);
-        std::fs::read_to_string(&path).is_ok_and(|source| {
+        project_read::read_project_file(root, &path).is_some_and(|source| {
             extract_nuxt_modules(&source, &path)
                 .iter()
                 .any(|module| crate::resolve::extract_package_name(module) == CONTENT_MODULE)
@@ -498,7 +499,7 @@ fn layer_registers_content_module(dir: &Path) -> bool {
 /// `node_modules/<name>` above the config directory is the installed copy, as
 /// in Node resolution. The `extends` of that layer are not followed. A known
 /// content layer implies the module also when it is not installed.
-fn package_layer_registers_content_module(entry: &str, config_path: &Path) -> bool {
+fn package_layer_registers_content_module(entry: &str, config_path: &Path, root: &Path) -> bool {
     if entry.contains(':') {
         return false;
     }
@@ -512,7 +513,7 @@ fn package_layer_registers_content_module(entry: &str, config_path: &Path) -> bo
         .flat_map(Path::ancestors)
         .map(|dir| dir.join("node_modules").join(&name))
         .find(|dir| dir.is_dir())
-        .is_some_and(|dir| layer_registers_content_module(&dir))
+        .is_some_and(|dir| layer_registers_content_module(root, &dir))
 }
 
 /// Credit the `@nuxt/content` global component directories of the config
@@ -574,7 +575,7 @@ fn local_layer_dirs(
 /// layers without an `extends` entry, in a stable order. A directory without a
 /// Nuxt config is no layer.
 fn auto_registered_layer_dirs(root: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(root.join(AUTO_LAYERS_DIR)) else {
+    let Some(entries) = project_read::read_project_dir(root, &root.join(AUTO_LAYERS_DIR)) else {
         return Vec::new();
     };
     let mut dirs: Vec<String> = entries
@@ -626,7 +627,7 @@ fn local_layer_roots(root: &Path) -> Vec<PathBuf> {
     while let Some(dir) = pending.pop() {
         for file in NUXT_CONFIG_FILES {
             let config_path = dir.join(file);
-            let Ok(source) = std::fs::read_to_string(&config_path) else {
+            let Some(source) = project_read::read_project_file(root, &config_path) else {
                 continue;
             };
             let src_dir = extract_nuxt_src_dir(&source, &config_path, root)
@@ -663,7 +664,7 @@ pub fn outside_layer_roots(root: &Path) -> Vec<PathBuf> {
     while let Some(dir) = pending.pop() {
         for file in NUXT_CONFIG_FILES {
             let config_path = dir.join(file);
-            let Ok(source) = std::fs::read_to_string(&config_path) else {
+            let Some(source) = project_read::read_project_file(root, &config_path) else {
                 continue;
             };
             let entries =
@@ -875,7 +876,7 @@ pub fn package_layer_names(root: &Path) -> Vec<String> {
     let config_dirs = std::iter::once(root.to_path_buf()).chain(local_layer_roots(root));
     for path in config_dirs.flat_map(|dir| NUXT_CONFIG_FILES.iter().map(move |name| dir.join(name)))
     {
-        let Ok(source) = std::fs::read_to_string(&path) else {
+        let Some(source) = project_read::read_project_file(root, &path) else {
             continue;
         };
         for entry in config_parser::extract_config_string_array(&source, &path, &["extends"]) {
@@ -1012,23 +1013,23 @@ fn prefix_with_src_dir(src_dir: &Path, path: &str) -> String {
 
 /// Collect the component and script auto-import rules of the Nuxt convention
 /// directories under one project or layer root.
-fn collect_convention_auto_imports(base: &Path, rules: &mut Vec<AutoImportRule>) {
+fn collect_convention_auto_imports(root: &Path, base: &Path, rules: &mut Vec<AutoImportRule>) {
     for dir in COMPONENT_DIRS {
         let components = base.join(dir);
         if components.is_dir() {
-            collect_component_auto_imports(&components, &components, rules);
+            collect_component_auto_imports(root, &components, &components, rules);
         }
     }
     for dir in SCRIPT_AUTO_IMPORT_DIRS {
         let scripts = base.join(dir);
         if scripts.is_dir() {
-            collect_script_auto_imports(&scripts, false, rules);
+            collect_script_auto_imports(root, &scripts, false, rules);
         }
     }
     for dir in SCRIPT_AUTO_IMPORT_RECURSIVE_DIRS {
         let scripts = base.join(dir);
         if scripts.is_dir() {
-            collect_script_auto_imports(&scripts, true, rules);
+            collect_script_auto_imports(root, &scripts, true, rules);
         }
     }
 }
@@ -1038,8 +1039,13 @@ fn collect_convention_auto_imports(base: &Path, rules: &mut Vec<AutoImportRule>)
 ///
 /// `base` is the components root (used to compute the relative path that drives
 /// the name); `dir` is the directory currently being scanned.
-fn collect_component_auto_imports(base: &Path, dir: &Path, rules: &mut Vec<AutoImportRule>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn collect_component_auto_imports(
+    root: &Path,
+    base: &Path,
+    dir: &Path,
+    rules: &mut Vec<AutoImportRule>,
+) {
+    let Some(entries) = project_read::read_project_dir(root, dir) else {
         return;
     };
     for entry in entries.flatten() {
@@ -1056,7 +1062,7 @@ fn collect_component_auto_imports(base: &Path, dir: &Path, rules: &mut Vec<AutoI
             } else {
                 base
             };
-            collect_component_auto_imports(child_base, &path, rules);
+            collect_component_auto_imports(root, child_base, &path, rules);
             continue;
         }
         if !has_component_extension(&path) {
@@ -1126,8 +1132,13 @@ fn push_component_rule(rules: &mut Vec<AutoImportRule>, name: String, source: Pa
 
 /// Scan one Nuxt composable/util directory and emit rules for the exports Nuxt
 /// can inject into scripts. Shared dirs recurse; composable/util dirs do not.
-fn collect_script_auto_imports(dir: &Path, recursive: bool, rules: &mut Vec<AutoImportRule>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn collect_script_auto_imports(
+    root: &Path,
+    dir: &Path,
+    recursive: bool,
+    rules: &mut Vec<AutoImportRule>,
+) {
+    let Some(entries) = project_read::read_project_dir(root, dir) else {
         return;
     };
     for entry in entries.flatten() {
@@ -1137,14 +1148,14 @@ fn collect_script_auto_imports(dir: &Path, recursive: bool, rules: &mut Vec<Auto
         };
         if file_type.is_dir() {
             if recursive {
-                collect_script_auto_imports(&path, true, rules);
+                collect_script_auto_imports(root, &path, true, rules);
             }
             continue;
         }
         if !has_auto_import_script_extension(&path) {
             continue;
         }
-        let Ok(source) = std::fs::read_to_string(&path) else {
+        let Some(source) = project_read::read_project_file(root, &path) else {
             continue;
         };
         let module = fallow_extract::parse_source_to_module(FileId(0), &path, &source, 0, false);
@@ -1530,7 +1541,7 @@ pub fn auto_import_settings(root: &Path) -> AutoImportSettings {
     let config_dirs = std::iter::once(root.to_path_buf()).chain(local_layer_roots(root));
     for path in config_dirs.flat_map(|dir| NUXT_CONFIG_FILES.iter().map(move |name| dir.join(name)))
     {
-        let Ok(source) = std::fs::read_to_string(&path) else {
+        let Some(source) = project_read::read_project_file(root, &path) else {
             continue;
         };
         let file = classify_config_source(&source, &path);
@@ -1936,6 +1947,9 @@ static COMPONENTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLoc
 static IMPORTS_KEY_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r#"["']?\bimports\b["']?\s*:"#).expect("valid regex")
 });
+
+#[cfg(test)]
+mod auto_import_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3134,182 +3148,6 @@ mod tests {
         assert_eq!(name_of("Banner.global.vue"), "Banner");
         assert_eq!(name_of("Banner.island.vue"), "Banner");
         assert_eq!(name_of("Banner.client.global.vue"), "Banner");
-    }
-
-    #[test]
-    fn auto_imports_name_global_and_island_components_after_their_own_directory() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("components/global")).unwrap();
-        std::fs::create_dir_all(root.join("components/islands")).unwrap();
-        std::fs::create_dir_all(root.join("components/base")).unwrap();
-        std::fs::write(
-            root.join("components/global/Foo.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("components/islands/Isle.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("components/base/Button.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-
-        let rules = NuxtPlugin.auto_imports(root);
-        let names: std::collections::BTreeSet<&str> =
-            rules.iter().map(|r| r.name.as_str()).collect();
-
-        assert!(names.contains("Foo"), "global component keeps its own name");
-        assert!(names.contains("LazyFoo"));
-        assert!(names.contains("Isle"), "island keeps its own name");
-        assert!(names.contains("BaseButton"), "other dirs still prefix");
-        assert!(!names.contains("GlobalFoo"));
-        assert!(!names.contains("IslandsIsle"));
-    }
-
-    #[test]
-    fn auto_imports_prefix_a_nested_global_directory_like_any_other() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("components/base/global")).unwrap();
-        std::fs::write(
-            root.join("components/base/global/Card.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-
-        let names: std::collections::BTreeSet<String> = NuxtPlugin
-            .auto_imports(root)
-            .into_iter()
-            .map(|r| r.name)
-            .collect();
-        assert!(names.contains("BaseGlobalCard"));
-        assert!(!names.contains("Card"));
-    }
-
-    #[test]
-    fn auto_imports_emits_canonical_and_lazy_variants() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("components/base")).unwrap();
-        std::fs::write(root.join("components/Card001.vue"), "<template></template>").unwrap();
-        std::fs::write(
-            root.join("components/base/Button.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-
-        let rules = NuxtPlugin.auto_imports(root);
-        let names: std::collections::BTreeSet<&str> =
-            rules.iter().map(|r| r.name.as_str()).collect();
-
-        assert!(names.contains("Card001"));
-        assert!(names.contains("LazyCard001"));
-        assert!(names.contains("BaseButton"));
-        assert!(names.contains("LazyBaseButton"));
-        assert!(
-            rules
-                .iter()
-                .all(|r| matches!(r.kind, AutoImportKind::DefaultComponent)),
-            "component rules are DefaultComponent kind"
-        );
-        let card = rules.iter().find(|r| r.name == "Card001").unwrap();
-        assert_eq!(card.source, root.join("components/Card001.vue"));
-    }
-
-    #[test]
-    fn auto_imports_paired_client_server_share_a_name_with_distinct_sources() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("app/components")).unwrap();
-        std::fs::write(
-            root.join("app/components/Comments.client.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("app/components/Comments.server.vue"),
-            "<template></template>",
-        )
-        .unwrap();
-
-        let rules = NuxtPlugin.auto_imports(root);
-        let comments_sources: std::collections::BTreeSet<_> = rules
-            .iter()
-            .filter(|r| r.name == "Comments")
-            .map(|r| r.source.clone())
-            .collect();
-        assert_eq!(comments_sources.len(), 2);
-    }
-
-    #[test]
-    fn auto_imports_emits_script_named_and_default_exports() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("composables")).unwrap();
-        std::fs::create_dir_all(root.join("utils")).unwrap();
-        std::fs::write(
-            root.join("composables/useCounter.ts"),
-            "export function useCounter() { return 1; }\nexport type CounterType = number;\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("utils/format-price.ts"),
-            "export default function format(value: number) { return String(value); }\n",
-        )
-        .unwrap();
-
-        let rules = NuxtPlugin.auto_imports(root);
-        let use_counter = rules
-            .iter()
-            .find(|rule| rule.name == "useCounter")
-            .expect("named export rule");
-        assert_eq!(use_counter.source, root.join("composables/useCounter.ts"));
-        assert!(matches!(use_counter.kind, AutoImportKind::Named));
-        assert!(
-            rules.iter().all(|rule| rule.name != "CounterType"),
-            "type-only exports are not value auto-import rules"
-        );
-        let format_price = rules
-            .iter()
-            .find(|rule| rule.name == "formatPrice")
-            .expect("default export rule");
-        assert_eq!(format_price.source, root.join("utils/format-price.ts"));
-        assert!(matches!(format_price.kind, AutoImportKind::Default));
-    }
-
-    #[test]
-    fn auto_imports_scans_shared_recursively() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("shared/utils/nested")).unwrap();
-        std::fs::write(
-            root.join("shared/utils/useShared.ts"),
-            "export const useShared = () => null;\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("shared/utils/nested/useDeep.ts"),
-            "export const useDeep = () => null;\n",
-        )
-        .unwrap();
-
-        let rules = NuxtPlugin.auto_imports(root);
-        assert!(rules.iter().any(|rule| rule.name == "useShared"));
-        assert!(
-            rules.iter().any(|rule| rule.name == "useDeep"),
-            "nested shared utils are scanned by default"
-        );
-    }
-
-    #[test]
-    fn auto_imports_empty_without_convention_dirs() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        assert!(NuxtPlugin.auto_imports(tmp.path()).is_empty());
     }
 
     #[test]

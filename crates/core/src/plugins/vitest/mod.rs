@@ -200,7 +200,7 @@ fn resolve_followed_config(
     project_root: &Path,
     read: &ConfigRead<'_>,
 ) -> PluginResult {
-    if !is_shadowed_vite_config(config_path)
+    if !is_shadowed_vite_config(config_path, project_root)
         && let Some((target, target_source)) =
             reexport::follow_default_reexport(config_path, source, project_root)
     {
@@ -233,7 +233,7 @@ fn resolve_vitest_config(
     let dirs = VitestDirs::read(source, config_path, run_dir);
     // Vitest does not load a vite config that a vitest config shadows, so
     // the includes and the JSX settings of that vite config apply to no file.
-    if !is_shadowed_vite_config(config_path) {
+    if !is_shadowed_vite_config(config_path, project_root) {
         // The Vitest version matters only for inline projects, so the
         // disk reads run only for a config that names `projects`.
         let jsx = JsxContext {
@@ -553,7 +553,7 @@ struct JsxContext {
 /// `mergeConfig`, a `projects` entry or an `extends` path. Then the vite
 /// config applies. Any mention of `vite.config` counts, so a dynamic path
 /// keeps the vite config too.
-fn is_shadowed_vite_config(config_path: &Path) -> bool {
+fn is_shadowed_vite_config(config_path: &Path, project_root: &Path) -> bool {
     let (Some(name), Some(config_dir)) = (
         config_path.file_name().and_then(|name| name.to_str()),
         config_path.parent(),
@@ -570,7 +570,9 @@ fn is_shadowed_vite_config(config_path: &Path) -> bool {
     else {
         return false;
     };
-    let Ok(vitest_source) = std::fs::read_to_string(&vitest_config) else {
+    let Some(vitest_source) =
+        crate::discover::project_read::read_project_file(project_root, &vitest_config)
+    else {
         return true;
     };
     !vitest_source.contains("vite.config")
@@ -981,7 +983,7 @@ fn collect_project_scopes(
             ProjectBase::DeclaringConfig => own.over(&root_scope),
             ProjectBase::None => own,
             ProjectBase::File(path) if !config_parser::is_inside_root(&path, project_root) => own,
-            ProjectBase::File(path) => match read_config_scope(&path) {
+            ProjectBase::File(path) => match read_config_scope(project_root, &path) {
                 Some(base) => {
                     extended_files.push(path);
                     own.over(&base)
@@ -996,8 +998,8 @@ fn collect_project_scopes(
 
 /// Read the scope of the config file that an inline project extends. A Vite
 /// config has no top-level `extends`, so one level is enough.
-fn read_config_scope(path: &Path) -> Option<ProjectScope> {
-    let source = std::fs::read_to_string(path).ok()?;
+fn read_config_scope(project_root: &Path, path: &Path) -> Option<ProjectScope> {
+    let source = crate::discover::project_read::read_project_file(project_root, path)?;
     config_parser::extract_from_source(&source, path, |program| {
         config_parser::find_config_object(program).map(ProjectScope::read)
     })
@@ -1099,7 +1101,9 @@ fn add_vitest_project_config_files(
             {
                 continue;
             }
-            let Ok(project_source) = std::fs::read_to_string(&path) else {
+            let Some(project_source) =
+                crate::discover::project_read::read_project_file(project_root, &path)
+            else {
                 continue;
             };
             add_vitest_jsx_import_sources(result, &project_source, &path, project_root, jsx);

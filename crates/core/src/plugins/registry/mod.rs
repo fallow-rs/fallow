@@ -10,7 +10,7 @@ use fallow_config::{
     UsedClassMemberRule,
 };
 
-use crate::scripts;
+use crate::{discover::project_read, scripts};
 
 use super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, ProvidedDependencyRule};
 
@@ -1124,7 +1124,7 @@ impl PluginRegistry {
                 if !super::config_parser::is_inside_root(&abs_path, project_root) {
                     continue;
                 }
-                let Ok(source) = std::fs::read_to_string(&abs_path) else {
+                let Some(source) = project_read::read_project_file(project_root, &abs_path) else {
                     continue;
                 };
                 let mut file_result = AggregatedPluginResult::default();

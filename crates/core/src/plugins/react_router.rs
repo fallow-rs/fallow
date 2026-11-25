@@ -3,10 +3,7 @@
 //! Detects React Router projects and marks route files, root layout, and entry points.
 //! Recognizes conventional route exports (loader, action, meta, etc.).
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use fallow_extract::JsText;
 use oxc_ast::ast::{
@@ -235,7 +232,8 @@ fn collect_route_config_from_disk(result: &mut PluginResult, root: &Path, app_di
         if !candidate.is_file() {
             continue;
         }
-        let Ok(source) = fs::read_to_string(&candidate) else {
+        let Some(source) = crate::discover::project_read::read_project_file(root, &candidate)
+        else {
             continue;
         };
         add_referenced_dependencies(result, &source, &candidate);
@@ -496,7 +494,7 @@ fn follow_module_export(
     {
         return;
     }
-    let Ok(source) = fs::read_to_string(&path) else {
+    let Some(source) = crate::discover::project_read::read_project_file(walk.root, &path) else {
         return;
     };
     parse_route_module(&source, &path, |module| {
@@ -887,6 +885,48 @@ mod tests {
         );
 
         assert!(has_entry_pattern(&result, "web/marketing/home.tsx"));
+    }
+
+    /// A route config and an imported route module that link out of the
+    /// project are not read.
+    #[test]
+    #[cfg(unix)]
+    fn resolve_config_does_not_read_route_files_that_link_out_of_the_project() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("project");
+        let outside = temp.path().join("elsewhere");
+        fs::create_dir_all(root.join("web")).unwrap();
+        fs::create_dir_all(root.join("app")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(
+            outside.join("routes.ts"),
+            r#"
+                import { index } from "@react-router/dev/routes";
+                export const routes = [index("./outside.tsx")];
+                export default routes;
+            "#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.join("routes.ts"), root.join("web/routes.ts")).unwrap();
+        std::os::unix::fs::symlink(outside.join("routes.ts"), root.join("app/linked.ts")).unwrap();
+
+        let plugin = ReactRouterPlugin;
+        let from_disk = plugin.resolve_config(
+            root.join("react-router.config.ts").as_path(),
+            r#"export default { appDirectory: "web" };"#,
+            &root,
+        );
+        let followed = plugin.resolve_config(
+            root.join("app/routes.ts").as_path(),
+            r#"
+                import { routes } from "./linked";
+                export default routes;
+            "#,
+            &root,
+        );
+
+        assert!(!has_entry_pattern(&from_disk, "web/outside.tsx"));
+        assert!(!has_entry_pattern(&followed, "app/outside.tsx"));
     }
 
     #[test]

@@ -44,7 +44,8 @@ pub(super) fn follow_relative_preset(
     let Some(file) = relative_preset_file(&preset, &root_dir, walk.project_root) else {
         return;
     };
-    let Ok(source) = std::fs::read_to_string(&file) else {
+    let Some(source) = crate::discover::project_read::read_project_file(walk.project_root, &file)
+    else {
         return;
     };
     result.setup_files.push(file.clone());

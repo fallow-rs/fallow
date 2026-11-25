@@ -405,7 +405,7 @@ impl ResolveContext<'_> {
             return;
         }
         self.result.setup_files.push(file.to_path_buf());
-        let Ok(source) = std::fs::read_to_string(file) else {
+        let Some(source) = crate::discover::project_read::read_project_file(self.root, file) else {
             return;
         };
         let Some(config) = read_runner_config(&source, file) else {

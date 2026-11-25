@@ -123,8 +123,7 @@ impl Plugin for GraphqlConfigPlugin {
 
     fn is_enabled_with_package_json(&self, _pkg: &PackageJson, root: &Path) -> bool {
         // `PackageJson` does not keep the `graphql` key, so read the manifest.
-        std::fs::read_to_string(root.join("package.json"))
-            .ok()
+        crate::discover::project_read::read_project_file(root, &root.join("package.json"))
             .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
             .is_some_and(|manifest| {
                 manifest
@@ -416,6 +415,23 @@ mod tests {
         assert!(
             !GraphqlConfigPlugin.is_enabled_with_package_json(&PackageJson::default(), dir.path())
         );
+    }
+
+    /// A `package.json` that links out of the project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn a_package_json_that_links_out_of_the_project_does_not_activate() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{ "name": "app", "graphql": { "schema": "schema.graphql" } }"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(dir.path().join("package.json"), root.join("package.json"))
+            .unwrap();
+        assert!(!GraphqlConfigPlugin.is_enabled_with_package_json(&PackageJson::default(), &root));
     }
 
     #[test]

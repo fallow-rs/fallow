@@ -127,7 +127,7 @@ fn credit_imported_presets(
         if !visited.insert(file.clone()) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&file) else {
+        let Some(text) = crate::discover::project_read::read_project_file(root, &file) else {
             continue;
         };
         let Some((specifiers, nested)) =
@@ -198,7 +198,8 @@ fn default_import_source(program: &Program<'_>, local: &str) -> Option<String> {
 /// resolves through `node_modules` and the `exports` map of its manifest.
 fn resolve_preset_file(importer: &Path, root: &Path, source: &str) -> Option<PathBuf> {
     if is_local_specifier(source) {
-        let file = resolve_local_module_file(resolve_config_relative_path(importer, root, source));
+        let file =
+            resolve_local_module_file(root, resolve_config_relative_path(importer, root, source));
         return file.is_file().then_some(file);
     }
     if !is_package_specifier(source) {
@@ -206,13 +207,16 @@ fn resolve_preset_file(importer: &Path, root: &Path, source: &str) -> Option<Pat
     }
     let package_name = crate::resolve::extract_package_name(source);
     let package_dir = super::eslint::find_package_dir(importer.parent()?, &package_name)?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(package_dir.join("package.json")).ok()?)
-            .ok()?;
+    let manifest: serde_json::Value = serde_json::from_str(
+        &crate::discover::project_read::read_project_file(root, &package_dir.join("package.json"))?,
+    )
+    .ok()?;
     let subpath_key = format!(".{}", source.get(package_name.len()..).unwrap_or_default());
     let entry = super::eslint::resolve_package_entry(&manifest, &subpath_key, &package_dir)?;
-    let file =
-        resolve_local_module_file(config_parser::lexical_normalize(&package_dir.join(entry)));
+    let file = resolve_local_module_file(
+        root,
+        config_parser::lexical_normalize(&package_dir.join(entry)),
+    );
     file.is_file().then_some(file)
 }
 
@@ -404,8 +408,10 @@ fn credit_config_specifier(
     specifier: &str,
 ) {
     if is_local_specifier(specifier) {
-        let path =
-            resolve_local_module_file(resolve_config_relative_path(config_path, root, specifier));
+        let path = resolve_local_module_file(
+            root,
+            resolve_config_relative_path(config_path, root, specifier),
+        );
         // Oxlint loads the default export of a local plugin file (issue #3871).
         if let Ok(relative) = path.strip_prefix(root) {
             result.push_entry_export_credit(
@@ -443,7 +449,7 @@ fn resolve_config_relative_path(config_path: &Path, root: &Path, specifier: &str
 /// an `index` file (issue #3961). A `main` field that points at build output
 /// maps back to its source file, the same as a package entry (issue #4034).
 /// An unresolved path stays as written.
-fn resolve_local_module_file(path: PathBuf) -> PathBuf {
+fn resolve_local_module_file(root: &Path, path: PathBuf) -> PathBuf {
     if path.is_file() {
         return path;
     }
@@ -453,7 +459,7 @@ fn resolve_local_module_file(path: PathBuf) -> PathBuf {
     if !path.is_dir() {
         return path;
     }
-    let main_file = package_main(&path).and_then(|main| {
+    let main_file = package_main(root, &path).and_then(|main| {
         if let Some(source) = crate::discover::output_entry_source_file(&path, &main) {
             return Some(source);
         }
@@ -466,8 +472,8 @@ fn resolve_local_module_file(path: PathBuf) -> PathBuf {
     main_file.or_else(|| index_file(&path)).unwrap_or(path)
 }
 
-fn package_main(dir: &Path) -> Option<String> {
-    let source = std::fs::read_to_string(dir.join("package.json")).ok()?;
+fn package_main(root: &Path, dir: &Path) -> Option<String> {
+    let source = crate::discover::project_read::read_project_file(root, &dir.join("package.json"))?;
     let manifest: serde_json::Value = serde_json::from_str(&source).ok()?;
     manifest
         .get("main")
@@ -495,6 +501,55 @@ fn index_file(dir: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    /// A local preset and a local plugin manifest that link out of the
+    /// project are not read.
+    #[test]
+    #[cfg(unix)]
+    fn presets_that_link_out_of_the_project_are_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(
+            outside.join("preset.js"),
+            "export default { jsPlugins: [\"plugin-outside\"] };\n",
+        )
+        .expect("write");
+        std::fs::write(
+            outside.join("package.json"),
+            r#"{ "name": "plugin", "main": "lib/plugin.js" }"#,
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("preset.js"), root.join("preset.js"))
+            .expect("link");
+        std::fs::create_dir_all(root.join("plugin/lib")).expect("create plugin");
+        std::fs::write(root.join("plugin/lib/plugin.js"), "export default {};\n").expect("write");
+        std::fs::write(root.join("plugin/index.js"), "export default {};\n").expect("write");
+        std::os::unix::fs::symlink(
+            outside.join("package.json"),
+            root.join("plugin/package.json"),
+        )
+        .expect("link");
+
+        let result = resolve_project_config(
+            &root,
+            r#"
+                import preset from "./preset.js";
+                export default { extends: [preset] };
+            "#,
+        );
+        assert!(
+            !result
+                .referenced_dependencies
+                .contains(&"plugin-outside".to_string())
+        );
+        assert_eq!(
+            resolve_local_module_file(&root, root.join("plugin")),
+            root.join("plugin/index.js")
+        );
+    }
+
     fn write_file(path: &Path, contents: &str) {
         std::fs::create_dir_all(path.parent().expect("file has a parent")).expect("create dir");
         std::fs::write(path, contents).expect("write file");
@@ -511,7 +566,7 @@ mod tests {
         );
         write_file(&plugin.join("src/index.ts"), "export default {};\n");
 
-        let resolved = resolve_local_module_file(plugin.clone());
+        let resolved = resolve_local_module_file(dir.path(), plugin.clone());
         assert_eq!(resolved, plugin.join("src/index.ts"));
     }
 
@@ -526,7 +581,7 @@ mod tests {
         write_file(&plugin.join("lib/plugin.js"), "export default {};\n");
         write_file(&plugin.join("src/index.ts"), "export default {};\n");
 
-        let resolved = resolve_local_module_file(plugin.clone());
+        let resolved = resolve_local_module_file(dir.path(), plugin.clone());
         assert_eq!(resolved, plugin.join("lib/plugin.js"));
     }
 

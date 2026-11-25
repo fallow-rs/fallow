@@ -1305,10 +1305,13 @@ fn vite_config_that_the_vitest_config_names_is_not_shadowed() {
         "import base from './vite.config';\nexport default base;",
     ] {
         std::fs::write(dir.path().join("vitest.config.ts"), vitest_source).unwrap();
-        assert!(!is_shadowed_vite_config(&vite), "{vitest_source}");
+        assert!(
+            !is_shadowed_vite_config(&vite, dir.path()),
+            "{vitest_source}"
+        );
     }
     std::fs::write(dir.path().join("vitest.config.ts"), "export default {};").unwrap();
-    assert!(is_shadowed_vite_config(&vite));
+    assert!(is_shadowed_vite_config(&vite, dir.path()));
 }
 
 #[test]
@@ -2090,4 +2093,27 @@ export default defineConfig({
         "{:?}",
         entry_globs(&result)
     );
+}
+
+/// A vitest config that links out of the project is not read, so it does
+/// not keep a vite config next to it.
+#[test]
+#[cfg(unix)]
+fn a_vitest_config_that_links_out_of_the_project_is_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("project");
+    let outside = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(
+        outside.join("vitest.config.ts"),
+        "import base from './vite.config';\nexport default base;",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        outside.join("vitest.config.ts"),
+        root.join("vitest.config.ts"),
+    )
+    .unwrap();
+    assert!(is_shadowed_vite_config(&root.join("vite.config.ts"), &root));
 }
