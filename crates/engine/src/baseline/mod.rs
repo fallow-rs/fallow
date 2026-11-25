@@ -5,7 +5,7 @@ use std::path::Path;
 use fallow_types::extract::is_anonymous_function_name;
 use fallow_types::identity::{IdentifiedFinding, IdentityPaths};
 
-use crate::duplicates::DuplicationReport;
+use crate::{duplicates::DuplicationReport, saved_file::json_error_position};
 
 /// Strip the project root from a path to produce a portable relative key.
 ///
@@ -1792,7 +1792,7 @@ pub fn apply_dead_code_baseline(
     change_scoped: bool,
 ) -> Result<DeadCodeBaselineOutcome, DeadCodeBaselineError> {
     let parsed = serde_json::from_str::<serde_json::Value>(content)
-        .map_err(|err| DeadCodeBaselineError::Parse(err.to_string()))?;
+        .map_err(|err| DeadCodeBaselineError::Parse(json_error_position(&err)))?;
     let saved_by = match classify_baseline_value(&parsed, BaselineKind::DeadCode) {
         BaselineFileKind::Own | BaselineFileKind::NotAnObject => None,
         foreign @ BaselineFileKind::Foreign(_) => Some(foreign.saved_by()),
@@ -1810,7 +1810,7 @@ pub fn apply_dead_code_baseline(
         });
     }
     let baseline = serde_json::from_value::<BaselineData>(parsed)
-        .map_err(|err| DeadCodeBaselineError::Parse(err.to_string()))?;
+        .map_err(|err| DeadCodeBaselineError::Parse(json_error_position(&err)))?;
     if let Some(scheme) = baseline.identity.as_deref()
         && scheme != BASELINE_KEY_SCHEME
     {

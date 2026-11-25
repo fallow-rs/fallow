@@ -156,10 +156,12 @@ pub(super) fn load_health_baseline(
     mode: HealthBaselineMode,
     scope_reasons: fallow_output::BaselineScopeReasons,
 ) -> Result<LoadedHealthBaseline, HealthError> {
-    let json = std::fs::read_to_string(baseline_path)
+    let json = crate::saved_file::read_saved_file(root, baseline_path)
         .map_err(|e| HealthError::message(format!("failed to read health baseline: {e}"), 2))?;
-    let baseline: HealthBaselineData = serde_json::from_str(&json)
-        .map_err(|e| HealthError::message(format!("failed to parse health baseline: {e}"), 2))?;
+    let baseline: HealthBaselineData = serde_json::from_str(&json).map_err(|e| {
+        let position = crate::saved_file::json_error_position(&e);
+        HealthError::message(format!("failed to parse health baseline: {position}"), 2)
+    })?;
     // A file this command did not write carries no identity buckets either, so
     // without this the identity mode would reject another command's baseline
     // with advice to re-save it in identity mode, instead of saying it is not a

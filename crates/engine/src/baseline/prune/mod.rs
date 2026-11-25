@@ -20,6 +20,7 @@ use super::{
     health_finding_counts, match_health_baseline, severity_counts_for_dimension, severity_index,
 };
 use crate::duplicates::{CloneFingerprintSet, DuplicationReport};
+use crate::saved_file::json_error_position;
 
 /// One baseline entry that matched no current finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,7 +182,7 @@ fn parse_own_kind(
     kind: BaselineKind,
 ) -> Result<serde_json::Value, BaselinePruneRefusal> {
     let parsed = serde_json::from_str::<serde_json::Value>(content)
-        .map_err(|error| BaselinePruneRefusal::Parse(error.to_string()))?;
+        .map_err(|error| BaselinePruneRefusal::Parse(json_error_position(&error)))?;
     match classify_baseline_value(&parsed, kind) {
         BaselineFileKind::Own | BaselineFileKind::NotAnObject => Ok(parsed),
         other @ (BaselineFileKind::Foreign(_) | BaselineFileKind::Unrecognised) => {
@@ -199,8 +200,8 @@ fn parse_own_kind(
 fn parse_value<T: serde::de::DeserializeOwned + serde::Serialize>(
     value: &serde_json::Value,
 ) -> Result<T, BaselinePruneRefusal> {
-    let parsed =
-        T::deserialize(value).map_err(|error| BaselinePruneRefusal::Parse(error.to_string()))?;
+    let parsed = T::deserialize(value)
+        .map_err(|error| BaselinePruneRefusal::Parse(json_error_position(&error)))?;
     let round_trip = serde_json::to_value(&parsed)
         .map_err(|error| BaselinePruneRefusal::Parse(error.to_string()))?;
     if let (Some(original), Some(known)) = (value.as_object(), round_trip.as_object()) {

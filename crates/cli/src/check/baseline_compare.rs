@@ -17,7 +17,7 @@ pub(super) fn load_and_compare_baseline(
         DeadCodeBaselineError, DeadCodeBaselineOutcome, apply_dead_code_baseline,
     };
 
-    let content = std::fs::read_to_string(baseline_path)
+    let content = fallow_engine::saved_file::read_saved_file(&io.config.root, baseline_path)
         .map_err(|e| emit_input_error(&format!("failed to read baseline: {e}"), io.output))?;
     baseline_notes::warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
     let comparison =

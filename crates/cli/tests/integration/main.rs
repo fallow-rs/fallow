@@ -198,6 +198,7 @@ mod rule_pack_gdp_tests;
 mod rule_pack_tests;
 mod run_notice_tests;
 mod sarif_run_category_tests;
+mod saved_file_read_tests;
 mod schema_conformance;
 mod schema_tests;
 mod scope_path_tests;

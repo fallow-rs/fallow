@@ -11,6 +11,7 @@ use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
 use crate::check::resolve_workspace_scope;
 use crate::report;
 use crate::{error::emit_input_error, exit_codes::INVALID_INPUT, load_config_for_analysis};
+use fallow_engine::saved_file::{json_error_position as position, read_saved_file};
 use fallow_engine::workspace_scope::WorkspaceScope;
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -659,7 +660,7 @@ fn apply_duplication_baseline(
     };
 
     let (baseline_data, saved_by, unrecognised_format) =
-        read_duplication_baseline(path, opts.output)?;
+        read_duplication_baseline(opts.root, path, opts.output)?;
     let saved_mode = baseline_data.saved_mode();
     let baseline_entries = baseline_data.entry_count();
     let legacy_keys = baseline_data.has_unparsed_collision_keys();
@@ -726,6 +727,7 @@ fn apply_duplication_baseline(
 /// answers when it carries one, and the keys answer for a baseline saved before
 /// that member existed.
 fn read_duplication_baseline(
+    root: &std::path::Path,
     path: &std::path::Path,
     output: OutputFormat,
 ) -> Result<
@@ -736,14 +738,12 @@ fn read_duplication_baseline(
     ),
     ExitCode,
 > {
-    let json = std::fs::read_to_string(path).map_err(|e| {
+    let json = read_saved_file(root, path).map_err(|e| {
         emit_input_error(&format!("failed to read duplication baseline: {e}"), output)
     })?;
     let data = serde_json::from_str::<DuplicationBaselineData>(&json).map_err(|e| {
-        emit_input_error(
-            &format!("failed to parse duplication baseline: {e}"),
-            output,
-        )
+        let message = format!("failed to parse duplication baseline: {}", position(&e));
+        emit_input_error(&message, output)
     })?;
     let classified = fallow_engine::baseline::classify_baseline_file(
         &json,

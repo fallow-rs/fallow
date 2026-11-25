@@ -429,7 +429,7 @@ fn ensure_fallow_dir(root: &Path, file: &Path) -> Result<(), String> {
 
 fn load_setup_state(root: &Path) -> CoverageSetupState {
     let path = setup_state_path(root);
-    let Ok(content) = std::fs::read_to_string(&path) else {
+    let Ok(content) = fallow_engine::saved_file::read_saved_file(root, &path) else {
         return CoverageSetupState::default();
     };
     match serde_json::from_str::<CoverageSetupState>(&content) {
@@ -443,8 +443,9 @@ fn load_setup_state(root: &Path) -> CoverageSetupState {
         }
         Err(err) => {
             eprintln!(
-                "fallow coverage setup: ignoring unreadable setup state at {}: {err}",
-                display_relative(root, &path)
+                "fallow coverage setup: ignoring unreadable setup state at {}: {}",
+                display_relative(root, &path),
+                fallow_engine::saved_file::json_error_position(&err)
             );
             CoverageSetupState::default()
         }

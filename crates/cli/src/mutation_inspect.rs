@@ -8,7 +8,6 @@
 //! and has no code, so a changed file never gives a wrong answer.
 
 use std::fmt::Write as _;
-use std::io::Read as _;
 use std::path::Path;
 
 use fallow_mutation::MutationOptions;
@@ -162,31 +161,38 @@ pub fn report_input_error(message: impl Into<String>) -> fallow_api::Programmati
 ///
 /// Returns an error when the file cannot be read, is too large, is not a
 /// mutation report or plan, or does not parse.
-pub fn read_saved_report(path: &Path) -> Result<SavedReport, fallow_api::ProgrammaticError> {
-    parse_saved_report(&read_report_bytes(path)?)
+pub fn read_saved_report(
+    root: &Path,
+    path: &Path,
+) -> Result<SavedReport, fallow_api::ProgrammaticError> {
+    parse_saved_report(&read_report_bytes_in(Some(root), path)?)
 }
 
-/// Reads the bytes of a saved report, bounded to 64 MiB.
+/// Reads the bytes of a saved report, bounded to 64 MiB. A path below the
+/// working directory must resolve inside it.
 ///
 /// # Errors
 ///
-/// Returns an error when the file cannot be read or is too large.
+/// Returns an error when the file cannot be read, is too large, or is a link
+/// below the working directory that resolves outside it.
 pub fn read_report_bytes(path: &Path) -> Result<Vec<u8>, fallow_api::ProgrammaticError> {
-    let file = std::fs::File::open(path).map_err(|error| {
-        report_input_error(format!("failed to read {}: {error}", path.display()))
-    })?;
-    let mut bytes = Vec::new();
-    file.take(MAX_REPORT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| {
-            report_input_error(format!("failed to read {}: {error}", path.display()))
-        })?;
-    if bytes.len() as u64 > MAX_REPORT_BYTES {
-        return Err(report_input_error(
+    read_report_bytes_in(None, path)
+}
+
+fn read_report_bytes_in(
+    root: Option<&Path>,
+    path: &Path,
+) -> Result<Vec<u8>, fallow_api::ProgrammaticError> {
+    match fallow_engine::saved_file::read_saved_text(root, path, MAX_REPORT_BYTES) {
+        Ok(text) => Ok(text.into_bytes()),
+        Err(fallow_types::read_guard::ReadRefusal::TooLarge { .. }) => Err(report_input_error(
             "the mutation report is larger than 64 MiB",
-        ));
+        )),
+        Err(fallow_types::read_guard::ReadRefusal::Io { source, .. }) => Err(report_input_error(
+            format!("failed to read {}: {source}", path.display()),
+        )),
+        Err(refusal) => Err(report_input_error(refusal.to_string())),
     }
-    Ok(bytes)
 }
 
 /// Parses the bytes of a saved report.
@@ -197,7 +203,8 @@ pub fn read_report_bytes(path: &Path) -> Result<Vec<u8>, fallow_api::Programmati
 pub fn parse_saved_report(bytes: &[u8]) -> Result<SavedReport, fallow_api::ProgrammaticError> {
     let report: SavedReport = serde_json::from_slice(bytes).map_err(|error| {
         report_input_error(format!(
-            "the file is not a `fallow mutation --format json` report: {error}"
+            "the file is not a `fallow mutation --format json` report: {}",
+            fallow_engine::saved_file::json_error_position(&error)
         ))
     })?;
     if let Some(kind) = report.kind.as_deref()
@@ -463,6 +470,21 @@ mod tests {
     use fallow_mutation::{SourceKind, instrument};
 
     const SOURCE: &str = "export function add(a: number, b: number) {\n  return a + b;\n}\n";
+
+    #[test]
+    #[cfg(unix)]
+    fn a_saved_report_link_out_of_the_root_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("report.json");
+        std::fs::write(&target, r#"{"kind": "mutation"}"#).unwrap();
+        let link = dir.path().join("report.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let error = read_saved_report(dir.path(), &link).err().unwrap();
+
+        assert!(error.message.contains("outside"), "{}", error.message);
+    }
 
     fn arithmetic_mutant(source: &str) -> fallow_mutation::Mutant {
         let instrumented = instrument(

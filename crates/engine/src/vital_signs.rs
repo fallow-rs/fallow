@@ -740,21 +740,21 @@ fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
 )]
 fn load_snapshots_with_paths(root: &Path) -> Vec<(PathBuf, VitalSignsSnapshot)> {
     let dir = root.join(".fallow").join("snapshots");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    let Ok(entries) = crate::saved_file::read_saved_dir(root, &dir) else {
         return Vec::new();
     };
-
     let mut snapshots = Vec::new();
     for entry in entries {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "json") {
-            match std::fs::read_to_string(&path) {
+            match crate::saved_file::read_saved_file(root, &path) {
                 Ok(content) => match serde_json::from_str::<VitalSignsSnapshot>(&content) {
                     Ok(snap) => snapshots.push((path, snap)),
-                    Err(e) => {
+                    Err(error) => {
+                        let e = crate::saved_file::json_error_position(&error);
                         eprintln!("warning: skipping corrupt snapshot {}: {e}", path.display());
-                        record_unreadable_snapshot(root, &path, &e.to_string());
+                        record_unreadable_snapshot(root, &path, &e);
                     }
                 },
                 Err(e) => {
@@ -812,7 +812,7 @@ pub(crate) fn load_trend_baseline(
     explicit: Option<&Path>,
 ) -> Result<Option<TrendBaseline>, String> {
     if let Some(path) = explicit {
-        let content = std::fs::read_to_string(path).map_err(|e| {
+        let content = crate::saved_file::read_saved_file(root, path).map_err(|e| {
             format!(
                 "failed to read --trend-from snapshot {}: {e}",
                 path.display()

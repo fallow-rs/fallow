@@ -95,6 +95,7 @@ pub mod requested_rule_off;
 pub mod resolved_run;
 mod result_scope;
 mod results;
+pub mod saved_file;
 pub mod search_visibility;
 mod security;
 pub mod session;
