@@ -16,6 +16,8 @@
 mod common;
 #[path = "../common/http_stub.rs"]
 mod http_stub;
+#[cfg(unix)]
+mod linked_cwd_root_tests;
 #[path = "../common/sign.rs"]
 mod sign;
 

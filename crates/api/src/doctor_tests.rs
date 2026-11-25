@@ -7,6 +7,7 @@ fn zero_config_is_ready_with_stable_order() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -80,6 +81,7 @@ fn missing_node_modules_warns_without_failing() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -106,6 +108,7 @@ fn dependency_remediation_command(root: &Path) -> String {
         &DoctorOptions {
             root,
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     )
@@ -186,6 +189,7 @@ fn type_aware_remediation_uses_the_project_package_manager() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -226,6 +230,7 @@ fn type_aware_remediation_adds_the_yarn_classic_workspace_root_flag() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -254,6 +259,7 @@ fn installed_dependencies_pass_the_dependency_check() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -282,6 +288,7 @@ fn cache_repairs_use_the_inspected_config() {
         &DoctorOptions {
             root,
             config_path: Some(&path),
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_owned()),
     );
@@ -328,6 +335,7 @@ fn a_cache_repair_keeps_manual_cache_and_config_inputs() {
             &DoctorOptions {
                 root,
                 config_path: Some(&config),
+                root_is_current_dir: false,
             },
             override_dir.as_deref(),
             &|_| Err("missing companion".to_owned()),
@@ -356,6 +364,7 @@ fn absent_cache_passes_the_cache_check() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -391,6 +400,7 @@ fn a_corrupt_cache_warns_as_undecodable_with_a_size_that_shows() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -444,6 +454,7 @@ fn a_cache_from_an_older_format_version_warns_as_a_format_change() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -478,6 +489,7 @@ fn absent_graph_cache_passes_its_own_check() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -506,6 +518,7 @@ fn a_corrupt_graph_cache_warns_as_undecodable_with_a_size_that_shows() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -543,6 +556,7 @@ fn invalid_config_returns_complete_failed_report() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -589,6 +603,7 @@ fn optional_missing_type_aware_companion_warns() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -611,6 +626,7 @@ fn required_missing_type_aware_companion_fails() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -633,6 +649,7 @@ fn invalid_root_does_not_echo_the_host_path() {
     let output = run_doctor(&DoctorOptions {
         root: missing,
         config_path: None,
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -661,6 +678,7 @@ fn external_config_does_not_echo_its_host_path() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Pass);
@@ -687,6 +705,7 @@ fn parent_relative_external_config_stays_private() {
     let output = run_doctor(&DoctorOptions {
         root: &root,
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Pass);
@@ -711,6 +730,7 @@ fn successful_config_below_external_symlink_stays_private() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Pass);
@@ -730,6 +750,7 @@ fn relative_explicit_config_is_preserved_in_remediation() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -750,6 +771,7 @@ fn nested_missing_project_relative_config_is_preserved_in_remediation() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -775,6 +797,7 @@ fn leading_dash_config_name_is_bound_to_its_option() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(
@@ -793,6 +816,7 @@ fn config_path_equal_to_root_never_renders_an_empty_argument() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(root.path()),
+        root_is_current_dir: false,
     });
 
     let command = output.checks[1]
@@ -813,6 +837,7 @@ fn missing_config_traversal_outside_root_stays_private() {
     let output = run_doctor(&DoctorOptions {
         root: &root,
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -837,6 +862,7 @@ fn missing_config_below_external_symlink_stays_private() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -859,6 +885,7 @@ fn failed_external_config_requires_reusing_the_private_value() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: Some(&config_path),
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -887,6 +914,7 @@ fn missing_explicit_plugin_is_a_required_failure() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: None,
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -913,6 +941,7 @@ fn malformed_explicit_plugin_is_a_required_failure() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: None,
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -939,6 +968,7 @@ fn explicit_plugin_directory_without_definitions_is_a_required_failure() {
     let output = run_doctor(&DoctorOptions {
         root: root.path(),
         config_path: None,
+        root_is_current_dir: false,
     });
 
     assert_eq!(output.status, DoctorStatus::Fail);
@@ -969,6 +999,7 @@ fn inactive_external_plugin_warns_with_project_root_remediation() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );
@@ -1008,6 +1039,7 @@ fn active_external_plugin_passes() {
         &DoctorOptions {
             root: root.path(),
             config_path: None,
+            root_is_current_dir: false,
         },
         &|_| Err("missing companion".to_string()),
     );

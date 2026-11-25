@@ -886,7 +886,7 @@ fn run_doctor_command_if_requested(cli: &Cli, format: &FormatConfig) -> Option<E
             root.join(path)
         }
     });
-    let report = doctor::collect_report(&root, config_path.as_deref());
+    let report = doctor::collect_report(&root, config_path.as_deref(), cli.root.is_none());
     Some(doctor::render_report(
         &report,
         format.output,

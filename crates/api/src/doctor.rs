@@ -11,12 +11,18 @@ use fallow_output::{
 use fallow_types::envelope::{SchemaVersion, ToolVersion};
 use fallow_types::sourced::{Given, Origin};
 
+const ROOT_LINK_REFUSED: &str = "Project root passes through a link that resolves outside the checkout or the project. Pass the resolved absolute path with --root, or cd -P to it.";
+
 /// Inputs for a deterministic doctor run.
 pub struct DoctorOptions<'a> {
     /// Project root, before canonical validation.
     pub root: &'a Path,
     /// Optional explicit fallow config path.
     pub config_path: Option<&'a Path>,
+    /// True when the caller got no root and `root` is the current directory.
+    /// The root check then also covers the `PWD` spelling of the current
+    /// directory, as for an analysis run with no root.
+    pub root_is_current_dir: bool,
 }
 
 /// Inspect project-local readiness without analysis, cache writes, telemetry,
@@ -61,7 +67,12 @@ where
     F: Fn(&Path) -> Result<(), String>,
 {
     let mut checks = Vec::with_capacity(9);
-    let root = match fallow_engine::validate::validate_root(options.root) {
+    let validated = if options.root_is_current_dir {
+        fallow_engine::validate::validate_current_dir_root(options.root)
+    } else {
+        fallow_engine::validate::validate_root(options.root)
+    };
+    let root = match validated {
         Ok(root) => {
             checks.push(check(
                 DoctorCheckId::Root,
@@ -74,12 +85,19 @@ where
             root
         }
         Err(_) => {
+            // The report names no path, so a refused link gets a fixed text.
+            // An existing directory that fails the check is such a refusal.
+            let message = if options.root.is_dir() {
+                ROOT_LINK_REFUSED
+            } else {
+                "Project root is not accessible. Set --root to an existing, readable directory."
+            };
             checks.push(check(
                 DoctorCheckId::Root,
                 DoctorCheckCategory::Project,
                 DoctorCheckStatus::Fail,
                 true,
-                "Project root is not accessible. Set --root to an existing, readable directory.",
+                message,
                 None,
             ));
             push_prerequisite_skips(&mut checks, "Project root readiness failed.");
