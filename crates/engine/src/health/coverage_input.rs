@@ -18,18 +18,44 @@ enum SelectedCoverageFiles {
     V8Dumps(Vec<PathBuf>),
 }
 
+/// The size limit for one coverage file. V8 dumps of large test suites reach
+/// hundreds of MiB, so this limit is above the default limit for project
+/// files.
+pub(super) const MAX_COVERAGE_FILE_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// True when `path` exists, is below `project_root`, and resolves outside it,
+/// for example a committed link. A path outside the root that the user names
+/// stays allowed.
+pub(super) fn leaves_the_root(project_root: Option<&Path>, path: &Path) -> bool {
+    project_root.is_some_and(|root| {
+        path.symlink_metadata().is_ok()
+            && crate::saved_file::lies_below(root, path)
+            && !fallow_types::read_guard::is_inside_root(root, path)
+    })
+}
+
 /// Select the files of a `--coverage` path. A directory gives its
 /// `coverage-final.json` when that file exists, and its V8 dumps when it
-/// does not. A file gives itself.
-fn select_coverage_files(resolved: &Path) -> Result<SelectedCoverageFiles, String> {
+/// does not. A file gives itself. A file below `project_root` that resolves
+/// outside it is not selected.
+fn select_coverage_files(
+    resolved: &Path,
+    project_root: Option<&Path>,
+) -> Result<SelectedCoverageFiles, String> {
+    if leaves_the_root(project_root, resolved) {
+        return Err(format!(
+            "refusing to read coverage input {}: it resolves to a location outside the project root",
+            resolved.display()
+        ));
+    }
     if !resolved.is_dir() {
         return Ok(SelectedCoverageFiles::Single(resolved.to_path_buf()));
     }
     let candidate = resolved.join("coverage-final.json");
-    if candidate.is_file() {
+    if candidate.is_file() && !leaves_the_root(project_root, &candidate) {
         return Ok(SelectedCoverageFiles::Single(candidate));
     }
-    let dump_files = coverage_v8::dump_files_in(resolved)?;
+    let dump_files = coverage_v8::dump_files_in(resolved, project_root)?;
     if dump_files.is_empty() {
         return Err(format!(
             "no coverage-final.json or V8 coverage files found in {}",
@@ -47,7 +73,7 @@ fn select_coverage_files(resolved: &Path) -> Result<SelectedCoverageFiles, Strin
 ///
 /// Returns the reader error for a directory that holds no coverage file.
 pub fn selected_coverage_files(resolved: &Path) -> Result<Vec<PathBuf>, String> {
-    Ok(match select_coverage_files(resolved)? {
+    Ok(match select_coverage_files(resolved, None)? {
         SelectedCoverageFiles::Single(file) => vec![file],
         SelectedCoverageFiles::V8Dumps(files) => files,
     })
@@ -56,16 +82,20 @@ pub fn selected_coverage_files(resolved: &Path) -> Result<Vec<PathBuf>, String> 
 /// Detect the format of a `--coverage` path. A directory holds either an
 /// Istanbul `coverage-final.json` (preferred) or `NODE_V8_COVERAGE` dumps; a
 /// file is an Istanbul map or one V8 dump.
-pub(super) fn read_coverage_input(resolved: &Path) -> Result<CoverageInput, String> {
-    match select_coverage_files(resolved)? {
+pub(super) fn read_coverage_input(
+    resolved: &Path,
+    project_root: Option<&Path>,
+) -> Result<CoverageInput, String> {
+    match select_coverage_files(resolved, project_root)? {
         SelectedCoverageFiles::Single(file) => read_coverage_file(file),
         SelectedCoverageFiles::V8Dumps(dump_files) => Ok(CoverageInput::V8 { dump_files }),
     }
 }
 
 fn read_coverage_file(file_path: PathBuf) -> Result<CoverageInput, String> {
-    let json = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("failed to read coverage file {}: {e}", file_path.display()))?;
+    let json =
+        fallow_types::read_guard::read_to_string_bounded(&file_path, MAX_COVERAGE_FILE_BYTES)
+            .map_err(|e| format!("failed to read coverage file {}: {e}", file_path.display()))?;
     if coverage_v8::is_v8_dump(&json) {
         return Ok(CoverageInput::V8 {
             dump_files: vec![file_path],
@@ -134,6 +164,37 @@ mod tests {
         assert_eq!(
             selected_coverage_files(&missing).expect("selection"),
             vec![missing]
+        );
+    }
+
+    /// A `*.json` link in a coverage directory below the root that leaves
+    /// the root is not selected, and a coverage path that is such a link is
+    /// refused.
+    #[test]
+    #[cfg(unix)]
+    fn a_dump_link_out_of_the_root_is_not_selected() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let coverage = root.join("coverage");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&coverage).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        write(&outside, "other.json", r#"{"result":[]}"#);
+        write(&coverage, "own.json", r#"{"result":[]}"#);
+        std::os::unix::fs::symlink(outside.join("other.json"), coverage.join("linked.json"))
+            .expect("link");
+        std::os::unix::fs::symlink(&outside, root.join("linked-dir")).expect("link");
+
+        let Ok(SelectedCoverageFiles::V8Dumps(files)) =
+            select_coverage_files(&coverage, Some(&root))
+        else {
+            panic!("expected V8 dumps");
+        };
+        assert_eq!(files, vec![coverage.join("own.json")]);
+        assert!(select_coverage_files(&root.join("linked-dir"), Some(&root)).is_err());
+        assert!(
+            select_coverage_files(&outside, Some(&root)).is_ok(),
+            "a user path outside the root stays allowed"
         );
     }
 }

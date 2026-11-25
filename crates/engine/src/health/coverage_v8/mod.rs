@@ -70,13 +70,19 @@ pub(super) fn is_v8_dump(json: &str) -> bool {
 }
 
 /// The `*.json` files of a directory, sorted for a deterministic merge order.
-pub(super) fn dump_files_in(dir: &Path) -> Result<Vec<PathBuf>, String> {
+/// An entry below `project_root` that resolves outside it, such as a
+/// committed link, is skipped.
+pub(super) fn dump_files_in(
+    dir: &Path,
+    project_root: Option<&Path>,
+) -> Result<Vec<PathBuf>, String> {
     let entries = std::fs::read_dir(dir)
         .map_err(|e| format!("failed to read coverage directory {}: {e}", dir.display()))?;
     let mut files: Vec<PathBuf> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "json") && path.is_file())
+        .filter(|path| !super::coverage_input::leaves_the_root(project_root, path))
         .collect();
     files.sort();
     Ok(files)
@@ -175,7 +181,11 @@ pub(super) fn load_v8_coverage_map(
 }
 
 fn read_dump(dump_file: &Path) -> Result<V8Dump, String> {
-    let json = std::fs::read_to_string(dump_file).map_err(|e| {
+    let json = fallow_types::read_guard::read_to_string_bounded(
+        dump_file,
+        super::coverage_input::MAX_COVERAGE_FILE_BYTES,
+    )
+    .map_err(|e| {
         format!(
             "failed to read V8 coverage file {}: {e}",
             dump_file.display()

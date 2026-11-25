@@ -1688,7 +1688,7 @@ pub(super) fn load_istanbul_coverage_for_sources(
 ) -> Result<IstanbulCoverage, String> {
     super::validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
-    match read_coverage_input(&resolved)? {
+    match read_coverage_input(&resolved, project_root)? {
         CoverageInput::Istanbul { file_path, json } => {
             let raw = parse_coverage_map_tolerantly(&json).map_err(|e| {
                 format!(
