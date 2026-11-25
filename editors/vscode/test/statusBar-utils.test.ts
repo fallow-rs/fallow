@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { COUNTED_FINDING_KEYS } from "../src/analysis-utils.js";
 import {
+  alignWithSidebarCount,
   buildAnalysisSummaryLines,
   buildParamsFromCli,
   formatChangedSinceRefForStatusBar,
@@ -8,6 +12,7 @@ import {
 } from "../src/statusBar-utils.js";
 import type { AnalysisCompleteParams } from "../src/statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
+import { ISSUE_TYPE_DEFAULTS } from "../src/generated/issue-types.js";
 
 const baseParams = (
   overrides: Partial<AnalysisCompleteParams> = {}
@@ -510,5 +515,89 @@ describe("buildParamsFromCli", () => {
     expect(params.circularDependencies).toBe(0);
     expect(params.boundaryViolations).toBe(0);
     expect(params.staleSuppressions).toBe(0);
+  });
+});
+
+const toField = (key: string): string =>
+  key.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
+
+/** Params with a field for each counted category, as the current LSP sends. */
+const lspParams = (counts: Record<string, number>): AnalysisCompleteParams => {
+  const fields: Record<string, number> = {};
+  for (const key of COUNTED_FINDING_KEYS) {
+    fields[toField(key)] = 0;
+  }
+  delete fields["boundaryCoverageViolations"];
+  delete fields["boundaryCallViolations"];
+  return { ...baseParams(), ...fields, ...counts } as AnalysisCompleteParams;
+};
+
+describe("alignWithSidebarCount", () => {
+  // The status bar count must equal the sidebar count and the "found N issues"
+  // notification (#5278).
+  it("removes the categories that fallow.issueTypes turns off", () => {
+    const params = lspParams({ totalIssues: 250, circularDependencies: 72, unusedFiles: 35 });
+    const aligned = alignWithSidebarCount(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "circular-dependencies": false,
+    });
+    expect(aligned.totalIssues).toBe(35);
+    expect(aligned.circularDependencies).toBe(0);
+    expect(aligned.unusedFiles).toBe(35);
+  });
+
+  it("removes a category that has no typed field in the extension", () => {
+    const params = lspParams({ totalIssues: 7, routeCollisions: 4, unusedExports: 3 });
+    const aligned = alignWithSidebarCount(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "route-collision": false,
+    });
+    expect(aligned.totalIssues).toBe(3);
+  });
+
+  it("leaves out the findings that the sidebar does not count", () => {
+    // The LSP total also counts deprecated exports in use and enforced
+    // component findings. The sidebar count leaves them out.
+    const params = lspParams({ totalIssues: 12, unusedExports: 9 });
+    expect(alignWithSidebarCount(params, ISSUE_TYPE_DEFAULTS).totalIssues).toBe(9);
+  });
+
+  it("removes the boundary count once for the three boundary arrays", () => {
+    const params = lspParams({ totalIssues: 9, boundaryViolations: 5, unusedFiles: 4 });
+    const aligned = alignWithSidebarCount(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "boundary-violation": false,
+    });
+    expect(aligned.totalIssues).toBe(4);
+  });
+
+  it("subtracts from the total of an older LSP that sends fewer fields", () => {
+    const params = baseParams({ totalIssues: 250, circularDependencies: 72 });
+    const aligned = alignWithSidebarCount(params, {
+      ...ISSUE_TYPE_DEFAULTS,
+      "circular-dependencies": false,
+    });
+    expect(aligned.totalIssues).toBe(178);
+  });
+
+  it("sends a params field for each category that the sidebar counts", () => {
+    const protocol = readFileSync(
+      resolve(__dirname, "../../../crates/lsp/src/protocol.rs"),
+      "utf8",
+    );
+    const struct = protocol.slice(protocol.indexOf("pub struct AnalysisCompleteParams"));
+    const fields = new Set(
+      [...struct.slice(0, struct.indexOf("\n}\n")).matchAll(/pub ([a-z_]+):/g)].map(
+        (match) => match[1],
+      ),
+    );
+    const sharedBoundaryCount = new Set([
+      "boundary_coverage_violations",
+      "boundary_call_violations",
+    ]);
+    const missing = COUNTED_FINDING_KEYS.filter(
+      (key) => !fields.has(key) && !sharedBoundaryCount.has(key),
+    );
+    expect(missing).toEqual([]);
   });
 });

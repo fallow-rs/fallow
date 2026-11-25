@@ -1409,6 +1409,7 @@ dependencies = [
  "tokio",
  "tower",
  "tower-lsp-server",
+ "tracing",
  "tracing-subscriber",
 ]
 

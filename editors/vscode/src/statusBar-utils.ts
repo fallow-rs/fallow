@@ -1,7 +1,12 @@
-import { countCheckIssues } from "./analysis-utils.js";
+import { COUNTED_FINDING_KEYS, countCheckIssues, ISSUE_TYPE_FILTERS } from "./analysis-utils.js";
 import type { PackageBaselineStatus } from "./generated/output-contract.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
-import type { FallowAnalysisScope, FallowCheckResult, FallowDupesResult } from "./types.js";
+import type {
+  FallowAnalysisScope,
+  FallowCheckResult,
+  FallowDupesResult,
+  IssueTypeConfig,
+} from "./types.js";
 
 export type { PackageBaselineStatus } from "./generated/output-contract.js";
 
@@ -105,6 +110,47 @@ export const buildParamsFromCli = (
   changedSinceScope: changedSinceScopeFromCli(scope),
   packageBaselines: scope?.package_baselines,
 });
+
+const toParamsField = (key: string): string =>
+  key.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
+
+/**
+ * Align LSP params with the count of the sidebar and of the "found N issues"
+ * notification.
+ *
+ * The LSP total counts every category of the run, also the categories that
+ * `fallow.issueTypes` turns off and findings that the sidebar does not count.
+ * Without this, each LSP run set the status bar to a higher count than the
+ * sidebar showed (#5278). The function sets each disabled category to zero and
+ * sums the categories of {@link COUNTED_FINDING_KEYS}. The LSP sends one
+ * `boundaryViolations` count for the three boundary arrays. An older LSP that
+ * does not send each counted field keeps its total, less the disabled fields.
+ */
+export const alignWithSidebarCount = (
+  params: AnalysisCompleteParams,
+  issueTypes: IssueTypeConfig,
+): AnalysisCompleteParams => {
+  const counts: Record<string, unknown> = { ...params };
+  const disabled = new Set(
+    ISSUE_TYPE_FILTERS.filter(([, type]) => !issueTypes[type]).map(([key]) => toParamsField(key)),
+  );
+  let removed = 0;
+  for (const field of disabled) {
+    const value = counts[field];
+    if (typeof value === "number") {
+      removed += value;
+      counts[field] = 0;
+    }
+  }
+  const counted = [...new Set(COUNTED_FINDING_KEYS.map(toParamsField))].filter(
+    (field) => field !== "boundaryCoverageViolations" && field !== "boundaryCallViolations",
+  );
+  const values = counted.map((field) => counts[field]);
+  const totalIssues = values.every((value) => typeof value === "number")
+    ? values.reduce<number>((sum, value) => sum + (value as number), 0)
+    : Math.max(0, params.totalIssues - removed);
+  return { ...(counts as unknown as AnalysisCompleteParams), totalIssues };
+};
 
 interface BreakdownLine {
   readonly count: keyof AnalysisCompleteParams;

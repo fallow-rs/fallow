@@ -25,6 +25,7 @@ import {
   getMutedDiagnosticCategories,
   getComplexityBreakdownEnabled,
   getComplexityAfterText,
+  getIssueTypes,
   onConfigChange,
 } from "./config.js";
 import { ComplexityDecorationController } from "./complexityDecorations.js";
@@ -84,11 +85,13 @@ import { STATUS_MENU_COMMAND } from "./statusBar-model.js";
 import { auditScopeSummary, gatingCount } from "./audit-utils.js";
 import { OPEN_FILE_COMMAND, openFileCommandHandler } from "./openFileCommand.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
+import { alignWithSidebarCount } from "./statusBar-utils.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
 import {
   applyWorkspaceVisibility,
   clearWorkspaceScope,
   refreshWorkspacePicker,
+  resolveActiveWorkspaceScope,
   showWorkspacePicker,
 } from "./workspacePicker.js";
 import { RuntimeCoverageTreeProvider } from "./coverageView.js";
@@ -225,8 +228,13 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     if (!shouldAcceptLspAnalysisComplete(vscode.workspace.textDocuments)) {
       return;
     }
-    updateStatusBarFromLsp(params);
     void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
+    // The LSP analyzes the whole project. After a scoped CLI run, the status
+    // bar keeps the scoped count of the sidebar (#5278).
+    if (lastCheckResult !== null && resolveActiveWorkspaceScope(context) !== "") {
+      return;
+    }
+    updateStatusBarFromLsp(alignWithSidebarCount(params, getIssueTypes()));
   };
 
   const syncFindingsVisibility = (): void => {

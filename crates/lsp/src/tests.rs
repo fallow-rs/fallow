@@ -4853,6 +4853,7 @@ async fn edit_or_watched_change_after_save_needs_a_disk_read_again() {
             }],
         })
         .await;
+    write_open_document_fixture(dir.path(), "touched.ts", "export const b = 2;\n");
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent::new(touched.clone(), FileChangeType::CHANGED)],
@@ -4866,9 +4867,30 @@ async fn edit_or_watched_change_after_save_needs_a_disk_read_again() {
         "the edited buffer differs from disk"
     );
     assert!(
-        snapshot[&touched].matches_disk,
-        "the buffer still equals the file after the watched event",
+        !snapshot[&touched].matches_disk,
+        "another tool changed the file under the buffer",
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn watched_event_without_a_content_change_keeps_the_saved_buffer_proven() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (service, _socket) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    backend
+        .startup_analysis_started
+        .store(true, Ordering::SeqCst);
+    let touched = write_open_document_fixture(dir.path(), "touched.ts", "export const b = 1;\n");
+    open_document(backend, &touched, 1, "export const b = 1;\n").await;
+    save_document(backend, &touched).await;
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(touched.clone(), FileChangeType::CHANGED)],
+        })
+        .await;
+
+    assert_eq!(pending_disk_reads(backend).await, 0);
+    assert!(backend.snapshot_document_versions().await[&touched].matches_disk);
 }
 
 #[tokio::test(flavor = "current_thread")]
