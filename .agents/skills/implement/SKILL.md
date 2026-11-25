@@ -19,6 +19,12 @@ Deliver the requested change through the native Fallow lifecycle.
    `gh pr list --state all --search "<terms>"`. Do the search and a rebase
    on `origin/main` again before you open the pull request, because another
    session can merge the same change in the meantime.
+   For an issue, also read its status. An issue `In progress` or
+   `In review` that has no pull request of this objective has another
+   owner. Report the issue, its status and any linked pull request to the
+   maintainer as an open decision, with a recommended answer. Otherwise set
+   the issue to `In progress` before you start, and record its number in
+   the plan of step 3 (see `docs/development/issue-status.md`).
 3. Write the acceptance criteria and verification plan to the gitignored
    `.plans/<task>.md`. Write the logs, builds, clones, probes and drafts of
    the task to `.plans/<task>/`, not to the top of `.plans/`.
