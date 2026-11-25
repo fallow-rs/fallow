@@ -1711,7 +1711,7 @@ impl ModuleInfoExtractor {
     /// ever leaks into the module, and `this@<id>` qualifiers are stripped exactly
     /// as `finalize_resolution_phase` does before any spelling is emitted.
     pub(crate) fn take_template_expression_usage(&mut self) -> (Vec<MemberAccess>, Vec<String>) {
-        self.resolve_typed_destructure_bindings();
+        self.begin_resolution_phase();
         self.resolve_bound_member_accesses();
         self.finish_this_reads();
         (
@@ -3243,7 +3243,7 @@ impl ModuleInfoExtractor {
     /// Run every finalize/resolve pass shared by `into_module_info` and
     /// `merge_into`, returning the collected namespace object aliases.
     fn finalize_resolution_phase(&mut self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
-        self.resolve_typed_destructure_bindings();
+        self.begin_resolution_phase();
         self.resolve_pending_local_export_specifiers();
         self.resolve_native_html_element_aliases();
         self.finalize_local_class_heritage();

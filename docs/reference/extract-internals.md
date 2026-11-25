@@ -306,6 +306,18 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   from the program's statement list, because an import declaration is legal
   after the code that reads it. Namespace objects bound by `require` or a
   dynamic import keep the older allow-list.
+- The visitor keeps a bare reference to a namespace import local as a
+  candidate with its span (`record_namespace_whole_object_use` in
+  `crates/extract/src/visitor/semantic_calls.rs`). The semantic pass keeps
+  only the candidates that resolve to a root-scope binding, which is the
+  import binding. The other candidates resolve to a local with the name of
+  the import, for example a `catch` parameter, a binding in a static block,
+  or the name of a named function or class expression. A use of that local
+  is not a use of the import (issue #5064). A nested namespace binding with
+  the same name in scope at the reference, such as `const NS =
+  require('./x')` in a function, keeps the credit. An extractor that no
+  semantic pass resolves, such as a template-expression pass, records every
+  candidate.
 - The MDX line scan hands the statement lines of the whole file to the parser
   as one program, and a rejected program is an empty program, so one
   misclassified line would drop every import of the file. A line opens a

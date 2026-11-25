@@ -95,6 +95,11 @@ pub(in crate::visitor) struct ShadowedReads {
     /// `var` names that hoist to module scope, such as a `var` in an `if`
     /// block of module scope. Such a binding is never nested only.
     pub(in crate::visitor) module_vars: FxHashSet<String>,
+    /// Bare references to a namespace import local, with the reference span,
+    /// until the semantic pass keeps the references that resolve to the
+    /// import binding. A local of the same name can shadow the others
+    /// (issue #5064).
+    pub(in crate::visitor) namespace_whole_uses: Vec<(oxc_span::Span, String)>,
 }
 
 impl ShadowedReads {
