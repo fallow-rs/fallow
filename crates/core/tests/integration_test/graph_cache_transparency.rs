@@ -231,7 +231,7 @@ fn exact_cache_hit_rebuilds_when_a_module_path_is_outside_the_root() {
     let cold = fallow_core::analyze(&config).expect("cold analysis");
     let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
         .expect("persisted graph cache exists after cold run");
-    for module in &mut store.graph.modules {
+    for module in store.graph.modules_mut() {
         module.path.clone_from(&outside);
     }
     store.save(fallow_types::path_guard::CacheTarget::inside(&cache_dir));
@@ -274,17 +274,19 @@ fn assert_edited_cache_rebuilds(edit: impl FnOnce(&mut fallow_core::graph::Modul
 #[test]
 fn exact_cache_hit_rebuilds_when_one_module_path_changes() {
     assert_edited_cache_rebuilds(|graph| {
-        let last = graph.modules.len() - 1;
-        graph.modules[last].path = graph.modules[last].path.with_file_name("other.ts");
+        let modules = graph.modules_mut();
+        let last = modules.len() - 1;
+        modules[last].path = modules[last].path.with_file_name("other.ts");
     });
 }
 
 #[test]
 fn exact_cache_hit_rebuilds_when_two_inside_paths_swap() {
     assert_edited_cache_rebuilds(|graph| {
-        let (first, second) = (graph.modules[0].path.clone(), graph.modules[1].path.clone());
-        graph.modules[0].path = second;
-        graph.modules[1].path = first;
+        let modules = graph.modules_mut();
+        let (first, second) = (modules[0].path.clone(), modules[1].path.clone());
+        modules[0].path = second;
+        modules[1].path = first;
     });
 }
 
