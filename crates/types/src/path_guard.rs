@@ -7,7 +7,6 @@
 //! Git metadata or into an installed package (see
 //! [`is_protected_link_target`]).
 
-use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 
 /// The name of the Git metadata entry of a work tree.
@@ -24,6 +23,58 @@ const GITDIR_PREFIX: &str = "gitdir:";
 /// The file in a linked Git directory that names the common Git directory.
 const COMMONDIR_FILE: &str = "commondir";
 
+/// Why a write under a base directory is refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Refusal {
+    /// The path is not below the base, or a `..` takes it out of the base.
+    NotBelowBase,
+    /// A symlink resolves outside the base, or does not resolve.
+    LinkOutside,
+    /// A symlink resolves into Git metadata.
+    GitMetadata,
+    /// A symlink resolves into a `node_modules` directory.
+    Packages,
+    /// The target is not a regular file or a directory.
+    NotRegular,
+    /// An entry on the path cannot be read.
+    Unreadable,
+}
+
+impl Refusal {
+    /// The reason, as a sentence about `entry`.
+    fn describe(self, entry: &Path, base: &Path) -> String {
+        let entry = entry.display();
+        match self {
+            Self::NotBelowBase => format!("{entry} is not below {}", base.display()),
+            Self::LinkOutside => format!(
+                "{entry} is a symlink that resolves outside {} or does not resolve",
+                base.display()
+            ),
+            Self::GitMetadata => format!("{entry} is a symlink that resolves into Git metadata"),
+            Self::Packages => {
+                format!("{entry} is a symlink that resolves into a node_modules directory")
+            }
+            Self::NotRegular => format!("{entry} is not a regular file or directory"),
+            Self::Unreadable => format!("{entry} cannot be read"),
+        }
+    }
+}
+
+/// The entry that a write is refused at, and why.
+struct Refused {
+    entry: PathBuf,
+    reason: Refusal,
+}
+
+/// How a walk treats a `..` or `.` component.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParentSteps {
+    /// Refuse the path.
+    Refuse,
+    /// Apply the step to the resolved path, as the file system does.
+    Resolve,
+}
+
 /// The first entry below `base`, up to and including `path`, that is a
 /// symlink whose resolved target is outside the canonical `base`, or that
 /// [`is_protected_link_target`] refuses. A dangling link also counts, because
@@ -36,58 +87,91 @@ const COMMONDIR_FILE: &str = "commondir";
 /// yet.
 #[must_use]
 pub fn outside_link(base: &Path, path: &Path) -> Option<PathBuf> {
+    find_refusal(base, path, ParentSteps::Refuse).map(|refused| refused.entry)
+}
+
+/// The walk of [`outside_link`]. With [`ParentSteps::Resolve`], a `..` steps
+/// up from the resolved path, so a link before it is checked and the walk
+/// goes on below a missing entry.
+fn find_refusal(base: &Path, path: &Path, steps: ParentSteps) -> Option<Refused> {
+    let refuse = |entry: &Path, reason| {
+        Some(Refused {
+            entry: entry.to_path_buf(),
+            reason,
+        })
+    };
     let Ok(relative) = path.strip_prefix(base) else {
-        return Some(path.to_path_buf());
+        return refuse(path, Refusal::NotBelowBase);
     };
     let Ok(canonical_base) = std::fs::canonicalize(base) else {
-        return Some(path.to_path_buf());
+        return refuse(path, Refusal::Unreadable);
     };
-    if base_is_protected_link(base, &canonical_base) {
-        return Some(base.to_path_buf());
+    if let Some(reason) = base_protected_link(base, &canonical_base) {
+        return refuse(base, reason);
     }
     let mut current = base.to_path_buf();
+    let mut resolved = canonical_base.clone();
     for component in relative.components() {
-        let Component::Normal(name) = component else {
-            return Some(path.to_path_buf());
+        let name = match component {
+            Component::Normal(name) => name,
+            Component::CurDir if steps == ParentSteps::Resolve => continue,
+            Component::ParentDir if steps == ParentSteps::Resolve => {
+                current.push(component);
+                resolved.pop();
+                if !resolved.starts_with(&canonical_base) {
+                    return refuse(&current, Refusal::NotBelowBase);
+                }
+                continue;
+            }
+            _ => return refuse(path, Refusal::NotBelowBase),
         };
         current.push(name);
-        match current.symlink_metadata() {
+        let candidate = resolved.join(name);
+        match candidate.symlink_metadata() {
             Ok(meta) if meta.file_type().is_symlink() => {
-                let allowed = std::fs::canonicalize(&current).is_ok_and(|resolved| {
-                    resolved.starts_with(&canonical_base)
-                        && !is_protected_link_target(&canonical_base, &resolved)
-                });
-                if !allowed {
-                    return Some(current);
+                let Ok(target) = std::fs::canonicalize(&candidate) else {
+                    return refuse(&current, Refusal::LinkOutside);
+                };
+                if !target.starts_with(&canonical_base) {
+                    return refuse(&current, Refusal::LinkOutside);
                 }
+                if let Some(reason) = protected_kind(&canonical_base, &target) {
+                    return refuse(&current, reason);
+                }
+                resolved = target;
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-            Err(_) => return Some(current),
+            Ok(_) => resolved = candidate,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if steps == ParentSteps::Refuse {
+                    return None;
+                }
+                resolved = candidate;
+            }
+            Err(_) => return refuse(&current, Refusal::Unreadable),
         }
     }
-    match std::fs::metadata(path) {
-        Ok(meta) if !meta.is_file() && !meta.is_dir() => Some(path.to_path_buf()),
+    match std::fs::metadata(&resolved) {
+        Ok(meta) if !meta.is_file() && !meta.is_dir() => refuse(path, Refusal::NotRegular),
         _ => None,
     }
 }
 
-/// Whether `base` is a symlink whose target is a protected directory, seen
-/// from the directory that contains the link.
-fn base_is_protected_link(base: &Path, canonical_base: &Path) -> bool {
+/// Why `base` is refused when it is a symlink whose target is a protected
+/// directory, seen from the directory that contains the link.
+fn base_protected_link(base: &Path, canonical_base: &Path) -> Option<Refusal> {
     if !base
         .symlink_metadata()
         .is_ok_and(|meta| meta.file_type().is_symlink())
     {
-        return false;
+        return None;
     }
     let Some(parent) = base
         .parent()
         .and_then(|parent| std::fs::canonicalize(parent).ok())
     else {
-        return true;
+        return Some(Refusal::Unreadable);
     };
-    is_protected_link_target(&parent, canonical_base)
+    protected_kind(&parent, canonical_base)
 }
 
 /// Whether a symlink whose canonical target is `resolved` leads into Git
@@ -96,56 +180,106 @@ fn base_is_protected_link(base: &Path, canonical_base: &Path) -> bool {
 ///
 /// The target is protected when the part of it below `within` (all of it when
 /// it is not below `within`) has a `.git` component (in any case) or a
-/// `node_modules` component, or when it is inside the Git directory or the
-/// common Git directory of the work tree that contains `within`. A `.git`
-/// file can name a Git directory with any name, so the second test covers a
-/// linked worktree and a submodule.
+/// `node_modules` component, or when [`GitDirs::holds`] it for the work tree
+/// that contains `within`. A `.git` file can name a Git directory with any
+/// name, so the second test covers a linked worktree, a submodule and a
+/// separate Git directory.
 ///
 /// The rule is for links only. A direct path into `.git`, such as a hook that
 /// `fallow hooks install` writes on purpose, does not go through it.
 #[must_use]
 pub fn is_protected_link_target(within: &Path, resolved: &Path) -> bool {
-    let below = resolved.strip_prefix(within).unwrap_or(resolved);
-    let protected_name = below.components().any(|component| match component {
-        Component::Normal(name) => is_protected_name(name),
-        _ => false,
-    });
-    protected_name
-        || git_dirs(within)
-            .iter()
-            .any(|git_dir| resolved.starts_with(git_dir))
+    protected_kind(within, resolved).is_some()
 }
 
-fn is_protected_name(name: &OsStr) -> bool {
-    name.to_str().is_some_and(|name| {
-        name.eq_ignore_ascii_case(GIT_ENTRY) || name.eq_ignore_ascii_case(PACKAGE_DIR)
-    })
+/// The refusal of [`is_protected_link_target`], or `None`.
+fn protected_kind(within: &Path, resolved: &Path) -> Option<Refusal> {
+    let below = resolved.strip_prefix(within).unwrap_or(resolved);
+    let names = || {
+        below.components().filter_map(|component| match component {
+            Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+    };
+    if names().any(|name| name.eq_ignore_ascii_case(PACKAGE_DIR)) {
+        return Some(Refusal::Packages);
+    }
+    if names().any(|name| name.eq_ignore_ascii_case(GIT_ENTRY)) {
+        return Some(Refusal::GitMetadata);
+    }
+    GitDirs::of(within)
+        .holds(resolved)
+        .then_some(Refusal::GitMetadata)
 }
 
 /// The canonical Git directory and common Git directory of the work tree
-/// that contains `dir`. Empty when no ancestor of `dir` has a `.git` entry.
-/// The two can be outside the work tree, for a separate Git directory or a
-/// worktree of a bare repository.
-#[must_use]
-pub fn git_dirs(dir: &Path) -> Vec<PathBuf> {
-    let Some(top) = work_tree_top(dir) else {
-        return Vec::new();
-    };
-    let entry = top.join(GIT_ENTRY);
-    let Some(git_dir) = git_dir_of_entry(&entry) else {
-        return Vec::new();
-    };
-    let mut dirs = vec![git_dir.clone()];
-    if let Some(common) = common_dir_of(&git_dir)
-        && common != git_dir
-    {
-        dirs.push(common);
-    }
-    dirs
+/// that contains a directory. The two can be outside the work tree, for a
+/// separate Git directory or a worktree of a bare repository.
+#[derive(Clone, Debug, Default)]
+pub struct GitDirs {
+    /// The canonical top of the work tree.
+    work_tree: Option<PathBuf>,
+    dirs: Vec<PathBuf>,
+    /// The `commondir` file exists but cannot be read or resolved, so the
+    /// common Git directory is not known.
+    unknown: bool,
 }
 
-/// The nearest ancestor of `dir`, `dir` included, with a `.git` entry.
-fn work_tree_top(dir: &Path) -> Option<&Path> {
+impl GitDirs {
+    /// The Git directories of the work tree that contains `dir`. Empty when
+    /// no ancestor of `dir` has a `.git` entry, or when the entry names no
+    /// Git directory that exists.
+    #[must_use]
+    pub fn of(dir: &Path) -> Self {
+        let Some(top) = work_tree_top(dir) else {
+            return Self::default();
+        };
+        let work_tree = std::fs::canonicalize(top).ok();
+        let Some(git_dir) = git_dir_of_entry(&top.join(GIT_ENTRY)) else {
+            return Self {
+                work_tree,
+                ..Self::default()
+            };
+        };
+        let common = common_dir_of(&git_dir);
+        let unknown = common.is_none();
+        let mut dirs = vec![git_dir];
+        if let Some(common) = common
+            && !dirs.contains(&common)
+        {
+            dirs.push(common);
+        }
+        Self {
+            work_tree,
+            dirs,
+            unknown,
+        }
+    }
+
+    /// Whether the canonical `path` is in one of the Git directories. A
+    /// path in the work tree does not count when the work tree itself is in
+    /// that Git directory, as for a worktree inside a bare repository. When
+    /// the common Git directory is not known, every path counts.
+    #[must_use]
+    pub fn holds(&self, path: &Path) -> bool {
+        if self.unknown {
+            return true;
+        }
+        let in_work_tree_of = |dir: &Path| {
+            self.work_tree
+                .as_deref()
+                .is_some_and(|tree| tree.starts_with(dir) && path.starts_with(tree))
+        };
+        self.dirs
+            .iter()
+            .any(|dir| path.starts_with(dir) && !in_work_tree_of(dir))
+    }
+}
+
+/// The nearest ancestor of `dir`, `dir` included, with a `.git` entry. The
+/// entry counts when it exists as an entry, also as a dangling link.
+#[must_use]
+pub fn work_tree_top(dir: &Path) -> Option<&Path> {
     dir.ancestors()
         .find(|ancestor| ancestor.join(GIT_ENTRY).symlink_metadata().is_ok())
 }
@@ -167,11 +301,14 @@ fn git_dir_of_entry(entry: &Path) -> Option<PathBuf> {
 }
 
 /// The canonical common Git directory of the Git directory `git_dir`: the
-/// directory that its `commondir` file names, or `git_dir` itself.
+/// directory that its `commondir` file names, or `git_dir` itself when it
+/// has no `commondir` file. `None` when the file cannot be read or names a
+/// directory that does not resolve.
 fn common_dir_of(git_dir: &Path) -> Option<PathBuf> {
     match std::fs::read_to_string(git_dir.join(COMMONDIR_FILE)) {
         Ok(text) => std::fs::canonicalize(git_dir.join(text.trim())).ok(),
-        Err(_) => Some(git_dir.to_path_buf()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(git_dir.to_path_buf()),
+        Err(_) => None,
     }
 }
 
@@ -188,7 +325,7 @@ fn common_dir_of(git_dir: &Path) -> Option<PathBuf> {
 ///   checked.
 ///
 /// A `..` in the cache directory is resolved by text first, so
-/// `cache.dir: "../shared"` counts as a directory outside the root.
+/// `FALLOW_CACHE_DIR=../shared` counts as a directory outside the root.
 #[must_use]
 pub fn cache_write_base(root: &Path, cache_dir: &Path) -> PathBuf {
     let normalized = lexically_normalized(cache_dir);
@@ -274,25 +411,26 @@ pub fn lexically_normalized(path: &Path) -> PathBuf {
 /// directory, with the base from [`cache_write_base`]. A base that does not
 /// exist yet has no link below it, so the first save into a new cache
 /// directory passes. A dangling link at the base itself exists, so it is
-/// still checked.
+/// still checked. A `..` in `path` is applied to the resolved path, as the
+/// file system does, so `FALLOW_CACHE_DIR=../shared` from a subdirectory
+/// root works and a link before the `..` is still checked.
 ///
 /// # Errors
 ///
-/// Returns a `PermissionDenied` error that names the entry that
-/// [`outside_link`] refuses.
+/// Returns a `PermissionDenied` error that names the refused entry and the
+/// reason.
 pub fn ensure_no_outside_link(base: &Path, path: &Path) -> std::io::Result<()> {
     if base.symlink_metadata().is_err() {
         return Ok(());
     }
-    match outside_link(base, path) {
+    match find_refusal(base, path, ParentSteps::Resolve) {
         None => Ok(()),
-        Some(link) => Err(std::io::Error::new(
+        Some(refused) => Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             format!(
-                "refusing to write {}: {} is a symlink that resolves outside {} or into a .git or node_modules directory, or it is not a regular file or directory",
+                "refusing to write {}: {}",
                 path.display(),
-                link.display(),
-                base.display()
+                refused.reason.describe(&refused.entry, base)
             ),
         )),
     }
@@ -449,7 +587,9 @@ mod tests {
         std::fs::create_dir_all(f.root.join(".fallow")).expect("cache");
         let link = f.root.join(".fallow/.gitignore");
         symlink(f.outside.join("missing"), &link).expect("link");
-        assert_eq!(outside_link(&f.root, &link), Some(link));
+        assert_eq!(outside_link(&f.root, &link), Some(link.clone()));
+        let error = ensure_no_outside_link(&f.root, &link).expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -554,6 +694,9 @@ mod tests {
         symlink(f.root.join(".git"), f.root.join("conf")).expect("link");
         let path = f.root.join("conf/config");
         assert_eq!(outside_link(&f.root, &path), Some(f.root.join("conf")));
+        let error = ensure_no_outside_link(&f.root, &path).expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("Git metadata"), "{error}");
     }
 
     #[test]
@@ -821,6 +964,103 @@ mod tests {
                 .is_err()
         );
         assert!(!other.join("nested/cache").exists());
+    }
+
+    /// A worktree of a bare repository lies inside the common Git directory.
+    /// Its files are not Git metadata, but the Git directory still is.
+    #[test]
+    fn a_worktree_inside_a_bare_repository_is_not_git_metadata() {
+        let f = fixture();
+        let bare = f.root.join("proj.git");
+        let main = bare.join("main");
+        linked_work_tree(&bare, &main, "main");
+        std::fs::create_dir_all(main.join("src")).expect("src");
+        std::fs::create_dir_all(bare.join("hooks")).expect("hooks");
+        let canonical_main = std::fs::canonicalize(&main).expect("main");
+        let canonical_bare = std::fs::canonicalize(&bare).expect("bare");
+        assert!(!is_protected_link_target(
+            &canonical_main,
+            &canonical_main.join("src/a.ts")
+        ));
+        assert!(is_protected_link_target(
+            &canonical_main,
+            &canonical_bare.join("hooks/pre-commit")
+        ));
+        assert!(is_protected_link_target(
+            &canonical_main,
+            &canonical_bare.join("worktrees/main/HEAD")
+        ));
+        std::fs::create_dir_all(main.join("build/cache")).expect("cache");
+        symlink("build/cache", main.join(".fallow")).expect("link");
+        let dir = main.join(".fallow");
+        CacheTarget::new(&main, &dir)
+            .write_file("cache.bin", b"data")
+            .expect("file");
+        symlink(bare.join("hooks"), main.join("hooks")).expect("hooks link");
+        let error =
+            ensure_no_outside_link(&main, &main.join("hooks/pre-commit")).expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    /// A `commondir` file that cannot be read leaves the common Git
+    /// directory unknown, so every link target counts as protected.
+    #[test]
+    fn an_unreadable_commondir_protects_every_link_target() {
+        let f = fixture();
+        let repo = f.root.join("repo");
+        std::fs::create_dir_all(repo.join(".git/worktrees/main/commondir")).expect("git dir");
+        let main = f.root.join("main");
+        std::fs::create_dir_all(&main).expect("main");
+        std::fs::write(
+            main.join(".git"),
+            format!("gitdir: {}\n", repo.join(".git/worktrees/main").display()),
+        )
+        .expect("git file");
+        let canonical = std::fs::canonicalize(&main).expect("main");
+        assert!(is_protected_link_target(
+            &canonical,
+            &canonical.join("src/a.ts")
+        ));
+    }
+
+    /// `FALLOW_CACHE_DIR=../shared` from a subdirectory root names a folder
+    /// in the same work tree. The `..` is resolved on disk, so the save
+    /// writes, and a link before the `..` is still checked.
+    #[test]
+    fn a_user_cache_dir_with_a_parent_step_in_the_work_tree_writes() {
+        let f = fixture();
+        std::fs::create_dir_all(f.root.join(".git")).expect("git dir");
+        let root = f.root.join("pkg");
+        std::fs::create_dir_all(&root).expect("pkg");
+        let dir = root.join("../shared");
+        assert_eq!(cache_write_base(&root, &dir), f.root);
+        CacheTarget::new(&root, &dir)
+            .write_file("cache.bin", b"data")
+            .expect("file");
+        assert!(f.root.join("shared/cache.bin").exists());
+
+        std::fs::create_dir_all(f.outside.join("sub")).expect("sub");
+        symlink(f.outside.join("sub"), root.join("link")).expect("link");
+        let through = root.join("link/../elsewhere");
+        let error = CacheTarget::new(&root, &through)
+            .write_file("cache.bin", b"data")
+            .expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("outside"), "{error}");
+        assert!(!f.outside.join("elsewhere").exists());
+    }
+
+    /// The refusal names the real reason.
+    #[test]
+    fn the_refusal_names_the_reason() {
+        let f = fixture();
+        std::fs::create_dir_all(f.root.join("node_modules/pkg")).expect("packages");
+        symlink(f.root.join("node_modules/pkg"), f.root.join(".fallow")).expect("link");
+        let error = ensure_no_outside_link(&f.root, &f.root.join(".fallow/cache.bin"))
+            .expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("node_modules"), "{error}");
+        assert!(!error.to_string().contains("outside"), "{error}");
     }
 
     #[test]

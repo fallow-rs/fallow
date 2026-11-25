@@ -40,10 +40,9 @@ pub struct WriteScope {
     /// The Git work tree that contains the root, wherever the run starts.
     /// A symlink in it is a link that the repository controls.
     checkout: Option<PathBuf>,
-    /// The Git directory and common Git directory of the root
-    /// ([`fallow_types::path_guard::git_dirs`]). No symlink may resolve into
-    /// them, wherever they are.
-    git_dirs: Vec<PathBuf>,
+    /// The Git directory and common Git directory of the root. No symlink
+    /// may resolve into them, wherever they are.
+    git_dirs: fallow_types::path_guard::GitDirs,
     shared_dirs: Vec<PathBuf>,
 }
 
@@ -80,7 +79,7 @@ impl LinkTarget {
         match self {
             Self::Outside => "outside the project",
             Self::Packages => "into a node_modules directory",
-            Self::GitMetadata => "into Git metadata (a .git directory)",
+            Self::GitMetadata => "into Git metadata",
         }
     }
 
@@ -126,12 +125,9 @@ impl WriteScope {
             )
         })?;
         let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-        let checkout = root
-            .ancestors()
-            .find(|dir| dir.join(".git").exists())
-            .map(Path::to_path_buf);
+        let checkout = fallow_types::path_guard::work_tree_top(&root).map(Path::to_path_buf);
         let work_tree = checkout.clone().filter(|tree| cwd.starts_with(tree));
-        let git_dirs = fallow_types::path_guard::git_dirs(&root);
+        let git_dirs = fallow_types::path_guard::GitDirs::of(&root);
         Ok(Self {
             root,
             work_tree,
@@ -212,7 +208,7 @@ impl WriteScope {
     fn refusal(&self, walk: &Walk) -> Option<Refusal> {
         let mut through_project_link = false;
         for link in &walk.links {
-            let kind = if self.git_dirs.iter().any(|dir| link.target.starts_with(dir)) {
+            let kind = if self.git_dirs.holds(&link.target) {
                 Some(LinkTarget::GitMetadata)
             } else if self.in_checkout(&link.location) {
                 through_project_link = true;
@@ -1233,6 +1229,42 @@ mod tests {
             WriteScope::new(&root, &root, vec![shared.canonicalize().unwrap()]).expect("scope");
         assert!(scope.check("--output-file", &link, &root).is_some());
         assert_eq!(std::fs::read_to_string(&hook).unwrap(), "keep");
+    }
+
+    /// A worktree of a bare repository lies inside the common Git directory.
+    /// A link in it to another file of the same worktree is allowed, and a
+    /// link into the Git directory is still refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_a_worktree_of_a_bare_repository_is_allowed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bare = dir.path().join("proj.git");
+        let linked = bare.join("worktrees/main");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::create_dir_all(bare.join("hooks")).unwrap();
+        std::fs::write(linked.join("commondir"), "../..\n").unwrap();
+        let root = bare.join("main");
+        std::fs::create_dir_all(root.join("reports")).unwrap();
+        std::fs::write(root.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        std::os::unix::fs::symlink(root.join("reports"), root.join("out")).unwrap();
+        std::os::unix::fs::symlink(bare.join("hooks"), root.join("hooks")).unwrap();
+        let scope = WriteScope::new(&root, &root, Vec::new()).expect("scope");
+        assert!(scope.contains(&root.join("out/r.json")));
+        assert!(scope.contains(&root.join("reports/r.json")));
+        assert!(!scope.contains(&root.join("hooks/pre-commit")));
+    }
+
+    /// A `.git` entry counts for the checkout when it exists as an entry,
+    /// also as a dangling link, the same rule that the cache guard uses.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_git_link_marks_the_checkout() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join("pkg")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("missing"), repo.join(".git")).unwrap();
+        let scope = WriteScope::new(&repo.join("pkg"), &repo, Vec::new()).expect("scope");
+        assert!(scope.contains(&repo.join("r.json")));
     }
 
     /// A socket is not a regular file, so a write to it is refused.

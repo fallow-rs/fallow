@@ -221,6 +221,31 @@ mod tests {
         assert!(result.is_none());
     }
 
+    /// A worktree of a bare repository lies inside the common Git directory.
+    /// Its own files stay readable, and a link into the Git directory is
+    /// still refused.
+    #[cfg(unix)]
+    #[test]
+    fn read_source_reads_a_file_of_a_worktree_inside_a_bare_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("proj.git");
+        let linked = bare.join("worktrees/main");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::create_dir_all(bare.join("hooks")).unwrap();
+        std::fs::write(linked.join("commondir"), "../..\n").unwrap();
+        let root = bare.join("main");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join(".git"), format!("gitdir: {}\n", linked.display())).unwrap();
+        let file = root.join("src/a.ts");
+        std::fs::write(&file, "export const a = 1;\n").unwrap();
+        std::fs::write(bare.join("hooks/pre-commit"), "keep").unwrap();
+        let link = root.join("src/hook.ts");
+        std::os::unix::fs::symlink(bare.join("hooks/pre-commit"), &link).unwrap();
+
+        assert!(read_source(&root, &file).unwrap().is_some());
+        assert!(read_source(&root, &link).unwrap().is_none());
+    }
+
     #[test]
     fn read_source_returns_none_for_nonexistent_file() {
         let dir = tempfile::tempdir().unwrap();
