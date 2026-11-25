@@ -984,13 +984,14 @@ pub fn check_plugin_detection(
                 }
             }
             // A pattern that can lead above the root never matches.
-            // A match through a link that leaves the root does not count.
+            // A match through a link that leaves the read scope does not
+            // count.
             !fallow_config::glob_validation::escapes_project_root(pattern)
                 && fallow_config::glob_validation::expand_disk_glob(root, pattern).is_some_and(
                     |paths| {
                         paths
                             .filter_map(Result::ok)
-                            .any(|path| fallow_types::read_guard::is_inside_root(root, &path))
+                            .any(|path| crate::discover::project_read::is_inside_scope(root, &path))
                     },
                 )
         }
@@ -1046,6 +1047,25 @@ mod tests {
             pattern: "linked/f*".to_owned(),
         };
         assert!(!check_plugin_detection(&detection, &[], &root, &[]));
+    }
+
+    /// A package root inside a Git work tree may link a shared config of the
+    /// work tree, and the link counts for detection.
+    #[test]
+    #[cfg(unix)]
+    fn file_exists_detection_follows_a_link_into_the_work_tree() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dir.path().join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::write(top.join("jest.base.js"), "").expect("write");
+        std::os::unix::fs::symlink("../../jest.base.js", root.join("jest.config.js"))
+            .expect("link");
+        let detection = PluginDetection::FileExists {
+            pattern: "jest.config.*".to_owned(),
+        };
+        assert!(check_plugin_detection(&detection, &[], &root, &[]));
     }
 
     #[test]

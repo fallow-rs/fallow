@@ -328,19 +328,22 @@ fn warning_value(warning: &CheckWarning) -> Value {
 /// An expansion that is absolute or has a `..` segment never matches, so the
 /// probe stays below `root`.
 fn entry_path_exists(root: &Path, entry: &str) -> bool {
+    let home = fallow_process::HostPaths::from_env().home;
+    let base = fallow_types::read_scope::read_scope_base(root, home.as_deref());
     expand_braces(entry).iter().any(|pattern| {
         if fallow_config::glob_validation::validate_user_path(pattern, "entry").is_err() {
             return false;
         }
         if pattern.contains(['*', '?', '[']) {
-            // A match through a link that leaves the root does not count.
+            // A match through a link that leaves the read scope does not
+            // count.
             fallow_config::glob_validation::expand_disk_glob(root, pattern).is_some_and(|paths| {
                 paths
                     .filter_map(Result::ok)
-                    .any(|path| fallow_types::read_guard::is_inside_root(root, &path))
+                    .any(|path| fallow_types::read_guard::is_inside_root(&base, &path))
             })
         } else {
-            fallow_types::read_guard::is_inside_root(root, &root.join(pattern))
+            fallow_types::read_guard::is_inside_root(&base, &root.join(pattern))
         }
     })
 }
@@ -590,6 +593,24 @@ mod tests {
 
         assert!(!entry_path_exists(&root, "linked/*.ts"));
         assert!(!entry_path_exists(&root, "linked/index.ts"));
+    }
+
+    /// A seeded entry that links to a shared file of the Git work tree above
+    /// the root exists for the check.
+    #[test]
+    #[cfg(unix)]
+    fn entry_path_exists_follows_a_link_into_the_work_tree() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dir.path().join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::write(top.join("jest.base.js"), "").expect("write");
+        std::os::unix::fs::symlink("../../jest.base.js", root.join("jest.config.js"))
+            .expect("link");
+
+        assert!(entry_path_exists(&root, "jest.config.js"));
+        assert!(entry_path_exists(&root, "jest.config.*"));
     }
 
     #[test]

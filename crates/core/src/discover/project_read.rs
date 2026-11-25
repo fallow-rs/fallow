@@ -47,10 +47,15 @@ pub fn read_project_dir(root: &Path, dir: &Path) -> Option<std::fs::ReadDir> {
     std::fs::read_dir(dir).ok()
 }
 
+/// True when `path` resolves inside the read scope of `root`.
+pub fn is_inside_scope(root: &Path, path: &Path) -> bool {
+    is_inside_root(&scope_base(root), path)
+}
+
 /// True when `path` is a regular file that resolves inside the read scope of
 /// `root`.
 pub fn is_project_file(root: &Path, path: &Path) -> bool {
-    path.is_file() && is_inside_root(&scope_base(root), path)
+    path.is_file() && is_inside_scope(root, path)
 }
 
 /// The `package.json` of the project directory `dir`, or `None` when it is
