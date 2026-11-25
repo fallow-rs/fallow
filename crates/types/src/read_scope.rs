@@ -103,6 +103,22 @@ mod tests {
         std::fs::set_permissions(&top, std::fs::Permissions::from_mode(0o700)).expect("chmod");
     }
 
+    /// A directory that another user owns does not widen the scope. `/usr`
+    /// belongs to the system user on each Unix host.
+    #[test]
+    #[cfg(unix)]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_work_tree_that_another_user_owns_does_not_widen_the_scope() {
+        if rustix::process::geteuid().is_root() {
+            return;
+        }
+        let other = Path::new("/usr");
+        assert!(!owned_by_this_user(other));
+        assert!(!widens_scope(other, Some(Path::new("/home/user"))));
+        let own = tempfile::tempdir().expect("temp dir");
+        assert!(owned_by_this_user(own.path()));
+    }
+
     #[test]
     fn a_work_tree_at_the_file_system_root_does_not_widen_the_scope() {
         let top = Path::new("/");

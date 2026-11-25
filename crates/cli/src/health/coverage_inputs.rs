@@ -263,11 +263,17 @@ mod tests {
                 script("node:fs"),
                 script("file:///project/../elsewhere/a.js"),
                 script("/elsewhere/b.js"),
+                script("/project/dist/../c.js"),
             ],
         );
         let urls: Vec<&str> = kept.iter().map(|script| script.url.as_str()).collect();
         assert_eq!(urls, ["file:///project/dist/missing.js", "node:fs"]);
-        assert_eq!(dropped, 2);
+        assert_eq!(dropped, 3);
+        assert_eq!(
+            file_url_to_path("/project/dist/../c.js"),
+            Some(PathBuf::from("/project/dist/../c.js")),
+            "the parser keeps the raw `..` segments of a plain path"
+        );
     }
 
     #[test]

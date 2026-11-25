@@ -41,8 +41,13 @@ fn read_text_file_from(cwd: &Path, path: &Path, label: &str) -> Result<String, S
 /// Read the review envelope of `post-review` and `reconcile-review`. A parse
 /// error names the position only.
 pub(super) fn read_envelope(path: &Path) -> Result<serde_json::Value, String> {
-    let data = read_text_file(path, "review envelope")?;
-    serde_json::from_str(&data).map_err(|e| {
+    parse_envelope(path, &read_text_file(path, ENVELOPE_LABEL)?)
+}
+
+const ENVELOPE_LABEL: &str = "review envelope";
+
+fn parse_envelope(path: &Path, data: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(data).map_err(|e| {
         format!(
             "failed to parse review envelope '{}': {}",
             path.display(),
@@ -95,17 +100,19 @@ mod tests {
     #[cfg(unix)]
     fn review_envelope_reads_are_bounded_and_quote_no_value() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let outside = dir.path().join("other.json");
+        let cwd = dunce::canonicalize(dir.path())
+            .expect("canonical")
+            .join("checkout");
+        std::fs::create_dir_all(&cwd).expect("mkdir");
+        let outside = cwd.parent().expect("parent").join("other.json");
         std::fs::write(&outside, r#"{"meta": "hidden-value"}"#).expect("write");
-        let cwd = std::env::current_dir().expect("cwd");
-        let link = cwd.join(format!("u3b-envelope-link-{}.json", std::process::id()));
+        let link = cwd.join("envelope.json");
         std::os::unix::fs::symlink(&outside, &link).expect("link");
-        let refused = super::read_envelope(&link);
-        std::fs::remove_file(&link).expect("remove link");
-        assert!(refused.is_err());
+        assert!(read_text_file_from(&cwd, &link, ENVELOPE_LABEL).is_err());
 
         std::fs::write(&outside, r#"{"meta": "hidden-value""#).expect("write");
-        let error = super::read_envelope(&outside).unwrap_err();
+        let data = read_text_file_from(&cwd, &outside, ENVELOPE_LABEL).expect("plain path");
+        let error = parse_envelope(&outside, &data).unwrap_err();
         assert!(!error.contains("hidden-value"), "{error}");
     }
 }
