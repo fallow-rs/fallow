@@ -124,6 +124,7 @@ fn ignore_exports_wildcard() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
@@ -203,6 +204,7 @@ fn ignore_exports_specific() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 
@@ -431,6 +433,7 @@ fn ignore_dependencies_config() {
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
+        outside_keys: fallow_config::OutsideKeys::default(),
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None);
 

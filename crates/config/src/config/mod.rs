@@ -15,7 +15,7 @@ mod legacy_glob;
 mod markup_extensions;
 mod mutation;
 mod outside_root;
-pub use outside_root::{TrackedLinkProbe, set_tracked_link_probe};
+pub use outside_root::{OutsideKeys, TrackedLinkProbe, set_tracked_link_probe};
 mod override_effect;
 mod parsing;
 mod resolution;
@@ -691,6 +691,14 @@ pub struct FallowConfig {
     /// Overrides the location and size ceiling of fallow's persistent extraction cache (default `.fallow/cache.bin` under the project root). Set to relocate the cache or cap its footprint; the object holds `dir` (cache directory, relative paths resolve from the project root) and `maxSizeMb` (extraction-cache size limit in megabytes). The `FALLOW_CACHE_MAX_SIZE` environment variable overrides `maxSizeMb`.
     #[serde(default, skip_serializing_if = "CacheConfig::is_default")]
     pub cache: CacheConfig,
+
+    /// The keys whose value can come from a local config file outside the
+    /// project, set by the load. Checks after the load name these keys
+    /// without their values. It is not part of the config file format.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[doc(hidden)]
+    pub outside_keys: OutsideKeys,
 }
 
 /// Scopes `fallow security` catalogue behavior. An absent category block admits

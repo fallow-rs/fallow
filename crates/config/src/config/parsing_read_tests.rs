@@ -351,3 +351,99 @@ fn an_untracked_config_link_out_of_the_checkout_loads() {
     assert!(message.contains("symbolic link"), "{message}");
     assert!(FallowConfig::find_config_path(&project).is_none());
 }
+
+/// The error of a config whose only value comes from the extended file
+/// `outside.json` next to the project.
+fn outside_value_error(outside_content: &str) -> String {
+    let dir = project_with_outside_file("outside.json", outside_content);
+    let config = dir.path().join("project/.fallowrc.json");
+    std::fs::write(&config, r#"{"extends": ["../outside.json"]}"#).unwrap();
+    FallowConfig::load(&config).unwrap_err().to_string()
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn checks_after_the_merge_omit_values_of_a_file_outside_the_project() {
+    for (content, key) in [
+        (
+            format!(r#"{{"minimumVersion": "{MARKER}"}}"#),
+            "minimumVersion",
+        ),
+        (format!(r#"{{"entry": ["/{MARKER}/a.ts"]}}"#), "entry"),
+        (
+            format!(r#"{{"health": {{"tailwindIgnorePatterns": ["({MARKER}"]}}}}"#),
+            "health.tailwindIgnorePatterns",
+        ),
+        (
+            format!(r#"{{"unusedComponentProps": {{"ignorePattern": "({MARKER}"}}}}"#),
+            "unusedComponentProps.ignorePattern",
+        ),
+        (
+            format!(r#"{{"circularDependencies": {{"allow": [["{MARKER}.ts", "{MARKER}.ts"]]}}}}"#),
+            "circularDependencies.allow",
+        ),
+        (format!(r#"{{"extends": ["./{MARKER}.json"]}}"#), "extends"),
+    ] {
+        let message = outside_value_error(&content);
+        assert!(!message.contains(MARKER), "{message}");
+        assert!(message.contains(key), "{key}: {message}");
+        assert!(message.contains("outside.json"), "{message}");
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn checks_after_the_merge_keep_values_of_a_file_inside_the_project() {
+    let dir = project_with_outside_file("outside.json", r#"{"ignorePatterns": ["dist/**"]}"#);
+    let project = dir.path().join("project");
+    std::fs::write(
+        project.join("base.json"),
+        format!(r#"{{"entry": ["/{MARKER}/a.ts"], "minimumVersion": "{MARKER}"}}"#),
+    )
+    .unwrap();
+    let config = project.join(".fallowrc.json");
+    std::fs::write(
+        &config,
+        r#"{"extends": ["../outside.json", "./base.json"]}"#,
+    )
+    .unwrap();
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(message.contains(MARKER), "{message}");
+
+    std::fs::write(
+        project.join("base.json"),
+        format!(r#"{{"entry": ["/{MARKER}/a.ts"]}}"#),
+    )
+    .unwrap();
+    let message = FallowConfig::load(&config).unwrap_err().to_string();
+    assert!(message.contains(MARKER), "{message}");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn file_path_key_check_omits_a_value_of_a_file_outside_the_project() {
+    let dir = project_with_outside_file(
+        "outside.json",
+        &format!(r#"{{"codeowners": "../../{MARKER}/CODEOWNERS"}}"#),
+    );
+    let project = dir.path().join("project");
+    let config = project.join(".fallowrc.json");
+    std::fs::write(&config, r#"{"extends": ["../outside.json"]}"#).unwrap();
+    let loaded = FallowConfig::load(&config).unwrap();
+    let errors = loaded.check_file_path_keys_inside(&project).unwrap_err();
+    let message = errors.join("\n");
+    assert!(!message.contains(MARKER), "{message}");
+    assert!(message.contains("codeowners"), "{message}");
+
+    std::fs::write(
+        &config,
+        format!(r#"{{"codeowners": "../../{MARKER}/CODEOWNERS"}}"#),
+    )
+    .unwrap();
+    let loaded = FallowConfig::load(&config).unwrap();
+    let message = loaded
+        .check_file_path_keys_inside(&project)
+        .unwrap_err()
+        .join("\n");
+    assert!(message.contains(MARKER), "{message}");
+}

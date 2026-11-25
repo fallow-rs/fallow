@@ -2,10 +2,13 @@ use std::net::Ipv6Addr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::FallowConfig;
+
+#[path = "parsing_extends.rs"]
+mod extends_entry;
+use extends_entry::{ExtendsTarget, LocalExtendsEntry, extends_target, outside_extends_error};
 
 pub use fallow_types::config_file_names::{
     CONFIG_FILE_NAMES, UNRECOGNIZED_CONFIG_FILE_NAMES, config_file_name,
@@ -653,16 +656,6 @@ struct ResolvedConfig {
     merge_order: MergeOrder,
 }
 
-#[derive(Clone, Copy)]
-struct LocalExtendsEntry<'a> {
-    path: &'a Path,
-    config_dir: &'a Path,
-    entry: &'a str,
-    sealed: bool,
-    sealed_dir_canonical: Option<&'a Path>,
-    depth: usize,
-}
-
 impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
     fn new(options: ConfigLoadOptions, fetcher: &'a mut Fetcher) -> Self {
         Self {
@@ -808,69 +801,29 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
         let mut merged = serde_json::Value::Object(serde_json::Map::new());
         for entry in &extends {
-            let base = self.resolve_local_entry(LocalExtendsEntry {
+            let target = extends_target(LocalExtendsEntry {
                 path,
                 config_dir,
                 entry,
                 sealed,
                 sealed_dir_canonical: sealed_dir_canonical.as_deref(),
-                depth,
+            })
+            .map_err(|error| {
+                if inside {
+                    error
+                } else {
+                    outside_extends_error(path)
+                }
             })?;
+            let base = match target {
+                ExtendsTarget::Remote(url) => self.resolve_remote(url, depth + 1)?,
+                ExtendsTarget::Local(target) => self.resolve_local(&target, depth + 1)?,
+            };
             deep_merge_json(&mut merged, base);
         }
         deep_merge_json(&mut merged, value);
         Ok(merged)
     }
-
-    fn resolve_local_entry(
-        &mut self,
-        input: LocalExtendsEntry<'_>,
-    ) -> Result<serde_json::Value, miette::Report> {
-        let LocalExtendsEntry {
-            path,
-            config_dir,
-            entry,
-            sealed,
-            sealed_dir_canonical,
-            depth,
-        } = input;
-        if starts_with_url_prefix(entry, HTTPS_PREFIX) {
-            reject_sealed_remote_extends(path, entry, sealed, "URL")?;
-            return self.resolve_remote(entry, depth + 1);
-        }
-        if starts_with_url_prefix(entry, HTTP_PREFIX) {
-            let entry_display = remote_config_display(entry);
-            return Err(miette::miette!(
-                "URL extends must use https://, got http:// URL '{}' (in {}). \
-                 Change the URL to use https:// instead",
-                entry_display,
-                path.display()
-            ));
-        }
-        if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
-            reject_sealed_remote_extends(path, entry, sealed, "npm")?;
-            let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
-            return self.resolve_local(&npm_path, depth + 1);
-        }
-        if is_absolute_path_any_platform(Path::new(entry)) {
-            return Err(miette::miette!(
-                "extends paths must be relative, got absolute path: {} (in {})",
-                entry,
-                path.display()
-            ));
-        }
-        let resolved_path = config_dir.join(entry);
-        if !resolved_path.exists() {
-            return Err(miette::miette!(
-                "Extended config file not found: {} (referenced from {})",
-                resolved_path.display(),
-                path.display()
-            ));
-        }
-        validate_sealed_relative_extends(path, entry, &resolved_path, sealed_dir_canonical)?;
-        self.resolve_local(&resolved_path, depth + 1)
-    }
-
     fn resolve_remote(
         &mut self,
         url: &str,
@@ -1027,56 +980,6 @@ fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>,
     })
 }
 
-fn reject_sealed_remote_extends(
-    path: &Path,
-    entry: &str,
-    sealed: bool,
-    kind: &str,
-) -> Result<(), miette::Report> {
-    if sealed {
-        let entry_display = remote_config_display(entry);
-        Err(miette::miette!(
-            "'sealed: true' config at {} rejects {} extends '{}'. \
-             Sealed configs only allow file-relative extends within \
-             the config's directory",
-            path.display(),
-            kind,
-            entry_display
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_sealed_relative_extends(
-    path: &Path,
-    entry: &str,
-    resolved_path: &Path,
-    sealed_dir_canonical: Option<&Path>,
-) -> Result<(), miette::Report> {
-    let Some(dir_canonical) = sealed_dir_canonical else {
-        return Ok(());
-    };
-    let p_canonical = dunce::canonicalize(resolved_path).map_err(|e| {
-        miette::miette!(
-            "Sealed config extends path '{}' could not be canonicalized: {e}",
-            resolved_path.display()
-        )
-    })?;
-    if p_canonical.starts_with(dir_canonical) {
-        Ok(())
-    } else {
-        Err(miette::miette!(
-            "'sealed: true' config at {} rejects extends '{}' which resolves \
-             outside the config's directory ({}). Sealed configs only allow \
-             extends within the config's directory",
-            path.display(),
-            entry,
-            p_canonical.display()
-        ))
-    }
-}
-
 /// Public entry point: resolve a config file with all its extends chain.
 ///
 /// Delegates to [`resolve_extends_file`] with a fresh visited set.
@@ -1185,11 +1088,19 @@ pub(super) fn version_triple(value: &str) -> Option<(u64, u64, u64)> {
 fn assert_binary_meets_minimum_version(
     path: &Path,
     merged: &serde_json::Value,
+    outside: &super::outside_root::OutsideKeys,
 ) -> Result<(), miette::Report> {
     let Some(declared) = merged.get("minimumVersion") else {
         return Ok(());
     };
     let declared = declared.as_str().and_then(version_triple).ok_or_else(|| {
+        if outside.covers("minimumVersion") {
+            return miette::miette!(
+                "{} in {}",
+                outside.field_message("minimumVersion"),
+                path.display()
+            );
+        }
         miette::miette!(
             "minimumVersion must be MAJOR.MINOR.PATCH in {}, found {declared}",
             path.display()
@@ -1302,7 +1213,11 @@ fn capture_coexisting_config_warnings<F: FnOnce() -> R, R>(body: F) -> (R, Vec<C
 
 /// Warn once per config file about each key under `workspaces` that fallow
 /// does not know. An error would break configs that carry a stray key today.
-fn warn_on_unknown_workspace_keys(config_path: &Path, workspaces: Option<&crate::WorkspaceConfig>) {
+fn warn_on_unknown_workspace_keys(
+    config_path: &Path,
+    workspaces: Option<&crate::WorkspaceConfig>,
+    outside: &super::outside_root::OutsideKeys,
+) {
     use std::sync::{Mutex, OnceLock};
 
     static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
@@ -1311,6 +1226,17 @@ fn warn_on_unknown_workspace_keys(config_path: &Path, workspaces: Option<&crate:
     };
     let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
     for key in workspaces.unknown_keys.keys() {
+        if outside.covers(&format!("workspaces.{key}")) {
+            let dedupe_key = format!("{}::outside", config_path.display());
+            if warned.lock().is_ok_and(|mut set| set.insert(dedupe_key)) {
+                tracing::warn!(
+                    "unknown key under 'workspaces' in a config file outside the project ({}); \
+                     fallow ignores it. The text of a file outside the project is not shown.",
+                    outside.file_list(),
+                );
+            }
+            continue;
+        }
         let dedupe_key = format!("{}::{key}", config_path.display());
         if let Ok(mut set) = warned.lock()
             && !set.insert(dedupe_key)
@@ -1482,7 +1408,8 @@ impl FallowConfig {
         merged: serde_json::Value,
         local_values: &[super::outside_root::LocalValue],
     ) -> Result<Self, miette::Report> {
-        assert_binary_meets_minimum_version(path, &merged)?;
+        let outside_keys = super::outside_root::OutsideKeys::from_values(local_values);
+        assert_binary_meets_minimum_version(path, &merged, &outside_keys)?;
         let outside = super::outside_root::has_outside(local_values);
         if outside {
             for value in local_values.iter().filter(|value| value.inside) {
@@ -1517,20 +1444,33 @@ impl FallowConfig {
             miette::miette!("{reason} in {}{hint}", path.display())
         })?;
         config.rules.private_type_leaks_configured = private_type_leaks_configured;
-        warn_on_unknown_workspace_keys(path, config.workspaces.as_ref());
+        config.outside_keys = outside_keys;
+        warn_on_unknown_workspace_keys(path, config.workspaces.as_ref(), &config.outside_keys);
+        config.check_merged_values()?;
+        Ok(config)
+    }
 
-        config.validate_user_globs().map_err(|errors| {
+    /// The checks of the merged config that serde cannot express. A message
+    /// for a value that can come from a config file outside the project
+    /// names the key and that file only, see
+    /// [`super::outside_root::OutsideKeys`].
+    fn check_merged_values(&self) -> Result<(), miette::Report> {
+        let config = self;
+        let invalid = |errors: Vec<String>| {
             let joined = errors
-                .iter()
-                .map(ToString::to_string)
+                .into_iter()
+                .map(|error| config.outside_keys.redact(error))
                 .collect::<Vec<_>>()
                 .join("\n  - ");
             miette::miette!("invalid config:\n  - {}", joined)
-        })?;
+        };
+        config
+            .validate_user_globs()
+            .map_err(|errors| invalid(errors.iter().map(ToString::to_string).collect()))?;
         if !config.security.request_receivers_are_valid() {
-            return Err(miette::miette!(
-                "invalid config:\n  - security.requestReceivers entries must be non-empty strings"
-            ));
+            return Err(invalid(vec![
+                "security.requestReceivers entries must be non-empty strings".to_owned(),
+            ]));
         }
         let mut health_errors = config.health.threshold_override_errors();
         health_errors.extend(config.health.change_coupling.errors());
@@ -1543,27 +1483,20 @@ impl FallowConfig {
             }
         }
         if !health_errors.is_empty() {
-            return Err(miette::miette!(
-                "invalid config:\n  - {}",
-                health_errors.join("\n  - ")
-            ));
+            return Err(invalid(health_errors));
         }
         let allow_errors = config.circular_dependencies.allow_errors();
         if !allow_errors.is_empty() {
-            return Err(miette::miette!(
-                "invalid config:\n  - {}",
-                allow_errors.join("\n  - ")
-            ));
+            return Err(invalid(allow_errors));
         }
         if let Some(pattern) = &config.unused_component_props.ignore_pattern
             && let Err(e) = regex::Regex::new(pattern)
         {
-            return Err(miette::miette!(
-                "invalid config:\n  - unusedComponentProps.ignorePattern is not a valid regex: {e}"
-            ));
+            return Err(invalid(vec![format!(
+                "unusedComponentProps.ignorePattern is not a valid regex: {e}"
+            )]));
         }
-
-        Ok(config)
+        Ok(())
     }
 
     /// Validate all user-supplied glob patterns and directory paths in this config.
@@ -1685,7 +1618,16 @@ impl FallowConfig {
                 })
             })
             .map(|(value, field)| {
-                format!("{field}: '{value}' resolves to a location outside the project root")
+                if self.outside_keys.covers(field) {
+                    format!(
+                        "{field}: a value from a config file outside the project ({}) resolves \
+                         to a location outside the project root. The text of a file outside \
+                         the project is not shown",
+                        self.outside_keys.file_list()
+                    )
+                } else {
+                    format!("{field}: '{value}' resolves to a location outside the project root")
+                }
             })
             .collect();
         if errors.is_empty() {
