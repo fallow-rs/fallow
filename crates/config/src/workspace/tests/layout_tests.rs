@@ -618,3 +618,27 @@ fn dot_slash_root_entry_does_not_declare_a_nested_project() {
         &dir.path().join("docs")
     ));
 }
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_pnpm_workspace_link_out_of_the_project_gives_no_patterns() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let outer = dunce::canonicalize(dir.path()).unwrap();
+    let root = outer.join("project");
+    std::fs::write(outer.join("other.yaml"), "packages:\n  - marker-7531/*\n").unwrap();
+    write_package(&root, r#"{"name":"root","private":true}"#);
+    std::os::unix::fs::symlink(outer.join("other.yaml"), root.join("pnpm-workspace.yaml")).unwrap();
+    write_package(&root.join("docs"), r#"{"name":"docs","private":true}"#);
+    std::os::unix::fs::symlink(
+        outer.join("other.yaml"),
+        root.join("docs/pnpm-workspace.yaml"),
+    )
+    .unwrap();
+
+    let (_, diagnostics) =
+        discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty()).unwrap();
+    let text = format!("{diagnostics:?}");
+    assert!(!text.contains("marker-7531"), "{text}");
+    assert!(!nested_member_dirs_missing(&root.join("docs")));
+}

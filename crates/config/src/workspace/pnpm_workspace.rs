@@ -363,6 +363,25 @@ fn packages_from_lines(content: &str) -> Vec<String> {
     patterns
 }
 
+/// The text of the `pnpm-workspace.yaml` in `dir`, read with the bounded
+/// read helper: the file must resolve inside `dir`, be a regular file and
+/// fit the size limit. A missing file gives `None`. Each other refusal gives
+/// `None` and a warning that names the path only.
+pub(super) fn read_pnpm_workspace(dir: &std::path::Path) -> Option<String> {
+    match fallow_types::read_guard::read_to_string_inside(
+        dir,
+        std::path::Path::new("pnpm-workspace.yaml"),
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) {
+        Ok(content) => Some(content),
+        Err(refusal) if refusal.is_not_found() => None,
+        Err(refusal) => {
+            tracing::warn!("{refusal}");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

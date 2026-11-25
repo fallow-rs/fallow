@@ -419,7 +419,7 @@ fn collect_declared_patterns(
     }
 
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
-    if let Ok(content) = std::fs::read_to_string(&pnpm_workspace) {
+    if let Some(content) = pnpm_workspace::read_pnpm_workspace(root) {
         push_all(&pnpm_workspace, pnpm_workspace_packages(&content));
     }
 

@@ -202,9 +202,12 @@ pub(super) fn collect_nested_project_workspaces(
 
 /// The `packages` entries of the `pnpm-workspace.yaml` in `project_dir`, as
 /// written in the file. Each entry names that file as its source.
+///
+/// The file must resolve inside `project_dir`, the same rule as the root
+/// `pnpm-workspace.yaml` of the analysis root.
 pub(super) fn nested_declared_patterns(project_dir: &Path) -> Vec<DeclaredPattern> {
     let source = project_dir.join(PNPM_WORKSPACE_FILE);
-    let Ok(content) = std::fs::read_to_string(&source) else {
+    let Some(content) = super::pnpm_workspace::read_pnpm_workspace(project_dir) else {
         return Vec::new();
     };
     pnpm_workspace_packages(&content)
