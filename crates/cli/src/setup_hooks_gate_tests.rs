@@ -2219,6 +2219,23 @@ fn gate_keeps_every_cd_target_as_an_audit_candidate() {
         String::from_utf8_lossy(&run.output.stderr)
     );
 
+    // A parenthesis in a here-document body is text, not a subshell.
+    let run = run_gate(
+        &gate,
+        &repo,
+        &root.join("home"),
+        &command_payload(
+            &repo,
+            "cat <<'A'\n(\nA\ncd packages\ncat <<'B'\n)\nB\ngit -C app commit -m test",
+        ),
+    );
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "here-document: stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+
     // A `cd` before the subshell still counts after it.
     let run = run_gate(
         &gate,

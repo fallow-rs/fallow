@@ -484,11 +484,11 @@ is_git_write_command() {
   # in a subshell does not change the directory of the later commands, so `(`
   # saves the directory and `)` restores it. An unmatched `)` keeps it. A
   # command over GATE_SMALL_INPUT_LIMIT characters, or one with ANSI-C quotes,
-  # a `#` or a `case`, has no quote-aware scan: there each parenthesis is
-  # only a separator, and the directory stays.
+  # a `#`, a `case` or a here-document, has no quote-aware scan: there each
+  # parenthesis is only a separator, and the directory stays.
   [ "${#cmd}" -le "$GATE_SMALL_INPUT_LIMIT" ] || track=0
   case "$cmd" in
-    *"\$'"* | *'#'* | *case*) track=0 ;;
+    *"\$'"* | *'#'* | *case* | *'<<'*) track=0 ;;
   esac
   if [ "$track" -eq 1 ]; then
     cmd="$(gate_mark_subshells "$cmd" "$open_mark" "$close_mark")"
