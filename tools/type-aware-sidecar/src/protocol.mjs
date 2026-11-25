@@ -10,6 +10,7 @@ import {
   WIRE_PROTOCOL_VERSION,
 } from "./generated-protocol.mjs";
 import { canonicalFileIdentity } from "./file-identity.mjs";
+import { resolvesInside } from "./read-scope.mjs";
 import { normalizePhaseTimings, normalizeSemanticResult } from "./response-normalization.mjs";
 
 const require = createRequire(import.meta.url);
@@ -354,10 +355,11 @@ const requireUniqueProjects = (projects) => {
 const parseProjects = (value, root) => {
   const projects = requireBoundedArray(value, "projects", MAX_PROJECTS).map((project, index) => {
     const projectPath = requireString(project, `projects[${index}]`);
-    return {
-      path: projectPath,
-      absolutePath: path.resolve(root, projectPath),
-    };
+    const absolutePath = path.resolve(root, projectPath);
+    if (!resolvesInside(root, absolutePath)) {
+      throw new Error(`projects[${index}] resolves outside the root`);
+    }
+    return { path: projectPath, absolutePath };
   });
   requireUniqueProjects(projects);
   return projects;

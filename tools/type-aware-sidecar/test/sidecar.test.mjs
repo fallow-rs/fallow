@@ -4077,6 +4077,8 @@ test("unknown external framework package provenance abstains", () => {
   const monorepo = makeProject();
   const root = path.join(monorepo, "packages", "app");
   try {
+    // The monorepo is a Git work tree, so its root tsconfig is in the read scope.
+    write(monorepo, ".git/HEAD", "ref: refs/heads/main\n");
     write(
       monorepo,
       "tsconfig.json",

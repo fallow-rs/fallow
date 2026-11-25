@@ -1,7 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { selectBackend, supportedRange, supportsVersion } from "./backend-selection.mjs";
+import { createReadScope } from "./read-scope.mjs";
 
 const SELECTED = selectBackend();
 const { version: resolvedVersion } = await import(SELECTED.package);
@@ -135,12 +137,40 @@ const withLinearSnapshots = (api) => {
 };
 
 /**
- * Create a backend API with the TypeScript 7.0 snapshot contract.
+ * The `node_modules` directory that holds the backend package. The platform
+ * package of the compiler, with its library files, is installed next to it.
+ */
+const COMPILER_DIRS = (() => {
+  try {
+    const manifest = createRequire(import.meta.url).resolve(`${BACKEND.package}/package.json`);
+    const packageDir = path.dirname(realpathSync(manifest));
+    return [packageDir, path.dirname(packageDir), path.dirname(path.dirname(packageDir))].filter(
+      (dir) => path.basename(dir) === "node_modules" || dir === packageDir,
+    );
+  } catch {
+    return [];
+  }
+})();
+
+/**
+ * Give `fs` a `readFile` callback that refuses a file outside the read scope
+ * of `root` (see {@link createReadScope}). A refused file reads as missing.
+ */
+const withReadScope = (root, fs = {}) => {
+  const inScope = createReadScope(root, COMPILER_DIRS);
+  const readFile = fs.readFile ?? (() => READ_FROM_DISK);
+  return { ...fs, readFile: (fileName) => (inScope(fileName) ? readFile(fileName) : null) };
+};
+
+/**
+ * Create a backend API with the TypeScript 7.0 snapshot contract. With a
+ * `cwd`, the checker reads only the files in the read scope of that root.
  *
  * @param {{ cwd?: string, fs?: Record<string, unknown> }} options
  */
 export const createApi = (options = {}) => {
-  const fs = options.fs ? { ...FS_CALLBACK_DEFAULTS, ...options.fs } : undefined;
+  const scoped = options.cwd ? withReadScope(options.cwd, options.fs) : options.fs;
+  const fs = scoped ? { ...FS_CALLBACK_DEFAULTS, ...scoped } : undefined;
   const api = new sync.API({ ...options, ...(fs ? { fs } : {}) });
   return typeof api.createSnapshot === "function" ? withLinearSnapshots(api) : api;
 };

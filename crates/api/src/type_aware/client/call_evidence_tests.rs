@@ -139,3 +139,16 @@ fn a_companion_of_another_release_with_the_same_protocol_is_accepted() {
         .is_err()
     );
 }
+
+#[test]
+fn semantic_response_paths_must_stay_project_relative() {
+    use crate::type_aware::client::validate_semantic_response_path;
+
+    for path in ["../other/a.ts", "src/../../a.ts", "/abs/a.ts"] {
+        assert!(
+            validate_semantic_response_path(std::path::Path::new(path), 0).is_err(),
+            "{path}"
+        );
+    }
+    assert!(validate_semantic_response_path(std::path::Path::new("src/a.ts"), 0).is_ok());
+}
