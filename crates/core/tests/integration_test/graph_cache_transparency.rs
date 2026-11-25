@@ -249,6 +249,45 @@ fn exact_cache_hit_rebuilds_when_a_module_path_is_outside_the_root() {
     );
 }
 
+/// Persist a cold run, change the cached graph with `edit`, then assert that
+/// the warm run rebuilds and matches the cold results.
+fn assert_edited_cache_rebuilds(edit: impl FnOnce(&mut fallow_core::graph::ModuleGraph)) {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
+    let cache_dir = temp.path().join("cache");
+    let config = create_config_with_cache(root, cache_dir.clone());
+    let cold = fallow_core::analyze(&config).expect("cold analysis");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    edit(&mut store.graph);
+    store.save(fallow_types::path_guard::CacheTarget::inside(&cache_dir));
+
+    let warm = fallow_core::analyze(&config).expect("warm analysis");
+    assert_eq!(
+        serde_json::to_value(&cold).expect("serialize cold results"),
+        serde_json::to_value(&warm).expect("serialize warm results"),
+        "an edited graph cache must rebuild to the cold results"
+    );
+}
+
+#[test]
+fn exact_cache_hit_rebuilds_when_one_module_path_changes() {
+    assert_edited_cache_rebuilds(|graph| {
+        let last = graph.modules.len() - 1;
+        graph.modules[last].path = graph.modules[last].path.with_file_name("other.ts");
+    });
+}
+
+#[test]
+fn exact_cache_hit_rebuilds_when_two_inside_paths_swap() {
+    assert_edited_cache_rebuilds(|graph| {
+        let (first, second) = (graph.modules[0].path.clone(), graph.modules[1].path.clone());
+        graph.modules[0].path = second;
+        graph.modules[1].path = first;
+    });
+}
+
 #[test]
 fn resolver_cache_hit_rebuilds_graph_when_file_ids_shift() {
     assert_resolver_cache_hit_matches_cold("barrel-exports");

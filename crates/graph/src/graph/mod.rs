@@ -5,6 +5,7 @@
 
 mod ambiguity;
 mod build;
+mod cache_check;
 mod cycle_edge_span;
 mod cycles;
 mod effective_exports;
@@ -725,32 +726,6 @@ fn propagate_namespace_references(
 }
 
 impl ModuleGraph {
-    /// True when every module index, edge range and edge end of the graph is
-    /// in bounds. A graph that a cache file supplies can break these
-    /// invariants, and the detectors index with them without a check.
-    #[must_use]
-    pub fn has_valid_structure(&self) -> bool {
-        let module_count = self.modules.len();
-        let in_range = |id: FileId| (id.0 as usize) < module_count;
-        self.modules.iter().enumerate().all(|(index, module)| {
-            module.file_id.0 as usize == index
-                && module.edge_range.start <= module.edge_range.end
-                && module.edge_range.end <= self.edges.len()
-        }) && self
-            .edges
-            .iter()
-            .all(|edge| in_range(edge.source) && in_range(edge.target))
-            && self.reverse_deps.len() <= module_count
-            && self.reverse_deps.iter().flatten().all(|id| in_range(*id))
-            && self
-                .entry_points
-                .iter()
-                .chain(&self.runtime_entry_points)
-                .chain(&self.test_entry_points)
-                .chain(&self.support_entry_points)
-                .all(|id| in_range(*id))
-    }
-
     /// True when the graph has a valid structure and holds exactly one module
     /// for each file of `files`, with the same `FileId` and the same path.
     ///

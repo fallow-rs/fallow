@@ -1217,3 +1217,26 @@ fn graph_multiple_entry_points() {
     assert!(graph.modules[1].is_reachable());
     assert!(graph.modules[2].is_reachable());
 }
+
+/// A cached graph with a `FileId` out of bounds in a side table is not valid,
+/// because the detectors index the modules with it.
+#[test]
+fn a_file_id_out_of_bounds_in_a_side_table_breaks_the_structure() {
+    let graph = build_simple_graph();
+    assert!(graph.has_valid_structure());
+    let outside = FileId(u32::try_from(graph.modules.len()).unwrap() + 7);
+
+    let mut usage = build_simple_graph();
+    usage.package_usage.insert("pkg".to_owned(), vec![outside]);
+    assert!(!usage.has_valid_structure());
+
+    let mut reference = build_simple_graph();
+    let export = reference
+        .modules
+        .iter_mut()
+        .flat_map(|module| module.exports.iter_mut())
+        .find(|export| !export.references.is_empty())
+        .expect("an export with a reference");
+    export.references[0].from_file = outside;
+    assert!(!reference.has_valid_structure());
+}
