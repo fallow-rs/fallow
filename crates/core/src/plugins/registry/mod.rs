@@ -1371,7 +1371,9 @@ fn load_workspace_filesystem_configs(input: &mut WorkspaceFsConfigInput<'_>) {
             continue;
         };
         let plugin_result =
-            plugin.resolve_config_in_project(abs_path, &source, input.root, input.project_root);
+            crate::discover::project_read::with_project_root(input.project_root, || {
+                plugin.resolve_config_in_project(abs_path, &source, input.root, input.project_root)
+            });
         if plugin_result.is_empty() {
             continue;
         }
@@ -1462,12 +1464,15 @@ fn resolve_plugin_matching_files(input: &mut PluginMatchingFilesInput<'_, '_, '_
         else {
             continue;
         };
-        let plugin_result = input.plugin.resolve_config_in_project(
-            abs_path,
-            &source,
-            input.root,
-            input.project_root,
-        );
+        let plugin_result =
+            crate::discover::project_read::with_project_root(input.project_root, || {
+                input.plugin.resolve_config_in_project(
+                    abs_path,
+                    &source,
+                    input.root,
+                    input.project_root,
+                )
+            });
         if plugin_result.is_empty() {
             continue;
         }
@@ -1494,7 +1499,9 @@ fn resolve_plugin_filesystem_config(
     let Some(source) = crate::discover::project_read::read_project_file(root, abs_path) else {
         return;
     };
-    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+    let plugin_result = crate::discover::project_read::with_project_root(root, || {
+        plugin.resolve_config(abs_path, &source, root)
+    });
     if plugin_result.is_empty() {
         return;
     }
@@ -1793,12 +1800,15 @@ fn process_package_json_inline_configs(
         }
         let config_json = serde_json::to_string(config_value).unwrap_or_default();
         let fake_path = input.root.join(format!("{key}.config.json"));
-        let mut plugin_result = plugin.resolve_config_in_project(
-            &fake_path,
-            &config_json,
-            input.root,
-            input.project_root,
-        );
+        let mut plugin_result =
+            crate::discover::project_read::with_project_root(input.project_root, || {
+                plugin.resolve_config_in_project(
+                    &fake_path,
+                    &config_json,
+                    input.root,
+                    input.project_root,
+                )
+            });
         if plugin_result.is_empty() {
             continue;
         }

@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::discover::project_read::{carry_project_root, config_project_root, read_project_file};
 use fallow_extract::{JsText, visitor::extract_import_from_callable};
 use oxc_ast::ast::*;
 use oxc_span::SourceType;
@@ -1239,12 +1240,12 @@ pub(crate) fn extract_from_source<T: Send>(
         });
     }
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    fallow_extract::parse_bounded(source, || {
+    let parse = carry_project_root(|| {
         let allocator = oxc_allocator::Allocator::default();
         let mut parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
         const_inline::with_inlined_program(&allocator, &mut parsed.program, source.len(), extractor)
-    })
-    .flatten()
+    });
+    fallow_extract::parse_bounded(source, parse).flatten()
 }
 
 /// Wrap JSON or JSONC source in parentheses so Oxc parses it as one JavaScript
@@ -2578,29 +2579,28 @@ pub(crate) fn is_relative_specifier(specifier: &str) -> bool {
 }
 
 /// Resolve a relative specifier against `config_path`'s directory to a sibling
-/// file that a project read from that directory accepts (a regular file in its
-/// read scope), with its source. Tries the path as written (`./vite.shared.js`),
-/// then each known config extension (extensionless `./vite.shared`, and dotted
-/// basenames that `Path::extension` misreads), then an `index.*` file.
+/// file in the read scope of the project root (`config_project_root`), with its
+/// source. Tries the path as written, then each known config extension (also
+/// for dotted basenames that `Path::extension` misreads), then `index.*`.
 pub(crate) fn resolve_sibling_module(
     config_path: &Path,
     specifier: &str,
 ) -> Option<(PathBuf, String)> {
     let parent = config_path.parent().unwrap_or(config_path);
-    let read = |path: &Path| crate::discover::project_read::read_project_file(parent, path);
+    let (root, read) = (config_project_root(parent), read_project_file);
     let direct = parent.join(specifier);
-    if let Some(source) = read(&direct) {
+    if let Some(source) = read(&root, &direct) {
         return Some((direct, source));
     }
     for ext in ALIAS_SIBLING_EXTS {
         let candidate = parent.join(format!("{specifier}.{ext}"));
-        if let Some(source) = read(&candidate) {
+        if let Some(source) = read(&root, &candidate) {
             return Some((candidate, source));
         }
     }
     for ext in ALIAS_SIBLING_EXTS {
         let candidate = direct.join(format!("index.{ext}"));
-        if let Some(source) = read(&candidate) {
+        if let Some(source) = read(&root, &candidate) {
             return Some((candidate, source));
         }
     }

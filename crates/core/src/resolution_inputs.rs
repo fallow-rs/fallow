@@ -100,9 +100,7 @@ pub fn resolution_inputs_hash(
     let mut inputs: Vec<(String, Vec<u8>)> = collect_input_files(root, workspaces, files)
         .into_iter()
         .filter_map(|path| {
-            // A lockfile can sit above the root, so each input is a bounded
-            // read in the scope of its own directory.
-            let content = crate::discover::project_read::read_project_bytes(path.parent()?, &path)?;
+            let content = input_fingerprint(root, &path)?;
             Some((portable_key(root, &path), content))
         })
         .collect();
@@ -304,6 +302,25 @@ fn collect_export_targets<'a>(value: &'a serde_json::Value, targets: &mut Vec<&'
         }
         _ => {}
     }
+}
+
+/// The bytes that key the hash for the input file `path`. A file in the
+/// read scope of `root` keys the hash with its content. The resolver also
+/// reads install state above that scope, so such a file keys the hash with
+/// its size and change time, and its content is not read.
+fn input_fingerprint(root: &Path, path: &Path) -> Option<Vec<u8>> {
+    if let Some(content) = crate::discover::project_read::read_project_bytes(root, path) {
+        return Some(content);
+    }
+    let metadata = std::fs::metadata(path)
+        .ok()
+        .filter(std::fs::Metadata::is_file)?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
+    Some(format!("outside-scope:{}:{modified}", metadata.len()).into_bytes())
 }
 
 fn collect_input_files(

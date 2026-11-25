@@ -19,6 +19,41 @@ fn scope_base(root: &Path) -> PathBuf {
     fallow_config::project_scope_base(root)
 }
 
+std::thread_local! {
+    static PROJECT_ROOT: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `resolve` with `project_root` as the project root of the config
+/// readers on this thread (see [`config_project_root`]). The plugin registry
+/// sets it around each config resolution, so a reader deep in a config walk
+/// reads in the scope of the project and not of the config directory.
+pub fn with_project_root<T>(project_root: &Path, resolve: impl FnOnce() -> T) -> T {
+    let previous = PROJECT_ROOT.with(|root| root.replace(Some(project_root.to_path_buf())));
+    let result = resolve();
+    PROJECT_ROOT.with(|root| *root.borrow_mut() = previous);
+    result
+}
+
+/// `run` with the project root of this thread (see [`with_project_root`]),
+/// for a closure that runs on another thread, such as a bounded parse.
+pub fn carry_project_root<T>(run: impl FnOnce() -> T + Send) -> impl FnOnce() -> T + Send {
+    let project_root = PROJECT_ROOT.with(|root| root.borrow().clone());
+    move || match project_root {
+        Some(project_root) => with_project_root(&project_root, run),
+        None => run(),
+    }
+}
+
+/// The project root of a config reader: the root that
+/// [`with_project_root`] set on this thread, or `config_dir` when a caller
+/// outside a config resolution set none.
+pub fn config_project_root(config_dir: &Path) -> PathBuf {
+    PROJECT_ROOT
+        .with(|root| root.borrow().clone())
+        .unwrap_or_else(|| config_dir.to_path_buf())
+}
+
 /// The text of the project file `path`, or `None` when it is missing or the
 /// read is refused.
 pub fn read_project_file(root: &Path, path: &Path) -> Option<String> {
@@ -164,5 +199,50 @@ mod tests {
         );
         assert!(read_project_bytes(&root, &root.join("linked.txt")).is_none());
         assert!(read_project_bytes(&root, &root.join("zero.txt")).is_none());
+    }
+
+    /// A package of a workspace without Git reads a shared alias file of the
+    /// workspace root, and a committed directory link next to the config is
+    /// not read.
+    #[test]
+    #[cfg(unix)]
+    fn config_siblings_read_in_the_scope_of_the_project_root() {
+        use crate::plugins::config_parser::extract_config_aliases;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dunce::canonicalize(dir.path())
+            .expect("canonical")
+            .join("ws");
+        let app = top.join("packages/app");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&app).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(
+            top.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .expect("write");
+        let shared = r#"export const aliases = [{ find: "@", replacement: "./src" }];"#;
+        std::fs::write(top.join("vite.shared.ts"), shared).expect("write");
+        std::fs::write(outside.join("aliases.ts"), shared).expect("write");
+        std::os::unix::fs::symlink(&outside, app.join("linked")).expect("link");
+        fallow_config::clear_project_scope_bases();
+        let aliases_from = |config: &Path, specifier: &str| {
+            let source = format!(
+                "import {{ aliases }} from \"{specifier}\";\nexport default defineConfig({{ resolve: {{ alias: aliases }} }});"
+            );
+            with_project_root(&app, || {
+                extract_config_aliases(&source, config, &["resolve", "alias"])
+            })
+        };
+        let config = app.join("vite.config.ts");
+
+        assert_eq!(
+            aliases_from(&config, "../../vite.shared"),
+            vec![("@".to_string(), "./src".to_string())]
+        );
+        assert!(aliases_from(&config, "./linked/aliases").is_empty());
+        // A config inside the linked directory does not make the link
+        // target the root of its sibling reads.
+        assert!(aliases_from(&app.join("linked/vite.config.ts"), "./aliases").is_empty());
     }
 }
