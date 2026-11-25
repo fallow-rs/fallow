@@ -88,12 +88,12 @@ impl Probe<'_> {
     }
 
     /// The nearest directory, `dir` or an ancestor below the ceiling, that
-    /// holds a project manifest. The home directory, the directories above
-    /// it, and the file system root are never a project.
+    /// holds a project manifest. The home directory, each directory that
+    /// holds it, and the file system root are never a project.
     fn nearest_project(&self, dir: &Path) -> Option<PathBuf> {
         let home = self.home;
         self.ancestors(dir)
-            .take_while(move |ancestor| home.is_none_or(|home| *ancestor != home))
+            .filter(|ancestor| home.is_none_or(|home| !home.starts_with(ancestor)))
             .filter(|ancestor| ancestor.parent().is_some())
             .find(|ancestor| holds_project_manifest(ancestor))
             .map(Path::to_path_buf)
@@ -1164,9 +1164,9 @@ mod tests {
     fn refuses_a_link_from_a_linked_worktree_into_an_unrelated_outer_repository() {
         let fixture = Fixture::new();
         let home = fixture.repo("home");
-        let secret = fixture.dir("home/secret");
+        let notes = fixture.dir("home/notes");
         let repo = fixture.repo("repo");
-        symlink(&secret, repo.join("packages")).expect("link");
+        symlink(&notes, repo.join("packages")).expect("link");
         commit(&repo);
         let worktree = home.join("work").join("wt");
         git(
@@ -1265,10 +1265,10 @@ mod tests {
     fn refuses_a_link_out_of_an_untracked_project_inside_a_checkout() {
         let fixture = Fixture::new();
         let home = fixture.repo("home");
-        let secret = fixture.dir("home/secret");
+        let notes = fixture.dir("home/notes");
         let project = fixture.dir("home/downloads/project");
         std::fs::write(project.join("package.json"), "{}").expect("manifest");
-        symlink(&secret, project.join("packages")).expect("link");
+        symlink(&notes, project.join("packages")).expect("link");
         let elsewhere = fixture.dir("elsewhere");
 
         let err = fixture
@@ -1276,7 +1276,7 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("outside the project directory"), "got: {err}");
         assert_eq!(
-            fixture.check(&home.join("secret"), &elsewhere),
+            fixture.check(&home.join("notes"), &elsewhere),
             Ok(()),
             "a plain directory of the outer checkout stays allowed"
         );
@@ -1326,6 +1326,27 @@ mod tests {
         std::fs::write(notes.join("package.json"), "{}").expect("project manifest");
         let err = check(&home).unwrap_err();
         assert!(err.contains("outside the project directory"), "got: {err}");
+    }
+
+    /// A directory that holds the home directory is never a project, also for
+    /// a link outside the home directory, such as in the home directory of
+    /// another user.
+    #[cfg(unix)]
+    #[test]
+    fn ignores_a_manifest_in_a_directory_that_holds_the_home_directory() {
+        let fixture = Fixture::new();
+        let users = fixture.dir("users");
+        let home = fixture.dir("users/me");
+        std::fs::write(users.join("package.json"), "{}").expect("manifest");
+        let volume = fixture.dir("volume/app").parent().unwrap().to_path_buf();
+        let notes = fixture.dir("users/other/notes");
+        symlink(&volume, notes.join("dev")).expect("link");
+        let root = notes.join("dev").join("app");
+
+        assert_eq!(
+            fixture.check_with_home(&root, &home, None, Some(&home)),
+            Ok(())
+        );
     }
 
     /// A personal link in a directory with no project manifest, such as a
