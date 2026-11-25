@@ -941,6 +941,11 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     let mut config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
     validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
+    if opts.filters.test_only_exports && config.production && !opts.quiet {
+        eprintln!(
+            "Warning: --test-only-exports finds nothing in production mode. A production run reports these exports as unused exports."
+        );
+    }
 
     let ws_roots = filtering::resolve_workspace_scope(
         opts.root,

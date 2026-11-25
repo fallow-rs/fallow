@@ -227,6 +227,46 @@ fn line_suppression_hides_the_finding() {
 }
 
 #[test]
+fn production_run_keeps_a_test_only_export_marker_valid() {
+    let dir = copy_fixture(FIXTURE);
+    let lib = dir.path().join("src/lib.ts");
+    let source = std::fs::read_to_string(&lib).unwrap().replace(
+        "export const testOnly =",
+        "// fallow-ignore-next-line test-only-export\nexport const testOnly =",
+    );
+    std::fs::write(&lib, source).unwrap();
+    let json = dead_code(dir.path(), &["--production"]);
+    let stale = json["stale_suppressions"].to_string();
+    assert!(
+        !stale.contains("test-only-export"),
+        "the rule does not run in production mode, so its marker is not stale: {stale}"
+    );
+}
+
+#[test]
+fn selector_in_production_mode_warns() {
+    let dir = copy_fixture(FIXTURE);
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &[
+            "--production",
+            "--test-only-exports",
+            "--format",
+            "json",
+            "--no-cache",
+        ],
+    );
+    assert!(
+        output
+            .stderr
+            .contains("--test-only-exports finds nothing in production mode"),
+        "stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
 fn sarif_uses_the_rule_id() {
     let dir = copy_fixture(FIXTURE);
     let output = run_fallow_in_root(

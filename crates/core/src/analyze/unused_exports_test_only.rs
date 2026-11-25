@@ -4,8 +4,9 @@
 //! from test-side files left out. An export that this run reports, and that
 //! a test-side file references as a value, is test-only. Each other rule of
 //! the unused-export pass applies unchanged: entry exports, `keepExportTags`,
-//! `ignoreExports`, plugin `usedExports` rules and suppressions of other
-//! kinds keep the export, as they do in a production run.
+//! `ignoreExports` and plugin `usedExports` rules keep the export, as they do
+//! in a production run. Only a `test-only-export` marker suppresses a
+//! finding, because an `unused-export` marker targets another kind.
 
 use fallow_config::Severity;
 use rayon::prelude::*;

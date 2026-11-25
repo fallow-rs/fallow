@@ -547,6 +547,12 @@ fn stale_entry_for_suppression(
         return None;
     }
 
+    // A production run does not run the rule, so no pass can consume the
+    // marker. The marker stays valid for the default-scope run.
+    if config.production && s.issue_kind_target() == Some(IssueKind::TestOnlyExport) {
+        return None;
+    }
+
     if let Some(target) = s.policy_rule_target() {
         if file_rules.policy_violation == Severity::Off || policy_rule_is_disabled(config, target) {
             return None;

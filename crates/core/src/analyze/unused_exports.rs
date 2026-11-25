@@ -480,7 +480,18 @@ pub fn find_unused_exports(
         suppressions,
         line_offsets_by_file,
     };
-    let test_side = (!config.production).then(|| crate::test_side::test_side_files(graph, config));
+    // Only an `@expected-unused` export reads the test-side set, so a run
+    // without one skips the reach walk.
+    let has_expected_unused = graph.modules().iter().any(|module| {
+        module.exports.iter().any(|export| {
+            matches!(
+                export.visibility,
+                fallow_types::extract::VisibilityTag::ExpectedUnused
+            )
+        })
+    });
+    let test_side = (!config.production && has_expected_unused)
+        .then(|| crate::test_side::test_side_files(graph, config));
     with_unused_export_context(
         input,
         ReferenceView::All,
