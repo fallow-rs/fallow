@@ -414,8 +414,29 @@ fn load_one_rule_pack(
         });
         return;
     }
-    let content = match std::fs::read_to_string(&path) {
+    // The root check runs before the read, and a missing file outside the
+    // root gets the same error as a file there that exists.
+    let outside = || RulePackError {
+        path: path.clone(),
+        message: "resolves outside the project root".to_owned(),
+    };
+    match crate::project_read::project_entry(canonical_root, Path::new(path_str)) {
+        crate::project_read::ProjectEntry::Outside => {
+            errors.push(outside());
+            return;
+        }
+        crate::project_read::ProjectEntry::Missing | crate::project_read::ProjectEntry::Inside => {}
+    }
+    let content = match fallow_types::read_guard::read_to_string_inside(
+        canonical_root,
+        &path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    ) {
         Ok(content) => content,
+        Err(fallow_types::read_guard::ReadRefusal::OutsideRoot { .. }) => {
+            errors.push(outside());
+            return;
+        }
         Err(e) => {
             errors.push(RulePackError {
                 path,
@@ -424,15 +445,6 @@ fn load_one_rule_pack(
             return;
         }
     };
-    // Checked after the read so a missing file reports as missing even on
-    // platforms where the project root itself sits behind a symlink.
-    if !crate::external_plugin::is_within_root(&path, canonical_root) {
-        errors.push(RulePackError {
-            path,
-            message: "resolves outside the project root".to_owned(),
-        });
-        return;
-    }
     let parsed: Result<RulePackDef, String> = if ext == "jsonc" {
         crate::jsonc::parse_to_value::<RulePackDef>(&content).map_err(|e| e.to_string())
     } else {
@@ -1446,6 +1458,33 @@ mod tests {
         .unwrap();
         let errors = load_rule_packs(&inner, &["../outside.json".to_owned()]).unwrap_err();
         assert!(errors[0].message.contains("outside the project root"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn outside_paths_get_one_message_whether_or_not_they_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = dir.path().join("project");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(dir.path().join("outside.json"), "{}").unwrap();
+        let existing = load_rule_packs(&inner, &["../outside.json".to_owned()]).unwrap_err();
+        let missing = load_rule_packs(&inner, &["../missing.json".to_owned()]).unwrap_err();
+        assert!(existing[0].message.contains("outside the project root"));
+        assert_eq!(existing[0].message, missing[0].message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn rejects_a_pack_link_to_a_device() {
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("/dev/null", dir.path().join("policy.json")).unwrap();
+        let errors = load_rule_packs(dir.path(), &["policy.json".to_owned()]).unwrap_err();
+        assert!(
+            errors[0].message.contains("outside the project root"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]

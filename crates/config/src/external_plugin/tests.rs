@@ -1081,3 +1081,74 @@ fn discover_skips_toml_plugin_with_nesting_that_evades_the_parser_limit() {
 
     assert!(discover_external_plugins(dir.path(), &[]).is_empty());
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn root_check_refuses_a_path_that_does_not_resolve() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    assert!(!is_within_root(&root.join("missing.toml"), &root));
+    std::fs::write(root.join("present.toml"), "").unwrap();
+    assert!(is_within_root(&root.join("present.toml"), &root));
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn plugin_parse_warning_text_omits_the_file_content() {
+    let source = "name = \"p\"\nkey=marker-7531\n";
+    let text = plugin_parse_error(source, &PluginFormat::Toml).unwrap_err();
+    assert!(!text.contains("marker-7531"), "{text}");
+    assert!(text.contains("line 2"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn plugin_links_out_of_the_root_are_not_loaded() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(root.join(".fallow/plugins")).unwrap();
+    std::fs::write(
+        dir.path().join("outside.toml"),
+        "name = \"outside\"\nenablers = [\"x\"]\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("outside.toml"),
+        root.join(".fallow/plugins/linked.toml"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("outside.toml"),
+        root.join("fallow-plugin-linked.toml"),
+    )
+    .unwrap();
+    let plugins = discover_external_plugins(&root, &[]);
+    assert!(plugins.is_empty(), "{plugins:?}");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn resolve_drops_plugins_with_patterns_that_leave_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("fallow-plugin-out.toml"),
+        "name = \"out\"\nenablers = [\"x\"]\nconfigPatterns = [\"{..,x}/other/*\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("fallow-plugin-ok.toml"),
+        "name = \"ok\"\nenablers = [\"x\"]\nconfigPatterns = [\"x.config.*\"]\n",
+    )
+    .unwrap();
+    let inline: ExternalPluginDef =
+        toml::from_str("name = \"inline\"\nenablers = [\"x\"]\nentryPoints = [\"/abs/*\"]\n")
+            .unwrap();
+    let names: Vec<String> = resolve_external_plugins(root, &[], vec![inline])
+        .into_iter()
+        .map(|plugin| plugin.name)
+        .collect();
+    assert_eq!(names, vec!["ok".to_owned()]);
+}
