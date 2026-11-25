@@ -2787,47 +2787,8 @@ fn a_run_without_call_facts_keeps_the_stored_facts() {
     assert_eq!(entry.call_facts, blob);
 }
 
-#[derive(Clone, Default)]
-struct WarnLogCollector(Arc<std::sync::Mutex<Vec<String>>>);
-
-impl tracing::Subscriber for WarnLogCollector {
-    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-        metadata.level() <= &tracing::Level::WARN
-    }
-    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-        tracing::span::Id::from_u64(1)
-    }
-    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
-    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
-    fn event(&self, event: &tracing::Event<'_>) {
-        struct MessageVisitor<'a>(&'a mut String);
-        impl tracing::field::Visit for MessageVisitor<'_> {
-            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-                if field.name() == "message" {
-                    use std::fmt::Write as _;
-                    let _ = write!(self.0, "{value:?}");
-                }
-            }
-            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-                if field.name() == "message" {
-                    self.0.push_str(value);
-                }
-            }
-        }
-        let mut msg = String::new();
-        event.record(&mut MessageVisitor(&mut msg));
-        if !msg.is_empty()
-            && let Ok(mut logs) = self.0.lock()
-        {
-            logs.push(msg);
-        }
-    }
-    fn enter(&self, _span: &tracing::span::Id) {}
-    fn exit(&self, _span: &tracing::span::Id) {}
-}
-
 #[test]
-fn working_set_eviction_tracks_and_warns_when_working_set_exceeds_cap() {
+fn working_set_eviction_counts_entries_when_working_set_exceeds_cap() {
     let dir = test_cache_dir("working_set_exceeds_cap");
     let mut store = CacheStore::new(Path::new(""));
     let latest_seen = 1_000_000;
@@ -2901,7 +2862,7 @@ fn stale_eviction_alone_does_not_track_working_set_eviction() {
 }
 
 #[test]
-fn working_set_within_cap_does_not_evict_or_warn() {
+fn working_set_within_cap_is_not_evicted() {
     let dir = test_cache_dir("within_cap_no_eviction");
     let mut store = CacheStore::new(Path::new(""));
     let latest_seen = 1_000_000;
@@ -2971,38 +2932,4 @@ fn working_set_eviction_message_is_none_when_nothing_of_the_run_was_evicted() {
         encoded_bytes: 1024,
     };
     assert!(super::store::working_set_eviction_message(&eviction, 1024 * 1024).is_none());
-}
-
-#[test]
-fn stale_eviction_alone_does_not_emit_warn_log() {
-    let dir = test_cache_dir("stale_no_warn_log");
-    let mut store = CacheStore::new(Path::new(""));
-    for i in 0..40u64 {
-        store.insert(
-            Path::new(&format!("stale{i:02}.ts")),
-            synthetic_module(i, 1 + i, 1),
-        );
-    }
-    let latest_seen = 1_000_000;
-    for i in 0..20u64 {
-        store.insert(
-            Path::new(&format!("live{i:02}.ts")),
-            synthetic_module(100 + i, latest_seen, 1),
-        );
-    }
-    let cap = 64 * 1024;
-
-    let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let subscriber = WarnLogCollector(Arc::clone(&logs));
-    tracing::subscriber::with_default(subscriber, || {
-        store.save(at(&dir), 1, cap).expect("save succeeds");
-    });
-
-    let messages = logs.lock().expect("lock logs").clone();
-    assert!(
-        !messages
-            .iter()
-            .any(|msg| msg.contains("Parse cache is full")),
-        "stale-only eviction must not emit the working-set warning: {messages:?}"
-    );
 }

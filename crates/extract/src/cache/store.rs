@@ -44,9 +44,10 @@ static WORKING_SET_EVICTION_WARNED: AtomicBool = AtomicBool::new(false);
 
 const BYTES_PER_MIB: usize = 1024 * 1024;
 
-/// Headroom, in basis points of the working set, in the suggested cap. The
-/// save evicts above 80 percent of the cap, so a cap of 125 percent of the
-/// working set keeps the next save out of eviction.
+/// Headroom, in basis points of the working set, in the suggested cap. A save
+/// above 80 percent of the cap evicts the entries of earlier runs, and a save
+/// above the cap also evicts the working set. With a cap of 125 percent of the
+/// working set, the working set alone stays under the 80 percent trigger.
 const SUGGESTED_CAP_BPS: usize = 12_500;
 
 /// Warn once for each process when the cap forced out working-set entries.
@@ -278,28 +279,25 @@ impl CacheStore {
 
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
-            if eviction.evicted > 0 {
-                warn_working_set_evicted(&eviction, max_size_bytes);
+            warn_working_set_evicted(&eviction, max_size_bytes);
+            let significant_evicted =
+                initial_entries.saturating_mul(EVICTION_SIGNIFICANT_BPS) / 10_000;
+            if evicted >= significant_evicted && initial_entries > 0 {
+                tracing::info!(
+                    evicted_entries = evicted,
+                    remaining_entries = self.entries.len(),
+                    final_size_kb = final_size / 1024,
+                    max_size_kb = max_size_bytes / 1024,
+                    "Cache eviction: removed oldest entries to stay under cap"
+                );
             } else {
-                let significant_evicted =
-                    initial_entries.saturating_mul(EVICTION_SIGNIFICANT_BPS) / 10_000;
-                if evicted >= significant_evicted && initial_entries > 0 {
-                    tracing::info!(
-                        evicted_entries = evicted,
-                        remaining_entries = self.entries.len(),
-                        final_size_kb = final_size / 1024,
-                        max_size_kb = max_size_bytes / 1024,
-                        "Cache eviction: removed oldest entries to stay under cap"
-                    );
-                } else {
-                    tracing::debug!(
-                        evicted_entries = evicted,
-                        remaining_entries = self.entries.len(),
-                        final_size_kb = final_size / 1024,
-                        max_size_kb = max_size_bytes / 1024,
-                        "Cache eviction"
-                    );
-                }
+                tracing::debug!(
+                    evicted_entries = evicted,
+                    remaining_entries = self.entries.len(),
+                    final_size_kb = final_size / 1024,
+                    max_size_kb = max_size_bytes / 1024,
+                    "Cache eviction"
+                );
             }
         }
 
@@ -354,8 +352,7 @@ impl CacheStore {
             .sum();
         // The per-entry estimates overshoot the real encoding, so the share of
         // the real size gives the working-set size that a cap must hold.
-        let working_set_encoded_bytes = u128::try_from(encoded.len())
-            .unwrap_or(u128::MAX)
+        let working_set_encoded_bytes = (encoded.len() as u128)
             .saturating_mul(estimated_working_set as u128)
             .checked_div(estimated_total as u128)
             .map_or(encoded.len(), |bytes| {
