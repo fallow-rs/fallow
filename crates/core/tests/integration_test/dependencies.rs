@@ -842,6 +842,13 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
         "export function createRoot() { return { render() {} }; }\n",
     )
     .expect("write react-dom client");
+    // The root manifest of the workspace lists the app, so the installed
+    // packages of the workspace root are in the scope of the app.
+    std::fs::write(
+        parent.join("package.json"),
+        r#"{"private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write workspace root package");
 
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");

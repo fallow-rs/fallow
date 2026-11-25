@@ -278,6 +278,14 @@ fn peer_dependency_of_parent_installed_package_not_flagged() {
         r#"{"name":"react-dom","peerDependencies":{"react":"^18.0.0"}}"#,
     )
     .expect("write parent react-dom package");
+    // The root manifest of the workspace lists the app, so the installed
+    // packages of the workspace root are in the scope of the app.
+    std::fs::create_dir_all(&root).expect("create app dir");
+    std::fs::write(
+        parent.join("package.json"),
+        r#"{"private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write workspace root package");
 
     let (graph, _) = build_graph_with_npm_imports(&[("react-dom", false)]);
     let pkg = make_pkg(&["react", "react-dom"], &[], &[]);
