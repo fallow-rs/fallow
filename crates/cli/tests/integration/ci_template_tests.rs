@@ -5,7 +5,7 @@
     reason = "tests use expect to keep fixture setup concise"
 )]
 
-use crate::common::{run_fallow_raw, run_fallow_raw_in_dir};
+use crate::common::run_fallow_raw;
 
 #[test]
 fn gitlab_vendor_help_names_only_the_directories_it_writes() {
@@ -73,7 +73,7 @@ fn gitlab_vendor_refuses_a_link_above_a_missing_vendor_dir() {
     std::fs::create_dir_all(&outside).expect("mkdir");
     std::os::unix::fs::symlink(&outside, checkout.join("linked")).expect("symlink");
 
-    let output = run_fallow_raw_in_dir(
+    let output = crate::common::run_fallow_raw_in_dir(
         &checkout,
         &["ci-template", "gitlab", "--vendor", "linked/vendor"],
     );

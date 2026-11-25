@@ -56,12 +56,11 @@ fn parse_envelope(path: &Path, data: &str) -> Result<serde_json::Value, String> 
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     #[test]
-    #[cfg(unix)]
     fn refuses_a_link_below_the_working_directory_that_leaves_it() {
         let dir = tempfile::tempdir().expect("temp dir");
         let cwd = dunce::canonicalize(dir.path())
@@ -97,7 +96,6 @@ mod tests {
     /// A review envelope link out of the working directory is refused, and a
     /// parse error names the position only.
     #[test]
-    #[cfg(unix)]
     fn review_envelope_reads_are_bounded_and_quote_no_value() {
         let dir = tempfile::tempdir().expect("temp dir");
         let cwd = dunce::canonicalize(dir.path())

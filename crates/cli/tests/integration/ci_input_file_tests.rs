@@ -1,5 +1,6 @@
 //! Input files of the `ci` commands.
 
+#[cfg(unix)]
 use crate::common::run_fallow_raw_in_dir;
 
 /// A `--body` link below the working directory that resolves outside it is
