@@ -38,6 +38,10 @@ tempfile = { workspace = true }
 # Resolved paths without the Windows verbatim prefix in `read_scope`.
 dunce = { workspace = true }
 
+# The owner check of the work tree directory in `read_scope`.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
 [features]
 # Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the
 # JSON output schema can be regenerated from the Rust source of truth.
