@@ -448,6 +448,38 @@ fn skill_install_ignores_a_committed_package_below_a_directory_with_a_pathspec_n
     }
 }
 
+/// `git ls-files` lists no path inside a nested repository or submodule, so a
+/// package below a `.git` entry under the work tree top counts as committed.
+#[test]
+fn skill_install_ignores_a_package_in_a_nested_repository_at_node_modules() {
+    let top = tempfile::tempdir().unwrap();
+    let top = top.path();
+    ship_skill(top);
+    let nested = top.join("node_modules");
+    git_in(&nested, &["init", "-q"]);
+    git_in(&nested, &["add", "-f", "."]);
+    git_in(
+        &nested,
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "vendor",
+        ],
+    );
+    git_in(top, &["init", "-q"]);
+    git_in(top, &["add", "-f", "node_modules"]);
+
+    let text = installed_flavor(top);
+
+    assert!(text.contains("skill=embedded"), "{text}");
+}
+
 /// When git cannot answer, the package counts as committed.
 #[test]
 fn skill_install_ignores_the_package_when_git_cannot_list_the_files() {

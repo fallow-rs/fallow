@@ -311,7 +311,8 @@ impl Source {
 /// of the work tree top counts (for example the pnpm store), not a directory
 /// elsewhere. Git must not track the `node_modules/fallow` entry or the
 /// package files: a package manager writes them, a commit does not. When git
-/// cannot answer, the package does not count.
+/// cannot answer, or a nested repository or submodule below the work tree top
+/// holds the package, the package does not count.
 fn installed_package(root: &Path) -> Option<PathBuf> {
     let package = dunce::canonicalize(root.join(NODE_MODULES_PACKAGE)).ok()?;
     let project = dunce::canonicalize(root).ok()?;
@@ -335,6 +336,14 @@ fn installed_package(root: &Path) -> Option<PathBuf> {
         return None;
     }
     if let Some(top) = &top {
+        // Git lists no path inside a nested repository or submodule.
+        if package
+            .ancestors()
+            .take_while(|dir| dir != top)
+            .any(|dir| dir.join(".git").symlink_metadata().is_ok())
+        {
+            return None;
+        }
         let mut tracked = vec![project.strip_prefix(top).ok()?.join(NODE_MODULES_PACKAGE)];
         if let Ok(inside) = package.strip_prefix(top) {
             tracked.push(inside.to_path_buf());
