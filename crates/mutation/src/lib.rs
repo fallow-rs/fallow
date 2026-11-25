@@ -86,6 +86,10 @@ pub struct MutationOptions {
     /// runtime can record its arguments. The wraps do not change the mutant
     /// ids. A script block of a component gets no wrap.
     pub record_exports: bool,
+    /// The ids of mutants that the output leaves out. The text of an excluded
+    /// mutant stays as in the original, and the ids of the other mutants do
+    /// not change.
+    pub excluded: std::collections::BTreeSet<MutantId>,
 }
 
 impl Default for MutationOptions {
@@ -94,6 +98,7 @@ impl Default for MutationOptions {
             operators: Operator::DEFAULT.to_vec(),
             ranges: None,
             record_exports: false,
+            excluded: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -388,6 +393,9 @@ fn instrument_text(
         let mut emit_mutants = Vec::with_capacity(kept.len());
         for candidate in kept {
             let id = unique_id(input.path, source, &site, &candidate, seen_ids);
+            if options.excluded.contains(&id) {
+                continue;
+            }
             let (line, column) = line_column(&line_starts, candidate.region.0);
             emit_mutants.push(emit::EmitMutant {
                 id: id.0.clone(),
@@ -405,6 +413,9 @@ fn instrument_text(
                 enclosing_function: site.function.clone(),
                 change: candidate.change,
             });
+        }
+        if emit_mutants.is_empty() {
+            continue;
         }
         emit_sites.push(emit::EmitSite {
             span: site.span,

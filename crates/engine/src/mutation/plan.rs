@@ -151,6 +151,7 @@ pub(super) fn build(
                 .unwrap_or_else(|| Operator::DEFAULT.to_vec()),
             ranges: None,
             record_exports: request.record_exports,
+            ..MutationOptions::default()
         },
         test_entries: FxHashMap::default(),
         runner_unreached: FxHashSet::default(),
@@ -407,14 +408,16 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         .instrument(source, &candidate.rel, &options)
     {
         Ok(instrumented) => instrumented,
-        Err(MutationError::Parse { .. }) => return skipped(SkipReason::Parse),
-        Err(MutationError::ReservedName { .. }) => return skipped(SkipReason::ReservedName),
-        Err(MutationError::TooLarge) => return skipped(SkipReason::TooLarge),
+        Err(error) => return skipped(skip_reason(&error)),
     };
     let covered = context.graph.is_test_reachable(candidate.file_id)
         && !context.runner_unreached.contains(&candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source, covered);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
+    let instrumented = match without_pruned(candidate, source, options, &mutants, instrumented) {
+        Ok(instrumented) => instrumented,
+        Err(error) => return skipped(skip_reason(&error)),
+    };
     if !matches!(candidate.layout, Layout::Component(_)) {
         context
             .constant_parameters
@@ -436,6 +439,39 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         mutants,
         skipped: None,
     }
+}
+
+const fn skip_reason(error: &MutationError) -> SkipReason {
+    match error {
+        MutationError::Parse { .. } => SkipReason::Parse,
+        MutationError::ReservedName { .. } => SkipReason::ReservedName,
+        MutationError::TooLarge => SkipReason::TooLarge,
+    }
+}
+
+/// The instrumented copy without the pruned mutants. No run activates a
+/// pruned mutant, so the copy keeps its original text. A plugin of the build
+/// tool can read a config value with a static parse of the copy, for example
+/// the `codeSplitGroupings` of a TanStack Router route. The ids of the other
+/// mutants do not change.
+fn without_pruned(
+    candidate: &Candidate<'_>,
+    source: &str,
+    mut options: MutationOptions,
+    mutants: &[RankEntry],
+    instrumented: Instrumented,
+) -> Result<Instrumented, MutationError> {
+    options.excluded = mutants
+        .iter()
+        .filter(|entry| matches!(entry.planned.disposition, MutantDisposition::Pruned(_)))
+        .map(|entry| entry.planned.mutant.id.clone())
+        .collect();
+    if options.excluded.is_empty() {
+        return Ok(instrumented);
+    }
+    candidate
+        .layout
+        .instrument(source, &candidate.rel, &options)
 }
 
 /// Widens the changed-line ranges of `options` to the functions that hold the

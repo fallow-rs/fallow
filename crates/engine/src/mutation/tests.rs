@@ -234,6 +234,43 @@ fn the_session_entry_point_prunes_plugin_known_config_exports() {
     );
 }
 
+/// A framework plugin can read a config value of a route with a static
+/// parse of the file that the runner loads, so the instrumented copy keeps
+/// each pruned mutant out. A planned mutant stays in the copy.
+#[test]
+fn the_instrumented_copy_holds_no_pruned_mutant() {
+    let root = fixture("mutation-plan-framework");
+    let plan = plan_mutations_for_session(
+        &session(&root),
+        &MutationPlanRequest::new(MutationScope::All),
+    )
+    .expect("plan");
+    let file = "src/routes/index.tsx";
+    let code = &plan
+        .files
+        .iter()
+        .find(|planned| planned.path == file)
+        .expect("the route file is instrumented")
+        .instrumented_code;
+    let (pruned, kept): (Vec<_>, Vec<_>) = plan
+        .mutants
+        .iter()
+        .filter(|entry| entry.file == file)
+        .partition(|entry| matches!(entry.disposition, MutantDisposition::Pruned(_)));
+    assert!(!pruned.is_empty() && !kept.is_empty());
+    for entry in &pruned {
+        assert!(
+            !code.contains(entry.mutant.id.as_str()),
+            "pruned mutant {} is in the copy:\n{code}",
+            entry.mutant.id
+        );
+    }
+    for entry in &kept {
+        assert!(code.contains(entry.mutant.id.as_str()));
+    }
+    assert!(code.contains(r#"createFileRoute("/")"#), "{code}");
+}
+
 fn pruned_count(plan: &MutationPlan, file: &str) -> usize {
     plan.mutants
         .iter()

@@ -538,6 +538,13 @@ or relational mutant, so it adds little test-strength signal for its run time.
   plan counts report these mutants as `pruned_build_tool_only`, a field that
   is absent when it is 0. The rule lives in `build_tool_reach`
   (`crates/engine/src/mutation/build_tool.rs`).
+- The instrumented copy of a file holds only the mutants that the plan does
+  not prune. A pruned mutant keeps its original text, so a build plugin that
+  parses the copy reads each config value as written. An example is the
+  `codeSplitGroupings` of a TanStack Router route, which the code splitter
+  reads as string literals. The ids of the other mutants do not change
+  (`without_pruned` in `crates/engine/src/mutation/plan.rs`). A
+  `fallow-ignore` comment does not prune a mutant, so the copy keeps it.
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on

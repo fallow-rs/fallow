@@ -3,8 +3,8 @@
 
 mod common;
 
-use common::run;
-use fallow_mutation::{Instrumented, Operator, SourceKind};
+use common::{run, run_with};
+use fallow_mutation::{Instrumented, MutationOptions, Operator, SourceKind};
 
 const BASE: &str = "function a(x) { return x + 1; }\nfunction b(y) { return y * 2; }\n";
 
@@ -98,4 +98,44 @@ fn identical_top_level_statements_get_distinct_ids() {
     assert_eq!(relational.len(), 6);
     let unique: std::collections::BTreeSet<_> = relational.iter().collect();
     assert_eq!(unique.len(), 6);
+}
+
+/// An excluded mutant keeps its original text in the output, and each other
+/// mutant keeps its id. A mutant with the same site text gets the same
+/// occurrence number with and without the exclusion.
+#[test]
+fn an_excluded_mutant_leaves_the_output_and_the_other_ids_stay() {
+    let source =
+        "export const a = \"x\";\nexport const b = \"x\";\nexport const f = (n) => n + 1;\n";
+    let all = run(source, SourceKind::Ts);
+    let Some(first) = all.mutants.first().map(|mutant| mutant.id.clone()) else {
+        panic!("the source has no mutant");
+    };
+    let options = MutationOptions {
+        excluded: std::collections::BTreeSet::from([first.clone()]),
+        ..MutationOptions::default()
+    };
+    let without = run_with(source, SourceKind::Ts, &options);
+    assert!(!without.code.contains(first.as_str()), "{}", without.code);
+    let kept: Vec<_> = all
+        .mutants
+        .iter()
+        .filter(|mutant| mutant.id != first)
+        .map(|mutant| mutant.id.clone())
+        .collect();
+    let ids: Vec<_> = without
+        .mutants
+        .iter()
+        .map(|mutant| mutant.id.clone())
+        .collect();
+    assert_eq!(ids, kept);
+    assert!(!kept.is_empty());
+    for id in &kept {
+        assert!(without.code.contains(id.as_str()));
+    }
+    assert!(
+        without.code.contains("export const a = \"x\";"),
+        "{}",
+        without.code
+    );
 }
