@@ -1433,6 +1433,13 @@ fi
 # The early check above already covers the target trees known then. This
 # check runs only when a later target or audit root added a new tree.
 if [ "$GATE_TARGET_COUNT" -gt "$GATE_CHECKED_COUNT" ]; then
+  # A JSON reader in a new target tree goes, and the gate looks for another.
+  if [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] && gate_runner_excluded "${GATE_JSON_RUNNER[0]}"; then
+    GATE_JSON_RUNNER=()
+    GATE_JSON_DIR=""
+    GATE_PATH_FALLOW="$(gate_find_fallow || true)"
+    gate_find_json_runner || true
+  fi
   GATE_CHECK_TOOLS=(fallow git)
   [ "${#GATE_JSON_RUNNER[@]}" -gt 0 ] || GATE_CHECK_TOOLS+=(jq)
   gate_check_targets "${GATE_CHECK_TOOLS[@]}"
