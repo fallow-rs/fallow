@@ -20,22 +20,10 @@ Workflow:
    output, a flag, the docs or an MCP tool result. The issue form field
    "How did you run fallow?" often shows this. Name the unclear part of the
    contract in the acceptance criteria.
-8. Set the issue status. The repository board groups issues by status.
-   - `Todo`: valid, actionable, and `priority:high` or `priority:medium`.
-   - `Backlog`: valid but `priority:low`, a question, a tracking issue,
-     `status:blocked`, or `status:major-version`.
-   - `Not planned` or `Duplicate`: when you close the issue.
-   - Do not set `In progress` or `In review`. A linked pull request sets them.
-
-   `gh issue edit` has no status flag. Use GraphQL:
-
-   ```bash
-   gh api graphql -f query='{repository(owner:"fallow-rs",name:"fallow"){
-     planningStatuses(first:20){nodes{id name}} issue(number:N){id}}}'
-   gh api graphql -f query='mutation($i:ID!,$s:ID!){
-     setIssueStatus(input:{issueId:$i,statusId:$s}){issue{status{name}}}}' \
-     -f i=ISSUE_ID -f s=STATUS_ID
-   ```
+8. Set the issue status: `Todo` or `Backlog` for an open issue, and
+   `Not planned` or `Duplicate` when you close it. Do not set
+   `In progress` or `In review`. `docs/development/issue-status.md` gives
+   the meaning of each status and the commands.
 
 Give each claim about cause or history one confidence level:
 - direct: you ran it, or the source shows it;

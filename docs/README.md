@@ -31,6 +31,8 @@ for contributors and maintainers of the open-source codebase.
   and publication workflow ownership.
 - [Dependency updates](development/dependency-updates.md): Dependabot
   auto-merge, the repair workflow, and its setup.
+- [Issue status](development/issue-status.md): the meaning of each issue
+  status, which skill sets it, and the GraphQL commands.
 
 ## Architecture and extension points
 

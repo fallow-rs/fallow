@@ -16,7 +16,7 @@ at the end of every objective, without a prompt from the maintainer.
 4. Re-run any weak or stale verification.
 5. Fix each in-scope omission now. A fix after the merge is a new pull
    request: send it through `review` and `ship`, and add it to the list of
-   step 6. Sort each separate follow-up into the three groups of
+   step 7. Sort each separate follow-up into the three groups of
    `CONTRIBUTING.md`. Add an improvement idea with no known need to the
    "Possible follow-ups" section of the PR body, also after the merge, and
    open no issue for it. Track each item of needed work:
@@ -32,23 +32,30 @@ at the end of every objective, without a prompt from the maintainer.
    - for a repository outside `fallow-rs`, write a draft issue in the final
      report. The maintainer posts it.
    Link each issue or draft in the final report. A note in `.plans/`, in
-   `/tmp`, or in the chat does not track a follow-up.
-6. Check each pull request in the list of `.plans/<task>.md` with
+   `/tmp`, or in the chat does not track a follow-up. Give each new
+   `fallow-rs/fallow` issue a status, `Todo` or `Backlog`, as
+   `triage-issue` does.
+6. Check the status of each issue of the objective (see
+   `docs/development/issue-status.md`). An open issue that stays
+   `In progress` or `In review` with no open pull request of this
+   objective goes back to `Todo` or `Backlog`. This happens after a partial
+   fix with `Refs #N`, and after a pull request closes without a merge.
+7. Check each pull request in the list of `.plans/<task>.md` with
    `gh pr view <url> --json state,mergeCommit`. For each merge commit, run
    `node scripts/ship-wait-checks.mjs --commit <sha> --follow-main` (for a
    companion repository, use the commands of the ship skill). Each pull
    request is merged with green merged-commit CI, or goes in the report as
    blocked, with the blocker and the next action. Armed auto-merge does not
    pass this check.
-7. Verify branches, worktrees, temporary worktrees, and generated artifacts are
+8. Verify branches, worktrees, temporary worktrees, and generated artifacts are
    clean.
-8. List the lessons of the task: corrections, failures that cost time, and
+9. List the lessons of the task: corrections, failures that cost time, and
    skipped steps. Keep a lesson only when all four filters pass:
    - it stays true after paths, versions, and counts change;
    - it changes a future decision, not only the amount of text to read;
    - no skill or doc covers it yet (sharpen a weak rule, do not copy it);
    - it belongs to a skill, doc, or surface that this task used.
-9. Store each kept lesson in the strongest form: a type or schema, then a
-   lint, test, or CI check, then a script. Write text only when none fits.
+10. Store each kept lesson in the strongest form: a type or schema, then a
+    lint, test, or CI check, then a script. Write text only when none fits.
 
 Finding no obvious bug is not completion. Prove every requested outcome.
