@@ -1136,9 +1136,11 @@ pub(super) fn git_top(root: &Path) -> GitTop {
 
 /// `Some(true)` when git tracks one of `paths` (relative to `root`) or a file
 /// below it, `Some(false)` when it tracks none, `None` when git cannot run or
-/// exits with an error. A caller treats `None` as "tracked".
+/// exits with an error. A caller treats `None` as "tracked". Git reads each
+/// path as a literal path, without pathspec magic or globs.
 pub(super) fn git_tracks_any(root: &Path, paths: &[PathBuf]) -> Option<bool> {
     let output = fallow_engine::changed_files::git_command_in(root)
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .args(["ls-files", "-z", "--"])
         .args(paths)
         .output()

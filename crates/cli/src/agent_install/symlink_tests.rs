@@ -430,6 +430,24 @@ fn skill_install_reads_a_subproject_package_from_the_store_of_the_work_tree() {
     assert!(installed_flavor(&app).contains("skill=stub"));
 }
 
+/// Git reads each path of the query as a literal path. A directory name that
+/// has the form of pathspec magic or of a glob does not change the query.
+#[test]
+fn skill_install_ignores_a_committed_package_below_a_directory_with_a_pathspec_name() {
+    for name in [":(attr:none)app", "a*p", "[x]app"] {
+        let top = tempfile::tempdir().unwrap();
+        let top = top.path();
+        let app = top.join(name);
+        ship_skill(&app);
+        git_in(top, &["init", "-q"]);
+        git_in(top, &["add", "-f", "--", &format!(":(literal){name}")]);
+
+        let text = installed_flavor(&app);
+
+        assert!(text.contains("skill=embedded"), "{name}: {text}");
+    }
+}
+
 /// When git cannot answer, the package counts as committed.
 #[test]
 fn skill_install_ignores_the_package_when_git_cannot_list_the_files() {
