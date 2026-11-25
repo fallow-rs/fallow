@@ -813,7 +813,7 @@ fn mark_ambiguous_function_line(
 fn prepare_coverage_sources(root: &Path, path: &Path) -> Result<PreparedCoverageSources, String> {
     coverage_inputs::check_input(root, path)?;
     let mut temp_dir = None;
-    let mut inner_iterations = InnerIterationIndex::default();
+    let mut inner_iterations = InnerIterationIndex::for_root(root);
     if !path.is_dir() {
         let mut sources = Vec::new();
         prepare_single_coverage_source(

@@ -69,8 +69,13 @@ pub(super) fn dir_fallback(dir: &Path, refused: bool) -> Vec<CoverageSource> {
 /// The text of the generated script of a V8 entry, when its `file://` URL
 /// names a regular file inside `root`.
 pub(super) fn generated_source(root: &Path, script: &ScriptCoverage) -> Option<String> {
-    let path = file_url_to_path(&script.url)?;
-    read_to_string_inside(root, &path, MAX_COVERAGE_FILE_BYTES).ok()
+    read_script_source(root, &file_url_to_path(&script.url)?)
+}
+
+/// The text of the script file `path` of a V8 dump, when it is a regular
+/// file inside `root`.
+pub(super) fn read_script_source(root: &Path, path: &Path) -> Option<String> {
+    read_to_string_inside(root, path, MAX_COVERAGE_FILE_BYTES).ok()
 }
 
 /// Read one coverage file that [`check_input`] or [`coverage_json_files`]
