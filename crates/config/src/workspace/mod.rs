@@ -406,7 +406,7 @@ fn collect_declared_patterns(
     };
 
     let pkg_path = root.join("package.json");
-    if pkg_path.exists() {
+    if pkg_path.symlink_metadata().is_ok() {
         match PackageJson::load_inside(root, &pkg_path) {
             Ok(pkg) => push_all(&pkg_path, pkg.workspace_patterns()),
             Err(error) => {

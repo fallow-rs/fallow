@@ -642,3 +642,22 @@ fn a_pnpm_workspace_link_out_of_the_project_gives_no_patterns() {
     assert!(!text.contains("marker-7531"), "{text}");
     assert!(!nested_member_dirs_missing(&root.join("docs")));
 }
+
+#[cfg(unix)]
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn a_dangling_and_an_outside_root_manifest_link_get_one_message() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let outer = dunce::canonicalize(dir.path()).unwrap();
+    std::fs::write(outer.join("other.json"), r#"{"name":"x"}"#).unwrap();
+    let message = |target: &str| {
+        let root = outer.join(format!("project-{target}"));
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(outer.join(target), root.join("package.json")).unwrap();
+        let error = discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty())
+            .unwrap_err()
+            .to_string();
+        error.replace(&format!("project-{target}"), "project")
+    };
+    assert_eq!(message("other.json"), message("missing.json"));
+}
