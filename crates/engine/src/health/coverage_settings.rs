@@ -56,7 +56,11 @@ fn load_health_coverage(
             // audit error. Explicit user coverage still fails loudly: the
             // head pass loads the same file strictly.
             Err(_) if opts.coverage_inputs.coverage_relocated => Ok(None),
-            Err(e) => Err(HealthError::message(format!("coverage: {e}"), 2)),
+            Err(e) => Err(HealthError::message(
+                fallow_config::outside_value_error(&config.root, "health.coverage", coverage_path)
+                    .unwrap_or_else(|| format!("coverage: {e}")),
+                2,
+            )),
         };
     }
 

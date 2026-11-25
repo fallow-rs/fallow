@@ -211,7 +211,10 @@ impl CodeOwners {
     pub fn load(root: &Path, config_path: Option<&str>) -> Result<Self, String> {
         if let Some(p) = config_path {
             let base = fallow_config::project_scope_base(root);
-            Self::from_project_file(&base, &root.join(p))
+            Self::from_project_file(&base, &root.join(p)).map_err(|error| {
+                fallow_config::outside_value_error(root, "codeowners", Path::new(p))
+                    .unwrap_or(error)
+            })
         } else {
             Self::discover(root)
         }
@@ -978,6 +981,51 @@ mod tests {
         assert_eq!(owners.owner_of(Path::new("a.ts")), Some("@repo-owner"));
         let err = CodeOwners::load(&package, Some("../../../CODEOWNERS")).unwrap_err();
         assert!(err.contains("outside"), "{err}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_codeowners_read_error_omits_a_value_from_an_outside_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("outside.json"),
+            r#"{"codeowners": "owners-7531/CODEOWNERS"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"extends": "../outside.json"}"#,
+        )
+        .unwrap();
+        let file = crate::project_config::load_config_file(
+            &root,
+            None,
+            crate::project_config::ConfigFileOptions::default(),
+        )
+        .unwrap();
+        let value = file.config.codeowners.unwrap();
+
+        let err = CodeOwners::load(&root, Some(&value)).unwrap_err();
+        assert!(!err.contains("owners-7531"), "{err}");
+        assert!(err.contains("codeowners"), "{err}");
+        assert!(err.contains("outside.json"), "{err}");
+
+        // A value that the project sets keeps its text.
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"codeowners": "owners-7531/CODEOWNERS"}"#,
+        )
+        .unwrap();
+        crate::project_config::load_config_file(
+            &root,
+            None,
+            crate::project_config::ConfigFileOptions::default(),
+        )
+        .unwrap();
+        let err = CodeOwners::load(&root, Some(&value)).unwrap_err();
+        assert!(err.contains("owners-7531"), "{err}");
     }
 
     #[cfg(unix)]

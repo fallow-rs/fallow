@@ -1571,7 +1571,7 @@ impl FallowConfig {
     }
 
     /// The config keys that name one file, with their values.
-    fn file_path_keys(&self) -> [(Option<String>, &'static str); 5] {
+    pub(super) fn file_path_keys(&self) -> [(Option<String>, &'static str); 5] {
         let coverage = self
             .health
             .coverage

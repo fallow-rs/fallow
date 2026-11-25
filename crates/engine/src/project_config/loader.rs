@@ -203,6 +203,7 @@ pub fn load_config_file(
     let load_options = ConfigLoadOptions::new(options.allow_remote_extends)
         .with_extends_timeout(options.extends_timeout);
     let file = load_config_file_unchecked(root, config_path, load_options)?;
+    file.config.record_outside_values(root);
     if let Err(errors) = file.config.check_file_path_keys_inside(root) {
         let message = format!("invalid config:\n  - {}", errors.join("\n  - "));
         return Err(ConfigLoadError::Parse {

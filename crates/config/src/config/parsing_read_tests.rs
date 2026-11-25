@@ -500,3 +500,34 @@ fn a_config_link_target_outside_the_project_counts_as_outside() {
     assert!(!message.contains(MARKER), "{message}");
     assert!(message.contains("entry"), "{message}");
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn outside_values_are_kept_for_the_reads_after_the_load() {
+    let dir = project_with_outside_file(
+        "outside.json",
+        &format!(
+            r#"{{"cache": {{"dir": "/{MARKER}"}}, "health": {{"coverage": "{MARKER}.json"}}}}"#
+        ),
+    );
+    let project = dir.path().join("project");
+    let config = project.join(".fallowrc.json");
+    std::fs::write(&config, r#"{"extends": ["../outside.json"]}"#).unwrap();
+    let loaded = FallowConfig::load(&config).unwrap();
+    loaded.record_outside_values(&project);
+
+    let cache = Path::new("/").join(MARKER);
+    let files = crate::outside_value_files(&project, "cache.dir", &cache).unwrap();
+    assert!(files.contains("outside.json"), "{files}");
+    let coverage = project.join(format!("{MARKER}.json"));
+    let message = crate::outside_value_error(&project, "health.coverage", &coverage).unwrap();
+    assert!(!message.contains(MARKER), "{message}");
+    assert!(message.contains("health.coverage"), "{message}");
+    // A CLI flag value is another path, so it keeps its text.
+    assert!(
+        crate::outside_value_files(&project, "health.coverage", Path::new("flag.json")).is_none()
+    );
+
+    FallowConfig::default().record_outside_values(&project);
+    assert!(crate::outside_value_files(&project, "cache.dir", &cache).is_none());
+}
