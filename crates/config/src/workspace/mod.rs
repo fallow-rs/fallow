@@ -172,9 +172,9 @@ pub fn discover_workspaces_with_diagnostics_and_patterns(
     ignore_patterns: &crate::IgnorePatternSet,
     extra_patterns: &[String],
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
+    crate::clear_project_scope_bases();
     let (workspaces, diagnostics) =
         collect_workspaces_and_diagnostics(root, ignore_patterns, extra_patterns)?;
-
     emit_diagnostics(root, &diagnostics);
 
     Ok((workspaces, diagnostics))

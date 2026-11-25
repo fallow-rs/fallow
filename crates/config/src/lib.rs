@@ -51,7 +51,7 @@ pub mod permutation;
 pub mod pnpm_catalog_edit;
 mod production_env;
 mod project_read;
-pub use project_read::project_scope_base;
+pub use project_read::{clear_project_scope_bases, project_scope_base};
 mod rule_pack;
 mod run_inputs;
 mod source_walk;

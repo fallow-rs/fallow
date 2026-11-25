@@ -2,6 +2,9 @@
 //! read of the file.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+use rustc_hash::FxHashMap;
 
 /// The state of a path that a config key names, relative to the project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,15 +31,48 @@ pub enum ProjectEntry {
 /// - Else it is the root itself.
 ///
 /// A root that does not resolve is its own base.
+///
+/// The result for each resolved root is kept until the next
+/// [`clear_project_scope_bases`], because a run without git asks for the
+/// base of each installed manifest and the search reads files above the
+/// root.
 #[must_use]
 pub fn project_scope_base(root: &Path) -> PathBuf {
     let Ok(root) = dunce::canonicalize(root) else {
         return root.to_path_buf();
     };
-    if let Some(top) = project_checkout_top(&root) {
+    let cache = SCOPE_BASES.get_or_init(Mutex::default);
+    if let Some(base) = cache
+        .lock()
+        .ok()
+        .and_then(|bases| bases.get(&root).cloned())
+    {
+        return base;
+    }
+    let base = uncached_scope_base(&root);
+    if let Ok(mut bases) = cache.lock() {
+        bases.insert(root, base.clone());
+    }
+    base
+}
+
+/// The scope bases that [`project_scope_base`] found, by resolved root.
+static SCOPE_BASES: OnceLock<Mutex<FxHashMap<PathBuf, PathBuf>>> = OnceLock::new();
+
+/// Forget the scope bases that [`project_scope_base`] found. Workspace
+/// discovery calls it at the start of each analysis, so a long-lived
+/// process (LSP, watch) sees a new `.git` entry or workspace manifest.
+pub fn clear_project_scope_bases() {
+    if let Some(Ok(mut bases)) = SCOPE_BASES.get().map(Mutex::lock) {
+        bases.clear();
+    }
+}
+
+fn uncached_scope_base(root: &Path) -> PathBuf {
+    if let Some(top) = project_checkout_top(root) {
         return top.to_path_buf();
     }
-    workspace_root_above(&root).unwrap_or(root)
+    workspace_root_above(root).unwrap_or_else(|| root.to_path_buf())
 }
 
 /// The git top level of the canonical directory `root` that counts as the
@@ -281,6 +317,8 @@ mod tests {
         std::fs::create_dir_all(&package).unwrap();
         assert_eq!(project_scope_base(&package), package);
         std::fs::create_dir(top.join(".git")).unwrap();
+        // An analysis clears the kept bases at its start.
+        clear_project_scope_bases();
         assert_eq!(project_scope_base(&package), top);
         assert_eq!(project_scope_base(&top), top);
     }

@@ -293,6 +293,7 @@ fn package_config_path_keys_may_name_files_up_to_the_git_top_level() {
         );
     }
     std::fs::remove_dir(top.join(".git")).unwrap();
+    crate::clear_project_scope_bases();
     assert!(inside.check_file_path_keys_inside(&package).is_err());
 }
 
