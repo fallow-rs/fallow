@@ -152,11 +152,15 @@ impl CodeOwners {
     /// Auto-probe standard CODEOWNERS locations relative to the project root.
     ///
     /// Tries `CODEOWNERS`, `.github/CODEOWNERS`, `.gitlab/CODEOWNERS`, `docs/CODEOWNERS`.
+    /// A probe that is a link must resolve to a file inside `root`.
     pub fn discover(root: &Path) -> Result<Self, String> {
         for probe in PROBE_PATHS {
-            let path = root.join(probe);
-            if path.is_file() {
-                return Self::from_file(&path);
+            let present = root
+                .join(probe)
+                .symlink_metadata()
+                .is_ok_and(|meta| meta.is_file() || meta.file_type().is_symlink());
+            if present {
+                return Self::from_project_file(root, Path::new(probe));
             }
         }
         Err(format!(
@@ -166,14 +170,27 @@ impl CodeOwners {
         ))
     }
 
-    /// Load from a config-specified path, or auto-discover.
+    /// Load from a config-specified path, or auto-discover. The file must
+    /// resolve inside `root`.
     pub fn load(root: &Path, config_path: Option<&str>) -> Result<Self, String> {
         if let Some(p) = config_path {
-            let path = root.join(p);
-            Self::from_file(&path)
+            Self::from_project_file(root, Path::new(p))
         } else {
             Self::discover(root)
         }
+    }
+
+    /// Load and parse the CODEOWNERS file at `path` below `root`. The read
+    /// refuses a path that resolves outside `root`, a file that is not a
+    /// regular file, and a very large file.
+    fn from_project_file(root: &Path, path: &Path) -> Result<Self, String> {
+        let content = fallow_types::read_guard::read_to_string_inside(
+            root,
+            path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        )
+        .map_err(|e| e.to_string())?;
+        Self::parse(&content)
     }
 
     /// Parse CODEOWNERS content into a lookup structure.
@@ -895,6 +912,22 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.contains("no CODEOWNERS file found"));
         assert!(err.contains("--group-by directory"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn codeowners_link_out_of_the_root_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("OWNERS"), "* @outside-owner\n").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("OWNERS"), root.join("CODEOWNERS")).unwrap();
+
+        let err = CodeOwners::discover(&root).unwrap_err();
+        assert!(err.contains("outside"), "{err}");
+        let err = CodeOwners::load(&root, Some("CODEOWNERS")).unwrap_err();
+        assert!(err.contains("outside"), "{err}");
     }
 
     #[test]

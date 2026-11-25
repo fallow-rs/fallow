@@ -172,6 +172,23 @@ pub fn load_config_file(
     load_count::record(root);
     let load_options = ConfigLoadOptions::new(options.allow_remote_extends)
         .with_extends_timeout(options.extends_timeout);
+    let file = load_config_file_unchecked(root, config_path, load_options)?;
+    if let Err(errors) = file.config.check_file_path_keys_inside(root) {
+        let message = format!("invalid config:\n  - {}", errors.join("\n  - "));
+        return Err(ConfigLoadError::Parse {
+            path: file.path,
+            chain: message.clone(),
+            message,
+        });
+    }
+    Ok(file)
+}
+
+fn load_config_file_unchecked(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+) -> Result<ConfigFile, ConfigLoadError> {
     if let Some(path) = config_path {
         let before = ConfigChainSnapshot::read(Some(path));
         return FallowConfig::load_with_options(path, load_options)
@@ -275,6 +292,26 @@ mod tests {
         std::fs::create_dir(root.join(".git")).expect("git marker");
         std::fs::write(root.join(".fallowrc.json"), config).expect("config");
         (dir, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn config_path_keys_through_a_link_out_of_the_root_are_refused() {
+        let outside = tempfile::tempdir().expect("tempdir");
+        for config in [
+            r#"{ "codeowners": "linked/CODEOWNERS" }"#,
+            r#"{ "health": { "coverage": "linked/coverage-final.json" } }"#,
+            r#"{ "audit": { "dupesBaseline": "linked/dupes.json" } }"#,
+        ] {
+            let (_dir, root) = project(config);
+            std::os::unix::fs::symlink(outside.path(), root.join("linked")).expect("link");
+            let err =
+                load_config_file(&root, None, ConfigFileOptions::default()).expect_err(config);
+            assert!(err.chain().contains("outside"), "{config}: {}", err.chain());
+        }
+        let (_dir, root) = project(r#"{ "codeowners": "missing/CODEOWNERS" }"#);
+        load_config_file(&root, None, ConfigFileOptions::default()).expect("a missing file loads");
     }
 
     #[test]
