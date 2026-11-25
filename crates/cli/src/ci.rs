@@ -11,8 +11,11 @@ use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
 use crate::coverage::upload_common::url_encode_path_segment;
 use crate::error::{emit_coded_error_with_style, emit_input_error_with_style};
 use crate::exit_codes::NETWORK_FAILURE;
+use input_file::read_text_file;
 #[path = "ci_check_run.rs"]
 mod check_run;
+#[path = "ci_input_file.rs"]
+mod input_file;
 #[path = "ci_pr_comment_post.rs"]
 mod pr_comment_post;
 #[path = "ci_provider_state.rs"]
@@ -334,11 +337,6 @@ fn existing_comment(
         id,
         body: read_text_file(body_path, "existing PR comment body")?,
     }))
-}
-
-fn read_text_file(path: &Path, label: &str) -> Result<String, String> {
-    std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {label} '{}': {e}", path.display()))
 }
 
 fn emit_pr_comment_post_plan(
