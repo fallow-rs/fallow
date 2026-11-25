@@ -93,9 +93,9 @@ fn resolve_module(
     if !config_parser::is_inside_root(&pkg_dir, project_root) {
         return None;
     }
-    let file = workspace_package_file(&pkg_dir, subpath, project_root)
+    let file = workspace_package_file(&pkg_dir, subpath, project_root, project_root)
         .filter(|file| config_parser::is_inside_root(file, project_root))?;
-    let source = std::fs::read_to_string(&file).ok()?;
+    let source = crate::discover::project_read::read_project_file(project_root, &file)?;
     Some((file, source))
 }
 

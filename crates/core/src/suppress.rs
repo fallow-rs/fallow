@@ -339,7 +339,7 @@ impl<'a> SuppressionContext<'a> {
                             .copied()
                             .filter(|&kind| file_rules.severity_for_kind(kind) != Severity::Off)
                             .collect();
-                        add_next_line_hint(&mut entry, s, &kinds, &source);
+                        add_next_line_hint(&mut entry, s, &kinds, &config.root, &source);
                     }
                     stale.push(entry);
                 }
@@ -483,6 +483,7 @@ fn add_next_line_hint(
     entry: &mut StaleSuppression,
     s: &Suppression,
     kinds: &[IssueKind],
+    root: &std::path::Path,
     source: &std::cell::OnceCell<Option<String>>,
 ) {
     if !kinds.is_empty() {
@@ -495,7 +496,7 @@ fn add_next_line_hint(
         return;
     }
     let text =
-        source.get_or_init(|| crate::discover::project_read::read_file_in_its_scope(&entry.path));
+        source.get_or_init(|| crate::discover::project_read::read_project_file(root, &entry.path));
     entry.next_line_blank = text
         .as_deref()
         .is_some_and(|text| line_is_blank(text, s.line));

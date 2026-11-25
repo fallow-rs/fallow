@@ -52,12 +52,6 @@ pub fn read_project_file(root: &Path, path: &Path) -> Option<String> {
     read_to_string_inside(&scope_base(root), path, DEFAULT_MAX_READ_BYTES).ok()
 }
 
-/// The text of `path` for a reader that has no project root: a project read
-/// with the directory of `path` as the root.
-pub fn read_file_in_its_scope(path: &Path) -> Option<String> {
-    read_project_file(path.parent()?, path)
-}
-
 /// The bytes of the project file `path`, or `None` when it is missing or the
 /// read is refused.
 pub fn read_project_bytes(root: &Path, path: &Path) -> Option<Vec<u8>> {
@@ -177,11 +171,11 @@ mod tests {
         assert!(resolve_sibling_module(&config, "./zero.js").is_none());
     }
 
-    /// The reads without a project root and the byte reads are bounded the
-    /// same way as the text reads.
+    /// A byte read refuses a link out of the read scope and a device, and
+    /// reads a regular file inside it.
     #[test]
     #[cfg(unix)]
-    fn byte_reads_and_reads_without_a_root_are_bounded() {
+    fn byte_reads_refuse_links_out_of_the_scope_and_devices() {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path().join("project");
         std::fs::create_dir_all(&root).expect("mkdir");
@@ -196,11 +190,6 @@ mod tests {
             Some(b"own".to_vec())
         );
         assert!(read_project_bytes(&root, &root.join("linked.txt")).is_none());
-        assert_eq!(
-            read_file_in_its_scope(&root.join("own.txt")).as_deref(),
-            Some("own")
-        );
-        assert!(read_file_in_its_scope(&root.join("linked.txt")).is_none());
-        assert!(read_file_in_its_scope(&root.join("zero.txt")).is_none());
+        assert!(read_project_bytes(&root, &root.join("zero.txt")).is_none());
     }
 }

@@ -209,7 +209,7 @@ fn workspace_shared_config_file(
         return None;
     }
     let subpath = specifier.strip_prefix(package)?;
-    workspace_package_file(&pkg_dir, subpath, root)
+    workspace_package_file(&pkg_dir, subpath, root, walk.project_root())
         .filter(|file| config_parser::is_inside_root(file, walk.project_root()))
 }
 
