@@ -906,7 +906,11 @@ fn diagnose_configured_plugin_file(
     let kind = if !is_within_root(path, canonical_root) {
         Some(ConfiguredPluginDiagnosticKind::OutsideProjectRoot)
     } else if let Some(format) = PluginFormat::from_path(path) {
-        match std::fs::read_to_string(path) {
+        match fallow_types::read_guard::read_to_string_inside(
+            canonical_root,
+            path,
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        ) {
             Ok(content) => match parse_plugin(&content, &format, path) {
                 Some(plugin) if !plugin.name.is_empty() => None,
                 Some(_) | None => Some(ConfiguredPluginDiagnosticKind::InvalidDefinition),
@@ -1126,12 +1130,17 @@ pub fn external_plugin_source_files(root: &Path, config_plugin_paths: &[String])
     files
 }
 
-/// True when `path` is a regular file or a link. The check does not follow
-/// the link, so a dangling link and a link to a file outside the root both
-/// reach the root check of the loader and get the same warning.
+/// True when `path` is a regular file, or a link that does not resolve to
+/// something other than a regular file. A dangling link and a link to a
+/// file outside the root both reach the root check of the loader and get
+/// the same warning. A link to a directory, a pipe or a device is not a
+/// plugin file.
 fn is_file_or_link(path: &Path) -> bool {
-    path.symlink_metadata()
-        .is_ok_and(|meta| meta.is_file() || meta.file_type().is_symlink())
+    path.symlink_metadata().is_ok_and(|meta| {
+        meta.is_file()
+            || (meta.file_type().is_symlink()
+                && std::fs::metadata(path).map_or(true, |target| target.is_file()))
+    })
 }
 
 /// Check if a path resolves within the canonical root (follows symlinks).

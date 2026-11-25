@@ -25,7 +25,8 @@ pub struct ConfigInputs {
 /// tell that a resolved config can be out of date.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConfigInputsSnapshot {
-    /// Each file with its content, or `None` when the file did not read.
+    /// Each file with its content, or `None` when the file did not read. The
+    /// read is the bounded read of a regular file inside the root.
     files: Vec<(PathBuf, Option<Vec<u8>>)>,
     /// Each directory with the sorted names of its child directories, or
     /// `None` when the directory did not read.
@@ -53,7 +54,12 @@ impl ConfigInputs {
             .into_iter()
             .chain(self.rule_pack_paths.iter().map(|path| self.root.join(path)))
             .map(|path| {
-                let content = std::fs::read(&path).ok();
+                let content = fallow_types::read_guard::read_bytes_inside(
+                    &self.root,
+                    &path,
+                    fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+                )
+                .ok();
                 (path, content)
             })
             .collect();
@@ -149,5 +155,38 @@ mod tests {
 
         std::fs::create_dir_all(root.join("src/features/billing")).unwrap();
         assert_ne!(before, inputs.snapshot(), "a new zone directory");
+    }
+
+    #[cfg(unix)]
+    fn make_fifo(path: &Path) {
+        let status = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo must create the test pipe");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_pipe_among_the_inputs_does_not_block_the_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".fallow/plugins")).unwrap();
+        make_fifo(&root.join("pipe"));
+        std::os::unix::fs::symlink(root.join("pipe"), root.join(".fallow/plugins/a.json")).unwrap();
+        std::os::unix::fs::symlink(root.join("pipe"), root.join("fallow-plugin-b.json")).unwrap();
+        let listed = external_plugin_source_files(&root, &[]);
+        assert!(listed.is_empty(), "{listed:?}");
+
+        let inputs = inputs(&root, r#"{"plugins":["pipe"],"rulePacks":["pipe"]}"#);
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(inputs.snapshot());
+        });
+        let snapshot = receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the snapshot must not wait on a pipe");
+        assert!(snapshot.files.iter().all(|(_, content)| content.is_none()));
     }
 }
