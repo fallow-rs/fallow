@@ -1,5 +1,6 @@
-//! Factory returns, injection tokens and the element and value types of
-//! bindings that the visitor records during the walk.
+//! Factory returns, injection tokens, the literal allowlist of mutating
+//! calls, and the element and value types of bindings that the visitor
+//! records during the walk.
 
 use super::*;
 
@@ -134,7 +135,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_factory_binding_producer(
+    fn record_factory_binding_producer(
         &mut self,
         name: &str,
         input: FactoryReturnFunctionInput<'_, '_>,
@@ -340,7 +341,7 @@ impl ModuleInfoExtractor {
     /// second argument) still records a self-provide DI site so the
     /// `unprovided-inject` detector treats it as provided. See issues #920 and
     /// the Angular `unprovided-inject` arm.
-    pub(super) fn record_injection_token(&mut self, name: &str, init: &Expression<'_>) {
+    fn record_injection_token(&mut self, name: &str, init: &Expression<'_>) {
         if !self.is_module_scope() {
             return;
         }
@@ -424,7 +425,7 @@ impl ModuleInfoExtractor {
         crate::visitor::helpers::try_extract_factory_new_class(&call.arguments)
     }
 
-    pub(super) fn is_svelte_derived_call(call: &CallExpression<'_>) -> bool {
+    fn is_svelte_derived_call(call: &CallExpression<'_>) -> bool {
         match &call.callee {
             Expression::Identifier(id) => id.name == "$derived",
             Expression::StaticMemberExpression(member) => {
@@ -563,7 +564,7 @@ impl ModuleInfoExtractor {
             })
     }
 
-    pub(super) fn array_type_origin(ty: &TSType<'_>) -> Option<Span> {
+    fn array_type_origin(ty: &TSType<'_>) -> Option<Span> {
         match ty {
             TSType::TSArrayType(array) => {
                 crate::visitor::helpers::extract_type_reference_origin(&array.element_type)
@@ -591,7 +592,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_map_binding_value_type(&mut self, binding: String, value: String) {
+    fn record_map_binding_value_type(&mut self, binding: String, value: String) {
         let root = binding
             .split_once('.')
             .map_or(binding.as_str(), |(root, _)| root);
@@ -694,7 +695,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn map_type_origin(ty: &TSType<'_>) -> Option<Span> {
+    fn map_type_origin(ty: &TSType<'_>) -> Option<Span> {
         match ty {
             TSType::TSTypeReference(reference) => reference
                 .type_arguments

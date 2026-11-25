@@ -101,10 +101,7 @@ impl ModuleInfoExtractor {
     ///
     /// The entity-name form (`import X = Some.Ns`) names a binding declared in
     /// this file, not a module object, so it is not registered.
-    pub(super) fn record_import_equals_namespace_local(
-        &mut self,
-        decl: &TSImportEqualsDeclaration<'_>,
-    ) {
+    fn record_import_equals_namespace_local(&mut self, decl: &TSImportEqualsDeclaration<'_>) {
         if matches!(
             &decl.module_reference,
             TSModuleReference::ExternalModuleReference(_)
@@ -245,7 +242,7 @@ impl ModuleInfoExtractor {
     /// object. Placing it there is precise on its own: the object-binding
     /// resolver follows `api.ns.<member>`, and issue #2372 keeps such a binding
     /// off the whole-module closure for exactly that reason. See issue #2377.
-    pub(super) fn record_object_literal_namespace_pass(&mut self, root_name: &str) {
+    fn record_object_literal_namespace_pass(&mut self, root_name: &str) {
         if self.object_literal_namespace_placements.is_empty() {
             return;
         }

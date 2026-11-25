@@ -1,4 +1,5 @@
-//! Free helpers that read the shape of an expression, a binding or a body.
+//! Free helpers that read the shape of an expression, a binding or a body,
+//! and the regex risk and imported call site records that use them.
 
 use super::*;
 
@@ -54,9 +55,7 @@ pub(super) fn then_callback_member_class(value: &Expression<'_>) -> Option<Strin
 /// The expression body of a `() => <expr>` arrow, unwrapping the optional
 /// parenthesized-expression-statement form. Returns `None` for a block body that
 /// is not a sole expression statement.
-pub(super) fn arrow_expression_body<'a, 'b>(
-    value: &'b Expression<'a>,
-) -> Option<&'b Expression<'a>> {
+fn arrow_expression_body<'a, 'b>(value: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
     let Expression::ArrowFunctionExpression(arrow) = value else {
         return None;
     };
@@ -65,7 +64,7 @@ pub(super) fn arrow_expression_body<'a, 'b>(
 
 /// The sole expression of an arrow function's body (expression-bodied arrow, or a
 /// block body with a single `return <expr>` / `<expr>;` statement).
-pub(super) fn arrow_fn_expression_body<'a, 'b>(
+fn arrow_fn_expression_body<'a, 'b>(
     arrow: &'b oxc_ast::ast::ArrowFunctionExpression<'a>,
 ) -> Option<&'b Expression<'a>> {
     let ArrowFunctionBody::FunctionBody(body) = &arrow.body else {
@@ -110,7 +109,7 @@ pub(super) fn assignment_target_identifier_name<'b>(
     }
 }
 
-pub(super) fn expression_identifier_name<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
+fn expression_identifier_name<'b>(expr: &'b Expression<'_>) -> Option<&'b str> {
     match expr {
         Expression::Identifier(ident) => Some(ident.name.as_str()),
         Expression::ParenthesizedExpression(paren) => expression_identifier_name(&paren.expression),
@@ -161,7 +160,7 @@ pub(super) fn is_literal_string_allowlist_expr(expr: &Expression<'_>) -> bool {
     }
 }
 
-pub(super) fn is_string_literal_array(array: &ArrayExpression<'_>) -> bool {
+fn is_string_literal_array(array: &ArrayExpression<'_>) -> bool {
     array
         .elements
         .iter()
@@ -234,7 +233,7 @@ pub(super) fn asserted_type_root_name<'borrow>(ty: &'borrow TSType<'_>) -> Optio
     }
 }
 
-pub(super) fn type_name_root_str<'borrow>(name: &'borrow TSTypeName<'_>) -> Option<&'borrow str> {
+fn type_name_root_str<'borrow>(name: &'borrow TSTypeName<'_>) -> Option<&'borrow str> {
     match name {
         TSTypeName::IdentifierReference(ident) => Some(ident.name.as_str()),
         TSTypeName::QualifiedName(qualified) => type_name_root_str(&qualified.left),
@@ -290,7 +289,7 @@ pub(super) fn map_callback_returned_call_name(arg: &Argument<'_>) -> Option<Stri
 /// The single returned expression of a `{ return <expr>; }` block body. Any
 /// other statement count yields `None`, so a multi-statement or conditional
 /// callback body does not credit an element class. See issue #1793.
-pub(super) fn single_return_expr<'a, 'b>(body: &'b FunctionBody<'a>) -> Option<&'b Expression<'a>> {
+fn single_return_expr<'a, 'b>(body: &'b FunctionBody<'a>) -> Option<&'b Expression<'a>> {
     if body.statements.len() != 1 {
         return None;
     }
@@ -319,9 +318,7 @@ pub(super) fn unwrap_parens<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Express
 }
 
 /// Root reference of a static callee without optional or computed members.
-pub(super) fn imported_callee_root<'a>(
-    expression: &'a Expression<'a>,
-) -> Option<&'a IdentifierReference<'a>> {
+fn imported_callee_root<'a>(expression: &'a Expression<'a>) -> Option<&'a IdentifierReference<'a>> {
     match unwrap_parens(expression) {
         Expression::Identifier(identifier) => Some(identifier),
         Expression::StaticMemberExpression(member) if !member.optional => {
@@ -494,7 +491,7 @@ pub(super) fn for_of_binding_name(left: &ForStatementLeft<'_>) -> Option<String>
     }
 }
 
-pub(super) fn binding_pattern_value_name(pattern: &BindingPattern<'_>) -> Option<String> {
+fn binding_pattern_value_name(pattern: &BindingPattern<'_>) -> Option<String> {
     match pattern {
         BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
         BindingPattern::ArrayPattern(array) => array.elements.iter().rev().find_map(|element| {
@@ -575,9 +572,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn risky_regex_fragment_for_new(
-        expr: &oxc_ast::ast::NewExpression<'_>,
-    ) -> Option<String> {
+    fn risky_regex_fragment_for_new(expr: &oxc_ast::ast::NewExpression<'_>) -> Option<String> {
         let Expression::Identifier(callee) = &expr.callee else {
             return None;
         };
@@ -592,7 +587,7 @@ impl ModuleInfoExtractor {
         risky_redos_fragment(&pattern)
     }
 
-    pub(super) fn risky_regex_fragment_for_call(expr: &CallExpression<'_>) -> Option<String> {
+    fn risky_regex_fragment_for_call(expr: &CallExpression<'_>) -> Option<String> {
         let Expression::Identifier(callee) = &expr.callee else {
             return None;
         };

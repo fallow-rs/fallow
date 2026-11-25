@@ -1,5 +1,6 @@
 //! The program prologue, import and export declarations, function bodies,
-//! and the variable declarators of a module.
+//! the dispatch of a variable declarator, route loader data, and the class
+//! of a receiver.
 
 use super::*;
 
@@ -11,7 +12,7 @@ impl<'a> ModuleInfoExtractor {
     /// preceded it), so the RSC bundler parses it as an ordinary expression and
     /// silently ignores it. Only the two RSC directive strings match; a stray
     /// `"use strict"` is harmless.
-    pub(super) fn record_misplaced_directive_statement(&mut self, stmt: &ExpressionStatement<'a>) {
+    fn record_misplaced_directive_statement(&mut self, stmt: &ExpressionStatement<'a>) {
         if let Expression::StringLiteral(lit) = &stmt.expression {
             let is_server = match lit.value.as_str() {
                 Some("use server") => Some(true),
@@ -73,7 +74,7 @@ impl<'a> ModuleInfoExtractor {
     /// `Promise<T>` / `T` for a non-builtin class `T`. `Promise.allSettled` /
     /// `any` / `race` are excluded (only `all` yields the resolved element
     /// array). Requires the `local_function_return_types` pre-pass. See #1793.
-    pub(super) fn promise_all_map_element_type(&self, init: &Expression<'_>) -> Option<String> {
+    fn promise_all_map_element_type(&self, init: &Expression<'_>) -> Option<String> {
         let Expression::CallExpression(call) = unwrap_await_paren_expr(init) else {
             return None;
         };
@@ -395,7 +396,7 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_declarator_receiver_aliases(
+    fn record_declarator_receiver_aliases(
         &mut self,
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
@@ -453,7 +454,7 @@ impl<'a> ModuleInfoExtractor {
     /// initialized declarator: a `new Class()` RHS, a Svelte `$derived(new ...)`,
     /// a factory `[svc] = wrap(...)` array destructure, a `useMemo(() => new ...)`
     /// product binding, and a `Obj.method(...)` factory-call candidate.
-    pub(super) fn record_declarator_instance_bindings(
+    fn record_declarator_instance_bindings(
         &mut self,
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
@@ -641,7 +642,7 @@ impl<'a> ModuleInfoExtractor {
     }
 
     /// The class bound to an identifier or static member receiver, if any.
-    pub(super) fn bound_class_name(&self, expr: &Expression<'_>) -> Option<String> {
+    fn bound_class_name(&self, expr: &Expression<'_>) -> Option<String> {
         let source = static_member_object_name(unwrap_static_expr(expr))?;
         let source = self.qualify_this_scope(&source);
         match self.resolve_bound_object_name(&source) {
@@ -650,7 +651,7 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_route_loader_data_declarator(
+    fn record_route_loader_data_declarator(
         &mut self,
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
@@ -700,7 +701,7 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn is_route_loader_data_call(&self, expr: &Expression<'_>) -> bool {
+    fn is_route_loader_data_call(&self, expr: &Expression<'_>) -> bool {
         let Expression::CallExpression(call) = unwrap_route_loader_data_expr(expr) else {
             return false;
         };
@@ -843,7 +844,7 @@ impl<'a> ModuleInfoExtractor {
         self.record_dynamic_import_declarator(declarator, init);
     }
 
-    pub(super) fn record_declarator_collection_bindings(
+    fn record_declarator_collection_bindings(
         &mut self,
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
@@ -916,7 +917,7 @@ impl<'a> ModuleInfoExtractor {
     /// Record the dynamic-import edges of a declarator init: a
     /// `Promise.all([import(...)])` array destructure, a call of a local
     /// loader function, or a direct `import(...)`.
-    pub(super) fn record_dynamic_import_declarator(
+    fn record_dynamic_import_declarator(
         &mut self,
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,

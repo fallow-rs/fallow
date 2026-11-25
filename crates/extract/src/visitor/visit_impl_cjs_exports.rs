@@ -1,4 +1,5 @@
-//! CommonJS export assignments and the proofs of the static export shape.
+//! CommonJS export assignments, the proofs of the static export shape, and
+//! the binding state that an assignment target invalidates.
 
 use super::*;
 
@@ -6,7 +7,7 @@ impl<'a> ModuleInfoExtractor {
     /// Record a CommonJS named export (`module.exports.X = ...` /
     /// `exports.X = ...` / a `module.exports = {...}` key) and flag the module
     /// as carrying CJS exports.
-    pub(super) fn push_cjs_named_export(&mut self, name: String, span: Span) {
+    fn push_cjs_named_export(&mut self, name: String, span: Span) {
         self.has_cjs_exports = true;
         self.exports.push(ExportInfo {
             name: ExportName::Named(name),
@@ -30,7 +31,7 @@ impl<'a> ModuleInfoExtractor {
             && !self.has_cjs_es_module_marker;
     }
 
-    pub(super) fn is_cjs_exports_expression(expression: &Expression<'_>) -> bool {
+    fn is_cjs_exports_expression(expression: &Expression<'_>) -> bool {
         match expression {
             Expression::Identifier(identifier) => identifier.name == "exports",
             Expression::StaticMemberExpression(member) => {
@@ -153,7 +154,7 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn assignment_target_maybe_default_mutates_cjs_exports(
+    fn assignment_target_maybe_default_mutates_cjs_exports(
         target: &AssignmentTargetMaybeDefault<'_>,
     ) -> bool {
         if let AssignmentTargetMaybeDefault::AssignmentTargetWithDefault(default) = target {
@@ -187,7 +188,7 @@ impl<'a> ModuleInfoExtractor {
         Self::is_cjs_exports_expression(target) && property.value == "__esModule"
     }
 
-    pub(super) fn is_static_cjs_object_map(obj: &ObjectExpression<'_>) -> bool {
+    fn is_static_cjs_object_map(obj: &ObjectExpression<'_>) -> bool {
         let mut names = FxHashSet::default();
         for property in &obj.properties {
             let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(property) = property else {
@@ -305,7 +306,7 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn invalidate_assignment_target_default_proof(
+    fn invalidate_assignment_target_default_proof(
         &mut self,
         target: &AssignmentTargetMaybeDefault<'_>,
     ) {

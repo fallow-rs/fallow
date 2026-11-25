@@ -1,4 +1,5 @@
-//! Top-level and nested declarations, and the variable declarator metadata.
+//! Top-level and nested declarations, and the metadata and initialized
+//! bindings of a variable declarator.
 
 use super::*;
 
@@ -35,7 +36,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_top_level_class_declaration(&mut self, class: &Class<'_>) {
+    fn record_top_level_class_declaration(&mut self, class: &Class<'_>) {
         if let Some(id) = class.id.as_ref() {
             let super_reference_span = class.heritage.as_ref().and_then(|base| {
                 match unwrap_static_expr(&base.expression) {
@@ -140,7 +141,7 @@ impl ModuleInfoExtractor {
         self.angular_outputs.extend(outputs);
     }
 
-    pub(super) fn record_top_level_function_declaration(&mut self, function: &Function<'_>) {
+    fn record_top_level_function_declaration(&mut self, function: &Function<'_>) {
         if let Some(id) = function.id.as_ref() {
             self.record_declaration_name(&id.name, function.declare);
             self.record_sanitizer_binding(id.name.as_str(), None);
@@ -180,11 +181,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_package_resolution_function_arg(
-        &mut self,
-        function: &Function<'_>,
-        name: &str,
-    ) {
+    fn record_package_resolution_function_arg(&mut self, function: &Function<'_>, name: &str) {
         if let Some(body) = function.body.as_deref()
             && let Some(arg_index) = package_resolution_arg_index(
                 &function.params,
@@ -199,7 +196,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_playwright_factory_helper(&mut self, function: &Function<'_>, name: &str) {
+    fn record_playwright_factory_helper(&mut self, function: &Function<'_>, name: &str) {
         if let Some(body) = function.body.as_deref()
             && let Some(call) = extract_function_body_final_return_call(body)
         {
@@ -207,10 +204,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_top_level_type_alias_declaration(
-        &mut self,
-        alias: &TSTypeAliasDeclaration<'_>,
-    ) {
+    fn record_top_level_type_alias_declaration(&mut self, alias: &TSTypeAliasDeclaration<'_>) {
         self.record_local_declaration_name(&alias.id.name);
         self.record_local_type_declaration(&alias.id.name, alias.id.span);
         self.record_type_alias_surface_targets(alias);
@@ -238,10 +232,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_top_level_interface_declaration(
-        &mut self,
-        iface: &TSInterfaceDeclaration<'_>,
-    ) {
+    fn record_top_level_interface_declaration(&mut self, iface: &TSInterfaceDeclaration<'_>) {
         self.record_local_declaration_name(&iface.id.name);
         self.record_local_type_declaration(&iface.id.name, iface.id.span);
         self.record_playwright_fixture_interface(iface);
@@ -259,11 +250,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_required_type_members(
-        &mut self,
-        type_name: &str,
-        members: &[TSSignature<'_>],
-    ) {
+    fn record_required_type_members(&mut self, type_name: &str, members: &[TSSignature<'_>]) {
         for member in members {
             let required_name = match member {
                 TSSignature::TSPropertySignature(property) if !property.optional => {
@@ -292,11 +279,7 @@ impl ModuleInfoExtractor {
     /// signature, computed key, or spread is NOT a named prop and is skipped (its
     /// presence does not abstain the others, mirroring the destructure harvest's
     /// per-property tolerance).
-    pub(super) fn record_react_object_type_props(
-        &mut self,
-        type_name: &str,
-        members: &[TSSignature<'_>],
-    ) {
+    fn record_react_object_type_props(&mut self, type_name: &str, members: &[TSSignature<'_>]) {
         let mut props: Vec<(String, u32)> = Vec::new();
         for member in members {
             let TSSignature::TSPropertySignature(prop) = member else {
@@ -380,7 +363,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_nested_named_declaration(&mut self, id: &BindingIdentifier<'_>) {
+    fn record_nested_named_declaration(&mut self, id: &BindingIdentifier<'_>) {
         self.record_nested_declaration_names(std::iter::once(id));
         self.record_sanitizer_binding(id.name.as_str(), None);
         self.record_literal_allowlist_binding(id.name.as_str(), false);
@@ -389,7 +372,7 @@ impl ModuleInfoExtractor {
         self.record_path_relative_binding(id.name.as_str(), None);
     }
 
-    pub(super) fn capture_subclass_producer_member_access(
+    fn capture_subclass_producer_member_access(
         &mut self,
         object: &Expression<'_>,
         member: &str,
