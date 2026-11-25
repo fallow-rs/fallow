@@ -81,6 +81,48 @@ test("only findings count, and each finding ID names its rule", () => {
   );
 });
 
+test("health and dupes findings get stable IDs from their identifying fields", () => {
+  const report = {
+    clone_groups: [{ fingerprint: "abc", instances: [{ file: "src/a.ts", start_line: 4 }] }],
+    coverage_gaps: {
+      files: [{ path: "src/b.ts" }],
+      exports: [{ path: "src/b.ts", export_name: "b", line: 2 }],
+    },
+    shallow_directories: { directories: [{ path: "src/lib", anchor_file: "src/lib/x.ts" }] },
+    styling_findings: [
+      { code: "css-dead-surface", path: "a.css", line: 3, sub_kind: "class", value: ".x" },
+      { code: "css-dead-surface", path: "a.css", line: 3, sub_kind: "class", value: ".x" },
+    ],
+    mirrored_directories: [{ dir_a: "src/a/", dir_b: "src/b/" }],
+  };
+  const rules = findingsByRule(report);
+  assert.deepEqual([...rules.keys()].toSorted(), [
+    "code-duplication",
+    "css-dead-surface",
+    "mirrored-directory",
+    "shallow-directory",
+    "untested-export",
+    "untested-file",
+  ]);
+  const ids = rules.get("css-dead-surface").map((f) => f.finding_id);
+  assert.equal(ids.length, 2);
+  assert.notEqual(ids[0], ids[1]);
+  assert.match(ids[1], /^rp1:css-dead-surface:[0-9a-f]+~1$/);
+  assert.deepEqual(
+    findingsByRule(report).get("untested-file")[0].finding_id,
+    rules.get("untested-file")[0].finding_id,
+  );
+  assert.deepEqual(findingAnchor(rules.get("code-duplication")[0]), { path: "src/a.ts", line: 4 });
+  assert.deepEqual(findingAnchor(rules.get("shallow-directory")[0]), {
+    path: "src/lib/x.ts",
+    line: null,
+  });
+  assert.deepEqual(findingAnchor(rules.get("mirrored-directory")[0]), {
+    path: "src/a/",
+    line: null,
+  });
+});
+
 test("the anchor falls back to the first nested location", () => {
   assert.deepEqual(findingAnchor(finding("x")), { path: "src/a.ts", line: 3 });
   assert.deepEqual(
@@ -470,6 +512,10 @@ const args = process.argv.slice(2);
 if (args[0] === "--version") console.log("fallow 9.9.9");
 else if (args[0] === "explain") console.log("Unused exports");
 else if (process.env.FAKE_BAD_JSON) console.log("not json");
+else if (process.env.FAKE_DIR_FINDING) {
+  if (!args.includes("--css")) process.exit(2);
+  console.log(JSON.stringify({ mirrored_directories: [{ dir_a: "src/", dir_b: "lib/" }] }));
+}
 else { console.log(${JSON.stringify(JSON.stringify(report))}); process.exit(1); }
 `,
   );
@@ -583,6 +629,36 @@ test("sample refuses a checkout with local changes and a bad sample size", () =>
     const size = cli([...base, "--out", join(fixture.root, "o3"), "--sample-size=-1"]);
     assert.equal(size.status, 2);
     assert.match(size.stderr, /--sample-size/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("sample passes --args to fallow and skips excerpts for directory anchors", () => {
+  const fixture = makeFixture();
+  try {
+    const cli = withLedger(fixture);
+    const out = join(fixture.root, "out");
+    const result = cli(
+      [
+        "sample",
+        "--fallow-bin",
+        fixture.fake,
+        "--corpus-dir",
+        join(fixture.root, "c"),
+        "--out",
+        out,
+        "--args=--css --flag",
+      ],
+      { FAKE_DIR_FINDING: "1" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const manifest = JSON.parse(
+      readFileSync(join(out, "mirrored-directory", "sample.json"), "utf8"),
+    );
+    assert.deepEqual(manifest.args, ["--css", "--flag"]);
+    const items = JSON.parse(readFileSync(join(out, "mirrored-directory", "review.json"), "utf8"));
+    assert.equal(items[0].snippet, null);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

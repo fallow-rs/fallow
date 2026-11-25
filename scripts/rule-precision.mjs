@@ -17,6 +17,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -134,7 +135,7 @@ const installDependencies = (dir, commit) => {
 const snippet = (root, anchor) => {
   if (!anchor.path) return null;
   const file = join(root, anchor.path);
-  if (!existsSync(file)) return null;
+  if (!existsSync(file) || !statSync(file).isFile()) return null;
   const lines = readFileSync(file, "utf8").split("\n");
   const line = anchor.line ?? 1;
   const start = Math.max(1, line - SNIPPET_RADIUS);
@@ -149,8 +150,8 @@ const snippet = (root, anchor) => {
 // for a corpus project. Only exit code 2 is an execution error.
 const FINDINGS_EXIT = 1;
 
-const runFallow = (bin, cwd, command) => {
-  const run = spawnSync(bin, [command, "--format", "json", "--quiet", "--no-cache"], {
+const runFallow = (bin, cwd, command, extraArgs) => {
+  const run = spawnSync(bin, [command, ...extraArgs, "--format", "json", "--quiet", "--no-cache"], {
     cwd,
     maxBuffer: MAX_REPORT_BYTES,
     stdio: ["ignore", "pipe", "pipe"],
@@ -205,12 +206,13 @@ const sampleProject = ({ perRule, name, dir, project, report, size, wanted }) =>
   }
 };
 
-const writeRuleSample = ({ out, rule, entry, command, version, size, bin }) => {
+const writeRuleSample = ({ out, rule, entry, command, extraArgs, version, size, bin }) => {
   const ruleDir = join(out, rule);
   mkdirSync(ruleDir, { recursive: true });
   writeJson(join(ruleDir, "sample.json"), {
     rule,
     command,
+    args: extraArgs,
     fallow_version: version,
     sample_size: size,
     projects: entry.projects,
@@ -228,6 +230,7 @@ const sample = (values) => {
   const corpusDir = values["corpus-dir"] ?? fail("sample needs --corpus-dir");
   const out = values.out ?? fail("sample needs --out");
   const { command } = values;
+  const extraArgs = values.args ? values.args.split(" ").filter(Boolean) : [];
   const size = Number(values["sample-size"]);
   if (!Number.isInteger(size) || size < 1)
     fail("--sample-size must be a whole number of 1 or more");
@@ -241,11 +244,11 @@ const sample = (values) => {
     const dir = join(corpusDir, name);
     ensureCheckout(dir, project);
     console.error(`rule-precision: ${name}: fallow ${command}`);
-    const report = runFallow(bin, dir, command);
+    const report = runFallow(bin, dir, command, extraArgs);
     sampleProject({ perRule, name, dir, project, report, size, wanted });
   }
   for (const [rule, entry] of perRule) {
-    writeRuleSample({ out, rule, entry, command, version, size, bin });
+    writeRuleSample({ out, rule, entry, command, extraArgs, version, size, bin });
   }
 };
 
@@ -294,6 +297,7 @@ const parseCli = () => {
         "corpus-dir": { type: "string" },
         out: { type: "string" },
         command: { type: "string", default: "dead-code" },
+        args: { type: "string" },
         rules: { type: "string" },
         "sample-size": { type: "string", default: String(DEFAULT_SAMPLE_SIZE) },
         in: { type: "string" },

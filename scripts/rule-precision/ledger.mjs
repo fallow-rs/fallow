@@ -38,21 +38,76 @@ const ruleOf = (finding, key) => {
  * Groups the findings of one JSON report by rule id. Each object with a
  * `finding_id` in a top-level array is a finding. Other keys are metadata.
  */
-export const findingsByRule = (report) => {
-  const out = new Map();
-  for (const [key, value] of Object.entries(report)) {
-    if (!Array.isArray(value)) continue;
-    for (const finding of value.filter(isFinding)) {
-      const rule = ruleOf(finding, key);
-      out.set(rule, [...(out.get(rule) ?? []), finding]);
+// `health` and `dupes` findings have no finding ID. Each entry names where
+// one kind of finding sits in the report, its rule, and the fields that
+// identify one finding across runs of the same commit.
+const UNNAMED_FINDINGS = [
+  { at: ["clone_groups"], rule: () => "code-duplication", key: (f) => f.fingerprint },
+  {
+    at: ["mirrored_directories"],
+    rule: () => "mirrored-directory",
+    key: (f) => `${f.dir_a}|${f.dir_b}`,
+  },
+  { at: ["coverage_gaps", "files"], rule: () => "untested-file", key: (f) => f.path },
+  {
+    at: ["coverage_gaps", "exports"],
+    rule: () => "untested-export",
+    key: (f) => `${f.path}:${f.export_name}`,
+  },
+  {
+    at: ["shallow_directories", "directories"],
+    rule: () => "shallow-directory",
+    key: (f) => f.path,
+  },
+  {
+    at: ["styling_findings"],
+    rule: (f) => f.code,
+    key: (f) => `${f.path}:${f.line}:${f.sub_kind}:${f.value}`,
+  },
+];
+
+const listAt = (report, at) => {
+  const value = at.reduce(
+    (node, step) => (node && typeof node === "object" ? node[step] : undefined),
+    report,
+  );
+  return Array.isArray(value) ? value : [];
+};
+
+// Gives each unnamed finding an ID of the form `rp1:<rule>:<hash>`. Two
+// findings with the same identifying fields get a counter, in report order.
+const namedFindings = (report) => {
+  const named = [];
+  for (const spec of UNNAMED_FINDINGS) {
+    const seen = new Map();
+    for (const finding of listAt(report, spec.at)) {
+      if (!finding || typeof finding !== "object" || isFinding(finding)) continue;
+      const rule = spec.rule(finding);
+      if (typeof rule !== "string" || rule === "") continue;
+      const base = `${rule}:${hashSeed(String(spec.key(finding))).toString(16)}`;
+      const count = seen.get(base) ?? 0;
+      seen.set(base, count + 1);
+      named.push({ ...finding, finding_id: `rp1:${base}${count ? `~${count}` : ""}` });
     }
   }
+  return named;
+};
+
+export const findingsByRule = (report) => {
+  const out = new Map();
+  const add = (rule, finding) => out.set(rule, [...(out.get(rule) ?? []), finding]);
+  for (const [key, value] of Object.entries(report)) {
+    if (!Array.isArray(value)) continue;
+    for (const finding of value.filter(isFinding)) add(ruleOf(finding, key), finding);
+  }
+  for (const finding of namedFindings(report)) add(finding.finding_id.split(":")[1], finding);
   return out;
 };
 
-const PATH_FIELDS = ["path", "from_path", "file"];
+const PATH_FIELDS = ["anchor_file", "path", "from_path", "file", "dir_a"];
 const LOCATION_LISTS = [
   "imported_from",
+  "instances",
   "used_in",
   "locations",
   "edges",
@@ -70,8 +125,8 @@ const firstPath = (finding) => {
     if (!Array.isArray(list) || list.length === 0) continue;
     const first = list[0];
     if (typeof first === "string") return { path: first, line: finding.line ?? null };
-    if (first && typeof first.path === "string")
-      return { path: first.path, line: first.line ?? null };
+    const path = first && (typeof first.path === "string" ? first.path : first.file);
+    if (typeof path === "string") return { path, line: first.line ?? first.start_line ?? null };
   }
   return { path: null, line: null };
 };
