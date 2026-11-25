@@ -1434,7 +1434,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> DiscoveredSources {
     let _span = tracing::info_span!("discover_files").entered();
-
+    super::project_read::begin_read_scope_run();
     let capture_config = !config.production;
     let skipped_dotdirs: SkippedDotdirSink = Arc::new(Mutex::new(Vec::new()));
     let walk_builder = build_source_walk_builder(

@@ -256,7 +256,6 @@ impl AnalysisDiscovery {
 /// Run engine-owned workspace and source discovery for a resolved project.
 #[must_use]
 pub(crate) fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
-    crate::core_backend::begin_read_scope_run();
     let workspaces_start = Instant::now();
     let workspaces =
         fallow_config::discover_workspaces_with_patterns(&config.root, &config.workspace_patterns);
@@ -293,7 +292,6 @@ pub(crate) fn prepare_analysis_discovery_with_workspaces(
     workspaces: &[WorkspaceInfo],
     workspaces_ms: f64,
 ) -> AnalysisDiscovery {
-    crate::core_backend::begin_read_scope_run();
     if !workspaces.is_empty() {
         tracing::info!(count = workspaces.len(), "workspaces discovered");
     }
