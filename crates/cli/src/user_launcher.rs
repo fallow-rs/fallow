@@ -9,7 +9,8 @@
 //! project. The search then goes on with the next `PATH` entry. A relative or
 //! empty `PATH` entry never counts. A version-manager shim (a file in a
 //! directory named `shims`, in `.volta/bin`, `volta/bin` or the `bin` of
-//! `VOLTA_HOME`, or a link to `volta-shim`) never counts either,
+//! `VOLTA_HOME`, or a link chain through such a directory or to `mise`,
+//! `asdf` or `volta-shim`) never counts either,
 //! because it runs the fallow that the project selects. On macOS and Windows, where the default
 //! file systems ignore letter case, the comparisons ignore letter case too.
 
@@ -95,20 +96,45 @@ fn is_shim_dir(dir: &Path, volta_home: Option<&Path>) -> bool {
         })
 }
 
-/// True when the directory of `file` is a version-manager shim directory,
-/// as found or after links, or when `file` is a `volta-shim`.
+/// The names of the programs that a version-manager shim links to.
+const SHIM_PROGRAMS: &[&str] = &["volta-shim", "mise", "asdf"];
+
+/// The most links that the shim check follows. A longer chain counts as a
+/// shim.
+const MAX_LINK_HOPS: usize = 40;
+
+/// True when a hop of the link chain of `file` lies in a version-manager shim
+/// directory (as found or canonical), or when the chain ends at a program
+/// that a shim links to. A link that cannot be read counts as a shim.
 fn is_version_manager_shim(file: &Path, volta_home: Option<&Path>) -> bool {
     let in_shim_dir = |path: &Path| {
-        path.parent()
-            .is_some_and(|dir| is_shim_dir(dir, volta_home))
+        path.parent().is_some_and(|dir| {
+            is_shim_dir(dir, volta_home)
+                || dunce::canonicalize(dir).is_ok_and(|real| is_shim_dir(&real, volta_home))
+        })
     };
-    let is_volta_shim = |path: &Path| {
-        path.file_name()
-            .map(|name| name.to_string_lossy().to_lowercase())
-            .is_some_and(|name| name == "volta-shim" || name == "volta-shim.exe")
-    };
-    in_shim_dir(file)
-        || dunce::canonicalize(file).is_ok_and(|real| in_shim_dir(&real) || is_volta_shim(&real))
+    let mut hop = file.to_path_buf();
+    for _ in 0..=MAX_LINK_HOPS {
+        if in_shim_dir(&hop) {
+            return true;
+        }
+        if !hop.is_symlink() {
+            let name = hop
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            let name = name.strip_suffix(".exe").unwrap_or(&name);
+            return SHIM_PROGRAMS.contains(&name);
+        }
+        let Ok(target) = std::fs::read_link(&hop) else {
+            return true;
+        };
+        hop = match hop.parent() {
+            Some(parent) if target.is_relative() => parent.join(target),
+            _ => target,
+        };
+    }
+    true
 }
 
 /// True when `candidate` can be a user-level launcher.
@@ -256,6 +282,32 @@ mod tests {
             &base.join(".asdf/shims/fallow"),
             &project_dirs(&project)
         ));
+    }
+
+    /// A link chain counts as a shim when one hop lies in a shim directory,
+    /// or when its last file is named `mise`, `asdf` or `volta-shim`.
+    #[cfg(unix)]
+    #[test]
+    fn is_user_launcher_skips_a_link_chain_through_a_shim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let dirs = project_dirs(&base.join("work/app"));
+        touch(&base.join("opt/real-fallow"));
+        touch(&base.join("opt/mise"));
+        std::fs::create_dir_all(base.join(".asdf/shims")).unwrap();
+        std::fs::create_dir_all(base.join("links")).unwrap();
+        std::os::unix::fs::symlink(
+            base.join("opt/real-fallow"),
+            base.join(".asdf/shims/fallow"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(base.join(".asdf/shims/fallow"), base.join("links/hop"))
+            .unwrap();
+        std::os::unix::fs::symlink(base.join("opt/mise"), base.join("links/fallow")).unwrap();
+
+        assert!(!is_user_launcher(&base.join("links/hop"), &dirs));
+        assert!(!is_user_launcher(&base.join("links/fallow"), &dirs));
+        assert!(is_user_launcher(&base.join("opt/real-fallow"), &dirs));
     }
 
     /// Each shim directory form, also one that `VOLTA_HOME` names.

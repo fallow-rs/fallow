@@ -339,13 +339,17 @@ gate_shim_dir() {
 }
 
 # Returns 0 when the fallow at $1 is a version-manager shim, which runs the
-# fallow that the project selects: a file in a shim directory (see
-# gate_shim_dir), before or after links, or a link to volta-shim. A link that
-# the gate cannot follow counts as a shim.
+# fallow that the project selects: a file whose link chain has a hop in a
+# shim directory (see gate_shim_dir), as found or resolved, or ends at a file
+# named mise, asdf or volta-shim. A link that the gate cannot follow counts as
+# a shim.
 gate_is_shim() {
   local file="$1" link hops=0 hit=1
-  gate_shim_dir "${file%/*}" && return 0
-  while [ -L "$file" ]; do
+  while :; do
+    gate_shim_dir "${file%/*}" && return 0
+    gate_resolve_dir "${file%/*}" || return 0
+    gate_shim_dir "$RESOLVED" && return 0
+    [ -L "$file" ] || break
     hops=$((hops + 1))
     [ "$hops" -le 40 ] || return 0
     link="$(readlink -- "$file" 2>/dev/null)" || return 0
@@ -354,11 +358,9 @@ gate_is_shim() {
       *) file="${file%/*}/$link" ;;
     esac
   done
-  gate_resolve_dir "${file%/*}" || return 0
-  gate_shim_dir "$RESOLVED" && return 0
   shopt -s nocasematch
   case "${file##*/}" in
-    volta-shim | volta-shim.exe) hit=0 ;;
+    volta-shim | volta-shim.exe | mise | mise.exe | asdf | asdf.exe) hit=0 ;;
   esac
   shopt -u nocasematch
   return "$hit"

@@ -1274,3 +1274,53 @@ fn gate_runs_the_recorded_fallow_when_a_target_holds_the_path_fallow() {
     assert!(calls.contains("recorded --version"), "{calls}\n{stderr}");
     assert!(!calls.contains("target"), "{calls}");
 }
+
+/// A link chain counts as a shim when one hop lies in a shim directory, or
+/// when its last file is named `mise`, `asdf` or `volta-shim`. A mise shim
+/// links to the `mise` program.
+#[test]
+fn gate_skips_a_link_chain_through_a_shim() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    std::fs::create_dir_all(&session).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("opt/real-fallow"), "hop", &log);
+    std::fs::create_dir_all(base.join(".asdf/shims")).unwrap();
+    std::os::unix::fs::symlink(
+        base.join("opt/real-fallow"),
+        base.join(".asdf/shims/fallow"),
+    )
+    .unwrap();
+    logging_stub(&base.join("opt/mise"), "mise", &log);
+    for (dir, target) in [
+        ("first", base.join(".asdf/shims/fallow")),
+        ("second", base.join("opt/mise")),
+    ] {
+        std::fs::create_dir_all(base.join(dir)).unwrap();
+        std::os::unix::fs::symlink(target, base.join(dir).join("fallow")).unwrap();
+    }
+    logging_stub(&base.join("bin/fallow"), "path", &log);
+    let prefix = format!(
+        "{}:{}:",
+        base.join("first").display(),
+        base.join("second").display()
+    );
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        &session_input(&session),
+        &prefix,
+    );
+    let calls = calls(&log);
+
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!calls.contains("hop") && !calls.contains("mise"), "{calls}");
+}
