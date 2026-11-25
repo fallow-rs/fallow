@@ -173,23 +173,14 @@ fn config_path_keys_must_stay_inside_the_project() {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join(".fallowrc.json");
     for (body, field) in [
-        (r#"{"codeowners": "../CODEOWNERS"}"#, "codeowners"),
         (r#"{"codeowners": "/abs/CODEOWNERS"}"#, "codeowners"),
         (
             r#"{"health": {"coverage": "/tmp/coverage.json"}}"#,
             "health.coverage",
         ),
         (
-            r#"{"audit": {"deadCodeBaseline": "../a.json"}}"#,
-            "audit.deadCodeBaseline",
-        ),
-        (
             r#"{"audit": {"healthBaseline": "/a.json"}}"#,
             "audit.healthBaseline",
-        ),
-        (
-            r#"{"audit": {"dupesBaseline": "x/../../a.json"}}"#,
-            "audit.dupesBaseline",
         ),
     ] {
         std::fs::write(&config, body).unwrap();
@@ -270,4 +261,37 @@ fn file_path_keys_are_refused_when_the_root_does_not_resolve() {
             .check_file_path_keys_inside(&dir.path().join("missing-root"))
             .is_ok()
     );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+fn package_config_path_keys_may_name_files_up_to_the_git_top_level() {
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dunce::canonicalize(dir.path()).unwrap();
+    let top = outer.join("repo");
+    let package = top.join("packages/app");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::create_dir_all(top.join(".git")).unwrap();
+    std::fs::create_dir_all(top.join(".github")).unwrap();
+    std::fs::write(top.join(".github/CODEOWNERS"), "* @owner\n").unwrap();
+    let inside: FallowConfig = serde_json::from_str(
+        r#"{"codeowners": "../../.github/CODEOWNERS",
+            "health": {"coverage": "../../coverage/coverage-final.json"},
+            "audit": {"deadCodeBaseline": "../../baselines/dead.json"}}"#,
+    )
+    .unwrap();
+    assert!(inside.check_file_path_keys_inside(&package).is_ok());
+
+    for body in [
+        r#"{"codeowners": "../../../CODEOWNERS"}"#,
+        r#"{"audit": {"dupesBaseline": "x/../../../../a.json"}}"#,
+    ] {
+        let config: FallowConfig = serde_json::from_str(body).unwrap();
+        assert!(
+            config.check_file_path_keys_inside(&package).is_err(),
+            "{body}"
+        );
+    }
+    std::fs::remove_dir(top.join(".git")).unwrap();
+    assert!(inside.check_file_path_keys_inside(&package).is_err());
 }

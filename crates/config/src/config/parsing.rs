@@ -1615,16 +1615,16 @@ impl FallowConfig {
     }
 
     /// Validate the config keys that name one file to read: each must be a
-    /// relative path with no `..` segment, the same rule as a zone root. The
-    /// CLI flags that override these keys come from the user and keep their
-    /// own rules.
+    /// relative path. [`Self::check_file_path_keys_inside`] checks on disk
+    /// that a `..` stays inside the project scope base. The CLI flags that
+    /// override these keys come from the user and keep their own rules.
     fn validate_file_path_keys(
         &self,
         errors: &mut Vec<super::glob_validation::GlobValidationError>,
     ) {
         for (value, field) in self.file_path_keys() {
             if let Some(value) = value
-                && let Err(error) = super::glob_validation::validate_user_path(&value, field)
+                && let Err(error) = super::glob_validation::validate_user_file_path(&value, field)
             {
                 errors.push(error);
             }
@@ -1650,9 +1650,11 @@ impl FallowConfig {
         ]
     }
 
-    /// Check that each config key that names one file resolves inside
-    /// `root`. A key whose path runs through a link that resolves outside
-    /// `root` is refused. A path that does not exist yet passes, so a later
+    /// Check that each config key that names one file, taken relative to
+    /// `root`, resolves inside the project scope base of `root` (see
+    /// [`crate::project_scope_base`]). A config of a monorepo package can
+    /// thus name `../../.github/CODEOWNERS`. A key whose path leaves the
+    /// scope base, by text or through a link, is refused. A path that does not exist yet passes, so a later
     /// read can report it as missing. When `root` does not resolve, each key
     /// that is set is refused. CLI flags and environment variables that
     /// override these keys are not checked here.
@@ -1663,14 +1665,18 @@ impl FallowConfig {
     /// its value, never a resolved path outside `root`.
     pub fn check_file_path_keys_inside(&self, root: &Path) -> Result<(), Vec<String>> {
         let canonical_root = dunce::canonicalize(root).ok();
+        let base = crate::project_scope_base(root);
         let errors: Vec<String> = self
             .file_path_keys()
             .into_iter()
             .filter_map(|(value, field)| value.map(|value| (value, field)))
             .filter(|(value, _)| {
                 canonical_root.as_deref().is_none_or(|canonical_root| {
-                    crate::project_read::project_entry(canonical_root, Path::new(value))
-                        == crate::project_read::ProjectEntry::Outside
+                    crate::project_read::project_entry_within(
+                        &base,
+                        canonical_root,
+                        Path::new(value),
+                    ) == crate::project_read::ProjectEntry::Outside
                 })
             })
             .map(|(value, field)| {

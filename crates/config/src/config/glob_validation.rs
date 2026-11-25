@@ -627,6 +627,27 @@ pub fn validate_user_path(path: &str, field: &'static str) -> Result<(), GlobVal
     Ok(())
 }
 
+/// Validate a user-supplied FILE PATH of a config key such as `codeowners`:
+/// the path must be relative. A `..` segment is allowed here, because a
+/// config of a monorepo package can name a file at the repository root.
+/// The project load checks on disk that the file stays inside the project
+/// scope base.
+///
+/// # Errors
+///
+/// Returns `AbsolutePath` for the same shapes as [`validate_user_path`].
+pub fn validate_user_file_path(path: &str, field: &'static str) -> Result<(), GlobValidationError> {
+    let folded = path.replace('\\', "/");
+    let stripped = folded.trim_start_matches("./");
+    if is_absolute_pattern(path) || is_absolute_pattern(stripped) {
+        return Err(GlobValidationError::AbsolutePath {
+            field,
+            pattern: path.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 /// Rewrites a validated, root-relative glob for expansion on disk with the
 /// `glob` crate.
 ///

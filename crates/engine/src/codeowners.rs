@@ -203,11 +203,15 @@ impl CodeOwners {
         ))
     }
 
-    /// Load from a config-specified path, or auto-discover. The file must
-    /// resolve inside `root`.
+    /// Load from a config-specified path, or auto-discover. A discovered
+    /// file must resolve inside `root`. A config-specified path is taken
+    /// relative to `root` and must resolve inside the project scope base of
+    /// `root` (see [`fallow_config::project_scope_base`]), so the config of a
+    /// monorepo package can name the `CODEOWNERS` file of the repository.
     pub fn load(root: &Path, config_path: Option<&str>) -> Result<Self, String> {
         if let Some(p) = config_path {
-            Self::from_project_file(root, Path::new(p))
+            let base = fallow_config::project_scope_base(root);
+            Self::from_project_file(&base, &root.join(p))
         } else {
             Self::discover(root)
         }
@@ -955,6 +959,24 @@ mod tests {
         let err = CodeOwners::discover(&root).unwrap_err();
         assert!(err.contains("no CODEOWNERS file found"), "{err}");
         let err = CodeOwners::load(&root, Some("CODEOWNERS")).unwrap_err();
+        assert!(err.contains("outside"), "{err}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_package_config_can_name_the_codeowners_file_of_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let top = dir.path().join("repo");
+        let package = top.join("packages/app");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::create_dir_all(top.join(".git")).unwrap();
+        std::fs::create_dir_all(top.join(".github")).unwrap();
+        std::fs::write(top.join(".github/CODEOWNERS"), "* @repo-owner\n").unwrap();
+        std::fs::write(dir.path().join("CODEOWNERS"), "* @outside-owner\n").unwrap();
+
+        let owners = CodeOwners::load(&package, Some("../../.github/CODEOWNERS")).unwrap();
+        assert_eq!(owners.owner_of(Path::new("a.ts")), Some("@repo-owner"));
+        let err = CodeOwners::load(&package, Some("../../../CODEOWNERS")).unwrap_err();
         assert!(err.contains("outside"), "{err}");
     }
 
