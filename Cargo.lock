@@ -1531,6 +1531,7 @@ name = "fallow-types"
 version = "3.48.0"
 dependencies = [
  "bitcode",
+ "dunce",
  "oxc_span",
  "proptest",
  "rustc-hash",
