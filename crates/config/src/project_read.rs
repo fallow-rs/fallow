@@ -93,27 +93,29 @@ fn uncached_scope_base(root: &Path) -> PathBuf {
 /// a `.git` entry. A top level above the root that is the home directory,
 /// an ancestor of it, or the file system root belongs to a dotfiles
 /// checkout and not to the project, so it gives `None`. A top level above
-/// the root that another user owns, or that all users can write, gives
-/// `None` too (see [`fallow_types::read_scope`]).
+/// the root that all users can write, or that neither the current user nor
+/// the owner of the root owns, gives `None` too (see
+/// [`fallow_types::read_scope`]).
 pub fn project_checkout_top(root: &Path) -> Option<&Path> {
     let top = root
         .ancestors()
         .take_while(|dir| test_ceiling::allows(dir))
         .find(|dir| dir.join(".git").symlink_metadata().is_ok())?;
-    (top == root || (!is_home_or_above(top) && fallow_types::read_scope::may_widen_scope(top)))
-        .then_some(top)
+    (top == root
+        || (!is_home_or_above(top) && fallow_types::read_scope::may_widen_scope(top, root)))
+    .then_some(top)
 }
 
 /// The nearest workspace root above the canonical directory `root` that
 /// lists the root as a member, below the home directory and the file
-/// system root. A workspace root that another user owns, or that all users
-/// can write, does not count.
+/// system root. A workspace root that all users can write, or that neither
+/// the current user nor the owner of the root owns, does not count.
 fn workspace_root_above(root: &Path) -> Option<PathBuf> {
     root.ancestors()
         .skip(1)
         .take_while(|dir| !is_home_or_above(dir) && test_ceiling::allows(dir))
         .find(|dir| {
-            fallow_types::read_scope::may_widen_scope(dir) && workspace_root_lists(dir, root)
+            fallow_types::read_scope::may_widen_scope(dir, root) && workspace_root_lists(dir, root)
         })
         .map(Path::to_path_buf)
 }
