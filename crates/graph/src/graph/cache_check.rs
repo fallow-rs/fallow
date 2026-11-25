@@ -11,7 +11,7 @@ impl ModuleGraph {
     /// paths of their modules. A graph that a cache file supplies can break
     /// these invariants, and the detectors index with them without a check.
     #[must_use]
-    pub fn has_valid_structure(&self) -> bool {
+    pub(crate) fn has_valid_structure(&self) -> bool {
         let module_count = self.modules.len();
         let in_range = |id: &FileId| (id.0 as usize) < module_count;
         let path_count = self.reference_paths.len();

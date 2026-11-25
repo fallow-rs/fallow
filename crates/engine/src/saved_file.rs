@@ -117,7 +117,7 @@ fn read_saved_file_from(
 ///
 /// Returns a `PermissionDenied` error when `dir` resolves outside `root`, and
 /// the error of `read_dir` otherwise.
-pub fn read_saved_dir(root: &Path, dir: &Path) -> std::io::Result<std::fs::ReadDir> {
+pub(crate) fn read_saved_dir(root: &Path, dir: &Path) -> std::io::Result<std::fs::ReadDir> {
     let entries = std::fs::read_dir(dir)?;
     if is_inside_root(root, dir) {
         Ok(entries)
