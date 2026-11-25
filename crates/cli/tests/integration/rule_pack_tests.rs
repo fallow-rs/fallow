@@ -496,9 +496,9 @@ fn rule_pack_init_does_not_edit_a_linked_config_named_by_an_absolute_path() {
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     assert!(
         output.stdout.contains("Could not update ")
-            && output
-                .stdout
-                .contains(".fallowrc.json is a symlink that resolves outside the project root"),
+            && output.stdout.contains(
+                ".fallowrc.json is a symlink that dangles or resolves outside the project root"
+            ),
         "stdout: {}",
         output.stdout
     );
