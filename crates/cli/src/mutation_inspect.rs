@@ -254,11 +254,13 @@ pub fn reproduce(
             operators: operators.clone(),
             ranges: None,
             record_exports: false,
+            framework_config_regions: Vec::new(),
         },
         MutationOptions {
             operators,
             ranges: Some(vec![span]),
             record_exports: false,
+            framework_config_regions: Vec::new(),
         },
     ];
     passes.iter().find_map(|options| {

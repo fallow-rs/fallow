@@ -184,6 +184,64 @@ fn a_framework_config_export_is_pruned_but_functions_stay() {
 }
 
 #[test]
+fn framework_config_preserves_static_literals_and_instruments_nested_closures() {
+    let root = fixture("mutation-plan");
+    let mut exports = FrameworkConfigExports::default();
+    exports.insert("src/page.ts", "revalidate");
+    exports.insert("src/page.ts", "config");
+    let plan = plans(
+        &root,
+        Some(&exports),
+        &[MutationPlanRequest::new(MutationScope::All)],
+    )
+    .remove(0);
+
+    let page_file = plan
+        .files
+        .iter()
+        .find(|file| file.path == "src/page.ts")
+        .expect("planned file for page");
+
+    // 1. Static config literals/operators outside functions are untouched in instrumented code
+    assert!(
+        page_file
+            .instrumented_code
+            .contains("export const revalidate = 60 * 5;"),
+        "revalidate literal expression must remain unmutated: {}",
+        page_file.instrumented_code
+    );
+    assert!(
+        page_file.instrumented_code.contains("ttl: 1 + 1,"),
+        "config.ttl literal expression must remain unmutated: {}",
+        page_file.instrumented_code
+    );
+
+    // 2. The mutants for those static literals are still discovered and pruned
+    let config_pruned = MutantDisposition::Pruned(PruneReason::FrameworkConfig);
+    let pruned_mutants: Vec<_> = plan
+        .mutants
+        .iter()
+        .filter(|m| m.file == "src/page.ts" && m.disposition == config_pruned)
+        .collect();
+    assert!(
+        !pruned_mutants.is_empty(),
+        "framework config mutants must be tracked and pruned"
+    );
+
+    // 3. Functions inside config (compute) and functions outside config (render) are instrumented
+    assert!(
+        page_file.instrumented_code.contains("value / 3"),
+        "compute arrow function inside config must be instrumented: {}",
+        page_file.instrumented_code
+    );
+    assert!(
+        page_file.instrumented_code.contains("revalidate >= 0"),
+        "render function outside config must be instrumented: {}",
+        page_file.instrumented_code
+    );
+}
+
+#[test]
 fn the_plan_says_whether_the_framework_config_rule_ran() {
     let root = fixture("mutation-plan");
     let checked = plans(
@@ -225,6 +283,40 @@ fn the_session_entry_point_prunes_plugin_known_config_exports() {
             .count(),
         1,
         "the loader function stays planned: {route:?}"
+    );
+
+    let route_file = from_session
+        .files
+        .iter()
+        .find(|file| file.path == "src/routes/index.tsx")
+        .expect("planned file for route");
+    assert!(
+        route_file.instrumented_code.contains("createFileRoute(\"/\")"),
+        "route path string literal must remain unmutated: {}",
+        route_file.instrumented_code
+    );
+    assert!(
+        route_file.instrumented_code.contains("1 - 1"),
+        "loader function body must still be instrumented: {}",
+        route_file.instrumented_code
+    );
+
+    let page_file = from_session
+        .files
+        .iter()
+        .find(|file| file.path == "app/blog/page.tsx")
+        .expect("planned file for page");
+    assert!(
+        page_file
+            .instrumented_code
+            .contains("export const dynamic = \"force-static\";"),
+        "dynamic export literal must remain unmutated: {}",
+        page_file.instrumented_code
+    );
+    assert!(
+        page_file.instrumented_code.contains("count >= 1"),
+        "heading function body must still be instrumented: {}",
+        page_file.instrumented_code
     );
 
     let without = plan_all(&root);

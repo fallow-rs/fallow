@@ -602,3 +602,93 @@ fn applied_replacement_never_joins_the_previous_statement() {
         }
     }
 }
+
+#[test]
+fn framework_config_regions_suppress_top_level_emission_while_keeping_mutants_and_functions() {
+    let source = "export const unmuted = 'normal';\nexport const Route = createFileRoute('/posts')({\n  codeSplitGroupings: [['loader', 'component']],\n  loader: () => {\n    const inner = (x) => x + 1;\n    return inner(41);\n  },\n  component: function RouteComponent() {\n    return 'rendered';\n  },\n});\n";
+    let route_start = source.find("export const Route").expect("route start") as u32;
+    let route_end = source.len() as u32;
+
+    let options = MutationOptions {
+        framework_config_regions: vec![(route_start, route_end)],
+        ..MutationOptions::default()
+    };
+    let result = run_with(source, SourceKind::Ts, &options);
+
+    // 1. Mutants list retains all mutants, including top-level config literals
+    let normal_mutant = result
+        .mutants
+        .iter()
+        .find(|m| m.original == "'normal'")
+        .expect("normal mutant collected");
+    let route_path_mutant = result
+        .mutants
+        .iter()
+        .find(|m| m.original == "'/posts'")
+        .expect("route path mutant collected");
+    let grouping_mutant = result
+        .mutants
+        .iter()
+        .find(|m| m.original == "'loader'")
+        .expect("grouping mutant collected");
+    let inner_math_mutant = result
+        .mutants
+        .iter()
+        .find(|m| m.original == "x + 1")
+        .expect("inner math mutant collected");
+    let component_mutant = result
+        .mutants
+        .iter()
+        .find(|m| m.original == "'rendered'")
+        .expect("component mutant collected");
+
+    assert!(route_path_mutant.enclosing_function.is_none());
+    assert!(grouping_mutant.enclosing_function.is_none());
+    assert!(inner_math_mutant.enclosing_function.is_some());
+    assert!(component_mutant.enclosing_function.is_some());
+
+    // 2. Normal code outside framework config is instrumented
+    let normal_act = format!("__fallow_m_a(\"{}\")", normal_mutant.id);
+    assert!(
+        result.code.contains(&normal_act),
+        "code outside framework config must be instrumented"
+    );
+
+    // 3. Top-level literals in framework config must NOT be emitted/rewritten
+    assert!(
+        result.code.contains("createFileRoute('/posts')"),
+        "top-level route path must remain untouched: {}",
+        result.code
+    );
+    assert!(
+        result
+            .code
+            .contains("codeSplitGroupings: [['loader', 'component']]"),
+        "codeSplitGroupings string literals must remain untouched: {}",
+        result.code
+    );
+    let path_act = format!("__fallow_m_a(\"{}\")", route_path_mutant.id);
+    assert!(
+        !result.code.contains(&path_act),
+        "route path mutant must not be emitted"
+    );
+    let grouping_act = format!("__fallow_m_a(\"{}\")", grouping_mutant.id);
+    assert!(
+        !result.code.contains(&grouping_act),
+        "grouping mutant must not be emitted"
+    );
+
+    // 4. Functions/closures and nested functions inside framework config MUST be instrumented
+    let inner_math_act = format!("__fallow_m_a(\"{}\")", inner_math_mutant.id);
+    assert!(
+        result.code.contains(&inner_math_act),
+        "nested closure inside config must be instrumented: {}",
+        result.code
+    );
+    let component_act = format!("__fallow_m_a(\"{}\")", component_mutant.id);
+    assert!(
+        result.code.contains(&component_act),
+        "component function inside config must be instrumented: {}",
+        result.code
+    );
+}

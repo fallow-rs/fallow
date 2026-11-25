@@ -151,6 +151,7 @@ pub(super) fn build(
                 .unwrap_or_else(|| Operator::DEFAULT.to_vec()),
             ranges: None,
             record_exports: request.record_exports,
+            framework_config_regions: Vec::new(),
         },
         test_entries: FxHashMap::default(),
         runner_unreached: FxHashSet::default(),
@@ -402,6 +403,10 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
     if context.request.function_scope {
         widen_to_functions(candidate, source, &mut options);
     }
+    let covered = context.graph.is_test_reachable(candidate.file_id)
+        && !context.runner_unreached.contains(&candidate.file_id);
+    let facts = FileFacts::new(context, candidate, module, source, covered);
+    options.framework_config_regions = facts.framework_regions.clone();
     let instrumented = match candidate
         .layout
         .instrument(source, &candidate.rel, &options)
@@ -411,9 +416,6 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         Err(MutationError::ReservedName { .. }) => return skipped(SkipReason::ReservedName),
         Err(MutationError::TooLarge) => return skipped(SkipReason::TooLarge),
     };
-    let covered = context.graph.is_test_reachable(candidate.file_id)
-        && !context.runner_unreached.contains(&candidate.file_id);
-    let facts = FileFacts::new(context, candidate, module, source, covered);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
     if !matches!(candidate.layout, Layout::Component(_)) {
         context

@@ -15,6 +15,7 @@ fn only(source: &str, kind: SourceKind, operator: Operator) -> Instrumented {
         operators: vec![operator],
         ranges: None,
         record_exports: false,
+        framework_config_regions: Vec::new(),
     };
     run_with(source, kind, &options)
 }
@@ -57,6 +58,7 @@ fn the_default_set_leaves_out_each_opt_in_operator() {
             operators: Operator::ALL.to_vec(),
             ranges: None,
             record_exports: false,
+            framework_config_regions: Vec::new(),
         },
     );
     for operator in Operator::OPT_IN {
@@ -148,6 +150,7 @@ fn block_statement_keeps_nested_mutants_and_declarations_valid() {
             ],
             ranges: None,
             record_exports: false,
+            framework_config_regions: Vec::new(),
         },
     );
     // The body of `f` declares the function `g`, so only the body of `g`
@@ -364,6 +367,7 @@ console.log(JSON.stringify(out));
         operators: vec![Operator::NullishFallback],
         ranges: None,
         record_exports: false,
+        framework_config_regions: Vec::new(),
     };
     let count = assert_runs_like_each_mutant(fixture, &options);
     assert!(count == 0 || count >= 5, "{count}");
@@ -452,6 +456,7 @@ fn statement_sites_keep_each_line_and_parse() {
             operators: Operator::ALL.to_vec(),
             ranges: None,
             record_exports: false,
+            framework_config_regions: Vec::new(),
         },
     );
     assert_eq!(result.code.lines().count(), source.lines().count() + 2);
@@ -571,6 +576,7 @@ fn opt_in_mutants_run_like_the_applied_mutant() {
         operators: Operator::ALL.to_vec(),
         ranges: None,
         record_exports: false,
+        framework_config_regions: Vec::new(),
     };
     for fixture in [SLOPPY_FIXTURE, STRICT_FIXTURE] {
         let count = assert_runs_like_each_mutant(fixture, &options);
@@ -610,6 +616,7 @@ fn statement_start_guard_keeps_the_statement_grouping() {
             operators,
             ranges: None,
             record_exports: false,
+            framework_config_regions: Vec::new(),
         };
         assert_runs_like_each_mutant(STATEMENT_START_FIXTURE, &options);
     }

@@ -87,6 +87,7 @@ fn instrument_passes(operator: Option<Operator>, span: (u32, u32)) -> Vec<Mutati
                 operators: operators.clone(),
                 ranges,
                 record_exports: false,
+                framework_config_regions: Vec::new(),
             })
         })
         .collect()
@@ -643,6 +644,7 @@ mod tests {
             operators: Operator::ALL.to_vec(),
             ranges: Some(vec![span]),
             record_exports: false,
+            framework_config_regions: Vec::new(),
         };
         let instrumented = fallow_engine::mutation::instrument_source(TWINS, "src/a.js", &options)
             .expect("layout")

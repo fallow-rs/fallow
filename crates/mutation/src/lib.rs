@@ -86,6 +86,11 @@ pub struct MutationOptions {
     /// runtime can record its arguments. The wraps do not change the mutant
     /// ids. A script block of a component gets no wrap.
     pub record_exports: bool,
+    /// Byte ranges of top-level framework configuration declarations. Mutants
+    /// within these ranges that are outside enclosing functions are recorded
+    /// in [`Instrumented::mutants`] for reporting and pruning, but are NOT
+    /// emitted into [`Instrumented::code`].
+    pub framework_config_regions: Vec<(u32, u32)>,
 }
 
 impl Default for MutationOptions {
@@ -94,6 +99,7 @@ impl Default for MutationOptions {
             operators: Operator::DEFAULT.to_vec(),
             ranges: None,
             record_exports: false,
+            framework_config_regions: Vec::new(),
         }
     }
 }
@@ -389,11 +395,21 @@ fn instrument_text(
         for candidate in kept {
             let id = unique_id(input.path, source, &site, &candidate, seen_ids);
             let (line, column) = line_column(&line_starts, candidate.region.0);
-            emit_mutants.push(emit::EmitMutant {
-                id: id.0.clone(),
-                region: candidate.region,
-                replacement: candidate.replacement.clone(),
+            let in_config = options.framework_config_regions.iter().any(|&region| {
+                region.0 <= candidate.region.0
+                    && candidate.region.1 <= region.1
+                    && site
+                        .function
+                        .as_ref()
+                        .map_or(true, |f| f.span.0 < region.0 || region.1 < f.span.1)
             });
+            if !in_config {
+                emit_mutants.push(emit::EmitMutant {
+                    id: id.0.clone(),
+                    region: candidate.region,
+                    replacement: candidate.replacement.clone(),
+                });
+            }
             mutants.push(Mutant {
                 id,
                 operator: candidate.operator,
@@ -406,11 +422,13 @@ fn instrument_text(
                 change: candidate.change,
             });
         }
-        emit_sites.push(emit::EmitSite {
-            span: site.span,
-            statement: site.statement,
-            mutants: emit_mutants,
-        });
+        if !emit_mutants.is_empty() {
+            emit_sites.push(emit::EmitSite {
+                span: site.span,
+                statement: site.statement,
+                mutants: emit_mutants,
+            });
+        }
     }
     mutants.sort_by_key(|mutant| mutant.span);
     let top_level = if record {
