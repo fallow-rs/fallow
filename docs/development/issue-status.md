@@ -17,7 +17,8 @@ an owner.
 | `Not planned` | The issue is closed as not planned. | `triage-issue` |
 | `Duplicate` | The issue is closed as a duplicate. | `triage-issue` |
 
-GitHub sets a status only for a linked pull request. A pull request links
+For an open issue, GitHub sets a status only for a linked pull request.
+GitHub also sets `Done` when an issue closes as completed. A pull request links
 to an issue through a closing keyword such as `Closes #N`. A pull request
 with `Refs #N` has no link, so GitHub does not change the status of the
 issue. The skill that does the work then sets the status.
@@ -47,7 +48,7 @@ gh api graphql -f query='mutation($i:ID!,$s:ID!){
 Find issues that somebody works on:
 
 ```bash
-gh issue list --search 'status:"In progress"'
+gh issue list -R fallow-rs/fallow --search 'status:"In progress"'
 ```
 
 The search needs the exact status name in quotes.

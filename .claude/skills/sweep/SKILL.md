@@ -36,11 +36,12 @@ at the end of every objective, without a prompt from the maintainer.
    `/tmp`, or in the chat does not track a follow-up. Give each new
    `fallow-rs/fallow` issue a status, `Todo` or `Backlog`, as
    `triage-issue` does.
-6. Check the status of each issue of the objective (see
+6. Check the status of each issue in the list of `.plans/<task>.md` (see
    `docs/development/issue-status.md`). An open issue that stays
-   `In progress` or `In review` with no open pull request of this
-   objective goes back to `Todo` or `Backlog`. This happens after a partial
-   fix with `Refs #N`, and after a pull request closes without a merge.
+   `In progress` or `In review` with no open pull request of any author
+   goes back to `Todo` or `Backlog`. This happens after a partial fix with
+   `Refs #N`, and after a pull request closes without a merge. Do not
+   change an issue that another owner works on.
 7. Check each pull request in the list of `.plans/<task>.md` with
    `gh pr view <url> --json state,mergeCommit`. For each merge commit, run
    `node scripts/ship-wait-checks.mjs --commit <sha> --follow-main` (for a
@@ -49,7 +50,9 @@ at the end of every objective, without a prompt from the maintainer.
    blocked, with the blocker and the next action. Armed auto-merge does not
    pass this check.
 8. Verify branches, worktrees, temporary worktrees, and generated artifacts are
-   clean.
+   clean. When the final status is `DONE` and `.plans/<task>.md` lists no
+   open item, delete `.plans/<task>.md` and `.plans/<task>/`. Keep both for
+   a `BLOCKED` or `RUNNING` status.
 9. List the lessons of the task: corrections, failures that cost time, and
    skipped steps. Keep a lesson only when all four filters pass:
    - it stays true after paths, versions, and counts change;
