@@ -1,0 +1,1 @@
+{ "name": "react-router-nested-vite-root", "private": true, "workspaces": ["apps/*", "packages/*"] }

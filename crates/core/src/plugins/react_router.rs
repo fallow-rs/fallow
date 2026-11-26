@@ -15,7 +15,16 @@ use rustc_hash::FxHashSet;
 
 use super::{Plugin, PluginResult, config_parser};
 
+#[path = "react_router_vite_root.rs"]
+mod vite_root;
+
 const ENABLERS: &[&str] = &["@react-router/dev"];
+
+/// The binary of `@react-router/dev`. Its `--config` option names a Vite
+/// config. The plugin reads that config also when the package of the script
+/// does not declare `@react-router/dev`, because a package manager can hoist
+/// the binary from another workspace.
+const SCRIPT_BINARIES: &[&str] = &["react-router"];
 const CONFIG_PATTERNS: &[&str] = &[
     "react-router.config.{ts,js,mjs,cjs}",
     "app/routes.{ts,js,mts,mjs}",
@@ -119,6 +128,7 @@ define_plugin! {
     tooling_dependencies: TOOLING_DEPENDENCIES,
     discovery_hidden_dirs: BUNDLE_BOUNDARY_DIRS,
     generated_type_import_prefixes: GENERATED_TYPE_IMPORT_PREFIXES,
+    script_config_binaries: SCRIPT_BINARIES,
     used_exports: [
         ("app/routes/**/*.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("app/root.{ts,tsx,js,jsx}", ROOT_EXPORTS),
@@ -139,6 +149,10 @@ define_plugin! {
             return result;
         }
 
+        if !is_route_config_file(config_path) {
+            vite_root::add_vite_root_app(&mut result, source, config_path, root);
+            return result;
+        }
         let Some(app_dir) = route_config_app_dir(config_path, root) else {
             return result;
         };
@@ -164,11 +178,19 @@ fn is_react_router_project_config(config_path: &Path) -> bool {
     })
 }
 
+/// The root-relative app directory of a React Router project config. React
+/// Router resolves `appDirectory`, and its default `app`, against the folder
+/// of the config.
 fn extract_app_directory(source: &str, config_path: &Path, root: &Path) -> String {
-    config_parser::extract_config_string(source, config_path, &["appDirectory"])
-        .as_deref()
-        .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
+    let raw = config_parser::extract_config_string(source, config_path, &["appDirectory"]);
+    config_parser::normalize_config_path(raw.as_deref().unwrap_or("app"), config_path, root)
         .unwrap_or_else(|| "app".to_string())
+}
+
+fn is_route_config_file(config_path: &Path) -> bool {
+    config_path
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("routes."))
 }
 
 fn route_config_app_dir(config_path: &Path, root: &Path) -> Option<String> {

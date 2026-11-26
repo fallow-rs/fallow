@@ -18,6 +18,7 @@ mod jsx_retry;
 mod jsx_runtime_from_config;
 mod load_data;
 mod member_access;
+mod migration_folders;
 mod module_augmentation;
 mod module_dir_path_references;
 mod new_url_node_modules;

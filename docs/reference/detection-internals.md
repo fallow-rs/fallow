@@ -398,7 +398,9 @@ error by suppressing a downstream detector.
   (`ModuleGraph::collect_exposed_namespace_targets`, issues #2357, #2372,
   #2373) is seed-agnostic. Its seeds are every target whose whole namespace
   object a consumer observes in Phase 2 (an ambient-module star, a
-  dynamic-import pattern match through `import()`, `import.meta.glob`, or
+  dynamic-import pattern match through `import()`, `import.meta.glob`,
+  Kysely's `new FileMigrationProvider({ migrationFolder })` with a folder
+  below the module directory (the files directly inside it, issue #5294), or
   `require.context` (an `import.meta.glob` with an `import` option observes
   only that export, and one with a `raw` or `url` query, or the legacy
   `as: 'raw'` or `as: 'url'`, observes no export, issue #4532), a bare
