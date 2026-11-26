@@ -1057,7 +1057,7 @@ fn push_unused_svelte_event_diagnostics(
     }
 }
 
-/// Push HINT diagnostics for unused SvelteKit `load()` return-object keys
+/// Push HINT diagnostics for unused route load and loader return-object keys
 /// (returned by `+page.{ts,server.ts,js,server.js}` but read by no consumer).
 fn push_unused_load_data_key_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
@@ -1073,7 +1073,7 @@ fn push_unused_load_data_key_diagnostics(
             name: &k.key_name,
         };
         let message = format!(
-            "load() return key '{}' is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
+            "Route data return key '{}' is read by no consumer (no data.<key>, page.data.<key> or useLoaderData() read)",
             k.key_name
         );
         push_anchor_diagnostic(

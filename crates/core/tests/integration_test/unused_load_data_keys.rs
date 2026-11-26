@@ -316,3 +316,34 @@ fn sveltekit_shorthand_data_attribute_abstains_route_load_keys() {
         key_names(&results)
     );
 }
+
+#[test]
+fn resource_route_and_response_body_keys_are_not_flagged() {
+    let config = fixture_config("remix-resource-route-loader");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let keys = key_names(&results);
+    for key in ["status", "timestamp", "checks", "version"] {
+        assert!(
+            !keys.contains(&key.to_string()),
+            "a resource route loader returns an HTTP response, not component data: {keys:?}"
+        );
+    }
+    for key in ["shown", "hidden"] {
+        assert!(
+            !keys.contains(&key.to_string()),
+            "the keys of a Response.json body must not be harvested: {keys:?}"
+        );
+    }
+    let mut keys = keys;
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![
+            "aliasDead".to_string(),
+            "dead".to_string(),
+            "forwardedDead".to_string()
+        ],
+        "a component route keeps its findings, also with `export {{ X as default }}` or `export {{ default }} from`"
+    );
+}

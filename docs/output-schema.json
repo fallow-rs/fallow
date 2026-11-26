@@ -6674,7 +6674,7 @@
         },
         "unused_load_data_keys": {
           "type": "integer",
-          "description": "SvelteKit `load()` return-object keys read by no consumer."
+          "description": "SvelteKit `load()` and React Router / Remix `loader` return-object keys\nread by no consumer."
         },
         "unresolved_imports": {
           "type": "integer",
@@ -8333,7 +8333,7 @@
         {
           "type": "string",
           "const": "use-load-data",
-          "description": "Use a SvelteKit load-data key from the route UI or remove the unused\nreturned key (manual; used by unused-load-data-key findings)."
+          "description": "Use a route load-data key from the route UI or remove the unused\nreturned key (manual; used by unused-load-data-key findings)."
         },
         {
           "type": "string",

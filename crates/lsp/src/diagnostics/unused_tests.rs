@@ -241,7 +241,7 @@ fn named_anchor_diagnostics_keep_exact_message_code_and_range() {
             "src/routes/+page.server.ts",
             "posts",
             "unused-load-data-key",
-            "load() return key 'posts' is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
+            "Route data return key 'posts' is read by no consumer (no data.<key>, page.data.<key> or useLoaderData() read)",
         ),
         (
             "services.ts",

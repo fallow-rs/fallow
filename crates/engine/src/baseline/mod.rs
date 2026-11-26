@@ -563,7 +563,7 @@ pub struct BaselineData {
     /// Unused server actions, keyed by `file:action_name`.
     #[serde(default)]
     unused_server_actions: Vec<String>,
-    /// Unused SvelteKit load() data keys, keyed by `file:key_name`.
+    /// Unused route load and loader data keys, keyed by `file:key_name`.
     #[serde(default)]
     unused_load_data_keys: Vec<String>,
     /// Unresolved imports, keyed by `file:specifier`.

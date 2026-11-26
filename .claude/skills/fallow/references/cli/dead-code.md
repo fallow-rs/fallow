@@ -50,7 +50,7 @@ Common global flags for this command: [`--format`](global-flags.md), [`--quiet`]
 | `--unused-tagged-errors` | An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it |
 | `--unproduced-catch-tags` | A catchTag handler names a project error tag that no code produces |
 | `--unused-server-actions` | A Next.js Server Action exported from a "use server" file is referenced by no code in the project |
-| `--unused-load-data-keys` | A SvelteKit load() return-object key is read by no consumer |
+| `--unused-load-data-keys` | A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer |
 | `--unresolved-imports` | Unresolved imports |
 | `--unlisted-deps` | Unlisted dependencies |
 | `--unlisted-binaries` | Binary used but provided by no installed package |

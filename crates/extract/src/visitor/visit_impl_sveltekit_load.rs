@@ -159,7 +159,13 @@ fn ts_type_reference_base_name(ty: &TSType<'_>) -> Option<String> {
 fn harvest_load_return_keys(
     returned: &Expression<'_>,
 ) -> Result<Vec<fallow_types::extract::LoadReturnKey>, ()> {
-    let returned = unwrap_json_return_expr(unwrap_paren_expr(returned));
+    let returned = unwrap_paren_expr(returned);
+    if is_response_json_call(returned) {
+        // `Response.json(body)` builds an HTTP response. A client reads its body
+        // over HTTP, so no component read can credit its keys: abstain.
+        return Err(());
+    }
+    let returned = unwrap_json_return_expr(returned);
     let Expression::ObjectExpression(obj) = returned else {
         // A non-object terminal return (`return data`, `return makeData()`)
         // cannot be key-harvested: abstain.
@@ -188,6 +194,17 @@ fn harvest_load_return_keys(
         }
     }
     Ok(keys)
+}
+
+fn is_response_json_call(returned: &Expression<'_>) -> bool {
+    let Expression::CallExpression(call) = returned else {
+        return false;
+    };
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return false;
+    };
+    member.property.name == "json"
+        && matches!(&member.object, Expression::Identifier(object) if object.name == "Response")
 }
 
 fn unwrap_json_return_expr<'a>(returned: &'a Expression<'a>) -> &'a Expression<'a> {

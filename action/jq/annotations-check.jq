@@ -127,7 +127,7 @@ def dependency_action(pkg):
   (.unprovided_injects[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unprovided inject::\(.framework | san) inject for key '\(.key_name | san)' has no matching provider in the project.\(nl)\(nl)Add a provide/setContext for this key, or remove the dead inject."),
   (.unused_load_data_keys[]? |
-    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),title=Unused load data key::SvelteKit load() return key '\(.key_name | san)' is read by no consumer (neither the sibling +page.svelte nor $page.data).\(nl)\(nl)The key runs a real server fetch / DB cost per request for data nothing renders. Remove the key, or use it."),
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),title=Unused load data key::Route data return key '\(.key_name | san)' is read by no consumer (no read in the route component, page.data or useLoaderData()).\(nl)\(nl)The key runs a real server fetch / DB cost per request for data nothing renders. Remove the key, or use it."),
   (.type_only_dependencies[]? |
     "::\(lvl("warning")) file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size."),
   (.test_only_dependencies[]? |

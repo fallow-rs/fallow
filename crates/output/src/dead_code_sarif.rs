@@ -850,7 +850,7 @@ fn sarif_unused_load_data_key_fields(
         rule_id: "fallow/unused-load-data-key",
         level,
         message: format!(
-            "load() return key \"{}\" is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            "Route data return key \"{}\" is read by no consumer (no data.<key>, page.data.<key> or useLoaderData() read); delete the key or wire a consumer",
             key.key_name
         ),
         uri: relative_uri(&key.path, root),

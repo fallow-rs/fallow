@@ -189,7 +189,7 @@ fn named_anchor_hovers_keep_exact_markdown_and_range() {
         (
             "src/routes/+page.server.ts",
             "posts",
-            "**fallow**: load() return key `posts` is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
+            "**fallow**: Route data return key `posts` is read by no consumer (no data.<key>, page.data.<key> or useLoaderData() read).",
         ),
     ];
     for (file, name, expected) in cases {
@@ -1842,7 +1842,7 @@ fn hover_on_unused_server_action_wrong_col_returns_none() {
 }
 
 // -------------------------------------------------------------------------
-// Unused SvelteKit load() return key (lines 816-853)
+// Unused SvelteKit Route data return key (lines 816-853)
 // -------------------------------------------------------------------------
 
 #[test]
@@ -1874,7 +1874,7 @@ fn hover_on_unused_load_data_key() {
     let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
     let value = markup_value(&hover);
     assert!(value.contains("posts"));
-    assert!(value.contains("load()"));
+    assert!(value.contains("Route data return key"));
     assert!(value.contains("read by no consumer"));
     let range = hover.range.unwrap();
     assert_eq!(range.start.line, 11);

@@ -176,7 +176,7 @@ fn route_loader_candidate_for_node<'a>(
     if producer.load_return_keys.is_empty() || producer.has_unharvestable_load {
         return None;
     }
-    if !is_conventional_route_loader_file(&node.path) {
+    if !is_conventional_route_loader_file(&node.path) || !has_default_export(producer) {
         return None;
     }
     let route_used = collect_route_loader_used_keys(producer)?;
@@ -190,6 +190,20 @@ fn route_loader_candidate_for_node<'a>(
         route_dir: route_dir.and_then(|dir| relativize_route_dir(dir, root)),
         route_used,
     })
+}
+
+/// Whether a route module renders a component. A route module with a `loader`
+/// and no default export is a resource route: its loader answers HTTP requests,
+/// so no component reads the returned keys.
+fn has_default_export(module: &ModuleInfo) -> bool {
+    module
+        .exports
+        .iter()
+        .any(|export| export.name.matches_str("default"))
+        || module
+            .re_exports
+            .iter()
+            .any(|re_export| re_export.exported_name == "default")
 }
 
 fn collect_route_loader_used_keys(module: &ModuleInfo) -> Option<FxHashSet<&str>> {
@@ -538,7 +552,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
-    use fallow_types::extract::{LoadReturnKey, MemberAccess};
+    use fallow_types::extract::{
+        ExportInfo, ExportName, LoadReturnKey, MemberAccess, ModuleInfo, VisibilityTag,
+    };
     use rustc_hash::{FxHashMap, FxHashSet};
 
     use crate::analyze::test_support::empty_module;
@@ -547,6 +563,24 @@ mod tests {
     use crate::suppress::SuppressionContext;
 
     use super::{ROUTE_LOADER_DATA_OBJECT, find_unused_load_data_keys};
+
+    fn with_default_export(mut module: ModuleInfo) -> ModuleInfo {
+        module.exports = vec![ExportInfo {
+            name: ExportName::Default,
+            local_name: None,
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            deprecated: false,
+            deprecated_reason: None,
+            span: oxc_span::Span::default(),
+            members: Vec::new(),
+            super_class: None,
+        }]
+        .into();
+        module
+    }
 
     fn graph_for_paths(paths: &[PathBuf]) -> ModuleGraph {
         let files: Vec<DiscoveredFile> = paths
@@ -581,7 +615,7 @@ mod tests {
         global.file_id = FileId(0);
         global.has_page_data_store_whole_use = true;
 
-        let mut route = empty_module();
+        let mut route = with_default_export(empty_module());
         route.file_id = FileId(1);
         route.load_return_keys = vec![
             LoadReturnKey {
@@ -630,7 +664,7 @@ mod tests {
         let route_path = root.join("app/routes/home.tsx");
         let graph = graph_for_paths(std::slice::from_ref(&route_path));
 
-        let mut route = empty_module();
+        let mut route = with_default_export(empty_module());
         route.file_id = FileId(0);
         route.load_return_keys = vec![LoadReturnKey {
             name: "opaque".to_string(),
@@ -667,7 +701,7 @@ mod tests {
 
         let mut first = empty_module();
         first.file_id = FileId(0);
-        let mut producer = empty_module();
+        let mut producer = with_default_export(empty_module());
         producer.file_id = FileId(2);
         producer.load_return_keys = vec![LoadReturnKey {
             name: "dead".to_string(),
@@ -689,5 +723,36 @@ mod tests {
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.findings[0].path, producer_path);
         assert_ne!(result.findings[0].path, missing_path);
+    }
+
+    #[test]
+    fn resource_route_without_default_export_abstains() {
+        let root = Path::new("/repo");
+        let route_path = root.join("app/routes/api.health.ts");
+        let graph = graph_for_paths(std::slice::from_ref(&route_path));
+
+        let mut route = empty_module();
+        route.file_id = FileId(0);
+        route.load_return_keys = vec![LoadReturnKey {
+            name: "status".to_string(),
+            span_start: 0,
+            span_end: 6,
+        }];
+
+        let mut declared_deps = FxHashSet::default();
+        declared_deps.insert("react-router".to_string());
+        let result = find_unused_load_data_keys(
+            &graph,
+            &[route],
+            &declared_deps,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            root,
+        );
+
+        assert!(
+            result.findings.is_empty(),
+            "a resource route has no component that can read its loader keys"
+        );
     }
 }
