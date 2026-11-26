@@ -5,7 +5,7 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
     program: &Program<'_>,
     extractor: &mut ModuleInfoExtractor,
     template_used: &rustc_hash::FxHashSet<String>,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> SemanticUsage {
     // Both candidate sets ask which spans resolve to a root-scope binding,
     // and each resolver below reads only its own spans.
@@ -23,7 +23,8 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
         &require_namespace_bindings,
         template_used,
         SemanticReferenceCandidates {
-            mode,
+            mode: gates.mode,
+            call_facts: gates.call_facts,
             module_bindings: &module_binding_candidates,
             subclass_bindings: &subclass_candidates,
             callback_captures: &callback_candidates,

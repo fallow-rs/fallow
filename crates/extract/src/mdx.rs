@@ -561,7 +561,7 @@ fn parse_statement_body(
     file_id: FileId,
     content_hash: u64,
     parsed_suppressions: crate::suppress::ParsedSuppressions,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> (ModuleInfo, bool) {
     if extraction.body.is_empty() {
         let info =
@@ -578,7 +578,7 @@ fn parse_statement_body(
         &parser_return.program,
         &mut extractor,
         &rustc_hash::FxHashSet::default(),
-        mode,
+        gates,
     );
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
@@ -662,7 +662,7 @@ fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> Modu
         file_id,
         source,
         content_hash,
-        fallow_types::shared_state::ExtractionMode::Standard,
+        crate::module_parse::ExtractionGates::STANDARD,
     )
 }
 
@@ -670,7 +670,7 @@ pub(crate) fn parse_mdx_to_module_with_mode(
     file_id: FileId,
     source: &str,
     content_hash: u64,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> ModuleInfo {
     let parsed_suppressions = parse_host_suppressions(ScriptHost::Mdx, source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
@@ -680,7 +680,7 @@ pub(crate) fn parse_mdx_to_module_with_mode(
         file_id,
         content_hash,
         parsed_suppressions,
-        mode,
+        gates,
     );
     let (body_accesses, body_whole_object_uses) = collect_body_usage(&scan, &info.imports);
     extend_member_accesses(&mut info, body_accesses);

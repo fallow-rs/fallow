@@ -637,7 +637,7 @@ fn parse_astro_to_module(
         source,
         content_hash,
         need_complexity,
-        fallow_types::shared_state::ExtractionMode::Standard,
+        crate::module_parse::ExtractionGates::STANDARD,
     )
 }
 
@@ -646,7 +646,7 @@ pub(crate) fn parse_astro_to_module_with_mode(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> ModuleInfo {
     let parsed_suppressions = parse_host_suppressions(ScriptHost::Astro, source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
@@ -678,14 +678,14 @@ pub(crate) fn parse_astro_to_module_with_mode(
         &template_used,
         need_complexity,
         &line_offsets,
-        mode,
+        gates,
     );
 
     degradation.merge(extend_imports_from_template(
         &mut extractor,
         template,
         template_offset,
-        mode,
+        gates,
     ));
 
     // Capture the frontmatter facts that the template regions read before
@@ -787,7 +787,7 @@ fn analyze_astro_frontmatter(
     template_used: &FxHashSet<String>,
     need_complexity: bool,
     line_offsets: &[u32],
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> AstroFrontmatterAnalysis {
     let Some(script) = frontmatter else {
         return empty_astro_frontmatter_analysis();
@@ -805,7 +805,7 @@ fn analyze_astro_frontmatter(
         &parser_return.program,
         &mut extractor,
         template_used,
-        mode,
+        gates,
     );
     let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
@@ -878,7 +878,7 @@ fn extend_imports_from_template(
     extractor: &mut ModuleInfoExtractor,
     template: &str,
     template_offset: usize,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> crate::parse_degradation::ParseDegradation {
     if template.is_empty() {
         return crate::parse_degradation::ParseDegradation::default();
@@ -895,7 +895,7 @@ fn extend_imports_from_template(
         template_offset,
         &comment_ranges,
     );
-    extend_inline_script_imports(extractor, template, template_offset, &comment_ranges, mode)
+    extend_inline_script_imports(extractor, template, template_offset, &comment_ranges, gates)
 }
 
 /// Append `<script src="...">` processed-script references from the template.
@@ -939,7 +939,7 @@ fn extend_inline_script_imports(
     template: &str,
     template_offset: usize,
     comment_ranges: &[(usize, usize)],
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> crate::parse_degradation::ParseDegradation {
     let mut degradation = crate::parse_degradation::ParseDegradation::default();
     for open in blocks::scan(template, &SCRIPT_PREFIX_RE, Some(&SCRIPT_CLOSE_RE)) {
@@ -962,12 +962,12 @@ fn extend_inline_script_imports(
         ));
         let mut inline_extractor = ModuleInfoExtractor::new();
         inline_extractor.visit_program(&parser_return.program);
-        if mode == fallow_types::shared_state::ExtractionMode::SharedState {
+        if gates.mode == fallow_types::shared_state::ExtractionMode::SharedState {
             crate::parse::compute_semantic_usage_for_extractor_with_mode(
                 &parser_return.program,
                 &mut inline_extractor,
                 &FxHashSet::default(),
-                mode,
+                gates,
             );
         }
         let extraction = ExtractionResult::contiguous(body, template_offset + open.body.start);

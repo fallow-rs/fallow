@@ -196,7 +196,7 @@ mod tests {
             source,
             0,
             false,
-            fallow_types::shared_state::ExtractionMode::Standard,
+            crate::module_parse::ExtractionGates::STANDARD,
         )
     }
 

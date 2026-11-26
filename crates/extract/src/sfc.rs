@@ -374,7 +374,7 @@ fn parse_sfc_to_module(
         source,
         content_hash,
         need_complexity,
-        fallow_types::shared_state::ExtractionMode::Standard,
+        crate::module_parse::ExtractionGates::STANDARD,
     )
 }
 
@@ -384,7 +384,7 @@ pub(crate) fn parse_sfc_to_module_with_mode(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
-    mode: fallow_types::shared_state::ExtractionMode,
+    gates: crate::module_parse::ExtractionGates,
 ) -> ModuleInfo {
     let scripts = extract_sfc_scripts(source);
     let styles = extract_sfc_styles(source);
@@ -413,7 +413,7 @@ pub(crate) fn parse_sfc_to_module_with_mode(
             emit_return_binding: &mut emit_return_binding,
             script_binding_context: &mut script_binding_context,
             need_complexity,
-            mode,
+            gates,
         });
     }
     if scripts.len() > 1 {

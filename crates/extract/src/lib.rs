@@ -492,7 +492,7 @@ fn parse_single_file_cached(
     let parse_start = std::time::Instant::now();
     // Drop a count that a scan outside a parse left on this thread.
     css_masked_bytes::take();
-    let mut module = module_parse::parse_source_without_bom(
+    let module = module_parse::parse_source_without_bom(
         file.id,
         &file.path,
         source,
@@ -501,13 +501,11 @@ fn parse_single_file_cached(
         &module_parse::ExtractionOptions {
             flag_patterns,
             mode,
+            // A cache hit of the same run gives no call facts, so a parsed
+            // module must not give them either.
+            call_facts: need_call_facts,
         },
     );
-    if !need_call_facts {
-        // A cache hit of the same run gives no call facts, so a parsed module
-        // must not give them either.
-        module.function_contracts = None;
-    }
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let mut result =
         ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len());
@@ -530,6 +528,7 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
         &module_parse::ExtractionOptions {
             flag_patterns: &FlagPatterns::default(),
             mode: fallow_types::shared_state::ExtractionMode::Standard,
+            call_facts: true,
         },
     ))
 }
@@ -548,6 +547,7 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
         &module_parse::ExtractionOptions {
             flag_patterns: &FlagPatterns::default(),
             mode: fallow_types::shared_state::ExtractionMode::Standard,
+            call_facts: true,
         },
     )
 }

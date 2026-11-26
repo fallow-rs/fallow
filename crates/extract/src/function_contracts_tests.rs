@@ -1818,3 +1818,44 @@ fn a_wrapped_default_export_is_an_escape_and_a_bare_one_is_not() {
     );
     assert!(facts(&info).escapes.is_empty());
 }
+
+/// A run whose rules do not read call facts parses with `call_facts` off, and
+/// each module, of every host language, must then carry no call facts.
+#[test]
+fn call_facts_follow_the_extraction_option() {
+    let script = "function pad(n: number) { return n; }\npad(1);\n";
+    let sources = [
+        ("module.ts", script.to_owned()),
+        (
+            "Card.vue",
+            format!("<script setup lang=\"ts\">\n{script}</script>\n"),
+        ),
+        ("page.astro", format!("---\n{script}---\n<div />\n")),
+        ("doc.mdx", format!("export {script}\n# Title\n")),
+        (
+            "index.html",
+            format!("<script type=\"module\">\n{script}</script>\n"),
+        ),
+    ];
+    for (path, source) in &sources {
+        for call_facts in [false, true] {
+            let info = crate::module_parse::parse_source_without_bom(
+                FileId(0),
+                Path::new(path),
+                source,
+                0,
+                false,
+                &crate::module_parse::ExtractionOptions {
+                    flag_patterns: &fallow_types::extract::FlagPatterns::default(),
+                    mode: fallow_types::shared_state::ExtractionMode::Standard,
+                    call_facts,
+                },
+            );
+            assert_eq!(
+                info.function_contracts.is_some(),
+                call_facts,
+                "{path} with call_facts {call_facts}"
+            );
+        }
+    }
+}
