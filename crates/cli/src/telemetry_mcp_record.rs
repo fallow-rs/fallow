@@ -1,5 +1,7 @@
-//! The hidden `fallow telemetry record` command.
+//! The hidden telemetry commands that the MCP server runs: `record` and
+//! `claim-prompt` (in [`prompt`]).
 //!
+//! `record`:
 //! The MCP server runs most analysis tools in its own process through
 //! `fallow-api`, so no CLI run and no CLI telemetry event happens for them.
 //! After such a call, the server runs this command with the same
@@ -21,6 +23,23 @@ use super::{
     resolve_install_id_for_send, spool_event, spool_file,
 };
 
+#[path = "telemetry_prompt.rs"]
+mod prompt;
+
+/// A hidden telemetry command of the MCP server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum McpCommand {
+    Record(McpCall),
+    ClaimPrompt,
+}
+
+pub(super) fn run(command: McpCommand) -> ExitCode {
+    match command {
+        McpCommand::Record(call) => record_mcp_call(call),
+        McpCommand::ClaimPrompt => prompt::claim_prompt(),
+    }
+}
+
 /// The arguments of `fallow telemetry record`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::Args)]
 pub struct McpCall {
@@ -34,7 +53,7 @@ pub struct McpCall {
 
 /// Record one in-process MCP tool call. Always exits 0: telemetry never
 /// changes the result of the caller.
-pub(super) fn record_mcp_call(call: McpCall) -> ExitCode {
+fn record_mcp_call(call: McpCall) -> ExitCode {
     let McpCall {
         duration_ms,
         failed,

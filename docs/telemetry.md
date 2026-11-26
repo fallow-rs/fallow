@@ -148,6 +148,18 @@ Code Mode snippets can make several read-only host calls. The CLI host calls giv
 
 The LSP server, VS Code extension, N-API bindings, and programmatic embedding run analysis in-process rather than by spawning the CLI, so they emit no telemetry today. Their `integration_surface` values are reserved for when they emit directly.
 
+## Consent form in MCP clients
+
+Agent users run Fallow through MCP and never see the one-time telemetry note of the human CLI. So the MCP server can ask the person once, in an MCP form (`elicitation/create`), whether to share usage data. The form tells what a yes turns on: telemetry for all Fallow runs on the machine, the coarse fields, the random install ID, and the endpoint.
+
+- The form has one required checkbox, clear by default. Only a submit with the box checked runs `fallow telemetry enable`. A submit with the box clear, or a decline, runs `fallow telemetry disable`, which records the decision, so no surface asks again. A cancel, a missing field or a client error records nothing.
+- The server sends the form after it answered the first tool call of the process, and only when no Fallow tool call has run for 20 seconds. The server cannot see other tools of the agent, so the form can still appear while the agent works with them. The server never mentions the form to the agent.
+- Only clients that declare form elicitation on a protocol before `2026-07-28` get the form. The newer protocol does not allow requests from the server outside a tool call.
+- The machine gets the form at most twice in total, at least 14 days apart, for all MCP servers on it together. The count and the time of the last form are in `telemetry-prompt.json` next to `telemetry.json`. They stay on the machine and are never uploaded.
+- The form never appears in CI, when `DO_NOT_TRACK` or `FALLOW_TELEMETRY_DISABLED` holds an opt-out value, when `FALLOW_TELEMETRY` or `FALLOW_TELEMETRY_DEBUG` is set, after a recorded decision, or when the config folder cannot be written.
+
+To keep the form off a fleet of machines, set `FALLOW_TELEMETRY_DISABLED=1` in the machine or container image.
+
 ## Agent Source
 
 When telemetry is enabled and a run is classified as agent-driven, Fallow may emit one normalized `agent_source` value:
@@ -203,7 +215,7 @@ The `--parent-run` flag is hidden from `--help`. `--parent-run` accepts only sho
 
 Separately, when telemetry is enabled Fallow keeps one anonymous install grouping token in `telemetry.json`. It is minted the moment you opt in (`fallow telemetry enable`, or the first upload after `FALLOW_TELEMETRY=on`), reused unchanged on later runs, and deleted when you run `fallow telemetry disable`. It is a freshly random value, never derived from your machine, user, repository, project, file paths, environment, or cloud responses. Like the parent-run token, it is sent only as a private transport header (`X-Fallow-Install`) for server-side grouping, never as an event property, so the events Fallow serializes still carry no identifiers. It exists so aggregate dashboards can count distinct workflows per install per week rather than per run. `fallow telemetry status` reports only whether the token is present (never the token itself); `fallow telemetry inspect --example` lists the transport headers alongside the example payload.
 
-Agents must not enable telemetry automatically. `fallow telemetry enable` requires explicit user action in a human-controlled shell or explicit CI environment configuration.
+Agents must not enable telemetry automatically. Telemetry turns on only by an explicit action of a person: `fallow telemetry enable` in a shell, the one-time MCP consent form (see "Consent form in MCP clients"), or an explicit CI environment configuration.
 
 ## Transport And Server Privacy
 

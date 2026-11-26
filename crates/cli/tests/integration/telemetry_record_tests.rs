@@ -234,3 +234,52 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+fn claim(home: &Path, extra_env: &[(&str, &str)]) -> bool {
+    let output = run_fallow(home, &["telemetry", "claim-prompt"], extra_env);
+    assert_eq!(
+        output.code, 0,
+        "claim-prompt should exit 0: {}",
+        output.stderr
+    );
+    parse_json(&output)["ask"]
+        .as_bool()
+        .expect("an ask boolean")
+}
+
+#[test]
+fn the_first_claim_asks_and_the_next_claim_waits() {
+    let home = tempfile::tempdir().expect("temp home");
+    assert!(claim(home.path(), &[]), "the first claim may ask");
+    assert!(
+        !claim(home.path(), &[]),
+        "a second claim within 14 days may not"
+    );
+}
+
+#[test]
+fn no_claim_with_a_kill_switch_an_override_or_in_ci() {
+    for env in [
+        ("DO_NOT_TRACK", "1"),
+        ("FALLOW_TELEMETRY_DISABLED", "yes"),
+        ("FALLOW_TELEMETRY", "off"),
+        ("FALLOW_TELEMETRY_DEBUG", "1"),
+        ("CI", "true"),
+    ] {
+        let home = tempfile::tempdir().expect("temp home");
+        assert!(!claim(home.path(), &[env]), "{env:?} must refuse the claim");
+    }
+}
+
+#[test]
+fn no_claim_after_a_recorded_decision() {
+    for decision in ["enable", "disable"] {
+        let home = tempfile::tempdir().expect("temp home");
+        let output = run_fallow(home.path(), &["telemetry", decision], &[]);
+        assert_eq!(output.code, 0, "{decision}: {}", output.stderr);
+        assert!(
+            !claim(home.path(), &[]),
+            "a recorded `{decision}` must refuse the claim"
+        );
+    }
+}

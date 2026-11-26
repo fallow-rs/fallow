@@ -23,7 +23,7 @@ use crate::{exit_codes, json_style::JsonStyle};
 mod mcp_record;
 #[path = "telemetry_spool_drain.rs"]
 mod spool_drain;
-pub use mcp_record::McpCall;
+pub use mcp_record::{McpCall, McpCommand};
 use spool_drain::drain_spool_file;
 
 const CONFIG_SCHEMA_VERSION: u8 = 2;
@@ -618,7 +618,7 @@ pub enum TelemetryCommand {
     Enable,
     Disable,
     Inspect { example: bool },
-    Record(McpCall),
+    Mcp(McpCommand),
 }
 
 #[expect(
@@ -1022,7 +1022,7 @@ pub fn run(command: TelemetryCommand, output: OutputFormat, json_style: JsonStyl
         TelemetryCommand::Enable => set_enabled(true, output, json_style),
         TelemetryCommand::Disable => set_enabled(false, output, json_style),
         TelemetryCommand::Inspect { example } => inspect(example, output, json_style),
-        TelemetryCommand::Record(call) => mcp_record::record_mcp_call(call),
+        TelemetryCommand::Mcp(command) => mcp_record::run(command),
     }
 }
 

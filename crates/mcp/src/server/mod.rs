@@ -726,7 +726,8 @@ impl ServerHandler for FallowMcp {
     }
 
     /// Dispatch one tool call inside the cancellation scope of its request,
-    /// and record it when it ran in this process and telemetry is on.
+    /// and record it when it ran in this process and telemetry is on. After
+    /// the first call, the server may ask once for telemetry consent.
     ///
     /// A long call runs as an MCP task when the request declares the tasks
     /// extension: the response is the task handle, and the work gets its own
@@ -748,9 +749,16 @@ impl ServerHandler for FallowMcp {
         }
         let cancellation = context.ct.clone();
         let tool = request.name.clone();
+        let route = crate::tools::confirm_route(
+            context.protocol_version().as_ref(),
+            context.client_capabilities().as_ref(),
+        );
+        let peer = context.peer.clone();
         let call = ToolCallContext::new(self, request, context);
         let work = with_request_cancellation(cancellation, self.tool_router.call(call));
-        track_call(&self.binary, &tool, work).await
+        let result = track_call(&self.binary, &tool, work).await;
+        crate::tools::offer_telemetry_consent(&self.binary, peer, route);
+        result
     }
 
     async fn list_resources(

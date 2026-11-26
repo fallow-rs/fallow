@@ -16,7 +16,7 @@
 use std::future::Future;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use rmcp::ErrorData as McpError;
@@ -80,6 +80,48 @@ static STATE: Mutex<Option<Reading>> = Mutex::const_new(None);
 
 static RECORDS: Semaphore = Semaphore::const_new(RECORD_SLOTS);
 
+/// Tool calls that run now. The consent form waits until this is 0.
+static CALLS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// When the last tool call ended, for [`idle_for`].
+static LAST_CALL_END: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+
+/// How long the server has had no running tool call. `None` while a call
+/// runs, and before the first call ends.
+pub(super) fn idle_for() -> Option<Duration> {
+    if CALLS_IN_FLIGHT.load(Ordering::SeqCst) > 0 {
+        return None;
+    }
+    let ended = (*LAST_CALL_END.lock().ok()?)?;
+    Some(ended.elapsed())
+}
+
+/// Counts one running call until it drops, also when the call future is
+/// dropped on a client cancel.
+struct InFlight;
+
+impl InFlight {
+    fn start() -> Self {
+        CALLS_IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        if let Ok(mut ended) = LAST_CALL_END.lock() {
+            *ended = Some(Instant::now());
+        }
+        CALLS_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Forget the cached telemetry state, so the next call reads it again. The
+/// consent form calls this after it changes the state.
+pub(super) async fn forget_state() {
+    *STATE.lock().await = None;
+}
+
 /// Note that the current tool call started a fallow CLI process. That process
 /// records the event of the call.
 pub(super) fn note_cli_started() {
@@ -94,7 +136,9 @@ where
 {
     let started = Instant::now();
     let cli_started = Arc::new(AtomicBool::new(false));
+    let in_flight = InFlight::start();
     let result = CLI_STARTED.scope(Arc::clone(&cli_started), work).await;
+    drop(in_flight);
     let Some(failed) = call_outcome(&result) else {
         return result;
     };

@@ -18283,6 +18283,21 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "claim-prompt",
+          "path": "telemetry claim-prompt",
+          "aliases": [],
+          "help_group": null,
+          "about": "Claim the one-time consent form of the MCP server. The MCP server runs this",
+          "long_about": null,
+          "hidden": true,
+          "usage": "fallow telemetry claim-prompt [OPTIONS]",
+          "always_json": false,
+          "exit_codes": [],
+          "positionals": [],
+          "options": [],
+          "subcommands": []
         }
       ]
     },
