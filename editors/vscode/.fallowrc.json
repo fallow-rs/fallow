@@ -5,6 +5,7 @@
     "src/types.ts",
     "src/generated/output-contract.d.ts"
   ],
+  "supportEntry": ["scripts/watch-loop-harness.mjs"],
   "ignorePatterns": [
     "test/integration/fixtures/**"
   ],

@@ -531,6 +531,21 @@ Pull request CI runs three fixed project seeds without the Node bindings in
 the `fallow-mcp` integration tests. The scheduled job builds the Node
 bindings and runs 100 new project seeds a day.
 
+By hand only: `VS Code Watch Loop` (`workflow_dispatch`). It builds the CLI,
+the language server and the extension of the selected ref on Linux and on
+Windows. Then it drives a real VS Code with
+`editors/vscode/scripts/watch-loop-harness.mjs`. The harness saves
+`.fallowrc.json` once and counts the analysis runs, the cancelled runs and the
+`[error]` lines of the Output channel for 60 seconds. A second scenario
+rewrites the config with the same bytes each second, as a virus scanner or a
+sync client does. The job fails when a scenario starts more than 2 runs, any
+cancelled run, or any `[error]` line. The job summary gives the counts, and the
+artifact holds the screenshots and the logs. The `repository` input opens a
+public project in place of the small fixture. Start it for a change to the
+watched-file events, the analysis scheduler or the stderr log filter. A full
+run takes about 10 minutes and needs a Windows runner, so it does not run on
+pull requests or in a release.
+
 ### Oracle proof
 
 An oracle is a test that compares two results that must agree, for example a
