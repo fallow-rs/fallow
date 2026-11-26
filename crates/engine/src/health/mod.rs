@@ -52,6 +52,7 @@ mod hotspots;
 pub(crate) mod ignore;
 mod inline;
 pub use inline::{InlineComplexity, inline_complexity};
+mod dependency_classes;
 mod large_functions;
 mod output_build;
 pub mod ownership;

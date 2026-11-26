@@ -23,41 +23,6 @@ pub(super) fn project_uses_tailwind(root: &Path) -> bool {
         })
 }
 
-/// Normalized names of the project's declared dependencies (length-floored),
-/// used to abstain on third-party CSS classes a library applies to its own DOM.
-pub(super) fn dependency_class_prefixes(config: &ResolvedConfig) -> FxHashSet<String> {
-    let mut prefixes = FxHashSet::default();
-    let Ok(json) = root_package_json(&config.root) else {
-        return prefixes;
-    };
-    for key in ["dependencies", "devDependencies", "peerDependencies"] {
-        if let Some(deps) = json.get(key).and_then(serde_json::Value::as_object) {
-            for name in deps.keys() {
-                let bare = name.rsplit('/').next().unwrap_or(name);
-                let normalized = normalize_dep_token(bare);
-                if normalized.len() >= MIN_DEP_PREFIX_LEN {
-                    prefixes.insert(normalized);
-                }
-            }
-        }
-    }
-    prefixes
-}
-
-/// True when a CSS class is likely a third-party library class.
-pub(super) fn class_matches_dependency_prefix(
-    class: &str,
-    dependency_prefixes: &FxHashSet<String>,
-) -> bool {
-    if dependency_prefixes.is_empty() {
-        return false;
-    }
-    let normalized = normalize_dep_token(class);
-    dependency_prefixes
-        .iter()
-        .any(|prefix| normalized.starts_with(prefix.as_str()))
-}
-
 /// Project-root-relative CSS/SCSS paths published as package entry surfaces.
 pub(super) fn published_css_paths(config: &ResolvedConfig) -> FxHashSet<String> {
     let mut published = FxHashSet::default();
@@ -122,19 +87,10 @@ pub(super) fn project_uses_tailwind_plugin(any_plugin_directive: bool, root: &Pa
     false
 }
 
-const MIN_DEP_PREFIX_LEN: usize = 6;
-
 fn root_package_json(root: &Path) -> Result<serde_json::Value, std::io::Error> {
     let text = std::fs::read_to_string(root.join("package.json"))?;
     serde_json::from_str::<serde_json::Value>(&text)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
-}
-
-fn normalize_dep_token(name: &str) -> String {
-    name.chars()
-        .filter(char::is_ascii_alphanumeric)
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
 }
 
 /// True when a `tailwind.config.*` text declares a non-empty `plugins` array.
