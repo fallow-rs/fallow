@@ -106,8 +106,11 @@ pub fn cli_category_counts(
                 .as_array()
                 .map_or(0, Vec::len) as u64
         } else if let Some(rest) = field.strip_prefix(ENFORCED_PREFIX) {
-            let mut lowered = rest.to_string();
-            lowered[..1].make_ascii_lowercase();
+            let mut chars = rest.chars();
+            let first = chars
+                .next()
+                .unwrap_or_else(|| panic!("{field} names no component array"));
+            let lowered = format!("{}{}", first.to_ascii_lowercase(), chars.as_str());
             let array = cli_arrays(&lowered).remove(0);
             let enforced = check[array.as_str()].as_array().map_or(0, |findings| {
                 findings

@@ -111,11 +111,11 @@ class CategoryItem extends vscode.TreeItem {
 
   /**
    * `findings` is the count of the label. It is less than the row count when
-   * one finding has a row for each site, so the labels sum to the count of
-   * the "found N issues" notification and the status bar. `counted` is the
+   * one finding has a row for each site. `counted` is the
    * part of `findings` that the total counts: a component health finding
-   * counts only at `error` severity, so the row says when the total leaves
-   * findings out.
+   * counts only at `error` severity. The counted parts of the labels sum to
+   * the count of the "found N issues" notification and the status bar, and
+   * the row says when the total leaves findings out.
    */
   constructor(
     readonly category: IssueCategory,

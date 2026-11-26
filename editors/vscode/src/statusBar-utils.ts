@@ -446,11 +446,11 @@ const scopeLines = (params: AnalysisCompleteParams, changedSinceRef: string | nu
 
 /**
  * The Problems panel has a diagnostic for each location: each clone instance,
- * each edge of a cycle and each import site. Its count is then higher than
+ * each edge of a cycle and each import site. Its count can then differ from
  * the finding total, and that looks like a second, wrong total.
  */
 const PROBLEMS_PANEL_NOTE =
-  "$(info) The Problems panel lists each location of a finding, so its count can be higher.";
+  "$(info) The Problems panel lists each location of a finding, so its count can differ from this total.";
 
 /**
  * Hover lines for a completed analysis: the scope, then one line per issue
