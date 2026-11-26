@@ -111,15 +111,19 @@ struct LineIndex {
 
 impl LineIndex {
     fn new(content: String) -> Self {
-        let line_starts = std::iter::once(0)
-            .chain(
-                content
-                    .bytes()
-                    .enumerate()
-                    .filter(|&(_, byte)| byte == b'\n')
-                    .map(|(offset, _)| offset + 1),
-            )
-            .collect();
+        // The filtered iterator gives no size hint, so a collect grows the
+        // vector by doubling. A realloc can copy the buffer, which makes the
+        // cost of a large file unstable. A count pass allocates once.
+        let line_count = content.bytes().filter(|&byte| byte == b'\n').count() + 1;
+        let mut line_starts = Vec::with_capacity(line_count);
+        line_starts.push(0);
+        line_starts.extend(
+            content
+                .bytes()
+                .enumerate()
+                .filter(|&(_, byte)| byte == b'\n')
+                .map(|(offset, _)| offset + 1),
+        );
         Self {
             content,
             line_starts,
@@ -183,6 +187,16 @@ mod tests {
                 reference_utf16_col(&content, line0, byte_col),
             );
         }
+    }
+
+    #[test]
+    fn line_starts_get_their_final_capacity_before_the_first_push() {
+        let content = "const label = \"plain\";\n".repeat(5_000);
+        let index = LineIndex::new(content);
+        assert_eq!(index.line_starts.len(), 5_001);
+        // `Vec::with_capacity` allocates the exact capacity for `usize`. A
+        // vector that grew by doubling has a larger capacity.
+        assert_eq!(index.line_starts.capacity(), index.line_starts.len());
     }
 
     #[test]
