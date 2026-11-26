@@ -393,6 +393,47 @@ fn released_skills_are_served_byte_for_byte() {
     }
 }
 
+/// Claude Code saves an MCP response of more than 50,000 characters to a file,
+/// and the agent must then read that file in parts. Each served skill file must
+/// fit in one response.
+const MAX_SKILL_FILE_CHARS: usize = 50_000;
+
+#[test]
+fn served_skill_files_fit_in_one_response() {
+    if !skill_trees_present() {
+        return;
+    }
+    let mut server = McpServer::start_with("2025-11-25");
+    let listing = server.request(2, "skills/list", &serde_json::json!({}));
+    let skills = listing["result"]["skills"]
+        .as_array()
+        .unwrap_or_else(|| panic!("skills array: {listing}"));
+    let mut id = 10;
+    let mut too_large = Vec::new();
+    for skill in skills {
+        for file in skill["resources"].as_array().unwrap() {
+            let file_uri = file["uri"].as_str().unwrap();
+            id += 1;
+            let read = server.request(
+                id,
+                "resources/read",
+                &serde_json::json!({ "uri": file_uri }),
+            );
+            let text = read["result"]["contents"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("text contents: {read}"));
+            let chars = text.chars().count();
+            if chars > MAX_SKILL_FILE_CHARS {
+                too_large.push(format!("{file_uri}: {chars} characters"));
+            }
+        }
+    }
+    assert!(
+        too_large.is_empty(),
+        "served skill files above {MAX_SKILL_FILE_CHARS} characters: {too_large:?}"
+    );
+}
+
 #[test]
 fn unknown_skill_uri_is_invalid_params() {
     if !skill_trees_present() {

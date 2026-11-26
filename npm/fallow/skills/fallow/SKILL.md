@@ -108,7 +108,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 
 `fallow <command> --help` prints the live flag list for any command; `fallow schema` dumps the whole CLI definition as JSON.
 
-Full command catalogue, one row per command: **[references/cli-reference.md](references/cli-reference.md)**.
+Full command catalogue, one row per command: **[references/cli-reference.md](references/cli-reference.md)**. Each command and each shared topic has its own file with the complete flag specifications. Read only the file that you need: [agent](references/cli/agent.md), [architecture](references/cli/architecture.md), [audit](references/cli/audit.md), [ci](references/cli/ci.md), [ci-integration](references/cli/ci-integration.md), [cloud](references/cli/cloud.md), [config](references/cli/config.md), [config-schema](references/cli/config-schema.md), [configuration](references/cli/configuration.md), [coverage](references/cli/coverage.md), [dead-code](references/cli/dead-code.md), [decision-surface](references/cli/decision-surface.md), [dupes](references/cli/dupes.md), [environment-variables](references/cli/environment-variables.md), [explain](references/cli/explain.md), [fix](references/cli/fix.md), [flags](references/cli/flags.md), [global-flags](references/cli/global-flags.md), [health](references/cli/health.md), [hooks](references/cli/hooks.md), [impact](references/cli/impact.md), [init](references/cli/init.md), [inline-suppression](references/cli/inline-suppression.md), [inspect](references/cli/inspect.md), [json-output](references/cli/json-output.md), [license](references/cli/license.md), [list](references/cli/list.md), [migrate](references/cli/migrate.md), [mutation](references/cli/mutation.md), [output-formats](references/cli/output-formats.md), [plugin-check](references/cli/plugin-check.md), [plugin-schema](references/cli/plugin-schema.md), [rule-pack-schema](references/cli/rule-pack-schema.md), [schema](references/cli/schema.md), [security](references/cli/security.md), [telemetry](references/cli/telemetry.md), [trace](references/cli/trace.md).
 
 ## Issue Types
 
@@ -133,7 +133,7 @@ Fallow Cloud also runs a hosted MCP server at `POST https://api.fallow.cloud/mcp
 Full tool catalogue, resource catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
 
 ## References
-- [CLI Reference](references/cli-reference.md): the command catalogue, complete flag specifications, and configuration field details
+- [CLI Reference](references/cli-reference.md): the command catalogue and an index of the per-command files under `references/cli/`, with complete flag specifications, global flags, and configuration field details
 - [MCP Tools](references/mcp.md): MCP server tool and resource catalogues, CLI fallbacks, params, and agent dispatch guidance
 - [Issue Types](references/issue-types.md): every issue type with its filter flag, fixability, and suppression comment
 - [Gotchas](references/gotchas.md): common pitfalls, edge cases, and correct usage patterns

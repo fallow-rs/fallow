@@ -981,14 +981,24 @@ test("released skills agree across the npm package, the fallow-api embed, and ag
   assert.deepEqual(released, ["fallow", "fallow-setup"]);
 
   const buildScript = readFileSync("crates/api/build/embed_skills.rs", "utf8");
-  const embedded = [...buildScript.matchAll(/^ {8}"([a-z-]+)",\n {8}&\[\n([\s\S]*?)^ {8}\],/gmu)];
+  const embedded = [
+    ...buildScript.matchAll(
+      /^ {8}"([a-z-]+)",\n {8}&\[\n([\s\S]*?)^ {8}\],\n(?: {8}\/\/.*\n)* {8}&\[([^\]]*)\],/gmu,
+    ),
+  ];
   assert.deepEqual(
     embedded.map(([, name]) => name),
     released,
     "crates/api/build/embed_skills.rs must embed every released skill in the same order",
   );
-  for (const [, name, list] of embedded) {
-    const files = [...list.matchAll(/"([^"]+)"/gu)].map(([, path]) => path).toSorted();
+  for (const [, name, list, dirs] of embedded) {
+    const listed = [...list.matchAll(/"([^"]+)"/gu)].map(([, path]) => path);
+    const fromDirs = [...dirs.matchAll(/"([^"]+)"/gu)].flatMap(([, dir]) =>
+      readdirSync(join("npm/fallow/skills", name, dir))
+        .filter((file) => file.endsWith(".md"))
+        .map((file) => `${dir}/${file}`),
+    );
+    const files = [...listed, ...fromDirs].toSorted();
     assert.deepEqual(files, releasedSkillFiles(name), `embed_skills.rs file list for ${name}`);
   }
 

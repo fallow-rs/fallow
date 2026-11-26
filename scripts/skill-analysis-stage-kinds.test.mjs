@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKSPACE_RS = "crates/types/src/workspace_kind_class.rs";
-const SKILL_REFERENCE = "npm/fallow/skills/fallow/references/cli-reference.md";
+const SKILL_REFERENCE = "npm/fallow/skills/fallow/references/cli/list.md";
 const DOC_SENTENCE =
   /The (?:\w+ )?analysis-stage kinds \(([^)]*)\) are recorded by the dead-code analyze pass/u;
 

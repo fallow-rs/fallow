@@ -249,6 +249,7 @@ fn skill_embedded_copy_round_trips_when_available() {
     );
     for (name, reference) in [
         ("fallow", "references/cli-reference.md"),
+        ("fallow", "references/cli/audit.md"),
         ("fallow-setup", "references/ci-gate.md"),
     ] {
         let skill_dir = dir.path().join(".agents/skills").join(name);
@@ -264,6 +265,20 @@ fn skill_embedded_copy_round_trips_when_available() {
             }
         );
     }
+
+    let uninstall = Ctx {
+        mode: Mode::Uninstall,
+        ..ctx
+    };
+    let removed = skill::uninstall(&uninstall, &[Harness::Codex]);
+    assert!(
+        removed.iter().all(|s| s.status == StepStatus::Removed),
+        "{removed:?}"
+    );
+    assert!(
+        !dir.path().join(".agents/skills").exists(),
+        "uninstall removes the nested reference directories too"
+    );
 }
 
 #[test]

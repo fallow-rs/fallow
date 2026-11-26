@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { cliReferenceFiles } from "./generate-agent-docs.mjs";
 import {
   auditEmittedVersions,
   findEmittedVersions,
@@ -172,9 +174,12 @@ test("the repository's emitted version strings match the workspace version", () 
 });
 
 test("the gate catches a skill example that rotted several releases ago", () => {
-  const reference = "npm/fallow/skills/fallow/references/cli-reference.md";
+  const skillDir = "npm/fallow/skills/fallow";
+  const reference = cliReferenceFiles(skillDir)
+    .map((file) => readFileSync(join(skillDir, file), "utf8"))
+    .join("\n");
   const current = workspaceVersion();
-  const rotted = readFileSync(reference, "utf8").replaceAll(`"${current}"`, '"3.16.0"');
+  const rotted = reference.replaceAll(`"${current}"`, '"3.16.0"');
   const found = findEmittedVersions(rotted);
 
   assert.ok(found.length > 0, "the reference must carry fallow output examples");
