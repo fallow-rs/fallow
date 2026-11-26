@@ -21,14 +21,14 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 | `dead-code` | `unlisted-dependency` | 94 | 46 | 31 | 15 | 0 | 84% (71 to 88) | 3 (83% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unresolved-import` | 14 | 14 | 0 | 14 | 0 | 0% (0 to 65) | 3 (43% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-catalog-entry` | 16 | 16 | 16 | 0 | 0 | 100% (79 to 100) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-class-member` | 358 | 70 | 30 | 40 | 0 | 57% (36 to 76) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-class-member` | 268 | 70 | 33 | 37 | 0 | 60% (40 to 77) | 1 | 3.49.0, 2026-11-26 |
 | `dead-code` | `unused-component-prop` | 18 | 18 | 18 | 0 | 0 | 100% (81 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dependency` | 32 | 32 | 29 | 3 | 0 | 91% (58 to 99) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dependency-override` | 7 | 7 | 7 | 0 | 0 | 100% (59 to 100) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-dev-dependency` | 19 | 19 | 14 | 5 | 0 | 74% (28 to 99) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-enum-member` | 385 | 60 | 29 | 31 | 0 | 40% (33 to 49) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-export` | 670 | 91 | 85 | 6 | 0 | 94% (75 to 99) | 1 | 3.48.0, 2026-11-25 |
-| `dead-code` | `unused-file` | 381 | 120 | 66 | 54 | 0 | 57% (42 to 70) | 2 (100% agree) | 3.48.0, 2026-11-25 |
+| `dead-code` | `unused-file` | 262 | 104 | 69 | 35 | 0 | 80% (60 to 91) | 3 (97% agree) | 3.49.0, 2026-11-26 |
 | `dead-code` | `unused-load-data-key` | 5 | 5 | 2 | 3 | 0 | 40% (1 to 88) | 1 | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-tagged-error` | 1 | 1 | 1 | 0 | 0 | 100% (2 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `unused-type` | 579 | 91 | 90 | 1 | 0 | 100% (84 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
@@ -50,12 +50,12 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 - `unlisted-binary`: Mise-managed binary (1)
 - `unlisted-dependency`: documentation example (8), Deno import map (7)
 - `unresolved-import`: documentation example (8), build output import (3), generated type import (2), server route URL (1)
-- `unused-class-member`: test use (13), library contract (11), indirect receiver (6), release script (3), store hook (3), MobX annotation (2), required interface (1), Svelte template (1)
+- `unused-class-member`: library contract (7), test fixture call (7), test use (5), fluent builder call (3), framework lifecycle hook (2), framework property (2), indirect receiver (2), test global storage implementation (2), dependency injection call (1), instance property call (1), release script (1), required interface (1), serialized log metadata (1), test proxy call (1), typed test mock reference (1)
 - `unused-dependency`: required styling peer dependency (2), imported by an extensionless CLI entry (1)
 - `unused-dev-dependency`: loaded by tool configuration (4), invoked through a package binary (1)
 - `unused-enum-member`: published SDK enum contract (29), serialized value in live type (2)
 - `unused-export`: used in a Svelte component (4), tooling configuration export (2)
-- `unused-file`: dynamic database migration (25), React Router preview entry (11), documented Deno command (4), standalone test fixture generator (4), TypeScript test discovery (4), configured task command (2), shell script invocation (2), computed worker entry (1), tool-discovered configuration (1)
+- `unused-file`: computed worker path (4), documented Deno command (4), standalone test fixture generator (4), TypeScript test discovery (4), Vite dependency scan entry (4), configured task command (2), documented direct script (2), Docusaurus theme override (2), React Email preview discovery (2), shell script invocation (2), computed worker entry (1), Mise task entry (1), Prisma seed directory loader (1), tool-discovered configuration (1), Vitest global setup (1)
 - `unused-load-data-key`: HTTP resource response (3)
 - `unused-type`: imported by type tests (1)
 - `code-duplication`: unrelated markup skeleton (2), generated code (1)

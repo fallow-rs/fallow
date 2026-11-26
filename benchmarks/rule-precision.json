@@ -392,8 +392,8 @@
       "rule": "unused-class-member",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.48.0",
-      "reviewed_on": "2026-11-25",
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-26",
       "sample_size": 30,
       "reviews": 1,
       "agreement_percent": null,
@@ -410,16 +410,16 @@
         {
           "project": "plane",
           "commit": "723bb178f97b87e80a23df9eed134eb1388d7465",
-          "findings": 266,
+          "findings": 180,
           "sampled": 30,
-          "real": 21,
-          "noise": 9,
+          "real": 24,
+          "noise": 6,
           "unsure": 0
         },
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 82,
+          "findings": 78,
           "sampled": 30,
           "real": 5,
           "noise": 25,
@@ -428,35 +428,63 @@
       ],
       "noise_classes": [
         {
-          "class": "test use",
-          "count": 13
+          "class": "library contract",
+          "count": 7
         },
         {
-          "class": "library contract",
-          "count": 11
+          "class": "test fixture call",
+          "count": 7
+        },
+        {
+          "class": "test use",
+          "count": 5
+        },
+        {
+          "class": "fluent builder call",
+          "count": 3
+        },
+        {
+          "class": "framework lifecycle hook",
+          "count": 2
+        },
+        {
+          "class": "framework property",
+          "count": 2
         },
         {
           "class": "indirect receiver",
-          "count": 6
+          "count": 2
+        },
+        {
+          "class": "test global storage implementation",
+          "count": 2
+        },
+        {
+          "class": "dependency injection call",
+          "count": 1
+        },
+        {
+          "class": "instance property call",
+          "count": 1
         },
         {
           "class": "release script",
-          "count": 3
-        },
-        {
-          "class": "store hook",
-          "count": 3
-        },
-        {
-          "class": "MobX annotation",
-          "count": 2
+          "count": 1
         },
         {
           "class": "required interface",
           "count": 1
         },
         {
-          "class": "Svelte template",
+          "class": "serialized log metadata",
+          "count": 1
+        },
+        {
+          "class": "test proxy call",
+          "count": 1
+        },
+        {
+          "class": "typed test mock reference",
           "count": 1
         }
       ]
@@ -723,19 +751,19 @@
       "rule": "unused-file",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.48.0",
-      "reviewed_on": "2026-11-25",
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-26",
       "sample_size": 30,
-      "reviews": 2,
-      "agreement_percent": 100,
+      "reviews": 3,
+      "agreement_percent": 97,
       "projects": [
         {
           "project": "documenso",
           "commit": "cc491f1ec224bda8d3e09338e291ca11fe47641a",
-          "findings": 39,
-          "sampled": 30,
-          "real": 12,
-          "noise": 18,
+          "findings": 27,
+          "sampled": 27,
+          "real": 13,
+          "noise": 14,
           "unsure": 0
         },
         {
@@ -750,10 +778,10 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 124,
-          "sampled": 30,
-          "real": 2,
-          "noise": 28,
+          "findings": 17,
+          "sampled": 17,
+          "real": 4,
+          "noise": 13,
           "unsure": 0
         },
         {
@@ -768,12 +796,8 @@
       ],
       "noise_classes": [
         {
-          "class": "dynamic database migration",
-          "count": 25
-        },
-        {
-          "class": "React Router preview entry",
-          "count": 11
+          "class": "computed worker path",
+          "count": 4
         },
         {
           "class": "documented Deno command",
@@ -788,7 +812,23 @@
           "count": 4
         },
         {
+          "class": "Vite dependency scan entry",
+          "count": 4
+        },
+        {
           "class": "configured task command",
+          "count": 2
+        },
+        {
+          "class": "documented direct script",
+          "count": 2
+        },
+        {
+          "class": "Docusaurus theme override",
+          "count": 2
+        },
+        {
+          "class": "React Email preview discovery",
           "count": 2
         },
         {
@@ -800,7 +840,19 @@
           "count": 1
         },
         {
+          "class": "Mise task entry",
+          "count": 1
+        },
+        {
+          "class": "Prisma seed directory loader",
+          "count": 1
+        },
+        {
           "class": "tool-discovered configuration",
+          "count": 1
+        },
+        {
+          "class": "Vitest global setup",
           "count": 1
         }
       ]
