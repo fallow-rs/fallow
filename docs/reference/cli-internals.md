@@ -350,9 +350,8 @@ line states exit code 0.
     the effective type-aware selection.
 - The unused-file cascade filter is
   `fallow_engine::dead_code::hide_cascade_findings`. It runs inside
-  `apply_rule_severities`, so the CLI, the programmatic API, MCP, the Node
-  bindings and the editor diagnostics hide the same set. `fix` calls it
-  directly, because `fix` runs no rule pass. The filter removes
+  `apply_rule_severities`, so the CLI, `fix`, the programmatic API, MCP, the
+  Node bindings and the editor diagnostics hide the same set. The filter removes
   `unused_exports`, `unused_types`, `unused_class_members` and
   `unused_enum_members` findings only when the report lists their file in
   `unused_files`. Other finding kinds in an unused file stay.
