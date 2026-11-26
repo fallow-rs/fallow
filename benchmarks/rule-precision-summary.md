@@ -12,7 +12,7 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 
 | Command | Rule | Findings | Sampled | Real | Noise | Unsure | Precision | Reviews | Measured on |
 |---|---|---|---|---|---|---|---|---|---|
-| `dead-code` | `circular-dependency` | 182 | 88 | 73 | 15 | 0 | 85% (67 to 93) | 1 | 3.48.0, 2026-11-25 |
+| `dead-code` | `circular-dependency` | 166 | 88 | 82 | 6 | 0 | 95% (78 to 99) | 1 | 3.49.0, 2026-11-26 |
 | `dead-code` | `duplicate-export` | 20 | 20 | 17 | 3 | 0 | 85% (36 to 98) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `duplicate-export-alias` | 69 | 50 | 50 | 0 | 0 | 100% (76 to 100) | 2 (100% agree) | 3.48.0, 2026-11-25 |
 | `dead-code` | `package-cycle` | 20 | 20 | 18 | 2 | 0 | 90% (68 to 99) | 1 | 3.48.0, 2026-11-25 |
@@ -44,7 +44,7 @@ Reviews is the count of independent reviews; the percentage is how often the fir
 
 ## Noise classes
 
-- `circular-dependency`: implicit type-only import (14), elided unused import (1)
+- `circular-dependency`: type-only import elision (5), elided unused import (1)
 - `duplicate-export`: Svelte component instance method (3)
 - `package-cycle`: Playwright fixture import (2)
 - `unlisted-binary`: Mise-managed binary (1)

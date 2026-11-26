@@ -27,8 +27,8 @@
       "rule": "circular-dependency",
       "command": "dead-code",
       "args": [],
-      "fallow_version": "3.48.0",
-      "reviewed_on": "2026-11-25",
+      "fallow_version": "3.49.0",
+      "reviewed_on": "2026-11-26",
       "sample_size": 30,
       "reviews": 1,
       "agreement_percent": null,
@@ -54,10 +54,10 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 56,
+          "findings": 40,
           "sampled": 30,
-          "real": 16,
-          "noise": 14,
+          "real": 25,
+          "noise": 5,
           "unsure": 0
         },
         {
@@ -72,8 +72,8 @@
       ],
       "noise_classes": [
         {
-          "class": "implicit type-only import",
-          "count": 14
+          "class": "type-only import elision",
+          "count": 5
         },
         {
           "class": "elided unused import",
