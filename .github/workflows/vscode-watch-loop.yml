@@ -1,0 +1,121 @@
+name: VS Code Watch Loop
+
+# Drives a real VS Code with the extension and the language server of the
+# selected ref, saves `.fallowrc.json`, and fails when the save starts a loop
+# of analysis runs, a cancelled run, or `[error]` lines in the Output channel
+# (#5278). A second scenario rewrites the config with the same bytes each
+# second, like a virus scanner or a sync client. The run takes too long for
+# pull request CI, so a maintainer starts it by hand for a watcher or
+# scheduler change. It does not run on pull requests or on push to main, so
+# scripts/verify-release-ci.mjs does not need it in REQUIRED_WORKFLOWS.
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Public GitHub repository (owner/name) to open instead of the small fixture
+        required: false
+        default: ''
+        type: string
+      repository-ref:
+        description: Branch, tag or commit of that repository
+        required: false
+        default: ''
+        type: string
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  watch-loop:
+    name: Watch loop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          save-if: 'false'
+          cache-key: vscode-watch-loop
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 11.25.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+
+      - name: Build the CLI and the language server
+        run: cargo build -p fallow-cli -p fallow-lsp --bin fallow --bin fallow-lsp
+
+      - name: Build the extension
+        run: |
+          pnpm --dir editors/vscode install --frozen-lockfile --ignore-scripts
+          pnpm --dir editors/vscode run bundle
+
+      - name: Check out the selected project
+        if: ${{ inputs.repository != '' }}
+        env:
+          PROJECT_REPOSITORY: ${{ inputs.repository }}
+          PROJECT_REF: ${{ inputs.repository-ref }}
+        run: |
+          [[ "$PROJECT_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+            echo "::error::repository must be owner/name"
+            exit 1
+          }
+          # A ref that starts with `-` would reach git as an option.
+          [[ -z "$PROJECT_REF" || "$PROJECT_REF" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || {
+            echo "::error::repository-ref must be a branch, tag or commit"
+            exit 1
+          }
+          project="$RUNNER_TEMP/project"
+          git init -q "$project"
+          git -C "$project" fetch -q --depth 1 "https://github.com/$PROJECT_REPOSITORY.git" "${PROJECT_REF:-HEAD}"
+          git -C "$project" checkout -q FETCH_HEAD
+          echo "WATCH_LOOP_WORKSPACE=$project" >> "$GITHUB_ENV"
+
+      - name: Save the config once, then rewrite it with the same bytes each second
+        env:
+          FALLOW_BIN_DIR: ${{ github.workspace }}/target/debug
+          OUT_DIR: ${{ runner.temp }}/watch-loop
+          VSCODE_CACHE: ${{ runner.temp }}/fallow-vscode-test-cache
+        run: |
+          display=()
+          if [ "$RUNNER_OS" = Linux ]; then display=(xvfb-run -a); fi
+          workspace=()
+          if [ -n "${WATCH_LOOP_WORKSPACE:-}" ]; then workspace=(--workspace "$WATCH_LOOP_WORKSPACE"); fi
+          scenario() {
+            "${display[@]}" node editors/vscode/scripts/watch-loop-harness.mjs \
+              --bin "$FALLOW_BIN_DIR" --out "$OUT_DIR" --vscode-cache "$VSCODE_CACHE" \
+              "${workspace[@]}" --idle 60 --max-runs 2 --max-cancels 0 --max-error-lines 0 "$@"
+          }
+          printf '### Watch loop on %s\n\n' "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          scenario --label save || status=1
+          scenario --label touch --touch 1000 || status=1
+          exit "$status"
+
+      - name: Upload the screenshots and the logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: watch-loop-${{ matrix.os }}
+          path: ${{ runner.temp }}/watch-loop
+          if-no-files-found: ignore
+          retention-days: 14

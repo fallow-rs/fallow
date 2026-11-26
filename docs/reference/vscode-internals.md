@@ -150,3 +150,18 @@ changes. Release packaging uses `package:variants` to build the universal
 fallback and every platform target from one build into an explicit output
 directory. Verify extracted artifacts with `verify:vsix` and the matching
 `--target` value.
+
+For a change to the watched-file events, the analysis scheduler or the stderr
+log of the server, start the `VS Code Watch Loop` workflow by hand. It runs
+`scripts/watch-loop-harness.mjs` in a real VS Code on Linux and Windows. To
+run the harness on a local machine:
+
+```bash
+cargo build -p fallow-cli -p fallow-lsp --bin fallow --bin fallow-lsp
+pnpm --dir editors/vscode run bundle
+node editors/vscode/scripts/watch-loop-harness.mjs --bin target/debug \
+  --out /tmp/watch-loop --touch 1000 --max-runs 2 --max-cancels 0 --max-error-lines 0
+```
+
+The harness copies the workspace (`--workspace`, the small fixture by
+default) before the run. On Linux, start it under `xvfb-run -a`.
