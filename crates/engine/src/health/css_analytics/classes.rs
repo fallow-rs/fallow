@@ -675,7 +675,7 @@ pub(super) fn scan_unreferenced_css_classes(
     };
 
     let published = published_css_paths(config);
-    let dependency_prefixes = dependency_class_prefixes(config);
+    let dependency_classes = DependencyClasses::load(config);
 
     let mut out: Vec<UnreferencedCssClass> = Vec::new();
     for (rel, classes) in &class_inventory.defined_classes {
@@ -684,7 +684,7 @@ pub(super) fn scan_unreferenced_css_classes(
             rel,
             classes.clone(),
             &published,
-            &dependency_prefixes,
+            &dependency_classes,
             reference_surface,
         );
     }
@@ -1092,6 +1092,9 @@ fn collect_css_reference_surface_file(
     let is_markup_surface = extension.is_some_and(is_markup_source_extension)
         || (matches!(extension, Some("js" | "mjs" | "cjs")) && has_jsx_class_attribute(&source));
     collect_dom_class_reference_surface(surface, &source);
+    if extension.is_some_and(is_script_source_extension) {
+        collect_code_literal_reference_surface(surface, &source);
+    }
     if !is_markup_surface {
         return;
     }
@@ -1138,6 +1141,26 @@ fn collect_dom_class_reference_surface(surface: &mut CssReferenceSurfaceBuilder,
         surface.dynamic_corpus.push_str(&value);
         surface.dynamic_corpus.push('\n');
     }
+}
+
+/// Credit the class names that code holds in string literals (a constant, a
+/// pushed literal) and the class prefixes of template literal heads.
+fn collect_code_literal_reference_surface(surface: &mut CssReferenceSurfaceBuilder, source: &str) {
+    let scan = scan_code_literal_classes(source);
+    surface.static_tokens.extend(scan.tokens);
+    for prefix in scan.prefixes {
+        surface.dynamic_corpus.push_str(&prefix);
+        surface.dynamic_corpus.push_str("${\n");
+    }
+}
+
+/// Source extensions whose files hold script code, where string literals
+/// follow JavaScript syntax. Markdown and HTML hold prose quotes instead.
+fn is_script_source_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "vue" | "svelte" | "astro"
+    )
 }
 
 /// Walks the project for Markdown and template files. The walk uses the
@@ -1275,7 +1298,7 @@ fn push_unreferenced_css_class_candidates(
     rel: &str,
     classes: Vec<(String, u32)>,
     published: &rustc_hash::FxHashSet<String>,
-    dependency_prefixes: &rustc_hash::FxHashSet<String>,
+    dependency_classes: &DependencyClasses,
     reference_surface: &CssReferenceSurface,
 ) {
     use fallow_output::{CssCandidateAction, UnreferencedCssClass};
@@ -1290,7 +1313,7 @@ fn push_unreferenced_css_class_candidates(
     for (class, line) in classes {
         if class.len() >= MIN_UNREF_CLASS_LEN
             && !reference_surface.references(&class)
-            && !class_matches_dependency_prefix(&class, dependency_prefixes)
+            && !dependency_classes.covers(rel, &class)
         {
             out.push(UnreferencedCssClass {
                 actions: vec![CssCandidateAction::verify_unreferenced_class(

@@ -2,14 +2,15 @@
 
 use fallow_config::ResolvedConfig;
 
+use super::dependency_classes::DependencyClasses;
 use super::package_json::{
-    class_matches_dependency_prefix, dependency_class_prefixes, project_uses_tailwind,
-    project_uses_tailwind_plugin, published_css_paths,
+    project_uses_tailwind, project_uses_tailwind_plugin, published_css_paths,
 };
 use super::runtime_filter::relative_to_root;
 use super::tailwind_theme;
 
 mod classes;
+mod code_literals;
 mod cva;
 mod keyframe_hints;
 mod markup_scan;
@@ -20,6 +21,7 @@ mod theme_tokens;
 mod token_consumers;
 
 use classes::*;
+use code_literals::*;
 use cva::*;
 use keyframe_hints::*;
 use markup_scan::*;
