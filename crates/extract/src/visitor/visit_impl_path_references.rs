@@ -10,9 +10,10 @@
 use oxc_ast::ast::*;
 use oxc_span::Span;
 
-use crate::DynamicImportInfo;
 use crate::js_text::JsText;
-use fallow_types::extract::ImportLoadKind;
+use crate::visitor::helpers::escape_glob_literal;
+use crate::{DynamicImportInfo, ImportedName};
+use fallow_types::extract::{DynamicImportPattern, ImportLoadKind, ModuleLoadMechanism};
 
 use super::super::super::ModuleInfoExtractor;
 use super::super::super::declarations::ModuleRelativePath;
@@ -48,6 +49,21 @@ impl ModuleRelativePath {
         true
     }
 
+    /// The glob prefix of the files directly inside the directory that the
+    /// path names, such as `../schema/migrations/`.
+    fn folder_glob_prefix(&self) -> String {
+        let mut prefix = if self.parents == 0 {
+            "./".to_string()
+        } else {
+            "../".repeat(self.parents)
+        };
+        for part in &self.parts {
+            prefix.push_str(&escape_glob_literal(part));
+            prefix.push('/');
+        }
+        prefix
+    }
+
     /// The import specifier of the path, when the path names a script file.
     fn script_specifier(&self) -> Option<String> {
         let (_, extension) = self.parts.last()?.rsplit_once('.')?;
@@ -62,6 +78,19 @@ impl ModuleRelativePath {
         Some(format!("{prefix}{}", self.parts.join("/")))
     }
 }
+
+/// The constructor of Kysely that imports each migration file of a folder.
+const FILE_MIGRATION_PROVIDER: &str = "FileMigrationProvider";
+
+/// The Kysely entry points that export `FileMigrationProvider`.
+const FILE_MIGRATION_PROVIDER_SOURCES: &[&str] = &["kysely", "kysely/migration"];
+
+/// The option of `FileMigrationProvider` that names the migration folder.
+const MIGRATION_FOLDER_OPTION: &str = "migrationFolder";
+
+/// The glob suffix of the files that `FileMigrationProvider` imports. Kysely
+/// reads the folder without recursion and skips other extensions.
+const MIGRATION_FILE_SUFFIX: &str = ".{js,ts,mjs,mts,cjs,cts}";
 
 /// What reads the path of a reference.
 #[derive(Clone, Copy)]
@@ -205,6 +234,79 @@ impl ModuleInfoExtractor {
                 .module_paths
                 .insert(name.to_string(), (depth, path));
         }
+    }
+
+    /// Record the folder of `new FileMigrationProvider({ migrationFolder })`
+    /// as a glob over its files (issue #5294). Kysely imports each file with
+    /// a dynamic `import()` and reads its `up` and `down` exports, so the
+    /// pattern credits the whole module.
+    pub(in crate::visitor) fn record_migration_folder_pattern(&mut self, expr: &NewExpression<'_>) {
+        if !self.is_file_migration_provider(&expr.callee) {
+            return;
+        }
+        let Some(Argument::ObjectExpression(options)) = expr.arguments.first() else {
+            return;
+        };
+        let Some(folder) = options.properties.iter().find_map(|prop| match prop {
+            ObjectPropertyKind::ObjectProperty(prop)
+                if prop
+                    .key
+                    .static_name()
+                    .is_some_and(|name| name == MIGRATION_FOLDER_OPTION) =>
+            {
+                Some(&prop.value)
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        let Some(path) = self.module_relative_path(folder) else {
+            return;
+        };
+        let prefix = path.folder_glob_prefix();
+        // The `*` of an include glob can cross a `/`, so an exclude keeps the
+        // files of the sub-folders out. Kysely skips declaration files.
+        let excludes = vec![
+            format!("{prefix}*/**"),
+            format!("{prefix}*.d.{{ts,mts,cts}}"),
+        ];
+        self.dynamic_import_patterns.push(DynamicImportPattern {
+            prefix,
+            suffix: Some(MIGRATION_FILE_SUFFIX.to_string()),
+            excludes,
+            span: expr.span,
+            mechanism: ModuleLoadMechanism::EsModule,
+            imported_name: ImportedName::Namespace,
+        });
+    }
+
+    /// Whether `callee` is the `FileMigrationProvider` of a Kysely import:
+    /// a named import, or a member of a namespace import.
+    fn is_file_migration_provider(&self, callee: &Expression<'_>) -> bool {
+        let (local_name, via_namespace) = match callee.get_inner_expression() {
+            Expression::Identifier(ident) => (ident.name.as_str(), false),
+            Expression::StaticMemberExpression(member)
+                if member.property.name == FILE_MIGRATION_PROVIDER =>
+            {
+                let Expression::Identifier(object) = &member.object else {
+                    return false;
+                };
+                (object.name.as_str(), true)
+            }
+            _ => return false,
+        };
+        self.imports.iter().any(|import| {
+            FILE_MIGRATION_PROVIDER_SOURCES.contains(&import.source.as_str())
+                && import.local_name == local_name
+                && if via_namespace {
+                    matches!(import.imported_name, ImportedName::Namespace)
+                } else {
+                    matches!(
+                        &import.imported_name,
+                        ImportedName::Named(name) if name == FILE_MIGRATION_PROVIDER
+                    )
+                }
+        })
     }
 
     /// Record a join on the module directory that names a script file.

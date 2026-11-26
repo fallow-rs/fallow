@@ -251,6 +251,8 @@ mod release_it_plugin;
 mod rspress_theme;
 #[path = "integration_test/rules_config.rs"]
 mod rules_config;
+#[path = "integration_test/runtime_loaded_folders.rs"]
+mod runtime_loaded_folders;
 #[path = "integration_test/safe_analysis.rs"]
 mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]

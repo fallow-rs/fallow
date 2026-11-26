@@ -1,0 +1,6 @@
+### Fixed
+
+- **`fallow dead-code` no longer reports the files of a Kysely migration folder as unused.** Kysely's `FileMigrationProvider`, imported from `kysely` or `kysely/migration`, imports each script file of its `migrationFolder`. When that folder is a path below the module directory, such as `join(import.meta.dirname, '..', 'schema/migrations')`, fallow now credits the files directly inside the folder and their exports. Files in a sub-folder and declaration files stay unused, because Kysely does not read them. The `up` and `down` exports of migration files are no longer reported as duplicate exports. The extraction cache version changes, so the first run after the upgrade parses each file again.
+  (Closes [#5294](https://github.com/fallow-rs/fallow/issues/5294))
+- **`fallow dead-code` now finds a React Router app in a package sub-folder.** A package script such as `react-router dev --config preview/vite.config.ts` names a Vite config. When that config sets a static `root` below the package root, fallow reads `react-router.config.*` and the app directory from that root, and credits the root route, the entry files and the routes. This also works when the package does not declare `@react-router/dev` itself.
+  (Closes [#5295](https://github.com/fallow-rs/fallow/issues/5295))

@@ -111,8 +111,14 @@ pub(super) fn compile_plugin_matchers(
     compile_used_export_rules(pr.used_exports.iter())
 }
 
-/// Compile TanStack route contract export rules for duplicate-export filtering.
-fn compile_tanstack_duplicate_export_matchers(
+/// The plugins whose used-export rules name a module contract: a loader reads
+/// the same export names from each matching file, so those names are not
+/// duplicates. TanStack Router reads the route exports. Kysely reads `up` and
+/// `down` from each migration file (issue #5294).
+const DUPLICATE_EXPORT_CONTRACT_PLUGINS: &[&str] = &[TANSTACK_ROUTER_PLUGIN_NAME, "kysely"];
+
+/// Compile the module contract export rules for duplicate-export filtering.
+fn compile_duplicate_export_contract_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
@@ -121,7 +127,7 @@ fn compile_tanstack_duplicate_export_matchers(
     compile_used_export_rules(
         pr.used_exports
             .iter()
-            .filter(|rule| rule.plugin_name == TANSTACK_ROUTER_PLUGIN_NAME),
+            .filter(|rule| DUPLICATE_EXPORT_CONTRACT_PLUGINS.contains(&rule.plugin_name.as_str())),
     )
 }
 
@@ -1329,7 +1335,7 @@ fn collect_duplicate_export_locations(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> FxHashMap<String, Vec<ExportEntry>> {
     let ignore_matchers = config.compiled_ignore_exports.as_slice();
-    let tanstack_duplicate_matchers = compile_tanstack_duplicate_export_matchers(plugin_result);
+    let duplicate_contract_matchers = compile_duplicate_export_contract_matchers(plugin_result);
     let has_tanstack_router = is_tanstack_router_active(plugin_result);
 
     let mut export_locations: FxHashMap<String, Vec<ExportEntry>> = FxHashMap::default();
@@ -1342,7 +1348,7 @@ fn collect_duplicate_export_locations(
                 config,
                 suppressions,
                 ignore_matchers,
-                tanstack_duplicate_matchers: &tanstack_duplicate_matchers,
+                duplicate_contract_matchers: &duplicate_contract_matchers,
                 has_tanstack_router,
                 module_idx: idx,
                 module,
@@ -1359,7 +1365,7 @@ struct DuplicateExportModuleInput<'a> {
     config: &'a ResolvedConfig,
     suppressions: &'a SuppressionContext<'a>,
     ignore_matchers: &'a [CompiledIgnoreExportRule],
-    tanstack_duplicate_matchers: &'a PluginMatchers<'a>,
+    duplicate_contract_matchers: &'a PluginMatchers<'a>,
     has_tanstack_router: bool,
     module_idx: usize,
     module: &'a ModuleNode,
@@ -1387,20 +1393,17 @@ fn collect_module_duplicate_export_locations(
         &input.config.root,
         input.ignore_matchers,
     );
-    let (_, matching_tanstack_contracts) = matchers_for_module(
+    let (_, matching_contracts) = matchers_for_module(
         &input.module.path,
         &input.config.root,
         &[],
-        input.tanstack_duplicate_matchers,
+        input.duplicate_contract_matchers,
     );
 
     for export in &input.module.exports {
-        let Some((name, entry)) = duplicate_export_entry(
-            export,
-            &input,
-            &matching_ignore,
-            &matching_tanstack_contracts,
-        ) else {
+        let Some((name, entry)) =
+            duplicate_export_entry(export, &input, &matching_ignore, &matching_contracts)
+        else {
             continue;
         };
         export_locations.entry(name).or_default().push(entry);
@@ -1411,7 +1414,7 @@ fn duplicate_export_entry(
     export: &ExportSymbol,
     input: &DuplicateExportModuleInput<'_>,
     matching_ignore: &[&[String]],
-    matching_tanstack_contracts: &[&[&str]],
+    matching_contracts: &[&[&str]],
 ) -> Option<(String, ExportEntry)> {
     if matches!(export.name, crate::extract::ExportName::Default)
         || matches!(&export.name, crate::extract::ExportName::Named(name) if name == "default")
@@ -1422,7 +1425,7 @@ fn duplicate_export_entry(
         return None;
     }
     let name = export.name.to_string();
-    if is_export_ignored(&name, matching_ignore, matching_tanstack_contracts) {
+    if is_export_ignored(&name, matching_ignore, matching_contracts) {
         return None;
     }
     if input.has_tanstack_router

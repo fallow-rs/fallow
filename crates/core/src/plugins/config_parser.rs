@@ -2204,7 +2204,7 @@ fn single_returned_expression<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expr
 /// CommonJS global or its ESM equivalent `import.meta.dirname` (Node 20.11+).
 /// As the leading argument of `resolve(...)` / `join(...)` it is dropped so the
 /// remaining literal segments yield a config-directory-relative path.
-fn is_dirname_anchor(expr: &Expression) -> bool {
+pub(crate) fn is_dirname_anchor(expr: &Expression) -> bool {
     match expr {
         Expression::Identifier(id) => id.name == "__dirname",
         Expression::StaticMemberExpression(member) => {

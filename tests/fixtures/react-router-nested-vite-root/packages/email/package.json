@@ -1,0 +1,5 @@
+{
+  "name": "email",
+  "main": "./index.ts",
+  "scripts": { "dev": "react-router dev --config preview/vite.config.ts" }
+}

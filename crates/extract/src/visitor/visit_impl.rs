@@ -1246,6 +1246,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_callee_use(&expr.callee, expr.span.start, true);
         self.record_new_url_package_reference(expr);
         self.record_worker_new_url_arguments(expr);
+        self.record_migration_folder_pattern(expr);
 
         self.record_new_url_edge(expr);
 

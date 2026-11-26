@@ -1,0 +1,1 @@
+{ "name": "kysely-migration-folder", "type": "module", "main": "src/index.ts", "dependencies": { "kysely": "^0.28.0" } }
