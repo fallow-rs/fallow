@@ -161,11 +161,9 @@ impl OutsideKeys {
 pub(super) fn merged_error(path: &Path, values: &[LocalValue]) -> miette::Report {
     for value in values.iter().filter(|value| value.inside) {
         if let Err(error) = serde_json::from_value::<FallowConfig>(value.value.clone()) {
-            return miette::miette!(
-                "{} in {}",
-                crate::parse_error::describe_json(&error),
-                value.path.display()
-            );
+            let reason = crate::parse_error::describe_json(&error);
+            let hint = super::parsing::unknown_field_hint(&value.path, &reason);
+            return miette::miette!("{reason} in {}{hint}", value.path.display());
         }
     }
     let outside: Vec<String> = values
