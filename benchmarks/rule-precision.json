@@ -28,7 +28,7 @@
       "command": "dead-code",
       "args": [],
       "fallow_version": "3.49.0",
-      "reviewed_on": "2026-11-26",
+      "reviewed_on": "2026-11-27",
       "sample_size": 30,
       "reviews": 1,
       "agreement_percent": null,
@@ -54,10 +54,10 @@
         {
           "project": "immich",
           "commit": "7b27863b13d7ec52340e87637d71a39aa8d7efc0",
-          "findings": 40,
+          "findings": 32,
           "sampled": 30,
-          "real": 25,
-          "noise": 5,
+          "real": 30,
+          "noise": 0,
           "unsure": 0
         },
         {
@@ -71,10 +71,6 @@
         }
       ],
       "noise_classes": [
-        {
-          "class": "type-only import elision",
-          "count": 5
-        },
         {
           "class": "elided unused import",
           "count": 1
