@@ -860,6 +860,8 @@ mod issue_5064_shadowed_namespace_import;
 mod issue_5098_astro_tag_attrs;
 #[path = "integration_test/issue_5162_css_module_barrel.rs"]
 mod issue_5162_css_module_barrel;
+#[path = "integration_test/issue_5231_shadowed_namespace_member.rs"]
+mod issue_5231_shadowed_namespace_member;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

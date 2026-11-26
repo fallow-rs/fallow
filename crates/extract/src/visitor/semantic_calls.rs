@@ -38,16 +38,7 @@ impl ModuleInfoExtractor {
     /// catch parameter or another local of the same name can shadow the
     /// import where the scope stack of the walk does not see it (issue #5064).
     pub(super) fn record_namespace_whole_object_use(&mut self, span: Span, name: &str) {
-        // A nested namespace binding of the same name in scope here
-        // (`const NS = require('./x')` in a function) is not a shadow.
-        let walk_needs_name = name == "loaderData"
-            || self.route_loader_data_bindings.contains(name)
-            || self.walk_order_class_bindings.contains_key(name)
-            || self
-                .scoped_namespace_binding_names
-                .iter()
-                .any(|scope| scope.contains(name));
-        if self.namespace_import_locals.contains(name) && !walk_needs_name {
+        if self.defers_namespace_reference(name) {
             self.shadowed_reads
                 .namespace_whole_uses
                 .push((span, name.to_string()));
@@ -56,17 +47,39 @@ impl ModuleInfoExtractor {
         self.record_whole_object_identifier_use(name);
     }
 
+    /// Whether a reference with the root `name` waits for the semantic pass:
+    /// the root is a namespace import local, and the walk state does not need
+    /// the reference now. A nested namespace binding of the same name in scope
+    /// here (`const NS = require('./x')` in a function) is not a shadow.
+    pub(super) fn defers_namespace_reference(&self, name: &str) -> bool {
+        let walk_needs_name = name == "loaderData"
+            || self.route_loader_data_bindings.contains(name)
+            || self.walk_order_class_bindings.contains_key(name)
+            || self
+                .scoped_namespace_binding_names
+                .iter()
+                .any(|scope| scope.contains(name));
+        self.namespace_import_locals.contains(name) && !walk_needs_name
+    }
+
     pub(crate) fn namespace_whole_object_use_candidates(&self) -> FxHashSet<Span> {
-        self.shadowed_reads
+        let reads = &self.shadowed_reads;
+        reads
             .namespace_whole_uses
             .iter()
             .map(|(span, _)| *span)
+            .chain(
+                reads
+                    .namespace_member_accesses
+                    .iter()
+                    .map(|(span, _, _)| *span),
+            )
             .collect()
     }
 
     /// Record the pending namespace references in `import_references` as
-    /// whole-object uses, and drop the others: a local of the same name in a
-    /// nested scope declares their binding.
+    /// whole-object uses and member accesses, and drop the others: a local of
+    /// the same name in a nested scope declares their binding.
     pub(crate) fn resolve_namespace_whole_object_uses(
         &mut self,
         import_references: &FxHashSet<Span>,
@@ -76,13 +89,25 @@ impl ModuleInfoExtractor {
                 self.push_whole_object_use(name);
             }
         }
+        for (span, access, scope) in
+            std::mem::take(&mut self.shadowed_reads.namespace_member_accesses)
+        {
+            if import_references.contains(&span) {
+                self.push_scoped_member_access(access, scope);
+            }
+        }
     }
 
-    /// Record each pending namespace reference as a whole-object use. An
-    /// extractor that no semantic pass resolves keeps the conservative credit.
+    /// Record each pending namespace reference as a whole-object use or a
+    /// member access. An extractor that no semantic pass resolves keeps the
+    /// conservative credit.
     pub(crate) fn flush_pending_namespace_whole_object_uses(&mut self) {
         for (_, name) in std::mem::take(&mut self.shadowed_reads.namespace_whole_uses) {
             self.push_whole_object_use(name);
+        }
+        for (_, access, scope) in std::mem::take(&mut self.shadowed_reads.namespace_member_accesses)
+        {
+            self.push_scoped_member_access(access, scope);
         }
     }
 

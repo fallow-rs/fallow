@@ -1,0 +1,5 @@
+{
+  "name": "issue-5231-shadowed-namespace-member",
+  "version": "1.0.0",
+  "main": "src/index.ts"
+}

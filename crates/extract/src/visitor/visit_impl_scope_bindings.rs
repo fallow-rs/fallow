@@ -225,30 +225,43 @@ impl ModuleInfoExtractor {
         object: String,
         member: String,
     ) {
-        if self.class_binding_root_is_shadowed(&object) {
-            self.shadowed_reads
-                .class_roots
-                .insert(self.member_accesses.len());
+        let scope = self.receiver_read_scope(&object);
+        self.push_scoped_member_access(crate::MemberAccess { object, member }, scope);
+    }
+
+    pub(in crate::visitor) fn receiver_read_scope(
+        &self,
+        object: &str,
+    ) -> super::visit_value_alias::ReceiverReadScope {
+        let root = object.split_once('.').map_or(object, |(root, _)| root);
+        super::visit_value_alias::ReceiverReadScope {
+            class_root: self.class_binding_root_is_shadowed(object),
+            // A module alias can follow the function that shadows its name,
+            // so the finalize pass decides once it knows every module alias.
+            nested_root: self.nested_scope_shadows(root),
+            // A nested class binding can follow the read in the walk, so the
+            // finalize pass decides once it knows every nested binding.
+            module_scope: self.is_module_scope(),
         }
-        // A module alias can follow the function that shadows its name, so
-        // the finalize pass decides once it knows every module alias.
-        let root = object
-            .split_once('.')
-            .map_or(object.as_str(), |(root, _)| root);
-        if self.nested_scope_shadows(root) {
-            self.shadowed_reads
-                .nested_roots
-                .insert(self.member_accesses.len());
+    }
+
+    pub(in crate::visitor) fn push_scoped_member_access(
+        &mut self,
+        access: crate::MemberAccess,
+        scope: super::visit_value_alias::ReceiverReadScope,
+    ) {
+        let index = self.member_accesses.len();
+        let reads = &mut self.shadowed_reads;
+        if scope.class_root {
+            reads.class_roots.insert(index);
         }
-        // A nested class binding can follow the read in the walk, so the
-        // finalize pass decides once it knows every nested binding.
-        if self.is_module_scope() {
-            self.shadowed_reads
-                .module_scope
-                .insert(self.member_accesses.len());
+        if scope.nested_root {
+            reads.nested_roots.insert(index);
         }
-        self.member_accesses
-            .push(crate::MemberAccess { object, member });
+        if scope.module_scope {
+            reads.module_scope.insert(index);
+        }
+        self.member_accesses.push(access);
     }
 
     pub(in crate::visitor) fn insert_class_binding_target(

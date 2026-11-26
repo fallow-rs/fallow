@@ -274,6 +274,19 @@ impl<'a> ModuleInfoExtractor {
     /// Record `<object_name>.<member>` for a static member read whose receiver
     /// is a name path (`a`, `a.b`, `this`).
     pub(super) fn record_named_member_access(&mut self, object_name: &str, member: &str) {
+        self.record_named_member_access_at(object_name, member, None);
+    }
+
+    /// [`Self::record_named_member_access`] with the span of the root
+    /// identifier of the receiver. A read on a namespace import local then
+    /// waits for the semantic pass, which drops it when a local of the same
+    /// name declares the root (issue #5231).
+    pub(super) fn record_named_member_access_at(
+        &mut self,
+        object_name: &str,
+        member: &str,
+        root_span: Option<oxc_span::Span>,
+    ) {
         self.record_inherited_this_result_access(object_name, member);
         if self.route_loader_data_bindings.contains(object_name) {
             self.member_accesses.push(MemberAccess {
@@ -292,7 +305,23 @@ impl<'a> ModuleInfoExtractor {
             && !self.namespace_import_root_is_shadowed(object_name)
         {
             let object = self.qualify_this_scope(object_name);
-            if !self.record_walk_order_member_access(&object, member) {
+            if self.record_walk_order_member_access(&object, member) {
+                return;
+            }
+            // `e().message` and `e[0].message` keep the root `e`.
+            let root = object.split(['.', '(', '[']).next().unwrap_or_default();
+            if let Some(span) = root_span
+                && self.defers_namespace_reference(root)
+            {
+                let scope = self.receiver_read_scope(&object);
+                let access = MemberAccess {
+                    object,
+                    member: member.to_string(),
+                };
+                self.shadowed_reads
+                    .namespace_member_accesses
+                    .push((span, access, scope));
+            } else {
                 self.push_receiver_member_access(object, member.to_string());
             }
         }

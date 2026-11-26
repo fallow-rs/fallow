@@ -100,6 +100,19 @@ pub(in crate::visitor) struct ShadowedReads {
     /// import binding. A local of the same name can shadow the others
     /// (issue #5064).
     pub(in crate::visitor) namespace_whole_uses: Vec<(oxc_span::Span, String)>,
+    /// Member reads on a namespace import local (`NS.member`), with the span
+    /// of the root identifier, under the same rule (issue #5231).
+    pub(in crate::visitor) namespace_member_accesses:
+        Vec<(oxc_span::Span, crate::MemberAccess, ReceiverReadScope)>,
+}
+
+/// The walk state at a member read that `ShadowedReads::skips` reads. A read
+/// that waits for the semantic pass keeps the state of its own position.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::visitor) struct ReceiverReadScope {
+    pub(in crate::visitor) class_root: bool,
+    pub(in crate::visitor) nested_root: bool,
+    pub(in crate::visitor) module_scope: bool,
 }
 
 impl ShadowedReads {
