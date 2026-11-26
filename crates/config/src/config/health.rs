@@ -103,7 +103,7 @@ pub enum EmailMode {
 
 /// Configuration for ownership analysis (`fallow health --hotspots --ownership`).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct OwnershipConfig {
     /// Glob patterns that identify bot or service-account commits to exclude
     /// from ownership signals. A pattern matches the local part of the author

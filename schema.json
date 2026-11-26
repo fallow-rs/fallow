@@ -1013,7 +1013,8 @@
           "type": "boolean",
           "default": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "KeepExportTags": {
       "description": "Value of the `keepExportTags` config key.\n\nThe default lists all four tags, so a tagged export never gets an\n`unused-export` finding. `[\"public\"]` makes fallow check `@internal`,\n`@alpha` and `@beta` exports like untagged exports.",
@@ -1143,7 +1144,8 @@
           "minimum": 0,
           "default": 5000
         }
-      }
+      },
+      "additionalProperties": false
     },
     "DetectionMode": {
       "description": "Detection mode controlling how aggressively tokens are normalized.\n\nSince fallow uses AST-based tokenization (not lexer-based), whitespace and\ncomments are inherently absent from the token stream. The `Strict` and `Mild`\nmodes give the same result. `Weak` mode additionally blinds string\nliterals. `Semantic` mode blinds all identifiers and literal values for\nType-2 (renamed variable) clone detection.",
@@ -1202,7 +1204,8 @@
             "null"
           ]
         }
-      }
+      },
+      "additionalProperties": false
     },
     "SimilarCodeConfig": {
       "description": "Project-owned tuning for the explicit `fallow similar-code` workflow.\n\nProvider identity, executable discovery, model setup, credentials, and\nconsent are intentionally absent. Project configuration cannot select code\ndestinations or authorize model downloads.",
@@ -1711,7 +1714,8 @@
           "$ref": "#/$defs/EmailMode",
           "default": "handle"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "EmailMode": {
       "description": "Privacy mode for author emails emitted in ownership output.\n\nDefaults to `handle` (local-part only, no domain) so SARIF and JSON\nartifacts do not leak raw email addresses into CI pipelines.",
@@ -2533,7 +2537,8 @@
             "null"
           ]
         }
-      }
+      },
+      "additionalProperties": false
     },
     "SdkPattern": {
       "description": "A custom SDK call pattern for feature flag detection.\n\nDescribes a function call that evaluates a feature flag, e.g.,\n`useFlag('new-checkout')` or `client.getFeatureValue('parser', false)`.",
@@ -2558,6 +2563,7 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
         "function"
       ]
@@ -2625,7 +2631,8 @@
             "deletePrecedingComments": "auto"
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "CatalogFixConfig": {
       "description": "The `fix.catalog` section: how `fallow fix` cleans up unused\n`pnpm-workspace.yaml` catalog entries.",
@@ -2636,7 +2643,8 @@
           "$ref": "#/$defs/CatalogPrecedingCommentPolicy",
           "default": "auto"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "CatalogPrecedingCommentPolicy": {
       "description": "Value of `fix.catalog.deletePrecedingComments`: what happens to comment\nlines directly above a catalog entry that `fallow fix` removes. A\n`fallow-keep` marker in the block always preserves it regardless of policy.",
@@ -2669,7 +2677,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "ProductionConfig": {
       "description": "Value of the `production` config key: excludes test/spec/story/dev files\nfrom discovery, either globally or per analysis family.",
@@ -3592,7 +3601,8 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false
     },
     "RegressionBaseline": {
       "description": "Saved per-issue-type counts written by `--save-baseline` and compared by\n`--fail-on-regression`. Every count defaults to `0` when its key is missing,\nso hand-trimmed baselines stay loadable.",
@@ -3978,7 +3988,8 @@
             "null"
           ]
         }
-      }
+      },
+      "additionalProperties": false
     },
     "AuditGate": {
       "description": "Value of `audit.gate`: which findings drive the `fallow audit` verdict.",

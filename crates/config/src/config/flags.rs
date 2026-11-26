@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// Describes a function call that evaluates a feature flag, e.g.,
 /// `useFlag('new-checkout')` or `client.getFeatureValue('parser', false)`.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SdkPattern {
     /// Function name to match (e.g., `"useFlag"`, `"variation"`).
     pub function: String,
@@ -37,7 +37,7 @@ pub struct SdkPattern {
 /// }
 /// ```
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FlagsConfig {
     /// Additional SDK call patterns to detect as feature flags.
     /// These are merged with the built-in patterns for common providers
