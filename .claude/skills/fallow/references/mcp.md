@@ -59,6 +59,8 @@ When using fallow via MCP (`fallow-mcp`), the following tools are available:
 
 Tool hints: `fix_apply` changes source files and declares `destructiveHint: true`. `analyze`, `check_changed`, `find_dupes` and `check_health` write a baseline, regression baseline or snapshot file when you pass `save_baseline`, `save_regression_baseline` or `save_snapshot`. They declare `readOnlyHint: false` and `destructiveHint: false`, so a host can ask for approval before it runs them. Every other tool declares `readOnlyHint: true`.
 
+Fix confirmation: when the client declares form elicitation, `fix_apply` asks the user to confirm the dry-run plan before it writes. A result with `applied: false` means that no file changed, and `confirmation` gives the reason: `declined`, `cancelled`, `timed_out`, `failed` or `plan_changed`. Treat it as the decision of the user. Do not retry the call, and do not apply the fixes with `fallow fix --yes` or by hand. Tell the user which fixes wait for a confirmation. Only after `plan_changed` call `fix_apply` again, so the user confirms the new plan.
+
 ## Resource catalogue
 
 Resources contain read-only, compile-time reference documents. Use your client's resource tool to list them (`resources/list`, `resources/templates/list`) and read them (`resources/read`). These reads start no subprocess or analysis. The catalogue is static (no `subscribe`, no `listChanged`).
