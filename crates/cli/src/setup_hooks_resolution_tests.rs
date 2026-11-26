@@ -1604,6 +1604,58 @@ fn gate_blocks_when_a_target_holds_the_jq_that_read_the_input() {
     assert!(!calls.contains("--version"), "{calls}");
 }
 
+/// A PATH directory outside every target can hold a link to the jq of a target
+/// tree. The gate follows the link chain and blocks.
+#[test]
+fn gate_blocks_when_a_jq_outside_the_targets_links_into_a_target() {
+    let Some(jq) = host_jq() else {
+        eprintln!("skipping: jq not on PATH");
+        return;
+    };
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    let linked = base.join("linked-bin");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(target.join("tools")).unwrap();
+    std::fs::create_dir_all(&linked).unwrap();
+    std::os::unix::fs::symlink(jq, target.join("tools/jq")).unwrap();
+    std::os::unix::fs::symlink(target.join("tools/jq"), linked.join("jq")).unwrap();
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    let command = format!(
+        "git -C {} commit -m '{}'",
+        target.display(),
+        "x".repeat(9000)
+    );
+    reader_stub(&base.join("bin/fallow"), "path", &log, &command, &session);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!(
+            "{}:{}:{}",
+            linked.display(),
+            base.join("bin").display(),
+            sys.display()
+        ),
+        input.to_string().as_bytes(),
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("holds the jq of the gate"), "{stderr}");
+    assert!(stderr.contains(&target.display().to_string()), "{stderr}");
+    assert!(!calls.contains("--version"), "{calls}");
+}
+
 /// Bash below version 4 needs time that grows with the square of the length
 /// for the shell reader, so there the shell reader takes a hook input of at
 /// most 1024 characters. A longer input goes to the reader of the install.

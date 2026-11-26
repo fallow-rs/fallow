@@ -368,8 +368,37 @@ gate_check_targets() {
     [ "$tool" != fallow ] || [ -z "$GATE_LOCAL_FALLOW" ] || continue
     before="$(gate_find_tool "$tool" "$wide" || true)"
     after="$(gate_find_tool "$tool" "$PATH" || true)"
-    [ -n "$before" ] && [ "$after" != "$before" ] || continue
-    gate_block_target "$tool" "$before"
+    if [ -n "$before" ] && [ "$after" != "$before" ]; then
+      gate_block_target "$tool" "$before"
+    fi
+    # A PATH directory outside every target can hold a link into a target
+    # tree, so each hop of the link chain of a helper counts. The fallow
+    # lookup keeps its own rules: a developer build that a global link names
+    # stays usable.
+    [ "$tool" != fallow ] || continue
+    [ -z "$before" ] || ! gate_link_hop_excluded "$before" || gate_block_target "$tool" "$GATE_HOP"
+  done
+}
+
+# Returns 0 when a target tree holds the directory of file $1 or of a hop of
+# its link chain, as found or resolved, and sets GATE_HOP to that hop. A link
+# chain that the gate cannot follow counts as held.
+gate_link_hop_excluded() {
+  local file="$1" link hops=0
+  while :; do
+    GATE_HOP="$file"
+    gate_target_only "${file%/*}" && return 0
+    if gate_resolve_dir "${file%/*}"; then
+      gate_target_only "$RESOLVED" && return 0
+    fi
+    [ -L "$file" ] || return 1
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 0
+    link="$(readlink -- "$file" 2>/dev/null)" || return 0
+    case "$link" in
+      /* | [A-Za-z]:[\\/]*) file="$link" ;;
+      *) file="${file%/*}/$link" ;;
+    esac
   done
 }
 
