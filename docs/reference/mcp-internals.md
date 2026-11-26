@@ -175,8 +175,14 @@ gets the skill of the same version as the tools, with no separate install.
       `security_candidates` and `trace_file`.
     - The measurement of the runtime-coverage tools used the Istanbul
       coverage of the excalidraw test suite. Each tool returns the full
-      health JSON: about 14 million characters, and 256,458 characters with
-      `top: 20`.
+      health JSON: about 14 million characters. With `top: 20`, the result
+      of `check_runtime_coverage` is 141,815 characters. `--top` cuts the
+      findings, file scores, hotspots, large functions, targets and the
+      runtime lists. Before the cut of `large_functions`, the 985 large
+      functions of excalidraw made the result 257,106 characters. The
+      opt-in sections `coverage_gaps`, `prop_drilling_chains` and the CSS
+      styling findings have no `--top` cut. A default runtime-coverage call
+      does not include them.
     - These tools stayed below it: `trace_dependency`, `trace_export`,
       `trace_clone`, `trace_import_path`, `feature_flags`, `list_boundaries`,
       `list_suppressions`, `decision_surface`, `recommend` and

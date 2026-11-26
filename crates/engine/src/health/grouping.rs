@@ -320,6 +320,9 @@ fn build_group(
         group_hotspots.truncate(top);
         group_targets.truncate(top);
     }
+    let large_functions_omitted =
+        super::assembly::truncate_to_top(&mut group_large_functions, input.top)
+            .filter(|_| input.lists.large_functions);
 
     let functions_above_threshold = group_findings.len();
     omit_hidden_lists(
@@ -365,6 +368,7 @@ fn build_group(
         file_scores: group_file_scores,
         hotspots: wrap_group_hotspots(group_hotspots, project_root),
         large_functions: group_large_functions,
+        large_functions_omitted,
         targets: group_targets
             .into_iter()
             .map(RefactoringTargetFinding::with_actions)

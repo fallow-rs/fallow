@@ -31,7 +31,7 @@ use crate::{
 /// `large_functions`, `targets`) only when the project report shows the same
 /// list. A `--score` run keeps the score and the counts of each group and
 /// omits the lists.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthGroup {
     /// Group identifier produced by the resolver. For 'package' grouping:
@@ -115,6 +115,10 @@ pub struct HealthGroup {
     /// Large functions in files belonging to this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
+    /// Number of group large functions that `--top` cut. Omitted when no row
+    /// was cut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_functions_omitted: Option<usize>,
     /// Refactoring targets in files belonging to this group. Each entry is
     /// the typed [`RefactoringTargetFinding`] wrapper around a
     /// `RefactoringTarget`

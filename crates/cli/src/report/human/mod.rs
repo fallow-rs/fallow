@@ -5,6 +5,7 @@ mod dupes_range_markers;
 pub(super) mod health;
 mod health_crap_notes;
 mod health_hotspots;
+mod health_large_functions;
 mod health_runtime;
 mod health_shallow;
 mod health_status;

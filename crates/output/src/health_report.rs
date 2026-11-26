@@ -162,6 +162,11 @@ pub struct HealthReport {
     /// very-high-risk bin >= 3%. Sorted by line count descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
+    /// Number of large functions that `--top` cut from `large_functions`.
+    /// Omitted when no row was cut. The full count is
+    /// `large_functions.length + large_functions_omitted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_functions_omitted: Option<usize>,
     /// Ranked refactoring recommendations. Only present when --targets is used.
     /// Sorted by efficiency (priority/effort) descending. Each entry wraps
     /// its inner `RefactoringTarget` payload (flattened on the wire) with

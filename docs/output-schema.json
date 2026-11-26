@@ -1975,6 +1975,13 @@
           },
           "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size\nvery-high-risk bin >= 3%. Sorted by line count descending."
         },
+        "large_functions_omitted": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of large functions that `--top` cut from `large_functions`.\nOmitted when no row was cut. The full count is\n`large_functions.length + large_functions_omitted`."
+        },
         "targets": {
           "type": "array",
           "items": {
@@ -2272,6 +2279,13 @@
             "$ref": "#/definitions/LargeFunctionEntry"
           },
           "description": "Large functions in files belonging to this group."
+        },
+        "large_functions_omitted": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of group large functions that `--top` cut. Omitted when no row\nwas cut."
         },
         "targets": {
           "type": "array",
@@ -3327,6 +3341,13 @@
             "$ref": "#/definitions/LargeFunctionEntry"
           },
           "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size\nvery-high-risk bin >= 3%. Sorted by line count descending."
+        },
+        "large_functions_omitted": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of large functions that `--top` cut from `large_functions`.\nOmitted when no row was cut. The full count is\n`large_functions.length + large_functions_omitted`."
         },
         "targets": {
           "type": "array",

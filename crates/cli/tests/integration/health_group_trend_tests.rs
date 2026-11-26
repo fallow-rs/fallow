@@ -27,6 +27,11 @@ fn branchy(name: &str, branches: usize) -> String {
 
 /// Two CODEOWNERS teams, each owning two complex functions in two files.
 fn project() -> TempDir {
+    project_with_branches(30, 12)
+}
+
+/// The `project()` layout with `one` and `two` branch counts per team.
+fn project_with_branches(one: usize, two: usize) -> TempDir {
     let dir = TempDir::new().expect("temp dir");
     let root = dir.path();
     std::fs::write(
@@ -44,12 +49,12 @@ fn project() -> TempDir {
         std::fs::create_dir_all(root.join("src").join(team)).expect("create team dir");
         std::fs::write(
             root.join(format!("src/{team}/one.ts")),
-            branchy(&format!("{team}One"), 30),
+            branchy(&format!("{team}One"), one),
         )
         .expect("write one");
         std::fs::write(
             root.join(format!("src/{team}/two.ts")),
-            branchy(&format!("{team}Two"), 12),
+            branchy(&format!("{team}Two"), two),
         )
         .expect("write two");
     }
@@ -275,6 +280,61 @@ fn top_applies_to_each_group_and_keeps_the_counts() {
     }
     // The project list stays globally truncated.
     assert_eq!(top["findings"].as_array().map_or(0, Vec::len), 1);
+}
+
+/// `--top` also cuts `large_functions`, in the project report and in each
+/// group. Without the cut, a large project put every large function in a
+/// bounded `--top` run.
+#[test]
+fn top_limits_large_functions_in_project_and_groups() {
+    let dir = project_with_branches(80, 70);
+    let full = health_json(dir.path(), &[]);
+    assert_eq!(
+        full["large_functions"].as_array().map_or(0, Vec::len),
+        4,
+        "fixture must give four large functions: {:#}",
+        full["large_functions"]
+    );
+
+    let top = health_json(dir.path(), &["--top", "1"]);
+    let project_list = top["large_functions"].as_array().expect("large_functions");
+    assert_eq!(project_list.len(), 1, "{project_list:#?}");
+    assert_eq!(top["large_functions_omitted"], 3, "the cut keeps the count");
+    assert!(
+        full.get("large_functions_omitted").is_none(),
+        "a run without a cut has no omitted count"
+    );
+    assert_eq!(
+        project_list[0], full["large_functions"][0],
+        "the cut keeps the largest function"
+    );
+    for key in ["@team/a", "@team/b"] {
+        let limited = group(&top, key);
+        let list = limited["large_functions"]
+            .as_array()
+            .expect("group large_functions");
+        assert_eq!(list.len(), 1, "{key}: {limited:#}");
+        assert_eq!(limited["large_functions_omitted"], 1, "{key}: {limited:#}");
+        assert!(
+            list[0]["name"]
+                .as_str()
+                .is_some_and(|name| name.ends_with("One")),
+            "{key} keeps its largest function: {limited:#}"
+        );
+    }
+
+    let lean = health_json(dir.path(), &["--top", "1", "--lean"]);
+    assert_eq!(lean["large_functions_omitted"], 3, "--lean keeps the count");
+
+    let score_only = health_json(dir.path(), &["--score", "--top", "1"]);
+    assert!(score_only.get("large_functions_omitted").is_none());
+    for key in ["@team/a", "@team/b"] {
+        let hidden = group(&score_only, key);
+        assert!(
+            hidden.get("large_functions_omitted").is_none(),
+            "a hidden list has no omitted count: {hidden:#}"
+        );
+    }
 }
 
 #[test]

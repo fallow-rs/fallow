@@ -31,7 +31,7 @@ pub struct HealthParams {
     /// Passed through to the CLI's `--max-file-lines` flag.
     pub max_file_lines: Option<u32>,
 
-    /// Number of top results to return.
+    /// Number of top results to return per list.
     pub top: Option<usize>,
 
     /// Sort order for results (e.g., "cyclomatic", "cognitive", "lines", "severity").
