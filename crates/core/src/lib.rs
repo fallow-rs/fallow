@@ -33,6 +33,7 @@ use graph_cache_load::try_load_analysis_graph_cache;
 use graph_cache_manifest::{GraphCacheManifestInput, build_graph_cache_manifest};
 mod package_assets;
 mod package_credits;
+mod parse_cache;
 pub mod plugins;
 mod production_scope;
 pub(crate) mod progress;
@@ -117,42 +118,6 @@ pub struct AnalysisParseMetrics {
     cache_rejection: Option<CacheRejection>,
 }
 
-/// Update cache: write freshly parsed modules, refresh stale metadata entries,
-/// and upgrade entries that a run without complexity or call facts wrote
-/// earlier. [`cache::CacheStore::record_module`] keeps the complexity and the
-/// call facts that an earlier run stored and this run did not extract.
-///
-/// `read_started_ns` is the time before the parse read the sources. A
-/// fingerprint that is not older than that time by the settle window is stored
-/// without its ctime, so the next run compares content for that file. The
-/// metadata is read here, after the parse. A save between the parse read and
-/// this read gives a ctime newer than `read_started_ns`, so that fingerprint
-/// never settles and is stored without its ctime.
-fn update_cache(
-    store: &mut cache::CacheStore,
-    modules: &[extract::ModuleInfo],
-    files: &[discover::DiscoveredFile],
-    need_complexity: bool,
-    need_call_facts: bool,
-    read_started_ns: u64,
-) -> bool {
-    let mut dirty = false;
-    for module in modules {
-        if let Some(file) = files.get(module.file_id.0 as usize) {
-            let fingerprint = file_fingerprint(&file.path).for_content_read_at(read_started_ns);
-            dirty |= store.record_module(
-                &file.path,
-                module,
-                fingerprint,
-                need_complexity,
-                need_call_facts,
-            );
-        }
-    }
-    let removed_stale_paths = store.retain_paths(files);
-    dirty || removed_stale_paths
-}
-
 /// Resolve `config.cache_max_size_mb` into bytes, falling back to the
 /// extract crate's `DEFAULT_CACHE_MAX_SIZE`. Lives at this layer (not on
 /// `ResolvedConfig`) because `fallow-config` does not depend on
@@ -167,14 +132,6 @@ fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
         .map_or(cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
             (mb as usize).saturating_mul(1024 * 1024)
         })
-}
-
-/// Extract source fingerprint metadata from a path.
-fn file_fingerprint(path: &std::path::Path) -> fallow_types::source_fingerprint::SourceFingerprint {
-    std::fs::metadata(path).map_or(
-        fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
-        |metadata| fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata),
-    )
 }
 
 fn format_undeclared_workspace_warning(
@@ -1467,10 +1424,14 @@ fn parse_analysis_modules(
     let cache_ms = update_parse_cache_if_enabled(
         config,
         &mut cache_store,
-        &modules,
-        files,
-        need_complexity,
-        read_started_ns,
+        &parse_cache::CacheUpdate {
+            modules: &modules,
+            files,
+            metadata_hits: &parse_result.metadata_hits,
+            need_complexity,
+            need_call_facts: config.reads_call_facts(),
+            read_started_ns,
+        },
     );
 
     AnalysisParseOutput {
@@ -1523,27 +1484,19 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
 fn update_parse_cache_if_enabled(
     config: &ResolvedConfig,
     cache_store: &mut Option<cache::CacheStore>,
-    modules: &[extract::ModuleInfo],
-    files: &[discover::DiscoveredFile],
-    need_complexity: bool,
-    read_started_ns: u64,
+    update: &parse_cache::CacheUpdate<'_>,
 ) -> f64 {
     let t = Instant::now();
     if !config.no_cache {
         let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
         let store = cache_store.get_or_insert_with(|| cache::CacheStore::new(&config.root));
-        if update_cache(
-            store,
-            modules,
-            files,
-            need_complexity,
-            config.reads_call_facts(),
-            read_started_ns,
-        ) && let Err(error) = store.save(
-            config.cache_target(),
-            config.cache_config_hash,
-            cache_max_size_bytes,
-        ) {
+        if parse_cache::update_cache(store, update)
+            && let Err(error) = store.save(
+                config.cache_target(),
+                config.cache_config_hash,
+                cache_max_size_bytes,
+            )
+        {
             tracing::warn!("Failed to save cache: {error}");
         }
     }
@@ -3589,13 +3542,16 @@ mod tests {
         let first = super::extract::parse_all_files(&discovered, None, false);
         std::fs::write(&path, after).expect("rewrite source with equal-length content");
         let mut store = super::cache::CacheStore::new(project.path());
-        super::update_cache(
+        super::parse_cache::update_cache(
             &mut store,
-            &first.modules,
-            &discovered,
-            false,
-            true,
-            read_started_ns,
+            &super::parse_cache::CacheUpdate {
+                modules: &first.modules,
+                files: &discovered,
+                metadata_hits: &first.metadata_hits,
+                need_complexity: false,
+                need_call_facts: true,
+                read_started_ns,
+            },
         );
 
         let second = super::extract::parse_all_files(&discovered, Some(&store), false);

@@ -1352,6 +1352,10 @@ pub struct ParseResult {
     pub source_bytes_read: u64,
     /// Source bytes that the CSS comment mask read across all parsed files.
     pub css_masked_bytes: u64,
+    /// Files that the cache served from their metadata alone, without a read
+    /// of the source, sorted by id. The stored fingerprint of each equals the
+    /// metadata that the parse read, so a cache writer can keep it.
+    pub metadata_hits: Vec<FileId>,
 }
 
 /// A discovered source that could not be read as UTF-8 text.
