@@ -440,28 +440,36 @@ fi
 
 # npm puts the fallow command in its global bin folder. Node from pnpm/setup
 # does not put that folder on PATH, so later steps cannot find fallow (#5242).
+# A different fallow earlier on PATH would run in place of the verified one,
+# so the folder goes first on PATH when `fallow` resolves to another file.
 # On Windows npm writes the command into the prefix folder itself.
-if ! command -v fallow > /dev/null 2>&1; then
-  global_prefix="$(npm prefix -g | tr -d '\r\n')"
-  if [ "${RUNNER_OS:-}" = "Windows" ]; then
-    global_bin="$global_prefix"
-  else
-    global_bin="$global_prefix/bin"
-  fi
-  if [ ! -f "$global_bin/fallow" ]; then
-    echo "::error::npm installed fallow $(escape_command_data "$installed_fallow_version"), but no fallow command is on PATH, and $(escape_command_data "$global_bin") does not contain one. Add the npm global bin folder ($(escape_command_data "$global_bin")) to PATH before this action."
-    exit 1
-  fi
-  shell_bin="$(cygpath -u "$global_bin" 2> /dev/null || printf '%s' "$global_bin")"
+if ! global_prefix="$(npm prefix -g)"; then
+  echo "::error::npm prefix -g failed, so the action cannot find the fallow command that npm installed"
+  exit 1
+fi
+global_prefix="$(printf '%s' "$global_prefix" | tr -d '\r\n')"
+if [ "${RUNNER_OS:-}" = "Windows" ]; then
+  global_bin="$global_prefix"
+else
+  global_bin="$global_prefix/bin"
+fi
+shell_bin="$(cygpath -u "$global_bin" 2> /dev/null || printf '%s' "$global_bin")"
+if [ ! -f "$shell_bin/fallow" ]; then
+  echo "::error::npm installed fallow $(escape_command_data "$installed_fallow_version"), but the npm global bin folder $(escape_command_data "$global_bin") does not contain a fallow command"
+  exit 1
+fi
+if [ "$(command -v fallow 2> /dev/null || true)" != "$shell_bin/fallow" ]; then
   export PATH="${shell_bin}:${PATH}"
   if [ -n "${GITHUB_PATH:-}" ]; then
     printf '%s\n' "$global_bin" >> "$GITHUB_PATH"
   fi
-  echo "::notice::Added the npm global bin folder $(escape_command_data "$global_bin") to PATH, because it was not on PATH"
+  echo "::notice::Put the npm global bin folder $(escape_command_data "$global_bin") first on PATH, so later steps run the fallow that npm installed"
 fi
 
-installed_version="$(fallow --version 2>/dev/null || true)"
-[ -n "$installed_version" ] || installed_version="fallow ${installed_fallow_version}"
+if ! installed_version="$(fallow --version 2> /dev/null)" || [ -z "$installed_version" ]; then
+  installed_version="fallow ${installed_fallow_version}"
+  echo "::warning::fallow --version failed; the reported version comes from the installed package manifest"
+fi
 echo "Installed fallow ${installed_version}"
 
 if [ -z "$requested_version" ] && [ -n "$project_spec" ] && is_exact_version "$project_spec"; then

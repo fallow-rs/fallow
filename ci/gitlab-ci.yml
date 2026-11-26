@@ -308,6 +308,10 @@ variables:
       NODE
       }
 
+      # A shell executor can keep /tmp between jobs. Remove the bin folder that
+      # an earlier job recorded, so it cannot shadow the fallow of this job.
+      rm -f /tmp/fallow-bin-dir
+
       # FALLOW_SKIP_INSTALL lets a pipeline reuse a fallow binary that is already
       # on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`)
       # instead of `npm install -g fallow` at pipeline time. Default empty
@@ -382,18 +386,22 @@ variables:
       npm install -g --ignore-scripts "$install_arg" || { echo "ERROR: Failed to install ${install_arg}"; exit 2; }
 
       # A Node that pnpm or another version manager installs can leave the
-      # npm global bin folder off PATH (#5242). The run script reads
-      # /tmp/fallow-bin-dir and puts that folder on PATH for every later step.
-      rm -f /tmp/fallow-bin-dir
-      if ! command -v fallow > /dev/null 2>&1; then
-        global_bin="$(npm prefix -g)/bin"
-        if [ ! -f "$global_bin/fallow" ]; then
-          echo "ERROR: npm installed ${install_arg}, but no fallow command is on PATH, and ${global_bin} does not contain one. Add the npm global bin folder to PATH in the job image or before_script."
-          exit 2
-        fi
+      # npm global bin folder off PATH (#5242), and a different fallow
+      # earlier on PATH would run in place of the installed one. The run
+      # script reads /tmp/fallow-bin-dir and puts that folder first on PATH.
+      if ! global_prefix="$(npm prefix -g)"; then
+        echo "ERROR: npm prefix -g failed, so the template cannot find the fallow command that npm installed."
+        exit 2
+      fi
+      global_bin="${global_prefix}/bin"
+      if [ ! -f "$global_bin/fallow" ]; then
+        echo "ERROR: npm installed ${install_arg}, but the npm global bin folder ${global_bin} does not contain a fallow command."
+        exit 2
+      fi
+      if [ "$(command -v fallow 2> /dev/null || true)" != "$global_bin/fallow" ]; then
         printf '%s\n' "$global_bin" > /tmp/fallow-bin-dir
         export PATH="${global_bin}:${PATH}"
-        echo "Added the npm global bin folder ${global_bin} to PATH, because it was not on PATH"
+        echo "Put the npm global bin folder ${global_bin} first on PATH, so later steps run the fallow that npm installed."
       fi
 
       installed_version="$(fallow --version || echo 'unknown version')"
