@@ -28,9 +28,15 @@ workflows take them to `main` without a maintainer in most cases.
      patch, the list of changed files and a command that applies the patch
      after a SHA-256 check.
    - After a successful run, it merges the pull request when every check on
-     the head commit passed, except CodSpeed, majors included. A pull request
-     with a repair merges only on top of the current `main`. The squash
-     subject stays within the 100 character limit of commitlint.
+     the head commit passed, except CodSpeed. A pull request with a repair
+     merges only on top of the current `main`. The squash subject stays
+     within the 100 character limit of commitlint.
+   - A major update does not merge, also in a test fixture folder. When every
+     check passed, the pull request gets the `needs-review` label and a
+     comment, and a maintainer merges it. The update is major when the
+     Dependabot metadata says `semver-major`, or when the commit message
+     raises the first version number. A grouped or security update can lack
+     the update type in its metadata.
 
 The commit lint and the title lint in `commitlint.yml` skip bot pull requests.
 The workflow writes its own short squash subject, so a long Dependabot title
