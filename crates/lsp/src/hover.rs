@@ -785,7 +785,7 @@ fn check_unused_server_action(
     })
 }
 
-/// Check if the position is on an unused SvelteKit `load()` return-object key.
+/// Check if the position is on an unused route load or loader return-object key.
 fn check_unused_load_data_key(
     results: &AnalysisResults,
     file_path: &Path,
@@ -802,7 +802,7 @@ fn check_unused_load_data_key(
         };
         anchor_hover(&anchor, file_path, position, mapper, || {
             format!(
-                "**fallow**: load() return key {} is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>).",
+                "**fallow**: Route data return key {} is read by no consumer (no data.<key>, page.data.<key> or useLoaderData() read).",
                 format_inline_code(&k.key_name),
             )
         })

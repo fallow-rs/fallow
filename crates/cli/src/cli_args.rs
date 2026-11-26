@@ -136,7 +136,7 @@ pub enum Command {
         #[arg(long, help_heading = "Issue types")]
         unused_server_actions: bool,
 
-        /// Only report unused SvelteKit load() data keys
+        /// Only report unused route load and loader data keys
         #[arg(long, help_heading = "Issue types")]
         unused_load_data_keys: bool,
 

@@ -153,7 +153,7 @@ pub(super) fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
         SectionSpec {
             name: "Unused load data keys",
             key: "unused_load_data_keys",
-            header: "SvelteKit `load()` return-object keys read by no consumer (neither the sibling `+page.svelte` nor `$page.data`). The key runs a real server fetch / DB cost per request for data nothing renders.\n\n| File | Route | Key |\n|------|-------|-----|\n",
+            header: "SvelteKit `load()` and React Router / Remix `loader` return-object keys read by no consumer (no read in the route component, `page.data` or `useLoaderData()`). The key runs a real server fetch / DB cost per request for data nothing renders.\n\n| File | Route | Key |\n|------|-------|-----|\n",
             row: |it| {
                 format!(
                     "| {} | {} | {} |",

@@ -4078,7 +4078,8 @@ unproduced_catch_tags?: number
  */
 unused_server_actions?: number
 /**
- * SvelteKit `load()` return-object keys read by no consumer.
+ * SvelteKit `load()` and React Router / Remix `loader` return-object keys
+ * read by no consumer.
  */
 unused_load_data_keys?: number
 /**

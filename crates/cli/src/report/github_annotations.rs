@@ -1186,7 +1186,7 @@ fn collect_check_component_wiring(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_only,
         |it| {
             format!(
-                "SvelteKit load() return key '{}' is read by no consumer (neither the sibling +page.svelte nor $page.data).\n\nThe key runs a real server fetch / DB cost per request for data nothing renders. Remove the key, or use it.",
+                "Route data return key '{}' is read by no consumer (no read in the route component, page.data or useLoaderData()).\n\nThe key runs a real server fetch / DB cost per request for data nothing renders. Remove the key, or use it.",
                 s(it, "key_name"),
             )
         },

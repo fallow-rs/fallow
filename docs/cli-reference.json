@@ -5187,7 +5187,7 @@
           "possible_values": [],
           "default": null,
           "env": null,
-          "help": "Only report unused SvelteKit load() data keys",
+          "help": "Only report unused route load and loader data keys",
           "long_help": null,
           "hidden": false,
           "hidden_in_short_help": false,
@@ -22495,7 +22495,7 @@
       "rule_id": "fallow/unused-load-data-key",
       "command": "dead-code",
       "category": "Dead code",
-      "description": "A SvelteKit load() return-object key is read by no consumer",
+      "description": "A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer",
       "label": "Unused Load Data Keys",
       "config_key": "unused-load-data-keys",
       "registry_index": 44,
@@ -22529,9 +22529,9 @@
       "explanation": {
         "id": "fallow/unused-load-data-key",
         "name": "Unused load data keys",
-        "summary": "A SvelteKit load() return-object key is read by no consumer",
-        "rationale": "A SvelteKit route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) returns an object whose keys become the route's `data` prop. A returned key that NO consumer reads is dead: it runs a real server-side fetch / DB cost on every request for data nothing renders. fallow checks two channels: the sibling `+page.svelte`'s `data.<key>` reads (route-pinned), and project-wide `page.data.<key>` (Svelte 5 `$app/state`) / `$page.data.<key>` (Svelte 4 `$app/stores`) reads in any component. `svelte-check` types `data` via generated `$types` but never flags an unread returned key. The detector abstains (never false-flags) on a spread / non-literal / multi-return / computed-key / wrapped `load`, on a sibling that passes the whole `data` object opaquely, on a `+page.server.ts` whose universal `+page.ts` sibling forwards its `data`, and project-wide when any whole-object use of `page.data` / `$page.data` is seen. Default warn; delete the key or wire a consumer. A load fetch can have side effects, so there is no safe auto-fix. The check runs only when the project declares `@sveltejs/kit`.",
-        "example": "src/routes/blog/+page.ts returns { posts, draftCount } but +page.svelte only reads data.posts and no component reads page.data.draftCount.",
+        "summary": "A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer",
+        "rationale": "The rule checks route data producers in SvelteKit, React Router and Remix. A SvelteKit route `load()` (in `+page.ts` / `+page.server.ts` and the `.js` variants) returns an object whose keys become the route's `data` prop. A React Router or Remix route module exports a `loader` (or `clientLoader`) whose returned keys reach the route component through `useLoaderData()`. A returned key that no consumer reads is dead: it runs a real server-side fetch or database cost on every request for data that nothing renders. For SvelteKit, fallow credits the sibling `+page.svelte`'s `data.<key>` reads and project-wide `page.data.<key>` (Svelte 5 `$app/state`) or `$page.data.<key>` (Svelte 4 `$app/stores`) reads. For React Router and Remix, fallow credits `useLoaderData()` reads and `loaderData.<key>` prop reads in the same route module. The detector abstains on a spread, non-literal, multi-return, computed-key or wrapped producer, on a consumer that passes the whole `data` or loader data object on, on a `+page.server.ts` whose universal `+page.ts` sibling forwards its `data`, and project-wide for SvelteKit when any whole-object use of `page.data` / `$page.data` is seen. It also skips a resource route (a route module with a `loader` and no default export component) and a `Response.json(...)` return, because an HTTP client reads that body, not a component. Default warn; delete the key or wire a consumer. A load fetch can have side effects, so there is no safe auto-fix. The check runs only when the project declares `@sveltejs/kit`, `react-router`, `react-router-dom`, `@react-router/dev` or a `@remix-run/*` runtime package.",
+        "example": "src/routes/blog/+page.ts returns { posts, draftCount } but +page.svelte only reads data.posts and no component reads page.data.draftCount. In React Router, app/routes/home.tsx has a loader that returns { posts, draftCount } but the route component only reads posts from useLoaderData().",
         "example_files": [
           {
             "path": "src/routes/blog/+page.svelte",
@@ -22543,7 +22543,7 @@
           }
         ],
         "example_base_files": [],
-        "how_to_fix": "Delete the unused key from the load() return (and skip its fetch), or wire a consumer (read data.<key> in +page.svelte, or page.data.<key> in a shared component). If the load fetch has a side effect you must keep, suppress the line with // fallow-ignore-next-line unused-load-data-key.",
+        "how_to_fix": "Delete the unused key from the load() or loader return (and skip its fetch), or wire a consumer (read data.<key> in +page.svelte, page.data.<key> in a shared component, or the key from useLoaderData() in the route component). If the fetch has a side effect you must keep, suppress the line with // fallow-ignore-next-line unused-load-data-key.",
         "docs": "https://fallow.tools/docs/rules/unused-load-data-key/"
       },
       "display_label": "Unused load data keys"

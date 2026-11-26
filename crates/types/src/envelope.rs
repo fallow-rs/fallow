@@ -204,7 +204,8 @@ pub struct CheckSummary {
     /// code in the project.
     #[serde(default)]
     pub unused_server_actions: usize,
-    /// SvelteKit `load()` return-object keys read by no consumer.
+    /// SvelteKit `load()` and React Router / Remix `loader` return-object keys
+    /// read by no consumer.
     #[serde(default)]
     pub unused_load_data_keys: usize,
     /// Imports that could not be resolved against the project's module graph.

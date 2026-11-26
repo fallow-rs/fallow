@@ -1574,8 +1574,8 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-load-data-key",
-        sarif_description: "A SvelteKit load() return-object key is read by no consumer",
-        meta_description: "A SvelteKit load return-object key is read by no route or project-wide consumer.",
+        sarif_description: "A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer",
+        meta_description: "A SvelteKit load or React Router / Remix loader return-object key is read by no route or project-wide consumer.",
         meta_docs_path: "rules/unused-load-data-key",
         meta_name: "Unused load data keys",
         summary_label: "Unused load data keys",

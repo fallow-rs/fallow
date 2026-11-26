@@ -923,7 +923,7 @@
           "name": "--unused-load-data-keys",
           "type": "bool",
           "required": false,
-          "description": "Only report unused SvelteKit load() data keys",
+          "description": "Only report unused route load and loader data keys",
           "possible_values": [
             "true",
             "false"
@@ -5254,7 +5254,7 @@
       "rule_id": "fallow/unused-load-data-key",
       "command": "dead-code",
       "category": "Dead code",
-      "description": "A SvelteKit load() return-object key is read by no consumer",
+      "description": "A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer",
       "label": "Unused Load Data Keys",
       "config_key": "unused-load-data-keys",
       "registry_index": 44,

@@ -1313,7 +1313,7 @@ fn push_unused_load_data_key_issues(
         ]);
         let line = if k.line > 0 { Some(k.line) } else { None };
         let message = format!(
-            "load() return key `{}` is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            "Route data return key `{}` is read by no consumer (no data.<key>, page.data.<key> or useLoaderData() read); delete the key or wire a consumer",
             k.key_name
         );
         issues.push(dead_code_issue(

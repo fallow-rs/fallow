@@ -1038,7 +1038,7 @@
       "section": "flags:dead-code-filters",
       "row": "--unused-load-data-keys",
       "column": "Issue Type",
-      "seed": "A SvelteKit load() return-object key is read by no consumer"
+      "seed": "A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer"
     },
     {
       "section": "flags:dead-code-filters",
@@ -2652,7 +2652,7 @@
       "section": "issue-types",
       "row": "unused-load-data-key",
       "column": "Description",
-      "seed": "A SvelteKit load() return-object key is read by no consumer"
+      "seed": "A SvelteKit load() or React Router / Remix loader return-object key is read by no consumer"
     },
     {
       "section": "issue-types",

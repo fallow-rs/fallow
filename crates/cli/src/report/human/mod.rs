@@ -339,7 +339,7 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
             "https://fallow.tools/docs/rules/unused-server-action/",
         )),
         "Unused load data keys" => Some((
-            "A SvelteKit load() return-object key no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
+            "A SvelteKit load() or React Router / Remix loader return-object key no consumer reads (no data.<key>, page.data.<key> or useLoaderData() read); delete the key or wire a consumer",
             "https://fallow.tools/docs/rules/unused-load-data-key/",
         )),
         _ => None,

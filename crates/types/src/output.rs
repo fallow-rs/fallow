@@ -244,7 +244,7 @@ pub enum FixActionType {
     /// Add a provider for an injected key or remove the dead inject call
     /// (manual; used by unprovided-inject findings).
     ProvideInject,
-    /// Use a SvelteKit load-data key from the route UI or remove the unused
+    /// Use a route load-data key from the route UI or remove the unused
     /// returned key (manual; used by unused-load-data-key findings).
     UseLoadData,
     /// Render a reachable component from project code or remove the component
