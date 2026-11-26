@@ -76,7 +76,7 @@ pub fn find_orphan_module_declaration_files(
     }
 
     let referenced = triple_slash_reference_targets(files, &module_by_id);
-    let mut lookups = DirectoryChainLookups::default();
+    let mut lookups = DirectoryChainLookups::new(root);
 
     candidates
         .into_iter()
@@ -144,7 +144,6 @@ fn has_same_stem_sibling(path: &Path) -> bool {
 
 /// Per-directory caches for the package.json and tsconfig lookups, shared by
 /// every candidate of one run.
-#[derive(Default)]
 struct DirectoryChainLookups {
     package_type_targets: FxHashMap<PathBuf, Vec<PathTarget>>,
     tsconfig_scopes: FxHashMap<PathBuf, Vec<TsconfigScope>>,
@@ -154,21 +153,23 @@ struct DirectoryChainLookups {
 }
 
 /// A parse cache of tsconfig files for [`fallow_config::MergedTsconfig`].
-#[derive(Default)]
-struct TsconfigSources(std::cell::RefCell<FxHashMap<PathBuf, Option<Arc<serde_json::Value>>>>);
+/// Each read is a project read in the read scope of `root`.
+struct TsconfigSources {
+    root: PathBuf,
+    parsed: std::cell::RefCell<FxHashMap<PathBuf, Option<Arc<serde_json::Value>>>>,
+}
 
 impl TsconfigSources {
     fn load(&self, path: &Path) -> Option<Arc<serde_json::Value>> {
-        if let Some(source) = self.0.borrow().get(path) {
+        if let Some(source) = self.parsed.borrow().get(path) {
             return source.clone();
         }
-        let source = std::fs::read_to_string(path)
-            .ok()
+        let source = super::project_read::read_project_file(&self.root, path)
             .and_then(|content| {
                 fallow_config::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
             })
             .map(Arc::new);
-        self.0
+        self.parsed
             .borrow_mut()
             .insert(path.to_path_buf(), source.clone());
         source
@@ -176,6 +177,17 @@ impl TsconfigSources {
 }
 
 impl DirectoryChainLookups {
+    fn new(root: &Path) -> Self {
+        Self {
+            package_type_targets: FxHashMap::default(),
+            tsconfig_scopes: FxHashMap::default(),
+            tsconfig_sources: TsconfigSources {
+                root: root.to_path_buf(),
+                parsed: std::cell::RefCell::default(),
+            },
+        }
+    }
+
     fn named_by_package_json(&mut self, root: &Path, path: &Path) -> bool {
         directory_chain(root, path).any(|dir| {
             self.package_type_targets
@@ -673,6 +685,25 @@ mod tests {
                 "{reference} must keep the declaration file"
             );
         }
+    }
+
+    /// A tsconfig that links out of the project is not read, so it does not
+    /// narrow the files that the declaration file can belong to.
+    #[test]
+    #[cfg(unix)]
+    fn a_tsconfig_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        write(&outside, "tsconfig.json", r#"{"include": ["src"]}"#);
+        std::os::unix::fs::symlink(outside.join("tsconfig.json"), root.join("tsconfig.json"))
+            .expect("link");
+        assert!(!is_orphan(
+            &root,
+            "types/orphan.d.ts",
+            module(0, false, &[])
+        ));
     }
 
     #[test]

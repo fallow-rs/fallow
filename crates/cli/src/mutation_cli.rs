@@ -1276,7 +1276,7 @@ fn run_inspect(
 ) -> ExitCode {
     let (output, style) = (input.output, input.json_style);
     let packet = inspect_report_path(input, report).and_then(|(path, root)| {
-        let saved = crate::mutation_inspect::read_saved_report(&path)?;
+        let saved = crate::mutation_inspect::read_saved_report(&root, &path)?;
         let mut packet = crate::mutation_inspect::inspect(&saved, mutant_id, &root)?;
         if let Some(flags) = replay {
             add_replay(input, &mut packet, &root, flags)?;
@@ -1334,7 +1334,7 @@ fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
         );
     }
     let batch = inspect_report_path(input, report).and_then(|(path, root)| {
-        let saved = crate::mutation_inspect::read_saved_report(&path)?;
+        let saved = crate::mutation_inspect::read_saved_report(&root, &path)?;
         let analysis = AnalysisOptions {
             root: Some(root.clone()),
             config_path: input.config_path.map(Path::to_path_buf),
@@ -1407,7 +1407,7 @@ fn run_export(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
         );
     }
     let document = inspect_report_path(input, report).and_then(|(path, root)| {
-        let saved = crate::mutation_inspect::read_saved_report(&path)?;
+        let saved = crate::mutation_inspect::read_saved_report(&root, &path)?;
         export::export(&saved, &root)
     });
     let document = match document {

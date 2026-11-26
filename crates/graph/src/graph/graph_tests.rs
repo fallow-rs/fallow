@@ -1217,3 +1217,71 @@ fn graph_multiple_entry_points() {
     assert!(graph.modules[1].is_reachable());
     assert!(graph.modules[2].is_reachable());
 }
+
+/// A cached graph with a `FileId` out of bounds in a side table is not valid,
+/// because the detectors index the modules with it.
+#[test]
+fn a_file_id_out_of_bounds_in_a_side_table_breaks_the_structure() {
+    let graph = build_simple_graph();
+    assert!(graph.has_valid_structure());
+    let outside = FileId(u32::try_from(graph.modules.len()).unwrap() + 7);
+
+    let mut usage = build_simple_graph();
+    usage.package_usage.insert("pkg".to_owned(), vec![outside]);
+    assert!(!usage.has_valid_structure());
+
+    let mut reference = build_simple_graph();
+    let export = reference
+        .modules
+        .iter_mut()
+        .flat_map(|module| module.exports.iter_mut())
+        .find(|export| !export.references.is_empty())
+        .expect("an export with a reference");
+    export.references[0].from_file = outside;
+    assert!(!reference.has_valid_structure());
+}
+
+/// A cached re-export cycle must name each member by the path of its
+/// module, and a cached namespace escape must name modules in bounds.
+#[test]
+fn cycles_and_escapes_of_a_cached_graph_must_match_the_modules() {
+    let graph = build_simple_graph();
+    let outside = FileId(u32::try_from(graph.modules.len()).unwrap() + 7);
+    let member = graph.modules[0].file_id;
+    let cycle = GraphReExportCycle {
+        files: vec![graph.modules[0].path.clone()],
+        file_ids: vec![member],
+        is_self_loop: true,
+        anchor_span_start: None,
+    };
+
+    let mut valid = build_simple_graph();
+    valid.re_export_cycles.push(cycle.clone());
+    assert!(valid.has_valid_structure());
+
+    let mut other_path = build_simple_graph();
+    let mut renamed = cycle.clone();
+    renamed.files = vec![PathBuf::from("/elsewhere/a.ts")];
+    other_path.re_export_cycles.push(renamed);
+    assert!(!other_path.has_valid_structure());
+
+    let mut bad_id = build_simple_graph();
+    let mut moved = cycle;
+    moved.file_ids = vec![outside];
+    bad_id.re_export_cycles.push(moved);
+    assert!(!bad_id.has_valid_structure());
+
+    let escape = |consumer, target| NamespaceEscape {
+        consumer,
+        import_span: oxc_span::Span::new(0, 1),
+        local_name: "ns".to_owned(),
+        target,
+        reason: NamespaceEscapeReason::WholeObjectUse,
+        read_members: Vec::new(),
+    };
+    for (consumer, target) in [(outside, member), (member, outside)] {
+        let mut escaped = build_simple_graph();
+        escaped.namespace_escapes.push(escape(consumer, target));
+        assert!(!escaped.has_valid_structure());
+    }
+}

@@ -4,6 +4,7 @@ mod call_evidence;
 mod empty;
 mod queries;
 mod reconcile;
+mod response_path;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -42,6 +43,9 @@ use queries::{build_dead_code_queries, query_supports_guarded_fix};
 use reconcile::apply_dead_code_response;
 #[cfg(test)]
 use reconcile::semantic_only_candidate_stays_hidden;
+use response_path::{
+    ResponseScope, contract_paths_in_scope, impact_paths, reference_paths_in_scope,
+};
 
 const EVIDENCE_LIMIT: usize = 40;
 /// A type-coupling result is one project-wide report, not one symbol, so it
@@ -732,7 +736,13 @@ pub fn trace_symbol(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware trace response omitted its query result".to_string())
     })?;
-    decode_symbol_trace(&response, &request, result, symbol)
+    decode_symbol_trace(
+        &response,
+        &request,
+        result,
+        symbol,
+        &ResponseScope::new(root),
+    )
 }
 
 fn decode_symbol_trace(
@@ -740,6 +750,7 @@ fn decode_symbol_trace(
     request: &SemanticRequest,
     result: &SemanticQueryResponse,
     symbol: SemanticSymbol,
+    scope: &ResponseScope,
 ) -> Result<SemanticSymbolTrace, TypeAwareError> {
     let identity = semantic_identity(response, request, result.status);
     if result.status == SemanticCompleteness::Unavailable {
@@ -774,7 +785,7 @@ fn decode_symbol_trace(
             "type-aware symbol trace totals are smaller than returned evidence".to_string(),
         ));
     }
-    let references = decode_symbol_trace_evidence(result)?;
+    let references = decode_symbol_trace_evidence(result, scope)?;
     Ok(SemanticSymbolTrace {
         target: data.symbol,
         identity,
@@ -808,7 +819,13 @@ pub fn symbol_impact(
     let result = response.results.first().ok_or_else(|| {
         TypeAwareError::from("type-aware impact response omitted its query result".to_string())
     })?;
-    decode_symbol_impact(&response, &request, result, symbol)
+    decode_symbol_impact(
+        &response,
+        &request,
+        result,
+        symbol,
+        &ResponseScope::new(root),
+    )
 }
 
 fn decode_symbol_impact(
@@ -816,6 +833,7 @@ fn decode_symbol_impact(
     request: &SemanticRequest,
     result: &SemanticQueryResponse,
     symbol: SemanticSymbol,
+    scope: &ResponseScope,
 ) -> Result<SemanticSymbolImpact, TypeAwareError> {
     let identity = semantic_identity(response, request, result.status);
     if result.status == SemanticCompleteness::Unavailable {
@@ -846,19 +864,6 @@ fn decode_symbol_impact(
         ))
     })?;
     validate_returned_symbol(&symbol, &data.symbol, result.query_id)?;
-    for consumer in &data.direct_consumers {
-        validate_semantic_response_path(&consumer.path, result.query_id)?;
-    }
-    for path in data
-        .transitive_affected_files
-        .iter()
-        .chain(&data.targeted_tests)
-    {
-        validate_semantic_response_path(&path.path, result.query_id)?;
-        for provenance in &path.provenance {
-            validate_semantic_response_path(provenance, result.query_id)?;
-        }
-    }
     if data.confidence == SemanticImpactConfidence::Unavailable {
         return Err(TypeAwareError::from(format!(
             "type-aware query {} returned an unsupported impact confidence",
@@ -876,6 +881,7 @@ fn decode_symbol_impact(
     let direct_consumers = data
         .direct_consumers
         .into_iter()
+        .filter(|consumer| scope.allows(&consumer.path))
         .map(|consumer| SemanticImpactPath {
             path: consumer.path,
             relation: format!("direct-{}-consumer", namespace_name(consumer.namespace)),
@@ -883,8 +889,8 @@ fn decode_symbol_impact(
             via: Vec::new(),
         })
         .collect();
-    let affected_files = impact_paths(data.transitive_affected_files, "transitive-consumer");
-    let targeted_tests = impact_paths(data.targeted_tests, "targeted-test");
+    let affected_files = impact_paths(data.transitive_affected_files, "transitive-consumer", scope);
+    let targeted_tests = impact_paths(data.targeted_tests, "targeted-test", scope);
     Ok(SemanticSymbolImpact {
         target: data.symbol,
         identity,
@@ -993,7 +999,9 @@ pub fn inspect_symbol(
         .ok_or_else(|| {
             TypeAwareError::from("semantic inspect omitted symbol impact".to_string())
         })?;
-    let trace = decode_symbol_trace(&response, &request, trace_result, symbol.clone())?;
+    // One scope for the whole request, because the decoders share it.
+    let scope = ResponseScope::new(Path::new(&request.root));
+    let trace = decode_symbol_trace(&response, &request, trace_result, symbol.clone(), &scope)?;
     let api_query = request
         .queries
         .iter()
@@ -1002,7 +1010,7 @@ pub fn inspect_symbol(
             TypeAwareError::from("semantic inspect omitted its API surface query".to_string())
         })?;
     let api_surface = decode_api_surface(api_query, api_result)?;
-    let impact = decode_symbol_impact(&response, &request, impact_result, symbol)?;
+    let impact = decode_symbol_impact(&response, &request, impact_result, symbol, &scope)?;
     let type_aware = inspect_type_aware_outcome(&response, &request, &trace, &api_surface, &impact);
     Ok(SemanticInspectOutcome {
         trace,
@@ -1348,18 +1356,6 @@ fn semantic_identity(
     }
 }
 
-fn impact_paths(paths: Vec<ImpactPathData>, relation: &str) -> Vec<SemanticImpactPath> {
-    paths
-        .into_iter()
-        .map(|path| SemanticImpactPath {
-            distance: path.provenance.len().max(1),
-            via: path.provenance,
-            path: path.path,
-            relation: relation.to_string(),
-        })
-        .collect()
-}
-
 const fn namespace_name(namespace: SemanticNamespace) -> &'static str {
     match namespace {
         SemanticNamespace::Value => "value",
@@ -1480,6 +1476,7 @@ fn validate_response(
 
 fn decode_candidate_decision(
     root: &Path,
+    scope: &ResponseScope,
     query: &SemanticQuery,
     result: &SemanticQueryResponse,
     fix_supported: bool,
@@ -1503,6 +1500,11 @@ fn decode_candidate_decision(
             "failed to decode type-aware symbol-use decision: {error}"
         ))
     })?;
+    if !contract_paths_in_scope(&data, scope) {
+        // A contract relation decides the result, so the query has no
+        // decision without it. The candidate keeps its static result.
+        return Ok(unavailable_candidate_decision(requested.clone(), result));
+    }
     validate_symbol_use_data(
         SymbolUseValidation {
             root,
@@ -1514,7 +1516,7 @@ fn decode_candidate_decision(
         &data,
         source_cache,
     )?;
-    let evidence = decode_symbol_use_evidence(result)?;
+    let evidence = decode_symbol_use_evidence(result, scope)?;
     let required_contract = data
         .contract_relations
         .iter()
@@ -1695,12 +1697,6 @@ fn validate_symbol_use_data(
             result.query_id
         )));
     }
-    for contract in &data.contract_relations {
-        validate_semantic_response_path(&contract.declaration.path, result.query_id)?;
-    }
-    for contract in &data.framework_contract_relations {
-        validate_semantic_response_path(&contract.declaration.path, result.query_id)?;
-    }
     if fix_supported {
         validate_edit_guard(
             root,
@@ -1719,20 +1715,7 @@ fn declaration_path_matches_package(path: &Path, package: &str) -> bool {
     format!("/{normalized}").contains(&marker)
 }
 
-fn validate_semantic_response_path(path: &Path, query_id: usize) -> Result<(), TypeAwareError> {
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, Component::RootDir | Component::Prefix(_)))
-    {
-        return Err(TypeAwareError::from(format!(
-            "type-aware query {query_id} returned a non-project-relative path"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_semantic_reference_paths(
+fn validate_reference_provenance(
     evidence: &SemanticReferenceData,
     query_id: usize,
 ) -> Result<(), TypeAwareError> {
@@ -1740,10 +1723,6 @@ fn validate_semantic_reference_paths(
         return Err(TypeAwareError::from(format!(
             "type-aware query {query_id} returned unsupported reference provenance"
         )));
-    }
-    validate_semantic_response_path(&evidence.path, query_id)?;
-    for hop in &evidence.via {
-        validate_semantic_response_path(&hop.path, query_id)?;
     }
     Ok(())
 }
@@ -1784,39 +1763,42 @@ fn validate_edit_guard(
 
 fn decode_symbol_use_evidence(
     result: &SemanticQueryResponse,
+    scope: &ResponseScope,
 ) -> Result<Vec<SemanticReference>, TypeAwareError> {
-    result
-        .evidence
-        .iter()
-        .map(|value| {
-            let evidence: SemanticReferenceData =
-                serde_json::from_value(value.clone()).map_err(|error| {
-                    TypeAwareError::from(format!(
-                        "failed to decode type-aware evidence for query {}: {error}",
-                        result.query_id
-                    ))
-                })?;
-            let namespace = evidence.namespace.ok_or_else(|| {
+    let mut references = Vec::new();
+    for value in &result.evidence {
+        let evidence: SemanticReferenceData =
+            serde_json::from_value(value.clone()).map_err(|error| {
                 TypeAwareError::from(format!(
-                    "type-aware reference for query {} omitted its namespace",
+                    "failed to decode type-aware evidence for query {}: {error}",
                     result.query_id
                 ))
             })?;
-            validate_semantic_reference_paths(&evidence, result.query_id)?;
-            Ok(SemanticReference {
-                path: evidence.path,
-                line: evidence.line,
-                col: evidence.col,
-                role: evidence.role,
-                namespace,
-                via: evidence.via,
-            })
-        })
-        .collect()
+        let namespace = evidence.namespace.ok_or_else(|| {
+            TypeAwareError::from(format!(
+                "type-aware reference for query {} omitted its namespace",
+                result.query_id
+            ))
+        })?;
+        validate_reference_provenance(&evidence, result.query_id)?;
+        if !reference_paths_in_scope(&evidence, scope) {
+            continue;
+        }
+        references.push(SemanticReference {
+            path: evidence.path,
+            line: evidence.line,
+            col: evidence.col,
+            role: evidence.role,
+            namespace,
+            via: evidence.via,
+        });
+    }
+    Ok(references)
 }
 
 fn decode_symbol_trace_evidence(
     result: &SemanticQueryResponse,
+    scope: &ResponseScope,
 ) -> Result<Vec<SemanticReference>, TypeAwareError> {
     let mut references = Vec::new();
     for value in &result.evidence {
@@ -1827,8 +1809,10 @@ fn decode_symbol_trace_evidence(
                     result.query_id
                 ))
             })?;
-        validate_semantic_reference_paths(&evidence, result.query_id)?;
-        if evidence.role == "declaration" && evidence.namespace.is_none() {
+        validate_reference_provenance(&evidence, result.query_id)?;
+        if !reference_paths_in_scope(&evidence, scope)
+            || (evidence.role == "declaration" && evidence.namespace.is_none())
+        {
             continue;
         }
         let namespace = evidence.namespace.ok_or_else(|| {
@@ -2491,7 +2475,7 @@ mod tests {
         assert!(error.to_string().contains("outside project root"));
     }
 
-    fn symbol() -> SemanticSymbol {
+    pub(super) fn symbol() -> SemanticSymbol {
         SemanticSymbol {
             path: PathBuf::from("src/config.ts"),
             namespace: SemanticNamespace::Value,
@@ -2996,9 +2980,10 @@ mod tests {
         );
         assert!(protocol_path(root, Path::new("../outside.ts")).is_err());
         assert!(protocol_path(root, &root.join("../outside.ts")).is_err());
-        assert!(validate_semantic_response_path(Path::new("src/config.ts"), 0).is_ok());
-        assert!(validate_semantic_response_path(Path::new("../shared/consumer.ts"), 0).is_ok());
-        assert!(validate_semantic_response_path(&root.join("outside.ts"), 0).is_err());
+        let scope = ResponseScope::new(root);
+        assert!(scope.allows(Path::new("src/config.ts")));
+        assert!(scope.allows(Path::new("src/../shared/consumer.ts")));
+        assert!(!scope.allows(&root.join("outside.ts")));
         let unsafe_alias = SemanticReferenceData {
             path: PathBuf::from("src/config.ts"),
             line: 1,
@@ -3013,7 +2998,7 @@ mod tests {
                 relation: "import-alias".to_string(),
             }],
         };
-        assert!(validate_semantic_reference_paths(&unsafe_alias, 0).is_err());
+        assert!(!reference_paths_in_scope(&unsafe_alias, &scope));
         assert_eq!(namespace_name(SemanticNamespace::Value), "value");
         assert_eq!(namespace_name(SemanticNamespace::Type), "type");
         assert_eq!(digest_hex([0, 15, 255]), "000fff");
@@ -3033,6 +3018,7 @@ mod tests {
                 },
             ],
             "affected",
+            &scope,
         );
         assert_eq!(paths[0].distance, 1);
         assert_eq!(paths[1].distance, 2);
@@ -3722,99 +3708,6 @@ mod tests {
         assert!(applied.entries.is_empty());
         assert_eq!(decoded.status, SemanticCompleteness::Unavailable);
         assert!(decoded.private_type_leaks.is_empty());
-    }
-
-    #[test]
-    fn partial_symbol_impact_preserves_valid_consumers_and_targeted_tests() {
-        let target = symbol();
-        let request = SemanticRequest {
-            protocol_version: PROTOCOL_VERSION,
-            operation: OPERATION,
-            root: ".".to_string(),
-            projects: vec!["tsconfig.json".to_string()],
-            evidence_limit: EVIDENCE_LIMIT,
-            queries: vec![SemanticQuery::SymbolImpact {
-                id: 0,
-                symbol: target.clone(),
-            }],
-        };
-        let result = SemanticQueryResponse {
-            query_id: 0,
-            operation: SemanticOperation::SymbolImpact,
-            assertion: "consumers-found".to_string(),
-            status: SemanticCompleteness::Partial,
-            reason_code: Some(SemanticGapReason::DynamicBehavior),
-            actions: vec!["Review dynamic consumers.".to_string()],
-            evidence: Vec::new(),
-            total_evidence_count: 2,
-            truncated: false,
-            omissions: vec![SemanticOmission {
-                reason_code: SemanticGapReason::DynamicBehavior,
-                count: 1,
-            }],
-            data: json!({
-                "symbol": target,
-                "selected_project": "tsconfig.json",
-                "direct_consumers": [{
-                    "path": "src/consumer.ts",
-                    "namespace": "value"
-                }],
-                "total_direct_consumer_count": 1,
-                "transitive_affected_files": [{
-                    "path": "src/transitive.ts",
-                    "provenance": ["src/consumer.ts", "src/transitive.ts"]
-                }],
-                "total_transitive_affected_file_count": 1,
-                "targeted_tests": [{
-                    "path": "test/config.test.ts",
-                    "provenance": ["src/consumer.ts", "test/config.test.ts"]
-                }],
-                "total_targeted_test_count": 1,
-                "confidence": "bounded"
-            }),
-        };
-        let response = SemanticResponse {
-            protocol_version: PROTOCOL_VERSION,
-            operation: OPERATION.to_string(),
-            sidecar_version: env!("CARGO_PKG_VERSION").to_string(),
-            backend: BACKEND_FAMILY.to_string(),
-            backend_version: BACKEND_VERSION.to_string(),
-            selected_tsconfigs: vec!["tsconfig.json".to_string()],
-            projects: Vec::new(),
-            results: vec![result.clone()],
-            phase_timings_ms: SemanticPhaseTimings {
-                project_setup: 1,
-                diagnostics: 1,
-                semantic_queries: 1,
-            },
-            warnings: Vec::new(),
-            elapsed_ms: 3,
-        };
-
-        let impact =
-            decode_symbol_impact(&response, &request, &result, symbol()).expect("valid impact");
-
-        assert_eq!(impact.status, SemanticCompleteness::Partial);
-        assert_eq!(impact.total_direct_consumer_count, 1);
-        assert_eq!(
-            impact.direct_consumers[0].path,
-            PathBuf::from("src/consumer.ts")
-        );
-        assert_eq!(impact.total_affected_file_count, 1);
-        assert_eq!(impact.total_targeted_test_count, 1);
-        assert_eq!(
-            impact.targeted_tests[0].path,
-            PathBuf::from("test/config.test.ts")
-        );
-        assert_eq!(impact.confidence, SemanticImpactConfidence::Bounded);
-
-        let mut invalid_confidence = result.clone();
-        invalid_confidence.data["confidence"] = json!("certain");
-        assert!(decode_symbol_impact(&response, &request, &invalid_confidence, symbol()).is_err());
-
-        let mut invalid_path = result;
-        invalid_path.data["direct_consumers"][0]["path"] = json!("/outside.ts");
-        assert!(decode_symbol_impact(&response, &request, &invalid_path, symbol()).is_err());
     }
 
     #[test]

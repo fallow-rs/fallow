@@ -17,6 +17,8 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::discover::project_read::{is_project_file, read_project_dir, read_project_file};
+
 use super::{IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context};
 
 /// The hook script directories: husky, and Vite+ (`vp config`).
@@ -136,7 +138,7 @@ pub fn analyze_hook_files(root: &Path, context: &HookContext<'_>) -> FxHashSet<S
 fn collect_agent_hook_commands(root: &Path) -> Vec<(&'static str, String)> {
     let mut commands = Vec::new();
     for (file, harness) in AGENT_HOOK_FILES {
-        let Some(config) = read_json(&root.join(file)) else {
+        let Some(config) = read_json(root, &root.join(file)) else {
             continue;
         };
         let Some(events) = config.get("hooks").and_then(serde_json::Value::as_object) else {
@@ -172,8 +174,8 @@ fn runs_generated_gate(root: &Path, commands: &[(&str, String)]) -> bool {
     commands.iter().any(|(harness, command)| {
         let gate = format!("{harness}/{GENERATED_GATE}");
         command.contains(&gate)
-            && std::fs::read_to_string(root.join(&gate))
-                .is_ok_and(|content| content.contains(GENERATED_GATE_MARKER))
+            && read_project_file(root, &root.join(&gate))
+                .is_some_and(|content| content.contains(GENERATED_GATE_MARKER))
     })
 }
 
@@ -181,17 +183,17 @@ fn runs_generated_gate(root: &Path, commands: &[(&str, String)]) -> bool {
 fn collect_hook_commands(root: &Path) -> Vec<String> {
     let mut commands = Vec::new();
     for dir in HOOK_SCRIPT_DIRS {
-        collect_hook_script_commands(&root.join(dir), &mut commands);
+        collect_hook_script_commands(root, &root.join(dir), &mut commands);
     }
     commands.extend(super::vite_plus::staged_commands(root));
 
     for name in LEFTHOOK_FILES {
-        if let Ok(content) = std::fs::read_to_string(root.join(name)) {
+        if let Some(content) = read_project_file(root, &root.join(name)) {
             commands.extend(super::ci::extract_ci_commands(&content));
         }
     }
 
-    if let Some(manifest) = read_json(&root.join("package.json")) {
+    if let Some(manifest) = read_json(root, &root.join("package.json")) {
         for key in MANIFEST_COMMAND_KEYS {
             if let Some(value) = manifest.get(*key) {
                 collect_json_strings(value, &mut commands);
@@ -203,26 +205,26 @@ fn collect_hook_commands(root: &Path) -> Vec<String> {
         .iter()
         .chain(&[".lintstagedrc.json"])
     {
-        if let Some(value) = read_json(&root.join(name)) {
+        if let Some(value) = read_json(root, &root.join(name)) {
             collect_json_strings(&value, &mut commands);
         }
     }
 
     // `.lintstagedrc` is JSON or YAML.
-    if let Ok(content) = std::fs::read_to_string(root.join(".lintstagedrc")) {
+    if let Some(content) = read_project_file(root, &root.join(".lintstagedrc")) {
         match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(value) => collect_json_strings(&value, &mut commands),
             Err(_) => commands.extend(yaml_scalar_values(&content)),
         }
     }
     for name in LINT_STAGED_YAML_FILES {
-        if let Ok(content) = std::fs::read_to_string(root.join(name)) {
+        if let Some(content) = read_project_file(root, &root.join(name)) {
             commands.extend(yaml_scalar_values(&content));
         }
     }
 
     for name in SIMPLE_GIT_HOOKS_JS_FILES.iter().chain(LINT_STAGED_JS_FILES) {
-        if let Ok(content) = std::fs::read_to_string(root.join(name)) {
+        if let Some(content) = read_project_file(root, &root.join(name)) {
             commands.extend(js_string_literals(&content));
         }
     }
@@ -233,14 +235,14 @@ fn collect_hook_commands(root: &Path) -> Vec<String> {
 /// Read the hook scripts directly inside a hook directory such as `.husky/`.
 /// The `_` directory holds the runtime of the hook manager and is skipped
 /// with every other directory.
-fn collect_hook_script_commands(dir: &Path, commands: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn collect_hook_script_commands(root: &Path, dir: &Path, commands: &mut Vec<String>) {
+    let Some(entries) = read_project_dir(root, dir) else {
         return;
     };
     let mut paths: Vec<_> = entries
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| path.is_file())
+        .filter(|path| is_project_file(root, path))
         .filter(|path| {
             path.file_name()
                 .is_some_and(|name| !name.to_string_lossy().starts_with('.'))
@@ -248,14 +250,14 @@ fn collect_hook_script_commands(dir: &Path, commands: &mut Vec<String>) {
         .collect();
     paths.sort();
     for path in paths {
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Some(content) = read_project_file(root, &path) {
             commands.extend(super::shell_helpers::script_file_commands(&content));
         }
     }
 }
 
-fn read_json(path: &Path) -> Option<serde_json::Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+fn read_json(root: &Path, path: &Path) -> Option<serde_json::Value> {
+    let content = read_project_file(root, path)?;
     serde_json::from_str(&content).ok()
 }
 
@@ -411,6 +413,28 @@ mod tests {
         .collect();
         packages.sort();
         packages
+    }
+
+    /// A hook directory or a hook config that links out of the project is
+    /// not read.
+    #[test]
+    #[cfg(unix)]
+    fn hook_files_that_link_out_of_the_project_are_not_read() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        write(&outside, "hooks/pre-commit", "npx eslint .\n");
+        write(
+            &outside,
+            "lefthook.yml",
+            "pre-commit:\n  commands:\n    lint:\n      run: npx prettier --check .\n",
+        );
+        std::os::unix::fs::symlink(outside.join("hooks"), root.join(".husky")).expect("link");
+        std::os::unix::fs::symlink(outside.join("lefthook.yml"), root.join("lefthook.yml"))
+            .expect("link");
+
+        assert!(used(&root, &["eslint", "prettier"]).is_empty());
     }
 
     #[test]

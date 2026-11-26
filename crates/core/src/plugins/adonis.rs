@@ -405,7 +405,7 @@ fn subpath_import_to_path_alias(key: &str, value: &str) -> Option<(String, Strin
 /// missing, unreadable, or the `imports` field is absent.
 fn read_subpath_imports(root: &Path) -> Option<Vec<(String, String)>> {
     let pkg_path = root.join("package.json");
-    let content = std::fs::read_to_string(&pkg_path).ok()?;
+    let content = crate::discover::project_read::read_project_file(root, &pkg_path)?;
     let value: serde_json::Value = serde_json::from_str(&content).ok()?;
     let imports = value.get("imports")?.as_object()?;
     let mut pairs = Vec::with_capacity(imports.len());
@@ -442,6 +442,25 @@ define_plugin! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `package.json` that links out of the project gives no subpath imports.
+    #[test]
+    #[cfg(unix)]
+    fn subpath_imports_of_a_package_json_that_links_out_are_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(
+            outside.join("package.json"),
+            r##"{"imports":{"#app/*":"./app/*.js"}}"##,
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("package.json"), root.join("package.json"))
+            .expect("link");
+        assert!(read_subpath_imports(&root).is_none());
+    }
 
     fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
         result

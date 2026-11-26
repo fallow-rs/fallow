@@ -201,6 +201,7 @@ fn plan_response_results(
     let mut type_coupling = None;
     let mut query_summaries = Vec::new();
     let mut source_cache = FxHashMap::default();
+    let scope = super::response_path::ResponseScope::new(root);
     let reachable_files = results
         .semantic_reachable_files
         .iter()
@@ -229,6 +230,7 @@ fn plan_response_results(
                 let decision = retain_non_crediting_evidence(
                     decode_candidate_decision(
                         root,
+                        &scope,
                         query,
                         result,
                         fix_supported,
@@ -241,7 +243,14 @@ fn plan_response_results(
             }
             QueryTarget::UnusedExport(index) => {
                 let decision = retain_non_crediting_evidence(
-                    decode_candidate_decision(root, query, result, false, &mut source_cache)?,
+                    decode_candidate_decision(
+                        root,
+                        &scope,
+                        query,
+                        result,
+                        false,
+                        &mut source_cache,
+                    )?,
                     &reachable_files,
                     &mut summary,
                 );
@@ -249,7 +258,14 @@ fn plan_response_results(
             }
             QueryTarget::UnusedType(index) => {
                 let decision = retain_non_crediting_evidence(
-                    decode_candidate_decision(root, query, result, false, &mut source_cache)?,
+                    decode_candidate_decision(
+                        root,
+                        &scope,
+                        query,
+                        result,
+                        false,
+                        &mut source_cache,
+                    )?,
                     &reachable_files,
                     &mut summary,
                 );

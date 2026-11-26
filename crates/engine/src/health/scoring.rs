@@ -1623,19 +1623,18 @@ fn resolve_crap_coverage<'a>(
     }
 }
 
-/// Auto-detect a `coverage-final.json` file in common locations relative to the project root.
-///
-/// Checks (in order): `coverage/coverage-final.json`, `.nyc_output/coverage-final.json`.
-/// Returns the first path found, or `None` if no coverage file exists.
-/// The audit base-worktree pass uses the same detection against the head
-/// project root, so auto-detected coverage scores both attribution sides
-/// (#2347).
+/// Auto-detect a `coverage-final.json` file in `coverage/`, then in `.nyc_output/`, of the
+/// project root. Returns the first regular file that resolves inside the root. The audit
+/// base-worktree pass uses the same detection against the head project root, so
+/// auto-detected coverage scores both attribution sides (#2347).
 pub fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::PathBuf> {
     let candidates = [
         root.join("coverage/coverage-final.json"),
         root.join(".nyc_output/coverage-final.json"),
     ];
-    candidates.into_iter().find(|p| p.is_file())
+    candidates
+        .into_iter()
+        .find(|p| p.is_file() && fallow_types::read_guard::is_inside_root(root, p))
 }
 
 /// Resolve a relative path against the fallow project root. Returns `path`
@@ -1689,7 +1688,7 @@ pub(super) fn load_istanbul_coverage_for_sources(
 ) -> Result<IstanbulCoverage, String> {
     super::validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
-    match read_coverage_input(&resolved)? {
+    match read_coverage_input(&resolved, project_root)? {
         CoverageInput::Istanbul { file_path, json } => {
             let raw = parse_coverage_map_tolerantly(&json).map_err(|e| {
                 format!(

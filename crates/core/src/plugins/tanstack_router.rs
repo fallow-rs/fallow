@@ -430,7 +430,7 @@ fn add_virtual_route_config_file(config: &mut VirtualRouteConfig, root: &Path, c
     push_unique(&mut config.config_files, config_file.to_string());
 
     let file_path = root.join(config_file);
-    let Ok(source) = std::fs::read_to_string(&file_path) else {
+    let Some(source) = crate::discover::project_read::read_project_file(root, &file_path) else {
         return;
     };
     let base_dir = Path::new(config_file)
@@ -1143,6 +1143,10 @@ fn used_export_rule_from_path_rule(
         .with_excluded_regexes(rule.exclude_regexes)
         .with_excluded_segment_regexes(rule.exclude_segment_regexes)
 }
+
+#[cfg(test)]
+#[path = "tanstack_router_config_file_tests.rs"]
+mod config_file_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1968,63 +1972,6 @@ const { rootRoute } = "@tanstack/virtual-file-routes";
     // ---------------------------------------------------------------------------
     // add_virtual_route_config_file: reads config file from disk (400-414)
     // ---------------------------------------------------------------------------
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn add_virtual_route_config_file_reads_and_parses_virtual_route_file() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        let config_file = "src/routes.ts";
-        let routes_path = root.join("src");
-        std::fs::create_dir_all(&routes_path).expect("create dir");
-        let full_path = routes_path.join("routes.ts");
-        let mut f = std::fs::File::create(&full_path).expect("create file");
-        writeln!(
-            f,
-            r#"import {{ rootRoute, index }} from "@tanstack/virtual-file-routes";
-export default rootRoute("root.tsx", [index("index.tsx")]);"#
-        )
-        .expect("write");
-
-        let mut config = VirtualRouteConfig::default();
-        add_virtual_route_config_file(&mut config, root, config_file);
-
-        assert!(
-            config.config_files.contains(&config_file.to_string()),
-            "config file not registered: {:?}",
-            config.config_files
-        );
-        let files: Vec<String> = config
-            .route_files
-            .iter()
-            .map(|s| s.replace('\\', "/"))
-            .collect();
-        assert!(
-            files.iter().any(|f| f.contains("root.tsx")),
-            "root.tsx missing: {files:?}"
-        );
-        assert!(
-            files.iter().any(|f| f.contains("index.tsx")),
-            "index.tsx missing: {files:?}"
-        );
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn add_virtual_route_config_file_returns_early_when_file_missing() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
-        let mut config = VirtualRouteConfig::default();
-        // File does not exist on disk; should record config_file but not panic.
-        add_virtual_route_config_file(&mut config, root, "nonexistent/routes.ts");
-        assert!(
-            config
-                .config_files
-                .contains(&"nonexistent/routes.ts".to_string()),
-            "config file not registered even when missing from disk"
-        );
-        assert!(config.route_files.is_empty());
-    }
 
     // ---------------------------------------------------------------------------
     // tsr.config.json: virtualRouteConfig as file path string (lines 320-328)

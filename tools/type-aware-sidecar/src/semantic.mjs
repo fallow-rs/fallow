@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { accessorPairExists, countsAsAccessorUse } from "./accessor-direction.mjs";
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
+import { declarationIsProjectLocal, isUnresolvedContractHeritage } from "./heritage-provenance.mjs";
 
 import { canonicalFileIdentity, resetFileIdentityCache } from "./file-identity.mjs";
 import { packagePathTargets, projectPackage, wildcardPattern } from "./project-package.mjs";
@@ -56,6 +57,8 @@ import {
   isSupportedSemanticQuery,
   semanticOpenFiles,
   semanticOpenProjects,
+  projectsNamed,
+  graphProjects,
 } from "./semantic-input.mjs";
 
 const { SignatureKind, SymbolFlags } = sync;
@@ -907,11 +910,6 @@ const packageNameForDeclaration = (declaration) => {
   return segments[0] || undefined;
 };
 
-const declarationIsProjectLocal = (root, declaration) => {
-  const relative = path.relative(root, declaration.getSourceFile().fileName);
-  return relative === "" || (!path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`));
-};
-
 const frameworkContractRelationsFor = (root, project, declaration, contracts, memberName) => {
   const owner = ownerDeclaration(declaration);
   if (!owner || (!isClassDeclaration(owner) && !isClassExpression(owner))) {
@@ -930,6 +928,10 @@ const frameworkContractRelationsFor = (root, project, declaration, contracts, me
         project.checker.getTypeAtLocation(heritageType).aliasSymbol ??
         project.checker.getTypeAtLocation(heritageType).symbol;
       const symbol = resolveAlias(project.checker, rawSymbol);
+      provenanceUnknown ||= isUnresolvedContractHeritage(heritageType, project, symbol, {
+        contracts: matchingContracts,
+        relation: clauseRelation,
+      });
       for (const heritageDeclaration of declarationsForSymbol(project, symbol)) {
         const declarationPackage = packageNameForDeclaration(heritageDeclaration);
         for (const contract of matchingContracts) {
@@ -1551,11 +1553,6 @@ const publicApiGraph = (root, project, entryPoints, includeEntries = false) => {
   return { exports, entries, edges, leaks };
 };
 
-const graphProjects = (snapshot, explicitProjects) =>
-  (explicitProjects.length > 0 ? explicitProjects : snapshot.getProjects()).filter(
-    (project) => project.program.getSourceFileNames().length > 0,
-  );
-
 const readyProjectStates = (query, states) => {
   const ready = states.filter((state) => state.status === "complete");
   if (ready.length > 0) return { ready };
@@ -1942,6 +1939,8 @@ const semanticProjectSelection = (snapshot, openProjects, openFiles, allowDefaul
   const explicitProjects = openProjects
     .map((project) => snapshot.getProject(project))
     .filter(Boolean);
+  if (!allowDefaultFallback && explicitProjects.length === 0)
+    return { explicitProjects, selectedProjects: [] };
   const symbolProjects = openFiles
     .map((file) => selectProjectForSymbol(snapshot, explicitProjects, file, allowDefaultFallback))
     .filter(Boolean);
@@ -1982,7 +1981,7 @@ const semanticSetup = (root, projects, queries, api, sessionState) => {
     sessionState.openProjects = openProjectSet;
     previousSnapshot?.dispose();
   }
-  const allowDefaultFallback = projects.length === 0;
+  const allowDefaultFallback = !projectsNamed(projects);
   return {
     snapshot,
     openFiles,

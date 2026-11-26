@@ -364,6 +364,13 @@ fn collect_source_maps(
             dir.display()
         ))
     })?;
+    let below_root = fallow_engine::saved_file::lies_below(repo_root, dir);
+    if below_root && !fallow_types::read_guard::is_inside_root(repo_root, dir) {
+        return Err(UploadSourceMapsError::Validation(format!(
+            "selected build directory {} resolves outside the repository root",
+            dir.display()
+        )));
+    }
     let mut maps = Vec::new();
     let mut input = SourceMapWalkInput {
         repo_root,
@@ -1376,6 +1383,24 @@ mod tests {
 
         assert!(
             matches!(err, UploadSourceMapsError::Validation(ref message) if message.contains("outside selected build directory"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_source_maps_rejects_a_build_dir_link_out_of_the_repo() {
+        let repo_root = tempdir().expect("repo root");
+        let outside_dir = tempdir().expect("outside dir");
+        std::fs::write(outside_dir.path().join("app.js.map"), "{}").expect("outside map");
+        let build_dir = repo_root.path().join("dist");
+        std::os::unix::fs::symlink(outside_dir.path(), &build_dir).expect("dir symlink");
+
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&[], "--exclude").unwrap();
+        let err = collect_source_maps(repo_root.path(), &build_dir, &include, &exclude, false)
+            .expect_err("a build dir link out of the repo must be rejected");
+        assert!(
+            matches!(err, UploadSourceMapsError::Validation(ref message) if message.contains("outside the repository root"))
         );
     }
 

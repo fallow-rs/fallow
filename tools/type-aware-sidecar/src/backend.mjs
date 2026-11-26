@@ -1,7 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { selectBackend, supportedRange, supportsVersion } from "./backend-selection.mjs";
+import { createReadScope } from "./read-scope.mjs";
 
 const SELECTED = selectBackend();
 const { version: resolvedVersion } = await import(SELECTED.package);
@@ -37,6 +39,14 @@ const { serverFS } = await importApi("fs");
  * `undefined` as a missing file and needs the `serverFS.useOS` sentinel.
  */
 export const READ_FROM_DISK = serverFS?.useOS;
+
+/**
+ * The value a `readFile` callback returns for a file that the checker must
+ * treat as missing. An API with `serverFS` (TypeScript 7.1 and tsrs) reads
+ * `undefined` as a missing file and refuses `null`. TypeScript 7.0 reads
+ * `undefined` from disk, so it gets `null`.
+ */
+const MISSING_FILE = serverFS ? undefined : null;
 
 const FS_CALLBACK_DEFAULTS = serverFS
   ? {
@@ -135,14 +145,81 @@ const withLinearSnapshots = (api) => {
 };
 
 /**
- * Create a backend API with the TypeScript 7.0 snapshot contract.
+ * The `node_modules` directory that holds the backend package. The platform
+ * package of the compiler, with its library files, is installed next to it.
+ */
+const COMPILER_DIRS = (() => {
+  try {
+    const manifest = createRequire(import.meta.url).resolve(`${BACKEND.package}/package.json`);
+    const packageDir = path.dirname(realpathSync(manifest));
+    return [packageDir, path.dirname(packageDir), path.dirname(path.dirname(packageDir))].filter(
+      (dir) => path.basename(dir) === "node_modules" || dir === packageDir,
+    );
+  } catch {
+    return [];
+  }
+})();
+
+/**
+ * The answer of each scoped file system callback, besides `readFile`, for a
+ * path outside the read scope: a directory lists no entries.
  *
- * @param {{ cwd?: string, fs?: Record<string, unknown> }} options
+ * Each scoped callback costs one round trip from the checker for each call.
+ * So the callbacks that give no file content (`fileExists`,
+ * `directoryExists`, `stat` and `realpath`) go to the checker host. A link
+ * that `realpath` resolves to a path outside the scope stays unreadable,
+ * because `readFile` checks the resolved path of each file itself.
+ */
+const REFUSED = {
+  getAccessibleEntries: () => ({ files: [], directories: [] }),
+};
+
+/**
+ * Give `fs` callbacks that keep the checker inside the read scope of `root`
+ * (see {@link createReadScope}). A refused file reads as missing. A path in
+ * scope goes to the callback of the caller, or to the file system.
+ */
+export const withReadScope = (scope, fs = {}) => {
+  const scoped = { ...fs };
+  const readFile = fs.readFile ?? (() => READ_FROM_DISK);
+  scoped.readFile = (fileName) => (scope.readable(fileName) ? readFile(fileName) : MISSING_FILE);
+  for (const [name, refused] of Object.entries(REFUSED)) {
+    const inner = fs[name] ?? (() => FS_CALLBACK_DEFAULTS[name]);
+    scoped[name] = (fileName) => (scope.inScope(fileName) ? inner(fileName) : refused(fileName));
+  }
+  return scoped;
+};
+
+/** Drop the path cache of `scope` before each snapshot update of `api`. */
+const resettingScope = (api, scope) =>
+  new Proxy(api, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property === "updateSnapshot") {
+        return (...args) => {
+          scope.reset();
+          return value.apply(target, args);
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+/**
+ * Create a backend API with the TypeScript 7.0 snapshot contract. With a
+ * `cwd`, the checker touches only the paths in the read scope of that root.
+ * `scopeRoot` overrides the scope root that fallow sets in the environment.
+ *
+ * @param {{ cwd?: string, scopeRoot?: string, fs?: Record<string, unknown> }} options
  */
 export const createApi = (options = {}) => {
-  const fs = options.fs ? { ...FS_CALLBACK_DEFAULTS, ...options.fs } : undefined;
-  const api = new sync.API({ ...options, ...(fs ? { fs } : {}) });
-  return typeof api.createSnapshot === "function" ? withLinearSnapshots(api) : api;
+  const { scopeRoot, ...apiOptions } = options;
+  const scope = options.cwd ? createReadScope(options.cwd, COMPILER_DIRS, scopeRoot) : null;
+  const scoped = scope ? withReadScope(scope, options.fs) : options.fs;
+  const fs = scoped ? { ...FS_CALLBACK_DEFAULTS, ...scoped } : undefined;
+  const api = new sync.API({ ...apiOptions, ...(fs ? { fs } : {}) });
+  const linear = typeof api.createSnapshot === "function" ? withLinearSnapshots(api) : api;
+  return scope ? resettingScope(linear, scope) : linear;
 };
 
 const INFERRED_PROJECT_ID = "/dev/null/inferred";

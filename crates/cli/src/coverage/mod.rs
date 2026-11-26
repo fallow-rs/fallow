@@ -429,7 +429,7 @@ fn ensure_fallow_dir(root: &Path, file: &Path) -> Result<(), String> {
 
 fn load_setup_state(root: &Path) -> CoverageSetupState {
     let path = setup_state_path(root);
-    let Ok(content) = std::fs::read_to_string(&path) else {
+    let Ok(content) = fallow_engine::saved_file::read_saved_file(root, &path) else {
         return CoverageSetupState::default();
     };
     match serde_json::from_str::<CoverageSetupState>(&content) {
@@ -443,8 +443,9 @@ fn load_setup_state(root: &Path) -> CoverageSetupState {
         }
         Err(err) => {
             eprintln!(
-                "fallow coverage setup: ignoring unreadable setup state at {}: {err}",
-                display_relative(root, &path)
+                "fallow coverage setup: ignoring unreadable setup state at {}: {}",
+                display_relative(root, &path),
+                fallow_engine::saved_file::json_error_position(&err)
             );
             CoverageSetupState::default()
         }
@@ -1842,19 +1843,22 @@ fn recipe_contents(context: &CoverageSetupContext) -> String {
     lines.join("\n")
 }
 
+/// The first coverage file or directory in a common location that resolves
+/// inside `root`.
 fn detect_coverage_artifact(root: &Path) -> Option<PathBuf> {
+    let inside = |path: &Path| fallow_types::read_guard::is_inside_root(root, path);
     for file in [
         root.join("coverage/coverage-final.json"),
         root.join(".nyc_output/coverage-final.json"),
     ] {
-        if file.is_file() {
+        if file.is_file() && inside(&file) {
             return Some(file);
         }
     }
 
     [root.join("coverage"), root.join(".nyc_output")]
         .into_iter()
-        .find(|dir| dir.is_dir() && directory_has_json(dir))
+        .find(|dir| dir.is_dir() && inside(dir) && directory_has_json(dir))
 }
 
 fn directory_has_json(path: &Path) -> bool {

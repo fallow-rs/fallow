@@ -10,15 +10,21 @@ use fallow_config::{
     UsedClassMemberRule,
 };
 
-use crate::scripts;
+use crate::{discover::project_read, scripts};
 
 use super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, ProvidedDependencyRule};
 
 pub(crate) mod builtin;
 mod helpers;
+mod plugin_diagnostics;
 mod tooling_evidence;
 mod virtual_module;
 
+#[cfg(test)]
+use plugin_diagnostics::PluginDiagnostic;
+use plugin_diagnostics::{
+    detect_enabler_typos, detect_pattern_collisions, emit_plugin_diagnostics,
+};
 pub(crate) use tooling_evidence::find_config_file;
 pub(crate) use virtual_module::module_specifiers;
 pub use virtual_module::{VirtualModuleMatch, VirtualModuleProviderRule};
@@ -1124,7 +1130,7 @@ impl PluginRegistry {
                 if !super::config_parser::is_inside_root(&abs_path, project_root) {
                     continue;
                 }
-                let Ok(source) = std::fs::read_to_string(&abs_path) else {
+                let Some(source) = project_read::read_project_file(project_root, &abs_path) else {
                     continue;
                 };
                 let mut file_result = AggregatedPluginResult::default();
@@ -1365,11 +1371,15 @@ fn load_workspace_filesystem_configs(input: &mut WorkspaceFsConfigInput<'_>) {
         input.candidate_index,
     );
     for (abs_path, plugin) in &ws_json_configs {
-        let Ok(source) = std::fs::read_to_string(abs_path) else {
+        let Some(source) =
+            crate::discover::project_read::read_project_file(input.project_root, abs_path)
+        else {
             continue;
         };
         let plugin_result =
-            plugin.resolve_config_in_project(abs_path, &source, input.root, input.project_root);
+            crate::discover::project_read::with_project_root(input.project_root, || {
+                plugin.resolve_config_in_project(abs_path, &source, input.root, input.project_root)
+            });
         if plugin_result.is_empty() {
             continue;
         }
@@ -1455,15 +1465,20 @@ fn resolve_plugin_matching_files(input: &mut PluginMatchingFilesInput<'_, '_, '_
         })
         .collect();
     for abs_path in plugin_hits {
-        let Ok(source) = std::fs::read_to_string(abs_path) else {
+        let Some(source) =
+            crate::discover::project_read::read_project_file(input.project_root, abs_path)
+        else {
             continue;
         };
-        let plugin_result = input.plugin.resolve_config_in_project(
-            abs_path,
-            &source,
-            input.root,
-            input.project_root,
-        );
+        let plugin_result =
+            crate::discover::project_read::with_project_root(input.project_root, || {
+                input.plugin.resolve_config_in_project(
+                    abs_path,
+                    &source,
+                    input.root,
+                    input.project_root,
+                )
+            });
         if plugin_result.is_empty() {
             continue;
         }
@@ -1487,10 +1502,12 @@ fn resolve_plugin_filesystem_config(
     result: &mut AggregatedPluginResult,
     regex_errors: &mut Vec<PluginRegexValidationError>,
 ) {
-    let Ok(source) = std::fs::read_to_string(abs_path) else {
+    let Some(source) = crate::discover::project_read::read_project_file(root, abs_path) else {
         return;
     };
-    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+    let plugin_result = crate::discover::project_read::with_project_root(root, || {
+        plugin.resolve_config(abs_path, &source, root)
+    });
     if plugin_result.is_empty() {
         return;
     }
@@ -1545,211 +1562,6 @@ fn should_warn(key: String) -> bool {
         .lock()
         .map_or(true, |mut set| set.insert(key))
 }
-
-/// Structured diagnostic surfaced by the silent-fail plugin checks (#479).
-///
-/// Returned by [`detect_pattern_collisions`] and [`detect_enabler_typos`] so
-/// unit tests can assert on the findings without standing up a tracing
-/// subscriber. The runtime path calls [`emit_plugin_diagnostics`] to convert
-/// each variant into one `tracing::warn!` line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PluginDiagnostic {
-    /// Two or more plugins declared an identical `config_patterns` entry.
-    PatternCollision {
-        pattern: String,
-        owners: Vec<String>,
-    },
-    /// An external plugin enabler does not match any project dependency, but
-    /// at least one Levenshtein-close dep name exists.
-    EnablerTypo {
-        plugin: String,
-        enabler: String,
-        suggestion: String,
-    },
-}
-
-/// Detect plugins whose `config_patterns` collide byte-for-byte.
-///
-/// Detection is byte-equal on the pattern string. Overlapping but non-identical
-/// globs (e.g. `vite.config.{ts,js}` vs `vite.config.ts`) require pattern
-/// intersection logic and are intentionally out of scope. The warning's purpose
-/// is to surface USER-AUTHORED collisions between external plugins or between an
-/// external plugin and a built-in, so the user can disambiguate by editing one
-/// side.
-///
-/// Built-in-vs-built-in collisions are intentionally NOT reported: they are
-/// curated and benign (Phase 3a config matching runs every matching plugin's
-/// `resolve_config` independently, so there is no data loss), and the warning's
-/// remediation advice ("rename one of the patterns or remove the duplicate
-/// plugin") is impossible to follow for a built-in. Such a collision exists by
-/// design, e.g. both `vite` and `tanstack-router` claim
-/// `vite.config.{ts,js,mts,mjs}` because tanstack-router parses the
-/// `tanstackRouter({...})` call inside the vite config to find a custom
-/// `generatedRouteTree` path (#808). A finding is therefore emitted only when
-/// at least one owner is an external (user-authored) plugin.
-///
-/// Precedence rule when two plugins claim the same pattern: the one registered
-/// first wins. For built-in plugins, registration order is defined in
-/// [`builtin::create_builtin_plugins`]. External plugins (file-loaded plus
-/// inline `framework[]`) run AFTER built-ins, so they cannot displace a
-/// built-in's `resolve_config` result for the same file.
-fn detect_pattern_collisions(
-    builtin_active: &[&dyn Plugin],
-    external_active: &[&ExternalPluginDef],
-) -> Vec<PluginDiagnostic> {
-    use rustc_hash::FxHashMap;
-
-    let mut pattern_owners: FxHashMap<String, (Vec<String>, FxHashSet<String>)> =
-        FxHashMap::default();
-
-    let record = |pattern_owners: &mut FxHashMap<_, (Vec<String>, FxHashSet<String>)>,
-                  pattern: String,
-                  name: String| {
-        let (list, seen) = pattern_owners.entry(pattern).or_default();
-        if seen.insert(name.clone()) {
-            list.push(name);
-        }
-    };
-
-    for plugin in builtin_active {
-        for pat in plugin.config_patterns() {
-            record(
-                &mut pattern_owners,
-                (*pat).to_string(),
-                plugin.name().to_string(),
-            );
-        }
-    }
-    for ext in external_active {
-        for pat in &ext.config_patterns {
-            record(&mut pattern_owners, pat.clone(), ext.name.clone());
-        }
-    }
-
-    // Names of built-in plugins. Built-in-only collisions are curated + benign
-    // (every matching plugin runs `resolve_config` independently), so they must
-    // not surface an un-actionable warning (#808). Keying on the built-in set
-    // and emitting only when an owner is NOT built-in is robust even if a
-    // user-authored external plugin happens to share a built-in's name: the
-    // built-in owner alone never re-enables the warning.
-    let builtin_names: FxHashSet<&str> = builtin_active.iter().map(|p| p.name()).collect();
-
-    let mut findings: Vec<PluginDiagnostic> = pattern_owners
-        .into_iter()
-        .filter_map(|(pattern, (owners, _seen))| {
-            if owners.len() < 2 || owners.iter().all(|o| builtin_names.contains(o.as_str())) {
-                None
-            } else {
-                Some(PluginDiagnostic::PatternCollision { pattern, owners })
-            }
-        })
-        .collect();
-    findings.sort_unstable_by(|a, b| match (a, b) {
-        (
-            PluginDiagnostic::PatternCollision { pattern: ap, .. },
-            PluginDiagnostic::PatternCollision { pattern: bp, .. },
-        ) => ap.cmp(bp),
-        _ => std::cmp::Ordering::Equal,
-    });
-    findings
-}
-
-/// Detect external plugins whose enablers do not match any project dependency
-/// AND at least one enabler is a plausible typo of a real dep.
-///
-/// Scope:
-/// - Only external plugins (file-loaded plus inline `framework[]`). Built-in
-///   plugins' enablers are hard-coded so cannot be misspelled.
-/// - Skip plugins with a `detection` block: detection is the rich-logic path
-///   and false negatives there are not enabler typos.
-/// - Skip plugins with empty `enablers` (no signal to validate against).
-/// - Stay silent when no Levenshtein-close dep exists: the plugin may
-///   legitimately not apply to this project.
-///
-/// Matches the established #467 / #510 pattern: tracing-warn with a `did you
-/// mean` suggestion at the call site. No exit non-zero, no new CLI flag.
-fn detect_enabler_typos(
-    external_plugins: &[ExternalPluginDef],
-    all_deps: &[String],
-) -> Vec<PluginDiagnostic> {
-    let mut findings = Vec::new();
-
-    for ext in external_plugins {
-        if ext.detection.is_some() || ext.enablers.is_empty() {
-            continue;
-        }
-
-        let any_match = ext.enablers.iter().any(|enabler| {
-            if enabler.ends_with('/') {
-                all_deps.iter().any(|d| d.starts_with(enabler))
-            } else {
-                all_deps.iter().any(|d| d == enabler)
-            }
-        });
-        if any_match {
-            continue;
-        }
-
-        for enabler in &ext.enablers {
-            let candidates = all_deps.iter().map(String::as_str);
-            let Some(suggestion) = fallow_config::levenshtein::closest_match(enabler, candidates)
-            else {
-                continue;
-            };
-
-            findings.push(PluginDiagnostic::EnablerTypo {
-                plugin: ext.name.clone(),
-                enabler: enabler.clone(),
-                suggestion: suggestion.to_string(),
-            });
-        }
-    }
-
-    findings
-}
-
-/// Emit one `tracing::warn!` per finding, dedup'd against the process-wide
-/// `plugin_warn_dedupe` set so combined-mode does not triple-warn.
-fn emit_plugin_diagnostics(findings: &[PluginDiagnostic]) {
-    for finding in findings {
-        match finding {
-            PluginDiagnostic::PatternCollision { pattern, owners } => {
-                let key = format!("collision::{pattern}::{owners:?}");
-                if !should_warn(key) {
-                    continue;
-                }
-                let winner = &owners[0];
-                let others = owners[1..].join(", ");
-                tracing::warn!(
-                    "plugin config_patterns collision: identical pattern \
-                     '{pattern}' is claimed by plugins [{joined}]; '{winner}' \
-                     runs first (registration order), others ({others}) \
-                     follow. Rename one of the patterns or remove the \
-                     duplicate plugin to make resolution explicit. A future \
-                     release may reject identical-pattern collisions.",
-                    joined = owners.join(", "),
-                );
-            }
-            PluginDiagnostic::EnablerTypo {
-                plugin,
-                enabler,
-                suggestion,
-            } => {
-                let key = format!("enabler::{plugin}::{enabler}");
-                if !should_warn(key) {
-                    continue;
-                }
-                tracing::warn!(
-                    "plugin '{plugin}' enabler '{enabler}' does not match any \
-                     dependency in package.json; did you mean '{suggestion}'? \
-                     The plugin will not activate. A future release may reject \
-                     unmatched enablers.",
-                );
-            }
-        }
-    }
-}
-
 /// Phase 4 of `PluginRegistry::run_with_search_roots`, and the last phase of
 /// the workspace run: for any active plugin that supports inline package.json
 /// configuration via [`Plugin::package_json_config_key`] and has no config
@@ -1789,12 +1601,15 @@ fn process_package_json_inline_configs(
         }
         let config_json = serde_json::to_string(config_value).unwrap_or_default();
         let fake_path = input.root.join(format!("{key}.config.json"));
-        let mut plugin_result = plugin.resolve_config_in_project(
-            &fake_path,
-            &config_json,
-            input.root,
-            input.project_root,
-        );
+        let mut plugin_result =
+            crate::discover::project_read::with_project_root(input.project_root, || {
+                plugin.resolve_config_in_project(
+                    &fake_path,
+                    &config_json,
+                    input.root,
+                    input.project_root,
+                )
+            });
         if plugin_result.is_empty() {
             continue;
         }

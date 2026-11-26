@@ -439,7 +439,9 @@ impl FileVariables<'_> {
         ) else {
             return;
         };
-        let Ok(source) = std::fs::read_to_string(self.root.join(relative)) else {
+        let path = self.root.join(relative);
+        let Some(source) = crate::discover::project_read::read_project_file(self.root, &path)
+        else {
             return;
         };
         let Ok(document) = yaml::parse(&source) else {

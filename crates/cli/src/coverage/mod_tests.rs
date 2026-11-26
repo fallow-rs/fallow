@@ -1215,3 +1215,33 @@ fn recipe_step_tells_how_to_replace_a_kept_recipe() {
     assert!(line.contains("Move") && line.contains("away"), "{line}");
     assert!(!line.contains("Wrote"), "{line}");
 }
+
+#[test]
+#[cfg(unix)]
+fn setup_state_link_out_of_the_project_is_not_read() {
+    let dir = tempdir().expect("tempdir should be created");
+    let outside = tempdir().expect("tempdir should be created");
+    let target = outside.path().join("setup.json");
+    std::fs::write(&target, r#"{"schema_version": 1, "completed_at": 5}"#)
+        .expect("outside state should be written");
+    std::fs::create_dir_all(dir.path().join(".fallow")).expect(".fallow should be created");
+    std::os::unix::fs::symlink(&target, setup_state_path(dir.path()))
+        .expect("state link should be created");
+
+    let state = load_setup_state(dir.path());
+
+    assert!(state.completed_at.is_none());
+}
+
+#[test]
+#[cfg(unix)]
+fn detect_coverage_artifact_skips_links_out_of_the_project() {
+    let dir = tempdir().expect("tempdir should be created");
+    let outside = tempdir().expect("tempdir should be created");
+    std::fs::write(outside.path().join("coverage-final.json"), "{}")
+        .expect("outside coverage should be written");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("coverage"))
+        .expect("coverage link should be created");
+
+    assert_eq!(detect_coverage_artifact(dir.path()), None);
+}

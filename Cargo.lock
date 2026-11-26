@@ -1533,6 +1533,7 @@ dependencies = [
  "oxc_span",
  "proptest",
  "rustc-hash",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",

@@ -5,6 +5,7 @@
 
 mod ambiguity;
 mod build;
+mod cache_check;
 mod cycle_edge_span;
 mod cycles;
 mod effective_exports;
@@ -725,6 +726,22 @@ fn propagate_namespace_references(
 }
 
 impl ModuleGraph {
+    /// True when the graph has a valid structure and holds exactly one module
+    /// for each file of `files`, with the same `FileId` and the same path.
+    ///
+    /// A graph from the cache is reused only when this holds, so each module
+    /// path that goes into a finding is a path that discovery found.
+    #[must_use]
+    pub fn describes_files(&self, files: &[DiscoveredFile]) -> bool {
+        self.modules.len() == files.len()
+            && self.has_valid_structure()
+            && self
+                .modules
+                .iter()
+                .zip(files)
+                .all(|(module, file)| (module.file_id, &module.path) == (file.id, &file.path))
+    }
+
     fn resolve_entry_point_ids(
         entry_points: &[EntryPoint],
         path_to_id: &FxHashMap<&Path, FileId>,

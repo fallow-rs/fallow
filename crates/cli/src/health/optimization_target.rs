@@ -100,6 +100,9 @@ pub struct InnerIterationIndex {
     /// V8 function name of the function that represents a line of a raw
     /// script, keyed like `starts`. Empty names are not kept.
     raw_names: FxHashMap<(PathBuf, u32), String>,
+    /// The project root. A raw script is read only when it resolves inside
+    /// it, so an index without a root reads no raw script.
+    root: Option<PathBuf>,
 }
 
 /// One measured V8 function of a script without a source map.
@@ -119,6 +122,15 @@ struct RawLineStart {
 }
 
 impl InnerIterationIndex {
+    /// An index whose raw scripts are read only inside `root`.
+    #[must_use]
+    pub fn for_root(root: &Path) -> Self {
+        Self {
+            root: Some(root.to_path_buf()),
+            ..Self::default()
+        }
+    }
+
     /// True when the coverage input has no block totals.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -225,7 +237,11 @@ impl InnerIterationIndex {
         canonical: &Path,
         functions: FxHashMap<u32, RawFunctionStart>,
     ) {
-        let Ok(source) = std::fs::read_to_string(canonical) else {
+        let Some(source) = self
+            .root
+            .as_deref()
+            .and_then(|root| super::coverage_inputs::read_script_source(root, canonical))
+        else {
             return;
         };
         // Node removes a UTF-8 byte order mark before it compiles a module, so
@@ -613,14 +629,26 @@ mod tests {
         (dir, canonical)
     }
 
+    /// A raw script from the coverage dump that resolves outside the project
+    /// root is not read, so it gives no block totals.
+    #[test]
+    fn raw_script_outside_the_root_is_not_read() {
+        let (_dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
+        let other = tempfile::tempdir().expect("temp dir");
+        let mut index = InnerIterationIndex::for_root(other.path());
+        index.record_raw_script(&path, &[named_function("resolve", 0, &[5, 15])]);
+
+        assert_eq!(index.lookup(&path, 1, "resolve"), None);
+    }
+
     #[test]
     fn raw_script_offsets_start_after_a_byte_order_mark() {
-        let (_dir, path) = temp_script(
+        let (dir, path) = temp_script(
             "app.js",
             "\u{FEFF}const x = 1;\nfunction resolve() {\n  return x;\n}\n",
         );
         let offset_of_resolve = 13;
-        let mut index = InnerIterationIndex::default();
+        let mut index = InnerIterationIndex::for_root(dir.path());
         index.record_raw_script(
             &path,
             &[named_function("resolve", offset_of_resolve, &[5, 15])],
@@ -641,7 +669,7 @@ mod tests {
         let path = dunce::canonicalize(dir.path())
             .expect("canonical temp dir")
             .join("app.js");
-        let mut index = InnerIterationIndex::default();
+        let mut index = InnerIterationIndex::for_root(dir.path());
         index.record_raw_script(&path, &[named_function("resolve", 0, &[2, 2])]);
         std::fs::write(&path, "function resolve() {}\n").expect("write script");
 
@@ -653,8 +681,8 @@ mod tests {
 
     #[test]
     fn raw_script_dumps_keep_one_entry_per_function() {
-        let (_dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
-        let mut index = InnerIterationIndex::default();
+        let (dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
+        let mut index = InnerIterationIndex::for_root(dir.path());
         for _ in 0..3 {
             index.record_raw_script(&path, &[named_function("resolve", 0, &[2, 6])]);
         }
@@ -671,11 +699,11 @@ mod tests {
 
     #[test]
     fn raw_script_join_needs_the_same_function_name() {
-        let (_dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
+        let (dir, path) = temp_script("app.js", "function resolve() {\n  return 1;\n}\n");
         let mut statics = FxHashMap::default();
         statics.insert("fallow:fn:a".to_owned(), static_target(&path, false));
         let join = |v8_name: &str| {
-            let mut index = InnerIterationIndex::default();
+            let mut index = InnerIterationIndex::for_root(dir.path());
             index.record_raw_script(&path, &[named_function(v8_name, 0, &[2, 6])]);
             let mut hot_paths = vec![hot(Some("fallow:fn:a"))];
             attach_optimization_targets(&mut hot_paths, &statics, &mut index);

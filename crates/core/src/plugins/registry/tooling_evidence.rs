@@ -129,7 +129,8 @@ fn reference_packages<'a>(
 }
 
 fn read_manifest(root: &Path) -> Option<serde_json::Value> {
-    let content = std::fs::read_to_string(root.join("package.json")).ok()?;
+    let content =
+        crate::discover::project_read::read_project_file(root, &root.join("package.json"))?;
     serde_json::from_str(&content).ok()
 }
 
@@ -371,23 +372,74 @@ fn find_file_in_roots<'a>(
         .cloned()
 }
 
+fn is_file_inside(root: &Path, path: &Path) -> bool {
+    crate::discover::project_read::is_project_file(root, path)
+}
+
 fn first_file_match(root: &Path, pattern: &str) -> Option<PathBuf> {
     expand_brace_pattern(pattern)
         .into_iter()
         .find_map(|expanded| {
+            // A pattern that can lead above the root never matches.
+            if fallow_config::glob_validation::escapes_project_root(&expanded) {
+                return None;
+            }
             if !has_glob_syntax(&expanded) {
                 let path = root.join(&expanded);
-                return path.is_file().then_some(path);
+                return is_file_inside(root, &path).then_some(path);
             }
+            // A match through a link that leaves the read scope is skipped.
             fallow_config::glob_validation::expand_disk_glob(root, &expanded)?
                 .filter_map(Result::ok)
-                .find(|path| path.is_file())
+                .find(|path| is_file_inside(root, path))
         })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A glob match through a directory link that leaves the root is not a
+    /// match, and the result does not depend on the files in the target
+    /// directory.
+    #[test]
+    #[cfg(unix)]
+    fn a_glob_match_through_a_link_out_of_the_root_is_skipped() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("found.json"), "{}").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("config")).expect("link");
+
+        assert_eq!(first_file_match(&root, "config/*.json"), None);
+        assert_eq!(first_file_match(&root, "config/found.json"), None);
+    }
+
+    /// A package root inside a Git work tree may link a shared config of the
+    /// work tree.
+    #[test]
+    #[cfg(unix)]
+    fn a_link_to_a_shared_config_of_the_work_tree_is_a_match() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dir.path().join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::write(top.join("jest.base.js"), "").expect("write");
+        std::os::unix::fs::symlink("../../jest.base.js", root.join("jest.config.js"))
+            .expect("link");
+
+        assert_eq!(
+            first_file_match(&root, "jest.config.js"),
+            Some(root.join("jest.config.js"))
+        );
+        assert_eq!(
+            first_file_match(&root, "jest.config.*"),
+            Some(root.join("jest.config.js"))
+        );
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]

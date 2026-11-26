@@ -282,8 +282,8 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
     let found_knip_file = !sources.is_empty();
     let mut found_jscpd_file = false;
     let jscpd_path = root.join(".jscpd.json");
-    if jscpd_path.exists() {
-        let jscpd_value = load_json_or_jsonc(&jscpd_path)?;
+    if jscpd_path.exists() && detected_file_readable(root, &jscpd_path, "jscpd", &mut warnings) {
+        let jscpd_value = load_json_or_jsonc(Some(root), &jscpd_path)?;
         migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
         sources.push(".jscpd.json".to_string());
         found_jscpd_file = true;
@@ -336,7 +336,7 @@ fn migrate_first_knip_file(
 
     for name in &knip_files {
         let path = root.join(name);
-        if path.exists() {
+        if path.exists() && detected_file_readable(root, &path, "knip", warnings) {
             if name.ends_with(".ts") {
                 warnings.push(MigrationWarning {
                     source: "knip",
@@ -349,7 +349,7 @@ fn migrate_first_knip_file(
                 });
                 continue;
             }
-            let knip_value = load_json_or_jsonc(&path)?;
+            let knip_value = load_json_or_jsonc(Some(root), &path)?;
             migrate_knip(&knip_value, config, warnings);
             sources.push(name.to_string());
             break; // Only use the first knip config found
@@ -376,8 +376,8 @@ fn migrate_first_stylelint_file(
 
     for name in &stylelint_files {
         let path = root.join(name);
-        if path.exists() {
-            let stylelint_value = load_stylelint_config(&path)?;
+        if path.exists() && detected_file_readable(root, &path, "stylelint", warnings) {
+            let stylelint_value = load_stylelint_config(Some(root), &path)?;
             migrate_stylelint(&stylelint_value, config, warnings);
             sources.push(name.to_string());
             break;
@@ -409,11 +409,10 @@ fn migrate_package_json_keys(
     sources: &mut Vec<String>,
 ) -> Result<(), String> {
     let pkg_path = root.join("package.json");
-    if !pkg_path.exists() {
+    if !pkg_path.exists() || !detected_file_readable(root, &pkg_path, "package.json", warnings) {
         return Ok(());
     }
-    let pkg_content = std::fs::read_to_string(&pkg_path)
-        .map_err(|e| format!("failed to read package.json: {e}"))?;
+    let pkg_content = read_config_text(Some(root), &pkg_path)?;
     let pkg_value: serde_json::Value = serde_json::from_str(&pkg_content)
         .map_err(|e| format!("failed to parse package.json: {e}"))?;
     if needs.knip
@@ -463,15 +462,15 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
                  Convert to knip.json first, then re-run migrate."
             ));
         }
-        let knip_value = load_json_or_jsonc(path)?;
+        let knip_value = load_json_or_jsonc(None, path)?;
         migrate_knip(&knip_value, &mut config, &mut warnings);
         sources.push(path.display().to_string());
     } else if filename.contains("jscpd") {
-        let jscpd_value = load_json_or_jsonc(path)?;
+        let jscpd_value = load_json_or_jsonc(None, path)?;
         migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
         sources.push(path.display().to_string());
     } else if filename.contains("stylelint") || filename.starts_with(".stylelintrc") {
-        let stylelint_value = load_stylelint_config(path)?;
+        let stylelint_value = load_stylelint_config(None, path)?;
         migrate_stylelint(&stylelint_value, &mut config, &mut warnings);
         sources.push(path.display().to_string());
     } else if filename == "package.json" {
@@ -494,8 +493,7 @@ fn migrate_package_json_file(
     warnings: &mut Vec<MigrationWarning>,
     sources: &mut Vec<String>,
 ) -> Result<(), String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content = read_config_text(None, path)?;
     let pkg_value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
     if let Some(knip_config) = pkg_value.get("knip") {
@@ -527,7 +525,7 @@ fn migrate_unnamed_config_file(
     warnings: &mut Vec<MigrationWarning>,
     sources: &mut Vec<String>,
 ) -> Result<(), String> {
-    let value = load_json_or_jsonc(path)?;
+    let value = load_json_or_jsonc(None, path)?;
     if value.get("minTokens").is_some()
         || value.get("minLines").is_some()
         || value.get("threshold").is_some()
@@ -556,10 +554,56 @@ fn migrate_unnamed_config_file(
     Ok(())
 }
 
+/// The read scope base of the project at `root`.
+fn read_scope_base(root: &Path) -> std::path::PathBuf {
+    fallow_config::project_scope_base(root)
+}
+
+/// Whether migrate can read the detected config file `path` under `root`. A
+/// file that resolves outside the read scope of the project (see
+/// [`fallow_types::read_scope`]), or that is not a regular file, is skipped
+/// with a warning, and the run goes on with the other files.
+fn detected_file_readable(
+    root: &Path,
+    path: &Path,
+    source: &'static str,
+    warnings: &mut Vec<MigrationWarning>,
+) -> bool {
+    let base = read_scope_base(root);
+    if path.is_file() && fallow_types::read_guard::is_inside_root(&base, path) {
+        return true;
+    }
+    let name = path.strip_prefix(root).unwrap_or(path);
+    warnings.push(MigrationWarning {
+        source,
+        field: name.display().to_string(),
+        message: format!(
+            "skipped {}: it is not a regular file inside the project",
+            name.display()
+        ),
+        suggestion: None,
+    });
+    false
+}
+
+/// Read a config file. A file that migrate detects under `root` must resolve
+/// inside the read scope of the project. A file that the user names has no root. Each file must be a
+/// regular file of a bounded size.
+fn read_config_text(root: Option<&Path>, path: &Path) -> Result<String, String> {
+    let max = fallow_types::read_guard::DEFAULT_MAX_READ_BYTES;
+    match root {
+        Some(root) => {
+            let base = read_scope_base(root);
+            fallow_types::read_guard::read_to_string_inside(&base, path, max)
+        }
+        None => fallow_types::read_guard::read_to_string_bounded(path, max),
+    }
+    .map_err(|e| format!("failed to read {}: {e}", path.display()))
+}
+
 /// Load a JSON or JSONC file, accepting comments and trailing commas.
-fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+fn load_json_or_jsonc(root: Option<&Path>, path: &Path) -> Result<serde_json::Value, String> {
+    let content = read_config_text(root, path)?;
 
     // knip, jscpd and stylelint configs are foreign files, but fallow reads
     // them with the same JSONC dialect it accepts for its own config, so the
@@ -572,20 +616,19 @@ fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
     clippy::case_sensitive_file_extension_comparisons,
     reason = "config file extensions are always lowercase"
 )]
-fn load_stylelint_config(path: &Path) -> Result<serde_json::Value, String> {
+fn load_stylelint_config(root: Option<&Path>, path: &Path) -> Result<serde_json::Value, String> {
     let filename = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default();
     if filename.ends_with(".js") || filename.ends_with(".cjs") || filename.ends_with(".mjs") {
-        return load_stylelint_js_config(path);
+        return load_stylelint_js_config(root, path);
     }
-    load_json_or_jsonc(path)
+    load_json_or_jsonc(root, path)
 }
 
-fn load_stylelint_js_config(path: &Path) -> Result<serde_json::Value, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+fn load_stylelint_js_config(root: Option<&Path>, path: &Path) -> Result<serde_json::Value, String> {
+    let content = read_config_text(root, path)?;
     let Some(start) = content.find('{') else {
         return Err(format!(
             "failed to parse {}: no object literal found",

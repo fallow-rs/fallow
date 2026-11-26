@@ -209,6 +209,16 @@ fn root_relative_rule(mut rule: Value, package: &str) -> Value {
 
 /// Build the JSON for one external plugin.
 fn plugin_value(ext: &ExternalPluginDef, packages: &[PluginPackage]) -> Value {
+    // The globs of a plugin that fails validation can reach outside the
+    // project, so its detection is not evaluated.
+    if let Err(errors) = ext.validate_user_globs() {
+        let messages: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        return json!({
+            "name": ext.name,
+            "active": false,
+            "activation_requirement": format!("fix the invalid globs: {}", messages.join("; ")),
+        });
+    }
     let active: Vec<&PluginPackage> = packages
         .iter()
         .filter(|package| is_external_plugin_active(ext, &package.dependencies, &package.dir, &[]))
@@ -318,15 +328,21 @@ fn warning_value(warning: &CheckWarning) -> Value {
 /// An expansion that is absolute or has a `..` segment never matches, so the
 /// probe stays below `root`.
 fn entry_path_exists(root: &Path, entry: &str) -> bool {
+    let base = fallow_config::project_scope_base(root);
     expand_braces(entry).iter().any(|pattern| {
         if fallow_config::glob_validation::validate_user_path(pattern, "entry").is_err() {
             return false;
         }
         if pattern.contains(['*', '?', '[']) {
-            fallow_config::glob_validation::expand_disk_glob(root, pattern)
-                .is_some_and(|mut paths| paths.next().is_some())
+            // A match through a link that leaves the read scope does not
+            // count.
+            fallow_config::glob_validation::expand_disk_glob(root, pattern).is_some_and(|paths| {
+                paths
+                    .filter_map(Result::ok)
+                    .any(|path| fallow_types::read_guard::is_inside_root(&base, &path))
+            })
         } else {
-            root.join(pattern).exists()
+            fallow_types::read_guard::is_inside_root(&base, &root.join(pattern))
         }
     })
 }
@@ -559,6 +575,41 @@ mod tests {
     fn test_run(root: &Path) -> fallow_engine::resolved_run::ResolvedRun {
         crate::cli_production::benchmark_run(root, fallow_config::CommandKind::PluginCheck, 1)
             .expect("fixture run")
+    }
+
+    /// A seeded entry through a directory link out of the root does not
+    /// exist for the check.
+    #[test]
+    #[cfg(unix)]
+    fn entry_path_exists_skips_a_link_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("index.ts"), "").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("linked")).expect("link");
+
+        assert!(!entry_path_exists(&root, "linked/*.ts"));
+        assert!(!entry_path_exists(&root, "linked/index.ts"));
+    }
+
+    /// A seeded entry that links to a shared file of the Git work tree above
+    /// the root exists for the check.
+    #[test]
+    #[cfg(unix)]
+    fn entry_path_exists_follows_a_link_into_the_work_tree() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dir.path().join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::write(top.join("jest.base.js"), "").expect("write");
+        std::os::unix::fs::symlink("../../jest.base.js", root.join("jest.config.js"))
+            .expect("link");
+
+        assert!(entry_path_exists(&root, "jest.config.js"));
+        assert!(entry_path_exists(&root, "jest.config.*"));
     }
 
     #[test]

@@ -36,6 +36,11 @@ rustc-hash = { workspace = true }
 # Unique temp files for the atomic cache write in `atomic_file`.
 tempfile = { workspace = true }
 
+# The owner check of the scope base in `read_scope`, and the open of a file
+# that does not wait for a FIFO writer in `read_guard`.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
 [features]
 # Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the
 # JSON output schema can be regenerated from the Rust source of truth.

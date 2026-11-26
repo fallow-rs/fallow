@@ -259,9 +259,10 @@ fn with_undeclared_workspace_diagnostics(
 /// Validate the config of a run of `command`.
 ///
 /// - `plugin-check` reports each external plugin, also a plugin that fails
-///   validation, so it validates only the boundaries and the rule packs.
+///   validation, so it validates only the boundaries and the rule packs. It
+///   does not evaluate the detection of a plugin that fails validation.
 /// - A coverage upload reads the project as the config file gives it, so it
-///   validates nothing.
+///   validates only the globs of the external plugins, which reach the disk.
 /// - Each other command validates the external plugins, the boundaries and
 ///   the rule packs.
 pub(crate) fn validate_command_config(
@@ -271,15 +272,21 @@ pub(crate) fn validate_command_config(
 ) -> EngineResult<()> {
     match command {
         CommandKind::PluginCheck => validate_boundaries_and_rule_packs(root, config),
-        CommandKind::CoverageUpload => Ok(()),
+        CommandKind::CoverageUpload => validate_external_plugins(root, config),
         _ => validate_config(root, config),
     }
 }
 
+/// Validate the globs of the external plugins.
+fn validate_external_plugins(root: &Path, config: &FallowConfig) -> EngineResult<()> {
+    fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
+        .map(drop)
+        .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))
+}
+
 /// Validate the external plugins, the boundaries and the rule packs.
 pub(crate) fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
-    fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
-        .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
+    validate_external_plugins(root, config)?;
     validate_boundaries_and_rule_packs(root, config)
 }
 

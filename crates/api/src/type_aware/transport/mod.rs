@@ -397,6 +397,23 @@ impl From<discovery::DiscoveryError> for TypeAwareError {
     }
 }
 
+/// The compiler package directories of the companion that a semantic
+/// request for `root` runs. The companion reads the library files of the
+/// compiler there, also when it is installed outside the project. The list
+/// is empty when no companion or no compiler package is found.
+pub(in crate::type_aware) fn companion_compiler_dirs(root: &Path) -> Vec<PathBuf> {
+    let (Ok(backend), Ok(sidecar)) = (selected_backend(), discover_type_aware_sidecar(root)) else {
+        return Vec::new();
+    };
+    discovery::companion_compiler_dirs(&sidecar, backend.package)
+}
+
+/// [`discovery::companion_compiler_dirs`] for a test.
+#[cfg(test)]
+pub(in crate::type_aware) fn compiler_dirs_of(sidecar: &Path, package: &str) -> Vec<PathBuf> {
+    discovery::companion_compiler_dirs(sidecar, package)
+}
+
 pub fn run_semantic_request<Request, Response>(
     root: &Path,
     request: &Request,

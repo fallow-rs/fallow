@@ -48,8 +48,8 @@ impl Plugin for GithubActionPlugin {
             if candidate_index.is_some_and(|index| !index.dir_contains(root, OsStr::new(name))) {
                 return false;
             }
-            std::fs::read_to_string(root.join(name))
-                .is_ok_and(|source| !node_action_entries(&source).is_empty())
+            crate::discover::project_read::read_project_file(root, &root.join(name))
+                .is_some_and(|source| !node_action_entries(&source).is_empty())
         })
     }
 
@@ -141,6 +141,21 @@ fn root_relative_pattern(path: &Path, root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An action manifest that links out of the project does not activate.
+    #[test]
+    #[cfg(unix)]
+    fn an_action_manifest_that_links_out_of_the_project_does_not_activate() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(outside.join("action.yml"), NODE_ACTION).expect("write");
+        std::os::unix::fs::symlink(outside.join("action.yml"), root.join("action.yml"))
+            .expect("link");
+        assert!(!GithubActionPlugin.is_enabled_with_files(&[], &root, &[], None));
+    }
 
     struct Project {
         _dir: tempfile::TempDir,

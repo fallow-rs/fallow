@@ -40,11 +40,15 @@ fn collect_dockerfile_refs(
     file_refs: &mut Vec<String>,
 ) {
     for dir in infrastructure_search_dirs(root) {
-        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        for entry in super::project_read::read_project_dir(root, &dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             if is_dockerfile(&name_str)
-                && let Ok(content) = std::fs::read_to_string(entry.path())
+                && let Some(content) = super::project_read::read_project_file(root, &entry.path())
             {
                 file_refs.extend(extract_dockerfile_file_refs(&content, context));
             }
@@ -64,7 +68,7 @@ fn infrastructure_search_dirs(root: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_procfile_refs(root: &Path, context: CommandRefContext<'_>, file_refs: &mut Vec<String>) {
-    if let Ok(content) = std::fs::read_to_string(root.join("Procfile")) {
+    if let Some(content) = super::project_read::read_project_file(root, &root.join("Procfile")) {
         file_refs.extend(extract_procfile_file_refs(&content, context));
     }
 }
@@ -74,7 +78,7 @@ fn collect_fly_toml_refs(root: &Path, context: CommandRefContext<'_>, file_refs:
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if (name_str == "fly.toml" || (name_str.starts_with("fly.") && name_str.ends_with(".toml")))
-            && let Ok(content) = std::fs::read_to_string(entry.path())
+            && let Some(content) = super::project_read::read_project_file(root, &entry.path())
         {
             file_refs.extend(extract_fly_toml_file_refs(&content, context));
         }
@@ -363,6 +367,24 @@ mod unicode_span_oracle;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Procfile or a Dockerfile that links out of the project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn infrastructure_files_that_link_out_of_the_project_are_not_read() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(root.join("src")).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(root.join("src/server.js"), "").expect("write");
+        std::fs::write(outside.join("Procfile"), "web: node src/server.js\n").expect("write");
+        std::fs::write(outside.join("Dockerfile"), "CMD node src/server.js\n").expect("write");
+        std::os::unix::fs::symlink(outside.join("Procfile"), root.join("Procfile")).expect("link");
+        std::os::unix::fs::symlink(&outside, root.join("docker")).expect("link");
+
+        assert!(discover_infrastructure_entry_points(&root, CommandRefContext::NONE).is_empty());
+    }
 
     #[test]
     fn dockerfile_detection() {

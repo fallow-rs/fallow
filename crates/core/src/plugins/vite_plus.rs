@@ -53,7 +53,8 @@ impl Plugin for VitePlusPlugin {
         deps.iter().any(|dep| dep == VITE_PLUS_PACKAGE)
             || VITE_CONFIG_FILES.iter().any(|name| {
                 let path = root.join(name);
-                std::fs::read_to_string(&path).is_ok_and(|source| imports_vite_plus(&source, &path))
+                crate::discover::project_read::read_project_file(root, &path)
+                    .is_some_and(|source| imports_vite_plus(&source, &path))
             })
     }
 

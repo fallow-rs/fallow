@@ -161,7 +161,7 @@ pub(super) fn exec_child_index(tokens: &[&str], idx: usize) -> Option<usize> {
 fn read_vite_config(dir: &Path) -> Option<(std::path::PathBuf, String)> {
     VITE_CONFIG_FILES.iter().find_map(|name| {
         let path = dir.join(name);
-        let source = std::fs::read_to_string(&path).ok()?;
+        let source = crate::discover::project_read::read_project_file(dir, &path)?;
         Some((path, source))
     })
 }

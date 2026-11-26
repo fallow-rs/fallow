@@ -401,8 +401,12 @@ pub(super) fn load_regression_baseline_for(
     output: OutputFormat,
     command: BaselineCommand<'_>,
 ) -> Result<RegressionBaseline, ExitCode> {
-    let content = std::fs::read_to_string(path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
+    let content = match command.root_flag() {
+        Some(root) => fallow_engine::saved_file::read_saved_file(root, path),
+        None => fallow_engine::saved_file::read_saved_file_in_cwd(path),
+    };
+    let content = content.map_err(|e| {
+        if e.is_not_found() {
             emit_input_error(
                 &format!(
                     "no regression baseline found at '{}'.\n{}",
@@ -426,8 +430,9 @@ pub(super) fn load_regression_baseline_for(
             format_missing_schema_version_error(path, command)
         } else {
             format!(
-                "failed to parse regression baseline '{}': {e}.\n{}",
+                "failed to parse regression baseline '{}': {}.\n{}",
                 path.display(),
+                fallow_engine::saved_file::json_error_position(&e),
                 command.regenerate(path)
             )
         };

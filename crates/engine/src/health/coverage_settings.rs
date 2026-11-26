@@ -129,3 +129,32 @@ fn discovered_regular_sources(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(unix)]
+    fn auto_detection_skips_a_coverage_link_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(root.join(".nyc_output")).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("coverage-final.json"), "{}").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("coverage")).expect("link");
+        std::os::unix::fs::symlink(
+            outside.join("coverage-final.json"),
+            root.join(".nyc_output/coverage-final.json"),
+        )
+        .expect("link");
+
+        assert_eq!(super::scoring::auto_detect_coverage(&root), None);
+
+        std::fs::remove_file(root.join(".nyc_output/coverage-final.json")).expect("remove");
+        std::fs::write(root.join(".nyc_output/coverage-final.json"), "{}").expect("write");
+        assert_eq!(
+            super::scoring::auto_detect_coverage(&root),
+            Some(root.join(".nyc_output/coverage-final.json"))
+        );
+    }
+}

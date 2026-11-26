@@ -45,3 +45,30 @@ fn trend_baseline_is_the_last_save_of_one_second() {
     assert_eq!(baseline.snapshot.score, Some(20.0));
     assert!(baseline.path.ends_with("2026-01-01T00-00-00Z-11.json"));
 }
+
+/// A snapshot directory link out of the project is not listed, and a
+/// snapshot file link out of the project is not read.
+#[test]
+#[cfg(unix)]
+fn trend_baseline_skips_snapshot_links_out_of_the_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("project");
+    let outside = dir.path().join("elsewhere");
+    std::fs::create_dir_all(root.join(".fallow")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let outside_snapshot = outside.join("2026-01-01T00-00-00Z.json");
+    let snapshot = make_test_snapshot("2026-01-01T00:00:00Z", Some(42.0));
+    std::fs::write(&outside_snapshot, serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+    std::os::unix::fs::symlink(&outside, root.join(".fallow/snapshots")).unwrap();
+    assert!(load_trend_baseline(&root, None).unwrap().is_none());
+
+    std::fs::remove_file(root.join(".fallow/snapshots")).unwrap();
+    std::fs::create_dir(root.join(".fallow/snapshots")).unwrap();
+    std::os::unix::fs::symlink(
+        &outside_snapshot,
+        root.join(".fallow/snapshots/2026-01-01T00-00-00Z.json"),
+    )
+    .unwrap();
+    assert!(load_trend_baseline(&root, None).unwrap().is_none());
+}

@@ -57,7 +57,7 @@ define_plugin! {
 #[must_use]
 pub(super) fn preload_files(root: &Path) -> Vec<PathBuf> {
     let config_path = root.join(CONFIG_PATTERNS[0]);
-    let Ok(source) = std::fs::read_to_string(&config_path) else {
+    let Some(source) = crate::discover::project_read::read_project_file(root, &config_path) else {
         return Vec::new();
     };
     let Ok(value) = fallow_config::toml_input::from_str::<toml::Table>(&source) else {
@@ -126,6 +126,25 @@ fn scoped_test_entry_patterns(test_root: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `bunfig.toml` that links out of the project gives no preload files.
+    #[test]
+    #[cfg(unix)]
+    fn a_bunfig_that_links_out_of_the_project_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::create_dir_all(&outside).expect("create outside");
+        std::fs::write(
+            outside.join("bunfig.toml"),
+            "[test]\npreload = [\"./setup.ts\"]\n",
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("bunfig.toml"), root.join("bunfig.toml"))
+            .expect("link");
+        assert!(preload_files(&root).is_empty());
+    }
 
     #[test]
     fn types_bun_activates_plugin() {

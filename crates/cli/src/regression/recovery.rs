@@ -51,6 +51,14 @@ pub(super) enum BaselineCommand<'a> {
     EntryWeight(RegressionArgs<'a>),
 }
 
+impl<'a> BaselineCommand<'a> {
+    /// The `--root` value of the run, when the run has one.
+    pub(super) fn root_flag(self) -> Option<&'a Path> {
+        let (Self::Check { args, .. } | Self::Flags(args) | Self::EntryWeight(args)) = self;
+        args.cli.and_then(|cli| cli.root.as_deref())
+    }
+}
+
 impl BaselineCommand<'_> {
     pub(super) fn save(self, file: Option<&Path>) -> String {
         let (mut command, args) = match self {

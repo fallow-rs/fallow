@@ -462,10 +462,12 @@ mod tests {
 
     /// The maintainer list of environment variables and the registry that
     /// `fallow schema` prints must agree. The variables that the bundled CI
-    /// scripts set stay out of the registry.
+    /// scripts set, and the internal variables that the CLI sets for a
+    /// child process, stay out of the registry.
     #[test]
     fn environment_registry_matches_the_maintainer_list() {
         const SET_BY_CI_SCRIPTS: &[&str] = &["FALLOW_MAX_COMMENTS"];
+        const SET_BY_THE_CLI: &[&str] = &["FALLOW_TYPE_AWARE_SCOPE_ROOT"];
         let doc = include_str!("../../../../docs/environment-variables.md");
         let registry: FxHashSet<&str> = ENVIRONMENT_VARIABLES
             .iter()
@@ -478,7 +480,10 @@ mod tests {
             let Some((name, _)) = rest.split_once('`') else {
                 continue;
             };
-            if name == "Variable" || SET_BY_CI_SCRIPTS.contains(&name) {
+            if name == "Variable"
+                || SET_BY_CI_SCRIPTS.contains(&name)
+                || SET_BY_THE_CLI.contains(&name)
+            {
                 continue;
             }
             assert!(

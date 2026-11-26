@@ -34,6 +34,7 @@ use fallow_output::{
     DiffRiskRule, DiffRiskSeverity, DiffRiskSuppression, WeakenedTestsKind,
 };
 use fallow_types::duplicates::CloneGroup;
+use fallow_types::read_guard::{self, ReadRefusal};
 use fallow_types::suppress::{IssueKind, Suppression, SuppressionTarget};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -211,6 +212,17 @@ fn is_rule_relevant(root: &Path, rel: &str) -> bool {
         || crate::dependency_deltas::is_manifest_path(rel)
 }
 
+/// The head text of `abs`, or `None` when the file does not exist. A file
+/// that resolves outside `root`, is not a regular file or is too large is
+/// refused, and the caller skips it.
+fn read_head(root: &Path, abs: &Path) -> Result<Option<String>, ReadRefusal> {
+    match read_guard::read_bytes_inside(root, abs, read_guard::DEFAULT_MAX_READ_BYTES) {
+        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+        Err(refusal) if refusal.is_not_found() => Ok(None),
+        Err(refusal) => Err(refusal),
+    }
+}
+
 fn read_files(input: &DiffRiskInput<'_>, source: &mut BaseSource) -> Vec<FileTexts> {
     let rename_sources: FxHashSet<&Path> = input
         .renames
@@ -246,10 +258,8 @@ fn read_files(input: &DiffRiskInput<'_>, source: &mut BaseSource) -> Vec<FileTex
         if !is_rule_relevant(input.root, &rel) {
             continue;
         }
-        let head = match std::fs::read(abs) {
-            Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => continue,
+        let Ok(head) = read_head(input.root, abs) else {
+            continue;
         };
         let base = match source.read(base_abs) {
             BaseRead::Content(base) => Some(base),
@@ -350,9 +360,11 @@ fn detect_config_changes(
     source: &mut BaseSource,
     raw: &mut Vec<RawFinding>,
 ) {
-    let mut read_head = |abs: &Path| match std::fs::read(abs) {
-        Ok(bytes) => ConfigRead::Content(String::from_utf8_lossy(&bytes).into_owned()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ConfigRead::Missing,
+    // The config chain can reach above the analysis root, up to the git root.
+    let git_root = source.git_root.clone();
+    let mut read_head = |abs: &Path| match read_head(&git_root, abs) {
+        Ok(Some(text)) => ConfigRead::Content(text),
+        Ok(None) => ConfigRead::Missing,
         Err(_) => ConfigRead::Unreadable,
     };
     // Changed-file paths start at the canonical git root, so the chain paths
@@ -816,7 +828,7 @@ fn detect_diverged_clones(
     };
     let mut head_text = |rel: &str| match head_by_rel.get(rel) {
         Some(head) => head.map(str::to_owned),
-        None => std::fs::read_to_string(root.join(rel)).ok(),
+        None => read_head(root, &root.join(rel)).ok().flatten(),
     };
     let found = clones::diverged_clone_siblings(
         base_groups,

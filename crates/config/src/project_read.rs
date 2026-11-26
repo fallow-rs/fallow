@@ -92,23 +92,31 @@ fn uncached_scope_base(root: &Path) -> PathBuf {
 /// checkout of the project: the nearest directory at or above the root with
 /// a `.git` entry. A top level above the root that is the home directory,
 /// an ancestor of it, or the file system root belongs to a dotfiles
-/// checkout and not to the project, so it gives `None`.
+/// checkout and not to the project, so it gives `None`. A top level above
+/// the root that all users can write, or that neither the current user nor
+/// the owner of the root owns, gives `None` too (see
+/// [`fallow_types::read_scope`]).
 pub fn project_checkout_top(root: &Path) -> Option<&Path> {
     let top = root
         .ancestors()
         .take_while(|dir| test_ceiling::allows(dir))
         .find(|dir| dir.join(".git").symlink_metadata().is_ok())?;
-    (top == root || !is_home_or_above(top)).then_some(top)
+    (top == root
+        || (!is_home_or_above(top) && fallow_types::read_scope::may_widen_scope(top, root)))
+    .then_some(top)
 }
 
 /// The nearest workspace root above the canonical directory `root` that
 /// lists the root as a member, below the home directory and the file
-/// system root.
+/// system root. A workspace root that all users can write, or that neither
+/// the current user nor the owner of the root owns, does not count.
 fn workspace_root_above(root: &Path) -> Option<PathBuf> {
     root.ancestors()
         .skip(1)
         .take_while(|dir| !is_home_or_above(dir) && test_ceiling::allows(dir))
-        .find(|dir| workspace_root_lists(dir, root))
+        .find(|dir| {
+            fallow_types::read_scope::may_widen_scope(dir, root) && workspace_root_lists(dir, root)
+        })
         .map(Path::to_path_buf)
 }
 
@@ -474,6 +482,27 @@ mod tests {
         clear_project_scope_bases();
         assert_eq!(project_scope_base(&package), top);
         assert_eq!(project_scope_base(&top), top);
+    }
+
+    /// A git top level or a workspace root above the root that all users can
+    /// write does not widen the scope.
+    #[test]
+    #[cfg(unix)]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn a_shared_writable_directory_above_the_root_is_not_the_base() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, top, member) =
+            workspace_without_git(("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n"));
+        std::fs::create_dir(top.join(".git")).unwrap();
+        clear_project_scope_bases();
+        assert_eq!(project_scope_base(&member), top);
+        std::fs::set_permissions(&top, std::fs::Permissions::from_mode(0o777)).unwrap();
+        clear_project_scope_bases();
+        assert_eq!(project_scope_base(&member), member);
+        std::fs::remove_dir(top.join(".git")).unwrap();
+        clear_project_scope_bases();
+        assert_eq!(project_scope_base(&member), member, "workspace root");
+        std::fs::set_permissions(&top, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     /// A workspace below a temp dir without a `.git` entry, with the member

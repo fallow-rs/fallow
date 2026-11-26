@@ -148,7 +148,7 @@ fn extract_eslint_config(
     };
     let parse_path: &Path = &parse_path_buf;
 
-    add_eslint_import_dependencies(root, result, &parse_source, parse_path);
+    add_eslint_import_dependencies(root, walk.project_root(), result, &parse_source, parse_path);
     add_eslint_top_level_config(&mut EslintConfigInput {
         result,
         parse_source: &parse_source,
@@ -172,6 +172,7 @@ fn extract_eslint_config(
 
 fn add_eslint_import_dependencies(
     root: &Path,
+    project_root: &Path,
     result: &mut PluginResult,
     parse_source: &str,
     parse_path: &Path,
@@ -185,7 +186,7 @@ fn add_eslint_import_dependencies(
     for imp in &imports {
         let pkg_name = crate::resolve::extract_package_name(imp);
         if let Some((entry_source, entry_path)) =
-            read_package_entry_for_specifier(root, imp, &pkg_name)
+            read_package_entry_for_specifier(root, project_root, imp, &pkg_name)
         {
             let nested = config_parser::extract_imports(&entry_source, &entry_path);
             for nested_imp in &nested {
@@ -196,7 +197,7 @@ fn add_eslint_import_dependencies(
         }
 
         if is_eslint_preset(&pkg_name) {
-            credit_preset_plugin_dependencies(root, &pkg_name, result);
+            credit_preset_plugin_dependencies(root, project_root, &pkg_name, result);
         }
     }
 }
@@ -379,7 +380,9 @@ fn follow_chained_config(
     walk: &mut ExtendsWalk<'_>,
     depth: usize,
 ) -> bool {
-    let Ok(chained_source) = std::fs::read_to_string(path) else {
+    let Some(chained_source) =
+        crate::discover::project_read::read_project_file(walk.project_root(), path)
+    else {
         return false;
     };
     push_setup_file_once(result, path.to_path_buf());
@@ -403,7 +406,7 @@ fn workspace_shared_config_file(
     let full_name = normalize_eslint_config_name(extends_name);
     let pkg_dir = workspace_package_dir(config_dir, pkg_name, walk)?;
     let subpath = full_name.get(pkg_name.len()..).unwrap_or_default();
-    workspace_package_file(&pkg_dir, subpath, root)
+    workspace_package_file(&pkg_dir, subpath, root, walk.project_root())
 }
 
 /// True when an `extends` entry references a sibling file rather than a package.
@@ -445,14 +448,20 @@ pub(super) fn find_package_dir(start: &Path, pkg_name: &str) -> Option<PathBuf> 
 /// When `specifier` contains a subpath (e.g., `@scope/pkg/next`), resolves that
 /// subpath via the package's `exports` map. Without exports, it probes extensions.
 /// Returns `None` if the package is not found, the subpath cannot be resolved,
-/// or the entry file is unreadable.
+/// or the entry file is unreadable. Each read is a project read in the read
+/// scope of `project_root`, so a package directory that links out of it is
+/// not read.
 fn read_package_entry_for_specifier(
     workspace_dir: &Path,
+    project_root: &Path,
     specifier: &str,
     pkg_name: &str,
 ) -> Option<(String, PathBuf)> {
     let pkg_dir = find_package_dir(workspace_dir, pkg_name)?;
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json_str = crate::discover::project_read::read_project_file(
+        project_root,
+        &pkg_dir.join("package.json"),
+    )?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
 
     let subpath_key = if specifier.len() > pkg_name.len() {
@@ -464,7 +473,7 @@ fn read_package_entry_for_specifier(
 
     let entry_rel = resolve_package_entry(&pkg_json, &subpath_key, &pkg_dir)?;
     let entry_path = pkg_dir.join(entry_rel);
-    let source = std::fs::read_to_string(&entry_path).ok()?;
+    let source = crate::discover::project_read::read_project_file(project_root, &entry_path)?;
     Some((source, entry_path))
 }
 
@@ -497,9 +506,16 @@ fn is_eslint_ecosystem_dependency(name: &str) -> bool {
 
 /// Read and parse a package's `package.json` from node_modules, walking up the
 /// directory tree to find it (handles hoisted deps in monorepos).
-fn read_package_json(workspace_dir: &Path, pkg_name: &str) -> Option<serde_json::Value> {
+fn read_package_json(
+    workspace_dir: &Path,
+    project_root: &Path,
+    pkg_name: &str,
+) -> Option<serde_json::Value> {
     let pkg_dir = find_package_dir(workspace_dir, pkg_name)?;
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json_str = crate::discover::project_read::read_project_file(
+        project_root,
+        &pkg_dir.join("package.json"),
+    )?;
     serde_json::from_str(&pkg_json_str).ok()
 }
 
@@ -510,8 +526,13 @@ fn read_package_json(workspace_dir: &Path, pkg_name: &str) -> Option<serde_json:
 /// declare their framework plugins (react, vue, svelte, ...) as (optional) peer
 /// dependencies the host project installs, which is exactly the transitively-pulled
 /// set that would otherwise surface as `unused-(dev-)dependency`. See issue #754.
-fn credit_preset_plugin_dependencies(root: &Path, pkg_name: &str, result: &mut PluginResult) {
-    let Some(pkg_json) = read_package_json(root, pkg_name) else {
+fn credit_preset_plugin_dependencies(
+    root: &Path,
+    project_root: &Path,
+    pkg_name: &str,
+    result: &mut PluginResult,
+) {
+    let Some(pkg_json) = read_package_json(root, project_root, pkg_name) else {
         return;
     };
     for field in ["dependencies", "peerDependencies", "optionalDependencies"] {
@@ -648,7 +669,7 @@ fn resolve_export_target(value: &serde_json::Value) -> ExportTarget {
 
 #[cfg(test)]
 fn read_package_entry(root: &Path, pkg_name: &str) -> Option<(String, PathBuf)> {
-    read_package_entry_for_specifier(root, pkg_name, pkg_name)
+    read_package_entry_for_specifier(root, root, pkg_name, pkg_name)
 }
 
 /// Resolve `ESLint` plugin short name to full package name.
@@ -1156,6 +1177,28 @@ mod tests {
         assert!(super::find_package_dir(&deep, "missing-pkg").is_none());
     }
 
+    /// A committed `node_modules` link to a directory outside the project
+    /// root is not read.
+    #[test]
+    #[cfg(unix)]
+    fn read_package_entry_skips_a_package_dir_that_links_out_of_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            outside.join("package.json"),
+            r#"{"name": "linked-pkg", "main": "index.js"}"#,
+        )
+        .unwrap();
+        std::fs::write(outside.join("index.js"), "import x from 'eslint-plugin-x';").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("node_modules/linked-pkg")).unwrap();
+
+        assert!(super::read_package_entry(&root, "linked-pkg").is_none());
+        assert!(super::read_package_json(&root, &root, "linked-pkg").is_none());
+    }
+
     #[test]
     fn read_package_entry_exports_field() {
         let dir = tempfile::tempdir().unwrap();
@@ -1192,6 +1235,8 @@ mod tests {
     fn flat_config_workspace_package_dep_chain_traced() {
         let dir = tempfile::tempdir().unwrap();
         let monorepo_root = dir.path();
+        // The hoisted package is inside the Git work tree of the app root.
+        std::fs::create_dir(monorepo_root.join(".git")).unwrap();
 
         let shared_pkg_dir = monorepo_root.join("node_modules/@scope/eslint-config");
         std::fs::create_dir_all(&shared_pkg_dir).unwrap();
@@ -1243,6 +1288,8 @@ mod tests {
     fn flat_config_workspace_package_subpath_dep_chain_traced() {
         let dir = tempfile::tempdir().unwrap();
         let monorepo_root = dir.path();
+        // The hoisted package is inside the Git work tree of the app root.
+        std::fs::create_dir(monorepo_root.join(".git")).unwrap();
 
         let shared_pkg_dir = monorepo_root.join("node_modules/@scope/eslint-config");
         std::fs::create_dir_all(&shared_pkg_dir).unwrap();
@@ -1410,6 +1457,8 @@ mod tests {
         let fixture = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
             .join("../../tests/fixtures/eslint-workspace-export-patterns");
         let dir = tempfile::tempdir().unwrap();
+        // The hoisted package is inside the Git work tree of the app root.
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
         let package = dir.path().join("node_modules/@repo/lint");
         let mut pending = vec![fixture.join("packages/shared")];
         while let Some(source) = pending.pop() {

@@ -632,7 +632,7 @@ fn match_pattern_in_index(
 fn discover_pattern_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
     if !pattern_has_glob(pattern) {
         let path = root.join(pattern);
-        return if path.is_file() {
+        return if crate::discover::project_read::is_project_file(root, &path) {
             vec![path]
         } else {
             Vec::new()
@@ -651,21 +651,21 @@ fn discover_pattern_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
         None => (root.to_path_buf(), pattern),
     };
 
-    scan_dir_for_pattern(&dir, file_pattern)
+    scan_dir_for_pattern(root, &dir, file_pattern)
 }
 
-fn scan_dir_for_pattern(dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
+fn scan_dir_for_pattern(root: &Path, dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
     let Ok(matcher) = globset::Glob::new(file_pattern).map(|g| g.compile_matcher()) else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Some(entries) = crate::discover::project_read::read_project_dir(root, dir) else {
         return Vec::new();
     };
 
     entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.is_file())
+        .filter(|path| crate::discover::project_read::is_project_file(root, path))
         .filter(|path| {
             path.file_name()
                 .is_some_and(|name| matcher.is_match(std::path::Path::new(name)))
@@ -983,8 +983,17 @@ pub fn check_plugin_detection(
                     }
                 }
             }
-            fallow_config::glob_validation::expand_disk_glob(root, pattern)
-                .is_some_and(|mut paths| paths.next().is_some())
+            // A pattern that can lead above the root never matches.
+            // A match through a link that leaves the read scope does not
+            // count.
+            !fallow_config::glob_validation::escapes_project_root(pattern)
+                && fallow_config::glob_validation::expand_disk_glob(root, pattern).is_some_and(
+                    |paths| {
+                        paths
+                            .filter_map(Result::ok)
+                            .any(|path| crate::discover::project_read::is_inside_scope(root, &path))
+                    },
+                )
         }
         PluginDetection::All { conditions } => conditions
             .iter()
@@ -1022,6 +1031,53 @@ mod tests {
             .flat_map(|pattern| discover_pattern_matches(&root, pattern))
             .collect();
         assert!(hits.is_empty(), "{hits:?}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn file_exists_detection_skips_a_match_through_a_link_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("found.txt"), "").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("linked")).expect("link");
+        let detection = PluginDetection::FileExists {
+            pattern: "linked/f*".to_owned(),
+        };
+        assert!(!check_plugin_detection(&detection, &[], &root, &[]));
+    }
+
+    /// A package root inside a Git work tree may link a shared config of the
+    /// work tree, and the link counts for detection.
+    #[test]
+    #[cfg(unix)]
+    fn file_exists_detection_follows_a_link_into_the_work_tree() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let top = dir.path().join("repo");
+        let root = top.join("packages/app");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir(top.join(".git")).expect("mkdir");
+        std::fs::write(top.join("jest.base.js"), "").expect("write");
+        std::os::unix::fs::symlink("../../jest.base.js", root.join("jest.config.js"))
+            .expect("link");
+        let detection = PluginDetection::FileExists {
+            pattern: "jest.config.*".to_owned(),
+        };
+        assert!(check_plugin_detection(&detection, &[], &root, &[]));
+    }
+
+    #[test]
+    fn file_exists_detection_never_matches_above_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::write(dir.path().join("found.txt"), "").expect("write");
+        let detection = PluginDetection::FileExists {
+            pattern: "../f*".to_owned(),
+        };
+        assert!(!check_plugin_detection(&detection, &[], &root, &[]));
     }
 
     #[test]

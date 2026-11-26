@@ -183,7 +183,7 @@ pub fn run_baselines_prune(opts: &BaselinesPruneOptions<'_>) -> ExitCode {
         .targets
         .iter()
         .map(|(kind, path)| {
-            let pruned = match std::fs::read_to_string(path) {
+            let pruned = match fallow_engine::saved_file::read_saved_file(opts.root, path) {
                 Ok(content) => prune_one(kind, &content, &results, opts),
                 Err(error) => Err(PruneFailure::Unreadable(error.to_string())),
             };

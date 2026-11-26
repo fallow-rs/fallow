@@ -250,20 +250,27 @@ fn read_resolved(path: &Path, resolved: &Path, max_bytes: u64) -> Result<Vec<u8>
         path: path.to_path_buf(),
         source,
     };
-    let meta = std::fs::metadata(resolved).map_err(io)?;
-    if !meta.is_file() {
-        return Err(ReadRefusal::NotRegularFile {
-            path: path.to_path_buf(),
-        });
-    }
+    let not_regular = || ReadRefusal::NotRegularFile {
+        path: path.to_path_buf(),
+    };
     let too_large = || ReadRefusal::TooLarge {
         path: path.to_path_buf(),
         max_bytes,
     };
+    // The check before the open skips a device or a FIFO without opening it.
+    // The path can change between that check and the open, so the opened
+    // file is checked again. The open does not wait for a FIFO writer.
+    if !std::fs::metadata(resolved).map_err(io)?.is_file() {
+        return Err(not_regular());
+    }
+    let file = open_without_blocking(resolved).map_err(io)?;
+    let meta = file.metadata().map_err(io)?;
+    if !meta.is_file() {
+        return Err(not_regular());
+    }
     if meta.len() > max_bytes {
         return Err(too_large());
     }
-    let file = std::fs::File::open(resolved).map_err(io)?;
     let mut bytes = Vec::new();
     // The file can grow after the metadata call, so the read stops one byte
     // past the limit and refuses the file when it reaches that byte.
@@ -274,6 +281,19 @@ fn read_resolved(path: &Path, resolved: &Path, max_bytes: u64) -> Result<Vec<u8>
         return Err(too_large());
     }
     Ok(bytes)
+}
+
+/// Open `path` for reading. On Unix the open does not wait for the writer of
+/// a FIFO, so a FIFO that replaces a checked file cannot hang the read.
+fn open_without_blocking(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed());
+    }
+    options.open(path)
 }
 
 fn into_string(path: &Path, bytes: Vec<u8>) -> Result<String, ReadRefusal> {
@@ -289,6 +309,27 @@ fn into_string(path: &Path, bytes: Vec<u8>) -> Result<String, ReadRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The checked open does not wait for a FIFO writer, and the check of
+    /// the opened file refuses what is not a regular file.
+    #[test]
+    #[cfg(unix)]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn the_open_does_not_wait_for_a_fifo_and_checks_the_opened_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe.json");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let file = open_without_blocking(&fifo).unwrap();
+        assert!(!file.metadata().unwrap().is_file());
+        assert!(matches!(
+            read_to_string_bounded(&fifo, 16),
+            Err(ReadRefusal::NotRegularFile { .. })
+        ));
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]

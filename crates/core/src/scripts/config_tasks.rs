@@ -19,13 +19,14 @@ pub fn config_task_scripts(
     project_root: &str,
     production: bool,
 ) -> HashMap<String, String> {
-    let nx_targets: HashMap<String, String> = std::fs::read_to_string(dir.join("project.json"))
-        .map(|source| {
-            super::nx_targets::run_commands_scripts(&source, project_root)
-                .into_iter()
-                .collect()
-        })
-        .unwrap_or_default();
+    let nx_targets: HashMap<String, String> =
+        crate::discover::project_read::read_project_file(dir, &dir.join("project.json"))
+            .map(|source| {
+                super::nx_targets::run_commands_scripts(&source, project_root)
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default();
     let vp_tasks: HashMap<String, String> =
         super::vite_plus::task_commands(dir).into_iter().collect();
     let keep = |tasks: HashMap<String, String>| {

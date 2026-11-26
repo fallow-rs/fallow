@@ -17,8 +17,7 @@ pub fn suggestion_block(provider: Provider, issue: &CiIssue) -> Option<String> {
     }
 
     let root = std::env::var_os("FALLOW_ROOT").map_or_else(|| PathBuf::from("."), PathBuf::from);
-    let path = root.join(&issue.path);
-    let Some(source) = std::fs::read_to_string(path).ok() else {
+    let Some(source) = read_finding_source(&root, Path::new(&issue.path)) else {
         return (!block.is_empty()).then_some(block);
     };
     if let Some(suggestion) = suggestion_or_withheld_hint(
@@ -31,6 +30,26 @@ pub fn suggestion_block(provider: Provider, issue: &CiIssue) -> Option<String> {
         block.push_str(&suggestion);
     }
     (!block.is_empty()).then_some(block)
+}
+
+/// The text of the finding file, when `path` is a relative path without
+/// `..` that resolves to a regular file inside `root`.
+fn read_finding_source(root: &Path, path: &Path) -> Option<String> {
+    let plain_relative = path.components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    });
+    if !plain_relative {
+        return None;
+    }
+    fallow_types::read_guard::read_to_string_inside(
+        root,
+        path,
+        fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+    )
+    .ok()
 }
 
 /// The edit block for this finding's line, or the note that says why it was
@@ -729,6 +748,49 @@ mod tests {
             assert_eq!(suggestion_block(provider, &survived), None);
         }
         assert_eq!(fix_intent(&survived), None);
+    }
+
+    /// A finding path that leaves the root gives no suggestion block, so no
+    /// line of an outside file goes into a review comment.
+    #[test]
+    fn suggestion_block_skips_a_finding_path_outside_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outside = dir.path().join("other.ts");
+        std::fs::write(&outside, "export const otherValue = 1;\n").expect("write");
+        let finding = CiIssue {
+            rule_id: "fallow/unused-export".to_owned(),
+            description: "Export 'otherValue' is never imported".to_owned(),
+            severity: "minor".to_owned(),
+            path: outside.to_string_lossy().into_owned(),
+            line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
+            fingerprint: "abc".to_owned(),
+            legacy_fingerprint: None,
+            audit: None,
+        };
+        for provider in [Provider::Github, Provider::Gitlab] {
+            let block = suggestion_block(provider, &finding).unwrap_or_default();
+            assert!(!block.contains("otherValue"), "{block}");
+            assert!(!block.contains("```suggestion"), "{block}");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn finding_source_refuses_a_link_out_of_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join("src")).expect("mkdir");
+        let outside = dir.path().join("other.ts");
+        std::fs::write(&outside, "export const otherValue = 1;\n").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("src/linked.ts")).expect("link");
+        std::fs::write(root.join("src/own.ts"), "export const own = 1;\n").expect("write");
+
+        assert_eq!(read_finding_source(&root, Path::new("src/linked.ts")), None);
+        assert_eq!(read_finding_source(&root, Path::new("../other.ts")), None);
+        assert_eq!(read_finding_source(&root, &outside), None);
+        assert!(read_finding_source(&root, Path::new("./src/own.ts")).is_some());
     }
 
     #[test]

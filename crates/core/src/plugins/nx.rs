@@ -275,8 +275,7 @@ fn resolve_local_manifest(path: &str, root: &Path, include_main: bool, result: &
     if !config_parser::is_inside_root(&manifest_path, root) {
         return;
     }
-    let Some(manifest) = std::fs::read_to_string(&manifest_path)
-        .ok()
+    let Some(manifest) = crate::discover::project_read::read_project_file(root, &manifest_path)
         .and_then(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
     else {
         return;
@@ -302,7 +301,9 @@ fn resolve_local_manifest(path: &str, root: &Path, include_main: bool, result: &
         if !config_parser::is_inside_root(&collection_path, root) {
             continue;
         }
-        if let Ok(source) = std::fs::read_to_string(&collection_path) {
+        if let Some(source) =
+            crate::discover::project_read::read_project_file(root, &collection_path)
+        {
             resolve_collection(&collection_path, &source, root, result);
         }
     }

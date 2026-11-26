@@ -138,13 +138,18 @@ pub(in crate::plugins) fn workspace_package_dir(
 /// The file that `require` loads for `subpath` (empty or `/<path>`) of the
 /// package in `pkg_dir`, when that file is a project file. A file under
 /// `node_modules` gives `None`. The returned path uses the spelling of
-/// `root`, so it matches the discovered file.
+/// `root`, so it matches the discovered file. The manifest is a project read
+/// in the read scope of `project_root`.
 pub(in crate::plugins) fn workspace_package_file(
     pkg_dir: &Path,
     subpath: &str,
     root: &Path,
+    project_root: &Path,
 ) -> Option<PathBuf> {
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json_str = crate::discover::project_read::read_project_file(
+        project_root,
+        &pkg_dir.join("package.json"),
+    )?;
     let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
     let subpath_key = format!(".{subpath}");
     let entry_rel = required_main_entry(&pkg_json, &subpath_key)
@@ -206,6 +211,35 @@ mod tests {
         assert_eq!(
             next_walk.workspace_package_dir("pkg-b"),
             Some(root.join("packages/b"))
+        );
+    }
+
+    /// A committed directory link to a package outside the project root is
+    /// not read, so it gives no package file.
+    #[test]
+    #[cfg(unix)]
+    fn a_package_dir_that_links_out_of_the_project_gives_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        write(
+            &outside,
+            "package.json",
+            r#"{"name":"cfg","main":"index.js"}"#,
+        );
+        write(&outside, "index.js", "module.exports = {};");
+        write(
+            &root,
+            "packages/real/package.json",
+            r#"{"name":"real","main":"index.js"}"#,
+        );
+        write(&root, "packages/real/index.js", "module.exports = {};");
+        std::os::unix::fs::symlink(&outside, root.join("packages/cfg")).unwrap();
+
+        assert!(workspace_package_file(&root.join("packages/cfg"), "", &root, &root).is_none());
+        assert_eq!(
+            workspace_package_file(&root.join("packages/real"), "", &root, &root),
+            Some(root.join("packages/real/index.js"))
         );
     }
 }

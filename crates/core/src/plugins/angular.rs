@@ -210,7 +210,9 @@ fn resolve_ng_package_entries(config_path: &Path, source: &str, root: &Path) -> 
         let mut nested = Vec::new();
         collect_nested_ng_package_configs(base, 0, &mut nested);
         for nested_path in nested {
-            let Ok(nested_source) = std::fs::read_to_string(&nested_path) else {
+            let Some(nested_source) =
+                crate::discover::project_read::read_project_file(root, &nested_path)
+            else {
                 continue;
             };
             if let Some(entry) =

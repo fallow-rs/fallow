@@ -394,7 +394,12 @@ const DEPLOY_COMMANDS: [&str; 12] = [
 /// Workflow files that look like a deploy workflow, relative to the root: a
 /// file named for a deploy, else a file that runs a known deploy command.
 fn detect_deploy_workflows(root: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(root.join(".github").join("workflows")) else {
+    let workflows = root.join(".github").join("workflows");
+    // A workflow directory or file that resolves outside the root is not read.
+    if !fallow_types::read_guard::is_inside_root(root, &workflows) {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(&workflows) else {
         return Vec::new();
     };
     let mut named = Vec::new();
@@ -410,7 +415,12 @@ fn detect_deploy_workflows(root: &Path) -> Vec<String> {
         let path = format!(".github/workflows/{name}");
         if name.to_ascii_lowercase().contains("deploy") {
             named.push(path);
-        } else if std::fs::read_to_string(entry.path()).is_ok_and(|content| {
+        } else if fallow_types::read_guard::read_to_string_inside(
+            root,
+            &entry.path(),
+            fallow_types::read_guard::DEFAULT_MAX_READ_BYTES,
+        )
+        .is_ok_and(|content| {
             let content = content.to_ascii_lowercase();
             DEPLOY_COMMANDS
                 .iter()
@@ -869,5 +879,30 @@ fn print_wait_result(wait: &CoverageSetupWait) {
             "Could not read the setup state: {}",
             wait.message.as_deref().unwrap_or("unknown error")
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// A workflow directory or file that links out of the project is not read.
+    #[test]
+    #[cfg(unix)]
+    fn deploy_workflow_detection_skips_links_out_of_the_project() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(root.join(".github/workflows")).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(outside.join("release.yml"), "run: vercel deploy\n").expect("write");
+        std::os::unix::fs::symlink(
+            outside.join("release.yml"),
+            root.join(".github/workflows/release.yml"),
+        )
+        .expect("link");
+        assert!(super::detect_deploy_workflows(&root).is_empty());
+
+        std::fs::remove_dir_all(root.join(".github/workflows")).expect("remove");
+        std::os::unix::fs::symlink(&outside, root.join(".github/workflows")).expect("link");
+        assert!(super::detect_deploy_workflows(&root).is_empty());
     }
 }

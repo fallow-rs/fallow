@@ -289,7 +289,9 @@ fn extract_jest_string_projects(input: JestStringProjectsInput<'_, '_>) {
     for entry in &project_entries {
         let configs = expand_project_entry(entry, &root_dir, config_path, root, walk.project_root);
         for child_config in configs {
-            let Ok(child_source) = std::fs::read_to_string(&child_config) else {
+            let Some(child_source) =
+                crate::discover::project_read::read_project_file(walk.project_root, &child_config)
+            else {
                 continue;
             };
             let child_root = child_config
@@ -543,7 +545,7 @@ fn expand_project_entry(
             if let Some(found) = probe_directory_for_jest_config(&matched, project_root) {
                 configs.push(found);
             }
-        } else if matched.is_file() && is_recognised_config_path(&matched) {
+        } else if matched.is_file() && is_recognised_config_path(&matched, project_root) {
             configs.push(matched);
         }
     }
@@ -564,7 +566,7 @@ fn probe_directory_for_jest_config(dir: &Path, project_root: &Path) -> Option<Pa
     let pkg = dir.join(PACKAGE_JSON_FILENAME);
     if pkg.is_file()
         && config_parser::is_inside_root(&pkg, project_root)
-        && package_json_has_jest_key(&pkg)
+        && package_json_has_jest_key(&pkg, project_root)
     {
         return Some(pkg);
     }
@@ -573,9 +575,10 @@ fn probe_directory_for_jest_config(dir: &Path, project_root: &Path) -> Option<Pa
 
 /// True when `package.json` exists and has a top-level `"jest"` object.
 /// Reading + parsing the file is cheap relative to the cost of recursing
-/// into a synthesised config that turns out to be empty.
-fn package_json_has_jest_key(path: &Path) -> bool {
-    let Ok(raw) = std::fs::read_to_string(path) else {
+/// into a synthesised config that turns out to be empty. The read is a
+/// project read in the read scope of `project_root`.
+fn package_json_has_jest_key(path: &Path, project_root: &Path) -> bool {
+    let Some(raw) = crate::discover::project_read::read_project_file(project_root, path) else {
         return false;
     };
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
@@ -586,14 +589,14 @@ fn package_json_has_jest_key(path: &Path) -> bool {
 
 /// True when `path`'s filename is a recognised Jest config (dedicated
 /// config file or `package.json` whose `"jest"` key holds an object).
-fn is_recognised_config_path(path: &Path) -> bool {
+fn is_recognised_config_path(path: &Path, project_root: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
     if JEST_CONFIG_FILENAMES.contains(&name) {
         return true;
     }
-    name == PACKAGE_JSON_FILENAME && package_json_has_jest_key(path)
+    name == PACKAGE_JSON_FILENAME && package_json_has_jest_key(path, project_root)
 }
 
 /// Split a `projects` entry into the directory that it resolves against and
@@ -1950,5 +1953,15 @@ mod tests {
             "got: {:?}",
             result.referenced_dependencies,
         );
+    }
+
+    /// A `package.json` that links to a device has no `jest` key.
+    #[test]
+    #[cfg(unix)]
+    fn a_package_json_that_links_to_a_device_has_no_jest_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manifest = dir.path().join("package.json");
+        std::os::unix::fs::symlink("/dev/zero", &manifest).expect("link");
+        assert!(!package_json_has_jest_key(&manifest, dir.path()));
     }
 }

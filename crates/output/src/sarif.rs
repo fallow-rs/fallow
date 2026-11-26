@@ -198,7 +198,13 @@ impl SarifSourceSnippetCache {
             path.to_path_buf()
         };
         if !self.files.contains_key(&resolved) {
-            let lines = std::fs::read_to_string(&resolved)
+            let max = fallow_types::read_guard::DEFAULT_MAX_READ_BYTES;
+            // With a root, a file that resolves outside it gives no snippet.
+            let source = match self.root.as_deref() {
+                Some(root) => fallow_types::read_guard::read_to_string_inside(root, &resolved, max),
+                None => fallow_types::read_guard::read_to_string_bounded(&resolved, max),
+            };
+            let lines = source
                 .ok()
                 .map(|source| source.lines().map(str::to_owned).collect())
                 .unwrap_or_default();
@@ -489,6 +495,27 @@ pub fn extend_sarif_runs_with_category(runs: &mut Vec<Value>, sarif: &Value, cat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn snippet_cache_gives_no_line_for_a_file_outside_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let outside = dir.path().join("other.ts");
+        std::fs::write(&outside, "export const value = 1;\n").expect("write");
+        std::os::unix::fs::symlink(&outside, root.join("linked.ts")).expect("link");
+        std::fs::write(root.join("own.ts"), "export const own = 1;\n").expect("write");
+
+        let mut cache = SarifSourceSnippetCache::with_root(&root);
+        assert_eq!(cache.line(&outside, 1), None);
+        assert_eq!(cache.line(Path::new("linked.ts"), 1), None);
+        assert_eq!(
+            cache.line(Path::new("own.ts"), 1).as_deref(),
+            Some("export const own = 1;")
+        );
+    }
 
     #[test]
     fn extend_sarif_runs_with_category_sets_missing_ids_only() {

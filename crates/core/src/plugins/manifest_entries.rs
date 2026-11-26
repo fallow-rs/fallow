@@ -271,8 +271,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
             .unwrap_or_else(|| file.to_string_lossy().replace('\\', "/"));
         report.manifests_matched.push(rel_manifest.clone());
 
-        let manifest: Value = match std::fs::read_to_string(&file)
-            .ok()
+        let manifest: Value = match crate::discover::project_read::read_project_file(root, &file)
             .and_then(|source| parse_manifest(&source, rule.format))
         {
             Some(value) => value,

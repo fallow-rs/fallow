@@ -100,7 +100,7 @@ pub fn resolution_inputs_hash(
     let mut inputs: Vec<(String, Vec<u8>)> = collect_input_files(root, workspaces, files)
         .into_iter()
         .filter_map(|path| {
-            let content = std::fs::read(&path).ok()?;
+            let content = input_fingerprint(root, &path)?;
             Some((portable_key(root, &path), content))
         })
         .collect();
@@ -255,7 +255,9 @@ fn package_entry_target_states(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec
     let mut states = Vec::new();
     let package_dirs = std::iter::once(root).chain(workspaces.iter().map(|ws| ws.root.as_path()));
     for dir in package_dirs {
-        let Ok(content) = std::fs::read(dir.join("package.json")) else {
+        let Some(content) =
+            crate::discover::project_read::read_project_bytes(root, &dir.join("package.json"))
+        else {
             continue;
         };
         let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&content) else {
@@ -300,6 +302,30 @@ fn collect_export_targets<'a>(value: &'a serde_json::Value, targets: &mut Vec<&'
         }
         _ => {}
     }
+}
+
+/// The bytes that key the hash for the input file `path`, or `None` when no
+/// regular file is at `path`.
+///
+/// A file in the read scope of `root` keys the hash with its content. This
+/// function does not read the content of an input file outside the read
+/// scope. Such a file keys the hash with its size and modification time.
+/// This covers each input file outside the scope: install state above the
+/// root, an ancestor `package.json` or `tsconfig` file, and an `extends`
+/// target.
+fn input_fingerprint(root: &Path, path: &Path) -> Option<Vec<u8>> {
+    if let Some(content) = crate::discover::project_read::read_project_bytes(root, path) {
+        return Some(content);
+    }
+    let metadata = std::fs::metadata(path)
+        .ok()
+        .filter(std::fs::Metadata::is_file)?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
+    Some(format!("outside-scope:{}:{modified}", metadata.len()).into_bytes())
 }
 
 fn collect_input_files(
@@ -584,5 +610,47 @@ mod tests {
         assert!(is_tsconfig_name(Path::new("tsconfig.app.jsonc")));
         assert!(!is_tsconfig_name(Path::new("package.json")));
         assert!(!is_tsconfig_name(Path::new("tsconfig.ts")));
+    }
+
+    /// A file in the read scope keys by content. A file above the scope keys
+    /// by size and modification time. A missing file gives no key.
+    #[test]
+    fn input_fingerprint_keys_by_content_in_scope_and_by_size_above_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let base = dunce::canonicalize(dir.path()).expect("canonical");
+        let root = base.join("project");
+        let own = root.join("tsconfig.json");
+        let above = base.join("tsconfig.base.json");
+        write(&own, "{}");
+        write(&above, "{}");
+        fallow_config::clear_project_scope_bases();
+
+        assert_eq!(input_fingerprint(&root, &own), Some(b"{}".to_vec()));
+        let before = input_fingerprint(&root, &above).expect("key above the scope");
+        assert!(before.starts_with(b"outside-scope:2:"));
+        write(&above, "{ }");
+        let after = input_fingerprint(&root, &above).expect("key above the scope");
+        assert!(after.starts_with(b"outside-scope:3:"));
+        assert_ne!(before, after);
+        assert_eq!(input_fingerprint(&root, &root.join("missing.json")), None);
+    }
+
+    /// A `package.json` that links out of the root does not key the mode.
+    #[test]
+    #[cfg(unix)]
+    fn a_manifest_that_links_out_of_the_root_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::write(
+            outside.join("package.json"),
+            r#"{"main":"./dist/index.js"}"#,
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(outside.join("package.json"), root.join("package.json"))
+            .expect("link");
+        assert!(package_entry_target_states(&root, &[]).is_empty());
     }
 }
