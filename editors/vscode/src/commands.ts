@@ -57,7 +57,12 @@ import {
   getInstalledCliPath,
 } from "./download.js";
 import { buildWorkspacesArgs, compareVersions } from "./cli-args-utils.js";
-import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
+import {
+  buildFixArgs,
+  createFixPreviewItems,
+  resolveFixLocation,
+  zeroAppliedAdvice,
+} from "./fix-utils.js";
 import {
   buildHealthArgs,
   parseUnknownHealthSubcommand,
@@ -1120,6 +1125,19 @@ const showPartialDryRunPreview = async (
 };
 
 /**
+ * Show the result of an apply run. A run that applied no fix but skipped some
+ * is a warning with the reason and the next step, so the user can act on it.
+ */
+const showApplySummary = (result: FallowFixResult): void => {
+  const advice = zeroAppliedAdvice(result);
+  if (advice) {
+    void vscode.window.showWarningMessage(`Fallow: ${fixSummary(result)}. ${advice}`);
+    return;
+  }
+  void vscode.window.showInformationMessage(`Fallow: ${fixSummary(result)}.`);
+};
+
+/**
  * Run `fallow fix`. An apply run asks for confirmation and saves all editors
  * first. `afterRun` runs once the CLI was started, also when it failed, since
  * a failed apply run can have changed files before it stopped.
@@ -1163,7 +1181,7 @@ export const runFix = async (
     if (dryRun) {
       await showDryRunPreview(root, result);
     } else {
-      void vscode.window.showInformationMessage(`Fallow: ${fixSummary(result)}.`);
+      showApplySummary(result);
     }
 
     return result;

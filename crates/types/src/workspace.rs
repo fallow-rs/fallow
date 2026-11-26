@@ -1163,7 +1163,8 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
     match kind {
         WorkspaceDiagnosticKind::UndeclaredWorkspace => format!(
             "Directory '{display}' contains package.json but is not declared as a workspace. \
-             Add it to package.json workspaces or pnpm-workspace.yaml, or add it to ignorePatterns."
+             Add it to package.json workspaces, pnpm-workspace.yaml, or `workspaces.patterns` \
+             in the fallow config, or add it to ignorePatterns."
         ),
         WorkspaceDiagnosticKind::MalformedPackageJson { error } => format!(
             "Dropped workspace '{display}': package.json is not valid JSON ({error}). \

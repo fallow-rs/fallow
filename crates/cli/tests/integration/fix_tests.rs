@@ -1150,7 +1150,7 @@ fn fix_dry_run_withholds_every_removal_a_degraded_parse_distorted() {
     for skip in [export_skip, dep_entry] {
         assert_eq!(
             skip["help"],
-            "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
+            "Preserved because the import graph is incomplete: fallow did not fully analyze `src/consumer.ts`. This file has syntax errors. Fix the syntax, or add `src/consumer.ts` to `ignoreFindings` if the file is broken on purpose. Then run `fallow fix --dry-run` and review the new preview."
         );
     }
     assert_eq!(
@@ -1521,7 +1521,7 @@ fn fix_apply_does_not_delete_an_enum_member_a_skipped_file_references() {
     assert_eq!(withheld["skipped"], serde_json::json!(true));
     assert_eq!(
         withheld["help"],
-        "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
+        "Preserved because the import graph is incomplete: fallow did not fully analyze `src/huge.ts`. Fallow skipped this large file. Raise the limit with `--max-file-size <MB>`, or add `src/huge.ts` to `ignorePatterns`. Then run `fallow fix --dry-run` and review the new preview."
     );
     assert_eq!(
         withheld["skip_reason"].as_str(),

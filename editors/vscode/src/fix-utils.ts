@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import type { FixAction } from "./types.js";
+import type { FallowFixResult, FixAction } from "./types.js";
 import { appendAllowRemoteExtends, type BuiltCliArgs } from "./cli-args-utils.js";
 
 interface FixPreviewNavigateItem {
@@ -73,4 +73,32 @@ export const resolveFixLocation = (
     absolutePath: path.isAbsolute(filePath) ? filePath : path.resolve(root, filePath),
     line: Math.max(0, (fix.line ?? 1) - 1),
   };
+};
+
+/**
+ * The reason and the next step for an apply run that applied no fix but
+ * skipped some. The CLI writes the next step into the `help` of each skipped
+ * entry, so the most frequent help is the one that unblocks the most fixes.
+ * Return `null` when the run applied a fix or skipped none with help.
+ */
+export const zeroAppliedAdvice = (result: FallowFixResult): string | null => {
+  if (result.dry_run || result.total_fixed > 0) {
+    return null;
+  }
+  const counts = new Map<string, number>();
+  for (const fix of result.fixes) {
+    if (fix.skipped && fix.help) {
+      counts.set(fix.help, (counts.get(fix.help) ?? 0) + 1);
+    }
+  }
+  const ranked = [...counts.entries()].toSorted((a, b) => b[1] - a[1]);
+  const first = ranked[0];
+  if (!first) {
+    return null;
+  }
+  const others = ranked.length - 1;
+  if (others === 0) {
+    return first[0];
+  }
+  return `${first[0]} ${others} other reason${others === 1 ? "" : "s"} also held back fixes. Run \`fallow fix --dry-run\` in a terminal to see each one.`;
 };

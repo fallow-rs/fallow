@@ -1,7 +1,21 @@
 //! Fix JSON output contract.
 
+use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 use serde_json::Value;
+
+/// A diagnostic that withholds at least one fix of the run, with the step
+/// that unblocks the fix.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct IncompleteAnalysisDiagnostic {
+    /// The diagnostic, in the shape of a `workspace_diagnostics[]` entry.
+    #[serde(flatten)]
+    pub diagnostic: WorkspaceDiagnostic,
+    /// The config change or command that lets the run analyze the path, so
+    /// that the withheld fixes become available.
+    pub action: String,
+}
 
 /// Inputs for building `fallow fix --format json`.
 #[derive(Clone, Copy)]
@@ -31,6 +45,9 @@ pub struct FixJsonOutputInput<'a> {
     /// Export removals withheld in production mode because a file outside
     /// the production scope imports the export.
     pub skipped_test_importers: usize,
+    /// The diagnostics that can withhold the
+    /// `low_confidence_incomplete_analysis` entries of `fixes`.
+    pub incomplete_analysis_diagnostics: &'a [IncompleteAnalysisDiagnostic],
 }
 
 /// JSON root emitted by `fallow fix --format json`.
@@ -83,6 +100,16 @@ pub struct FixJsonOutput<'a> {
     /// `remove_export` entry with `skip_reason: "test_importers"`, so this
     /// counts exports, not files. Intentional and exit-code-neutral.
     pub skipped_test_importers: usize,
+    /// The diagnostics that can withhold the entries of `fixes` with
+    /// `skip_reason: "low_confidence_incomplete_analysis"`: each source file
+    /// or hidden folder that the run did not fully analyze, with the step
+    /// that unblocks the fix. Files that the run never read come first, then
+    /// parse failures, each group sorted by path. A diagnostic that degrades
+    /// the analysis but can withhold no fix (for example
+    /// `undeclared-workspace`) is not listed. Omitted when no fix is withheld
+    /// for this reason.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub incomplete_analysis_diagnostics: &'a [IncompleteAnalysisDiagnostic],
 }
 
 /// Count fix entries whose `applied` flag is true.
@@ -137,6 +164,7 @@ pub fn build_fix_json_output(input: FixJsonOutputInput<'_>) -> FixJsonOutput<'_>
         skipped_kept_re_exports: input.skipped_kept_re_exports,
         skipped_shared_declarations: input.skipped_shared_declarations,
         skipped_test_importers: input.skipped_test_importers,
+        incomplete_analysis_diagnostics: input.incomplete_analysis_diagnostics,
     }
 }
 
@@ -198,6 +226,7 @@ mod tests {
             skipped_kept_re_exports: 6,
             skipped_shared_declarations: 7,
             skipped_test_importers: 3,
+            incomplete_analysis_diagnostics: &[],
         });
 
         assert!(output.dry_run);
@@ -243,6 +272,7 @@ mod tests {
             skipped_kept_re_exports: 0,
             skipped_shared_declarations: 0,
             skipped_test_importers: 0,
+            incomplete_analysis_diagnostics: &[],
         })
         .expect("fix output serializes");
 

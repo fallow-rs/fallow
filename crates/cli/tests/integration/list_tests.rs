@@ -1250,8 +1250,8 @@ fn two_manifest_glob_human_listing_prints_each_directory_once() {
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
 
     assert!(
-        output.stderr.contains("2 workspace discovery diagnostics:"),
-        "the block header counts the deduplicated entries: {}",
+        output.stderr.contains("3 discovery diagnostics:"),
+        "the block header counts the deduplicated entries (2 globs and node-modules-missing): {}",
         output.stderr
     );
     let entries: Vec<&str> = output
@@ -1916,7 +1916,7 @@ fn list_workspaces_includes_nested_pnpm_project_members() {
         .iter()
         .filter_map(|entry| entry["kind"].as_str())
         .collect();
-    assert_eq!(kinds, ["nested-project-root"]);
+    assert_eq!(kinds, ["nested-project-root", "node-modules-missing"]);
 }
 
 /// A nested directory with its own `pnpm-workspace.yaml` is listed as a
@@ -1958,6 +1958,11 @@ fn list_workspaces_reports_nested_projects_and_missing_pattern_dirs() {
         diagnostics,
         [
             ("nested-project-root".into(), "docs".into(), String::new()),
+            (
+                "node-modules-missing".into(),
+                "node_modules".into(),
+                String::new(),
+            ),
             (
                 "workspace-pattern-dir-missing".into(),
                 "pnpm-workspace.yaml".into(),

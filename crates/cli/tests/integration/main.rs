@@ -113,6 +113,7 @@ mod finding_id_filter_tests;
 mod finding_id_tests;
 mod fix_export_list_import_tests;
 mod fix_generated_file_tests;
+mod fix_incomplete_analysis_hint_tests;
 mod fix_multiline_reexport_tests;
 mod fix_production_test_importers_tests;
 mod fix_program_meaning_tests;

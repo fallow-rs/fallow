@@ -14,6 +14,7 @@ mod enum_helpers;
 mod enum_members;
 mod export_list;
 mod exports;
+mod incomplete_analysis;
 mod io;
 mod list_imports;
 mod plan;
@@ -63,6 +64,7 @@ fn run_analyze(
         .analyze_dead_code_keeping_graph()
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let mut results = output_struct.results;
+    let diagnostics = session.current_workspace_diagnostics();
     let re_exports = output_struct
         .graph
         .as_ref()
@@ -128,6 +130,7 @@ fn run_analyze(
         results,
         file_hashes: output_struct.file_hashes,
         re_exports,
+        diagnostics,
     })
 }
 
@@ -138,6 +141,9 @@ struct AnalyzedProject {
     /// Named re-exports, so the export fixer never removes an export that a
     /// kept re-export still names.
     re_exports: Vec<fallow_engine::module_graph::NamedReExport>,
+    /// The workspace and source-discovery diagnostics of the analysis, read
+    /// after the parse so that read and parse failures are in the list.
+    diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
 pub struct FixOptions<'a> {
@@ -237,6 +243,7 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         mut results,
         file_hashes,
         re_exports,
+        diagnostics,
     } = match run_analyze(run, &config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
@@ -279,7 +286,17 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
 
     check_source_edits(opts, (&results, &re_exports), &mut plan, &mut fixes);
 
-    let exit_code = finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals);
+    let exit_code = finalize_fix_run(
+        opts,
+        plan,
+        &mut fixes,
+        had_write_error,
+        &FinalizeContext {
+            catalog_totals: &catalog_totals,
+            config: &config,
+            diagnostics: &diagnostics,
+        },
+    );
     *fix_count = fixes.len();
     exit_code
 }
@@ -314,14 +331,22 @@ fn check_source_edits(
     }
 }
 
+/// The run facts that [`finalize_fix_run`] reads besides the plan.
+struct FinalizeContext<'a> {
+    catalog_totals: &'a CatalogFixTotals,
+    config: &'a fallow_config::ResolvedConfig,
+    diagnostics: &'a [fallow_config::WorkspaceDiagnostic],
+}
+
 /// Commit the plan, emit output, and compute the exit code after every fixer ran.
 fn finalize_fix_run(
     opts: &FixOptions<'_>,
     plan: FixPlan,
     fixes: &mut Vec<serde_json::Value>,
     mut had_write_error: bool,
-    catalog_totals: &CatalogFixTotals,
+    context: &FinalizeContext<'_>,
 ) -> ExitCode {
+    let catalog_totals = context.catalog_totals;
     let plan_skip_records = build_skipped_records(opts.root, plan.skipped(), opts.output);
     fixes.extend(plan_skip_records.iter().cloned());
 
@@ -333,6 +358,10 @@ fn finalize_fix_run(
     let commit_outcome = commit_fix_plan(opts, plan, fixes);
 
     strip_target_sidechannel(fixes);
+
+    let blocking =
+        incomplete_analysis::blocking_diagnostics(context.config, context.diagnostics, fixes);
+    incomplete_analysis::name_blocking_diagnostics_in_help(fixes, &blocking);
 
     let skip_counts = count_fix_skips(&plan_skip_records);
     if commit_outcome.had_failures() {
@@ -369,6 +398,7 @@ fn finalize_fix_run(
                 fixes,
                 plan::SkipReason::TestImporters,
             ),
+            incomplete_analysis_diagnostics: &blocking,
         })
     {
         return code;
@@ -488,6 +518,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             skipped_kept_re_exports: 0,
             skipped_shared_declarations: 0,
             skipped_test_importers: 0,
+            incomplete_analysis_diagnostics: &[],
         }) {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
@@ -692,6 +723,7 @@ struct FixOutputInput<'a> {
     kept_re_export_count: usize,
     shared_declaration_count: usize,
     test_importer_count: usize,
+    incomplete_analysis_diagnostics: &'a [fallow_output::IncompleteAnalysisDiagnostic],
 }
 
 struct CatalogFixTotals {
@@ -850,6 +882,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             skipped_kept_re_exports: input.kept_re_export_count,
             skipped_shared_declarations: input.shared_declaration_count,
             skipped_test_importers: input.test_importer_count,
+            incomplete_analysis_diagnostics: input.incomplete_analysis_diagnostics,
         }) {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
@@ -885,6 +918,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             kept_re_export_count: input.kept_re_export_count,
             shared_declaration_count: input.shared_declaration_count,
             test_importer_count: input.test_importer_count,
+            incomplete_analysis_diagnostics: input.incomplete_analysis_diagnostics,
         });
     }
     Ok(())
@@ -998,6 +1032,7 @@ struct HumanSummaryInput<'a> {
     kept_re_export_count: usize,
     shared_declaration_count: usize,
     test_importer_count: usize,
+    incomplete_analysis_diagnostics: &'a [fallow_output::IncompleteAnalysisDiagnostic],
 }
 
 /// Emit the human fix summary, split by what `--quiet` may drop.
@@ -1022,6 +1057,10 @@ fn emit_human_summary(input: &HumanSummaryInput<'_>) {
         }
     }
     emit_residual_skip_warnings(input);
+    incomplete_analysis::print_blocking_diagnostics(
+        input.fixes,
+        input.incomplete_analysis_diagnostics,
+    );
 }
 
 fn emit_created_config_messages(fixes: &[serde_json::Value]) {
@@ -1149,14 +1188,14 @@ fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 9] {
             prefix: "Kept ",
             singular: "declared package",
             plural: "declared packages",
-            suffix: " whose only import may sit in a file this run did not fully read. Resolve the files named in the workspace diagnostics above, then re-run `fallow fix`.",
+            suffix: " whose only import may sit in a file this run did not fully read. Resolve the paths listed below, then re-run `fallow fix`.",
         },
         SkipWarning {
             count: input.low_confidence_member_count,
             prefix: "Kept ",
             singular: "unused enum member",
             plural: "unused enum members",
-            suffix: " whose only reference may sit in a file this run did not fully analyze. Resolve the files reported above, then re-run `fallow fix`.",
+            suffix: " whose only reference may sit in a file this run did not fully analyze. Resolve the paths listed below, then re-run `fallow fix`.",
         },
         SkipWarning {
             count: input.kept_re_export_count,

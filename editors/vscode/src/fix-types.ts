@@ -177,4 +177,16 @@ export interface FallowFixResult {
    * files. Always present; defaults to 0. Does NOT change the exit code.
    */
   readonly skipped_test_importers?: number;
+  /**
+   * The diagnostics that can withhold the entries with
+   * `skip_reason: "low_confidence_incomplete_analysis"`, each with the
+   * `action` that unblocks the fix. Omitted when no fix is withheld for
+   * this reason.
+   */
+  readonly incomplete_analysis_diagnostics?: ReadonlyArray<{
+    readonly kind: string;
+    readonly path: string;
+    readonly message: string;
+    readonly action: string;
+  }>;
 }

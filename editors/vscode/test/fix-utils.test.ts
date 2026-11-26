@@ -3,8 +3,9 @@ import {
   buildFixArgs,
   createFixPreviewItems,
   resolveFixLocation,
+  zeroAppliedAdvice,
 } from "../src/fix-utils.js";
-import type { FixAction } from "../src/types.js";
+import type { FallowFixResult, FixAction } from "../src/types.js";
 
 describe("buildFixArgs", () => {
   it("builds dry-run arguments without production mode", () => {
@@ -121,5 +122,34 @@ describe("resolveFixLocation", () => {
         package: "left-pad",
       })
     ).toBeNull();
+  });
+});
+
+describe("zeroAppliedAdvice", () => {
+  const skipped = (help: string): FixAction =>
+    ({ type: "remove_export", path: "src/a.ts", skipped: true, help }) as FixAction;
+  const result = (fixes: FixAction[], totalFixed = 0, dryRun = false): FallowFixResult => ({
+    dry_run: dryRun,
+    fixes,
+    total_fixed: totalFixed,
+  });
+
+  it("shows the help that held back the most fixes", () => {
+    const advice = zeroAppliedAdvice(
+      result([skipped("Add `!.claude/**`."), skipped("Add `!.claude/**`."), skipped("Other.")]),
+    );
+    expect(advice).toBe(
+      "Add `!.claude/**`. 1 other reason also held back fixes. Run `fallow fix --dry-run` in a terminal to see each one.",
+    );
+  });
+
+  it("shows a single reason as it is", () => {
+    expect(zeroAppliedAdvice(result([skipped("Add `!.claude/**`.")]))).toBe("Add `!.claude/**`.");
+  });
+
+  it("stays silent when a fix was applied or nothing has help", () => {
+    expect(zeroAppliedAdvice(result([skipped("x")], 1))).toBeNull();
+    expect(zeroAppliedAdvice(result([skipped("x")], 0, true))).toBeNull();
+    expect(zeroAppliedAdvice(result([]))).toBeNull();
   });
 });
