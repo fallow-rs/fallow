@@ -152,3 +152,8 @@ These `health` outputs have no row:
 Each row records the fallow version and the date of its review. A rule change
 that can change the precision needs a new row. The check does not fail on old
 rows, because the corpus run costs review time.
+
+To measure a rule again after a fix, take a new sample with the new binary on
+the same pinned commits. A finding with the same finding ID as before points at
+the same code, so its earlier verdict carries over. Only the new findings in
+the sample need a review.
