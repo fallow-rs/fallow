@@ -65,12 +65,19 @@ Every simulation job sets `cycle-estimation: 'false'`, so each instruction has
 the same cost and the value follows the instruction count. The cycle estimate
 of CodSpeed adds a cost for cache misses from a cache model of the physical
 CPU. The hosted runners change between Intel and AMD CPUs from run to run, so
-that estimate moves on the same code. The instruction count does not depend on
-the CPU.
+that estimate moves on the same code. The instruction count does not use the
+cache model, but it still depends on the CPU features. Code in the standard
+library and in dependencies selects a SIMD path at run time, so a change
+between Intel and AMD, or between a CPU with AVX-512 and one without it, moves
+the count by up to about 30% on the same code. CodSpeed lists these benchmarks
+under "Environment Differences". Treat such a change as a hardware change
+until a run on the same CPU shows it again.
 
 Thus a change of cache locality or memory layout, for example a new
 struct layout or a `Vec` that becomes a hash map, does not show in these
-shards. The walltime jobs show that cost for the CLI. For a Rust component,
+shards. The simulation value also does not count system calls, so a new
+`canonicalize`, `stat` or file read on a hot path does not show in these
+shards. The walltime jobs show both costs for the CLI. For a Rust component,
 use the local walltime retain gates below.
 
 `scripts/check-benchmark-harness.py` rejects a simulation job without the
