@@ -8,7 +8,11 @@ const LSP_PARENT = "crates/lsp/src/code_actions/mod.rs";
 const LSP_ORACLE = "crates/lsp/src/code_actions/quick_fix_unicode_span_oracle.rs";
 const LSP_ANCHOR = "mod quick_fix;\n";
 const LSP_MANIFEST = "crates/lsp/Cargo.toml";
-const RESULTS = "crates/types/src/results.rs";
+/** The files that held `UnusedExport`, newest first. */
+const UNUSED_EXPORT_FILES = [
+  "crates/types/src/results_export_findings.rs",
+  "crates/types/src/results.rs",
+];
 const CORE_PARENT = "crates/core/src/discover/infrastructure.rs";
 const CORE_ORACLE = "crates/core/src/discover/infrastructure_unicode_span_oracle.rs";
 const CORE_ANCHOR = "#[cfg(test)]\nmod tests {";
@@ -53,10 +57,13 @@ const port = (tree, source) => {
     notes.push("added proptest to the LSP dev-dependencies");
   }
 
-  const results = readFileSync(join(tree, RESULTS), "utf8");
-  const start = results.indexOf("pub struct UnusedExport {");
-  if (start < 0) throw new Error(`${RESULTS}: the UnusedExport struct is missing`);
-  const unusedExport = results.slice(start);
+  const results = UNUSED_EXPORT_FILES.filter((path) => existsSync(join(tree, path)))
+    .map((path) => readFileSync(join(tree, path), "utf8"))
+    .find((text) => text.includes("pub struct UnusedExport {"));
+  if (results === undefined) {
+    throw new Error(`the UnusedExport struct is missing from ${UNUSED_EXPORT_FILES.join(", ")}`);
+  }
+  const unusedExport = results.slice(results.indexOf("pub struct UnusedExport {"));
   if (!unusedExport.slice(0, unusedExport.indexOf("\n}")).includes("pub deprecated:")) {
     editFile(join(tree, LSP_ORACLE), (text) =>
       text.replace(/^ *deprecated(_reason)?: [^\n]*,\n/gm, ""),

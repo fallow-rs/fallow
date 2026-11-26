@@ -56,7 +56,7 @@ Check:
 
 - `crates/cli/src/report/json.rs` (main JSON serialization)
 - `crates/cli/src/report/mod.rs` (format dispatch, schema_version constant)
-- `crates/types/src/results.rs` (result types that become JSON)
+- `crates/types/src/results.rs` and its `results_*.rs` child modules (result types that become JSON)
 
 ## Veto rights
 
