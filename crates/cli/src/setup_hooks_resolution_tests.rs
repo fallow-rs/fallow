@@ -1480,6 +1480,107 @@ fn gate_blocks_when_a_target_holds_the_only_jq() {
     assert!(!calls(&log).contains("stub-jq"), "{}", calls(&log));
 }
 
+/// Prints the path of the jq on the test `PATH`, if any.
+fn host_jq() -> Option<PathBuf> {
+    std::process::Command::new("sh")
+        .args(["-c", "command -v jq"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
+        .filter(|path| path.is_absolute())
+}
+
+/// The gate looks for a fallow on PATH that is not a version-manager shim,
+/// and follows a link with readlink. Before the gate knows the targets of the
+/// command, it runs no helper, so a readlink in a target tree never runs.
+#[test]
+fn gate_runs_no_helper_from_a_target_tree_before_it_knows_the_targets() {
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    let log = base.join("calls.log");
+    logging_stub(&base.join("real/fallow"), "path", &log);
+    std::os::unix::fs::symlink(base.join("real/fallow"), base.join("bin/fallow")).unwrap();
+    logging_stub(&target.join("bin/readlink"), "stub-readlink", &log);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({
+        "cwd": session,
+        "tool_input": { "command": format!("git -C {} commit -m x", target.display()) },
+    });
+
+    let output = probe_gate_with_path_prefix(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &base.join("bin"),
+        input.to_string().as_bytes(),
+        &format!("{}:", target.join("bin").display()),
+    );
+    let calls = calls(&log);
+
+    assert!(!calls.contains("stub-readlink"), "{calls}");
+    assert!(
+        calls.contains("path --version"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A large hook input goes to jq before the gate knows the targets of the
+/// command. When a target tree holds that jq, the gate blocks, also when a
+/// fallow JSON reader reads the audit report.
+#[test]
+fn gate_blocks_when_a_target_holds_the_jq_that_read_the_input() {
+    let Some(jq) = host_jq() else {
+        eprintln!("skipping: jq not on PATH");
+        return;
+    };
+    let tmp = tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let session = base.join("clone");
+    let target = base.join("target");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(target.join("bin")).unwrap();
+    std::os::unix::fs::symlink(jq, target.join("bin/jq")).unwrap();
+    let sys = system_bin_without_jq(&base);
+    let log = base.join("calls.log");
+    let command = format!(
+        "git -C {} commit -m '{}'",
+        target.display(),
+        "x".repeat(9000)
+    );
+    reader_stub(&base.join("bin/fallow"), "path", &log, &command, &session);
+    git_init(&session);
+    git_init(&target);
+    let input = serde_json::json!({ "cwd": session, "tool_input": { "command": command } });
+
+    let output = probe_gate_with_path(
+        &render_gate_script(true, None),
+        &base.join("home/.claude/hooks/fallow-gate.sh"),
+        &session,
+        &format!(
+            "{}:{}:{}",
+            target.join("bin").display(),
+            base.join("bin").display(),
+            sys.display()
+        ),
+        input.to_string().as_bytes(),
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let calls = calls(&log);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("holds the jq of the gate"), "{stderr}");
+    assert!(stderr.contains(&target.display().to_string()), "{stderr}");
+    assert!(!calls.contains("--version"), "{calls}");
+}
+
 /// Bash below version 4 needs time that grows with the square of the length
 /// for the shell reader, so there the shell reader takes a hook input of at
 /// most 1024 characters. A longer input goes to the reader of the install.
