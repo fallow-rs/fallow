@@ -849,10 +849,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 ..Default::default()
             });
         }
+        let is_type_only = matches!(
+            decl.declaration,
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
+        );
         self.exports.push(ExportInfo {
             name: ExportName::Default,
             local_name,
-            is_type_only: false,
+            is_type_only,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
             expected_unused_reason: None,

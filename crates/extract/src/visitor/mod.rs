@@ -825,6 +825,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// `binding_target_names`. `None` outside the pass. NOT persisted.
     binding_target_prefix_index: Option<FxHashMap<String, Vec<String>>>,
     local_declaration_names: FxHashSet<String>,
+    /// Top-level names that an `interface` or a `type` alias declares, and
+    /// top-level names that a value declaration declares. A local
+    /// `export { X }` of a name with only a type declaration is a type-only
+    /// export (issue #5262).
+    module_type_names: FxHashSet<String>,
+    module_value_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     pending_binding_forwards: Vec<PendingBindingForward>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,

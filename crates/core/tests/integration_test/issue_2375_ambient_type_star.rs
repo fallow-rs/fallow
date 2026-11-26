@@ -236,7 +236,7 @@ fn ambient_type_star_references_land_in_the_type_namespace() {
 
     let ns_pair = module_named(graph.modules(), "src/ns-pair.ts");
     assert!(
-        reference_shapes(slot(ns_pair, "default", false))
+        reference_shapes(slot(ns_pair, "default", true))
             .contains(&(ReferenceKind::DefaultImport, ExportNamespace::Type)),
         "`export type * as ns` reaches `ns.default` in the type namespace"
     );

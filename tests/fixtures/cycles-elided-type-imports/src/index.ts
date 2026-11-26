@@ -1,0 +1,15 @@
+export * as interfaces from './interfaces/a';
+export * as alias from './alias/a';
+export * as barrel from './barrel/a';
+export * as value from './value/a';
+export * as merged from './merged/a';
+export * as mixed from './mixed/a';
+export * as defaultImport from './default/a';
+export * as namespaceImport from './namespace/a';
+export * as sideEffect from './side-effect/a';
+export * as verbatim from './verbatim/a';
+export * as preserve from './preserve/a';
+export * as solution from './solution/a';
+export * as js from './js/a.js';
+export * as dynamic from './dynamic/a';
+export * as references from './references/a';

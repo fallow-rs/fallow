@@ -14,6 +14,7 @@ mod entry_load;
 mod entry_marks;
 mod fan_io;
 mod impact_closure;
+mod import_elision;
 mod namespace_aliases;
 mod namespace_escapes;
 mod namespace_indexes;
