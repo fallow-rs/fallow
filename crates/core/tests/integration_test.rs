@@ -862,6 +862,8 @@ mod issue_5098_astro_tag_attrs;
 mod issue_5162_css_module_barrel;
 #[path = "integration_test/issue_5231_shadowed_namespace_member.rs"]
 mod issue_5231_shadowed_namespace_member;
+#[path = "integration_test/issue_5261_entry_re_exported_enum_members.rs"]
+mod issue_5261_entry_re_exported_enum_members;
 #[path = "integration_test/issue_5297_mobx_annotation_members.rs"]
 mod issue_5297_mobx_annotation_members;
 #[path = "integration_test/issue_5298_proven_receiver_forms.rs"]

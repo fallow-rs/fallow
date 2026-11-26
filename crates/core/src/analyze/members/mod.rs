@@ -24,6 +24,7 @@ use fallow_types::extract::{
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 mod cloudflare_runtime;
+mod entry_surface;
 mod external_override;
 mod factory;
 mod fluent_chain;
@@ -577,21 +578,6 @@ pub(super) fn public_export_origin_keys(
         .collect()
 }
 
-fn public_class_export_origin_keys(
-    graph: &ModuleGraph,
-    public_api_entry_points: &FxHashSet<FileId>,
-) -> FxHashSet<ExportKey> {
-    use crate::graph::ExportNamespace;
-
-    [ExportNamespace::Value, ExportNamespace::Type]
-        .into_iter()
-        .flat_map(|namespace| {
-            graph.public_export_origins_in_namespace(public_api_entry_points, namespace)
-        })
-        .map(|origin| ExportKey::new(origin.file_id(), origin.export_name()))
-        .collect()
-}
-
 fn export_has_class_members(export: &crate::graph::ExportSymbol) -> bool {
     export.members.iter().any(|member| {
         matches!(
@@ -920,6 +906,10 @@ struct PreparedMemberScan<'a> {
     self_accessed_members: FxHashMap<FileId, FxHashSet<String>>,
     whole_object_used_exports: FxHashSet<ExportKey>,
     public_class_exports: FxHashSet<ExportKey>,
+    /// The declarations whose enum members are public API: those that a
+    /// public package entry publishes, without the entries whose exports need
+    /// a consumer in the project. `None` means `public_class_exports`.
+    public_enums: Option<FxHashSet<ExportKey>>,
     error_subclass_keys: FxHashSet<ExportKey>,
     ol_interaction_subclass_keys: FxHashSet<ExportKey>,
     cloudflare_runtime_handlers: FxHashMap<ExportKey, &'static [&'static str]>,
@@ -1006,15 +996,9 @@ impl MemberReportContext<'_, '_> {
             return buckets;
         }
 
-        // The consumers of an entry file are outside the project, so only its
-        // store members are checked, unless `includeEntryExports` says that
-        // each export of the file needs a consumer in the project.
-        let store_only_scan = module.is_entry_point()
-            && !module.is_consumer_checked()
-            && !self
-                .input
-                .entry_exports_config
-                .is_some_and(|config| config.include_entry_exports_for(&module.path));
+        // Only the store members of such an entry file are checked.
+        let store_only_scan =
+            entry_surface::exposes_entry_members(module, self.input.entry_exports_config);
         for export in &module.exports {
             self.collect_export(module, export, store_only_scan, &mut buckets);
         }
@@ -1138,6 +1122,16 @@ impl MemberReportContext<'_, '_> {
         if target.store_only_scan && member.kind != MemberKind::StoreMember {
             return;
         }
+        if member.kind == MemberKind::EnumMember
+            && self
+                .prepared
+                .public_enums
+                .as_ref()
+                .unwrap_or(&self.prepared.public_class_exports)
+                .contains(skip_context.export_key)
+        {
+            return;
+        }
         if should_skip_member_for_unused_report(member, skip_context) {
             return;
         }
@@ -1208,7 +1202,13 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
     } = collect_propagated_member_accesses(input, &heritage_context, &parent_to_children, &indexes);
 
     let public_class_exports =
-        public_class_export_origin_keys(input.graph, input.public_api_entry_points);
+        entry_surface::public_declaration_keys(input.graph, input.public_api_entry_points);
+    let public_enums = entry_surface::public_member_entries(
+        input.graph,
+        input.public_api_entry_points,
+        input.entry_exports_config,
+    )
+    .map(|entries| entry_surface::public_declaration_keys(input.graph, &entries));
 
     let error_subclass_keys = build_error_subclass_export_keys(
         &parent_to_children,
@@ -1231,6 +1231,7 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         self_accessed_members,
         whole_object_used_exports,
         public_class_exports,
+        public_enums,
         error_subclass_keys,
         ol_interaction_subclass_keys,
         cloudflare_runtime_handlers,

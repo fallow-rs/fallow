@@ -3201,7 +3201,7 @@ fn shadowed_star_class_is_not_a_public_api_export() {
         ],
     );
     let public_entries = FxHashSet::from_iter([FileId(0)]);
-    let public_class_exports = public_class_export_origin_keys(&graph, &public_entries);
+    let public_class_exports = entry_surface::public_declaration_keys(&graph, &public_entries);
 
     assert!(!is_entry_point_public_class_export(
         &graph.modules()[1],
@@ -3233,7 +3233,7 @@ fn class_exposed_through_public_namespace_is_public_api() {
         }],
     );
     let public_entries = FxHashSet::from_iter([FileId(0)]);
-    let public_class_exports = public_class_export_origin_keys(&graph, &public_entries);
+    let public_class_exports = entry_surface::public_declaration_keys(&graph, &public_entries);
 
     assert!(is_entry_point_public_class_export(
         &graph.modules()[1],
@@ -3265,7 +3265,7 @@ fn class_exposed_through_type_only_public_re_export_is_public_api() {
         }],
     );
     let public_entries = FxHashSet::from_iter([FileId(0)]);
-    let public_class_exports = public_class_export_origin_keys(&graph, &public_entries);
+    let public_class_exports = entry_surface::public_declaration_keys(&graph, &public_entries);
 
     assert!(is_entry_point_public_class_export(
         &graph.modules()[1],

@@ -475,13 +475,13 @@ fn public_api_class_members_reexported_from_entry_points_are_not_reported() {
             )
         })
         .collect();
+    // The entry re-exports `PublicStatus`, so a consumer of the package can
+    // read each of its members (issue #5261).
     assert!(
-        unused_enum_members.contains(&(
-            "src/status.ts".to_string(),
-            "PublicStatus".to_string(),
-            "External".to_string(),
-        )),
-        "entry-point enum member behavior is unchanged by the public class API skip, found: {unused_enum_members:?}"
+        !unused_enum_members
+            .iter()
+            .any(|(path, parent, _)| path == "src/status.ts" && parent == "PublicStatus"),
+        "members of an enum that a public entry re-exports should not be reported, found: {unused_enum_members:?}"
     );
 }
 

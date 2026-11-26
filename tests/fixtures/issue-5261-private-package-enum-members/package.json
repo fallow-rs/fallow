@@ -1,0 +1,1 @@
+{ "name": "internal-sdk", "private": true, "exports": { ".": "./src/index.ts" } }
