@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,11 +21,24 @@ const writeExecutable = async (path, contents) => {
   await writeFile(path, contents, { mode: 0o755 });
 };
 
-const createHarness = async (verifyModule) => {
+const FALLOW_MOCK = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'fallow ${MOCK_VERSION}\\n'
+  exit 0
+fi
+printf 'unexpected fallow invocation: %s\\n' "$*" >&2
+exit 1
+`;
+
+// With fallowOnPath false, the mock fallow exists only in the npm global bin
+// folder, which is not on PATH. pnpm/setup gives this layout (#5242).
+const createHarness = async (verifyModule, { fallowOnPath = true } = {}) => {
   const root = await mkdtemp(join(tmpdir(), "fallow-action-verify-"));
   const actionRoot = join(root, "action-root");
   const binDir = join(root, "bin");
-  const globalRoot = join(root, "global", "node_modules");
+  const globalPrefix = join(root, "global");
+  const globalBin = join(globalPrefix, "bin");
+  const globalRoot = join(globalPrefix, "node_modules");
   const projectRoot = join(root, "project");
   const verifyScript = join(actionRoot, "npm", "fallow", "scripts", "verify-binary.js");
   const verifyRunner = join(actionRoot, "action", "scripts", "verify-installed.mjs");
@@ -36,6 +49,7 @@ const createHarness = async (verifyModule) => {
     mkdir(join(globalRoot, "fallow"), { recursive: true }),
     mkdir(projectRoot, { recursive: true }),
     mkdir(binDir, { recursive: true }),
+    mkdir(globalBin, { recursive: true }),
   ]);
   await Promise.all([
     writeFile(verifyScript, verifyModule),
@@ -50,6 +64,10 @@ if [ "$1" = "root" ] && [ "$2" = "-g" ]; then
   printf '%s\\n' "$MOCK_GLOBAL_ROOT"
   exit 0
 fi
+if [ "$1" = "prefix" ] && [ "$2" = "-g" ]; then
+  printf '%s\\n' "$MOCK_GLOBAL_PREFIX"
+  exit 0
+fi
 if [ "$1" = "install" ]; then
   exit 0
 fi
@@ -57,18 +75,12 @@ printf 'unexpected npm invocation: %s\\n' "$*" >&2
 exit 1
 `,
     ),
-    writeExecutable(
-      join(binDir, "fallow"),
-      `#!/bin/sh
-if [ "$1" = "--version" ]; then
-  printf 'fallow ${MOCK_VERSION}\\n'
-  exit 0
-fi
-printf 'unexpected fallow invocation: %s\\n' "$*" >&2
-exit 1
-`,
-    ),
+    writeExecutable(join(fallowOnPath ? binDir : globalBin, "fallow"), FALLOW_MOCK),
   ]);
+
+  // The test PATH holds only this folder and the system folders, so a fallow
+  // that the host installed cannot answer for the mock.
+  await symlink(process.execPath, join(binDir, "node"));
 
   // origin/main has no runner yet and ignores this path. The fixed install
   // script requires the production runner, so copy it when it exists.
@@ -78,7 +90,7 @@ exit 1
     if (error.code !== "ENOENT") throw error;
   }
 
-  return { actionRoot, binDir, globalRoot, projectRoot, root };
+  return { actionRoot, binDir, globalBin, globalPrefix, globalRoot, projectRoot, root };
 };
 
 const killProcessGroup = (child) => {
@@ -102,9 +114,10 @@ const runInstall = (harness, verifyTimeoutMs = NORMAL_VERIFY_TIMEOUT_MS, extraEn
         GITHUB_ACTION_PATH: harness.actionRoot,
         INPUT_ROOT: harness.projectRoot,
         INPUT_TYPE_AWARE: "false",
+        MOCK_GLOBAL_PREFIX: harness.globalPrefix,
         MOCK_GLOBAL_ROOT: harness.globalRoot,
         NODE_ENV: "test",
-        PATH: `${harness.binDir}:${process.env.PATH ?? ""}`,
+        PATH: `${harness.binDir}:/usr/bin:/bin`,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -241,4 +254,52 @@ module.exports = { SKIP_ENV, verifyInstalled };
   assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /The Action ref \(v3%25%0D%0A::error::injected\)/);
   assert.doesNotMatch(result.stdout, /^::error::injected/m);
+});
+
+const PASSING_VERIFIER = `
+const SKIP_ENV = "FALLOW_SKIP_BINARY_VERIFY";
+const verifyInstalled = async () => ({
+  ok: true,
+  package: "fallow-test-binary",
+  skipped: false,
+  version: "${MOCK_VERSION}",
+});
+module.exports = { SKIP_ENV, verifyInstalled };
+`;
+
+test("install.sh puts the npm global bin folder on PATH when fallow is not on it", async (context) => {
+  const harness = await createHarness(PASSING_VERIFIER, { fallowOnPath: false });
+  context.after(() => rm(harness.root, { force: true, recursive: true }));
+  const githubPath = join(harness.root, "github-path");
+  await writeFile(githubPath, "");
+
+  const result = await runInstall(harness, NORMAL_VERIFY_TIMEOUT_MS, { GITHUB_PATH: githubPath });
+  assertWatchdogDidNotFire(result);
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Installed fallow fallow 9\.9\.9/);
+  assert.equal(await readFile(githubPath, "utf8"), `${harness.globalBin}\n`);
+});
+
+test("install.sh leaves GITHUB_PATH alone when fallow is already on PATH", async (context) => {
+  const harness = await createHarness(PASSING_VERIFIER);
+  context.after(() => rm(harness.root, { force: true, recursive: true }));
+  const githubPath = join(harness.root, "github-path");
+  await writeFile(githubPath, "");
+
+  const result = await runInstall(harness, NORMAL_VERIFY_TIMEOUT_MS, { GITHUB_PATH: githubPath });
+  assertWatchdogDidNotFire(result);
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(await readFile(githubPath, "utf8"), "");
+});
+
+test("install.sh fails at install time when no fallow can be found", async (context) => {
+  const harness = await createHarness(PASSING_VERIFIER, { fallowOnPath: false });
+  context.after(() => rm(harness.root, { force: true, recursive: true }));
+  await rm(join(harness.globalBin, "fallow"));
+
+  const result = await runInstall(harness);
+  assertWatchdogDidNotFire(result);
+  assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /::error::npm installed fallow 9\.9\.9, but no fallow command is on PATH/);
+  assert.doesNotMatch(result.stdout, /unknown version/);
 });

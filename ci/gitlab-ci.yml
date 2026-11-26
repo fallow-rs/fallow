@@ -381,6 +381,21 @@ variables:
 
       npm install -g --ignore-scripts "$install_arg" || { echo "ERROR: Failed to install ${install_arg}"; exit 2; }
 
+      # A Node that pnpm or another version manager installs can leave the
+      # npm global bin folder off PATH (#5242). The run script reads
+      # /tmp/fallow-bin-dir and puts that folder on PATH for every later step.
+      rm -f /tmp/fallow-bin-dir
+      if ! command -v fallow > /dev/null 2>&1; then
+        global_bin="$(npm prefix -g)/bin"
+        if [ ! -f "$global_bin/fallow" ]; then
+          echo "ERROR: npm installed ${install_arg}, but no fallow command is on PATH, and ${global_bin} does not contain one. Add the npm global bin folder to PATH in the job image or before_script."
+          exit 2
+        fi
+        printf '%s\n' "$global_bin" > /tmp/fallow-bin-dir
+        export PATH="${global_bin}:${PATH}"
+        echo "Added the npm global bin folder ${global_bin} to PATH, because it was not on PATH"
+      fi
+
       installed_version="$(fallow --version || echo 'unknown version')"
       echo "Installed fallow ${installed_version}"
       installed_semver="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
@@ -476,6 +491,11 @@ variables:
       cat > /tmp/fallow-run.sh << 'FALLOW_SCRIPT_EOF'
       #!/bin/bash
       set -euo pipefail
+
+      if [ -s /tmp/fallow-bin-dir ]; then
+        PATH="$(cat /tmp/fallow-bin-dir):${PATH}"
+        export PATH
+      fi
 
       # ── Validate inputs ──────────────────────────────────────────────
       case "$FALLOW_COMMAND" in
