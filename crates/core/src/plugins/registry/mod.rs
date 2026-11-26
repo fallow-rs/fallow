@@ -563,6 +563,11 @@ pub struct AggregatedPluginResult {
     /// The directories of the tsconfig files that set the JSX runtime of
     /// TypeScript files, each with the runtime that the tsconfig selects.
     pub tsconfig_jsx_dirs: Vec<TsconfigJsxDir>,
+    /// The directories of the apps that an end-to-end runner starts as its
+    /// web server. Entry discovery moves the runtime entry points below such
+    /// a directory to the support role when the directory is not a workspace
+    /// package (issue #5270).
+    pub web_server_app_dirs: Vec<PathBuf>,
 }
 
 /// The directory of a tsconfig that sets the JSX runtime of the TypeScript
@@ -743,6 +748,7 @@ impl AggregatedPluginResult {
             jsx_import_sources,
             jsx_package_credits,
             tsconfig_jsx_dirs,
+            web_server_app_dirs,
         } = other;
 
         self.entry_patterns.extend(entry_patterns);
@@ -796,6 +802,7 @@ impl AggregatedPluginResult {
         push_missing(&mut self.jsx_import_sources, jsx_import_sources);
         push_missing(&mut self.jsx_package_credits, jsx_package_credits);
         push_missing(&mut self.tsconfig_jsx_dirs, tsconfig_jsx_dirs);
+        push_missing(&mut self.web_server_app_dirs, web_server_app_dirs);
         push_missing(&mut self.config_diagnostics, config_diagnostics);
     }
 }

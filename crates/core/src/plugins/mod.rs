@@ -216,6 +216,9 @@ pub struct PluginResult {
     /// Vite then does not use its own default runtime for the TypeScript
     /// files below these directories.
     tsconfig_jsx_dirs: Vec<registry::TsconfigJsxDir>,
+    /// The directories of the apps that an end-to-end runner starts as its
+    /// web server. See [`web_server_app`].
+    web_server_app_dirs: Vec<PathBuf>,
 }
 
 /// Match the Module Federation sources of one analysis against the discovered
@@ -680,26 +683,35 @@ impl PluginResult {
     /// advisory exists for, and skipping the result would drop it.
     #[must_use]
     const fn is_empty(&self) -> bool {
-        self.config_diagnostics.is_empty()
-            && self.entry_patterns.is_empty()
+        self.config_diagnostics.is_empty() && self.has_no_credits() && self.has_no_paths()
+    }
+
+    /// Whether the result adds no entry, export or dependency credit.
+    const fn has_no_credits(&self) -> bool {
+        self.entry_patterns.is_empty()
             && self.used_exports.is_empty()
             && self.entry_export_credits.is_empty()
             && self.used_class_members.is_empty()
             && self.referenced_dependencies.is_empty()
             && self.package_referenced_dependencies.is_empty()
             && self.required_dependencies.is_empty()
-            && self.always_used_files.is_empty()
+            && self.provided_dependencies.is_empty()
+            && self.jsx_import_sources.is_empty()
+            && self.jsx_package_credits.is_empty()
+    }
+
+    /// Whether the result adds no file, folder or path mapping.
+    const fn has_no_paths(&self) -> bool {
+        self.always_used_files.is_empty()
             && self.path_aliases.is_empty()
             && self.setup_files.is_empty()
             && self.fixture_patterns.is_empty()
             && self.scss_include_paths.is_empty()
             && self.static_dir_mappings.is_empty()
             && self.framework_static_dir_mappings.is_empty()
-            && self.provided_dependencies.is_empty()
             && self.federation_sources.is_empty()
-            && self.jsx_import_sources.is_empty()
-            && self.jsx_package_credits.is_empty()
             && self.tsconfig_jsx_dirs.is_empty()
+            && self.web_server_app_dirs.is_empty()
     }
 }
 
@@ -1795,6 +1807,7 @@ mod tooling;
 pub(crate) mod trace_provenance;
 mod used_export_names;
 mod used_export_rule;
+mod web_server_app;
 
 pub use config_dependencies::RequiredDependency;
 use config_dependencies::add_import_referenced_dependencies;

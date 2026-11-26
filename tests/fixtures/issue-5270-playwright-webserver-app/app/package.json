@@ -1,0 +1,11 @@
+{
+  "name": "form-lib-e2e-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "vite": "^6.0.0"
+  }
+}

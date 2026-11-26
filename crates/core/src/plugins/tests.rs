@@ -111,7 +111,7 @@ fn plugin_result_is_empty_only_when_every_field_is_empty() {
 
     assert!(PluginResult::default().is_empty());
 
-    let rows: [(&str, Fill); 18] = [
+    let rows: [(&str, Fill); 19] = [
         ("entry_patterns", |r| {
             r.entry_patterns.push(PathRule::new("src/*.ts"));
         }),
@@ -198,6 +198,9 @@ fn plugin_result_is_empty_only_when_every_field_is_empty() {
                 dir: PathBuf::from("/project"),
                 automatic_react: false,
             });
+        }),
+        ("web_server_app_dirs", |r| {
+            r.web_server_app_dirs.push(PathBuf::from("/project/app"));
         }),
     ];
 

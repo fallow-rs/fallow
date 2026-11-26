@@ -2151,6 +2151,7 @@ fn discover_all_entry_points(
     }
     spans.dynamic_ms = split_ms(&mut mark);
     discover::record_entry_pattern_effect(input.config, input.files, &entry_points, other_sources);
+    discover::move_web_server_app_entries(&mut entry_points, input.config, input.plugin_result);
 
     let deduped = entry_points.dedup();
     spans.dedup_ms = split_ms(&mut mark);
@@ -2168,24 +2169,6 @@ fn split_ms(mark: &mut Instant) -> f64 {
     elapsed
 }
 
-fn append_package_file_asset_patterns(
-    result: &mut plugins::AggregatedPluginResult,
-    prefix: &str,
-    pkg: &PackageJson,
-) {
-    let prefix = prefix.trim_matches('/');
-    for pattern in package_assets::scaffold_template_asset_patterns(pkg) {
-        let pattern = if prefix.is_empty() {
-            pattern
-        } else {
-            format!("{prefix}/{pattern}")
-        };
-        result
-            .discovered_always_used
-            .push((pattern, package_assets::PACKAGE_FILES_SOURCE.to_string()));
-    }
-}
-
 fn append_workspace_package_file_asset_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
@@ -2198,7 +2181,7 @@ fn append_workspace_package_file_asset_patterns(
             .unwrap_or(&ws.root)
             .to_string_lossy()
             .replace('\\', "/");
-        append_package_file_asset_patterns(result, &ws_prefix, ws_pkg);
+        package_assets::append_package_file_asset_patterns(result, &ws_prefix, ws_pkg);
     }
 }
 
@@ -2318,7 +2301,7 @@ fn run_root_plugins(
         plugins::AggregatedPluginResult::default()
     };
     if let Some(pkg) = root_pkg {
-        append_package_file_asset_patterns(&mut result, "", pkg);
+        package_assets::append_package_file_asset_patterns(&mut result, "", pkg);
     }
     Ok(result)
 }
