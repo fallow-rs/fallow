@@ -224,7 +224,9 @@ jobs:
       # on a just-published sibling can race the crates.io index: the sibling
       # uploads seconds earlier but the index has not propagated its new version
       # yet, so `cargo publish` aborts with "failed to select a version for the
-      # requirement". The retry loop below waits that lag out.
+      # requirement". The retry loop below waits that lag out. Its budget is 20
+      # attempts 30 seconds apart (about 10 minutes): the index lag passed the
+      # old budget of 4 minutes in v3.49.0.
       #
       # The error classification is load-bearing (incident v2.98.0). The old
       # per-crate `|| echo "Already published, skipping"` swallowed EVERY
@@ -243,7 +245,7 @@ jobs:
             crate="$1"
             shift
             attempt=1
-            max_attempts=8
+            max_attempts=20
             while :; do
               if out=$(cargo publish "$@" --no-verify 2>&1); then
                 printf '%s\n' "$out"
