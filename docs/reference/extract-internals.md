@@ -30,7 +30,8 @@ and parse-cache changes.
   and the packages that stylesheet `url()` values name.
 - `crates/extract/src/source_map.rs`: source-map normalization and mapping.
 
-Shared extraction result types live in `crates/types/src/extract.rs`.
+Shared extraction result types live in `crates/types/src/extract.rs` and its
+`extract_*.rs` child modules, which it re-exports.
 
 ## Invariants
 
