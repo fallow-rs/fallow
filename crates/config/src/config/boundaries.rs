@@ -458,7 +458,7 @@ impl BoundaryPreset {
 
 /// Architecture boundary configuration.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BoundaryConfig {
     /// Optional built-in preset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -486,7 +486,7 @@ pub struct BoundaryConfig {
 
 /// Boundary zone coverage policy.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BoundaryCoverageConfig {
     /// Report every analyzed source file that does not match any boundary
     /// zone, also a file that no entry point reaches.
@@ -507,7 +507,7 @@ impl BoundaryCoverageConfig {
 /// Boundary forbidden-call policy. Applies only to files classified into a
 /// zone; unzoned files are unrestricted, matching the import rules.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BoundaryCallsConfig {
     /// Callee patterns that files in a zone may not call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -529,7 +529,7 @@ impl BoundaryCallsConfig {
 /// One forbidden-call entry: files in zone `from` may not call callees
 /// matching `callee`.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ForbiddenCallRule {
     /// Zone whose files may not make matching calls.
     pub from: String,
@@ -564,7 +564,7 @@ impl ForbiddenCallee {
 
 /// A zone grouping files by directory pattern.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BoundaryZone {
     /// Zone name.
     pub name: String,
@@ -590,7 +590,7 @@ pub struct BoundaryZone {
 
 /// An import rule between zones.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct BoundaryRule {
     /// Source zone.
     pub from: String,

@@ -1449,17 +1449,7 @@ impl FallowConfig {
                 return super::outside_root::merged_error(path, local_values);
             }
             let reason = crate::parse_error::describe_json(&e);
-            // Unknown fields on overrides/ignoreExports entries are usually
-            // inline annotations; point at JSONC comments as the fix.
-            let hint = if matches!(ConfigFormat::from_path(path), ConfigFormat::Json)
-                && reason.contains("unknown field")
-                && (reason.contains("expected `files` or `rules`")
-                    || reason.contains("expected `file` or `exports`"))
-            {
-                " (annotations belong in a // comment; .fallowrc.json accepts JSONC)"
-            } else {
-                ""
-            };
+            let hint = unknown_field_hint(path, &reason);
             miette::miette!("{reason} in {}{hint}", path.display())
         })?;
         config.rules.private_type_leaks_configured = private_type_leaks_configured;
@@ -1947,6 +1937,26 @@ impl FallowConfig {
             Err(errors)
         }
     }
+}
+
+/// A fix for an unknown-field error whose usual cause is known.
+pub(super) fn unknown_field_hint(path: &Path, reason: &str) -> &'static str {
+    if !reason.contains("unknown field") {
+        return "";
+    }
+    // Unknown fields on overrides/ignoreExports entries are usually inline
+    // annotations; point at JSONC comments as the fix.
+    if matches!(ConfigFormat::from_path(path), ConfigFormat::Json)
+        && (reason.contains("expected `files` or `rules`")
+            || reason.contains("expected `file` or `exports`"))
+    {
+        return " (annotations belong in a // comment; .fallowrc.json accepts JSONC)";
+    }
+    // `duplicates` and `typeAware` have an `enabled` key, `boundaries` has not.
+    if reason.contains("unknown field `enabled`") && reason.contains("`presetPublicFiles`") {
+        return " (boundaries has no `enabled` key; remove the `boundaries` section to turn the checks off)";
+    }
+    ""
 }
 
 #[cfg(test)]

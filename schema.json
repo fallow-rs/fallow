@@ -2332,7 +2332,8 @@
           "description": "Optional forbidden-call policy for zoned files.",
           "$ref": "#/$defs/BoundaryCallsConfig"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "BoundaryPreset": {
       "description": "Built-in architecture presets.",
@@ -2401,6 +2402,7 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
         "name"
       ]
@@ -2429,6 +2431,7 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
         "from"
       ]
@@ -2448,7 +2451,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "BoundaryCallsConfig": {
       "description": "Boundary forbidden-call policy. Applies only to files classified into a\nzone; unzoned files are unrestricted, matching the import rules.",
@@ -2461,7 +2465,8 @@
             "$ref": "#/$defs/ForbiddenCallRule"
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "ForbiddenCallRule": {
       "description": "One forbidden-call entry: files in zone `from` may not call callees\nmatching `callee`.",
@@ -2476,6 +2481,7 @@
           "$ref": "#/$defs/ForbiddenCallee"
         }
       },
+      "additionalProperties": false,
       "required": [
         "from",
         "callee"
