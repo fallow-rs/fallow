@@ -41,6 +41,10 @@ tempfile = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true }
 
+# The owner SID lookups of the scope base in `read_scope`.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Security_Authorization"] }
+
 [features]
 # Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the
 # JSON output schema can be regenerated from the Rust source of truth.
